@@ -29,11 +29,11 @@ describe("claude-code discovery candidates", () => {
 
     const featured = def.featuredModels as CatalogModelSelector;
     const candidates = def.modelDiscoveryCandidates as CatalogModelSelector;
+    // Same families in both, so no family can be featurable but undiscoverable
+    // (or the reverse) — `claude-fable` was exactly that when a `limit` on the
+    // featured selector truncated the round-robin's last slot.
     expect(candidates.catalogFamilies).toEqual(featured.catalogFamilies);
     expect(candidates.generations).toBeGreaterThan(featured.generations);
-    // No cap on candidates: the featured `limit` exists to keep the picker's
-    // Featured row short, and must not leak into discovery.
-    expect(candidates.limit).toBeUndefined();
   });
 });
 

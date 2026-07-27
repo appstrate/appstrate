@@ -10,6 +10,7 @@ import {
   registerModelProviders,
   resetModelProviders,
 } from "../../src/services/model-providers/registry.ts";
+import { registerCatalog } from "../../src/services/pricing-catalog.ts";
 import { seedTestModelProviders } from "../helpers/model-providers.ts";
 
 function fakeDef(
@@ -126,6 +127,82 @@ describe("model-providers runtime registry", () => {
     it("flags api-key / unknown providers as non-oauth", () => {
       expect(isOAuthModelProvider("openai")).toBe(false);
       expect(isOAuthModelProvider("not-here")).toBe(false);
+    });
+  });
+
+  /**
+   * The boot check (`validateCatalogReferences`) is the only thing standing
+   * between a mistyped model list and a model picker that silently shows
+   * nothing. It resolves the selection first, which means "resolved to
+   * nothing" needs one arm per selection shape — an empty ARRAY is a
+   * deliberate declaration (openrouter, openai-compatible), an empty SELECTOR
+   * is always a mistake. The selector arm was missing: resolution returns `[]`
+   * for an unknown catalog instead of throwing, so the pre-existing
+   * `length > 0 && !catalogExists` guard could never fire for a selector and
+   * both cases below registered silently.
+   */
+  describe("catalog reference validation", () => {
+    const CATALOG = "test-registry-catalog";
+    registerCatalog(CATALOG, {
+      "claude-opus-5": {
+        label: "synthetic",
+        contextWindow: 1000,
+        maxTokens: 100,
+        capabilities: ["text"],
+        cost: { input: 0, output: 0 },
+      },
+    });
+
+    it("accepts a selector that resolves against a real catalog", () => {
+      registerModelProvider(
+        fakeDef("selector-ok", {
+          catalogProviderId: CATALOG,
+          featuredModels: { catalogFamilies: ["claude-opus"], generations: 1 },
+        }),
+      );
+      expect(getModelProvider("selector-ok")).not.toBeNull();
+    });
+
+    it("throws when a selector points at a catalog that does not exist", () => {
+      expect(() =>
+        registerModelProvider(
+          fakeDef("selector-no-catalog", {
+            catalogProviderId: "does-not-exist",
+            featuredModels: { catalogFamilies: ["claude-opus"], generations: 1 },
+          }),
+        ),
+      ).toThrow(/"does-not-exist".*no such catalog is registered/s);
+    });
+
+    it("throws on a family name that matches nothing (the typo case)", () => {
+      // One extra `s` used to cost nothing at boot and show the user an empty
+      // picker. The message must name the families so the typo is visible.
+      expect(() =>
+        registerModelProvider(
+          fakeDef("selector-typo", {
+            catalogProviderId: CATALOG,
+            featuredModels: { catalogFamilies: ["claude-opuss"], generations: 1 },
+          }),
+        ),
+      ).toThrow(/"selector-typo".*"claude-opuss".*resolves to no model/s);
+    });
+
+    it("still accepts a deliberately empty array with no catalog", () => {
+      // openrouter (live search) and openai-compatible (Custom only) declare
+      // exactly this — the arm the selector check must not swallow.
+      registerModelProvider(fakeDef("no-featured", { featuredModels: [] }));
+      expect(getModelProvider("no-featured")).not.toBeNull();
+    });
+
+    it("still rejects an array id that is absent from the catalog", () => {
+      expect(() =>
+        registerModelProvider(
+          fakeDef("array-bad-id", {
+            catalogProviderId: CATALOG,
+            featuredModels: ["claude-opus-99"],
+          }),
+        ),
+      ).toThrow(/is not in the test-registry-catalog catalog/);
     });
   });
 

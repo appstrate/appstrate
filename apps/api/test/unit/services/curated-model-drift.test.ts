@@ -2,7 +2,7 @@
 
 /**
  * Blocking gate — a CURATED subscription model list must not silently fall
- * behind the vendored catalog.
+ * behind what we know the vendor ships.
  *
  * Most model lists no longer rot: a {@link CatalogModelSelector} (claude-code)
  * re-derives from the catalog on every read, so the weekly pricing refresh
@@ -20,11 +20,24 @@
  * existing. Tests are the blocking CI gate here, hence a test and not a new
  * workflow.
  *
+ * ## What the curated list is compared AGAINST
+ *
+ * The union of two vendored sources (see `observedIds`): the pricing catalog
+ * (`openai.json` for codex) and the provider's subscription-watch snapshot
+ * (`chatgpt.json`). Neither alone is enough — 7 of the 10 snapshot ids are
+ * absent from the pricing catalog, and they are the subscription-specific ones
+ * (`-codex*`, `-instant`, `-pro`) a reviewer most needs to rule on, while the
+ * snapshot in turn lags the catalog (it carries neither `gpt-5.5` nor the
+ * `5.6` family).
+ *
+ * Both sources are FEEDS, and the vendor doc outranks them. When they
+ * disagree, the doc wins and the loser's ids get a `reviewed.json` entry.
+ *
  * ## The escape hatch — `apps/api/src/data/subscription-watch/reviewed.json`
  *
- * Plenty of catalog ids are legitimately NOT served by a subscription, so a
- * bare "catalog ⊆ curated" rule would be permanently red. `reviewed.json` maps
- * `{ "<providerId>": ["<catalog id>", …] }`. JSON has no comments, so the
+ * Plenty of observed ids are legitimately NOT served by a subscription, so a
+ * bare "observed ⊆ curated" rule would be permanently red. `reviewed.json`
+ * maps `{ "<providerId>": ["<model id>", …] }`. JSON has no comments, so the
  * semantics live here:
  *
  *   **An entry means: a human read the vendor's subscription doc on the date
@@ -33,12 +46,28 @@
  *   without checking the doc defeats the whole mechanism.
  *
  * Seeded 2026-07-27 against https://learn.chatgpt.com/docs/models (Codex with
- * ChatGPT sign-in). The doc's set is exactly `5.6 Sol/Terra/Luna`, `5.5`,
- * `5.3 Codex Spark`, `5.4`, `5.4 Mini` — i.e. exactly the curated list. The
- * three excused ids are catalog neighbours the doc does NOT name:
- *   - `gpt-5.3-chat-latest` — a chat-surface alias, absent from the Codex
- *     page. It ties the review floor (`gpt-5.3-codex-spark`), so it is the id
- *     the `>=` boundary below exists to surface rather than skip.
+ * ChatGPT sign-in). The doc's set is exactly recommended `5.6 Sol/Terra/Luna`,
+ * `5.5`, `5.3 Codex Spark` plus other-available `5.4`, `5.4 Mini` — i.e.
+ * exactly the curated list. Every excused id, with its reason:
+ *
+ *   Explicitly DEPRECATED for ChatGPT sign-in by that doc:
+ *   - `gpt-5.2`, `gpt-5.3-codex` — both named on the page as no longer
+ *     available to sign-in users. Both are still in the LiteLLM snapshot,
+ *     which is how a lagging feed looks.
+ *
+ *   ABSENT from the doc while present in the LiteLLM `chatgpt` snapshot — the
+ *   snapshot is a third-party reconstruction and trails the vendor page (it
+ *   lists neither `gpt-5.5` nor any `5.6`), so absence from the doc decides:
+ *   - `gpt-5.1-codex-max`, `gpt-5.1-codex-mini`, `gpt-5.2-codex` — retired
+ *     Codex model line, superseded by `gpt-5.3-codex-spark`.
+ *   - `gpt-5.3-instant` — a ChatGPT chat-surface model, not a Codex one.
+ *   - `gpt-5.4-pro` — Pro *plan* tier; the Codex sign-in page does not offer
+ *     it.
+ *
+ *   Pricing-catalog neighbours the doc does NOT name:
+ *   - `gpt-5.3-chat-latest` — a chat-surface alias. It ties the review floor
+ *     (`gpt-5.3-codex-spark`), so it is the id the `>=` boundary below exists
+ *     to surface rather than skip.
  *   - `gpt-5.4-nano` — API-only tier. The doc lists `gpt-5.4` and
  *     `gpt-5.4-mini` for ChatGPT sign-in; `-nano` appears nowhere on it.
  *   - `gpt-5.6` — the plain id is the API model. Codex sign-in serves the
@@ -59,6 +88,26 @@
  * IS the case the paragraph above describes, so a strict `>` would have
  * re-opened the same hole one generation lower. `gpt-5.3-chat-latest` — which
  * ties the codex floor — is the live proof it would have slipped through.
+ *
+ * Because the floor is per-STEM, four of the codex entries in `reviewed.json`
+ * (`gpt-5.1-codex-max`, `gpt-5.1-codex-mini`, `gpt-5.2`, `gpt-5.2-codex`) sit
+ * below the current floor and are inert today. They are recorded anyway: they
+ * were dropped from the served list by a human reading the doc, and that is
+ * what the file is for. They also stop being inert the day the curated list
+ * drops back to their generation.
+ *
+ * ## Known blind spot — a brand-new STEM is never compared
+ *
+ * The floor is keyed by stem, so an id whose stem is absent from the curated
+ * list (`o5-preview`, `codex-max-2`, anything OpenAI names off the `gpt-` line)
+ * has no floor to be measured against and is silently skipped. A whole new
+ * product line is therefore invisible to this gate. That is deliberate: the
+ * alternative — flagging every unknown stem — would report the entire back
+ * catalog of every provider on day one, and the machinery to suppress that
+ * again (per-stem opt-outs, a stem allow-list) would cost more than the human
+ * habit it replaces. The weekly catalog-refresh PR still shows a new stem in
+ * its diff; this gate covers the drift that PR is easy to skim past, namely a
+ * new member of a line we already serve.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from "bun:test";
@@ -68,85 +117,55 @@ import {
   listModelProviders,
   registerModelProvider,
 } from "../../../src/services/model-providers/registry.ts";
-import { resolveDiscoveryCandidates } from "../../../src/services/model-providers/model-selection.ts";
+import {
+  compareVersions,
+  parseModelId,
+  resolveDiscoveryCandidates,
+} from "../../../src/services/model-providers/model-selection.ts";
 import { listCatalogModels, registerCatalog } from "../../../src/services/pricing-catalog.ts";
 import { seedTestModelProviders } from "../../helpers/model-providers.ts";
 import reviewedFile from "../../../src/data/subscription-watch/reviewed.json" with { type: "json" };
+import chatgptWatch from "../../../src/data/subscription-watch/chatgpt.json" with { type: "json" };
 import type { CatalogModelEntry } from "@appstrate/shared-types";
 
 const reviewed = reviewedFile as Record<string, readonly string[]>;
 
 // ---------------------------------------------------------------------------
-// Model-id parsing
+// The observed set
 // ---------------------------------------------------------------------------
 
 /**
- * A version segment is fully numeric, optionally dotted: `4`, `8`, `5.6`.
- * Both id conventions in this repo are covered — OpenAI dots the minor
- * (`gpt-5.6-sol`), Anthropic dashes it (`claude-opus-4-8`).
+ * Provider → the subscription-watch snapshots that describe the same product.
+ *
+ * The vendored PRICING catalog is not the whole picture for a subscription
+ * provider. `codex` resolves against `openai.json` (the API catalog), but 7 of
+ * the 10 ids in the `chatgpt` snapshot — every `-codex*` id, `gpt-5.3-instant`,
+ * `gpt-5.4-pro` — appear nowhere in it. Those are precisely the
+ * subscription-specific ids a reviewer must rule on, so a gate that only reads
+ * the pricing catalog is blind to exactly the ids it exists for.
+ *
+ * The link is one line of configuration and lives here on purpose: nothing in
+ * production reads these snapshots (`scripts/refresh-pricing-catalog.ts` only
+ * writes them), so adding a field to `ModelProviderDefinition` would put a
+ * test-only concern in the published module contract. The cost of that choice
+ * is that a new subscription module must remember to add its line — hence the
+ * `codex` assertion below, which fails if the mapping ever stops resolving.
  */
-const VERSION_SEGMENT = /^\d+(\.\d+)*$/;
-
-/** Compact date stamp in a single segment: `claude-opus-4-20250514`. */
-const COMPACT_DATE_SEGMENT = /^\d{6,}$/;
-
-/** Leading segment of a dashed date stamp: `gpt-5.5-2026-04-23`. */
-const YEAR_SEGMENT = /^(19|20)\d{2}$/;
-
-interface ParsedModelId {
-  /** Leading run of non-version segments: `gpt`, `claude-opus`. */
-  stem: string;
-  /** Version tuple, most significant first: `[5, 6]`, `[4, 8]`. */
-  version: number[];
-}
+const WATCH_SNAPSHOTS: Record<string, readonly string[]> = {
+  codex: chatgptWatch as string[],
+};
 
 /**
- * Parse `<stem>-<version…>[-<qualifier…>]`. Returns null when the id carries
- * no version at all (`gpt-4o`, `chatgpt-4o-latest`) or when it carries a DATE
- * STAMP anywhere — those are snapshot aliases of a canonical id and would
- * otherwise be reported forever (`gpt-5.4-mini-2026-03-17` is `gpt-5.4-mini`,
- * already curated, wearing a release date).
- *
- * Two date conventions, so two detectors: 6+ digits in one segment (Anthropic's
- * `-20250514`), or a year segment followed by more numbers (OpenAI's
- * `-2026-04-23`). Both scan the WHOLE id, not just the version run — the stamp
- * often sits behind a qualifier (`…-mini-2026-03-17`). A 4-digit segment that
- * is NOT year-shaped and NOT followed by more numbers stays a version
- * (`gpt-4-0613` → `[4, 613]`) — harmless, it can only sort below anything a
- * curator is currently working on.
+ * Every id the gate is willing to rule on for `def`: pricing catalog ∪ watch
+ * snapshot. Union, not replacement — the catalog carries ids the LiteLLM
+ * snapshot lacks (it does not even list `gpt-5.5` or the `5.6` family) and the
+ * snapshot carries ids the catalog lacks. Neither source alone is complete;
+ * both lag the vendor doc, which is why an entry in `reviewed.json` records a
+ * human reading the doc rather than a machine reading a feed.
  */
-function parseModelId(id: string): ParsedModelId | null {
-  const segments = id.split("-");
-  const dated = segments.some(
-    (s, i) =>
-      COMPACT_DATE_SEGMENT.test(s) ||
-      (YEAR_SEGMENT.test(s) && VERSION_SEGMENT.test(segments[i + 1] ?? "")),
-  );
-  if (dated) return null;
-
-  const versionStart = segments.findIndex((s) => VERSION_SEGMENT.test(s));
-  // `<= 0` also rejects an id that STARTS with a number: no stem, nothing to
-  // compare it against.
-  if (versionStart <= 0) return null;
-
-  const versionSegments: string[] = [];
-  for (let i = versionStart; i < segments.length && VERSION_SEGMENT.test(segments[i]!); i++) {
-    versionSegments.push(segments[i]!);
-  }
-
-  return {
-    stem: segments.slice(0, versionStart).join("-"),
-    version: versionSegments.flatMap((s) => s.split(".").map(Number)),
-  };
-}
-
-/** Lexicographic compare; a missing segment counts as 0 (`[5]` > `[4, 8]`). */
-function compareVersions(a: readonly number[], b: readonly number[]): number {
-  for (let i = 0; i < Math.max(a.length, b.length); i++) {
-    const diff = (a[i] ?? 0) - (b[i] ?? 0);
-    if (diff !== 0) return diff;
-  }
-  return 0;
+function observedIds(def: ModelProviderDefinition): string[] {
+  const catalog = listCatalogModels(def.catalogProviderId ?? def.providerId).map((m) => m.id);
+  return [...new Set([...catalog, ...(WATCH_SNAPSHOTS[def.providerId] ?? [])])];
 }
 
 // ---------------------------------------------------------------------------
@@ -168,7 +187,7 @@ function gatedProviders(): ModelProviderDefinition[] {
   return listModelProviders().filter(isCuratedStaticProvider);
 }
 
-/** Catalog ids newer than the curated floor that are neither curated nor excused. */
+/** Observed ids at or above the curated floor that are neither curated nor excused. */
 function findDrift(def: ModelProviderDefinition): string[] {
   // Reuse the production resolver rather than reading the raw field: it
   // applies the same `?? featuredModels` fallback and dedupe the platform
@@ -187,8 +206,7 @@ function findDrift(def: ModelProviderDefinition): string[] {
   }
 
   const excused = new Set(reviewed[def.providerId] ?? []);
-  return listCatalogModels(def.catalogProviderId ?? def.providerId)
-    .map((m) => m.id)
+  return observedIds(def)
     .filter((id) => {
       if (curatedIds.has(id) || excused.has(id)) return false;
       const parsed = parseModelId(id);
@@ -210,12 +228,15 @@ function driftReport(def: ModelProviderDefinition): string {
   const drift = findDrift(def);
   if (drift.length === 0) return "";
   const catalog = def.catalogProviderId ?? def.providerId;
+  const sources = WATCH_SNAPSHOTS[def.providerId]
+    ? `the vendored "${catalog}" catalog and the subscription-watch snapshot`
+    : `the vendored "${catalog}" catalog`;
   const doc = def.docsUrl
     ? `the vendor's subscription doc (${def.docsUrl})`
     : "the vendor's subscription doc";
   return [
-    `[${def.providerId}] the vendored "${catalog}" catalog holds model ids newer than the curated`,
-    `subscription list, and nobody has ruled on them: ${drift.join(", ")}.`,
+    `[${def.providerId}] ${sources} hold model ids at or above the curated`,
+    `subscription list's generation, and nobody has ruled on them: ${drift.join(", ")}.`,
     ``,
     `Check ${doc}, then for EACH id either:`,
     `  - add it to \`modelDiscoveryCandidates\` on the "${def.providerId}" provider definition`,
@@ -313,33 +334,5 @@ describe("curated subscription lists vs the vendored catalog", () => {
     expect(findDrift(def)).toEqual(["syn-2-mini", "syn-3"]);
     expect(driftReport(def)).toContain("syn-3");
     expect(driftReport(def)).toContain("reviewed.json");
-  });
-});
-
-describe("model-id parsing", () => {
-  it("handles both version conventions", () => {
-    expect(parseModelId("gpt-5.6-sol")).toEqual({ stem: "gpt", version: [5, 6] });
-    expect(parseModelId("gpt-5.4-mini")).toEqual({ stem: "gpt", version: [5, 4] });
-    expect(parseModelId("claude-opus-4-8")).toEqual({ stem: "claude-opus", version: [4, 8] });
-  });
-
-  it("ignores date-stamped snapshot aliases in both conventions", () => {
-    expect(parseModelId("gpt-5.5-2026-04-23")).toBeNull();
-    expect(parseModelId("claude-opus-4-20250514")).toBeNull();
-    // The stamp behind a qualifier — this one is an alias of the already
-    // curated `gpt-5.4-mini`, and missing it made the gate cry wolf.
-    expect(parseModelId("gpt-5.4-mini-2026-03-17")).toBeNull();
-  });
-
-  it("ignores ids that carry no version", () => {
-    expect(parseModelId("gpt-4o")).toBeNull();
-    expect(parseModelId("chatgpt-4o-latest")).toBeNull();
-  });
-
-  it("orders a bare major above a dotted minor of the previous one", () => {
-    // `claude-opus-5` is newer than `claude-opus-4-8`: a shorter tuple is a
-    // fresh major with no minor yet, not an older release.
-    expect(compareVersions([5], [4, 8])).toBeGreaterThan(0);
-    expect(compareVersions([5, 6], [5, 6])).toBe(0);
   });
 });

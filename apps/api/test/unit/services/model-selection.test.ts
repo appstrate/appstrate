@@ -11,10 +11,19 @@
  * rejection and the round-robin are pinned explicitly, plus the real outcome
  * that motivated the work: `claude-code` must surface the current Anthropic
  * generation without anyone editing a list.
+ *
+ * The id GRAMMAR (`parseModelId` / `compareVersions`) is pinned here too, at
+ * the bottom. It is exported because the CI drift gate
+ * (`curated-model-drift.test.ts`) needs the same rule, and the one thing that
+ * must never happen again is two parsers disagreeing: the second copy had the
+ * stronger date detection while the shipped one let `gpt-5-2025-08-07` parse
+ * as version `[5, 2025, 8, 7]` and head a featured list.
  */
 
 import { describe, it, expect } from "bun:test";
 import {
+  compareVersions,
+  parseModelId,
   resolveFeaturedModels,
   resolveDiscoveryCandidates,
 } from "../../../src/services/model-providers/model-selection.ts";
@@ -86,7 +95,7 @@ describe("resolveFeaturedModels — catalog selectors", () => {
     ]);
   });
 
-  it("rejects dated aliases (6+ digit final segment) at any family depth", () => {
+  it("rejects dated aliases at any family depth", () => {
     const out = resolveFeaturedModels(def({ catalogFamilies: ["syn-alpha"], generations: 99 }));
     expect(out).not.toContain("syn-alpha-4-20250514");
     expect(out).not.toContain("syn-alpha-4-5-20251101");
@@ -102,8 +111,8 @@ describe("resolveFeaturedModels — catalog selectors", () => {
   });
 
   it("interleaves families round-robin by generation index", () => {
-    // Newest of every family first, THEN every second-newest — so a `limit`
-    // buys breadth across families instead of one family's back catalog.
+    // Newest of every family first, THEN every second-newest — so the head of
+    // the list is breadth across families, not one family's back catalog.
     expect(
       resolveFeaturedModels(
         def({ catalogFamilies: ["syn-alpha", "syn-beta", "syn-gamma"], generations: 2 }),
@@ -122,29 +131,6 @@ describe("resolveFeaturedModels — catalog selectors", () => {
     expect(
       resolveFeaturedModels(def({ catalogFamilies: ["syn-alpha", "syn-beta"], generations: 1 })),
     ).toEqual(["syn-alpha-5", "syn-beta-3"]);
-  });
-
-  it("honours `limit` as a hard cap applied after ordering", () => {
-    expect(
-      resolveFeaturedModels(
-        def({ catalogFamilies: ["syn-alpha", "syn-beta", "syn-gamma"], generations: 2, limit: 2 }),
-      ),
-    ).toEqual(["syn-alpha-5", "syn-beta-3"]);
-  });
-
-  it("applies `deny` on exact id before `limit`", () => {
-    // Denying the newest promotes the next generation into the capped window
-    // rather than shrinking the list — deny must not cost a slot.
-    expect(
-      resolveFeaturedModels(
-        def({
-          catalogFamilies: ["syn-alpha"],
-          generations: 3,
-          limit: 2,
-          deny: ["syn-alpha-5"],
-        }),
-      ),
-    ).toEqual(["syn-alpha-4-8", "syn-alpha-4-5"]);
   });
 
   it("resolves an unknown catalog to [] without throwing", () => {
@@ -204,7 +190,19 @@ describe("claude-code against the vendored anthropic catalog", () => {
     const featured = resolveFeaturedModels(claudeCode);
     expect(featured).toContain("claude-opus-5");
     expect(featured).toContain("claude-sonnet-5");
-    expect(featured).toHaveLength(3);
+  });
+
+  it("features every declared family, one current model each", () => {
+    // Four families × `generations: 1` = four ids, and no cap on top. An
+    // earlier `limit: 3` truncated the round-robin's fourth slot, which made
+    // `claude-fable` structurally unfeaturable — a family that could never
+    // surface a model no matter what Anthropic shipped.
+    expect(resolveFeaturedModels(claudeCode)).toEqual([
+      "claude-opus-5",
+      "claude-sonnet-5",
+      "claude-haiku-4-5",
+      "claude-fable-5",
+    ]);
   });
 
   it("carries three generations per family into discovery candidates", () => {
@@ -220,5 +218,75 @@ describe("claude-code against the vendored anthropic catalog", () => {
     }
     // No dated alias ever reaches `available_model_ids`.
     expect(candidates.every((id) => !/-\d{6,}$/.test(id))).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The id grammar
+// ---------------------------------------------------------------------------
+
+describe("parseModelId", () => {
+  it("handles both version conventions", () => {
+    // OpenAI dots the minor, Anthropic dashes it — one parser covers both.
+    expect(parseModelId("gpt-5.6-sol")).toEqual({ stem: "gpt", version: [5, 6], qualifier: "sol" });
+    expect(parseModelId("gpt-5.4-mini")).toEqual({
+      stem: "gpt",
+      version: [5, 4],
+      qualifier: "mini",
+    });
+    expect(parseModelId("claude-opus-4-8")).toEqual({
+      stem: "claude-opus",
+      version: [4, 8],
+      qualifier: "",
+    });
+  });
+
+  it("ignores date-stamped snapshot aliases in both conventions", () => {
+    // The regression: the shipped parser only looked at the LAST segment for
+    // 6+ digits, so every dashed `YYYY-MM-DD` stamp read as a version and
+    // outranked the real one.
+    expect(parseModelId("gpt-5-2025-08-07")).toBeNull();
+    expect(parseModelId("gpt-5.5-2026-04-23")).toBeNull();
+    expect(parseModelId("claude-opus-4-20250514")).toBeNull();
+    // The stamp behind a qualifier — an alias of `gpt-5.4-mini` wearing a
+    // release date, which made the drift gate cry wolf.
+    expect(parseModelId("gpt-5.4-mini-2026-03-17")).toBeNull();
+  });
+
+  it("ignores ids that carry no version, and ids that start with one", () => {
+    expect(parseModelId("gpt-4o")).toBeNull();
+    expect(parseModelId("chatgpt-4o-latest")).toBeNull();
+    // No stem: nothing to group or compare it against.
+    expect(parseModelId("4-mini")).toBeNull();
+  });
+
+  it("rejects zero-padded release stamps", () => {
+    // A version segment never carries a leading zero; every one of the 61
+    // zero-padded segments in the vendored catalogs is a stamp. Without this
+    // rule `grok-4-0709` parses as [4, 709] and outranks `grok-4.5`.
+    expect(parseModelId("grok-4-0709")).toBeNull();
+    expect(parseModelId("gpt-4-0613")).toBeNull();
+    expect(parseModelId("gemini-2.0-flash-001")).toBeNull();
+  });
+
+  it("keeps an unpadded YYMM stamp as a version (the accepted gap)", () => {
+    // `2512` is indistinguishable from a version without a per-vendor rule.
+    // Documented as a known gap: it orders its own family newest-first anyway,
+    // unlike the stamps above which outranked real versions across families.
+    expect(parseModelId("mistral-large-2512")).toEqual({
+      stem: "mistral-large",
+      version: [2512],
+      qualifier: "",
+    });
+  });
+});
+
+describe("compareVersions", () => {
+  it("orders a bare major above a dotted minor of the previous one", () => {
+    // `claude-opus-5` is newer than `claude-opus-4-8`: a shorter tuple is a
+    // fresh major with no minor yet, not an older release.
+    expect(compareVersions([5], [4, 8])).toBeGreaterThan(0);
+    expect(compareVersions([5, 6], [5, 6])).toBe(0);
+    expect(compareVersions([5, 3], [5, 4])).toBeLessThan(0);
   });
 });

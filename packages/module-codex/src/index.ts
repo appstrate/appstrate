@@ -20,9 +20,11 @@
  *
  * The platform issues ZERO Codex API calls to validate a credential or
  * discover models: validation is the local JWT decode below (inferred from the
- * presence of the `validateCredential` hook), and model discovery persists the
- * static `modelDiscoveryCandidates` (declared via `modelDiscovery: { mode:
- * "static" }`). The user's subscription token is only ever spent via the
+ * presence of the `validateCredential` hook), and model discovery neither
+ * probes nor persists — `modelDiscovery: { mode: "static" }` makes the served
+ * set a pure function of (definition, vendored catalog), so the platform
+ * resolves `modelDiscoveryCandidates` (∩ catalog) on every read rather than
+ * copying it onto the credential row. The user's subscription token is only ever spent via the
  * sidecar's verbatim bearer swap at run time — agent runs execute on the
  * single Pi engine, whose pi-ai SDK emits the codex-responses request
  * shape natively. See
@@ -221,11 +223,12 @@ const codexProvider: ModelProviderDefinition = {
   // OFFLINE validation: the platform issues ZERO Codex API calls to test
   // a credential or discover models. The connection test runs the
   // `validateCredential` hook below (local JWT decode) — its mere presence is
-  // what tells the platform to validate offline. Static discovery persists the
-  // candidates below (∩ catalog) without per-model probing. Real availability
-  // is checked at the first agent run (on the Pi engine).
-  // Persisted as-is (∩ catalog) — what THIS account's plan serves lands on
-  // the credential's `available_model_ids`. Superset of `featuredModels`:
+  // what tells the platform to validate offline. Static discovery resolves the
+  // candidates below (∩ catalog) at read time and probes nothing. Real
+  // availability is checked at the first agent run (on the Pi engine).
+  // Served as-is (∩ catalog) — what THIS account's plan actually serves is
+  // discovered by the user at first run, not by the platform. Superset of
+  // `featuredModels`:
   // the documented "recommended" set in doc order (incl. the Pro-only
   // `gpt-5.3-codex-spark` preview), then the "other available" models — which
   // is why the tail is not strictly newest-first. `gpt-5.2` and
@@ -240,7 +243,8 @@ const codexProvider: ModelProviderDefinition = {
     "gpt-5.4",
     "gpt-5.4-mini",
   ],
-  // Static discovery: persist the candidates above (∩ catalog) without probing.
+  // Static discovery: resolve the candidates above (∩ catalog) on read, never
+  // probe and never persist.
   modelDiscovery: { mode: "static" },
   hooks: codexHooks,
   // The chatgpt.com Codex backend rejects requests without a

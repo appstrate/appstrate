@@ -83,8 +83,12 @@ jobs:
             module-load time by `apps/api/src/services/pricing-catalog.ts`. Merging
             redeploys with the new prices on the next release.
           - `apps/api/src/data/subscription-watch/*.json` — id snapshots of
-            subscription backends. Nothing imports them at runtime; they exist
-            solely as the review signal for the hand-curated subscription lists.
+            subscription backends. Nothing imports them at runtime; they exist as
+            the review signal for the hand-curated subscription lists, and the
+            blocking gate `apps/api/test/unit/services/curated-model-drift.test.ts`
+            reads them at test time. If this PR's checks are red on that test, the
+            snapshot gained an id nobody has ruled on — that is the gate working,
+            not a flake.
 
           Reviewer checklist:
           EOF

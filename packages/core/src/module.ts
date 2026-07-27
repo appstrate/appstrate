@@ -712,22 +712,30 @@ export interface ModelProviderHooks {
  *
  * Resolution lives entirely platform-side (`apps/api/src/services/
  * model-providers/model-selection.ts`) — this type is only the declaration.
+ *
+ * Deliberately two knobs and no more. Anything that cannot be said with
+ * `catalogFamilies` × `generations` — an exclusion, a hard cap, a hand-picked
+ * ordering — is a sign the served set is NOT "the vendor's current
+ * generations", and the honest declaration for that is an explicit array
+ * (see {@link ModelIdSelection}), which carries its own reviewability.
  */
 export interface CatalogModelSelector {
   /**
    * Catalog id prefixes, in priority order (e.g. `"claude-opus"`). A catalog
    * id belongs to the family when it reads `<family>-<version>` with a purely
-   * numeric, dash-separated version (`claude-opus-4-8`, `claude-opus-5`).
-   * Dated aliases (`claude-opus-4-20250514`) are excluded — they duplicate a
-   * canonical id under a snapshot name.
+   * numeric version, dashed or dotted (`claude-opus-4-8`, `claude-opus-5`).
+   * A qualifier suffix disqualifies it (`claude-opus-5-thinking` is a variant
+   * of a generation, not a generation), and so do dated aliases
+   * (`claude-opus-4-20250514`) — they duplicate a canonical id under a
+   * snapshot name.
    */
   readonly catalogFamilies: readonly string[];
-  /** How many generations to keep per family, newest first. */
+  /**
+   * How many generations to keep per family, newest first. The resolved list
+   * interleaves families by generation index (newest of every family, then
+   * every second-newest), so its head is one current model per family.
+   */
   readonly generations: number;
-  /** Optional hard cap on the resolved list length. */
-  readonly limit?: number;
-  /** Catalog ids to exclude even when they match a family. */
-  readonly deny?: readonly string[];
 }
 
 /**
@@ -825,7 +833,8 @@ export interface ModelProviderDefinition {
    * {@link modelDiscovery} strategy applies. For the default (probe) strategy
    * the platform probes each one against the connected credential (1-token
    * inference request) and persists the ids that respond 2xx; for the static
-   * strategy it persists these directly (∩ catalog). Unlike
+   * strategy it serves these directly (∩ catalog), resolved on read and never
+   * persisted. Unlike
    * {@link featuredModels}, ids here do NOT have to exist in the resolved
    * catalog. When omitted, the platform uses `featuredModels`. Irrelevant for
    * api_key providers whose full catalog is exposed.
@@ -843,11 +852,19 @@ export interface ModelProviderDefinition {
    * the ids that respond 2xx as the credential's `availableModelIds`.
    *
    * `{ mode: "static" }` declares that the platform must issue ZERO API calls to
-   * discover models: it persists the static {@link modelDiscoveryCandidates}
-   * (∩ catalog) WITHOUT per-model live probing. Set by subscription providers
+   * discover models: the served set is {@link modelDiscoveryCandidates}
+   * (∩ catalog), WITHOUT per-model live probing. Set by subscription providers
    * (`claude-code`, `codex`) so a user's subscription token is never spent
    * enumerating models — real per-model availability is validated at the
    * first agent run (on the Pi engine).
+   *
+   * Nothing is written to `availableModelIds` under this mode. With no probe,
+   * the answer is a pure function of (definition, catalog) and therefore
+   * identical for every credential of the provider; a persisted copy would
+   * carry no per-credential information and could only go stale — which is
+   * exactly how users kept being offered a model list two generations old.
+   * The platform resolves it on read instead, so a catalog refresh corrects
+   * every existing credential at once.
    *
    * Offline credential VALIDATION (no upstream probe to test a token) is a
    * separate, orthogonal concern inferred from the PRESENCE of

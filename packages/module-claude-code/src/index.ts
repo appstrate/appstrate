@@ -30,12 +30,14 @@
  * The provider declares no `oauthWireFormat`; the module's only `hooks`
  * entry is `validateCredential`, an OFFLINE check (no network) that confirms
  * the bearer is well-formed and unexpired — its presence is what makes
- * credential validation offline. Model discovery persists the static
- * `modelDiscoveryCandidates` (declared via `modelDiscovery: { mode: "static" }`)
- * without probing — real per-model availability is validated at the first
- * agent run (on the Pi engine). Both model lists are declared as catalog
- * selectors, so they track the vendored anthropic catalog instead of rotting
- * as hand-curated snapshots. See
+ * credential validation offline. Model discovery neither probes nor persists:
+ * `modelDiscovery: { mode: "static" }` makes the served set a pure function of
+ * (definition, vendored catalog), so the platform resolves
+ * `modelDiscoveryCandidates` (∩ catalog) on every read instead of copying it
+ * onto the credential row, where it could only go stale. Real per-model
+ * availability is validated at the first agent run (on the Pi engine). Both
+ * model lists are declared as catalog selectors, so they track the vendored
+ * anthropic catalog instead of rotting as hand-curated snapshots. See
  * `docs/architecture/SUBSCRIPTION_COMPLIANCE.md`.
  */
 
@@ -136,30 +138,33 @@ const claudeCodeProvider: ModelProviderDefinition = {
   // silently missing for months. Under-listing is the failure mode that has
   // no feedback loop, so the derivation errs the other way.
   //
-  // Featured: the newest generation of each family, capped at 3 — the picker's
-  // Featured section and the `org_models` auto-seed want one current model per
-  // family, not a back catalog.
+  // Featured: exactly one current model per family — what the picker's
+  // Featured section and the `org_models` auto-seed want, and what
+  // `generations: 1` over the four families already yields. No cap on top of
+  // it: an earlier `limit: 3` silently truncated the round-robin's fourth
+  // slot, which made `claude-fable` a family that could never surface a single
+  // model no matter what Anthropic shipped.
   featuredModels: {
     catalogFamilies: ["claude-opus", "claude-sonnet", "claude-haiku", "claude-fable"],
     generations: 1,
-    limit: 3,
   },
   // OFFLINE validation: the platform issues ZERO Anthropic API calls to test a
   // credential or discover models. The connection test runs the
   // `validateCredential` hook below (a non-empty/unexpired bearer check) — its
   // mere presence is what tells the platform to validate offline. Static
-  // discovery persists the resolved candidates (∩ catalog) without per-model
-  // probing. Real availability is checked at the first agent run (on the
+  // discovery resolves these candidates (∩ catalog) at read time and probes
+  // nothing. Real availability is checked at the first agent run (on the
   // Pi engine).
   // Three generations per family, not one: plans lag the current release, so a
   // subscription still served by the previous Opus/Sonnet must keep it
-  // selectable. What THIS account actually serves lands on the credential's
-  // `available_model_ids`.
+  // selectable. What THIS account actually serves is discovered by the user at
+  // first run, not by the platform.
   modelDiscoveryCandidates: {
     catalogFamilies: ["claude-opus", "claude-sonnet", "claude-haiku", "claude-fable"],
     generations: 3,
   },
-  // Static discovery: persist the candidates above (∩ catalog) without probing.
+  // Static discovery: resolve the candidates above (∩ catalog) on read, never
+  // probe and never persist.
   modelDiscovery: { mode: "static" },
   // Anthropic OAuth tokens are not JWTs — no JWT identity decoding. There is no
   // fingerprint forging: both `claude-code` agent runs and the interactive chat

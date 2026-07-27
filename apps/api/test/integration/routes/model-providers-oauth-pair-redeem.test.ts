@@ -16,12 +16,7 @@ import { describe, it, expect, beforeEach, beforeAll, afterAll } from "bun:test"
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
-import {
-  getModelProvider,
-  registerModelProvider,
-} from "../../../src/services/model-providers/registry.ts";
 import { seedTestModelProviders } from "../../helpers/model-providers.ts";
-import claudeCodeModule from "@appstrate/module-claude-code";
 
 const app = getTestApp();
 
@@ -123,18 +118,25 @@ describe("POST /api/model-providers-oauth/pair/redeem — canonical route", () =
  * close. The assertions below therefore compare the two surfaces to each
  * other, never to a hardcoded list: the invariant is the equality itself.
  *
- * Run against the REAL `claude-code` definition (a `modelDiscovery: { mode:
- * "static" }` provider, like every OAuth provider shipped today). It is not in
- * the test `MODULES` list, so registering it here cannot collide; a synthetic
+ * Runs against the REAL `claude-code` definition (a `modelDiscovery: { mode:
+ * "static" }` provider, like every OAuth provider shipped today) — a synthetic
  * stand-in would keep passing while the shipped list rots.
  */
 describe("POST /api/model-providers-oauth/pair/redeem — reported model list", () => {
   let ctx: TestContext;
 
   beforeAll(() => {
-    if (!getModelProvider("claude-code")) {
-      for (const def of claudeCodeModule.modelProviders?.() ?? []) registerModelProvider(def);
-    }
+    // Seed the canonical baseline rather than hand-registering `claude-code`.
+    // The root preload (`test/setup/preload.ts`) discovers every
+    // `packages/module-*` workspace package independently of the test `MODULES`
+    // env var — which only gates the production loader — so the baseline
+    // already carries the real definition. Hand-registering it would throw
+    // "already registered" as soon as any earlier file in the shared `bun test`
+    // process re-seeded; guarding that with an `if (!getModelProvider(...))`
+    // only turned the registration into dead code that never ran, and left the
+    // block seeding no baseline at all when an earlier file had emptied the
+    // registry.
+    seedTestModelProviders();
   });
 
   afterAll(() => {

@@ -25,6 +25,7 @@
  * `registerModelProvider()` directly.
  */
 
+import { isCatalogModelSelector } from "@appstrate/core/module";
 import type { ModelProviderDefinition } from "@appstrate/core/module";
 import { hasCatalog, lookupCatalogModel } from "../pricing-catalog.ts";
 import { resolveFeaturedModels } from "./model-selection.ts";
@@ -69,17 +70,40 @@ export function registerModelProvider(def: ModelProviderDefinition): void {
  * Providers with no own catalog AND no `catalogProviderId` are allowed
  * IFF `featuredModels` is empty (openrouter, openai-compatible).
  *
- * The check runs on RESOLVED ids: a `CatalogModelSelector` derives from the
- * same catalog and can only ever produce members of it, so this stays a real
- * gate for explicit arrays and a cheap tautology for selectors. Registration
- * therefore requires the catalog to already be registered — production
- * catalogs are registered at `pricing-catalog.ts` import time, and test
- * fixtures must call `registerCatalog()` before `registerModelProvider()`.
+ * The check runs on RESOLVED ids, which needs one arm per selection shape,
+ * because "resolved to nothing" means opposite things on the two arms:
+ *
+ *   - EMPTY ARRAY — a deliberate declaration ("this provider features
+ *     nothing": openrouter is live-search, openai-compatible is Custom-only).
+ *     Allowed, with or without a catalog.
+ *   - SELECTOR resolving to nothing — always a misconfiguration. A selector is
+ *     a claim that the catalog carries these families; producing zero ids means
+ *     the catalog key is wrong or every family name is (a typo in
+ *     `claude-opuss` costs nothing at boot and shows the user an empty picker).
+ *     Resolving BEFORE this check is also what made the missing-catalog arm
+ *     unreachable for selectors — `resolveSelection` returns `[]` for an
+ *     unknown catalog rather than throwing, so `length > 0 && !catalogExists`
+ *     could never fire. This arm is that gate, restated in selector terms.
+ *
+ * Registration therefore requires the catalog to already be registered —
+ * production catalogs are registered at `pricing-catalog.ts` import time, and
+ * test fixtures must call `registerCatalog()` before `registerModelProvider()`.
  */
 function validateCatalogReferences(def: ModelProviderDefinition): void {
   const catalogKey = def.catalogProviderId ?? def.providerId;
   const catalogExists = hasCatalog(catalogKey);
   const featured = resolveFeaturedModels(def);
+
+  if (isCatalogModelSelector(def.featuredModels) && featured.length === 0) {
+    throw new Error(
+      `Model provider ${JSON.stringify(def.providerId)} declares a featuredModels catalog ` +
+        `selector over families [${def.featuredModels.catalogFamilies.map((f) => JSON.stringify(f)).join(", ")}] ` +
+        `that resolves to no model in the ${JSON.stringify(catalogKey)} catalog` +
+        `${catalogExists ? "" : " (no such catalog is registered)"}. ` +
+        `Fix the catalogProviderId or the family names — a selector that matches ` +
+        `nothing leaves the model picker empty.`,
+    );
+  }
 
   if (featured.length > 0 && !catalogExists) {
     throw new Error(

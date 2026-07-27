@@ -45,7 +45,6 @@ describe("claude-code module", () => {
     expect(cc?.featuredModels).toEqual({
       catalogFamilies: ["claude-opus", "claude-sonnet", "claude-haiku", "claude-fable"],
       generations: 1,
-      limit: 3,
     });
   });
 
