@@ -44,9 +44,10 @@
  * `llm-usage-retry.ts` for durable recovery.
  */
 
+import { getErrorMessage } from "@appstrate/core/errors";
 import { db, type Db } from "@appstrate/db/client";
 import { llmUsage, runs, terminalRunStatusValues } from "@appstrate/db/schema";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, sql, type SQL } from "drizzle-orm";
 import { logger } from "../lib/logger.ts";
 
 /** Credential set that reached the upstream provider for a ledger row. */
@@ -130,6 +131,76 @@ const runNotTerminalSql = sql`NOT EXISTS (
     )})
 )`;
 
+/** The monotonic columns of a candidate runner snapshot, as SQL expressions. */
+interface RunnerSnapshotSql {
+  costUsd: SQL;
+  inputTokens: SQL;
+  outputTokens: SQL;
+  cacheReadTokens: SQL;
+  cacheWriteTokens: SQL;
+}
+
+/** The candidate side inside an upsert: Postgres' `EXCLUDED` pseudo-row. */
+const excludedSnapshotSql: RunnerSnapshotSql = {
+  costUsd: sql`EXCLUDED.cost_usd`,
+  inputTokens: sql`EXCLUDED.input_tokens`,
+  outputTokens: sql`EXCLUDED.output_tokens`,
+  cacheReadTokens: sql`EXCLUDED.cache_read_tokens`,
+  cacheWriteTokens: sql`EXCLUDED.cache_write_tokens`,
+};
+
+/**
+ * The same candidate as bound parameters, so {@link runnerAdvancesSql} can be
+ * evaluated outside an upsert. Every value is cast: a bound parameter reaches
+ * Postgres untyped, and `$1 + $2` alone is not resolvable.
+ */
+function entrySnapshotSql(entry: LlmUsageEntry): RunnerSnapshotSql {
+  return {
+    costUsd: sql`${entry.costUsd}::double precision`,
+    inputTokens: sql`${entry.inputTokens}::integer`,
+    outputTokens: sql`${entry.outputTokens}::integer`,
+    cacheReadTokens: sql`${entry.cacheReadTokens ?? null}::integer`,
+    cacheWriteTokens: sql`${entry.cacheWriteTokens ?? null}::integer`,
+  };
+}
+
+/**
+ * SQL predicate: `candidate` strictly ADVANCES the conflicting runner row.
+ *
+ * Runner rows are cumulative snapshots — tokens and cost grow together — so the
+ * row must only ever advance:
+ *   1. a strictly higher cumulative cost wins; else
+ *   2. an EQUAL cost with a strictly higher total token count wins.
+ * Level 2 is what keeps a zero-cost model (free model / no catalog rate /
+ * zero-rate tokens) correct: its cost stays constant at 0 while token counts
+ * keep climbing, so a cost-only rule would freeze the token columns at their
+ * first values. Both levels use STRICT inequalities, so an exact duplicate
+ * replay (same cost AND same tokens) is a no-op that re-emits nothing — that
+ * idempotence is load-bearing for cursor consumers. Out-of-order metric events
+ * and the finalize fallback can never regress either dimension.
+ *
+ * Built once for the two sites that MUST agree on it: the upsert's `setWhere`
+ * (candidate = {@link excludedSnapshotSql}) and the refusal diagnostic
+ * {@link traceRejectedTerminalRunnerWrite} (candidate = the entry's bound
+ * values), so the diagnostic can never contradict the write it explains.
+ * Evaluates to NULL when there is no row to compare against (an unmatched LEFT
+ * JOIN) — the diagnostic reads that as "would have inserted".
+ */
+function runnerAdvancesSql(candidate: RunnerSnapshotSql): SQL<boolean | null> {
+  return sql<boolean | null>`(
+    ${candidate.costUsd} > ${llmUsage.costUsd}
+    OR (
+      ${candidate.costUsd} = ${llmUsage.costUsd}
+      AND ${candidate.inputTokens} + ${candidate.outputTokens}
+            + COALESCE(${candidate.cacheReadTokens}, 0)
+            + COALESCE(${candidate.cacheWriteTokens}, 0)
+          > ${llmUsage.inputTokens} + ${llmUsage.outputTokens}
+            + COALESCE(${llmUsage.cacheReadTokens}, 0)
+            + COALESCE(${llmUsage.cacheWriteTokens}, 0)
+    )
+  )`;
+}
+
 /**
  * Append one row to `llm_usage`.
  *
@@ -177,20 +248,9 @@ export async function recordLlmUsage(
       ? await executor
           .insert(llmUsage)
           .values(values)
-          // Two-level monotonic upsert on the partial unique index. Runner rows
-          // are cumulative snapshots — tokens and cost grow together — so the row
-          // must only ever advance:
-          //   1. a strictly higher cumulative cost wins; else
-          //   2. an EQUAL cost with a strictly higher total token count wins.
-          // Level 2 is what keeps a zero-cost model (free model / no catalog rate
-          // / zero-rate tokens) correct: its cost stays constant at 0 while token
-          // counts keep climbing, so a cost-only rule would freeze the token
-          // columns at their first values. Both levels use STRICT inequalities, so
-          // an exact duplicate replay (same cost AND same tokens) is a no-op that
-          // re-emits nothing — that idempotence is load-bearing for cursor
-          // consumers. Out-of-order metric events and the finalize fallback can
-          // never regress either dimension. Token columns are bumped alongside the
-          // cost so the snapshot stays consistent.
+          // Two-level monotonic upsert on the partial unique index — see
+          // {@link runnerAdvancesSql} for the advance rule. Token columns are
+          // bumped alongside the cost so the snapshot stays consistent.
           .onConflictDoUpdate({
             target: llmUsage.runId,
             targetWhere: sql`source = 'runner' AND run_id IS NOT NULL`,
@@ -205,21 +265,7 @@ export async function recordLlmUsage(
             // being non-terminal — see {@link runNotTerminalSql}: a settled row
             // has already been claimed by its serial id, so growing it strands
             // the delta.
-            setWhere: sql`
-              ${runNotTerminalSql}
-              AND (
-                EXCLUDED.cost_usd > ${llmUsage.costUsd}
-                OR (
-                  EXCLUDED.cost_usd = ${llmUsage.costUsd}
-                  AND EXCLUDED.input_tokens + EXCLUDED.output_tokens
-                        + COALESCE(EXCLUDED.cache_read_tokens, 0)
-                        + COALESCE(EXCLUDED.cache_write_tokens, 0)
-                      > ${llmUsage.inputTokens} + ${llmUsage.outputTokens}
-                        + COALESCE(${llmUsage.cacheReadTokens}, 0)
-                        + COALESCE(${llmUsage.cacheWriteTokens}, 0)
-                )
-              )
-            `,
+            setWhere: sql`${runNotTerminalSql} AND ${runnerAdvancesSql(excludedSnapshotSql)}`,
           })
           .returning({ id: llmUsage.id })
       : opts.onConflict === "proxy-idempotent"
@@ -254,26 +300,62 @@ export async function recordLlmUsage(
 
 /**
  * Log the post-settlement rejection of a late runner snapshot (see
- * {@link runNotTerminalSql}). Called only when the monotonic upsert wrote
- * nothing, and only for runner rows: reads the run's status plus the stored
- * total so the operator sees exactly how much spend was refused and on which
- * run. A run row that vanished (deleted mid-flight) is not a rejection — the
- * conflicting row was detached to `run_id = NULL` and the insert took the plain
- * path.
+ * {@link runNotTerminalSql}) — but ONLY when that snapshot would genuinely have
+ * advanced the stored row. Called only when the monotonic upsert wrote nothing,
+ * and only for runner rows.
+ *
+ * A no-op upsert has two unrelated causes: the terminal barrier refused a real
+ * delta (billing loss — the error below), or the snapshot was an equal-or-lower
+ * cumulative replay with nothing to add (benign — silence). Every successful run
+ * produces one of the latter, which is why a status-only test drowned the real
+ * losses under one error per run (issue #997): `run-launcher/execute-background.ts`
+ * defensively synthesises a finalize on ANY clean container exit, and
+ * `synthesiseFinalize` carries no cost, so finalize's terminal ledger barrier
+ * re-submits the run's own last snapshot at `costUsd: 0` once the run settled.
+ *
+ * The advance test is the SAME predicate the upsert gates on
+ * ({@link runnerAdvancesSql}), evaluated in Postgres against the stored row, so
+ * the diagnostic cannot drift from the write it explains — and no comparison
+ * value crosses the SQL/TS boundary. Only a definitive `false` is silence: NULL
+ * means the run carries no runner row, i.e. the snapshot would have INSERTed, so
+ * it is still reported. A run row that vanished (deleted mid-flight) is not a
+ * rejection — the conflicting row was detached to `run_id = NULL` and the insert
+ * took the plain path.
  */
 async function traceRejectedTerminalRunnerWrite(executor: Db, entry: LlmUsageEntry): Promise<void> {
-  const [row] = await executor
-    .select({ status: runs.status, storedCost: llmUsage.costUsd })
-    .from(runs)
-    .leftJoin(llmUsage, and(eq(llmUsage.runId, runs.id), eq(llmUsage.source, "runner")))
-    .where(eq(runs.id, entry.runId!))
-    .limit(1);
-  if (!row || !(terminalRunStatusValues as readonly string[]).includes(row.status)) return;
-  logger.error("llm_usage: refused a runner snapshot on an already-settled run", {
-    runId: entry.runId,
-    orgId: entry.orgId,
-    runStatus: row.status,
-    storedCostUsd: row.storedCost,
-    refusedCostUsd: entry.costUsd,
-  });
+  try {
+    const [row] = await executor
+      .select({
+        status: runs.status,
+        storedCostUsd: llmUsage.costUsd,
+        advances: runnerAdvancesSql(entrySnapshotSql(entry)),
+      })
+      .from(runs)
+      .leftJoin(llmUsage, and(eq(llmUsage.runId, runs.id), eq(llmUsage.source, "runner")))
+      .where(eq(runs.id, entry.runId!))
+      .limit(1);
+    if (!row || !(terminalRunStatusValues as readonly string[]).includes(row.status)) return;
+    if (row.advances === false) return;
+    logger.error("llm_usage: refused a runner snapshot on an already-settled run", {
+      runId: entry.runId,
+      orgId: entry.orgId,
+      runStatus: row.status,
+      // Both cumulative totals, plus the delta that will never be billed.
+      storedCostUsd: row.storedCostUsd,
+      incomingCostUsd: entry.costUsd,
+      refusedDeltaUsd: entry.costUsd - (row.storedCostUsd ?? 0),
+    });
+  } catch (err) {
+    // Explaining a no-op must never break the write: `recordLlmUsageReliably`
+    // always rethrows for runner rows, and the finalize barrier calls it with
+    // `required: true` outside any transaction, so a throw here would fail
+    // `finalizeRun` and leave the run unsettled. This cannot un-poison the
+    // `appstrate.metric` caller's ingestion transaction, which stays safe by its
+    // own design (the runner's next cumulative snapshot supersedes the lost
+    // write — see `run-launcher/appstrate-event-sink.ts`).
+    logger.warn("llm_usage: refusal diagnostic failed", {
+      runId: entry.runId,
+      error: getErrorMessage(err),
+    });
+  }
 }
