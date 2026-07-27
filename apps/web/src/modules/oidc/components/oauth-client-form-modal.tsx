@@ -30,6 +30,7 @@ import {
   type SignupRole,
 } from "../hooks/use-oauth-clients";
 import { getErrorMessage } from "@appstrate/core/errors";
+import { looksLoopback } from "../lib/redirect-uri";
 
 /** Role allowlist for org-level auto-provisioning. `owner` deliberately excluded. */
 const SIGNUP_ROLE_OPTIONS: SignupRole[] = ["member", "admin", "viewer"];
@@ -139,11 +140,21 @@ function OAuthClientFormBody({
     }
   }
 
+  /**
+   * Fast-fail UX pre-check, NOT the policy. The server decides
+   * (`isValidRedirectUri`, which shares its loopback predicate with the
+   * Dynamic Client Registration path) and its rejection surfaces through
+   * `onError` below, so this check is deliberately a superset of the server
+   * rule: `https:` or `http:` on anything that looks loopback. Being looser
+   * than the server only costs a round-trip; being stricter silently blocks
+   * URIs the API accepts — that was #1012, where `http://127.0.0.1/callback`
+   * was refused here even after the server started accepting it.
+   */
   function validateUris(uris: string[]): string[] | null {
     for (const uri of uris) {
       try {
         const url = new URL(uri);
-        if (url.protocol !== "https:" && url.hostname !== "localhost") {
+        if (url.protocol !== "https:" && !looksLoopback(url.hostname)) {
           setError("root", { message: t("settings:oauthClients.httpsRequired") });
           return null;
         }

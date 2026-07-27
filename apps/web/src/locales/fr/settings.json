@@ -264,7 +264,7 @@
   "oauthClients.redirectUris": "URIs de redirection",
   "oauthClients.redirectUrisHint": "Où l'utilisateur sera renvoyé après l'autorisation. HTTPS obligatoire (sauf localhost pour le développement).",
   "oauthClients.redirectUrisRequired": "Au moins une URI de redirection est requise.",
-  "oauthClients.httpsRequired": "HTTPS obligatoire (hors localhost).",
+  "oauthClients.httpsRequired": "HTTPS obligatoire (sauf loopback : localhost, 127.0.0.1, [::1]).",
   "oauthClients.invalidUri": "URI invalide.",
   "oauthClients.addRedirectUri": "Ajouter une URI",
   "oauthClients.postLogoutRedirectUris": "URLs de déconnexion autorisées",

@@ -97,8 +97,10 @@ What happens under the hood:
 ### Self-hosting requirements for Path B
 
 - The instance must be reachable over **HTTPS** at the configured `APP_URL`
-  (CIMD documents and redirect URIs must be HTTPS; loopback is allowed only for
-  local development).
+  (CIMD documents must be served over HTTPS; an instance on `http://localhost`
+  is a development setup only). Client **redirect URIs** are a separate matter:
+  `http://` is accepted for loopback hosts in every environment, on both the
+  self-registration (DCR) and dashboard paths — RFC 8252 §7.3.
 - `APP_URL` must match the public origin clients reach — each per-org resource
   URI (`<APP_URL>/api/mcp/o/<orgId>`) is derived from it and must equal what the
   org's PRM advertises, or audience binding will reject tokens.
