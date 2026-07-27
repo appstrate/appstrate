@@ -8,7 +8,7 @@
  *
  *   - the card set is the FULL manifest inventory, empty cards included (they
  *     are where the renderer offers to add the missing thing),
- *   - every edge connects a card to `agent` (three-column topology),
+ *   - every edge connects a card to `agent` (star topology, laid out in columns),
  *   - `diagnostics[]` carries the SAME failures the readiness gate raises, each
  *     routed to the node and row it belongs to,
  *   - the connection state per integration matches the connection resolver.
@@ -161,7 +161,7 @@ describe("GET /api/agents/:scope/:name/map", () => {
     expect(body.diagnostics).toHaveLength(0);
   });
 
-  it("every edge terminates on the agent, and the three columns are distinct", async () => {
+  it("every edge terminates on the agent, and the columns are ordered left to right", async () => {
     await seedAgentWith(
       agentManifest({
         dependencies: { integrations: { [INTEGRATION]: "^1.0.0" }, skills: { [SKILL]: "^1.0.0" } },
@@ -181,8 +181,12 @@ describe("GET /api/agents/:scope/:name/map", () => {
     const toolboxX = byId.get("toolbox")!.position.x;
     expect(inputX).toBeLessThan(agentX);
     expect(agentX).toBeLessThan(toolboxX);
-    // Inputs share one column.
+    // The result sits past the capabilities: read left to right, the canvas is
+    // the run itself.
+    expect(toolboxX).toBeLessThan(byId.get("output")!.position.x);
+    // Everything that feeds the agent shares one column.
     expect(byId.get("model")!.position.x).toBe(inputX);
+    expect(byId.get("input")!.position.x).toBe(inputX);
   });
 
   it("declared integration with no connection → not connected, run-blocking, diagnostic routed to its row", async () => {
