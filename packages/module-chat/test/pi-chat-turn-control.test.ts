@@ -215,3 +215,59 @@ describe("PiChatUiStreamMapper.stepCount", () => {
     expect(new Set(ids).size).toBe(ids.length);
   });
 });
+
+describe("createStepCapController — connect offers survive the cap", () => {
+  // pi-agent-core rebuilds a tool result as exactly {content, details, terminate}
+  // whenever `afterToolCall` returns a truthy override, so terminating on a batch
+  // that carries a `connectOffer` would strip the connect URL and leave the user
+  // a card with no button. `mcp-tools.ts` documents that contract.
+  const offerContext = (message: object) => ({
+    assistantMessage: message,
+    result: { content: [], connectOffer: { connect_url: "https://example.test/c" } },
+  });
+
+  it("does not terminate a batch carrying a connect offer", async () => {
+    const { session } = fakeSession();
+    const cap = createStepCapController({ modelCallCount: () => CHAT_TOOL_STEP_BUDGET });
+    cap.attach(session);
+
+    const override = await session.agent.afterToolCall?.(offerContext({}), undefined);
+
+    expect(override?.terminate).toBeUndefined();
+    expect(cap.fired()).toBe(false);
+  });
+
+  it("spares every call in the offer's batch, not just the one carrying it", async () => {
+    const { session } = fakeSession();
+    const cap = createStepCapController({ modelCallCount: () => CHAT_TOOL_STEP_BUDGET });
+    cap.attach(session);
+    const batch = {};
+
+    // The offer arrives first; a sibling call in the SAME batch must also be
+    // spared — `terminate` is only honoured when every result in the batch sets
+    // it, so a split decision would leave `fired` true with the loop still live.
+    await session.agent.afterToolCall?.(offerContext(batch), undefined);
+    const sibling = await session.agent.afterToolCall?.(
+      { assistantMessage: batch, result: { content: [] } },
+      undefined,
+    );
+
+    expect(sibling?.terminate).toBeUndefined();
+    expect(cap.fired()).toBe(false);
+  });
+
+  it("caps on the next batch once the offer's batch has passed", async () => {
+    const { session } = fakeSession();
+    const cap = createStepCapController({ modelCallCount: () => CHAT_TOOL_STEP_BUDGET });
+    cap.attach(session);
+
+    await session.agent.afterToolCall?.(offerContext({}), undefined);
+    const next = await session.agent.afterToolCall?.(
+      { assistantMessage: {}, result: { content: [] } },
+      undefined,
+    );
+
+    expect(next?.terminate).toBe(true);
+    expect(cap.fired()).toBe(true);
+  });
+});

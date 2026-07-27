@@ -85,6 +85,13 @@ export function formatBudgetDuration(ms: number): string {
  * invalidate a prompt-cache prefix (ai-sdk: a second system block AFTER the
  * cache breakpoint; Pi: appended to a tool result, i.e. frozen into the
  * transcript once written).
+ *
+ * The launch threshold it quotes is derived from {@link computeTurnRunBudget},
+ * NOT restated: the gate spends `CHAT_TURN_SAFETY_MARGIN_MS` of the remaining
+ * time before comparing against `CHAT_MIN_RUN_BUDGET_MS`, so a note advertising
+ * the bare minimum would tell a model with 1m50s left that it may launch and
+ * then refuse it. A model arbitrating on the wrong number is worse than one
+ * shown no number at all — that is the whole point of A5.
  */
 export function formatTurnBudgetNote(input: {
   remainingMs: number;
@@ -92,11 +99,11 @@ export function formatTurnBudgetNote(input: {
   maxSteps?: number;
 }): string {
   const maxSteps = input.maxSteps ?? CHAT_MAX_STEPS;
-  const minRun = formatBudgetDuration(CHAT_MIN_RUN_BUDGET_MS);
+  const launchThreshold = formatBudgetDuration(CHAT_MIN_RUN_BUDGET_MS + CHAT_TURN_SAFETY_MARGIN_MS);
   return (
     `[turn budget] ${formatBudgetDuration(input.remainingMs)} left in this turn, ` +
     `step ${input.stepsUsed}/${maxSteps}. ` +
-    `A run_and_wait launch needs at least ${minRun} of turn budget or it is refused; ` +
+    `A run_and_wait launch needs at least ${launchThreshold} left or it is refused; ` +
     `anything not written into your reply before the turn ends is lost.`
   );
 }
@@ -146,10 +153,6 @@ export function mergeTurnMetadata(
 
 export function isFinalChatStep(stepNumber: number, maxSteps = CHAT_MAX_STEPS): boolean {
   return stepNumber >= maxSteps - 1;
-}
-
-export function appendFinalStepSystemPrompt(system: string): string {
-  return `${system}\n\n${CHAT_FINAL_STEP_SYSTEM_PROMPT}`;
 }
 
 export function turnMetadataFromMessage(message: unknown): AppstrateTurnMetadata | null {

@@ -224,8 +224,13 @@ describe("turn budget shown to the model (A5)", () => {
     const note = formatTurnBudgetNote({ remainingMs: 4 * 60_000 + 12_000, stepsUsed: 7 });
     expect(note).toContain("4m12s");
     expect(note).toContain("step 7/16");
-    // The launch floor is quoted so the model knows when a run gets refused.
-    expect(note).toContain("1m30s");
+    // The quoted threshold must be the one the GATE applies, not the bare floor:
+    // `computeTurnRunBudget` spends the 45 s safety margin before comparing
+    // against the 90 s floor, so a launch actually needs 2m15s of remaining time.
+    // Quoting 1m30s here would tell a model with 1m50s left that it may launch,
+    // and it would then be refused.
+    expect(note).toContain("2m15s");
+    expect(note).not.toContain("1m30s");
   });
 
   it("renders sub-minute budgets without a minute component", () => {
