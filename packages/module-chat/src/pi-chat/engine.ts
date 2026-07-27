@@ -62,7 +62,6 @@ import {
  * both engines derive their child-call budgets from the SAME ceiling, and a
  * `run_and_wait` can no longer be granted more time than the turn hosting it.
  */
-const TURN_DEADLINE_MS = CHAT_TURN_DEADLINE_MS;
 
 export interface PiSubscriptionChatInput {
   /** Resolved subscription model + fresh real access token. */
@@ -116,9 +115,9 @@ export function runPiSubscriptionChat(input: PiSubscriptionChatInput): Response 
       // The ABSOLUTE instant this turn dies. The timer below is just its local
       // expression; the timestamp itself is what descends into every child call
       // (run_and_wait) so the whole subtree ends at the same instant.
-      const turnDeadlineAt = startedAt + TURN_DEADLINE_MS;
+      const turnDeadlineAt = startedAt + CHAT_TURN_DEADLINE_MS;
       const deadline = setTimeout(
-        () => turnAbort.abort(new ChatTurnDeadlineError(TURN_DEADLINE_MS)),
+        () => turnAbort.abort(new ChatTurnDeadlineError(CHAT_TURN_DEADLINE_MS)),
         Math.max(0, turnDeadlineAt - Date.now()),
       );
 
@@ -295,11 +294,11 @@ export function runPiSubscriptionChat(input: PiSubscriptionChatInput): Response 
           logger.warn("chat turn deadline reached", {
             chatSessionId: input.chatSessionId,
             stepCount,
-            deadlineMs: TURN_DEADLINE_MS,
+            deadlineMs: CHAT_TURN_DEADLINE_MS,
           });
           const notice = turnNoticeChunks(
             crypto.randomUUID(),
-            turnDeadlineNoticeText(TURN_DEADLINE_MS),
+            turnDeadlineNoticeText(CHAT_TURN_DEADLINE_MS),
           );
           for (const chunk of notice) write(chunk);
         }

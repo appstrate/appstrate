@@ -55,7 +55,7 @@ import { logger } from "./logger.ts";
  * `runs.metadata` key carrying the launching chat session. camelCase per the
  * universal DB-convention carve-out for `*Id` fields (CASING_CONVENTIONS.md).
  */
-export const RUN_METADATA_CHAT_SESSION_KEY = "chatSessionId";
+const RUN_METADATA_CHAT_SESSION_KEY = "chatSessionId";
 
 /** One document named in the notice. */
 interface NoticedDocument {
@@ -126,7 +126,7 @@ export function runNoticeText(input: {
 }
 
 /** Read the launching chat session id off a run's `metadata` JSONB, safely. */
-export function readChatSessionId(metadata: unknown): string | null {
+function readChatSessionId(metadata: unknown): string | null {
   if (typeof metadata !== "object" || metadata === null || Array.isArray(metadata)) return null;
   const value = (metadata as Record<string, unknown>)[RUN_METADATA_CHAT_SESSION_KEY];
   return typeof value === "string" && value.length > 0 ? value : null;
