@@ -248,8 +248,10 @@ export function createDocumentsRouter() {
  *
  *  - `html` — untrusted agent-generated ACTIVE content: a strict CSP header
  *    whose `sandbox allow-scripts` puts the document in an OPAQUE origin (no
- *    first-party origin to act on, and no top-level navigation — otherwise
- *    agent script could steer the tab to a real `/login` and phish), plus an
+ *    first-party origin to act on, and no navigation of the TOP-LEVEL browsing
+ *    context — otherwise a preview opened in its own tab could steer that tab
+ *    to a real `/login` and phish; a nested frame may still navigate ITSELF,
+ *    see {@link buildPreviewCsp}), plus an
  *    injected parse-time `<meta>` CSP carrying the same policy minus `sandbox`,
  *    which a meta context ignores (covers the relative-URL / `srcdoc` bypass a
  *    header alone can miss), COOP `same-origin`, the full `Permissions-Policy`.

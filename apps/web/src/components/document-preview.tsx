@@ -48,6 +48,12 @@ import { client } from "../api/client";
  * in a unit test) so a regression that widens the sandbox is caught: it must stay
  * `"allow-scripts"` and nothing else. Applies ONLY to the html iframe — the pdf
  * iframe is intentionally sandboxless (see file header).
+ *
+ * The server ships the SAME token set on the response's CSP `sandbox` directive
+ * (`buildPreviewCsp()` in `apps/api/src/services/document-preview.ts`). The two
+ * sandboxes INTERSECT — a token granted on only one side is not granted at all —
+ * so widening one alone is dead code, and widening it here while the server keeps
+ * it out (or the reverse) is a silent asymmetry. Move both or neither.
  */
 export const PREVIEW_IFRAME_SANDBOX = "allow-scripts";
 

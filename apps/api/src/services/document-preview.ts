@@ -200,18 +200,44 @@ export interface PreviewCsp {
  * else**. The sandbox is what makes executing agent script survivable at all: it
  * drops the response into an OPAQUE origin (no first-party origin to act on) and
  * — the reason it is here — it is the ONLY thing in this policy that restricts
- * TOP-LEVEL NAVIGATION. Without it an inline script in an agent document can
- * `location = "…/login"` and phish real credentials on a real first-party origin
- * (GHSA-8f6g-r37m-wg99). Tokens deliberately NOT granted:
+ * navigation of the TOP-LEVEL browsing context. Without it, a preview opened
+ * top-level (new tab, shared link) can `location = "…/login"` and phish real
+ * credentials on a real first-party origin (GHSA-8f6g-r37m-wg99). Tokens
+ * deliberately NOT granted:
  *
  *  - `allow-popups` / `allow-popups-to-escape-sandbox` — a popup to the app's
- *    `/login` reopens the exact phishing chain this closes. The cost is accepted:
- *    external links in agent documents are broken-on-click.
+ *    `/login` reopens the exact phishing chain this closes.
  *  - `allow-top-navigation` / `allow-top-navigation-by-user-activation` — the
  *    attack IS a user-initiated click, so the "by user activation" variant grants
  *    precisely the capability being removed.
  *  - `allow-same-origin` — hands the document back a real origin and defeats the
  *    entire control.
+ *
+ * What this does and does NOT cost the user, per loading context — a sandboxed
+ * navigable may ALWAYS navigate ITSELF, the flags only gate navigating a
+ * TOP-LEVEL browsing context:
+ *
+ *  - **Top-level load** (a `USERCONTENT_URL` preview opened in a new tab or via
+ *    a shared link): the document IS the top-level browsing context, so a plain
+ *    `<a href="https://…">` click, a `location = …` and a `<meta http-equiv=
+ *    "refresh">` are all blocked. That is the phishing fix, and the accepted
+ *    cost of it.
+ *  - **Inside the SPA's preview modal iframe**: the document is a NESTED
+ *    navigable, so a plain no-target link still navigates the frame in place —
+ *    it is not disabled. `target="_blank"` and `target="_top"` are dead, but
+ *    they were already dead before this policy existed, because the iframe
+ *    element has carried `sandbox="allow-scripts"` all along. Nothing about the
+ *    modal path changed here.
+ *
+ * LIMITATION (pre-existing, unchanged by this policy): because self-navigation
+ * is always allowed, an agent document rendered in the modal can still replace
+ * its OWN frame with an arbitrary page. Constraining that needs a `frame-src`
+ * directive on the SPA's own response — the app currently sends no CSP at all,
+ * so there is nothing here to hook it onto.
+ *
+ * The embedding iframe declares the SAME token set (`PREVIEW_IFRAME_SANDBOX` in
+ * `apps/web/src/components/document-preview.tsx`) and the two sandboxes
+ * INTERSECT, so the sets must move together or not at all.
  *
  * The `<meta>` copy omits `sandbox`, because the directive is IGNORED in a meta
  * context (per spec — a document cannot sandbox itself after parsing has begun).
