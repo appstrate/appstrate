@@ -264,7 +264,7 @@
   "oauthClients.redirectUris": "Redirect URIs",
   "oauthClients.redirectUrisHint": "Where the user is sent after authorization. HTTPS required (except localhost for development).",
   "oauthClients.redirectUrisRequired": "At least one redirect URI is required.",
-  "oauthClients.httpsRequired": "HTTPS required (except localhost).",
+  "oauthClients.httpsRequired": "HTTPS required (except loopback: localhost, 127.0.0.1, [::1]).",
   "oauthClients.invalidUri": "Invalid URI.",
   "oauthClients.addRedirectUri": "Add URI",
   "oauthClients.postLogoutRedirectUris": "Allowed logout URLs",
