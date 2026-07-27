@@ -90,15 +90,15 @@ function randomVerifier(): string {
 }
 
 /**
- * Extract the authorization code from a consent-endpoint response. The
+ * Extract the client callback URL from a consent-endpoint response. The
  * plugin's response shape depends on its version — 302 with a `Location`
  * header, or 200 with a JSON body containing the redirect URL under one
  * of `redirect_uri` / `redirectURI` / `url`.
  */
-async function extractCodeFromConsentResponse(res: Response): Promise<string | null> {
+async function extractCallbackFromConsentResponse(res: Response): Promise<URL | null> {
   const loc = res.headers.get("location");
   if (loc) {
-    return new URL(loc, "http://localhost").searchParams.get("code");
+    return new URL(loc, "http://localhost");
   }
   const json = (await res.json()) as {
     redirect_uri?: string;
@@ -107,7 +107,11 @@ async function extractCodeFromConsentResponse(res: Response): Promise<string | n
   };
   const redirectUri = json.redirect_uri ?? json.redirectURI ?? json.url;
   if (!redirectUri) return null;
-  return new URL(redirectUri).searchParams.get("code");
+  return new URL(redirectUri);
+}
+
+async function extractCodeFromConsentResponse(res: Response): Promise<string | null> {
+  return (await extractCallbackFromConsentResponse(res))?.searchParams.get("code") ?? null;
 }
 
 async function registerClient(
@@ -219,6 +223,7 @@ describe("OAuth 2.1 Authorization Code + PKCE end-to-end", () => {
       scopes_supported?: string[];
       response_types_supported?: string[];
       code_challenge_methods_supported?: string[];
+      authorization_response_iss_parameter_supported?: boolean;
     };
     expect(body.issuer).toBeTruthy();
     expect(body.token_endpoint).toContain("/oauth2/token");
@@ -228,6 +233,10 @@ describe("OAuth 2.1 Authorization Code + PKCE end-to-end", () => {
     expect(body.scopes_supported).toContain("offline_access");
     expect(body.response_types_supported).toContain("code");
     expect(body.code_challenge_methods_supported).toContain("S256");
+    // RFC 9207 (#953): a client that reads this flag — Codex's MCP login does —
+    // rejects any authorization response whose `iss` is absent or mismatched.
+    // The runtime counterpart is asserted on the final client callback below.
+    expect(body.authorization_response_iss_parameter_supported).toBe(true);
   });
 
   it("mints an access token via the full PKCE flow through the module consent handler", async () => {
@@ -267,6 +276,9 @@ describe("OAuth 2.1 Authorization Code + PKCE end-to-end", () => {
     // Better Auth has signed the query — both params must be present.
     expect(consentUrl.searchParams.get("sig")).toBeTruthy();
     expect(consentUrl.searchParams.get("exp")).toBeTruthy();
+    // This hop is internal (authorize → our consent page), not an
+    // authorization response: it must NOT be stamped with `iss`.
+    expect(consentUrl.searchParams.get("iss")).toBeNull();
 
     // ── Step 2 ── GET the consent page to obtain the CSRF token + cookie.
     const consentPageRes = await app.request(consentUrl.pathname + consentUrl.search, {
@@ -310,8 +322,22 @@ describe("OAuth 2.1 Authorization Code + PKCE end-to-end", () => {
     });
     expect([200, 302]).toContain(consentRes.status);
 
-    const code = await extractCodeFromConsentResponse(consentRes);
+    const callback = await extractCallbackFromConsentResponse(consentRes);
+    expect(callback).not.toBeNull();
+    // The callback lands on the registered redirect_uri, untouched apart from
+    // the authorization-response params.
+    expect(callback!.origin + callback!.pathname).toBe("https://satellite.example.com/callback");
+    const code = callback!.searchParams.get("code");
     expect(code).toBeTruthy();
+    expect(callback!.searchParams.get("state")).toBe(state);
+    // RFC 9207 (#953): the final client callback carries `iss`, and it matches
+    // the issuer advertised in the authorization-server metadata exactly —
+    // Codex's MCP login refuses the response otherwise. This is the runtime
+    // half of the discovery assertion above; the two must never drift apart.
+    const discovery = (await (
+      await app.request("/.well-known/oauth-authorization-server")
+    ).json()) as { issuer: string };
+    expect(callback!.searchParams.get("iss")).toBe(discovery.issuer);
 
     // ── Step 4 ── Exchange code + PKCE verifier for tokens. Must succeed.
     // CRITICAL: `resource` is REQUIRED on the token request for the plugin
