@@ -100,7 +100,21 @@ function mapStopReason(stop: string | undefined): PiFinishReason {
  * each Pi session event in arrival order and returns the UI chunks to write.
  */
 export class PiChatUiStreamMapper {
-  private step = 0;
+  /**
+   * Id namespace for content blocks. Bumped on EVERY `message_start` — Pi emits
+   * one per user, assistant AND tool-result message — which is what keeps
+   * `${blockSeq}-${contentIndex}` unique across the turn.
+   */
+  private blockSeq = 0;
+  /**
+   * Number of MODEL calls in the turn: the only counter comparable to
+   * `CHAT_MAX_STEPS`, and the one the step cap reads. Assistant `message_start`s
+   * only — counting every `message_start` over-counts a tool-heavy turn
+   * several-fold (the audited incident reported `stepCount: 20` for a turn that
+   * never made 20 model calls, because each user echo and each tool result
+   * counted as a step).
+   */
+  private modelCalls = 0;
   private readonly open = new Map<number, OpenBlock>();
   private accUsage: PiUsage = { ...ZERO_USAGE, cost: { ...ZERO_USAGE.cost } };
   private finishReason: PiFinishReason = "stop";
@@ -128,7 +142,8 @@ export class PiChatUiStreamMapper {
     };
     switch (e.type) {
       case "message_start":
-        this.step += 1;
+        this.blockSeq += 1;
+        if (assistantView(e.message)) this.modelCalls += 1;
         this.open.clear();
         return [{ type: "start-step" }];
       case "message_update":
@@ -158,7 +173,7 @@ export class PiChatUiStreamMapper {
   }
 
   private blockId(index: number): string {
-    return `${this.step}-${index}`;
+    return `${this.blockSeq}-${index}`;
   }
 
   private mapAssistantEvent(ev: PiAssistantMessageEvent): UIMessageChunk[] {
@@ -286,8 +301,9 @@ export class PiChatUiStreamMapper {
     };
   }
 
+  /** Model calls completed so far in this turn (see {@link modelCalls}). */
   stepCount(): number {
-    return this.step;
+    return this.modelCalls;
   }
 
   lastToolName(): string | undefined {

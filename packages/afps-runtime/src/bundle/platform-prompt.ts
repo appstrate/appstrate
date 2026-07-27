@@ -169,7 +169,7 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
   sections.push(
     "- **Workspace**: Your current working directory is the agent workspace. " +
       (hasUploads
-        ? "Uploaded documents are available under `./documents/` (relative to cwd) and listed in the `## Documents` section below. "
+        ? "Input documents are available under `./documents/` (relative to cwd) and listed in the `## Documents` section below. "
         : "") +
       "You may use the filesystem for temporary processing during this run only.\n",
   );
@@ -271,12 +271,13 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
     sections.push("");
   }
 
-  // --- Uploaded documents ---
+  // --- Input documents ---
+  // Neutral wording on purpose: a document reaching a run is not necessarily an
+  // upload from a human — it can be a sibling run's deliverable mounted by
+  // reference (`context_documents`). Saying "uploaded" would be wrong there.
   if (opts.uploads && opts.uploads.length > 0) {
     sections.push("## Documents\n");
-    sections.push(
-      "The following documents have been uploaded and are available on the local filesystem:\n",
-    );
+    sections.push("The following documents are available on the local filesystem:\n");
     for (const file of opts.uploads) {
       sections.push(
         `- **${file.name}** (${file.type || "unknown"}, ${formatFileSize(file.size)}) → \`${file.path}\``,

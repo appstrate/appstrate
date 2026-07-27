@@ -31,6 +31,49 @@ describe("SYSTEM_PROMPT invariants", () => {
     expect(SYSTEM_PROMPT).toContain("run_and_wait");
     expect(SYSTEM_PROMPT).toContain("never fabricate it");
   });
+
+  it("keeps the fan-in-by-reference rule (context_documents, never a copy)", () => {
+    expect(SYSTEM_PROMPT).toContain("context_documents");
+    expect(SYSTEM_PROMPT).toMatch(/NEVER paste a previous run's content/);
+    // The reason is load-bearing: a rule with a reason survives paraphrase.
+    expect(SYSTEM_PROMPT).toMatch(/retyped by a model/);
+  });
+
+  it("keeps the fan-out deliverable contract (file in outputs/ AND a short output)", () => {
+    expect(SYSTEM_PROMPT).toContain("outputs/<topic>.md");
+    expect(SYSTEM_PROMPT).toMatch(/short summary naming that file/);
+  });
+
+  it("keeps the sub-agent effort ceiling (cap, stop criterion, output last)", () => {
+    expect(SYSTEM_PROMPT).toMatch(/at most 3 searches/);
+    expect(SYSTEM_PROMPT).toMatch(/stop criterion/);
+    expect(SYSTEM_PROMPT).toMatch(/mandatory last action/);
+  });
+
+  it("keeps incremental delivery (synthesis written before the next step)", () => {
+    expect(SYSTEM_PROMPT).toMatch(/BEFORE launching the next step/);
+  });
+
+  it("routes integration_not_active to activation, never to a retry", () => {
+    // Retrying the run or re-running the connect flow can never clear a 412:
+    // connecting is personal, activating is application-wide. Activation IS
+    // reachable (`activateIntegration` is in the platform's operation surface),
+    // and RBAC decides who may call it — an admin fixes it in one step, a member
+    // gets a 403 and is told to ask one. Nothing in the chat pre-computes that
+    // right: quoting the operation instead of asserting the outcome is what
+    // keeps this honest for both roles.
+    expect(SYSTEM_PROMPT).toContain("integration_not_active");
+    expect(SYSTEM_PROMPT).toMatch(/do NOT re-run and do NOT restart the connect flow/);
+    expect(SYSTEM_PROMPT).toContain("activateIntegration");
+    expect(SYSTEM_PROMPT).toMatch(/administrator must activate/);
+  });
+
+  it("drops the stale claim that a prompt-pasted document:// URI gives no access", () => {
+    // `context_documents` made this half-false;
+    // the paragraph now points at the cheap path instead of the boilerplate.
+    expect(SYSTEM_PROMPT).not.toContain("does NOT give it access");
+    expect(SYSTEM_PROMPT).not.toContain("does NOT give access");
+  });
 });
 
 describe("normalizeChatLocale", () => {

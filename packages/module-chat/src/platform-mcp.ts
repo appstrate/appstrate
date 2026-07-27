@@ -16,8 +16,8 @@
  */
 
 import { createMCPClient, type MCPClient } from "@ai-sdk/mcp";
-import { runAndWaitStepsWithDocuments } from "@appstrate/core/run-and-wait-client";
 import { redactConnectLinks, splitConnectPayload, splitToolResult } from "./connect-offer.ts";
+import { runAndWaitStepsWithinTurnBudget, type TurnBudgetContext } from "./run-budget.ts";
 import { logger } from "./logger.ts";
 
 type ToolSet = Awaited<ReturnType<MCPClient["tools"]>>;
@@ -53,6 +53,18 @@ export async function openPlatformMcp(args: {
   /** App context for app-scoped operations (agents, runs); forwarded to dispatch. */
   applicationId?: string;
   fetch?: typeof fetch;
+  /**
+   * Absolute instant the hosting turn ends. Every `run_and_wait` derives its
+   * wait budget from it, and a launch with no room left is refused rather than
+   * started to be orphaned.
+   */
+  turnDeadlineAt: number;
+  /**
+   * Chat session the turn belongs to — trace attribution, and the link stamped
+   * on every run this turn launches so an orphaned run can still report back
+   * (C3). Null on an ephemeral (unpersisted) turn.
+   */
+  chatSessionId?: string | null;
 }): Promise<McpHandle> {
   const headers: Record<string, string> = { ...args.headers };
   if (args.applicationId) headers["x-application-id"] = args.applicationId;
@@ -83,6 +95,12 @@ export async function openPlatformMcp(args: {
       origin: args.origin,
       headers,
       fetch: args.fetch ?? fetch,
+      budget: {
+        turnDeadlineAt: args.turnDeadlineAt,
+        engine: "ai-sdk",
+        chatSessionId: args.chatSessionId,
+        orgId: args.orgId,
+      },
     });
     tools = wrapToolModelOutputs(tools);
   } catch (err) {
@@ -117,7 +135,13 @@ function callToolResult(payload: unknown, isError = false): unknown {
 
 export function wrapRunAndWaitTool(
   tools: ToolSet,
-  opts: { origin: string; headers: Record<string, string>; fetch: typeof fetch },
+  opts: {
+    origin: string;
+    headers: Record<string, string>;
+    fetch: typeof fetch;
+    /** Hosting turn's deadline — bounds the wait and gates hopeless launches. */
+    budget: TurnBudgetContext;
+  },
 ): ToolSet {
   const runAndWait = tools.run_and_wait as
     | (Record<string, unknown> & {
@@ -129,11 +153,15 @@ export function wrapRunAndWaitTool(
   const wrapped = {
     ...runAndWait,
     async *execute(rawArgs: unknown, options: { abortSignal?: AbortSignal }) {
-      for await (const step of runAndWaitStepsWithDocuments(rawArgs, {
+      // Same budget seam as the Pi engine (`pi-chat/mcp-tools.ts`): the wait
+      // never outlives the turn, and an unlaunchable call yields a non-error
+      // refusal instead of creating a run nobody will read.
+      for await (const step of runAndWaitStepsWithinTurnBudget(rawArgs, {
         origin: opts.origin,
         headers: opts.headers,
         fetch: opts.fetch,
         signal: options.abortSignal,
+        budget: opts.budget,
       })) {
         yield callToolResult(step.payload, step.isError);
       }

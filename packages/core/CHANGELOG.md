@@ -5,6 +5,35 @@ All notable changes to `@appstrate/core` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `@appstrate/core/chat-turn-metadata` — the chat turn's TIME budget alongside its
+  existing step budget: `CHAT_TURN_DEADLINE_MS`, `CHAT_TURN_SAFETY_MARGIN_MS`,
+  `CHAT_MIN_RUN_BUDGET_MS`, `CHAT_THIN_RUN_BUDGET_MS`, `CHAT_LAUNCH_THRESHOLD_MS`,
+  plus the pure
+  `computeTurnRunBudget()`, `formatBudgetDuration()` and `formatTurnBudgetNote()`.
+  Both chat engines derive a child call's wait from an absolute turn deadline
+  instead of silently taking `RUN_AND_WAIT_MAX_MS` (30 min), which is three times
+  longer than a turn.
+- `@appstrate/core/run-and-wait-client` — `RUN_RESULT_INLINE_MAX_BYTES` (32 KB),
+  `runResultExceedsInlineLimit()` and `truncateRunAndWaitPayload()`: a run result
+  over the cap is cut to a usable head that points back at the run, whose
+  `runs.result` already holds the whole payload (`getRun` returns it) — no copy is
+  made. `launchRunAndWait` forwards the new `context_documents` argument (inline
+  runs only).
+
+### Changed
+
+- `ChatTurnFinishReason` gains `"deadline"` — a turn cut by the engine's
+  wall-clock ceiling is no longer disguised as its last step's provider reason.
+
+### Removed
+
+- `appendFinalStepSystemPrompt()` — the final-step directive is now carried as a
+  separate system block rather than concatenated, leaving this with no importer.
+
 ## [6.0.0] — 2026-07-26
 
 Major release grouping every contract change the repository accumulated after

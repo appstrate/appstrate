@@ -25,6 +25,7 @@ import { chatPaths, chatComponentSchemas } from "./openapi.ts";
 import { chatLoopbackStrategy } from "./loopback-auth.ts";
 import { buildChatPlatformDeps, type ChatPlatformDeps } from "./platform-services.ts";
 import { drainTurns } from "./inflight.ts";
+import { reconcileChatRun } from "./run-reconcile.ts";
 import { logger } from "./logger.ts";
 import { z } from "zod";
 
@@ -98,6 +99,26 @@ const chatModule: AppstrateModule = {
         description: "Rename chat session",
       },
     ];
+  },
+
+  // A run launched from a chat turn can outlive it (the audited `report.html`
+  // landed 2 minutes after its turn was killed). On every terminal transition,
+  // check whether the launching session is idle and, if so, tell it what the run
+  // produced — see `run-reconcile.ts` for the liveness rule and its trade-offs.
+  // Event errors are isolated by the loader; the catch is only here so a failure
+  // leaves a trace instead of vanishing.
+  events: {
+    onRunStatusChange: async (params) => {
+      if (params.status === "started") return;
+      try {
+        await reconcileChatRun({ runId: params.runId, orgId: params.orgId });
+      } catch (err) {
+        logger.warn("chat: orphaned-run reconciliation failed", {
+          runId: params.runId,
+          err: String(err),
+        });
+      }
+    },
   },
 
   features: { chat: true },

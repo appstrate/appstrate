@@ -2,10 +2,14 @@
 
 import { describe, expect, it } from "bun:test";
 import {
-  appendFinalStepSystemPrompt,
-  CHAT_FINAL_STEP_SYSTEM_PROMPT,
+  formatTurnBudgetNote,
   CHAT_MAX_STEPS,
+  CHAT_MIN_RUN_BUDGET_MS,
   CHAT_TOOL_STEP_BUDGET,
+  CHAT_TURN_DEADLINE_MS,
+  CHAT_TURN_SAFETY_MARGIN_MS,
+  computeTurnRunBudget,
+  formatBudgetDuration,
   isFinalChatStep,
   mergeTurnMetadata,
   turnLimitReached,
@@ -92,8 +96,23 @@ describe("chat turn metadata", () => {
     expect(isFinalChatStep(16)).toBe(true);
   });
 
-  it("appends the final-step instruction to the existing system prompt", () => {
-    expect(appendFinalStepSystemPrompt("Base")).toBe(`Base\n\n${CHAT_FINAL_STEP_SYSTEM_PROMPT}`);
+  it("keeps a child call's budget strictly inside the turn that hosts it", () => {
+    // The defect: RUN_AND_WAIT_MAX_MS (30 min) was three times the turn ceiling.
+    expect(CHAT_TURN_DEADLINE_MS).toBe(10 * 60_000);
+    const now = 1_800_000_000_000;
+    const budget = computeTurnRunBudget(now + CHAT_TURN_DEADLINE_MS, now);
+    expect(budget.maxMs).toBeLessThan(CHAT_TURN_DEADLINE_MS);
+    expect(budget.maxMs).toBe(CHAT_TURN_DEADLINE_MS - CHAT_TURN_SAFETY_MARGIN_MS);
+    // A launch is refused once the derived budget drops under the floor.
+    expect(computeTurnRunBudget(now + CHAT_MIN_RUN_BUDGET_MS, now).launchable).toBe(false);
+  });
+
+  it("formats budget durations compactly", () => {
+    expect(formatBudgetDuration(0)).toBe("0s");
+    expect(formatBudgetDuration(-5_000)).toBe("0s");
+    expect(formatBudgetDuration(22_400)).toBe("22s");
+    expect(formatBudgetDuration(60_000)).toBe("1m00s");
+    expect(formatBudgetDuration(4 * 60_000 + 12_000)).toBe("4m12s");
   });
 
   it("ignores malformed metadata", () => {
@@ -101,5 +120,22 @@ describe("chat turn metadata", () => {
       null,
     );
     expect(turnLimitReached({ metadata: { appstrate: { turn: { stepCount: 1 } } } })).toBe(false);
+  });
+});
+
+describe("budget note ↔ gate consistency", () => {
+  // The note tells the model when a launch is possible; the gate decides. If
+  // they quote different numbers the model arbitrates on the wrong one, which
+  // is worse than showing no number at all.
+  it("advertises a threshold at which the gate actually launches", () => {
+    const threshold = CHAT_MIN_RUN_BUDGET_MS + CHAT_TURN_SAFETY_MARGIN_MS;
+    expect(computeTurnRunBudget(threshold, 0).launchable).toBe(true);
+    expect(computeTurnRunBudget(threshold - 1, 0).launchable).toBe(false);
+
+    const note = formatTurnBudgetNote({ remainingMs: threshold, stepsUsed: 1 });
+    expect(note).toContain(formatBudgetDuration(threshold));
+    // The bare floor must NOT be advertised as the launch threshold: at
+    // 1m30s remaining the gate refuses, because the safety margin comes first.
+    expect(computeTurnRunBudget(CHAT_MIN_RUN_BUDGET_MS, 0).launchable).toBe(false);
   });
 });

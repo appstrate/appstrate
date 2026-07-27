@@ -450,8 +450,13 @@ export function assertDocsWithinCap(files: { size: number }[], maxBytes: number)
  * part), so an unbounded `Promise.all` over a large array-file field could pin
  * `documents × 5 MiB`. Bounding it keeps the per-run streaming memory floor flat
  * regardless of document count.
+ *
+ * Exported as the single per-run document fan-out bound: any other per-document
+ * loop on the run-launch path (e.g. the inline-run prompt-repair ACL probe)
+ * reuses it rather than picking a second number. A probe is strictly cheaper
+ * than the stream it precedes, so this ceiling is safe for both.
  */
-const DOC_STREAM_CONCURRENCY = 4;
+export const DOC_STREAM_CONCURRENCY = 4;
 
 /**
  * Map over `items` running at most `limit` callbacks concurrently, preserving
@@ -547,6 +552,19 @@ export async function parseRequestInput(
      * ownership).
      */
     agentPackageId?: string;
+    /**
+     * Server-synthesized input fields merged into the request's `input` before
+     * any file ref is collected. The ONLY sanctioned way to add an input field
+     * the caller did not send: the merged values then travel the normal
+     * `collectFileRefs` path (ACL, caps, streaming, `document_links`) and are
+     * announced to the agent by the platform prompt like any other input
+     * document — nothing is mounted by a side path.
+     *
+     * Used by `POST /runs/inline` for the reserved `_context_documents` field
+     * (see `services/inline-run.ts`); the field must already be declared on the
+     * `inputSchema` passed here, or it is inert.
+     */
+    injectedInput?: Record<string, unknown>;
   },
 ): Promise<ParsedInput> {
   let body: RunRequestBody = {};
@@ -567,6 +585,12 @@ export async function parseRequestInput(
       );
     }
     input = await resolveRerunInput(c, body.rerun_from, opts?.agentPackageId);
+  }
+  // Server-synthesized fields last: they are platform-owned reserved names the
+  // caller cannot legitimately hold (the route 400s on a collision before we
+  // get here), and a fresh object keeps the request body untouched.
+  if (opts?.injectedInput && Object.keys(opts.injectedInput).length > 0) {
+    input = { ...input, ...opts.injectedInput };
   }
   let uploadedFiles: FileReference[] = [];
   let pendingDocuments: PendingUploadMaterialization[] = [];

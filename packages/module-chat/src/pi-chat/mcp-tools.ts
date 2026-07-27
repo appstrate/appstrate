@@ -16,7 +16,7 @@
  * behaviour the `ai-sdk` path gets from `wrapRunAndWaitTool`.
  */
 
-import { runAndWaitStepsWithDocuments } from "@appstrate/core/run-and-wait-client";
+import { formatTurnBudgetNote } from "@appstrate/core/chat-turn-metadata";
 import { createMcpHttpClient, type AppstrateMcpClient } from "@appstrate/mcp-transport";
 import { Type, type ExtensionAPI, type ExtensionFactory } from "@appstrate/runner-pi";
 import type { UIMessageChunk } from "ai";
@@ -27,6 +27,7 @@ import {
   splitJsonText,
   type ConnectOffer,
 } from "../connect-offer.ts";
+import { runAndWaitStepsWithinTurnBudget } from "../run-budget.ts";
 import { logger } from "../logger.ts";
 
 const RUN_AND_WAIT_TOOL = "run_and_wait";
@@ -108,6 +109,27 @@ export interface PlatformMcpTools {
   close(): Promise<void>;
 }
 
+/**
+ * The hosting turn's budget, as the tool layer sees it: an absolute deadline
+ * (propagated into every `run_and_wait`) plus the live model-call count (so each
+ * tool result can tell the model where it stands — A5).
+ */
+export interface PiTurnBudget {
+  /** Absolute instant this turn ends. */
+  deadlineAt: number;
+  /** Model calls completed so far in the turn (`PiChatUiStreamMapper.stepCount`). */
+  stepCount: () => number;
+  /**
+   * Trace attribution, and the link stamped on every run this turn launches so
+   * an orphaned run can still report back (C3). Null on an ephemeral turn.
+   */
+  chatSessionId?: string | null;
+  /** Owning organization — scopes the orphan-run link write. */
+  orgId?: string;
+  /** Clock seam (tests inject a fixed now). */
+  now?: () => number;
+}
+
 export interface BuildPlatformMcpToolsOptions {
   /** Platform MCP endpoint (`/api/mcp/o/:org?context=injected`). */
   url: string;
@@ -117,6 +139,28 @@ export interface BuildPlatformMcpToolsOptions {
   writeChunk: (chunk: UIMessageChunk) => void;
   /** Cancellation for tool calls + the run_and_wait poll loop. */
   signal: AbortSignal;
+  /** Turn deadline + step counter — bounds run_and_wait and feeds the budget note. */
+  turnBudget: PiTurnBudget;
+}
+
+/**
+ * Append the turn-budget line to a tool result's MODEL channel (A5).
+ *
+ * Why the tool result and not the system prompt: the Pi system prompt is built
+ * ONCE per session, and pi-ai anchors its Anthropic conversation cache breakpoint
+ * on the LAST message of each request — so a per-step note appended as a trailing
+ * synthetic message would move the breakpoint every step and never hit the cache
+ * again. Written into a tool result the note is frozen into the transcript the
+ * moment it is produced, so every later request keeps the exact same prefix and
+ * the cache still hits. `details` (the UI channel) is left untouched.
+ */
+export function withTurnBudgetNote(result: PiToolResult, budget: PiTurnBudget): PiToolResult {
+  const now = (budget.now ?? Date.now)();
+  const text = formatTurnBudgetNote({
+    remainingMs: budget.deadlineAt - now,
+    stepsUsed: budget.stepCount(),
+  });
+  return { ...result, content: [...result.content, { type: "text", text }] };
 }
 
 /**
@@ -150,8 +194,9 @@ export async function buildPlatformMcpTools(
           headers: opts.headers,
           writeChunk: opts.writeChunk,
           signal: opts.signal,
+          turnBudget: opts.turnBudget,
         })
-      : makeForwardExtension(tool, client, opts.signal),
+      : makeForwardExtension(tool, client, opts.signal, opts.turnBudget),
   );
 
   let closed = false;
@@ -176,6 +221,7 @@ function makeForwardExtension(
   tool: { name: string; description?: string; inputSchema: unknown },
   client: AppstrateMcpClient,
   signal: AbortSignal,
+  turnBudget: PiTurnBudget,
 ): ExtensionFactory {
   const toolName = stripMcpToolPrefix(tool.name);
   return (pi: ExtensionAPI) => {
@@ -191,7 +237,7 @@ function makeForwardExtension(
           { name: tool.name, arguments: (params as Record<string, unknown>) ?? {} },
           { signal: execSignal ?? signal },
         );
-        return mcpResultToPi(result as never);
+        return withTurnBudgetNote(mcpResultToPi(result as never), turnBudget);
       },
     });
   };
@@ -210,6 +256,7 @@ function makeRunAndWaitExtension(
     headers: Record<string, string>;
     writeChunk: (chunk: UIMessageChunk) => void;
     signal: AbortSignal;
+    turnBudget: PiTurnBudget;
   },
 ): ExtensionFactory {
   return (pi: ExtensionAPI) => {
@@ -224,11 +271,21 @@ function makeRunAndWaitExtension(
         let finalPayload: Record<string, unknown> = {
           error: "run_and_wait produced no result",
         };
-        for await (const step of runAndWaitStepsWithDocuments(params, {
+        // The run's wait budget descends from the TURN's deadline (never the
+        // 30-minute client default), and a launch with no room left is refused
+        // here — before any run row exists.
+        for await (const step of runAndWaitStepsWithinTurnBudget(params, {
           origin: ctx.origin,
           headers: ctx.headers,
           fetch,
           signal: execSignal ?? ctx.signal,
+          budget: {
+            turnDeadlineAt: ctx.turnBudget.deadlineAt,
+            engine: "subscription",
+            chatSessionId: ctx.turnBudget.chatSessionId,
+            ...(ctx.turnBudget.orgId ? { orgId: ctx.turnBudget.orgId } : {}),
+            ...(ctx.turnBudget.now ? { now: ctx.turnBudget.now } : {}),
+          },
         })) {
           finalPayload = step.payload;
           // Live card: push each step's payload under this tool call id so the
@@ -241,7 +298,9 @@ function makeRunAndWaitExtension(
         }
         // The final step is ALSO delivered as the tool result (tool_execution_end
         // re-emits it under the same id — an idempotent update to the same card).
-        return toPiToolResult(finalPayload);
+        // The budget note rides the MODEL channel only, so the UI card (fed from
+        // `details` by the live chunks above) is unchanged.
+        return withTurnBudgetNote(toPiToolResult(finalPayload), ctx.turnBudget);
       },
     });
   };

@@ -25,9 +25,14 @@ import { collectMountedDocumentIds, type ParsedInput } from "./input-parser.ts";
 import { prepareAndExecuteRun } from "./run-pipeline.ts";
 import { assertExplicitModelExists } from "./org-models.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
-import { documentUri, extractDocumentIdsFromText } from "@appstrate/core/document-uri";
+import {
+  documentUri,
+  extractDocumentIdsFromText,
+  isDocumentUri,
+  parseDocumentUri,
+} from "@appstrate/core/document-uri";
 import { asJSONSchemaObject, type JSONSchemaObject } from "@appstrate/core/form";
-import { validationFailed } from "../lib/errors.ts";
+import { invalidRequest, validationFailed } from "../lib/errors.ts";
 
 export type { InlineRunBody };
 
@@ -149,24 +154,202 @@ export function assertPromptDocumentsCoveredByInput(
   input: unknown,
   inputSchema: JSONSchemaObject | undefined,
 ): void {
-  const promptIds = extractDocumentIdsFromText(prompt);
-  if (promptIds.length === 0) return;
-  const covered = collectMountedDocumentIds(inputSchema, input);
-  const uncovered = promptIds.filter((id) => !covered.has(id));
+  const uncovered = uncoveredPromptDocumentIds(prompt, input, inputSchema);
   if (uncovered.length === 0) return;
-  throw validationFailed([
+  throw promptDocumentsNotMountedError(uncovered);
+}
+
+/**
+ * The `document://` ids a prompt names that the resolved input does NOT mount.
+ * Pure, no I/O — the detection primitive behind
+ * {@link assertPromptDocumentsCoveredByInput}.
+ */
+function uncoveredPromptDocumentIds(
+  prompt: string,
+  input: unknown,
+  inputSchema: JSONSchemaObject | undefined,
+): string[] {
+  const promptIds = extractDocumentIdsFromText(prompt);
+  if (promptIds.length === 0) return [];
+  const covered = collectMountedDocumentIds(inputSchema, input);
+  return promptIds.filter((id) => !covered.has(id));
+}
+
+/** The recoverable 400 for prompt-named documents the run cannot be given. */
+function promptDocumentsNotMountedError(documentIds: readonly string[]): Error {
+  return validationFailed([
     {
       field: "prompt",
       code: "document_uri_in_prompt",
       title: "Document URI In Prompt",
       message:
-        "The run prompt references document:// URIs but the run cannot read documents from " +
-        "prompt text. Declare a file input field in manifest.input.schema " +
-        '({"type":"string","format":"uri","contentMediaType":"<mime>"}) and pass each ' +
-        "document:// URI in the top-level input. Unreferenced: " +
-        uncovered.map(documentUri).join(", "),
+        "The run prompt references document:// URIs the caller cannot read, so they cannot be " +
+        "mounted into the run. Pass only document:// URIs you have access to — either in " +
+        "`context_documents` or through a file input field declared in manifest.input.schema " +
+        '({"type":"string","format":"uri","contentMediaType":"<mime>"}). Unresolvable: ' +
+        documentIds.map(documentUri).join(", "),
     },
   ]);
+}
+
+// ---------------------------------------------------------------------------
+// Reserved context-documents field (fan-in by reference)
+// ---------------------------------------------------------------------------
+
+/**
+ * Reserved input-field name the platform synthesizes on an INLINE manifest to
+ * mount caller-named `document://` URIs into the run's `documents/` directory.
+ *
+ * Reserved means: a caller-supplied manifest (or input) that already declares it
+ * is rejected with a 400 rather than silently overwritten — the platform owns
+ * this name. Inline only: a cataloged agent's `input.schema` is a versioned
+ * contract and is never rewritten.
+ */
+export const CONTEXT_DOCUMENTS_FIELD = "_context_documents";
+
+/**
+ * The synthesized property. The wildcard media range on `contentMediaType` is
+ * what makes the field a FILE field for the whole platform: `isFileField`
+ * (`@appstrate/afps-shared/file-field`) only tests `contentMediaType != null` and
+ * never inspects the value, so the wildcard needs zero changes to the shared
+ * predicate or to any of its consumers (SchemaForm, apps/api, afps-runtime). A
+ * fan-in mixes json/md/csv/… so no single media type would do, and nothing
+ * downstream compares a `document://` input's real MIME against the declared
+ * `contentMediaType` (the magic-byte sniff covers `upload://` and `data:` only;
+ * `validateInput` excludes file fields from AJV entirely).
+ */
+function contextDocumentsProperty(): Record<string, unknown> {
+  return {
+    type: "array",
+    description:
+      "Platform-managed: document:// URIs mounted read-only into ./documents/ for this run.",
+    items: { type: "string", format: "uri", contentMediaType: "*/*" },
+  };
+}
+
+/**
+ * Reject a caller-supplied inline manifest / input that uses the reserved
+ * {@link CONTEXT_DOCUMENTS_FIELD} name. Never overwrite caller data silently —
+ * a collision is a 400 the caller can act on by renaming their field.
+ */
+export function assertContextDocumentsFieldAvailable(manifest: unknown, input: unknown): void {
+  const properties = manifestInputProperties(manifest);
+  if (properties && CONTEXT_DOCUMENTS_FIELD in properties) {
+    throw invalidRequest(
+      `'${CONTEXT_DOCUMENTS_FIELD}' is a reserved input field name — rename the property in ` +
+        "manifest.input.schema and pass your document:// URIs in `context_documents` instead.",
+      `manifest.input.schema.properties.${CONTEXT_DOCUMENTS_FIELD}`,
+    );
+  }
+  if (input && typeof input === "object" && !Array.isArray(input)) {
+    if (CONTEXT_DOCUMENTS_FIELD in (input as Record<string, unknown>)) {
+      throw invalidRequest(
+        `'${CONTEXT_DOCUMENTS_FIELD}' is a reserved input field name — pass your document:// ` +
+          "URIs in the top-level `context_documents` argument instead.",
+        `input.${CONTEXT_DOCUMENTS_FIELD}`,
+      );
+    }
+  }
+}
+
+/**
+ * The `properties` map of an inline manifest's input schema, when it has one.
+ * Takes `unknown` so the reserved-name guard can run against a raw request
+ * manifest (the validate endpoint) as well as a parsed one.
+ */
+function manifestInputProperties(manifest: unknown): Record<string, unknown> | undefined {
+  if (!manifest || typeof manifest !== "object" || Array.isArray(manifest)) return undefined;
+  const input = (manifest as { input?: unknown }).input;
+  if (!input || typeof input !== "object") return undefined;
+  const schema = (input as { schema?: unknown }).schema;
+  if (!schema || typeof schema !== "object") return undefined;
+  const properties = (schema as { properties?: unknown }).properties;
+  return properties && typeof properties === "object" && !Array.isArray(properties)
+    ? (properties as Record<string, unknown>)
+    : undefined;
+}
+
+/** Result of {@link injectContextDocuments}. */
+export interface ContextDocumentsInjection {
+  /** Manifest with the reserved field declared. Unchanged when there is nothing to mount. */
+  manifest: AgentManifest;
+  /**
+   * Input patch to merge into the request input (`parseRequestInput`'s
+   * `injectedInput`). `undefined` when there is nothing to mount.
+   */
+  inputPatch: Record<string, unknown> | undefined;
+}
+
+/**
+ * THE single synthesis point for context documents (B2): the caller's explicit
+ * `context_documents` argument reduces to one list of `document://` URIs, so
+ * there is exactly one place that knows the field shape.
+ *
+ * Declaring the field is all the work: from here the URIs travel the NORMAL
+ * file-ref path (`collectFileRefs` → `getDocumentForActor` ACL → byte/count caps
+ * → stream into `documents/` → `document_links`), and the platform prompt
+ * announces them like any other input document. Nothing is mounted by a side
+ * path, so nothing can be mounted unannounced or unchecked.
+ *
+ * Pure: returns a shallow-copied manifest, never mutates the caller's.
+ */
+export function injectContextDocuments(
+  manifest: AgentManifest,
+  uris: readonly string[],
+): ContextDocumentsInjection {
+  // Dedupe by document id — the same document reachable through both entry
+  // paths must be streamed (and counted against the caps) exactly once.
+  const seen = new Set<string>();
+  const unique: string[] = [];
+  for (const uri of uris) {
+    const id = parseDocumentUri(uri);
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    unique.push(documentUri(id));
+  }
+  if (unique.length === 0) return { manifest, inputPatch: undefined };
+
+  const schema = (manifest.input?.schema ?? {}) as Record<string, unknown>;
+  const properties = manifestInputProperties(manifest) ?? {};
+  const nextManifest: AgentManifest = {
+    ...manifest,
+    input: {
+      ...manifest.input,
+      schema: {
+        ...schema,
+        type: "object",
+        properties: { ...properties, [CONTEXT_DOCUMENTS_FIELD]: contextDocumentsProperty() },
+      },
+    },
+  } as AgentManifest;
+
+  return { manifest: nextManifest, inputPatch: { [CONTEXT_DOCUMENTS_FIELD]: unique } };
+}
+
+/**
+ * Normalize the caller's `context_documents` argument into `document://` URIs.
+ * Rejects anything that is not a `document://` URI with a 400 naming the
+ * offending entry — an `upload://`/`https://` value would otherwise be mounted
+ * under a contract that only promises durable, ACL-checked documents.
+ */
+export function normalizeContextDocumentUris(value: unknown): string[] {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value)) {
+    throw invalidRequest(
+      "`context_documents` must be an array of document:// URIs",
+      "context_documents",
+    );
+  }
+  return value.map((entry) => {
+    if (!isDocumentUri(entry)) {
+      throw invalidRequest(
+        "`context_documents` entries must be document:// URIs (typically taken from a previous " +
+          `run's documents result) — got '${String(entry)}'`,
+        "context_documents",
+      );
+    }
+    return entry;
+  });
 }
 
 /**

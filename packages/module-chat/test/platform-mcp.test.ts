@@ -19,9 +19,15 @@ function parseToolResult(output: unknown): Record<string, unknown> {
   return JSON.parse(first.text) as Record<string, unknown>;
 }
 
+/** A turn with plenty of time left — the budget gate is not what is under test. */
+function ampleBudget() {
+  return { turnDeadlineAt: Date.now() + 10 * 60_000, engine: "ai-sdk" as const };
+}
+
 async function collectRunAndWait(
   fetchImpl: typeof fetch,
   args: Record<string, unknown>,
+  budget = ampleBudget(),
 ): Promise<{
   outputs: Record<string, unknown>[];
   originalCalled: boolean;
@@ -41,6 +47,7 @@ async function collectRunAndWait(
       origin: "https://test.local",
       headers: { authorization: "Bearer tok", "x-org-id": "org_1", "x-application-id": "app_1" },
       fetch: fetchImpl,
+      budget,
     },
   ) as {
     run_and_wait: {
@@ -177,7 +184,7 @@ describe("platform MCP run_and_wait wrapper", () => {
           },
         },
       } as never,
-      { origin: "https://test.local", headers: {}, fetch: fetchImpl },
+      { origin: "https://test.local", headers: {}, fetch: fetchImpl, budget: ampleBudget() },
     ) as {
       run_and_wait: {
         execute: (
@@ -203,6 +210,33 @@ describe("platform MCP run_and_wait wrapper", () => {
     expect(text).toContain("connect link hidden");
     // …the typed offer does.
     expect(terminal.connectOffer).toEqual({ connect_url: url });
+  });
+
+  /**
+   * The A1 gate on the ai-sdk engine: with less than the launch floor left in
+   * the turn, the wrapper must refuse WITHOUT touching the platform — no POST,
+   * so no `runs` row and nothing billed — and say so as a non-error result.
+   */
+  it("refuses to launch when the turn budget is exhausted (no HTTP call at all)", async () => {
+    const calls: string[] = [];
+    const fetchImpl: typeof fetch = async (input) => {
+      calls.push(String(input));
+      throw new Error("must not reach the platform");
+    };
+
+    const { outputs } = await collectRunAndWait(
+      fetchImpl,
+      { kind: "agent", scope: "@acme", name: "writer" },
+      // 22 s left — the exact shape of the audited incident.
+      { turnDeadlineAt: Date.now() + 22_000, engine: "ai-sdk" },
+    );
+
+    expect(calls).toEqual([]);
+    expect(outputs).toHaveLength(1);
+    expect(outputs[0]).toMatchObject({ launched: false, reason: "insufficient_turn_budget" });
+    // Distinguishable from a failure: no error/status field on the payload.
+    expect(outputs[0]).not.toHaveProperty("error");
+    expect(outputs[0]).not.toHaveProperty("status");
   });
 
   it("validates arguments before dispatching", async () => {

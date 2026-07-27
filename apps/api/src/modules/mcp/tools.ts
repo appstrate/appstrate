@@ -788,6 +788,9 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
       "published as a document when the run ends and returned here as a `resource_link` — when the " +
       "goal is a downloadable file (report, CSV, image…), instruct the run's `prompt` to write it " +
       "into `outputs/`; content merely returned in the output payload never becomes a document. " +
+      "Chaining runs (kind:inline): feed earlier runs' deliverables to a later one by passing " +
+      "their `document://` URIs in `context_documents` — never by copying their content into " +
+      "`prompt`. " +
       "Prefer an existing agent over an inline manifest when one matches the intent.",
     annotations: {
       title: "Run and wait",
@@ -843,6 +846,20 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
           type: "object",
           description: "Per-run config override (either kind).",
           additionalProperties: true,
+        },
+        context_documents: {
+          type: "array",
+          items: { type: "string" },
+          description:
+            "kind:inline ONLY. `document://` URIs — typically straight from a previous run's " +
+            "`documents` result — mounted read-only into this run's `documents/` directory and " +
+            "listed in its prompt. This is how you chain runs: to give a run the output of " +
+            "earlier runs, pass their `document://` URIs here VERBATIM. Never copy a previous " +
+            "run's content into `prompt`: re-typing it costs tokens twice, and every URL, figure " +
+            "and date you retype is one you can get wrong — the file itself cannot be. No " +
+            "manifest change is needed; the platform declares the input field for you. For " +
+            "kind:agent this argument is rejected — a published agent's input schema is a " +
+            "versioned contract, so pass the URI through one of its declared file fields instead.",
         },
       },
       required: ["kind"],

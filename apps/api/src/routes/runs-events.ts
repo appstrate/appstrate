@@ -444,7 +444,6 @@ export function createRunsEventsRouter() {
       );
     }
     const name = sanitizeFilename(decodedName);
-
     const mime = c.req.header("Content-Type");
     if (!mime) throw invalidRequest("Content-Type header is required", "Content-Type");
 

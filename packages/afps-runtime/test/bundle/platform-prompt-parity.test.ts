@@ -122,7 +122,7 @@ function canonicalize(prompt: string): string {
       // strip the uploads-related sentence in the Workspace bullet
       // (platform-only when uploads are wired; CLI paths omit it)
       .replace(
-        /Uploaded documents are available under `\.\/documents\/` \(relative to cwd\) and listed in the `## Documents` section below\. /g,
+        /Input documents are available under `\.\/documents\/` \(relative to cwd\) and listed in the `## Documents` section below\. /g,
         "",
       )
       // collapse repeated blank lines left by section removal

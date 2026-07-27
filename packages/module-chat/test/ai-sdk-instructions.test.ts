@@ -50,11 +50,21 @@ function textStream(text: string): { stream: ReadableStream<LanguageModelV3Strea
   };
 }
 
+type RecordedSystemMessage = {
+  role: "system";
+  content: string;
+  providerOptions?: Record<string, unknown>;
+};
+
 /** The system message the model recorded on a given `doStream` invocation. */
 function recordedSystemMessage(model: MockLanguageModelV3, call = 0) {
+  return recordedSystemMessages(model, call)[0];
+}
+
+/** ALL system messages the model recorded, in prompt order. */
+function recordedSystemMessages(model: MockLanguageModelV3, call = 0): RecordedSystemMessage[] {
   const prompt = model.doStreamCalls[call]?.prompt ?? [];
-  return prompt.find((m) => m.role === "system") as
-    { role: "system"; content: string; providerOptions?: Record<string, unknown> } | undefined;
+  return prompt.filter((m) => m.role === "system") as RecordedSystemMessage[];
 }
 
 const EPHEMERAL_CACHE = { anthropic: { cacheControl: { type: "ephemeral" } } };
@@ -99,14 +109,15 @@ describe("ai@7 cache-controlled instructions", () => {
       { id: "m1", role: "user", parts: [{ type: "text", text: "hello" }] },
     ] satisfies UIMessage[]);
 
-    // The final-step path swaps in its own cache-controlled instructions object
-    // (the base prompt plus the appended final-step directive) and resets
-    // `messages` to the original history.
+    // The final-step path keeps the cached base prompt as block 0 and puts the
+    // final-step directive (plus the turn-budget note) in an uncached trailing
+    // block, then resets `messages` to the original history.
     const prepared = prepareAiSdkChatStep({
       stepNumber: CHAT_MAX_STEPS - 1,
       system: SYSTEM_TEXT,
       modelMessages,
       markToolStepBudgetReached: () => {},
+      turnDeadlineAt: Date.now() + 60_000,
     });
     expect(prepared).toBeDefined();
 
@@ -114,9 +125,9 @@ describe("ai@7 cache-controlled instructions", () => {
 
     const result = streamText({
       model,
-      instructions: prepared!.instructions,
-      messages: prepared!.messages,
-      toolChoice: prepared!.toolChoice,
+      instructions: prepared.instructions,
+      messages: prepared.messages,
+      toolChoice: prepared.toolChoice,
     });
 
     const parts: LanguageModelV3StreamPart[] = [];
@@ -127,9 +138,64 @@ describe("ai@7 cache-controlled instructions", () => {
     expect(model.doStreamCalls[0]?.prompt[0]?.role).toBe("system");
 
     const system = recordedSystemMessage(model);
-    // The final-step system message carries the base prompt (plus the appended
-    // final-step instruction) and the same cacheControl breakpoint.
-    expect(system?.content).toContain(SYSTEM_TEXT);
+    // The FIRST system message is the untouched base prompt and carries the
+    // cacheControl breakpoint.
+    expect(system?.content).toBe(SYSTEM_TEXT);
     expect(system?.providerOptions).toEqual(EPHEMERAL_CACHE);
+  });
+
+  /**
+   * A5's cache guard, driven through the real ai@7 pipeline: the per-step turn
+   * budget must reach the model, and it must reach it AFTER the cache
+   * breakpoint. Two consecutive steps with different budgets must produce a
+   * byte-identical FIRST system block (the cached prefix) and differ only in the
+   * trailing, uncached one.
+   */
+  it("keeps the cached prefix byte-identical across steps while the budget block varies", async () => {
+    const modelMessages = await convertToModelMessages([
+      { id: "m1", role: "user", parts: [{ type: "text", text: "hello" }] },
+    ] satisfies UIMessage[]);
+
+    const now = 1_800_000_000_000;
+    const model = new MockLanguageModelV3({ doStream: async () => textStream("ok") });
+
+    for (const [step, remainingMs] of [
+      [2, 9 * 60_000],
+      [3, 5 * 60_000],
+    ] as const) {
+      const prepared = prepareAiSdkChatStep({
+        stepNumber: step,
+        system: SYSTEM_TEXT,
+        modelMessages,
+        markToolStepBudgetReached: () => {},
+        turnDeadlineAt: now + remainingMs,
+        now,
+      });
+      const result = streamText({
+        model,
+        instructions: prepared.instructions,
+        messages: modelMessages,
+      });
+      for await (const _part of result.fullStream) void _part;
+    }
+
+    const first = recordedSystemMessages(model, 0);
+    const second = recordedSystemMessages(model, 1);
+    expect(first).toHaveLength(2);
+    expect(second).toHaveLength(2);
+
+    // Cached prefix: identical content AND identical cacheControl.
+    expect(first[0]?.content).toBe(SYSTEM_TEXT);
+    expect(second[0]?.content).toBe(SYSTEM_TEXT);
+    expect(first[0]?.providerOptions).toEqual(EPHEMERAL_CACHE);
+    expect(second[0]?.providerOptions).toEqual(EPHEMERAL_CACHE);
+
+    // Varying block: after the breakpoint, uncached, and carrying real numbers.
+    expect(first[1]?.providerOptions).toBeUndefined();
+    expect(first[1]?.content).toContain("9m00s");
+    expect(first[1]?.content).toContain("step 2/16");
+    expect(second[1]?.content).toContain("5m00s");
+    expect(second[1]?.content).toContain("step 3/16");
+    expect(first[1]?.content).not.toBe(second[1]?.content);
   });
 });

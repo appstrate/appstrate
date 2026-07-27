@@ -2,9 +2,47 @@
 
 import { encodePackageIdPath } from "./naming.ts";
 
+/**
+ * Fallback wait ceiling for a caller that has no deadline of its own.
+ *
+ * A caller that DOES have one (a chat turn, whose ceiling is
+ * `CHAT_TURN_DEADLINE_MS` = 10 min) must pass `maxMs` derived from it — this
+ * default is three times longer than such a turn, so relying on it means waiting
+ * for a result the caller will not be alive to read. See
+ * `module-chat/src/run-budget.ts`.
+ */
 export const RUN_AND_WAIT_MAX_MS = 30 * 60_000;
 export const RUN_AND_WAIT_BACKOFF_MS = 500;
 const RUN_GET_WAIT_MAX_SECONDS = 55;
+
+/**
+ * Inline ceiling for a run's structured `result` inside a tool result (≈8k
+ * tokens of JSON). Above it the payload is TRUNCATED to a head that points back
+ * at the run ({@link truncateRunAndWaitPayload}).
+ *
+ * Sized as a CONTEXT SAFETY NET, not as the fan-in mechanism (that is the
+ * prompt's fan-out/fan-in rule). The 32 KB figure is the same order as the
+ * tool-result caps production agent harnesses apply, and it is deliberately NOT
+ * aggressive: a 4 KB threshold — the first proposal — would have forced a read
+ * round-trip on results the chat must read to answer at all, making the common
+ * single-run case strictly worse. The audited incident's results were 9–11.6 KB,
+ * i.e. comfortably under this bar: it would not have fired there, and it is not
+ * claimed to be that fix. What it does earn is a bound on an otherwise unbounded
+ * surface — nothing else caps how much of `runs.result` reaches a chat context.
+ *
+ * The pointer is the RUN, not a copy of it. An earlier revision spilled the full
+ * payload into a dedicated `agent_output` document so the truncated result could
+ * carry a `document://` URI. That duplicated bytes already durable in
+ * `runs.result` and already readable through `getRun`, and locating the copy BY
+ * NAME opened an impersonation hole (an agent publishing a decoy under the same
+ * name) that then needed its own publish-boundary refusal to close. Pointing at
+ * the run removes the copy, the reserved name, the refusal, and the hole.
+ */
+export const RUN_RESULT_INLINE_MAX_BYTES = 32 * 1024;
+
+const TEXT_ENCODER = new TextEncoder();
+/** Non-fatal: a head cut mid-codepoint yields U+FFFD rather than throwing. */
+const TEXT_DECODER = new TextDecoder();
 
 export const RUN_AND_WAIT_TERMINAL_STATUSES = new Set([
   "success",
@@ -67,6 +105,15 @@ function asString(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
+/**
+ * The tool's `context_documents` argument, when the model actually supplied
+ * entries. Shape/scheme validation stays server-side (the inline route answers
+ * with a field-precise 400) — here we only decide whether to forward it.
+ */
+function asNonEmptyArray(value: unknown): unknown[] | undefined {
+  return Array.isArray(value) && value.length > 0 ? value : undefined;
+}
+
 export function isRunAndWaitTerminalStatus(status: unknown): boolean {
   return typeof status === "string" && RUN_AND_WAIT_TERMINAL_STATUSES.has(status);
 }
@@ -94,6 +141,78 @@ export function projectRunAndWaitPayload(
   const error = asString(run?.error);
   if (error) payload.error = error;
   return payload;
+}
+
+/**
+ * UTF-8 byte length of `value`'s JSON serialization, or null when it does not
+ * serialize (cycle, or a value `JSON.stringify` maps to `undefined`).
+ */
+function serializedResultBytes(value: unknown): Uint8Array | null {
+  let json: string | undefined;
+  try {
+    json = JSON.stringify(value);
+  } catch {
+    return null;
+  }
+  return typeof json === "string" ? TEXT_ENCODER.encode(json) : null;
+}
+
+/**
+ * Does this run result overrun the inline tool-result ceiling? The WRITE side of
+ * the spill (the platform's finalize path) asks this so both sides use one
+ * threshold and one measurement.
+ *
+ * The two sides do not measure byte-identical inputs: the writer measures the
+ * in-process object, the reader measures the same value after a `jsonb`
+ * round-trip (which reorders keys but preserves length). A disagreement is
+ * therefore benign in both directions — an unused spill document, or an
+ * untruncated payload, never a truncation with no pointer.
+ */
+export function runResultExceedsInlineLimit(result: unknown): boolean {
+  const bytes = serializedResultBytes(result);
+  return bytes !== null && bytes.length > RUN_RESULT_INLINE_MAX_BYTES;
+}
+
+/**
+ * Truncate an oversized `result` on a terminal run_and_wait payload, replacing
+ * it with a usable HEAD that points back at the run holding the whole thing.
+ *
+ * No copy is made and no pointer can be missing: the full payload is already in
+ * `runs.result`, durable before this ever runs, and `getRun` returns it. That is
+ * what makes truncation unconditional here — the earlier spill-document design
+ * had to fall back to NOT truncating whenever its best-effort write failed,
+ * which meant the guard silently stopped guarding exactly when a result was
+ * large enough to be a problem.
+ *
+ * `result` is removed rather than shortened in place: leaving the same key with
+ * a shortened value invites the model to treat it as complete. `result_head` is
+ * the first {@link RUN_RESULT_INLINE_MAX_BYTES} bytes of the JSON serialization
+ * — a prefix, not valid JSON — which in the median case already answers the
+ * question, so only a genuinely huge result costs a read round-trip.
+ */
+export function truncateRunAndWaitPayload(
+  payload: Record<string, unknown>,
+): Record<string, unknown> {
+  if (payload.result === undefined || payload.result === null) return payload;
+  const bytes = serializedResultBytes(payload.result);
+  if (bytes === null || bytes.length <= RUN_RESULT_INLINE_MAX_BYTES) return payload;
+
+  const { result: _full, ...rest } = payload;
+  const runId = asString(payload.id);
+  return {
+    ...rest,
+    truncated: true,
+    result_size_bytes: bytes.length,
+    result_head: TEXT_DECODER.decode(bytes.slice(0, RUN_RESULT_INLINE_MAX_BYTES)),
+    message:
+      `This run's result is ${bytes.length} bytes, over the ` +
+      `${RUN_RESULT_INLINE_MAX_BYTES}-byte inline limit for a tool result. ` +
+      `\`result_head\` holds its first ${RUN_RESULT_INLINE_MAX_BYTES} bytes as JSON text ` +
+      `(a prefix — not parseable on its own). The complete result is stored on the run` +
+      `${runId ? ` (\`${runId}\`)` : ""}: call \`getRun\` to read it, and only if the ` +
+      `head does not already answer the question. A deliverable meant for the user ` +
+      `belongs in the run's \`outputs/\` directory, not in this payload.`,
+  };
 }
 
 function throwIfAborted(signal: AbortSignal | undefined): void {
@@ -189,7 +308,28 @@ export async function launchRunAndWait(
 
   let launchPath: string;
   let launchBody: Record<string, unknown> | undefined;
+  const contextDocuments = asNonEmptyArray(args.context_documents);
   if (kind === "agent") {
+    // `context_documents` works by synthesizing an input field on the manifest,
+    // which only an inline run owns. A published agent's `input.schema` is a
+    // versioned contract the platform must not rewrite — reject explicitly
+    // rather than dropping the argument, which would mount nothing and leave
+    // the model believing the documents were delivered.
+    if (contextDocuments) {
+      return {
+        ok: false,
+        step: {
+          payload: {
+            error:
+              "`context_documents` is only supported for kind:'inline'. To give a published " +
+              "agent a document, pass its document:// URI through one of the file fields " +
+              'declared in the agent\'s own input schema (`format:"uri"` + `contentMediaType`), ' +
+              "via the `input` argument.",
+          },
+          isError: true,
+        },
+      };
+    }
     const scope = asString(args.scope);
     const name = asString(args.name);
     if (!scope || !name) {
@@ -256,6 +396,9 @@ export async function launchRunAndWait(
     launchBody = { manifest, prompt };
     if (asRecord(args.input)) launchBody.input = args.input;
     if (asRecord(args.config)) launchBody.config = args.config;
+    // Fan-in by reference: forwarded verbatim; the route resolves each URI
+    // through the document ACL and declares the reserved input field itself.
+    if (contextDocuments) launchBody.context_documents = contextDocuments;
   } else {
     return {
       ok: false,
@@ -425,6 +568,10 @@ export async function fetchRunDocuments(
  * into a follow-up run (D6). The extra fetch runs only once the run is terminal
  * and only when a run id exists; a run that published nothing keeps the payload
  * document-free. Used by the chat run_and_wait paths (pi + ai-sdk).
+ *
+ * Truncation ({@link truncateRunAndWaitPayload}) is applied on the same terminal
+ * step but is INDEPENDENT of the document list — an oversized result is cut back
+ * whether or not the run published anything.
  */
 export async function* runAndWaitStepsWithDocuments(
   rawArgs: unknown,
@@ -434,10 +581,12 @@ export async function* runAndWaitStepsWithDocuments(
     const runId = asString(step.payload.id);
     if (step.payload.done === true && runId) {
       const documents = await fetchRunDocuments(runId, opts);
-      if (documents.length > 0) {
-        yield { ...step, payload: { ...step.payload, documents } };
-        continue;
-      }
+      const payload = truncateRunAndWaitPayload(step.payload);
+      yield {
+        ...step,
+        payload: documents.length > 0 ? { ...payload, documents } : payload,
+      };
+      continue;
     }
     yield step;
   }
