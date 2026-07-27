@@ -170,6 +170,24 @@ async function forkWithConfig(
     });
   }
 
+  // Same reason the check above only warns, applied to the identity itself: a
+  // drifted `type` (the `provider` rows #481 left behind, or a snapshot whose
+  // type no longer matches its `packages.type` row) sits in an immutable,
+  // unrepairable artifact, so the fork is the one path allowed to normalize it.
+  // `createOrgItem` used to do this silently for every caller, which is how a
+  // manifest valid for one type became a stored manifest no schema accepts
+  // (issue #987); it now REFUSES divergence, so the repair lives here.
+  if (updatedManifest.type !== cfg.type) {
+    logger.warn("normalizing drifted manifest type on fork", {
+      sourcePackageId,
+      packageId: targetId,
+      version: versionRow.version,
+      manifestType: String(updatedManifest.type),
+      packageType: cfg.type,
+    });
+    updatedManifest.type = cfg.type;
+  }
+
   // Create the fork package (draft)
   const newPkg = await createOrgItem(
     orgId,
