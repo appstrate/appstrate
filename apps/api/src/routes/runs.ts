@@ -315,7 +315,17 @@ export function createRunsRouter() {
       .min(0)
       .catch(0)
       .parse(c.req.query("offset") ?? 0);
-    const userFilter = c.req.query("user");
+    // `user` is a closed set of one: `me`. An unrecognised value is rejected,
+    // never ignored — falling back to the whole org hands the caller a list
+    // they read as already scoped. Validated BEFORE the end-user branch below
+    // so the param means the same thing for every caller, instead of a typo
+    // surviving in an end-user integration until it runs under an org session.
+    // Present-but-empty (`?user=`) reads as absent, like `kind`/`status`/dates.
+    const userQuery = c.req.query("user");
+    const userFilter = userQuery === "" ? undefined : userQuery;
+    if (userFilter !== undefined && userFilter !== "me") {
+      throw invalidRequest("user must be 'me'", "user");
+    }
     const endUser = c.get("endUser");
 
     // End-users always see only their own runs — same semantic as before.

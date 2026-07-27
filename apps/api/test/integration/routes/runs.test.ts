@@ -6,7 +6,13 @@ import { db } from "@appstrate/db/client";
 import { auditEvents, runLogs, runs } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
-import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
+import {
+  createTestContext,
+  authHeaders,
+  createTestUser,
+  addOrgMember,
+  type TestContext,
+} from "../../helpers/auth.ts";
 import {
   seedAgent,
   seedRun,
@@ -705,6 +711,166 @@ describe("Runs API", () => {
       const detailBody = (await detail.json()) as { id: string; data?: unknown };
       expect(detailBody.id).toBe(run.id);
       expect(detailBody.data).toBeUndefined();
+    });
+  });
+
+  // ─── GET /api/runs — ?user is a closed set ─────────────────
+
+  // `user` used to accept `me` and silently ignore everything else, so
+  // `?user=<some id>` came back as the full org list while the caller read it
+  // as filtered. The param is now validated against its declared enum.
+  describe("GET /api/runs — ?user validation", () => {
+    // Two members, one run each — enough to tell "all org runs" apart from
+    // "only mine" in the responses below.
+    async function seedTwoMembersRuns() {
+      const otherUser = await createTestUser();
+      await addOrgMember(ctx.orgId, otherUser.id);
+      await seedAgent({ id: "@runorg/uservalid-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
+      await seedRun({
+        packageId: "@runorg/uservalid-agent",
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        userId: ctx.user.id,
+        status: "success",
+      });
+      await seedRun({
+        packageId: "@runorg/uservalid-agent",
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        userId: otherUser.id,
+        status: "success",
+      });
+    }
+
+    it("still restricts to the caller with ?user=me", async () => {
+      await seedTwoMembersRuns();
+
+      const res = await app.request("/api/runs?user=me", { headers: authHeaders(ctx) });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { data: { userId: string }[]; total: number };
+      expect(body.total).toBe(1);
+      expect(body.data[0]!.userId).toBe(ctx.user.id);
+    });
+
+    it("lists all org runs when no ?user param is given", async () => {
+      await seedTwoMembersRuns();
+
+      const res = await app.request("/api/runs", { headers: authHeaders(ctx) });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { data: unknown[]; total: number };
+      expect(body.total).toBe(2);
+    });
+
+    it("rejects an unknown ?user value with 400 naming the param", async () => {
+      await seedTwoMembersRuns();
+
+      const res = await app.request(`/api/runs?user=${ctx.user.id}`, { headers: authHeaders(ctx) });
+
+      expect(res.status).toBe(400);
+      expect(res.headers.get("content-type")).toContain("application/problem+json");
+      const body = (await res.json()) as { param?: string; code?: string };
+      expect(body.param).toBe("user");
+      expect(body.code).toBe("invalid_request");
+    });
+
+    it("rejects a non-id garbage ?user value too", async () => {
+      const res = await app.request("/api/runs?user=everyone", { headers: authHeaders(ctx) });
+
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { param?: string };
+      expect(body.param).toBe("user");
+    });
+
+    // Present-but-empty is the shape a client emits for an unset filter — read
+    // as absent, exactly like the `kind`/`status`/date params on this route.
+    it("treats a present-but-empty ?user= as absent (full org list)", async () => {
+      await seedTwoMembersRuns();
+
+      const res = await app.request("/api/runs?user=", { headers: authHeaders(ctx) });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { data: unknown[]; total: number };
+      expect(body.total).toBe(2);
+    });
+
+    it("restricts an end-user caller to their own runs", async () => {
+      await seedAgent({ id: "@runorg/eu-filter-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
+      const endUser = await seedEndUser({
+        applicationId: ctx.defaultAppId,
+        orgId: ctx.orgId,
+        externalId: "ext-user-filter",
+      });
+      const apiKey = await seedApiKey({
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        createdBy: ctx.user.id,
+        name: "user-filter-key",
+      });
+      const ownRun = await seedRun({
+        packageId: "@runorg/eu-filter-agent",
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        endUserId: endUser.id,
+        status: "success",
+      });
+      // A member-owned run the end-user must never see.
+      await seedRun({
+        packageId: "@runorg/eu-filter-agent",
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        userId: ctx.user.id,
+        status: "success",
+      });
+
+      const euHeaders = {
+        Authorization: `Bearer ${apiKey.rawKey}`,
+        "X-Application-Id": ctx.defaultAppId,
+        "Appstrate-User": endUser.id,
+      };
+
+      // No param — still restricted.
+      const bare = await app.request("/api/runs", { headers: euHeaders });
+      expect(bare.status).toBe(200);
+      const bareBody = (await bare.json()) as { data: { id: string }[]; total: number };
+      expect(bareBody.total).toBe(1);
+      expect(bareBody.data.map((r) => r.id)).toEqual([ownRun.id]);
+
+      // `?user=me` — accepted, same restriction.
+      const explicit = await app.request("/api/runs?user=me", { headers: euHeaders });
+      expect(explicit.status).toBe(200);
+      const explicitBody = (await explicit.json()) as { data: { id: string }[] };
+      expect(explicitBody.data.map((r) => r.id)).toEqual([ownRun.id]);
+    });
+
+    // The param is validated before the end-user branch, so a bad value 400s
+    // for every caller rather than being swallowed by the implicit
+    // self-restriction — the same URL means the same thing for everyone.
+    it("still rejects an unknown ?user value for an end-user caller", async () => {
+      const endUser = await seedEndUser({
+        applicationId: ctx.defaultAppId,
+        orgId: ctx.orgId,
+        externalId: "ext-user-filter-bad",
+      });
+      const apiKey = await seedApiKey({
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        createdBy: ctx.user.id,
+        name: "user-filter-key-bad",
+      });
+
+      const res = await app.request("/api/runs?user=garbage", {
+        headers: {
+          Authorization: `Bearer ${apiKey.rawKey}`,
+          "X-Application-Id": ctx.defaultAppId,
+          "Appstrate-User": endUser.id,
+        },
+      });
+
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { param?: string };
+      expect(body.param).toBe("user");
     });
   });
 
