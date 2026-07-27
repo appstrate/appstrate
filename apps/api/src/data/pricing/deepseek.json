@@ -7,10 +7,9 @@
       "text"
     ],
     "cost": {
-      "input": 0.14,
-      "output": 0.28,
-      "cacheRead": 0.0028,
-      "cacheWrite": 0
+      "input": 0.28,
+      "output": 0.42,
+      "cacheRead": 0.028
     }
   },
   "deepseek-coder": {

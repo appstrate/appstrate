@@ -447,6 +447,36 @@
       "cacheRead": 0.2
     }
   },
+  "grok-4.5": {
+    "label": "Grok 4.5",
+    "contextWindow": 500000,
+    "maxTokens": null,
+    "capabilities": [
+      "text",
+      "image",
+      "reasoning"
+    ],
+    "cost": {
+      "input": 2,
+      "output": 6,
+      "cacheRead": 0.5
+    }
+  },
+  "grok-4.5-latest": {
+    "label": "Grok 4.5 Latest",
+    "contextWindow": 500000,
+    "maxTokens": null,
+    "capabilities": [
+      "text",
+      "image",
+      "reasoning"
+    ],
+    "cost": {
+      "input": 2,
+      "output": 6,
+      "cacheRead": 0.5
+    }
+  },
   "grok-beta": {
     "label": "Grok Beta",
     "contextWindow": 131072,

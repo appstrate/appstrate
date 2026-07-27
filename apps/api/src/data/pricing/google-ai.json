@@ -326,6 +326,36 @@
       "cacheRead": 0.15
     }
   },
+  "gemini-3.5-flash-lite": {
+    "label": "Gemini 3.5 Flash Lite",
+    "contextWindow": 1048576,
+    "maxTokens": 65536,
+    "capabilities": [
+      "text",
+      "image",
+      "reasoning"
+    ],
+    "cost": {
+      "input": 0.3,
+      "output": 2.5,
+      "cacheRead": 0.03
+    }
+  },
+  "gemini-3.6-flash": {
+    "label": "Gemini 3.6 Flash",
+    "contextWindow": 1048576,
+    "maxTokens": 65536,
+    "capabilities": [
+      "text",
+      "image",
+      "reasoning"
+    ],
+    "cost": {
+      "input": 1.5,
+      "output": 7.5,
+      "cacheRead": 0.15
+    }
+  },
   "gemini-exp-1114": {
     "label": "Gemini Exp 1114",
     "contextWindow": 1048576,
@@ -382,6 +412,20 @@
       "input": 0.1,
       "output": 0.4,
       "cacheRead": 0.01
+    }
+  },
+  "gemini-omni-flash-preview": {
+    "label": "Gemini Omni Flash Preview",
+    "contextWindow": 1048576,
+    "maxTokens": 65535,
+    "capabilities": [
+      "text",
+      "image",
+      "reasoning"
+    ],
+    "cost": {
+      "input": 1.5,
+      "output": 9
     }
   },
   "gemini-pro-latest": {

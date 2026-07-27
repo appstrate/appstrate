@@ -538,32 +538,6 @@
       "output": 0.6
     }
   },
-  "gpt-4o-mini-realtime-preview": {
-    "label": "Gpt 4o Mini Realtime Preview",
-    "contextWindow": 128000,
-    "maxTokens": 4096,
-    "capabilities": [
-      "text"
-    ],
-    "cost": {
-      "input": 0.6,
-      "output": 2.4,
-      "cacheRead": 0.3
-    }
-  },
-  "gpt-4o-mini-realtime-preview-2024-12-17": {
-    "label": "Gpt 4o Mini Realtime Preview 2024 12 17",
-    "contextWindow": 128000,
-    "maxTokens": 4096,
-    "capabilities": [
-      "text"
-    ],
-    "cost": {
-      "input": 0.6,
-      "output": 2.4,
-      "cacheRead": 0.3
-    }
-  },
   "gpt-4o-mini-search-preview": {
     "label": "Gpt 4o Mini Search Preview",
     "contextWindow": 128000,
@@ -590,45 +564,6 @@
       "input": 0.15,
       "output": 0.6,
       "cacheRead": 0.075
-    }
-  },
-  "gpt-4o-realtime-preview": {
-    "label": "Gpt 4o Realtime Preview",
-    "contextWindow": 128000,
-    "maxTokens": 4096,
-    "capabilities": [
-      "text"
-    ],
-    "cost": {
-      "input": 5,
-      "output": 20,
-      "cacheRead": 2.5
-    }
-  },
-  "gpt-4o-realtime-preview-2024-12-17": {
-    "label": "Gpt 4o Realtime Preview 2024 12 17",
-    "contextWindow": 128000,
-    "maxTokens": 4096,
-    "capabilities": [
-      "text"
-    ],
-    "cost": {
-      "input": 5,
-      "output": 20,
-      "cacheRead": 2.5
-    }
-  },
-  "gpt-4o-realtime-preview-2025-06-03": {
-    "label": "Gpt 4o Realtime Preview 2025 06 03",
-    "contextWindow": 128000,
-    "maxTokens": 4096,
-    "capabilities": [
-      "text"
-    ],
-    "cost": {
-      "input": 5,
-      "output": 20,
-      "cacheRead": 2.5
     }
   },
   "gpt-4o-search-preview": {
@@ -1032,6 +967,70 @@
       "cacheRead": 0.5
     }
   },
+  "gpt-5.6": {
+    "label": "Gpt 5.6",
+    "contextWindow": 1050000,
+    "maxTokens": 128000,
+    "capabilities": [
+      "text",
+      "image",
+      "reasoning"
+    ],
+    "cost": {
+      "input": 5,
+      "output": 30,
+      "cacheRead": 0.5,
+      "cacheWrite": 6.25
+    }
+  },
+  "gpt-5.6-luna": {
+    "label": "Gpt 5.6 Luna",
+    "contextWindow": 1050000,
+    "maxTokens": 128000,
+    "capabilities": [
+      "text",
+      "image",
+      "reasoning"
+    ],
+    "cost": {
+      "input": 1,
+      "output": 6,
+      "cacheRead": 0.1,
+      "cacheWrite": 1.25
+    }
+  },
+  "gpt-5.6-sol": {
+    "label": "Gpt 5.6 Sol",
+    "contextWindow": 1050000,
+    "maxTokens": 128000,
+    "capabilities": [
+      "text",
+      "image",
+      "reasoning"
+    ],
+    "cost": {
+      "input": 5,
+      "output": 30,
+      "cacheRead": 0.5,
+      "cacheWrite": 6.25
+    }
+  },
+  "gpt-5.6-terra": {
+    "label": "Gpt 5.6 Terra",
+    "contextWindow": 1050000,
+    "maxTokens": 128000,
+    "capabilities": [
+      "text",
+      "image",
+      "reasoning"
+    ],
+    "cost": {
+      "input": 2.5,
+      "output": 15,
+      "cacheRead": 0.25,
+      "cacheWrite": 3.125
+    }
+  },
   "gpt-audio": {
     "label": "Gpt Audio",
     "contextWindow": 128000,
@@ -1102,96 +1101,6 @@
     "cost": {
       "input": 0.6,
       "output": 2.4
-    }
-  },
-  "gpt-realtime": {
-    "label": "Gpt Realtime",
-    "contextWindow": 32000,
-    "maxTokens": 4096,
-    "capabilities": [
-      "text"
-    ],
-    "cost": {
-      "input": 4,
-      "output": 16,
-      "cacheRead": 0.4
-    }
-  },
-  "gpt-realtime-1.5": {
-    "label": "Gpt Realtime 1.5",
-    "contextWindow": 32000,
-    "maxTokens": 4096,
-    "capabilities": [
-      "text"
-    ],
-    "cost": {
-      "input": 4,
-      "output": 16,
-      "cacheRead": 0.4
-    }
-  },
-  "gpt-realtime-2": {
-    "label": "Gpt Realtime 2",
-    "contextWindow": 32000,
-    "maxTokens": 4096,
-    "capabilities": [
-      "text"
-    ],
-    "cost": {
-      "input": 4,
-      "output": 16,
-      "cacheRead": 0.4
-    }
-  },
-  "gpt-realtime-2025-08-28": {
-    "label": "Gpt Realtime 2025 08 28",
-    "contextWindow": 32000,
-    "maxTokens": 4096,
-    "capabilities": [
-      "text"
-    ],
-    "cost": {
-      "input": 4,
-      "output": 16,
-      "cacheRead": 0.4
-    }
-  },
-  "gpt-realtime-mini": {
-    "label": "Gpt Realtime Mini",
-    "contextWindow": 128000,
-    "maxTokens": 4096,
-    "capabilities": [
-      "text"
-    ],
-    "cost": {
-      "input": 0.6,
-      "output": 2.4
-    }
-  },
-  "gpt-realtime-mini-2025-10-06": {
-    "label": "Gpt Realtime Mini 2025 10 06",
-    "contextWindow": 128000,
-    "maxTokens": 4096,
-    "capabilities": [
-      "text"
-    ],
-    "cost": {
-      "input": 0.6,
-      "output": 2.4,
-      "cacheRead": 0.06
-    }
-  },
-  "gpt-realtime-mini-2025-12-15": {
-    "label": "Gpt Realtime Mini 2025 12 15",
-    "contextWindow": 128000,
-    "maxTokens": 4096,
-    "capabilities": [
-      "text"
-    ],
-    "cost": {
-      "input": 0.6,
-      "output": 2.4,
-      "cacheRead": 0.06
     }
   },
   "o1": {
