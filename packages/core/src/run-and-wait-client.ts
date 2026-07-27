@@ -17,8 +17,8 @@ const RUN_GET_WAIT_MAX_SECONDS = 55;
 
 /**
  * Inline ceiling for a run's structured `result` inside a tool result (≈8k
- * tokens of JSON). Above it the payload is TRUNCATED and paired with a
- * `document://` pointer at the full copy ({@link truncateRunAndWaitPayload}).
+ * tokens of JSON). Above it the payload is TRUNCATED to a head that points back
+ * at the run ({@link truncateRunAndWaitPayload}).
  *
  * Sized as a CONTEXT SAFETY NET, not as the fan-in mechanism (that is the
  * prompt's fan-out/fan-in rule). The 32 KB figure is the same order as the
@@ -27,31 +27,18 @@ const RUN_GET_WAIT_MAX_SECONDS = 55;
  * round-trip on results the chat must read to answer at all, making the common
  * single-run case strictly worse. The audited incident's results were 9–11.6 KB,
  * i.e. comfortably under this bar: it would not have fired there, and it is not
- * claimed to be that fix.
+ * claimed to be that fix. What it does earn is a bound on an otherwise unbounded
+ * surface — nothing else caps how much of `runs.result` reaches a chat context.
+ *
+ * The pointer is the RUN, not a copy of it. An earlier revision spilled the full
+ * payload into a dedicated `agent_output` document so the truncated result could
+ * carry a `document://` URI. That duplicated bytes already durable in
+ * `runs.result` and already readable through `getRun`, and locating the copy BY
+ * NAME opened an impersonation hole (an agent publishing a decoy under the same
+ * name) that then needed its own publish-boundary refusal to close. Pointing at
+ * the run removes the copy, the reserved name, the refusal, and the hole.
  */
 export const RUN_RESULT_INLINE_MAX_BYTES = 32 * 1024;
-
-/**
- * Name of the `agent_output` document the platform writes when a run's `result`
- * overruns {@link RUN_RESULT_INLINE_MAX_BYTES} — the full payload, so the
- * truncated tool result can point at it.
- *
- * The spill is located BY NAME below, so the name must be unforgeable — and
- * namespacing alone does not achieve that: the agent-output dedup key is
- * `(run_id, sha256, name)`, so an agent-published decoy and the genuine spill
- * would coexist. The guarantee comes from the publish boundary instead:
- * `routes/runs-events.ts` REFUSES this name from an agent (400). Without that
- * refusal an agent could publish a decoy, then exhaust its own output budget so
- * the genuine spill is rejected — the spill is best-effort by design — and the
- * orchestrating model would read agent-substituted content as the authoritative
- * result while `runs.result` held something else.
- *
- * Written by `apps/api/src/services/documents.ts` (`spillRunResultDocument`),
- * refused at publish by `apps/api/src/routes/runs-events.ts`, read here. The
- * constant lives in core because all three must agree and core is the only
- * package they all import — core itself never touches storage.
- */
-export const RUN_RESULT_SPILL_DOCUMENT_NAME = "appstrate-run-result.json";
 
 const TEXT_ENCODER = new TextEncoder();
 /** Non-fatal: a head cut mid-codepoint yields U+FFFD rather than throwing. */
@@ -188,12 +175,14 @@ export function runResultExceedsInlineLimit(result: unknown): boolean {
 
 /**
  * Truncate an oversized `result` on a terminal run_and_wait payload, replacing
- * it with a usable HEAD plus a `document://` pointer at the full copy (D4).
+ * it with a usable HEAD that points back at the run holding the whole thing.
  *
- * Truncate-AND-point, never truncate-or-drop: when no spill document is present
- * (the platform's best-effort write failed, or the run predates it) the payload
- * is returned UNCHANGED. A truncation with no way back to the rest would lose
- * data silently, which is worse than a large tool result.
+ * No copy is made and no pointer can be missing: the full payload is already in
+ * `runs.result`, durable before this ever runs, and `getRun` returns it. That is
+ * what makes truncation unconditional here — the earlier spill-document design
+ * had to fall back to NOT truncating whenever its best-effort write failed,
+ * which meant the guard silently stopped guarding exactly when a result was
+ * large enough to be a problem.
  *
  * `result` is removed rather than shortened in place: leaving the same key with
  * a shortened value invites the model to treat it as complete. `result_head` is
@@ -203,29 +192,26 @@ export function runResultExceedsInlineLimit(result: unknown): boolean {
  */
 export function truncateRunAndWaitPayload(
   payload: Record<string, unknown>,
-  documents: readonly RunAndWaitDocument[],
 ): Record<string, unknown> {
   if (payload.result === undefined || payload.result === null) return payload;
   const bytes = serializedResultBytes(payload.result);
   if (bytes === null || bytes.length <= RUN_RESULT_INLINE_MAX_BYTES) return payload;
-  const spill = documents.find((doc) => doc.name === RUN_RESULT_SPILL_DOCUMENT_NAME);
-  if (!spill) return payload;
 
   const { result: _full, ...rest } = payload;
+  const runId = asString(payload.id);
   return {
     ...rest,
     truncated: true,
     result_size_bytes: bytes.length,
     result_head: TEXT_DECODER.decode(bytes.slice(0, RUN_RESULT_INLINE_MAX_BYTES)),
-    full_document_uri: spill.uri,
     message:
       `This run's result is ${bytes.length} bytes, over the ` +
       `${RUN_RESULT_INLINE_MAX_BYTES}-byte inline limit for a tool result. ` +
       `\`result_head\` holds its first ${RUN_RESULT_INLINE_MAX_BYTES} bytes as JSON text ` +
-      `(a prefix — not parseable on its own). The complete result is stored as the ` +
-      `document at \`full_document_uri\`; read it only if the head does not already ` +
-      `answer the question, and pass that URI (never a copy of the content) to any ` +
-      `follow-up run that needs the whole thing.`,
+      `(a prefix — not parseable on its own). The complete result is stored on the run` +
+      `${runId ? ` (\`${runId}\`)` : ""}: call \`getRun\` to read it, and only if the ` +
+      `head does not already answer the question. A deliverable meant for the user ` +
+      `belongs in the run's \`outputs/\` directory, not in this payload.`,
   };
 }
 
@@ -583,9 +569,9 @@ export async function fetchRunDocuments(
  * and only when a run id exists; a run that published nothing keeps the payload
  * document-free. Used by the chat run_and_wait paths (pi + ai-sdk).
  *
- * The same document list feeds the oversized-result truncation (B5/D4): the
- * spill document the platform wrote for a >32 KB result is found in this list,
- * so the pointer costs no extra request ({@link truncateRunAndWaitPayload}).
+ * Truncation ({@link truncateRunAndWaitPayload}) is applied on the same terminal
+ * step but is INDEPENDENT of the document list — an oversized result is cut back
+ * whether or not the run published anything.
  */
 export async function* runAndWaitStepsWithDocuments(
   rawArgs: unknown,
@@ -595,11 +581,12 @@ export async function* runAndWaitStepsWithDocuments(
     const runId = asString(step.payload.id);
     if (step.payload.done === true && runId) {
       const documents = await fetchRunDocuments(runId, opts);
-      if (documents.length > 0) {
-        const payload = truncateRunAndWaitPayload(step.payload, documents);
-        yield { ...step, payload: { ...payload, documents } };
-        continue;
-      }
+      const payload = truncateRunAndWaitPayload(step.payload);
+      yield {
+        ...step,
+        payload: documents.length > 0 ? { ...payload, documents } : payload,
+      };
+      continue;
     }
     yield step;
   }

@@ -89,7 +89,6 @@ import {
   documentUri,
   extractDocumentIds,
 } from "@appstrate/core/document-uri";
-import { RUN_RESULT_SPILL_DOCUMENT_NAME } from "@appstrate/core/run-and-wait-client";
 
 /** Durable documents bucket (distinct from the ephemeral `uploads` bucket). */
 export const DOCUMENTS_BUCKET = "documents";
@@ -1060,47 +1059,6 @@ export async function createDocumentFromStream(
     }
     throw err;
   }
-}
-
-/**
- * Persist a run's oversized structured `result` as a durable `agent_output`
- * document, so a tool-result consumer can truncate its inline copy and still
- * point at the whole payload (`document://…`, B5/D4).
- *
- * Why a document and not a new store: the truncation happens in
- * `@appstrate/core/run-and-wait-client`, which is published on npm and carries
- * no DB or storage dependency — it can only be handed a URI. `documents` is the
- * platform's existing durable, ACL-inheriting, quota-accounted store for exactly
- * this, and the run is the correct container (`DocumentContainer` is
- * `{runId} XOR {chatSessionId}`): an `agent_output` is readable by anyone who can
- * read the run, which is precisely who can see the truncated tool result.
- *
- * Reuses {@link createDocumentFromStream} verbatim, so the file cap, the per-run
- * byte/count caps, the org quota and the `(run, sha256, name)` dedup all apply
- * unchanged — a retried finalize re-publishes the same bytes and dedups instead
- * of storing them twice. The caller treats a rejection (over-quota, over-cap) as
- * non-fatal: no spill simply means the tool result stays untruncated.
- */
-export async function spillRunResultDocument(
-  scope: AppScope,
-  runId: string,
-  attribution: { userId: string | null; endUserId: string | null },
-  packageId: string | null,
-  result: unknown,
-): Promise<DocumentRow> {
-  const bytes = new TextEncoder().encode(JSON.stringify(result));
-  const body = new ReadableStream<Uint8Array>({
-    start(controller) {
-      controller.enqueue(bytes);
-      controller.close();
-    },
-  });
-  const { row } = await createDocumentFromStream(scope, runId, attribution, packageId, {
-    name: RUN_RESULT_SPILL_DOCUMENT_NAME,
-    mime: "application/json",
-    body,
-  });
-  return row;
 }
 
 function assertWithinFileCap(size: number, cap: number): void {

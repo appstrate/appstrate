@@ -21,12 +21,7 @@ import type { AgentManifest, LoadedPackage } from "../types/index.ts";
 import type { Actor } from "../lib/actor.ts";
 import { logger } from "../lib/logger.ts";
 import type { InlineRunBody, InlineRunPreflightResult } from "./inline-run-preflight.ts";
-import {
-  collectMountedDocumentIds,
-  mapWithConcurrency,
-  DOC_STREAM_CONCURRENCY,
-  type ParsedInput,
-} from "./input-parser.ts";
+import { collectMountedDocumentIds, type ParsedInput } from "./input-parser.ts";
 import { prepareAndExecuteRun } from "./run-pipeline.ts";
 import { assertExplicitModelExists } from "./org-models.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
@@ -37,9 +32,7 @@ import {
   parseDocumentUri,
 } from "@appstrate/core/document-uri";
 import { asJSONSchemaObject, type JSONSchemaObject } from "@appstrate/core/form";
-import { documentCountExceeded, invalidRequest, validationFailed } from "../lib/errors.ts";
-import { appendRunLog } from "./state/runs.ts";
-import { getEnv } from "@appstrate/env";
+import { invalidRequest, validationFailed } from "../lib/errors.ts";
 
 export type { InlineRunBody };
 
@@ -168,9 +161,8 @@ export function assertPromptDocumentsCoveredByInput(
 
 /**
  * The `document://` ids a prompt names that the resolved input does NOT mount.
- * Pure, no I/O — the shared detection primitive behind both the backstop guard
- * ({@link assertPromptDocumentsCoveredByInput}) and the auto-repair
- * ({@link resolvePromptDocumentsForContext}).
+ * Pure, no I/O — the detection primitive behind
+ * {@link assertPromptDocumentsCoveredByInput}.
  */
 function uncoveredPromptDocumentIds(
   prompt: string,
@@ -289,9 +281,8 @@ export interface ContextDocumentsInjection {
 }
 
 /**
- * THE single synthesis point for context documents — used by both entry paths:
- * the explicit `context_documents` argument (B2) and the auto-repair of
- * prompt-named URIs (B3). Both reduce to one list of `document://` URIs, so
+ * THE single synthesis point for context documents (B2): the caller's explicit
+ * `context_documents` argument reduces to one list of `document://` URIs, so
  * there is exactly one place that knows the field shape.
  *
  * Declaring the field is all the work: from here the URIs travel the NORMAL
@@ -362,68 +353,6 @@ export function normalizeContextDocumentUris(value: unknown): string[] {
 }
 
 /**
- * B3 — auto-repair instead of refusal.
- *
- * A model that pastes `document://` URIs into the sub-agent's prompt text is
- * doing the natural thing; the URIs are simply inert there (the runtime cannot
- * fetch them). Rather than answering with a 400 that asks the model to write the
- * schema boilerplate itself, resolve those URIs and route them into the same
- * reserved field {@link injectContextDocuments} declares.
- *
- * The 400 survives for the one case a repair cannot fix: a URI that does not
- * resolve for THIS actor (unknown document, or outside its container ACL).
- * Readability is probed through the injected `canRead` (the route passes
- * `getDocumentForActor` + the `download` capability) so this stays unit-testable
- * without touching the DB — and so the repair can never widen access: an
- * unreadable document is refused here and would be refused again by the consume
- * path.
- *
- * ACCEPTED TRADE-OFF (deliberate, not an oversight): prompt text becomes a mount
- * primitive where it used to be inert, so prompt injection can now cause a mount
- * — but only WITHIN the set the calling actor may already read, since every
- * candidate still clears the container ACL. Authorization is unchanged; the blast
- * radius of injected prompt text widens by one class of side effect. The
- * `context_documents_auto_repaired` run log is the instrumentation that keeps
- * that visible.
- *
- * COST CONTROL: the candidate list comes from free-form model text, so it is
- * attacker-shaped — a ~200 KB prompt can name thousands of distinct ids. It is
- * therefore capped at `RUN_MAX_DOCUMENTS` BEFORE any probe runs (the same ceiling
- * `parseRequestInput` enforces on the mount, just moved ahead of the I/O), and
- * the surviving probes run at `DOC_STREAM_CONCURRENCY` — the same bound the
- * document streaming uses, and a strictly cheaper unit of work than the streams
- * it precedes.
- *
- * Returns the `document://` URIs to mount (possibly empty).
- */
-export async function resolvePromptDocumentsForContext(params: {
-  prompt: string;
-  input: unknown;
-  inputSchema: JSONSchemaObject | undefined;
-  canRead: (documentId: string) => Promise<boolean>;
-}): Promise<string[]> {
-  const uncovered = uncoveredPromptDocumentIds(params.prompt, params.input, params.inputSchema);
-  if (uncovered.length === 0) return [];
-
-  // Cap FIRST: an over-cap prompt can never produce a legal run (the mount would
-  // reject it anyway), so probing it would spend the queries for nothing.
-  const maxDocuments = getEnv().RUN_MAX_DOCUMENTS;
-  if (uncovered.length > maxDocuments) {
-    throw documentCountExceeded(
-      `The run prompt references ${uncovered.length} document:// URIs; a run may carry at most ` +
-        `${maxDocuments} input documents`,
-    );
-  }
-
-  const readable = await mapWithConcurrency(uncovered, DOC_STREAM_CONCURRENCY, (id) =>
-    params.canRead(id),
-  );
-  const unresolvable = uncovered.filter((_, i) => !readable[i]);
-  if (unresolvable.length > 0) throw promptDocumentsNotMountedError(unresolvable);
-  return uncovered.map(documentUri);
-}
-
-/**
  * Trigger an inline agent run end-to-end: insert the shadow package and fire
  * the pipeline. The route owns the earlier stages — `runInlinePreflight`
  * (manifest shape, config, readiness) then `parseRequestInput` (file fields
@@ -449,13 +378,6 @@ export async function triggerInlineRun(params: {
   apiKeyId?: string;
   /** W3C `traceparent` of the spawning request — forwarded to the runtime. */
   traceparent?: string;
-  /**
-   * `document://` URIs the route auto-repaired out of the prompt text into the
-   * reserved context-documents field (B3). Recorded as an `info` run log once
-   * the run row exists — without it model drift becomes invisible, and this
-   * signal is what surfaced the behaviour in the first place.
-   */
-  repairedPromptDocumentUris?: readonly string[];
 }): Promise<{ runId: string; packageId: string }> {
   const { orgId, applicationId, actor, runId, preflight, parsed, apiKeyId, traceparent } = params;
   const { manifest, prompt, effectiveConfig, modelIdOverride, proxyIdOverride } = preflight;
@@ -510,27 +432,6 @@ export async function triggerInlineRun(params: {
   } catch (err) {
     await deleteOrphanShadowPackage(shadowId);
     throw err;
-  }
-
-  // Auto-repair breadcrumb (B3) — the run row exists from here on. Best-effort
-  // like the pipeline's own progress breadcrumb: a failed log must never fail a
-  // launched run.
-  const repaired = params.repairedPromptDocumentUris ?? [];
-  if (repaired.length > 0) {
-    void appendRunLog(
-      { orgId },
-      runId,
-      "progress",
-      "context_documents_auto_repaired",
-      `mounted ${repaired.length} document(s) referenced only in the prompt text`,
-      { platform: true, documents: [...repaired] },
-      "info",
-    ).catch((err) => {
-      logger.warn("failed to append context-documents auto-repair log", {
-        runId,
-        error: getErrorMessage(err),
-      });
-    });
   }
 
   return { runId, packageId: shadowId };

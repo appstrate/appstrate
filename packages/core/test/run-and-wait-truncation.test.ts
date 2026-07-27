@@ -7,17 +7,18 @@
  *   - the threshold is 32 KB of SERIALIZED result, and it is a strict overrun
  *     (a payload landing exactly on the limit passes through untouched);
  *   - what survives is a USABLE head — enough to answer in the median case —
- *     plus `truncated: true` and a `document://` pointer at the full copy;
- *   - the pointer is the platform's spill document, found in the same
- *     `documents` list the terminal step already carries (no extra request);
- *   - with NO spill document there is no truncation at all: losing data
- *     silently would be worse than a large tool result.
+ *     plus `truncated: true` and the run id the whole result can be read from;
+ *   - truncation is UNCONDITIONAL: it depends on nothing the platform had to
+ *     write first, because the full payload is already durable in `runs.result`
+ *     and `getRun` returns it. An earlier revision copied the payload into a
+ *     dedicated document and skipped truncating whenever that best-effort copy
+ *     was missing — i.e. the guard stopped guarding exactly when a result was
+ *     big enough to matter. These tests pin the absence of that hole.
  */
 
 import { describe, expect, it } from "bun:test";
 import {
   RUN_RESULT_INLINE_MAX_BYTES,
-  RUN_RESULT_SPILL_DOCUMENT_NAME,
   runAndWaitStepsWithDocuments,
   runResultExceedsInlineLimit,
   truncateRunAndWaitPayload,
@@ -32,14 +33,6 @@ function resultOfExactlyBytes(bytes: number): { output: { text: string } } {
   const envelope = JSON.stringify({ output: { text: "" } }).length;
   return { output: { text: "x".repeat(bytes - envelope) } };
 }
-
-const spillDocument: RunAndWaitDocument = {
-  id: "doc_spill0001",
-  uri: "document://doc_spill0001",
-  name: RUN_RESULT_SPILL_DOCUMENT_NAME,
-  mime: "application/json",
-  size: 40_000,
-};
 
 const reportDocument: RunAndWaitDocument = {
   id: "doc_report001",
@@ -77,20 +70,18 @@ describe("truncateRunAndWaitPayload", () => {
 
   it("leaves a payload exactly on the limit untouched", () => {
     const payload = { ...base, result: resultOfExactlyBytes(RUN_RESULT_INLINE_MAX_BYTES) };
-    expect(truncateRunAndWaitPayload(payload, [spillDocument])).toBe(payload);
+    expect(truncateRunAndWaitPayload(payload)).toBe(payload);
   });
 
-  it("truncates one byte over the limit, keeping a usable head and a pointer", () => {
+  it("truncates one byte over the limit, keeping a usable head and the run id", () => {
     const result = resultOfExactlyBytes(RUN_RESULT_INLINE_MAX_BYTES + 1);
-    const out = truncateRunAndWaitPayload({ ...base, result }, [reportDocument, spillDocument]);
+    const out = truncateRunAndWaitPayload({ ...base, result });
 
     // The full copy is gone from the transcript, and unmistakably so.
     expect(out).not.toHaveProperty("result");
     expect(out.truncated).toBe(true);
     expect(out.result_size_bytes).toBe(RUN_RESULT_INLINE_MAX_BYTES + 1);
-    // The pointer is the spill document, not the agent's own report.
-    expect(out.full_document_uri).toBe(spillDocument.uri);
-    // Run identity survives — the model can still act on the run itself.
+    // Run identity survives — it IS the pointer, so it must.
     expect(out).toMatchObject({ id: "run_1", packageId: "@acme/writer", status: "success" });
 
     // The head is genuinely usable: exactly one cap's worth of bytes, and a
@@ -100,25 +91,39 @@ describe("truncateRunAndWaitPayload", () => {
     expect(new TextEncoder().encode(head).length).toBe(RUN_RESULT_INLINE_MAX_BYTES);
     expect(JSON.stringify(result).startsWith(head)).toBe(true);
     expect(head.startsWith('{"output":{"text":"xxx')).toBe(true);
-    // And the model is told what it is holding + where the rest is.
+    // And the model is told what it is holding + how to reach the rest.
     expect(String(out.message)).toContain("result_head");
-    expect(String(out.message)).toContain("full_document_uri");
+    expect(String(out.message)).toContain("getRun");
+    expect(String(out.message)).toContain("run_1");
   });
 
-  it("does NOT truncate when no spill document exists — no silent data loss", () => {
+  it("truncates regardless of what the run published — the guard never opts out", () => {
+    // The removed spill design skipped truncation when its copy was absent.
+    // Nothing the run did (or failed to do) may disarm the cap now.
     const payload = { ...base, result: resultOfExactlyBytes(RUN_RESULT_INLINE_MAX_BYTES + 5_000) };
-    expect(truncateRunAndWaitPayload(payload, [reportDocument])).toBe(payload);
-    expect(truncateRunAndWaitPayload(payload, [])).toBe(payload);
+    expect(truncateRunAndWaitPayload(payload).truncated).toBe(true);
+  });
+
+  it("still truncates when the payload carries no run id, minus the id in the text", () => {
+    const { id: _id, ...noId } = base;
+    const out = truncateRunAndWaitPayload({
+      ...noId,
+      result: resultOfExactlyBytes(RUN_RESULT_INLINE_MAX_BYTES + 1),
+    });
+    expect(out.truncated).toBe(true);
+    expect(String(out.message)).toContain("getRun");
   });
 
   it("leaves a resultless payload alone", () => {
     const payload = { ...base };
-    expect(truncateRunAndWaitPayload(payload, [spillDocument])).toBe(payload);
+    expect(truncateRunAndWaitPayload(payload)).toBe(payload);
   });
 });
 
-describe("run_and_wait terminal step (pointer resolves end to end)", () => {
-  it("serves the truncated payload with the spill document listed alongside it", async () => {
+describe("run_and_wait terminal step", () => {
+  async function terminalPayload(
+    documents: RunAndWaitDocument[],
+  ): Promise<Record<string, unknown>> {
     const bigResult = resultOfExactlyBytes(RUN_RESULT_INLINE_MAX_BYTES * 2);
     const fetchImpl = (async (input: unknown) => {
       const url = String(input);
@@ -129,7 +134,7 @@ describe("run_and_wait terminal step (pointer resolves end to end)", () => {
         });
       if (url.endsWith("/run")) return json({ id: "run_1", status: "pending" });
       if (url.includes("/api/documents")) {
-        return json({ object: "list", data: [spillDocument, reportDocument], hasMore: false });
+        return json({ object: "list", data: documents, hasMore: false });
       }
       return json({ id: "run_1", packageId: "@acme/writer", status: "success", result: bigResult });
     }) as unknown as typeof fetch;
@@ -141,15 +146,21 @@ describe("run_and_wait terminal step (pointer resolves end to end)", () => {
     )) {
       payloads.push(step.payload);
     }
+    return payloads.at(-1)!;
+  }
 
-    const terminal = payloads.at(-1)!;
+  it("serves the truncated payload alongside the run's own documents", async () => {
+    const terminal = await terminalPayload([reportDocument]);
     expect(terminal.truncated).toBe(true);
     expect(terminal).not.toHaveProperty("result");
-    expect(terminal.full_document_uri).toBe("document://doc_spill0001");
-    // The pointer resolves within the list the model already has in hand.
-    const listed = terminal.documents as RunAndWaitDocument[];
-    expect(listed.find((d) => d.uri === terminal.full_document_uri)?.name).toBe(
-      RUN_RESULT_SPILL_DOCUMENT_NAME,
-    );
+    // The agent's deliverable is still listed and is untouched by truncation.
+    expect(terminal.documents).toEqual([reportDocument]);
+  });
+
+  it("truncates a run that published NOTHING — the case the old design missed", async () => {
+    const terminal = await terminalPayload([]);
+    expect(terminal.truncated).toBe(true);
+    expect(terminal).not.toHaveProperty("result");
+    expect(terminal).not.toHaveProperty("documents");
   });
 });

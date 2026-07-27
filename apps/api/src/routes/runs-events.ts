@@ -29,7 +29,6 @@ import {
 } from "../middleware/verify-run-signature.ts";
 import { ingestRunEvent, finalizeRun } from "../services/run-event-ingestion.ts";
 import { createDocumentFromStream } from "../services/documents.ts";
-import { RUN_RESULT_SPILL_DOCUMENT_NAME } from "@appstrate/core/run-and-wait-client";
 import { getRunAttribution } from "../services/state/runs.ts";
 import { recordAudit } from "../services/audit.ts";
 import { actorFromIds } from "../lib/actor.ts";
@@ -445,22 +444,6 @@ export function createRunsEventsRouter() {
       );
     }
     const name = sanitizeFilename(decodedName);
-    // Reserved: the platform writes `RUN_RESULT_SPILL_DOCUMENT_NAME` at finalize
-    // for an oversized `result`, and `truncateRunAndWaitPayload` locates that
-    // spill BY NAME. Without this guard an agent could publish a decoy under the
-    // same name, then exhaust its own output budget so the genuine spill is
-    // rejected (it is best-effort by design) — and the orchestrating model would
-    // read agent-substituted content as the authoritative run result while
-    // `runs.result` held something else. Namespacing the name is not enough on
-    // its own: the agent-output dedup key is `(run_id, sha256, name)`, so a decoy
-    // and the real spill would simply coexist.
-    if (name === RUN_RESULT_SPILL_DOCUMENT_NAME) {
-      throw invalidRequest(
-        `'${RUN_RESULT_SPILL_DOCUMENT_NAME}' is reserved by the platform — publish under another name`,
-        "X-Document-Name",
-      );
-    }
-
     const mime = c.req.header("Content-Type");
     if (!mime) throw invalidRequest("Content-Type header is required", "Content-Type");
 

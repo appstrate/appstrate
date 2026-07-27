@@ -42,10 +42,8 @@ import {
   assertContextDocumentsFieldAvailable,
   injectContextDocuments,
   normalizeContextDocumentUris,
-  resolvePromptDocumentsForContext,
   triggerInlineRun,
 } from "../services/inline-run.ts";
-import { getDocumentForActor } from "../services/documents.ts";
 import { runInlinePreflight } from "../services/inline-run-preflight.ts";
 import { synthesiseFinalize } from "../services/run-event-ingestion.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
@@ -609,25 +607,9 @@ export function createRunsRouter() {
       // B2 — the explicit argument. Shape-checked first: a malformed URI 400s
       // without spending a document lookup.
       const explicitDocumentUris = normalizeContextDocumentUris(body.context_documents);
-      const preflightInputSchema = preflight.manifest.input?.schema
-        ? asJSONSchemaObject(preflight.manifest.input.schema)
-        : undefined;
-      // B3 — repair instead of refuse: `document://` URIs the model pasted into
-      // the prompt text are inert there. Mount the ones this actor may read;
-      // keep the recoverable 400 for the ones it may not.
-      const repairedDocumentUris = await resolvePromptDocumentsForContext({
-        prompt: preflight.prompt,
-        input: body.input ?? null,
-        inputSchema: preflightInputSchema,
-        canRead: async (documentId) => {
-          const doc = await getDocumentForActor({ orgId, applicationId }, actor, documentId);
-          return doc !== null && doc.capabilities.download;
-        },
-      });
-      // ONE synthesis point for both entry paths.
       const { manifest: effectiveManifest, inputPatch } = injectContextDocuments(
         preflight.manifest,
-        [...explicitDocumentUris, ...repairedDocumentUris],
+        explicitDocumentUris,
       );
       const effectivePreflight = inputPatch
         ? { ...preflight, manifest: effectiveManifest }
@@ -663,7 +645,6 @@ export function createRunsRouter() {
           parsed,
           apiKeyId: c.get("apiKeyId") ?? undefined,
           traceparent: runTraceparent(c),
-          repairedPromptDocumentUris: repairedDocumentUris,
         });
         // Pipeline launched — the run now owns its workspace teardown.
         launched = true;

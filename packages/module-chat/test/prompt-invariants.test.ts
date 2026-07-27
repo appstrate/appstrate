@@ -69,7 +69,7 @@ describe("SYSTEM_PROMPT invariants", () => {
   });
 
   it("drops the stale claim that a prompt-pasted document:// URI gives no access", () => {
-    // `context_documents` + the platform-side auto-repair made this half-false;
+    // `context_documents` made this half-false;
     // the paragraph now points at the cheap path instead of the boilerplate.
     expect(SYSTEM_PROMPT).not.toContain("does NOT give it access");
     expect(SYSTEM_PROMPT).not.toContain("does NOT give access");

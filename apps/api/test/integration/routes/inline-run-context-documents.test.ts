@@ -2,7 +2,7 @@
 
 /**
  * Integration tests for `context_documents` on POST /api/runs/inline — fan-in by
- * reference (B2) and the prompt-URI auto-repair (B3).
+ * reference (B2).
  *
  * Like the sibling inline-run suite, these never assert `201`: a successful
  * launch fires `executeAgentInBackground()`, whose async tail keeps writing to
@@ -212,68 +212,5 @@ describe("POST /api/runs/inline — context_documents", () => {
     expect(res.status).toBe(404);
     const body = (await res.json()) as ProblemBody;
     expect(body.detail ?? "").toMatch(/Model/);
-  });
-
-  // --- B3: auto-repair of prompt-named URIs ---------------------------------
-
-  it("auto-repairs a prompt-named document the actor can read", async () => {
-    const docId = await seedReadableDocument("brief.json");
-    const res = await post({
-      manifest: validManifest(),
-      prompt: `Compile ${documentUri(docId)} into one report.`,
-      modelId: UNKNOWN_MODEL,
-    });
-    // Before B3 this was a 400 `document_uri_in_prompt`; the URI is now routed
-    // into the reserved field instead, so the request proceeds to the mount and
-    // only the unknown model stops it.
-    expect(res.status).toBe(404);
-    const body = (await res.json()) as ProblemBody;
-    expect(body.errors?.[0]?.code).not.toBe("document_uri_in_prompt");
-    expect(body.detail ?? "").toMatch(/Model/);
-  });
-
-  it("still returns 400 for a prompt-named document that does not resolve", async () => {
-    const res = await post({
-      manifest: validManifest(),
-      prompt: `Read ${MISSING_DOC} and summarise it.`,
-      modelId: UNKNOWN_MODEL,
-    });
-    expect(res.status).toBe(400);
-    const body = (await res.json()) as ProblemBody;
-    expect(body.errors?.[0]?.code).toBe("document_uri_in_prompt");
-    expect(body.errors?.[0]?.field).toBe("prompt");
-    expect(await shadowRows()).toHaveLength(0);
-  });
-
-  it("still returns 400 for a prompt-named document owned by another application", async () => {
-    const other = await createTestContext({ orgSlug: "ctxdocsforeign2" });
-    const foreignRunId = `run_${crypto.randomUUID()}`;
-    await db.insert(runs).values({
-      id: foreignRunId,
-      orgId: other.orgId,
-      applicationId: other.defaultAppId,
-      packageId: null,
-      status: "success",
-    });
-    const { row } = await createDocumentFromStream(
-      { orgId: other.orgId, applicationId: other.defaultAppId },
-      foreignRunId,
-      { userId: null, endUserId: null },
-      null,
-      {
-        name: "secret.md",
-        mime: "text/markdown",
-        body: new Blob([new TextEncoder().encode("classified")]).stream(),
-      },
-    );
-
-    const res = await post({
-      manifest: validManifest(),
-      prompt: `Read ${documentUri(row.id)} and summarise it.`,
-    });
-    expect(res.status).toBe(400);
-    const body = (await res.json()) as ProblemBody;
-    expect(body.errors?.[0]?.code).toBe("document_uri_in_prompt");
-    expect(await shadowRows()).toHaveLength(0);
   });
 });
