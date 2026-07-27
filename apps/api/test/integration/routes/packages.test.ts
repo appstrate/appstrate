@@ -2019,14 +2019,15 @@ describe("Packages API", () => {
       content = "source prompt",
     ): Promise<void> {
       const version = manifest.version as string;
+      const type = manifest.type as "agent" | "skill";
       await seedPackage({
         id: packageId,
         orgId,
-        type: "agent",
+        type,
         draftManifest: manifest,
         draftContent: content,
       });
-      const zip = buildMinimalZip(manifest, content);
+      const zip = buildMinimalZip(manifest, content, type === "skill" ? "SKILL.md" : "prompt.md");
       await uploadPackageZip(packageId, version, zip);
       const row = await seedPackageVersion({
         packageId,
@@ -2132,7 +2133,7 @@ describe("Packages API", () => {
       expect(zipped).not.toHaveProperty("runtime_tools");
     });
 
-    it("forks a clean manifest byte-for-byte — nothing reordered, nothing defaulted", async () => {
+    it("forks a clean manifest unchanged — nothing reordered, nothing defaulted", async () => {
       const srcCtx = await createTestContext({ orgSlug: "forkclean" });
       const sourceId = "@forkclean/clean-agent";
       await seedPublishedSource(sourceId, srcCtx.orgId, {
@@ -2152,12 +2153,15 @@ describe("Packages API", () => {
       });
       expect(res.status).toBe(201);
 
-      // The dropper is structural, so a source with nothing to drop must
-      // serialise to the source manifest with ONLY `name` swapped — same keys,
-      // same order, no schema defaults materialised. A Zod re-parse here would
-      // reorder to schema order and defeat publish dedup (#896). Compared
-      // against the STORED source manifest (not the literal above) because
-      // jsonb does not preserve authoring key order.
+      // FORWARD guard, not a proof of the fix: `dropRetiredRuntimeTools`
+      // returns the same object reference when there is nothing to drop, so
+      // this passed before the normalisation existed too. What it pins is the
+      // shape of any FUTURE normalisation added here — a Zod re-parse would
+      // reorder keys to schema order and materialise defaults, giving one
+      // manifest two integrity hashes and defeating publish dedup (#896). A
+      // source with nothing to drop must serialise to the source manifest with
+      // ONLY `name` swapped. Compared against the STORED source manifest (not
+      // the literal above) because jsonb does not preserve authoring key order.
       const targetId = "@pkgorg/clean-agent";
       const expected = JSON.stringify(
         { ...(await versionManifest(sourceId)), name: targetId },
@@ -2165,6 +2169,43 @@ describe("Packages API", () => {
         2,
       );
       expect(await artifactManifestText(targetId, "0.1.0")).toBe(expected);
+    });
+
+    it("is a no-op for a non-agent package — a skill forks with only `name` swapped", async () => {
+      // `runtime_tools` is agent vocabulary, so the normalisation must be
+      // invisible to the other three package types.
+      const srcCtx = await createTestContext({ orgSlug: "forkskill" });
+      const sourceId = "@forkskill/plain-skill";
+      await seedPublishedSource(
+        sourceId,
+        srcCtx.orgId,
+        {
+          name: sourceId,
+          version: "0.1.0",
+          type: "skill",
+          schema_version: "0.1",
+          display_name: "Plain Skill",
+          description: "Nothing an agent-shaped normalisation could touch",
+        },
+        "# Plain Skill",
+      );
+
+      const res = await app.request(`/api/packages/${sourceId}/fork`, {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({}),
+      });
+      expect(res.status).toBe(201);
+
+      const targetId = "@pkgorg/plain-skill";
+      const expected = { ...(await versionManifest(sourceId)), name: targetId };
+      expect(await versionManifest(targetId)).toEqual(expected);
+      expect(await artifactManifestText(targetId, "0.1.0")).toBe(JSON.stringify(expected, null, 2));
+      // `toMatchObject`, not `toEqual`: every draft row gets `$schema` + `type`
+      // stamped by `createOrgItem` regardless of package type — pre-existing,
+      // unrelated to this normalisation. What matters here is that nothing the
+      // source declared was changed or lost.
+      expect(await draftManifest(targetId)).toMatchObject(expected);
     });
   });
 });

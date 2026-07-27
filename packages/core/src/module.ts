@@ -53,9 +53,10 @@ export interface ModuleManifest {
   /**
    * Semver RANGE naming the `@appstrate/core` major this module was built
    * against (e.g. `"^6.0.0"`). The platform loader checks it against
-   * {@link CORE_VERSION} at boot and refuses to load a module whose range this
-   * core does not satisfy (`MODULE_CONTRACT_ENFORCE=warn` downgrades that to a
-   * log line).
+   * {@link CORE_VERSION} at boot: a range this core does not satisfy is logged
+   * (`MODULE_CONTRACT_ENFORCE=warn`, the shipped default) or refuses the boot
+   * (`MODULE_CONTRACT_ENFORCE=fail`, the intended end state once every module
+   * can declare the published major).
    *
    * Why it exists: the module→platform direction of the contract is invisible
    * to `tsc` for an out-of-tree module. `PlatformServices.checkUsageAllowed`

@@ -70,6 +70,24 @@ with no importer anywhere is deleted.
 
 ### Added
 
+- **`CORE_VERSION`** (`@appstrate/core/module`) — the core version this build
+  ships, as a string literal (`"6.0.0"`). A module author does not read it; the
+  host platform does, to check it against the range each loaded module declares.
+  It is hardcoded rather than imported from `package.json` because core is
+  consumed over npm by repos where an ESM JSON import is a portability hazard,
+  and `packages/core/test/core-version.test.ts` asserts it equals the published
+  `version` so it cannot drift.
+
+- **`ModuleManifest.core_version`** (optional) — the semver RANGE naming the
+  core major a module was built against, e.g. `core_version: "^6.0.0"` beside
+  `id`/`name`/`version`. An out-of-tree module author should declare it: the
+  module→platform direction of the contract is invisible to `tsc`, and it fails
+  SILENTLY — a 5.x-era caller omitting the now-required
+  `checkUsageAllowed.subscription` reports a subscription turn as
+  platform-funded. Optional so no existing module breaks: when absent the host
+  falls back to the `@appstrate/core` range in the module's own `package.json`,
+  and an unresolvable range is a warning, not a fault.
+
 - **`@appstrate/core/oauth-bearer-swap`** — `ANTHROPIC_OAUTH_PLACEHOLDER_API_KEY`
   (`"sk-ant-oat01-placeholder"`). The placeholder `apiKey` handed to pi-ai for
   an Anthropic OAuth subscription binding on every path where the real token is

@@ -112,15 +112,24 @@ export async function postInstallPackage(params: {
   // row with no version (an un-runnable orphan). `createVersionAndUpload`
   // already cleans up its uploaded ZIP on DB failure before re-throwing.
   //
-  // Persist `manifest` — the raw bytes' object — NEVER `validation.manifest`.
-  // Unlike `createVersionFromDraft`, this path does not build the artifact: the
-  // `zipBuffer` is caller-supplied and its integrity IS the version's identity
-  // (a bundle reassembled by `reconstructPackageZip`, or the ZIP the user
-  // uploaded), so a normalised manifest cannot be reflected in the bytes.
-  // Writing the Zod output into the DB column alone would make the row diverge
-  // from the ZIP — and pinned runs read the manifest FROM the ZIP, so the
-  // divergence would be silent. The gate above buys the invariant that matters
-  // ("a stored manifest was validated at least once") without touching a byte.
+  // Persist `manifest` — the object parsed out of `files` — NEVER
+  // `validation.manifest`. Unlike `createVersionFromDraft`, this path does not
+  // build the artifact: the `zipBuffer` is caller-supplied and its integrity IS
+  // the version's identity (a bundle reassembled by `reconstructPackageZip`, or
+  // the ZIP the user uploaded), so a normalised manifest cannot be reflected in
+  // the bytes. Writing the Zod output into the DB column alone would make the
+  // row diverge from the ZIP — and pinned runs read the manifest FROM the ZIP,
+  // so the divergence would be silent. The gate above buys the invariant that
+  // matters ("a stored manifest was validated at least once") without touching
+  // a byte.
+  //
+  // ONE caller breaks the "`files` and `zipBuffer` carry the same manifest"
+  // assumption: the skill-only-ZIP fallback (`routes/packages.ts`, the
+  // `handleImport(c, parsed, buffer, …)` call on the `/import` routes) passes
+  // the ORIGINAL upload, which by construction has no `manifest.json` — that
+  // absence is what triggered the fallback — while `files` carries the manifest
+  // synthesized from `SKILL.md`. There the stored row is the only manifest
+  // there is; nothing diverges because the ZIP declares none.
   await createVersionAndUpload({
     packageId,
     version,

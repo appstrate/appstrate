@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { parseScopedName, isOwnedByOrg } from "@appstrate/core/naming";
-import { dropRetiredRuntimeTools, type PackageType } from "@appstrate/core/validation";
+import {
+  dropRetiredRuntimeTools,
+  validateManifest,
+  type PackageType,
+} from "@appstrate/core/validation";
 import { logger } from "../lib/logger.ts";
 
 import { zipArtifact } from "@appstrate/core/zip";
@@ -117,10 +121,11 @@ async function forkWithConfig(
   // Rejecting would make every legacy agent permanently un-forkable (the same
   // reason `createVersionFromDraft` drops rather than fails); carrying the id
   // forward verbatim would regrave the retired legacy into a version row + ZIP
-  // minted today. The drop is structural (no Zod re-parse): key order, unknown
-  // fields and absent defaults survive byte-for-byte, so a source with nothing
-  // to drop forks to the exact same bytes and publish dedup (#896) is
-  // unaffected.
+  // minted today. `dropRetiredRuntimeTools` is structural (no Zod re-parse):
+  // key order, unknown fields and absent defaults survive it untouched, so it
+  // never introduces a difference of its own. (The fork's bytes still differ
+  // from the source's — the manifest is re-serialised from a jsonb read, which
+  // reorders keys, and `zipArtifact` rebuilds the archive.)
   //
   // BEFORE `createOrgItem`, not later: this one object feeds all three sinks —
   // the draft row, the draft storage files, and the published version (row +
@@ -136,6 +141,24 @@ async function forkWithConfig(
       packageId: targetId,
       version: versionRow.version,
       dropped: droppedRuntimeTools,
+    });
+  }
+
+  // Look, warn, NEVER reject. The drop above closes the retired-tool hole, but
+  // a source manifest invalid for any other reason (missing `type` /
+  // `schema_version`, a null/array jsonb column) would otherwise mint a fresh
+  // draft row, version row and ZIP unnoticed. Rejecting is not an option:
+  // drifted catalog entries exist in production (#928) and a gate here would
+  // make them permanently un-forkable — the fork is a READ of an immutable,
+  // unrepairable artifact. So the operator gets a log line, and the fork
+  // proceeds.
+  const validation = validateManifest(updatedManifest, { retiredRuntimeTools: "drop" });
+  if (!validation.valid) {
+    logger.warn("forking an invalid published manifest", {
+      sourcePackageId,
+      packageId: targetId,
+      version: versionRow.version,
+      errors: validation.errors,
     });
   }
 

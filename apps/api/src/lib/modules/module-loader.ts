@@ -116,60 +116,97 @@ const CORE_PACKAGE = "@appstrate/core";
  */
 const IN_TREE_RANGE_PREFIXES = ["workspace:", "link:", "file:"];
 
+interface PackageJsonDeps {
+  dependencies?: Record<string, string>;
+  peerDependencies?: Record<string, string>;
+  devDependencies?: Record<string, string>;
+}
+
+/** The `@appstrate/core` range one package.json declares, in dep-kind precedence order. */
+function coreRangeOf(pkg: PackageJsonDeps): string | null {
+  return (
+    pkg.dependencies?.[CORE_PACKAGE] ??
+    pkg.peerDependencies?.[CORE_PACKAGE] ??
+    pkg.devDependencies?.[CORE_PACKAGE] ??
+    null
+  );
+}
+
+/** Absolute path a specifier resolves to, or null when it resolves to nothing. */
+function tryResolve(specifier: string): string | null {
+  try {
+    return fileURLToPath(import.meta.resolve(specifier));
+  } catch {
+    return null;
+  }
+}
+
+/** Parse a package.json off disk. Null when absent or unparsable. */
+async function readPackageJson(path: string | null): Promise<PackageJsonDeps | null> {
+  if (path === null) return null;
+  try {
+    const file = Bun.file(path);
+    return (await file.exists()) ? ((await file.json()) as PackageJsonDeps) : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Read the `@appstrate/core` range an npm-loaded module declares in its own
- * `package.json`. `import.meta.resolve` yields the module's entry file (the
- * same resolution {@link resolveSpecifier} performs), and a package's root is
- * by definition the nearest ancestor directory carrying a `package.json`.
+ * `package.json`.
+ *
+ * The module's OWN manifest is asked for first: a package that exports
+ * `./package.json` (or a path specifier) lands straight on the package root.
+ * The entry-file walk below is the fallback for the majority of npm packages,
+ * which export no such subpath — and it can land on the wrong file: a module
+ * whose entry sits in `dist/` next to a `{"type":"module"}` marker stops at
+ * that marker, finds no `@appstrate/core` key and silently reports "unknown".
  *
  * Best-effort by design: an unresolvable specifier, an unreadable file or a
  * missing entry all mean "unknown", never a crash — this guard must not be the
  * thing that stops a working module from booting.
+ *
+ * Exported for tests: this is the branch a real npm module's boot verdict comes
+ * from, and it is unreachable through the instance-loading entry point.
  */
-async function coreRangeFromPackageJson(specifier: string): Promise<string | null> {
-  try {
-    let dir = dirname(fileURLToPath(import.meta.resolve(specifier)));
-    // Bounded walk: a package root is a handful of levels above its entry file
-    // at most, and an unbounded loop would climb out of the repo.
-    for (let depth = 0; depth < 10; depth++) {
-      const file = Bun.file(join(dir, "package.json"));
-      if (await file.exists()) {
-        const pkg = (await file.json()) as {
-          dependencies?: Record<string, string>;
-          peerDependencies?: Record<string, string>;
-          devDependencies?: Record<string, string>;
-        };
-        return (
-          pkg.dependencies?.[CORE_PACKAGE] ??
-          pkg.peerDependencies?.[CORE_PACKAGE] ??
-          pkg.devDependencies?.[CORE_PACKAGE] ??
-          null
-        );
-      }
-      const parent = dirname(dir);
-      if (parent === dir) break;
-      dir = parent;
-    }
-  } catch {
-    // Unresolvable — falls through to "unknown" (warned by the caller).
+export async function _coreRangeFromPackageJson(specifier: string): Promise<string | null> {
+  const own = await readPackageJson(tryResolve(`${specifier}/package.json`));
+  if (own) return coreRangeOf(own);
+
+  const entry = tryResolve(specifier);
+  if (entry === null) return null;
+  let dir = dirname(entry);
+  // Bounded walk: a package root is a handful of levels above its entry file
+  // at most, and an unbounded loop would climb out of the repo.
+  for (let depth = 0; depth < 10; depth++) {
+    const pkg = await readPackageJson(join(dir, "package.json"));
+    if (pkg) return coreRangeOf(pkg);
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
   }
   return null;
 }
 
 /**
  * Resolve the `@appstrate/core` range a module declares, in precedence order:
- * the manifest field, then the module's own package.json for an npm specifier.
- * A built-in module is in-tree by construction, so it short-circuits to the
- * workspace protocol instead of a filesystem lookup.
+ * a built-in module (in-tree by construction), then the manifest field, then
+ * the module's own package.json for an npm specifier.
+ *
+ * Built-in FIRST, not the manifest: a built-in compiles against the very core
+ * it runs on, so `tsc` is its gate. Reading its manifest first would let a
+ * `core_version` copy-pasted from the authoring README (a plain string nothing
+ * validates) fail the boot of a module that is correct by construction.
  */
 async function resolveDeclaredCoreRange(
   mod: AppstrateModule,
   specifier: string | null,
 ): Promise<string | null> {
+  if (specifier !== null && getBuiltinModules().has(specifier)) return "workspace:*";
   if (mod.manifest.core_version) return mod.manifest.core_version;
   if (specifier === null) return null; // instance-loaded: the manifest is the only source
-  if (getBuiltinModules().has(specifier)) return "workspace:*";
-  return coreRangeFromPackageJson(specifier);
+  return _coreRangeFromPackageJson(specifier);
 }
 
 /**
@@ -178,10 +215,20 @@ async function resolveDeclaredCoreRange(
  * `tsc` cannot see an out-of-tree module, and the platform's `PlatformServices`
  * surface changes shape between majors: `checkUsageAllowed` gained a REQUIRED
  * `subscription` flag in core 6.0.0, and a 5.x-era caller that omits it does
- * not error — it silently reports a subscription turn as platform-funded. So a
- * declared-but-unsatisfied range is fatal by default; the operator running a
- * lagging third-party module can downgrade to a warning with
- * `MODULE_CONTRACT_ENFORCE=warn`.
+ * not error — it silently reports a subscription turn as platform-funded.
+ *
+ * A declared-but-unsatisfied range is a warning by default
+ * (`MODULE_CONTRACT_ENFORCE=warn`) and fatal under `fail`. `warn` ships as the
+ * default only because the release chain has not run: this platform builds core
+ * 6.0.0 while npm still serves 5.0.0, so no out-of-tree module can declare
+ * `^6.0.0` yet. `fail` is the intended end state — the mispricing that actually
+ * matters is already blocked fail-closed inside `checkUsageAllowed`.
+ *
+ * KNOWN LIMITATION, documented rather than worked around: were `CORE_VERSION`
+ * ever a prerelease (`7.0.0-beta.1`), every module declaring the recommended
+ * `^7.0.0` would fail this check at once — semver excludes prereleases from
+ * ranges by default. Core has never published one, and the fix would mean
+ * widening a core helper's API for a case that does not exist.
  */
 async function enforceCoreVersionContract(
   mod: AppstrateModule,

@@ -262,4 +262,19 @@ describe("checkUsageAllowed", () => {
     // The turn is denied BEFORE the admission hook sees a fabricated fact.
     expect(calls).toHaveLength(0);
   });
+
+  it("still returns null for a stale caller in OSS mode (no hook prices the turn)", async () => {
+    // The guard above exists to keep a fabricated fact out of an admission
+    // hook — so with no hook loaded there is nothing to protect, and a stale
+    // caller must keep getting the `null` OSS always gave it rather than a 500.
+    await loadModulesFromInstances([], fakeInitCtx());
+
+    await expect(
+      checkUsageAllowed({
+        orgId: "org_1",
+        presetId: SYSTEM_PRESET,
+        sessionId: "chs_oss",
+      } as never),
+    ).resolves.toBeNull();
+  });
 });
