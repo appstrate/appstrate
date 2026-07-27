@@ -245,8 +245,41 @@ export function printBootstrapFollowup(
   }
 }
 
-export async function installCommand(opts: InstallOptions): Promise<void> {
+/**
+ * DI seam for `installCommand()` — production wires the real per-tier
+ * installers plus the two Docker probes; tests inject stubs so the tier
+ * decision (inherit-on-upgrade vs. explicit `--tier`) can be asserted
+ * without cloning source, talking to a Docker daemon, or binding ports.
+ * Same shape as the `TierResolverDeps` / `PortResolverDeps` seams one
+ * level down.
+ */
+export interface InstallCommandDeps {
+  /** Terminal Tier 0 installer (clone + bun install + dev server). */
+  installTier0?: typeof installTier0;
+  /** Terminal Docker-tier installer (compose write + `docker compose up`). */
+  installDockerTier?: typeof installDockerTier;
+  /** Docker probe behind the tier default, consulted only when no tier is expressed. */
+  isDockerAvailable?: () => Promise<boolean>;
+  /** `docker compose ls` cross-check used by the port resolver on upgrades. */
+  findRunningComposeProject?: (name: string) => Promise<RunningComposeProject | null>;
+  /** Operator-facing info sink — carries the tier-inheritance notice. */
+  info?: (message: string) => void;
+}
+
+const defaultInstallDeps: Required<InstallCommandDeps> = {
+  installTier0,
+  installDockerTier,
+  isDockerAvailable,
+  findRunningComposeProject: findRunningComposeProjectImport,
+  info: (message: string) => clack.log.info(message),
+};
+
+export async function installCommand(
+  opts: InstallOptions,
+  deps: InstallCommandDeps = {},
+): Promise<void> {
   intro("Appstrate install");
+  const d = { ...defaultInstallDeps, ...deps };
 
   try {
     const autoConfirm = opts.autoConfirm === true;
@@ -284,23 +317,17 @@ export async function installCommand(opts: InstallOptions): Promise<void> {
     let tierArg = opts.tier;
     if (tierArg === undefined && installedTier !== null) {
       tierArg = String(installedTier);
-      clack.log.info(
+      d.info(
         `Existing Tier ${installedTier} install detected — keeping Tier ${installedTier}. ` +
           `Switching tiers rewrites docker-compose.yml with a different service set ` +
           `(and can change the storage backend, hiding existing files), so it requires ` +
           `an explicit \`--tier N\`.`,
       );
     }
-    let tier = await resolveTier(tierArg, { autoConfirm });
-
-    // Defense in depth: reconcile is a no-op when the inheritance above
-    // already applied (installed === resolved) and still guards the
-    // remaining cells of the matrix.
-    if (installState.mode === "upgrade") {
-      const reconciled = reconcileUpgradeTier(tier, tierArg, installedTier);
-      if (reconciled.note) clack.log.info(reconciled.note);
-      tier = reconciled.tier;
-    }
+    const tier = await resolveTier(tierArg, {
+      autoConfirm,
+      isDockerAvailable: d.isDockerAvailable,
+    });
 
     // Fail fast on an EXPLICIT firecracker request on tier 0 — before any
     // install work starts. Absence of the flag stays silent (tier 0 simply
@@ -326,7 +353,7 @@ export async function installCommand(opts: InstallOptions): Promise<void> {
       installState.existing,
       dir,
       project?.name,
-      { autoPick: autoConfirm },
+      { autoPick: autoConfirm, findRunningComposeProject: d.findRunningComposeProject },
     );
     // Closed-mode bootstrap (issue #228) — env var > prompt > undefined.
     // Skipped on upgrades (mergeEnv preserves whatever the user had) and
@@ -348,7 +375,7 @@ export async function installCommand(opts: InstallOptions): Promise<void> {
     });
 
     if (tier === 0) {
-      await installTier0(dir, port, appUrl, { autoConfirm, bootstrap });
+      await d.installTier0(dir, port, appUrl, { autoConfirm, bootstrap });
     } else {
       // Agent execution backend (docker | firecracker) — offered only on
       // Docker tiers. Docker stays the default; firecracker mints a runner
@@ -362,7 +389,7 @@ export async function installCommand(opts: InstallOptions): Promise<void> {
         appPort: port,
         nonInteractive,
       });
-      await installDockerTier(dir, tier, port, appUrl, {
+      await d.installDockerTier(dir, tier, port, appUrl, {
         force: opts.force ?? false,
         mode: installState.mode,
         existing: installState.existing,
@@ -376,46 +403,6 @@ export async function installCommand(opts: InstallOptions): Promise<void> {
   } catch (err) {
     exitWithError(err);
   }
-}
-
-/**
- * Reconcile the resolved tier with the tier of an already-installed stack
- * (upgrade mode only). The primary inheritance now happens BEFORE tier
- * resolution in `installCommand` (the prompt is skipped and the installed
- * tier passed through as the tier argument); this pure function remains as
- * the unit-testable defense-in-depth contract behind it:
- *
- *   - explicit tier argument always wins (scripted tier changes stay
- *     possible; the operator owns the storage migration that comes with
- *     them);
- *   - nothing recognizable installed (hand-rolled deploy) or a Tier 0
- *     resolution → keep the resolved tier;
- *   - otherwise inherit the installed tier (0-3 — a Tier 0 dir must not be
- *     silently converted to Docker/Postgres either, that hides all PGlite
- *     data) and explain why.
- *
- * Without this, changing the smart default (Tier 3 → Tier 2, issue #829)
- * would make every `install --yes` re-run on an existing Tier 3 deployment
- * silently swap its compose template — and the reverse hazard (a Tier 2
- * install silently upgraded to the Tier 3 template, flipping storage from
- * filesystem to S3 and hiding all existing files) predates the default
- * change. Inheritance closes both directions.
- */
-export function reconcileUpgradeTier(
-  resolved: Tier,
-  explicitTier: string | undefined,
-  installed: 0 | 1 | 2 | 3 | null,
-): { tier: Tier; note?: string } {
-  if (explicitTier !== undefined) return { tier: resolved };
-  if (installed === null || resolved === 0 || installed === resolved) return { tier: resolved };
-  return {
-    tier: installed,
-    note:
-      `Existing Tier ${installed} install detected — keeping Tier ${installed}. ` +
-      `Switching tiers rewrites docker-compose.yml with a different service set ` +
-      `(and can change the storage backend, hiding existing files), so it requires ` +
-      `an explicit \`--tier ${resolved}\`.`,
-  };
 }
 
 /**

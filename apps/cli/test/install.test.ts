@@ -17,8 +17,8 @@
  *     in tier0/tier123 gets a stable cwd.
  */
 
-import { describe, it, expect, afterEach, spyOn } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { describe, it, expect, afterEach, beforeEach, spyOn } from "bun:test";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -39,8 +39,9 @@ import {
   firecrackerFollowupNote,
   resolveCliInvocation,
   runSameHostRunnerInstall,
+  installCommand,
   type RunBackendConfig,
-  reconcileUpgradeTier,
+  type InstallOptions,
 } from "../src/commands/install.ts";
 import type { RunningComposeProject } from "../src/lib/install/tier123.ts";
 
@@ -1768,60 +1769,157 @@ describe("assertLoopbackPortMatches (issue #822) — loopback port-mismatch guar
   });
 });
 
-describe("reconcileUpgradeTier", () => {
-  it("inherits the installed tier when the default would silently change the stack", () => {
-    // The #829 hazard: `install --yes` (default Tier 2) re-run on a Tier 3
-    // deployment must NOT rewrite compose with the Tier 2 template — MinIO
-    // would vanish while .env keeps the S3 config, hiding all stored objects.
-    const r = reconcileUpgradeTier(2, undefined, 3);
-    expect(r.tier).toBe(3);
-    expect(r.note).toMatch(/keeping Tier 3/i);
-    expect(r.note).toMatch(/--tier 2/);
+/**
+ * Tier inheritance as `installCommand` actually performs it (issue #829).
+ *
+ * These drive the real command against a temp install dir and assert the
+ * tier that reaches the per-tier installer — the value that decides which
+ * `docker-compose.yml` template gets written. Getting it wrong is data
+ * loss on a self-hosted box: swapping the template drops/adds services
+ * (MinIO, Postgres) while `mergeEnv` keeps the old storage config, hiding
+ * every stored package, upload and run artifact.
+ *
+ * The DI seam (`InstallCommandDeps`) stops the flow at the two terminal
+ * installers and replaces the two Docker probes, so nothing here clones
+ * source, talks to a daemon, or binds a port.
+ */
+describe("installCommand tier inheritance", () => {
+  const dirs: string[] = [];
+  /** Ambient env the installer reads — cleared so the host's shell can't steer a test. */
+  const ENV_KEYS = [
+    "APPSTRATE_PORT",
+    "APPSTRATE_APP_URL",
+    "APPSTRATE_RUN_ADAPTER",
+    "APPSTRATE_BOOTSTRAP_OWNER_EMAIL",
+  ] as const;
+  const savedEnv = new Map<string, string | undefined>();
+
+  beforeEach(() => {
+    for (const key of ENV_KEYS) {
+      savedEnv.set(key, process.env[key]);
+      delete process.env[key];
+    }
   });
 
-  it("inherits downward too (pre-existing reverse hazard: Tier 2 install, Tier 3 pick)", () => {
-    const r = reconcileUpgradeTier(3, undefined, 2);
-    expect(r.tier).toBe(2);
-    expect(r.note).toMatch(/keeping Tier 2/i);
+  afterEach(() => {
+    for (const [key, value] of savedEnv) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    savedEnv.clear();
+    for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
   });
 
-  it("an explicit --tier always wins (scripted tier changes stay possible)", () => {
-    const r = reconcileUpgradeTier(2, "2", 3);
-    expect(r.tier).toBe(2);
-    expect(r.note).toBeUndefined();
+  /** Compose templates reduced to the service keys `inferInstalledTier` reads. */
+  const COMPOSE = {
+    tier3: "services:\n  postgres:\n  redis:\n  minio:\n  appstrate:\n",
+    tier1: "services:\n  postgres:\n  appstrate:\n",
+    unknown: "services:\n  appstrate:\n",
+  };
+  /** A docker-tier `.env`: pins the port (so no preflight) and marks the dir non-Tier-0. */
+  const DOCKER_ENV = "PORT=3000\nPOSTGRES_PASSWORD=secret\n";
+  /** A Tier 0 `.env`: no POSTGRES_PASSWORD / DATABASE_URL, no compose file. */
+  const TIER0_ENV = "PORT=3000\n";
+
+  function makeInstall(files: Record<string, string>): string {
+    const dir = mkdtempSync(join(tmpdir(), "appstrate-cli-install-"));
+    dirs.push(dir);
+    for (const [name, body] of Object.entries(files)) writeFileSync(join(dir, name), body);
+    return dir;
+  }
+
+  /**
+   * Run the real command against `dir` and report what it decided.
+   * `process.exit` is spied so an internal failure surfaces as a failing
+   * assertion instead of tearing down the test runner.
+   */
+  async function runInstall(dir: string, opts: Partial<InstallOptions> = {}) {
+    const captured = {
+      dockerTier: undefined as 1 | 2 | 3 | undefined,
+      tier0Installed: false,
+      infos: [] as string[],
+      probeCalls: 0,
+    };
+    const exitSpy = spyOn(process, "exit").mockImplementation(((code?: number) => {
+      throw new Error(`installCommand exited: ${code}`);
+    }) as never);
+    try {
+      await installCommand(
+        { dir, autoConfirm: true, ...opts },
+        {
+          installTier0: async () => {
+            captured.tier0Installed = true;
+          },
+          installDockerTier: async (_dir, tier) => {
+            captured.dockerTier = tier;
+          },
+          isDockerAvailable: async () => {
+            captured.probeCalls += 1;
+            return true;
+          },
+          findRunningComposeProject: async (name) => ({
+            name,
+            configFiles: [join(dir, "docker-compose.yml")],
+          }),
+          info: (message) => captured.infos.push(message),
+        },
+      );
+    } finally {
+      exitSpy.mockRestore();
+    }
+    return captured;
+  }
+
+  it("inherits an existing Tier 3 install under --yes, skipping the tier default entirely", async () => {
+    // The #829 hazard: the --yes default is Tier 2. Re-running on a Tier 3
+    // deployment must keep Tier 3 — the Tier 2 template has no MinIO, while
+    // mergeEnv keeps the S3 config, so every stored object goes unreachable.
+    const dir = makeInstall({ "docker-compose.yml": COMPOSE.tier3, ".env": DOCKER_ENV });
+    const c = await runInstall(dir);
+    expect(c.dockerTier).toBe(3);
+    expect(c.tier0Installed).toBe(false);
+    expect(c.infos.join("\n")).toMatch(/keeping Tier 3/i);
+    // The inherited tier is passed as the tier argument, so the Docker-aware
+    // default is never computed — no probe, no prompt to override.
+    expect(c.probeCalls).toBe(0);
   });
 
-  it("keeps the resolved tier when no compose tier could be inferred", () => {
-    const r = reconcileUpgradeTier(2, undefined, null);
-    expect(r.tier).toBe(2);
-    expect(r.note).toBeUndefined();
+  it("inherits downward too — a Tier 1 install is not silently upgraded", async () => {
+    // Reverse hazard: resolving the Tier 2/3 default on a Tier 1 dir would
+    // add services the operator never provisioned and can flip the storage
+    // backend under the existing .env.
+    const dir = makeInstall({ "docker-compose.yml": COMPOSE.tier1, ".env": DOCKER_ENV });
+    const c = await runInstall(dir);
+    expect(c.dockerTier).toBe(1);
+    expect(c.infos.join("\n")).toMatch(/keeping Tier 1/i);
   });
 
-  it("keeps a Tier 0 resolution untouched (source-clone dirs have no compose tier)", () => {
-    const r = reconcileUpgradeTier(0, undefined, 3);
-    expect(r.tier).toBe(0);
-    expect(r.note).toBeUndefined();
+  it("inherits an installed Tier 0 — a --yes re-run must not convert a PGlite install to Docker", async () => {
+    // Tier 0 keeps its data in PGlite + ./data; booting the Docker default
+    // on top would start an empty Postgres and hide every user, org and run.
+    const dir = makeInstall({ ".env": TIER0_ENV });
+    const c = await runInstall(dir);
+    expect(c.tier0Installed).toBe(true);
+    expect(c.dockerTier).toBeUndefined();
+    expect(c.infos.join("\n")).toMatch(/keeping Tier 0/i);
   });
 
-  it("is a no-op when the tiers already agree", () => {
-    const r = reconcileUpgradeTier(3, undefined, 3);
-    expect(r.tier).toBe(3);
-    expect(r.note).toBeUndefined();
+  it("lets an explicit --tier win, with no inheritance notice", async () => {
+    // Scripted tier changes stay possible — the operator owns the storage
+    // migration that comes with them.
+    const dir = makeInstall({ "docker-compose.yml": COMPOSE.tier3, ".env": DOCKER_ENV });
+    const c = await runInstall(dir, { tier: "1", autoConfirm: false });
+    expect(c.dockerTier).toBe(1);
+    expect(c.infos).toEqual([]);
   });
 
-  it("inherits an installed Tier 0 (a --yes re-run must not convert PGlite installs to Docker)", () => {
-    // Tier 0 dirs (`.env` without POSTGRES_PASSWORD/DATABASE_URL, no compose)
-    // hold their data in PGlite + ./data — resolving the Docker-aware default
-    // (Tier 2) on top would boot an empty Postgres and hide every user/org.
-    const r = reconcileUpgradeTier(2, undefined, 0);
-    expect(r.tier).toBe(0);
-    expect(r.note).toMatch(/keeping Tier 0/i);
-    expect(r.note).toMatch(/--tier 2/);
-  });
-
-  it("an explicit --tier still converts a Tier 0 install (operator owns the migration)", () => {
-    const r = reconcileUpgradeTier(2, "2", 0);
-    expect(r.tier).toBe(2);
-    expect(r.note).toBeUndefined();
+  it("keeps the resolved default when no tier can be inferred (hand-rolled deploy)", async () => {
+    // Nothing recognizable installed → nothing to inherit, and no misleading
+    // "keeping Tier N" notice; the normal Docker-aware default applies.
+    const dir = makeInstall({ "docker-compose.yml": COMPOSE.unknown, ".env": DOCKER_ENV });
+    const c = await runInstall(dir);
+    expect(c.dockerTier).toBe(2);
+    expect(c.infos).toEqual([]);
+    expect(c.probeCalls).toBe(1);
   });
 });
