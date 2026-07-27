@@ -17,14 +17,19 @@
  *      terminal (a durable-retry replay, a losing concurrent finalize) is
  *      REFUSED, not silently applied to a row someone already billed;
  *   2b. AND THE REFUSAL IS REPORTED WITH A SIGNAL-TO-NOISE RATIO OF 1 — a
- *      refusal that loses billable spend emits exactly one `logger.error`
- *      carrying the two cumulative totals and the delta nobody will bill; a
- *      refusal that loses NOTHING is silent. The distinction is the whole
- *      point: `run-launcher/execute-background.ts` synthesises a finalize on
- *      EVERY clean container exit, so every successful run replays its own
- *      last snapshot at `costUsd: 0` after settling. A status-only test drowned
- *      the real losses under one error per run (issue #997). Both halves are
- *      asserted below — the noise floor as well as the alarm;
+ *      refusal that loses something emits exactly one `logger.error`; a refusal
+ *      that loses NOTHING is silent. The distinction is the whole point:
+ *      `run-launcher/execute-background.ts` synthesises a finalize on EVERY
+ *      clean container exit, so every successful run replays its own last
+ *      snapshot at `costUsd: 0` after settling. A status-only test drowned the
+ *      real losses under one error per run (issue #997). Both halves are
+ *      asserted below — the noise floor as well as the alarm.
+ *      The report carries BOTH dimensions (stored / incoming / refused delta,
+ *      in USD *and* in total tokens) because a refusal can lose either one
+ *      alone: the advance rule is two-level, so a zero-cost model — free tier,
+ *      no catalog rate, cache-only turn — loses tokens while its cost delta
+ *      stays flat at 0. A one-dimensional payload would render exactly that
+ *      loss class indistinguishable from the #997 noise;
  *   3. NO DURABLE QUEUE FOR RUNNER ROWS — a failed runner write propagates
  *      instead of being deferred, because a deferred replay could only land
  *      after settlement, where (2) refuses it.
@@ -222,10 +227,11 @@ describe("llm_usage settlement — terminal barrier and post-settlement immutabi
     // …and it is LOUD. This is money the platform consumed and will never
     // invoice, so the only way an operator learns about it is this line. It
     // fires exactly once (nothing before it in this test refused anything real)
-    // and carries the whole picture: both cumulative totals plus the delta —
-    // $4 — which is the figure a human acts on. Asserting the arithmetic, not
-    // just the presence of a field, is what stops a future refactor from
-    // reporting the incoming total as the loss.
+    // and carries the whole picture on BOTH dimensions: the two cumulative
+    // totals plus the refused delta, in USD ($4) and in tokens (600 − 150).
+    // Those two deltas are the figures a human acts on. Asserting the
+    // arithmetic, not just the presence of the fields, is what stops a future
+    // refactor from reporting an incoming total as the loss.
     expect(errorSpy).toHaveBeenCalledTimes(1);
     const [message, fields] = errorSpy.mock.calls[0]!;
     expect(message).toBe(REFUSAL_MESSAGE);
@@ -236,6 +242,9 @@ describe("llm_usage settlement — terminal barrier and post-settlement immutabi
       storedCostUsd: 5,
       incomingCostUsd: 9,
       refusedDeltaUsd: 4,
+      storedTotalTokens: 150,
+      incomingTotalTokens: 600,
+      refusedDeltaTokens: 450,
     });
   });
 
@@ -307,12 +316,18 @@ describe("llm_usage settlement — terminal barrier and post-settlement immutabi
 
   it("a late EQUAL-cost snapshot with more cached tokens is still reported — the zero-cost-model loss", async () => {
     // A model with no catalog rate (or a cache-only turn) holds `cost_usd` at a
-    // constant while the token columns keep climbing. The refused delta is $0,
-    // yet the loss is real: those tokens will never reach the ledger. A
+    // constant while the token columns keep climbing. The refused COST delta is
+    // $0, yet the loss is real: those tokens will never reach the ledger. A
     // cost-only advance test would have called this benign and stayed quiet, so
     // the diagnostic reuses the upsert's OWN two-level predicate — and this test
     // is what proves the COALESCE'd cache arms are actually wired into it, by
     // moving nothing but `cacheWriteTokens`.
+    //
+    // This is also the test that pins `refusedDeltaTokens` as the sound alert
+    // predicate. On this loss class every cost field reads 0, exactly like the
+    // benign #997 replay; the token delta is the ONLY figure that separates
+    // them. An operator (or a downstream alert) keying on `refusedDeltaUsd > 0`
+    // would silently drop precisely the losses level 2 exists to catch.
     const runId = await seedSinkRun(ctx, { tokenUsage: null });
     await recordLlmUsage(
       {
@@ -348,9 +363,8 @@ describe("llm_usage settlement — terminal barrier and post-settlement immutabi
     expect(errorSpy).toHaveBeenCalledTimes(1);
     const [message, fields] = errorSpy.mock.calls[0]!;
     expect(message).toBe(REFUSAL_MESSAGE);
-    // NOTE the honest consequence of a token-only loss: `refusedDeltaUsd` is 0,
-    // exactly like the benign #997 replay. The two are distinguishable by the
-    // presence of the line, never by that field.
+    // Cost side: three zeroes' worth of signal. Token side: 160 → 180, a
+    // refused delta of 20 — the whole reason the payload carries both.
     expect(fields).toEqual({
       runId,
       orgId: ctx.orgId,
@@ -358,10 +372,13 @@ describe("llm_usage settlement — terminal barrier and post-settlement immutabi
       storedCostUsd: 2,
       incomingCostUsd: 2,
       refusedDeltaUsd: 0,
+      storedTotalTokens: 160,
+      incomingTotalTokens: 180,
+      refusedDeltaTokens: 20,
     });
   });
 
-  it("a diagnostic that itself fails degrades to a warn and never fails the refused write", async () => {
+  it("a diagnostic that itself fails still reports the refusal, minus the stored-side figures", async () => {
     // The diagnostic added a SELECT to a path that previously did no I/O at all,
     // and it runs inside the terminal barrier, which calls the ledger with
     // `required: true` — a throw here would fail `finalizeRun` and leave a
@@ -393,33 +410,42 @@ describe("llm_usage settlement — terminal barrier and post-settlement immutabi
       },
     } as unknown as Db;
 
-    const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
-    try {
-      // A genuinely advancing snapshot, so the diagnostic is definitely reached.
-      const late = await recordLlmUsage(
-        {
-          source: "runner",
-          orgId: ctx.orgId,
-          runId,
-          credentialSource: "system",
-          inputTokens: 400,
-          outputTokens: 200,
-          costUsd: 9,
-        },
-        { onConflict: "runner-monotonic", executor: diagnosticBlindExecutor },
-      );
-      // The write itself still reports its outcome normally.
-      expect(late).toBeNull();
-      expect((await runnerRow(runId))!.costUsd).toBe(2);
-      // The failure is visible rather than swallowed …
-      expect(warnSpy.mock.calls.map(([m]) => m)).toContain("llm_usage: refusal diagnostic failed");
-      // … and, honestly stated: when the diagnostic cannot run, the real loss
-      // goes UNREPORTED. Silence here is a known consequence of not letting the
-      // explanation break the write, not evidence that nothing was lost.
-      expect(errorSpy).toHaveBeenCalledTimes(0);
-    } finally {
-      warnSpy.mockRestore();
-    }
+    // A genuinely advancing snapshot, so the diagnostic is definitely reached.
+    const late = await recordLlmUsage(
+      {
+        source: "runner",
+        orgId: ctx.orgId,
+        runId,
+        credentialSource: "system",
+        inputTokens: 400,
+        outputTokens: 200,
+        costUsd: 9,
+      },
+      { onConflict: "runner-monotonic", executor: diagnosticBlindExecutor },
+    );
+    // The write itself still reports its outcome normally — no throw reaches
+    // the barrier, and the settled row is untouched.
+    expect(late).toBeNull();
+    expect((await runnerRow(runId))!.costUsd).toBe(2);
+
+    // The refusal is NOT downgraded to a warn and NOT swallowed: an unassessed
+    // refusal may be a real billing loss, so it stays at error level under a
+    // DISTINCT message — an operator can tell "we lost X" from "we could not
+    // work out whether we lost anything", and alert on both.
+    expect(errorSpy).toHaveBeenCalledTimes(1);
+    const [message, fields] = errorSpy.mock.calls[0]!;
+    expect(message).toBe("llm_usage: could not assess a refused runner snapshot");
+    // Honestly stated: the report is one-sided. The DB read is what failed, so
+    // only the entry's own values survive — no stored total, hence no delta.
+    // The incoming token total is summed in TS here (400 + 200, no cache
+    // buckets set), the one place that formula is duplicated.
+    expect(fields).toEqual({
+      runId,
+      orgId: ctx.orgId,
+      incomingCostUsd: 9,
+      incomingTotalTokens: 600,
+      error: "connection terminated unexpectedly",
+    });
   });
 
   it("the same snapshot IS applied while the run is still open", async () => {

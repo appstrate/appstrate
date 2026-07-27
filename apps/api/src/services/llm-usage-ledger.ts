@@ -131,7 +131,7 @@ const runNotTerminalSql = sql`NOT EXISTS (
     )})
 )`;
 
-/** The monotonic columns of a candidate runner snapshot, as SQL expressions. */
+/** The monotonic columns of one runner snapshot, as SQL expressions. */
 interface RunnerSnapshotSql {
   costUsd: SQL;
   inputTokens: SQL;
@@ -139,6 +139,15 @@ interface RunnerSnapshotSql {
   cacheReadTokens: SQL;
   cacheWriteTokens: SQL;
 }
+
+/** The stored side: the conflicting row's own columns. */
+const storedSnapshotSql: RunnerSnapshotSql = {
+  costUsd: sql`${llmUsage.costUsd}`,
+  inputTokens: sql`${llmUsage.inputTokens}`,
+  outputTokens: sql`${llmUsage.outputTokens}`,
+  cacheReadTokens: sql`${llmUsage.cacheReadTokens}`,
+  cacheWriteTokens: sql`${llmUsage.cacheWriteTokens}`,
+};
 
 /** The candidate side inside an upsert: Postgres' `EXCLUDED` pseudo-row. */
 const excludedSnapshotSql: RunnerSnapshotSql = {
@@ -165,6 +174,20 @@ function entrySnapshotSql(entry: LlmUsageEntry): RunnerSnapshotSql {
 }
 
 /**
+ * Cumulative token total of a snapshot — the measure the level-2 tiebreak
+ * compares, and the one the refusal diagnostic reports. Shared so the figure an
+ * operator reads is by construction the figure the predicate weighed; NULL for
+ * an unmatched LEFT JOIN (no stored row), 0-COALESCED per cache arm otherwise.
+ */
+function snapshotTotalTokensSql(snapshot: RunnerSnapshotSql): SQL<number | null> {
+  return sql<number | null>`(
+    ${snapshot.inputTokens} + ${snapshot.outputTokens}
+      + COALESCE(${snapshot.cacheReadTokens}, 0)
+      + COALESCE(${snapshot.cacheWriteTokens}, 0)
+  )`;
+}
+
+/**
  * SQL predicate: `candidate` strictly ADVANCES the conflicting runner row.
  *
  * Runner rows are cumulative snapshots — tokens and cost grow together — so the
@@ -188,15 +211,10 @@ function entrySnapshotSql(entry: LlmUsageEntry): RunnerSnapshotSql {
  */
 function runnerAdvancesSql(candidate: RunnerSnapshotSql): SQL<boolean | null> {
   return sql<boolean | null>`(
-    ${candidate.costUsd} > ${llmUsage.costUsd}
+    ${candidate.costUsd} > ${storedSnapshotSql.costUsd}
     OR (
-      ${candidate.costUsd} = ${llmUsage.costUsd}
-      AND ${candidate.inputTokens} + ${candidate.outputTokens}
-            + COALESCE(${candidate.cacheReadTokens}, 0)
-            + COALESCE(${candidate.cacheWriteTokens}, 0)
-          > ${llmUsage.inputTokens} + ${llmUsage.outputTokens}
-            + COALESCE(${llmUsage.cacheReadTokens}, 0)
-            + COALESCE(${llmUsage.cacheWriteTokens}, 0)
+      ${candidate.costUsd} = ${storedSnapshotSql.costUsd}
+      AND ${snapshotTotalTokensSql(candidate)} > ${snapshotTotalTokensSql(storedSnapshotSql)}
     )
   )`;
 }
@@ -323,12 +341,15 @@ export async function recordLlmUsage(
  * took the plain path.
  */
 async function traceRejectedTerminalRunnerWrite(executor: Db, entry: LlmUsageEntry): Promise<void> {
+  const incoming = entrySnapshotSql(entry);
   try {
     const [row] = await executor
       .select({
         status: runs.status,
         storedCostUsd: llmUsage.costUsd,
-        advances: runnerAdvancesSql(entrySnapshotSql(entry)),
+        storedTotalTokens: snapshotTotalTokensSql(storedSnapshotSql),
+        incomingTotalTokens: snapshotTotalTokensSql(incoming),
+        advances: runnerAdvancesSql(incoming),
       })
       .from(runs)
       .leftJoin(llmUsage, and(eq(llmUsage.runId, runs.id), eq(llmUsage.source, "runner")))
@@ -336,25 +357,43 @@ async function traceRejectedTerminalRunnerWrite(executor: Db, entry: LlmUsageEnt
       .limit(1);
     if (!row || !(terminalRunStatusValues as readonly string[]).includes(row.status)) return;
     if (row.advances === false) return;
+    // BOTH dimensions, because a refusal can lose either one: a zero-cost model
+    // holds `cost_usd` flat while tokens climb, so a token-only loss reports
+    // three zeroes on the cost side. `refusedDeltaTokens > 0` is what separates
+    // it from a benign replay — never `refusedDeltaUsd`.
     logger.error("llm_usage: refused a runner snapshot on an already-settled run", {
       runId: entry.runId,
       orgId: entry.orgId,
       runStatus: row.status,
-      // Both cumulative totals, plus the delta that will never be billed.
       storedCostUsd: row.storedCostUsd,
       incomingCostUsd: entry.costUsd,
       refusedDeltaUsd: entry.costUsd - (row.storedCostUsd ?? 0),
+      storedTotalTokens: row.storedTotalTokens,
+      incomingTotalTokens: row.incomingTotalTokens,
+      refusedDeltaTokens: (row.incomingTotalTokens ?? 0) - (row.storedTotalTokens ?? 0),
     });
   } catch (err) {
     // Explaining a no-op must never break the write: `recordLlmUsageReliably`
     // always rethrows for runner rows, and the finalize barrier calls it with
     // `required: true` outside any transaction, so a throw here would fail
-    // `finalizeRun` and leave the run unsettled. This cannot un-poison the
-    // `appstrate.metric` caller's ingestion transaction, which stays safe by its
-    // own design (the runner's next cumulative snapshot supersedes the lost
-    // write — see `run-launcher/appstrate-event-sink.ts`).
-    logger.warn("llm_usage: refusal diagnostic failed", {
+    // `finalizeRun` and leave the run unsettled. It stays at `error` because an
+    // unassessed refusal may be a real billing loss and a diagnostic that cannot
+    // run in a billing path is itself actionable — noisy only if the SELECT
+    // breaks systematically, and bounded by a query that runs solely on a no-op.
+    // Catching cannot un-poison the `appstrate.metric` caller's ingestion
+    // transaction, which stays safe by its own design (the runner's next
+    // cumulative snapshot supersedes — see `run-launcher/appstrate-event-sink.ts`).
+    logger.error("llm_usage: could not assess a refused runner snapshot", {
       runId: entry.runId,
+      orgId: entry.orgId,
+      incomingCostUsd: entry.costUsd,
+      // Summed in TS, not by {@link snapshotTotalTokensSql}: the DB read is what
+      // just failed, so only the entry's own values are still in hand.
+      incomingTotalTokens:
+        entry.inputTokens +
+        entry.outputTokens +
+        (entry.cacheReadTokens ?? 0) +
+        (entry.cacheWriteTokens ?? 0),
       error: getErrorMessage(err),
     });
   }
