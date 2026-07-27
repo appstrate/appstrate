@@ -11,8 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `@appstrate/core/chat-turn-metadata` — the chat turn's TIME budget alongside its
   existing step budget: `CHAT_TURN_DEADLINE_MS`, `CHAT_TURN_SAFETY_MARGIN_MS`,
-  `CHAT_MIN_RUN_BUDGET_MS`, `CHAT_THIN_RUN_BUDGET_MS`, `CHAT_LAUNCH_THRESHOLD_MS`,
-  plus the pure
+  `CHAT_MIN_RUN_BUDGET_MS`, `CHAT_LAUNCH_THRESHOLD_MS`, plus the pure
   `computeTurnRunBudget()`, `formatBudgetDuration()` and `formatTurnBudgetNote()`.
   Both chat engines derive a child call's wait from an absolute turn deadline
   instead of silently taking `RUN_AND_WAIT_MAX_MS` (30 min), which is three times

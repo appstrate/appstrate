@@ -40,9 +40,6 @@ export const CHAT_TURN_SAFETY_MARGIN_MS = 45_000;
  */
 export const CHAT_MIN_RUN_BUDGET_MS = 90_000;
 
-/** Above the floor but tight enough that the launch deserves a `warn` trace. */
-export const CHAT_THIN_RUN_BUDGET_MS = 3 * 60_000;
-
 /**
  * Remaining turn time a launch actually requires — THE number every
  * model-facing message must quote.
@@ -64,8 +61,6 @@ export interface TurnRunBudget {
   maxMs: number;
   /** Whether a run may be launched at all (`maxMs >= CHAT_MIN_RUN_BUDGET_MS`). */
   launchable: boolean;
-  /** Launchable, but under {@link CHAT_THIN_RUN_BUDGET_MS} — worth a warn. */
-  thin: boolean;
 }
 
 /**
@@ -78,7 +73,7 @@ export function computeTurnRunBudget(turnDeadlineAt: number, now: number): TurnR
   const remainingMs = Math.max(0, turnDeadlineAt - now);
   const maxMs = Math.max(0, remainingMs - CHAT_TURN_SAFETY_MARGIN_MS);
   const launchable = maxMs >= CHAT_MIN_RUN_BUDGET_MS;
-  return { remainingMs, maxMs, launchable, thin: launchable && maxMs < CHAT_THIN_RUN_BUDGET_MS };
+  return { remainingMs, maxMs, launchable };
 }
 
 /** Compact human duration for model-facing budget text ("4m12s", "45s"). */
