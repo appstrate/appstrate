@@ -290,15 +290,15 @@ export OIDC_INSTANCE_CLIENTS='[
 ]'
 ```
 
-| Field                    | Required | Notes                                                                                                                                                                    |
-| ------------------------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `clientId`               | yes      | Operator-chosen stable identifier (`^[a-zA-Z0-9_-]+$`, 3–100 chars). Cannot start with `oauth_` — that prefix is reserved for the auto-provisioned platform client.      |
-| `clientSecret`           | yes      | Operator-supplied, minimum 32 chars. Hashed SHA-256 at rest — plaintext lives only in memory for the duration of the hash call and is NEVER logged.                      |
-| `name`                   | yes      | Human-readable name shown on the consent screen (when `skipConsent: false`).                                                                                             |
-| `redirectUris`           | yes      | At least one. Validated by `services/redirect-uri.ts → isValidRedirectUri` — `http://` only for loopback hosts (`localhost`, `127.0.0.0/8`, `[::1]` — RFC 8252 §7.3, any environment), `https://` (non-SSRF host) for everything else.         |
-| `postLogoutRedirectUris` | no       | Defaults to `[]`.                                                                                                                                                        |
-| `scopes`                 | no       | Defaults to `["openid", "profile", "email", "offline_access"]`. Must be a subset of `getAppstrateScopes()` — invalid scopes are rejected at the service validation step. |
-| `skipConsent`            | no       | Defaults to `false`. Set to `true` for trusted first-party satellites to skip the consent screen.                                                                        |
+| Field                    | Required | Notes                                                                                                                                                                                                                                  |
+| ------------------------ | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `clientId`               | yes      | Operator-chosen stable identifier (`^[a-zA-Z0-9_-]+$`, 3–100 chars). Cannot start with `oauth_` — that prefix is reserved for the auto-provisioned platform client.                                                                    |
+| `clientSecret`           | yes      | Operator-supplied, minimum 32 chars. Hashed SHA-256 at rest — plaintext lives only in memory for the duration of the hash call and is NEVER logged.                                                                                    |
+| `name`                   | yes      | Human-readable name shown on the consent screen (when `skipConsent: false`).                                                                                                                                                           |
+| `redirectUris`           | yes      | At least one. Validated by `services/redirect-uri.ts → isValidRedirectUri` — `http://` only for loopback hosts (`localhost`, `127.0.0.0/8`, `[::1]` — RFC 8252 §7.3, any environment), `https://` (non-SSRF host) for everything else. |
+| `postLogoutRedirectUris` | no       | Defaults to `[]`.                                                                                                                                                                                                                      |
+| `scopes`                 | no       | Defaults to `["openid", "profile", "email", "offline_access"]`. Must be a subset of `getAppstrateScopes()` — invalid scopes are rejected at the service validation step.                                                               |
+| `skipConsent`            | no       | Defaults to `false`. Set to `true` for trusted first-party satellites to skip the consent screen.                                                                                                                                      |
 
 ### Sync policy — create-only + fail-on-drift
 
