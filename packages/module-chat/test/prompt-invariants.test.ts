@@ -54,6 +54,15 @@ describe("SYSTEM_PROMPT invariants", () => {
     expect(SYSTEM_PROMPT).toMatch(/BEFORE launching the next step/);
   });
 
+  it("keeps the no-retry rule on integration_not_active (activation is admin-only)", () => {
+    // Auto-activation on connect requires `integrations:install`, which members
+    // and end-users lack — for them the 412 still reproduces, and a retry or a
+    // second connect flow can never clear it.
+    expect(SYSTEM_PROMPT).toContain("integration_not_active");
+    expect(SYSTEM_PROMPT).toMatch(/do NOT re-run and do NOT restart the connect flow/);
+    expect(SYSTEM_PROMPT).toMatch(/administrator must activate/);
+  });
+
   it("drops the stale claim that a prompt-pasted document:// URI gives no access", () => {
     // `context_documents` + the platform-side auto-repair made this half-false;
     // the paragraph now points at the cheap path instead of the boilerplate.
