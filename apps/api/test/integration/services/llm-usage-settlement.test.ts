@@ -131,8 +131,10 @@ async function runnerRow(runId: string) {
  * orphan sweep, container crash): a `RunResult` that carries no `cost`.
  *
  * Delegates to the REAL entry point rather than re-deriving one, so these tests
- * break if the synthesis path stops reconstructing the run's usage from
- * `runs.tokenUsage` or stops going through finalize's terminal barrier.
+ * break if the synthesis path stops going through finalize's terminal barrier.
+ * They do NOT pin its reconstruction of the usage from `runs.tokenUsage`:
+ * `finalizeRun` performs the identical reconstruction for every non-success
+ * terminal, so on this `failed` shape the two paths are indistinguishable.
  */
 async function synthesisedFinalize(runId: string): Promise<void> {
   await synthesiseFinalize(runId, {
@@ -175,17 +177,22 @@ async function settledRunWithLateSnapshot(
 /**
  * The one-sided report both diagnostic-failure paths emit before they diverge.
  * One-sided by necessity: the DB read is what failed, so only the entry's own
- * values survive — no stored total, hence neither delta. The incoming token
- * total (400 + 200, no cache buckets) is summed in TS on this path, the single
- * place that formula is duplicated away from SQL.
+ * values survive — no stored total, hence neither delta. Derived from the
+ * refused entry rather than hardcoded, so retuning the fixture above cannot
+ * fail these tests with a diff pointing at the wrong place; the token total is
+ * summed here in TS, the single place that formula lives away from SQL.
  */
-function expectUnassessedRefusal(call: unknown[] | undefined, runId: string, orgId: string): void {
+function expectUnassessedRefusal(call: unknown[] | undefined, late: LlmUsageEntry): void {
   expect(call?.[0]).toBe("llm_usage: could not assess a refused runner snapshot");
   expect(call?.[1]).toEqual({
-    runId,
-    orgId,
-    incomingCostUsd: 9,
-    incomingTotalTokens: 600,
+    runId: late.runId,
+    orgId: late.orgId,
+    incomingCostUsd: late.costUsd,
+    incomingTotalTokens:
+      late.inputTokens +
+      late.outputTokens +
+      (late.cacheReadTokens ?? 0) +
+      (late.cacheWriteTokens ?? 0),
     error: "connection terminated unexpectedly",
   });
 }
@@ -459,7 +466,7 @@ describe("llm_usage settlement — terminal barrier and post-settlement immutabi
     // explanation failed.
     expect((await runnerRow(runId))!.costUsd).toBe(2);
     expect(errorSpy).toHaveBeenCalledTimes(1);
-    expectUnassessedRefusal(errorSpy.mock.calls[0], runId, ctx.orgId);
+    expectUnassessedRefusal(errorSpy.mock.calls[0], late);
   });
 
   it("the same failure on the finalize barrier's executor-less path is reported and SWALLOWED", async () => {
@@ -488,7 +495,7 @@ describe("llm_usage settlement — terminal barrier and post-settlement immutabi
     expect(refused).toBeNull();
     expect((await runnerRow(runId))!.costUsd).toBe(2);
     expect(errorSpy).toHaveBeenCalledTimes(1);
-    expectUnassessedRefusal(errorSpy.mock.calls[0], runId, ctx.orgId);
+    expectUnassessedRefusal(errorSpy.mock.calls[0], late);
   });
 
   it("the same snapshot IS applied while the run is still open", async () => {
