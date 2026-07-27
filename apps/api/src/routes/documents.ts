@@ -246,9 +246,13 @@ export function createDocumentsRouter() {
  * previewable document in maximum isolation, branching on its
  * {@link previewKind}:
  *
- *  - `html` — untrusted agent-generated ACTIVE content: a strict CSP header + an
- *    injected parse-time `<meta>` CSP (covers the relative-URL / `srcdoc` bypass
- *    a header alone can miss), COOP `same-origin`, the full `Permissions-Policy`.
+ *  - `html` — untrusted agent-generated ACTIVE content: a strict CSP header
+ *    whose `sandbox allow-scripts` puts the document in an OPAQUE origin (no
+ *    first-party origin to act on, and no top-level navigation — otherwise
+ *    agent script could steer the tab to a real `/login` and phish), plus an
+ *    injected parse-time `<meta>` CSP carrying the same policy minus `sandbox`,
+ *    which a meta context ignores (covers the relative-URL / `srcdoc` bypass a
+ *    header alone can miss), COOP `same-origin`, the full `Permissions-Policy`.
  *    Served as ACTIVE html only where execution cannot reach the app session —
  *    on a dedicated `USERCONTENT_URL` origin, or (same-origin mode) inside the
  *    SPA's opaque `sandbox="allow-scripts"` iframe. Any other loading context,
@@ -340,6 +344,10 @@ export function createDocumentPreviewRouter() {
         "Referrer-Policy": "no-referrer",
         "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
         "Cache-Control": "private, no-store",
+        // On the active branch the CSP sandbox gives the document an opaque
+        // origin, which `same-origin` can never match — so it lands in its own
+        // browsing-context group. Stricter than the intended pairing, not a
+        // regression; keep it (the inert branch still matches normally).
         "Cross-Origin-Opener-Policy": "same-origin",
         "Cross-Origin-Resource-Policy": corp,
         // The representation depends on the request header — say so, even
@@ -362,14 +370,19 @@ export function createDocumentPreviewRouter() {
         });
       }
 
+      // Two copies of one policy: the header carries `sandbox allow-scripts`
+      // (opaque origin — the only thing here that stops agent script from
+      // navigating the top-level browsing context to a real `/login`), the meta
+      // copy omits it because `sandbox` is ignored in a meta context. They are
+      // NOT interchangeable — see `buildPreviewCsp`.
       const csp = buildPreviewCsp(appOrigin);
-      const body = injectMetaCsp(html, csp);
+      const body = injectMetaCsp(html, csp.meta);
       return new Response(body, {
         status: 200,
         headers: {
           ...commonHeaders,
           "Content-Type": "text/html; charset=utf-8",
-          "Content-Security-Policy": csp,
+          "Content-Security-Policy": csp.header,
         },
       });
     }

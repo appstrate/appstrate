@@ -77,11 +77,41 @@ describe("preview token", () => {
 describe("buildPreviewCsp", () => {
   it("denies by default and pins frame-ancestors to the app origin", () => {
     const csp = buildPreviewCsp("https://app.example");
-    expect(csp).toContain("default-src 'none'");
-    expect(csp).toContain("connect-src 'none'");
-    expect(csp).toContain("form-action 'none'");
-    expect(csp).toContain("base-uri 'none'");
-    expect(csp).toContain("frame-ancestors https://app.example");
+    for (const copy of [csp.header, csp.meta]) {
+      expect(copy).toContain("default-src 'none'");
+      expect(copy).toContain("connect-src 'none'");
+      expect(copy).toContain("form-action 'none'");
+      expect(copy).toContain("base-uri 'none'");
+      expect(copy).toContain("frame-ancestors https://app.example");
+    }
+  });
+
+  it("sandboxes the header copy into an opaque origin", () => {
+    // The directive that stops agent script from navigating the top-level
+    // browsing context to a real `/login` (GHSA-8f6g-r37m-wg99).
+    expect(buildPreviewCsp("https://app.example").header).toContain("sandbox allow-scripts");
+  });
+
+  it("grants no sandbox token beyond allow-scripts", () => {
+    const { header } = buildPreviewCsp("https://app.example");
+    // `allow-same-origin` would hand the document back a real origin; a popup
+    // to the app's `/login` reopens the phishing chain the sandbox closes.
+    expect(header).not.toContain("allow-same-origin");
+    expect(header).not.toContain("allow-popups");
+    // `allow-top-navigation` is a prefix of `allow-top-navigation-by-user-activation`,
+    // so this single assertion rejects both variants.
+    expect(header).not.toContain("allow-top-navigation");
+  });
+
+  it("keeps sandbox OUT of the meta copy (ignored in a meta context)", () => {
+    expect(buildPreviewCsp("https://app.example").meta).not.toContain("sandbox");
+  });
+
+  it("differs from the header copy by the sandbox directive and nothing else", () => {
+    // Pinning the exact relationship means a directive added to one copy must
+    // be added to the other — the two can never quietly drift apart.
+    const { header, meta } = buildPreviewCsp("https://app.example");
+    expect(header).toBe(`${meta}; sandbox allow-scripts`);
   });
 });
 
@@ -107,6 +137,19 @@ describe("injectMetaCsp", () => {
   it("prepends a <head> for a bare fragment", () => {
     const out = injectMetaCsp("<p>x</p>", csp);
     expect(out).toBe(`<head>${meta}</head><p>x</p>`);
+  });
+
+  it("emits a content attribute with no sandbox when fed the meta copy", () => {
+    // The route injects `buildPreviewCsp().meta`; a `sandbox` reaching the tag
+    // would be dead text that reads like a live control.
+    const out = injectMetaCsp(
+      "<html><head></head></html>",
+      buildPreviewCsp("https://app.example").meta,
+    );
+    const content = /content="([^"]*)"/.exec(out)?.[1];
+    expect(content).toBeTruthy();
+    expect(content).not.toContain("sandbox");
+    expect(content).toContain("default-src 'none'");
   });
 });
 
@@ -166,6 +209,10 @@ describe("buildInertPreviewCsp", () => {
   it("denies everything and pins frame-ancestors to the app origin", () => {
     const csp = buildInertPreviewCsp("https://app.example");
     expect(csp).toBe("default-src 'none'; frame-ancestors https://app.example");
+  });
+
+  it("carries no sandbox — the inert kinds cannot execute in the first place", () => {
+    expect(buildInertPreviewCsp("https://app.example")).not.toContain("sandbox");
   });
 });
 

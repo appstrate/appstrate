@@ -6,9 +6,11 @@
  * The security assertions are the deliverable:
  *  - the preview route (`GET /preview/documents/:id`) serves a document ONLY with
  *    a valid, unexpired, doc-bound signed token. HTML (active content) gets the
- *    full hardened header set (strict CSP, nosniff, no-referrer,
+ *    full hardened header set (strict CSP incl. `sandbox allow-scripts` — the
+ *    opaque origin that denies top-level navigation — nosniff, no-referrer,
  *    Permissions-Policy, no Set-Cookie) plus a parse-time `<meta>` CSP injected
- *    as the FIRST child of `<head>`; the inert kinds (image / pdf / text) stream
+ *    as the FIRST child of `<head>` carrying the same policy WITHOUT `sandbox`
+ *    (ignored in a meta context); the inert kinds (image / pdf / text) stream
  *    byte-for-byte with an `inline` disposition, `nosniff`, and a minimal
  *    `default-src 'none'` CSP — text ALWAYS relabelled `text/plain`;
  *  - expired / cross-document / missing tokens 401; non-previewable / missing /
@@ -119,13 +121,19 @@ describe("GET /preview/documents/:id — hardened HTML preview", () => {
     expect(res.status).toBe(200);
 
     const appOrigin = new URL(getEnv().APP_URL).origin;
-    const expectedCsp =
+    // The meta copy; the header copy is this plus the `sandbox` directive, which
+    // a meta context ignores (so it would be dead text on the tag).
+    const expectedMetaCsp =
       `default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; ` +
       `img-src data: blob:; media-src data: blob:; font-src data:; connect-src 'none'; ` +
       `form-action 'none'; frame-ancestors ${appOrigin}; base-uri 'none'`;
+    const expectedHeaderCsp = `${expectedMetaCsp}; sandbox allow-scripts`;
 
     expect(res.headers.get("content-type")).toBe("text/html; charset=utf-8");
-    expect(res.headers.get("content-security-policy")).toBe(expectedCsp);
+    expect(res.headers.get("content-security-policy")).toBe(expectedHeaderCsp);
+    // The opaque origin is the control that stops agent script from navigating
+    // the tab to a real `/login` (GHSA-8f6g-r37m-wg99).
+    expect(res.headers.get("content-security-policy")).toContain("sandbox allow-scripts");
     expect(res.headers.get("x-content-type-options")).toBe("nosniff");
     expect(res.headers.get("referrer-policy")).toBe("no-referrer");
     expect(res.headers.get("permissions-policy")).toBe(
@@ -146,8 +154,10 @@ describe("GET /preview/documents/:id — hardened HTML preview", () => {
     expect(headIdx).toBeGreaterThanOrEqual(0);
     expect(metaIdx).toBe(headIdx + "<head>".length);
     expect(metaIdx).toBeLessThan(titleIdx); // meta precedes the original head content
-    // The injected meta CSP duplicates the header policy.
-    expect(body).toContain(`content="${expectedCsp}"`);
+    // The injected meta CSP duplicates the header policy MINUS `sandbox` (which
+    // a meta context ignores — leaving it there would read like a live control).
+    expect(body).toContain(`content="${expectedMetaCsp}"`);
+    expect(/content="([^"]*)"/.exec(body)?.[1]).not.toContain("sandbox");
   });
 
   it("ignores a session cookie (token-only): a cookie present does not change the 200", async () => {
@@ -221,6 +231,14 @@ describe("GET /preview/documents/:id — hardened HTML preview", () => {
     const body = await res.text();
     expect(body).toBe(bytes);
     expect(body).not.toContain("Content-Security-Policy");
+  });
+
+  it("does NOT sandbox an inert kind (it cannot execute, so the diff stays on the active branch)", async () => {
+    const docId = await seedDoc(ctx, { mime: "image/png", body: "fake-png" });
+    const token = mintToken(docId, ctx.orgId, nowSec() + 300);
+    const res = await app.request(`/preview/documents/${docId}?t=${encodeURIComponent(token)}`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-security-policy")).not.toContain("sandbox");
   });
 
   it("serves application/pdf inline with nosniff + inert CSP (native-viewer path)", async () => {
@@ -357,8 +375,11 @@ describe("GET /preview/documents/:id — hardened HTML preview", () => {
         expect(res.headers.get("content-type")).toBe("text/plain; charset=utf-8");
         expect(res.headers.get("x-content-type-options")).toBe("nosniff");
         expect(res.headers.get("content-security-policy")).toContain("default-src 'none'");
-        // No script-src grant at all on the inert policy.
+        // No script-src grant at all on the inert policy — and no sandbox
+        // either: nothing is parsed as a document, so there is nothing to
+        // put in an opaque origin.
         expect(res.headers.get("content-security-policy")).not.toContain("unsafe-inline");
+        expect(res.headers.get("content-security-policy")).not.toContain("sandbox");
         expect(res.headers.get("vary")).toBe("Sec-Fetch-Dest");
         // The source is still readable (the token holder could download it
         // anyway) — it is simply never parsed as a document, so the meta CSP
@@ -388,6 +409,8 @@ describe("GET /preview/documents/:id — hardened HTML preview", () => {
         expect(res.status).toBe(200);
         expect(res.headers.get("content-type")).toBe("text/html; charset=utf-8");
         expect(res.headers.get("content-security-policy")).toContain("script-src 'unsafe-inline'");
+        // Active anywhere still means active inside an opaque origin.
+        expect(res.headers.get("content-security-policy")).toContain("sandbox allow-scripts");
       });
     });
 

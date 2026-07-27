@@ -19,8 +19,9 @@
  *    upload URLs; reusing the upload secret keeps the OSS boot surface smaller.
  *    The mandatory HMAC domain separator means the two token types can never be
  *    substituted for each other even though they share the key.)
- *  - {@link buildPreviewCsp} — the strict CSP string, reused verbatim for both
- *    the response header and the injected `<meta>` tag.
+ *  - {@link buildPreviewCsp} — the strict CSP, returned as the TWO copies the
+ *    response header and the injected `<meta>` tag each need (they differ by
+ *    exactly one directive — see the function).
  *  - {@link injectMetaCsp} — parse-time injection of a duplicate CSP as the first
  *    child of `<head>`, so the policy binds even on the `srcdoc`/relative-URL
  *    paths a header alone can miss.
@@ -173,16 +174,56 @@ export function buildInertPreviewCsp(appOrigin: string): string {
 }
 
 /**
- * The strict Content-Security-Policy for the preview response — isolation over
- * sanitization. `default-src 'none'` denies everything, then only the minimum is
- * re-granted: inline scripts/styles (so the agent's page renders), data:/blob:
- * images and media, data: fonts. `connect-src 'none'` kills fetch/XHR/WebSocket/
- * EventSource exfil; `form-action 'none'` kills form-post exfil; `base-uri 'none'`
- * blocks `<base>` hijacking. `frame-ancestors` is pinned to the app origin so
- * only the platform UI may frame the preview (clickjacking / re-embed defense).
+ * The two copies of the active-HTML preview policy: one for the response header,
+ * one for the injected `<meta>` tag. They are NOT interchangeable — see
+ * {@link buildPreviewCsp}. Named members (rather than a tuple or a bare string)
+ * so a caller cannot silently put the meta copy on the header.
  */
-export function buildPreviewCsp(appOrigin: string): string {
-  return [
+export interface PreviewCsp {
+  /** For the `Content-Security-Policy` response header. Carries `sandbox`. */
+  header: string;
+  /** For {@link injectMetaCsp}. Same policy MINUS the `sandbox` directive. */
+  meta: string;
+}
+
+/**
+ * The strict Content-Security-Policy for the ACTIVE agent-HTML preview response
+ * — isolation over sanitization. `default-src 'none'` denies everything, then
+ * only the minimum is re-granted: inline scripts/styles (so the agent's page
+ * renders), data:/blob: images and media, data: fonts. `connect-src 'none'`
+ * kills fetch/XHR/WebSocket/EventSource exfil; `form-action 'none'` kills
+ * form-post exfil; `base-uri 'none'` blocks `<base>` hijacking.
+ * `frame-ancestors` is pinned to the app origin so only the platform UI may
+ * frame the preview (clickjacking / re-embed defense).
+ *
+ * On top of that, the header copy carries **`sandbox allow-scripts` and nothing
+ * else**. The sandbox is what makes executing agent script survivable at all: it
+ * drops the response into an OPAQUE origin (no first-party origin to act on) and
+ * — the reason it is here — it is the ONLY thing in this policy that restricts
+ * TOP-LEVEL NAVIGATION. Without it an inline script in an agent document can
+ * `location = "…/login"` and phish real credentials on a real first-party origin
+ * (GHSA-8f6g-r37m-wg99). Tokens deliberately NOT granted:
+ *
+ *  - `allow-popups` / `allow-popups-to-escape-sandbox` — a popup to the app's
+ *    `/login` reopens the exact phishing chain this closes. The cost is accepted:
+ *    external links in agent documents are broken-on-click.
+ *  - `allow-top-navigation` / `allow-top-navigation-by-user-activation` — the
+ *    attack IS a user-initiated click, so the "by user activation" variant grants
+ *    precisely the capability being removed.
+ *  - `allow-same-origin` — hands the document back a real origin and defeats the
+ *    entire control.
+ *
+ * The `<meta>` copy omits `sandbox`, because the directive is IGNORED in a meta
+ * context (per spec — a document cannot sandbox itself after parsing has begun).
+ * Leaving it there would be dead text that READS like a live control, and the
+ * next reader "fixing" the divergence by collapsing the two strings into one
+ * would silently disable the header's sandbox. The divergence therefore lives in
+ * the return TYPE ({@link PreviewCsp}), not in a comment: the header copy is the
+ * meta copy plus the sandbox directive, and every OTHER directive is added to
+ * both by construction.
+ */
+export function buildPreviewCsp(appOrigin: string): PreviewCsp {
+  const meta = [
     "default-src 'none'",
     "script-src 'unsafe-inline'",
     "style-src 'unsafe-inline'",
@@ -194,6 +235,7 @@ export function buildPreviewCsp(appOrigin: string): string {
     `frame-ancestors ${appOrigin}`,
     "base-uri 'none'",
   ].join("; ");
+  return { header: `${meta}; sandbox allow-scripts`, meta };
 }
 
 /**
@@ -220,7 +262,11 @@ export function buildPreviewCsp(appOrigin: string): string {
  *    token, so it can also be opened TOP-LEVEL (new tab, shared link). There
  *    the sandbox attribute does not exist: the script runs on `APP_URL` with
  *    full access to the SPA's `localStorage`/`sessionStorage`, non-HttpOnly
- *    cookies, and same-origin navigation. That is the hole this closes.
+ *    cookies, and same-origin navigation. That is the hole this closes. (The
+ *    header's `sandbox allow-scripts` is a SECOND, independent layer over the
+ *    same hole — it revokes the origin even when the bytes ARE parsed as a
+ *    document. This gate is kept because it stops the parse from happening at
+ *    all, so it holds without relying on a UA honouring a CSP directive.)
  *
  * `Sec-Fetch-Dest` is a browser-set, script-unforgeable header, so it is the
  * authoritative statement of the loading context. In same-origin mode the
