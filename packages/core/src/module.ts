@@ -699,6 +699,52 @@ export interface ModelProviderHooks {
 }
 
 /**
+ * Declarative model-list selector resolved against the platform's vendored
+ * pricing catalog instead of being hand-enumerated.
+ *
+ * Why this exists: a hand-curated id list is a snapshot that rots silently.
+ * The subscription providers (`claude-code`, `codex`) cannot probe their
+ * upstream to enumerate models — `docs/architecture/SUBSCRIPTION_COMPLIANCE.md`
+ * forbids ANY platform-side API call for that — so their lists used to be
+ * frozen prose that fell behind the catalog by whole model generations. A
+ * selector re-derives the list from the catalog on every read, so the weekly
+ * catalog refresh carries new generations through automatically.
+ *
+ * Resolution lives entirely platform-side (`apps/api/src/services/
+ * model-providers/model-selection.ts`) — this type is only the declaration.
+ */
+export interface CatalogModelSelector {
+  /**
+   * Catalog id prefixes, in priority order (e.g. `"claude-opus"`). A catalog
+   * id belongs to the family when it reads `<family>-<version>` with a purely
+   * numeric, dash-separated version (`claude-opus-4-8`, `claude-opus-5`).
+   * Dated aliases (`claude-opus-4-20250514`) are excluded — they duplicate a
+   * canonical id under a snapshot name.
+   */
+  readonly catalogFamilies: readonly string[];
+  /** How many generations to keep per family, newest first. */
+  readonly generations: number;
+  /** Optional hard cap on the resolved list length. */
+  readonly limit?: number;
+  /** Catalog ids to exclude even when they match a family. */
+  readonly deny?: readonly string[];
+}
+
+/**
+ * Either an explicit id list or a {@link CatalogModelSelector}. An explicit
+ * array stays the right answer whenever the set is defined by something the
+ * catalog does not model (e.g. the Codex ChatGPT sign-in set, which is
+ * defined by OpenAI documentation and deliberately narrower than the OpenAI
+ * API catalog).
+ */
+export type ModelIdSelection = readonly string[] | CatalogModelSelector;
+
+/** Narrow a {@link ModelIdSelection} to its selector arm. */
+export function isCatalogModelSelector(value: ModelIdSelection): value is CatalogModelSelector {
+  return !Array.isArray(value);
+}
+
+/**
  * A model provider Appstrate knows how to talk to.
  *
  * Aggregated by the platform from every loaded module's
@@ -764,8 +810,15 @@ export interface ModelProviderDefinition {
    * underlying API has more models than the OAuth product actually
    * exposes. Empty for openrouter (live-search) and openai-compatible
    * (Custom only).
+   *
+   * Accepts either an explicit id array or a {@link CatalogModelSelector}
+   * derived from the catalog at read time. A selector is the right choice
+   * when the product tracks the vendor's current generation (`claude-code`);
+   * an array is right when the served set is defined outside the catalog
+   * (`codex` — the ChatGPT sign-in set is narrower than the OpenAI API
+   * catalog). Either way the boot check applies to the RESOLVED ids.
    */
-  featuredModels: readonly string[];
+  featuredModels: ModelIdSelection;
 
   /**
    * Candidate model ids for discovery — the source list for whichever
@@ -776,8 +829,13 @@ export interface ModelProviderDefinition {
    * {@link featuredModels}, ids here do NOT have to exist in the resolved
    * catalog. When omitted, the platform uses `featuredModels`. Irrelevant for
    * api_key providers whose full catalog is exposed.
+   *
+   * Same {@link ModelIdSelection} duality as {@link featuredModels}: a
+   * {@link CatalogModelSelector} typically declares more `generations` here
+   * than in the featured list, so a plan still serving a previous generation
+   * keeps it selectable.
    */
-  modelDiscoveryCandidates?: readonly string[];
+  modelDiscoveryCandidates?: ModelIdSelection;
 
   /**
    * Model-discovery strategy. When omitted, discovery is **empirical** (probe):

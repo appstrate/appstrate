@@ -24,6 +24,7 @@ import {
   updateModelProviderCredential,
 } from "../services/model-providers/credentials.ts";
 import { getModelProvider, listModelProviders } from "../services/model-providers/registry.ts";
+import { resolveFeaturedModels } from "../services/model-providers/model-selection.ts";
 import { discoverAvailableModels } from "../services/model-providers/model-discovery.ts";
 import { listCatalogModels } from "../services/pricing-catalog.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
@@ -115,7 +116,7 @@ function serializeProviderModels(p: ModelProviderDefinition): ProviderRegistryMo
   const catalog = listCatalogModels(catalogKey);
   if (catalog.length === 0) return [];
 
-  const featuredSet = new Set(p.featuredModels);
+  const featuredSet = new Set(resolveFeaturedModels(p));
   return catalog.map((m) => ({ ...m, featured: featuredSet.has(m.id) }));
 }
 
@@ -283,7 +284,8 @@ export function createModelProviderCredentialsRouter() {
         let modelId = "_test";
         if (creds.providerId) {
           const cfg = getModelProvider(creds.providerId);
-          if (cfg && cfg.featuredModels.length > 0) modelId = cfg.featuredModels[0]!;
+          const featured = cfg ? resolveFeaturedModels(cfg) : [];
+          if (featured.length > 0) modelId = featured[0]!;
         }
         const result = await testModelConfig({ ...creds, modelId });
         return c.json(result);

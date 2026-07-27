@@ -30,6 +30,7 @@ import {
   type CreateOAuthCredentialInput,
 } from "./credentials.ts";
 import { getModelProvider } from "./registry.ts";
+import { resolveFeaturedModels } from "./model-selection.ts";
 import { invalidRequest, notFound } from "../../lib/errors.ts";
 import { logger } from "../../lib/logger.ts";
 
@@ -123,6 +124,6 @@ export async function importOAuthModelProviderConnection(
     credentialId,
     providerId: input.providerId,
     email,
-    availableModelIds: [...config.featuredModels],
+    availableModelIds: resolveFeaturedModels(config),
   };
 }

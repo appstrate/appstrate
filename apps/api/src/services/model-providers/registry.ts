@@ -27,6 +27,7 @@
 
 import type { ModelProviderDefinition } from "@appstrate/core/module";
 import { hasCatalog, lookupCatalogModel } from "../pricing-catalog.ts";
+import { resolveFeaturedModels } from "./model-selection.ts";
 
 // ---------------------------------------------------------------------------
 // Singleton state
@@ -67,12 +68,20 @@ export function registerModelProvider(def: ModelProviderDefinition): void {
  *
  * Providers with no own catalog AND no `catalogProviderId` are allowed
  * IFF `featuredModels` is empty (openrouter, openai-compatible).
+ *
+ * The check runs on RESOLVED ids: a `CatalogModelSelector` derives from the
+ * same catalog and can only ever produce members of it, so this stays a real
+ * gate for explicit arrays and a cheap tautology for selectors. Registration
+ * therefore requires the catalog to already be registered — production
+ * catalogs are registered at `pricing-catalog.ts` import time, and test
+ * fixtures must call `registerCatalog()` before `registerModelProvider()`.
  */
 function validateCatalogReferences(def: ModelProviderDefinition): void {
   const catalogKey = def.catalogProviderId ?? def.providerId;
   const catalogExists = hasCatalog(catalogKey);
+  const featured = resolveFeaturedModels(def);
 
-  if (def.featuredModels.length > 0 && !catalogExists) {
+  if (featured.length > 0 && !catalogExists) {
     throw new Error(
       `Model provider ${JSON.stringify(def.providerId)} declares featuredModels ` +
         `but no catalog exists for ${JSON.stringify(catalogKey)}. ` +
@@ -81,7 +90,7 @@ function validateCatalogReferences(def: ModelProviderDefinition): void {
   }
 
   if (catalogExists) {
-    for (const modelId of def.featuredModels) {
+    for (const modelId of featured) {
       if (!lookupCatalogModel(catalogKey, modelId)) {
         throw new Error(
           `Model provider ${JSON.stringify(def.providerId)} features ` +

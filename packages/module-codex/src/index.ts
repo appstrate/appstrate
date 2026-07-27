@@ -197,12 +197,21 @@ const codexProvider: ModelProviderDefinition = {
   // (`apps/api/src/data/subscription-watch/chatgpt.json`) — review this
   // list when that snapshot drifts.
   catalogProviderId: "openai",
-  // Per https://developers.openai.com/codex/models (ChatGPT sign-in):
-  // gpt-5.5, gpt-5.4, gpt-5.4-mini. `gpt-5.3-codex-spark` (Pro-only
-  // research preview) is also served but absent from openai.json, so it
-  // can't be listed here (boot check). gpt-5.2 / gpt-5.3-codex are
-  // deprecated on ChatGPT sign-in.
-  featuredModels: ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini"],
+  // Explicit arrays, NOT a catalog selector (unlike `claude-code`, which
+  // derives from the vendored anthropic catalog). The ChatGPT sign-in set is
+  // defined by OpenAI's documentation and does not track the OpenAI API
+  // catalog: openai.json carries API-only models (`gpt-5.4-nano`,
+  // `gpt-5-search-api`, the `-chat-latest` aliases…) that a Codex
+  // subscription never serves, so deriving from it would over-list by a wide
+  // margin. Reviewed against
+  // https://learn.chatgpt.com/docs/models (Codex with ChatGPT sign-in,
+  // fetched 2026-07-27) and re-reviewed whenever
+  // `apps/api/src/data/subscription-watch/chatgpt.json` drifts.
+  //
+  // Recommended set, newest first. `gpt-5.3-codex-spark` (Pro-only research
+  // preview) is also recommended but is absent from openai.json, so the boot
+  // check forbids featuring it — it lives in the candidate list only.
+  featuredModels: ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"],
   // OFFLINE validation: the platform issues ZERO Codex API calls to test
   // a credential or discover models. The connection test runs the
   // `validateCredential` hook below (local JWT decode) — its mere presence is
@@ -211,24 +220,19 @@ const codexProvider: ModelProviderDefinition = {
   // is checked at the first agent run (on the Pi engine).
   // Persisted as-is (∩ catalog) — what THIS account's plan serves lands on
   // the credential's `available_model_ids`. Superset of `featuredModels`:
-  // includes Pro-only previews and recently-deprecated ids so plans that
-  // still serve them keep them selectable. Source: featured ∪ LiteLLM's
-  // `chatgpt` provider snapshot
-  // (apps/api/src/data/subscription-watch/chatgpt.json) — review when the
-  // weekly drift PR flags that snapshot.
+  // the documented "recommended" set in doc order (incl. the Pro-only
+  // `gpt-5.3-codex-spark` preview), then the "other available" models — which
+  // is why the tail is not strictly newest-first. `gpt-5.2` and
+  // `gpt-5.3-codex` are deprecated for ChatGPT sign-in and were dropped from
+  // both lists.
   modelDiscoveryCandidates: [
+    "gpt-5.6-sol",
+    "gpt-5.6-terra",
+    "gpt-5.6-luna",
     "gpt-5.5",
+    "gpt-5.3-codex-spark",
     "gpt-5.4",
     "gpt-5.4-mini",
-    "gpt-5.4-pro",
-    "gpt-5.3-codex-spark",
-    "gpt-5.3-instant",
-    "gpt-5.3-chat-latest",
-    "gpt-5.3-codex",
-    "gpt-5.2",
-    "gpt-5.2-codex",
-    "gpt-5.1-codex-max",
-    "gpt-5.1-codex-mini",
   ],
   // Static discovery: persist the candidates above (∩ catalog) without probing.
   modelDiscovery: { mode: "static" },

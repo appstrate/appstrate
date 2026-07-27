@@ -36,13 +36,17 @@ describe("claude-code module", () => {
     expect(cc?.oauth?.scopes).toEqual(["org:create_api_key", "user:profile", "user:inference"]);
   });
 
-  it("exposes a non-empty featured catalog", () => {
+  it("derives its featured list from the anthropic catalog", () => {
+    // The literal ids are NOT asserted here: they are resolved platform-side
+    // from the vendored anthropic catalog (see the API suite), which is the
+    // whole point — a literal assertion here would be the same rotting
+    // snapshot the selector replaced.
     const cc = claudeCodeModule.modelProviders?.()[0];
-    expect(cc?.featuredModels).toEqual([
-      "claude-opus-4-7",
-      "claude-sonnet-4-6",
-      "claude-haiku-4-5",
-    ]);
+    expect(cc?.featuredModels).toEqual({
+      catalogFamilies: ["claude-opus", "claude-sonnet", "claude-haiku", "claude-fable"],
+      generations: 1,
+      limit: 3,
+    });
   });
 
   it("declares no identity hook — Anthropic OAuth tokens are not JWTs", () => {

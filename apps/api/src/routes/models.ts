@@ -26,6 +26,7 @@ import {
   type CatalogDefaults,
 } from "../services/org-models.ts";
 import { getModelProvider, isOAuthModelProvider } from "../services/model-providers/registry.ts";
+import { resolveFeaturedModels } from "../services/model-providers/model-selection.ts";
 import { checkAliasInvariants, type AliasInvariantViolation } from "@appstrate/core/model-swap";
 import { listCatalogModels } from "../services/pricing-catalog.ts";
 import type { CatalogModelEntry } from "@appstrate/shared-types";
@@ -347,7 +348,7 @@ export function createModelsRouter() {
       ? await getOrgModelProviderCredential(orgId, data.credentialId)
       : undefined;
     const allowedSet = new Set([
-      ...registry.featuredModels,
+      ...resolveFeaturedModels(registry),
       ...(credentialInfo?.available_model_ids ?? []),
     ]);
     const models: Array<CatalogModelEntry & { id: string }> = [];

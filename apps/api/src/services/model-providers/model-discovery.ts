@@ -46,6 +46,7 @@ import { modelProviderCredentials } from "@appstrate/db/schema";
 import type { TestResult } from "@appstrate/shared-types";
 import { loadInferenceCredentials } from "./credentials.ts";
 import { getModelProvider } from "./registry.ts";
+import { resolveDiscoveryCandidates } from "./model-selection.ts";
 import { testModelConfig } from "../org-models.ts";
 import { listCatalogModels } from "../pricing-catalog.ts";
 import { logger } from "../../lib/logger.ts";
@@ -128,7 +129,7 @@ async function persistStaticCandidates(
 ): Promise<ModelDiscoveryResult> {
   const catalogKey = def.catalogProviderId ?? providerId;
   const catalogIds = new Set(listCatalogModels(catalogKey).map((m) => m.id));
-  const candidates = [...new Set(def.modelDiscoveryCandidates ?? def.featuredModels ?? [])];
+  const candidates = resolveDiscoveryCandidates(def);
   const verified = candidates.filter((id) => catalogIds.has(id));
 
   if (verified.length === 0) {
@@ -193,10 +194,7 @@ export async function discoverAvailableModels(
     return persistStaticCandidates(orgId, credentialId, creds.providerId, def);
   }
 
-  const candidates = [...new Set(def?.modelDiscoveryCandidates ?? def?.featuredModels ?? [])].slice(
-    0,
-    MAX_CANDIDATES,
-  );
+  const candidates = (def ? resolveDiscoveryCandidates(def) : []).slice(0, MAX_CANDIDATES);
   if (candidates.length === 0) {
     return { outcome: "no_candidates", verifiedModelIds: [], probedCount: 0, persisted: false };
   }
