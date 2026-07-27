@@ -163,6 +163,11 @@ describe("module-loader", () => {
 
     beforeEach(async () => {
       root = await mkdtemp(join(tmpdir(), "appstrate-module-contract-"));
+      // Start every test from an unset var so "the default" is whatever the
+      // Zod schema says, not whatever the ambient environment happens to
+      // carry (Bun auto-loads `.env`).
+      delete process.env.MODULE_CONTRACT_ENFORCE;
+      _resetCacheForTesting();
     });
 
     afterEach(async () => {
@@ -198,28 +203,66 @@ describe("module-loader", () => {
     }
 
     /**
-     * Opt into the strict policy. `warn` ships as the default only until the
-     * `core@6.0.0 on npm → module bump` chain has run — `fail` is the intended
-     * end state, so it is what the refusal path is pinned against.
+     * Pin the policy explicitly, so the test that proves a branch does not
+     * silently ride on the schema default — the default is proven by its own
+     * test, with the var left unset.
      */
-    function enforceFail(): void {
-      process.env.MODULE_CONTRACT_ENFORCE = "fail";
+    function setEnforce(policy: "fail" | "warn"): void {
+      process.env.MODULE_CONTRACT_ENFORCE = policy;
       _resetCacheForTesting();
     }
 
-    it("refuses a module whose declared core range excludes the running core", async () => {
-      enforceFail();
+    it("refuses a module whose range excludes the running core, no env set", async () => {
+      // The gate only earns its keep if an operator gets it without opting in,
+      // so the refusal is pinned against the SHIPPED DEFAULT (var deleted in
+      // `beforeEach`), not against an explicit policy. Both versions must
+      // appear in the message: the operator has to see what the module wants
+      // AND what this platform ships to know which side to bump.
       const promise = loadModules([await moduleFixture("stale", staleRange)], mockCtx());
-      // Both versions must appear: the operator has to see what the module
-      // wants AND what this platform ships to know which side to bump.
       await expect(promise).rejects.toThrow(staleRange);
       expect(getModules().size).toBe(0);
     });
 
     it("names the running core version in the failure", async () => {
-      enforceFail();
       const promise = loadModules([await moduleFixture("stale", staleRange)], mockCtx());
       await expect(promise).rejects.toThrow(CORE_VERSION);
+    });
+
+    it("refuses under an explicit `fail`", async () => {
+      setEnforce("fail");
+      const promise = loadModules([await moduleFixture("stale", staleRange)], mockCtx());
+      await expect(promise).rejects.toThrow(staleRange);
+      expect(getModules().size).toBe(0);
+    });
+
+    it("offers the escape hatch in the refusal", async () => {
+      // A refusal that only says "no" strands an operator who cannot republish
+      // the module right now: the way to boot anyway has to be IN the failure.
+      const promise = loadModules([await moduleFixture("stale", staleRange)], mockCtx());
+      await expect(promise).rejects.toThrow("MODULE_CONTRACT_ENFORCE=warn");
+    });
+
+    it("logs the mismatch and boots under `warn`", async () => {
+      setEnforce("warn");
+      const warn = spyOn(logger, "warn");
+      try {
+        await loadModules([await moduleFixture("stale", staleRange)], mockCtx());
+        // The escape hatch must stay loud: booting anyway is only defensible
+        // if the operator can see, in the logs, exactly which module is stale.
+        expect(getModules().has("stale")).toBe(true);
+        const mismatchLine = warn.mock.calls
+          .map(([msg]) => String(msg))
+          .find((msg) => msg.includes(staleRange) && msg.includes(CORE_VERSION));
+        expect(mismatchLine).toBeDefined();
+        // `warn` is an explicit opt-in, so the operator reading this line has
+        // already set the var. Telling them to set it is a wrong instruction —
+        // the line must report what is being ACCEPTED, not prescribe a remedy
+        // that is already in effect. (Asserted case-insensitively so a reworded
+        // "Set …"/"set …" cannot slip the check.)
+        expect(mismatchLine?.toLowerCase()).not.toContain("set module_contract_enforce");
+      } finally {
+        warn.mockRestore();
+      }
     });
 
     it("loads a module whose declared range is satisfied by the running core", async () => {
@@ -246,14 +289,6 @@ describe("module-loader", () => {
     it("loads an in-tree module (workspace protocol is gated by tsc, not semver)", async () => {
       await loadModules([await moduleFixture("in-tree", "workspace:*")], mockCtx());
       expect(getModules().has("in-tree")).toBe(true);
-    });
-
-    it("boots despite a mismatch under the shipped default (warn)", async () => {
-      // No env set: the default must stay `warn` while npm still serves core
-      // 5.0.0 and no out-of-tree module can declare `^6.0.0` yet. Flip this to
-      // `fail` only together with the env schema default.
-      await loadModules([await moduleFixture("stale", staleRange)], mockCtx());
-      expect(getModules().has("stale")).toBe(true);
     });
   });
 
