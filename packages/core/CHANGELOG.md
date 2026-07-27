@@ -23,9 +23,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   by `1*SP`, so a conformant `authorization: bearer ey…` must match, which
   `startsWith("Bearer ")` rejects. First release carrying the subpath — a module
   built against an earlier core must parse the header itself.
-- `@appstrate/core/run-and-wait-client` — `RUN_RESULT_INLINE_MAX_BYTES` (32 KB),
-  `runResultExceedsInlineLimit()` and `truncateRunAndWaitPayload()`: a run result
-  over the cap is cut to a usable head that points back at the run, whose
+- `@appstrate/core/run-and-wait-client` — `RUN_RESULT_INLINE_MAX_BYTES` (32 KB) and
+  `truncateRunAndWaitPayload()`: a run result over the cap is cut to a usable
+  head that points back at the run, whose
   `runs.result` already holds the whole payload (`getRun` returns it) — no copy is
   made. `launchRunAndWait` forwards the new `context_documents` argument (inline
   runs only).
