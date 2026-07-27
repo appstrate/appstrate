@@ -5,8 +5,8 @@ import { unionAll } from "drizzle-orm/pg-core";
 import { db } from "@appstrate/db/client";
 import { applicationPackages, packages } from "@appstrate/db/schema";
 import type { Package } from "@appstrate/db/schema";
-import { AFPS_SCHEMA_URLS } from "@appstrate/core/validation";
 import { type PackageTypeConfig } from "./config.ts";
+import { buildStoredManifest } from "./manifest.ts";
 import { enqueueStorageDeletion } from "../storage-deletion.ts";
 import { packageStorageDeletionJobs } from "../package-storage-deletion.ts";
 import { asRecord } from "@appstrate/core/safe-json";
@@ -146,26 +146,30 @@ export interface CreateItemInput {
   createdBy?: string;
 }
 
-/** Insert a new package item. `item.id` must be the fully-scoped packageId (e.g. `@scope/name`). */
+/**
+ * Insert a new package item. `item.id` must be the fully-scoped packageId (e.g. `@scope/name`).
+ *
+ * `manifest` is REQUIRED — every caller has a real one (author input already
+ * validated by the route, a published version snapshot, or the manifest parsed
+ * out of a ZIP/bundle). It used to be optional, and the `{version, name}` stub
+ * synthesized in its absence was persisted as the draft and then snapshotted
+ * verbatim into the immutable `package_versions.manifest` row, where no AFPS
+ * schema had ever accepted it (issue #987).
+ *
+ * `manifest.type` MUST equal `cfg.type` — see {@link buildStoredManifest},
+ * which stamps the stored copy and throws on divergence.
+ */
 export async function createOrgItem(
   orgId: string,
   item: CreateItemInput,
   cfg: PackageTypeConfig,
-  manifest?: Record<string, unknown>,
+  manifest: Record<string, unknown>,
   forkedFrom?: string,
 ): Promise<Package> {
   const now = new Date();
   const packageId = item.id;
 
-  const finalManifest: Record<string, unknown> = manifest
-    ? { ...manifest }
-    : { version: "1.0.0", name: packageId };
-
-  finalManifest.$schema = AFPS_SCHEMA_URLS[cfg.type];
-  finalManifest.type = cfg.type;
-  if (!finalManifest.name) finalManifest.name = packageId;
-  if (item.name) finalManifest.display_name = item.name;
-  if (item.description) finalManifest.description = item.description;
+  const finalManifest = buildStoredManifest(manifest, cfg, item);
 
   try {
     const [row] = await db

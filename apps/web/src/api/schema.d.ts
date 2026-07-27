@@ -16312,13 +16312,13 @@ export interface operations {
             path?: never;
             cookie?: never;
         };
-        /** @description Upload a package ZIP (`multipart/form-data` with a `.afps`/`.zip` file — the package ID is derived from the file name), or post a JSON body. Parsed by `parsePackageUpload`. */
+        /** @description Upload a package ZIP (`multipart/form-data` with a `.afps`/`.zip` file — the package ID is derived from the file name, and the archive must contain a valid `manifest.json`), or post a JSON body carrying the manifest. Parsed by `parsePackageUpload`. */
         requestBody: {
             content: {
                 "multipart/form-data": {
                     /**
                      * Format: binary
-                     * @description Package archive (`.afps` or `.zip`). File name (sans extension) is the kebab-case package id.
+                     * @description Package archive (`.afps` or `.zip`) containing a valid `manifest.json`. File name (sans extension) is the kebab-case package id.
                      */
                     file: Blob;
                 };
@@ -16331,10 +16331,8 @@ export interface operations {
                     name?: string;
                     /** @description Package description. Auto-extracted from the manifest if omitted. */
                     description?: string;
-                    /** @description Initial semver (optional). */
-                    version?: string;
-                    /** @description Optional manifest object (stored as-is). */
-                    manifest?: {
+                    /** @description Manifest object, validated against the AFPS mcp-server schema and stored as-is. */
+                    manifest: {
                         [key: string]: unknown;
                     };
                 };

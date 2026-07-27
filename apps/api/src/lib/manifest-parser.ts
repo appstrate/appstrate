@@ -16,15 +16,6 @@ export function parseManifestFromFiles(files: Record<string, Uint8Array>): Recor
   return parseManifestBytes(data);
 }
 
-/** Parse manifest.json bytes, returning undefined on failure instead of throwing. */
-export function parseManifestBytesSafe(bytes: Uint8Array): Record<string, unknown> | undefined {
-  try {
-    return parseManifestBytes(bytes);
-  } catch {
-    return undefined;
-  }
-}
-
 /** Parse raw bytes as a JSON object. Throws on invalid JSON or non-object result. */
 function parseManifestBytes(bytes: Uint8Array): Record<string, unknown> {
   const text = new TextDecoder().decode(bytes);
