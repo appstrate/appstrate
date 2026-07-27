@@ -208,6 +208,12 @@ const codexProvider: ModelProviderDefinition = {
   // fetched 2026-07-27) and re-reviewed whenever
   // `apps/api/src/data/subscription-watch/chatgpt.json` drifts.
   //
+  // That review is no longer trust-based: `apps/api/test/unit/services/
+  // curated-model-drift.test.ts` fails CI when the vendored openai catalog
+  // gains an id newer than this list. A catalog id the subscription does NOT
+  // serve is recorded — after checking the doc above — in
+  // `apps/api/src/data/subscription-watch/reviewed.json`, never just dropped.
+  //
   // Recommended set, newest first. `gpt-5.3-codex-spark` (Pro-only research
   // preview) is also recommended but is absent from openai.json, so the boot
   // check forbids featuring it — it lives in the candidate list only.
