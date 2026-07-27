@@ -5878,7 +5878,7 @@ export interface components {
         AppstrateUser: string;
         /** @description API version override (format: YYYY-MM-DD). Defaults to the org's pinned version or the current platform version. */
         AppstrateVersion: string;
-        /** @description Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Cached for 24 hours. */
+        /** @description Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Cached for 24 hours. Only the operations that declare this parameter honour it — sending it to any other mutating operation is refused with `400 idempotency_not_supported` rather than silently ignored. Safe methods (GET/HEAD/OPTIONS) ignore it. */
         IdempotencyKey: string;
         /** @description Application ID. Required for cookie auth (SSE cannot send X-Application-Id header). Not needed for API key auth (app resolved from key). */
         SseAppId: string;
@@ -6820,7 +6820,7 @@ export interface operations {
                 "Appstrate-User"?: components["parameters"]["AppstrateUser"];
                 /** @description API version override (format: YYYY-MM-DD). Defaults to the org's pinned version or the current platform version. */
                 "Appstrate-Version"?: components["parameters"]["AppstrateVersion"];
-                /** @description Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Cached for 24 hours. */
+                /** @description Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Cached for 24 hours. Only the operations that declare this parameter honour it — sending it to any other mutating operation is refused with `400 idempotency_not_supported` rather than silently ignored. Safe methods (GET/HEAD/OPTIONS) ignore it. */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path: {
@@ -10220,7 +10220,7 @@ export interface operations {
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
                 /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
                 "X-Application-Id"?: components["parameters"]["XAppId"];
-                /** @description Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Cached for 24 hours. */
+                /** @description Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Cached for 24 hours. Only the operations that declare this parameter honour it — sending it to any other mutating operation is refused with `400 idempotency_not_supported` rather than silently ignored. Safe methods (GET/HEAD/OPTIONS) ignore it. */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path?: never;
@@ -14027,7 +14027,7 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Cached for 24 hours. */
+                /** @description Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Cached for 24 hours. Only the operations that declare this parameter honour it — sending it to any other mutating operation is refused with `400 idempotency_not_supported` rather than silently ignored. Safe methods (GET/HEAD/OPTIONS) ignore it. */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path?: never;
@@ -18092,7 +18092,7 @@ export interface operations {
     listRuns: {
         parameters: {
             query?: {
-                /** @description Filter runs by user. `me` returns only the current user's runs. Omit for all org runs. */
+                /** @description Filter runs by user. `me` is the only accepted value and returns only the current user's runs. Omit (or send an empty value) for all org runs the caller may see. Any other value — an arbitrary user id, for instance — is rejected with `400`; it is never ignored, so a filtered response is never silently widened to the whole org. */
                 user?: "me";
                 limit?: number;
                 offset?: number;
@@ -18132,7 +18132,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Invalid query parameter (e.g. malformed date) */
+            /** @description Invalid query parameter (unknown `user` value, malformed date, …) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -18156,7 +18156,7 @@ export interface operations {
                 "Appstrate-User"?: components["parameters"]["AppstrateUser"];
                 /** @description API version override (format: YYYY-MM-DD). Defaults to the org's pinned version or the current platform version. */
                 "Appstrate-Version"?: components["parameters"]["AppstrateVersion"];
-                /** @description Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Cached for 24 hours. */
+                /** @description Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Cached for 24 hours. Only the operations that declare this parameter honour it — sending it to any other mutating operation is refused with `400 idempotency_not_supported` rather than silently ignored. Safe methods (GET/HEAD/OPTIONS) ignore it. */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path?: never;
@@ -18416,7 +18416,7 @@ export interface operations {
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
                 /** @description API version override (format: YYYY-MM-DD). Defaults to the org's pinned version or the current platform version. */
                 "Appstrate-Version"?: components["parameters"]["AppstrateVersion"];
-                /** @description Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Cached for 24 hours. */
+                /** @description Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Cached for 24 hours. Only the operations that declare this parameter honour it — sending it to any other mutating operation is refused with `400 idempotency_not_supported` rather than silently ignored. Safe methods (GET/HEAD/OPTIONS) ignore it. */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path?: never;
@@ -19058,6 +19058,11 @@ export interface operations {
                     /** @constant */
                     datacontenttype: "application/json";
                     data: Record<string, never>;
+                    /**
+                     * Format: uri
+                     * @description OPTIONAL CloudEvents attribute identifying the JSON Schema the `data` payload adheres to. Emitted for canonical event types (e.g. `https://schemas.afps.dev/v0/events/memory.added.schema.json`); absent for third-party `@scope/tool.verb` events.
+                     */
+                    dataschema?: string;
                     sequence: number;
                 };
             };
@@ -19797,7 +19802,7 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Cached for 24 hours. */
+                /** @description Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Cached for 24 hours. Only the operations that declare this parameter honour it — sending it to any other mutating operation is refused with `400 idempotency_not_supported` rather than silently ignored. Safe methods (GET/HEAD/OPTIONS) ignore it. */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path?: never;
