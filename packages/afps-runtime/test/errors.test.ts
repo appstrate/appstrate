@@ -12,6 +12,8 @@ import {
   WorkloadExitError,
   isAfpsError,
   toProblem,
+  afpsErrorTypeUri,
+  AFPS_ERROR_CODES,
 } from "../src/errors.ts";
 import { BundleError } from "../src/bundle/errors.ts";
 import { BundleSignaturePolicyError } from "../src/bundle/signature-policy.ts";
@@ -97,7 +99,7 @@ describe("toProblem (RFC 9457)", () => {
     });
     const problem = toProblem(err);
     expect(problem.code).toBe("AUTHORIZED_URIS_MISMATCH");
-    expect(problem.type).toBe("https://docs.appstrate.dev/errors/AUTHORIZED-URIS-MISMATCH");
+    expect(problem.type).toBe("https://docs.appstrate.dev/errors/afps/AUTHORIZED-URIS-MISMATCH");
     expect(problem.title).toBe("AuthorizedUrisError");
     expect(problem.status).toBe(422);
     expect(problem.detail).toBe("rejected");
@@ -128,86 +130,69 @@ describe("toProblem (RFC 9457)", () => {
 });
 
 /**
- * One error code must produce ONE `type` URI no matter which layer raised
- * it. The runtime duplicates core's two-line `codeToType()` (core is a
- * devDependency here, not a runtime one — see the rationale in
- * `src/errors.ts`), so this asserts the two implementations agree byte for
- * byte across the whole `AfpsErrorCode` union.
+ * The runtime and the platform must share ONE documentation host — but not
+ * one flat namespace: their code catalogues overlap on names that mean
+ * different things (`INTEGRITY_MISMATCH` vs `integrity_mismatch`). The
+ * runtime therefore adds an `afps/` segment.
+ *
+ * These assertions pin the relationship rather than byte-identity: same
+ * host and `/errors` root, same slug transform, differing by exactly the
+ * namespace segment. Drift in either implementation fails here.
+ * `apps/api/test/unit/error-uri-namespaces.test.ts` proves the resulting
+ * URI sets never collide.
  */
-describe("toProblem type URI ↔ @appstrate/core parity", () => {
-  /** Every member of `AfpsErrorCode`, including both casing families. */
-  const AFPS_ERROR_CODES: readonly string[] = [
-    // BundleErrorCode
-    "ARCHIVE_INVALID",
-    "BUNDLE_JSON_MISSING",
-    "BUNDLE_JSON_INVALID",
-    "RECORD_MISSING",
-    "RECORD_MALFORMED",
-    "RECORD_MISMATCH",
-    "INTEGRITY_MISMATCH",
-    "VERSION_UNSUPPORTED",
-    "LIMITS_EXCEEDED",
-    "MANIFEST_SCHEMA",
-    "DEPENDENCY_UNRESOLVED",
-    "TOOL_BUNDLE_FAILED",
-    // SignaturePolicyReason + unsigned_required (lower_snake family)
-    "signature_invalid",
-    "alg_unsupported",
-    "chain_untrusted",
-    "chain_invalid",
-    "chain_missing",
-    "malformed",
-    "unsigned",
-    "unsigned_required",
-    // Runner / resolver / history taxonomy
-    "RUN_TIMEOUT",
-    "RUN_CANCELLED",
-    "WORKLOAD_EXIT_NONZERO",
-    "AUTHORIZED_URIS_EMPTY",
-    "AUTHORIZED_URIS_MISMATCH",
-    "RESOLVER_MISSING_REQUIRED",
-    "RESOLVER_BODY_REFERENCE_FORBIDDEN",
-    "RESOLVER_BODY_TOO_LARGE",
-    "RESOLVER_BODY_INVALID",
-    "RESOLVER_PATH_OUTSIDE_ALLOWED_ROOTS",
-    "RESOLVER_PATH_SYMLINK_REFUSED",
-    "RESOLVER_PATH_INVALID",
-    "RESOLVER_URL_BLOCKED",
-    "RESOLVER_REDIRECT_BLOCKED",
-    "RESOLVER_CREDENTIAL_EXFIL_BLOCKED",
-    "RUN_HISTORY_FETCH_FAILED",
-    "RUN_HISTORY_BAD_RESPONSE",
-    "CREDENTIAL_RESOLUTION",
-  ];
+describe("toProblem type URI ↔ @appstrate/core namespace relationship", () => {
+  const ERRORS_ROOT = "https://docs.appstrate.dev/errors";
 
-  /** The URI core would mint for the same code. */
+  /** The URI core mints for the same code. */
   function coreTypeUri(code: string): string {
     return new ApiError({ status: 422, code, title: "t", detail: "d" }).toProblemDetail("req_test")
       .type;
   }
 
-  it("produces the identical type URI for every AFPS error code", () => {
+  it("enumerates the AfpsErrorCode union exhaustively", () => {
+    // Compile-time exhaustiveness lives on the `satisfies Record<AfpsErrorCode, true>`
+    // in src/errors.ts; this pins the count so a silent shrink is visible.
+    expect(AFPS_ERROR_CODES).toHaveLength(38);
+    expect(new Set(AFPS_ERROR_CODES).size).toBe(AFPS_ERROR_CODES.length);
+  });
+
+  it("shares core's host and /errors root", () => {
     for (const code of AFPS_ERROR_CODES) {
-      const err = new ResolverError(code as never, "boom");
-      expect(toProblem(err).type).toBe(coreTypeUri(code));
+      expect(coreTypeUri(code).startsWith(`${ERRORS_ROOT}/`)).toBe(true);
+      expect(afpsErrorTypeUri(code).startsWith(`${ERRORS_ROOT}/`)).toBe(true);
     }
   });
 
-  it("uses the canonical docs host — never the unresolvable errors.* subdomain", () => {
+  it("adds exactly the afps/ segment and nothing else", () => {
+    for (const code of AFPS_ERROR_CODES) {
+      expect(afpsErrorTypeUri(code)).toBe(
+        `${ERRORS_ROOT}/afps/${coreTypeUri(code).slice(ERRORS_ROOT.length + 1)}`,
+      );
+    }
+  });
+
+  it("applies an identical code→slug transform (underscores to dashes, no case folding)", () => {
+    for (const code of AFPS_ERROR_CODES) {
+      const coreSlug = coreTypeUri(code).slice(`${ERRORS_ROOT}/`.length);
+      const afpsSlug = afpsErrorTypeUri(code).slice(`${ERRORS_ROOT}/afps/`.length);
+      expect(afpsSlug).toBe(coreSlug);
+      expect(afpsSlug).not.toContain("_");
+      expect(afpsSlug).not.toContain("/");
+    }
+  });
+
+  it("routes toProblem through the namespaced URI — never the dead errors.* subdomain", () => {
     for (const code of AFPS_ERROR_CODES) {
       const uri = toProblem(new ResolverError(code as never, "boom")).type;
-      expect(uri.startsWith("https://docs.appstrate.dev/errors/")).toBe(true);
+      expect(uri).toBe(afpsErrorTypeUri(code));
       expect(uri).not.toContain("errors.appstrate.dev");
-      expect(uri).not.toContain("_");
     }
-  });
-
-  it("normalises underscores to dashes exactly as core does", () => {
     expect(toProblem(new RunCancelledError("x")).type).toBe(
-      "https://docs.appstrate.dev/errors/RUN-CANCELLED",
+      "https://docs.appstrate.dev/errors/afps/RUN-CANCELLED",
     );
     expect(toProblem(new BundleSignaturePolicyError("unsigned_required", "x")).type).toBe(
-      "https://docs.appstrate.dev/errors/unsigned-required",
+      "https://docs.appstrate.dev/errors/afps/unsigned-required",
     );
   });
 });

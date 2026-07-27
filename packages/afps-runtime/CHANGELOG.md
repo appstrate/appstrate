@@ -25,16 +25,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `schemas.afps.dev/v0/events/` (AFPS-namespaced events) and
   `schemas.appstrate.dev/v0/events/` (`appstrate.*` vendor events).
 
-### Fixed — one error code, one RFC 9457 `type` URI
+### Fixed — RFC 9457 `type` URIs moved to the canonical docs host
 
 - `toProblem()` emitted `https://errors.appstrate.dev/{code}` while the
   platform emitted `https://docs.appstrate.dev/errors/{code-with-dashes}` for
   the same concept — two hosts (both unresolvable) and two code spellings.
-  `toProblem()` now uses the canonical docs host and the same
-  underscore→dash normalisation, so a given code yields a single URI
-  regardless of which layer raised it. A parity test asserts byte-identity
-  against `@appstrate/core`'s implementation over the whole `AfpsErrorCode`
-  union.
+  Runtime errors now resolve under the canonical docs host, in their own
+  namespace: `https://docs.appstrate.dev/errors/afps/{code-with-dashes}`.
+- The `afps/` segment is load-bearing. The two catalogues overlap on names
+  that mean different things — `INTEGRITY_MISMATCH` here is an SRI mismatch
+  over stored bytes, the platform's `integrity_mismatch` is a 409 "version
+  already exists with different content" — and renaming a code on either
+  side would be a wire-breaking change. The namespace makes the collision
+  structurally impossible instead of merely documented.
+- New exports on `@appstrate/afps-runtime/errors`: `afpsErrorTypeUri(code)`
+  and `AFPS_ERROR_CODES` (exhaustive over `AfpsErrorCode` at compile time).
 
 ### Added — shared tool-result truncation
 
