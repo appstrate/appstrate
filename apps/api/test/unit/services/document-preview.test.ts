@@ -208,17 +208,11 @@ describe("mayServeActiveHtml", () => {
     }
   });
 
-  it("takes the loading context as its ONLY input — no separate-origin escape hatch", () => {
-    // Regression guard. The function used to take `{ separateOrigin,
-    // secFetchDest }` and short-circuit to `true` whenever USERCONTENT_URL was
-    // set — which is what let agent HTML render as an active TOP-LEVEL
-    // document, the render this branch removes. Reintroducing any second input
-    // breaks this suite twice over: the signature change makes every call above
-    // a compile error, and at runtime an ignored `"iframe"` string yields
-    // `false`. Nothing but the header value may flip the answer, so passing one
-    // alongside a would-be separate-origin flag changes nothing.
-    const extra = mayServeActiveHtml as (d: string | null, ...rest: unknown[]) => boolean;
-    expect(extra("document", { separateOrigin: true })).toBe(false);
-    expect(extra("iframe", { separateOrigin: false })).toBe(true);
-  });
+  // NOTE for the next reader: the function used to take `{ separateOrigin,
+  // secFetchDest }` and short-circuit to `true` whenever USERCONTENT_URL was
+  // set — which is what let agent HTML render as an active TOP-LEVEL document,
+  // the render this branch removes. There is deliberately no runtime test for
+  // "a second input was reintroduced": the guard against that is the compile
+  // error every call above would become, and a runtime call passing an extra
+  // argument only demonstrates that JavaScript ignores extra arguments.
 });

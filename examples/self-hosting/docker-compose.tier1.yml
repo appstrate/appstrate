@@ -206,10 +206,12 @@ services:
       # client-less entry for DCR-based remote MCP integrations).
       - SYSTEM_INTEGRATIONS
       # Separate origin for agent-generated HTML previews. Unset => previews are
-      # served same-origin on APP_URL (hardened, but a weaker XSS posture). When
-      # set, boot FAILS unless its host differs from APP_URL's — the platform
-      # treats a configured value as proof of isolation and serves agent HTML as
-      # ACTIVE content. Point it at a second domain resolving to this server.
+      # served same-origin on APP_URL (hardened, but a weaker XSS posture). It
+      # grants NO behavioural exemption: agent HTML is rendered as ACTIVE content
+      # only inside the dashboard's sandboxed iframe, in EVERY mode. What a
+      # configured value buys is isolation — its own cookie jar, storage
+      # partition and process — which is why boot FAILS unless its host differs
+      # from APP_URL's. Point it at a second domain resolving to this server.
       - USERCONTENT_URL
       - AUTH_DISABLE_SIGNUP
       - AUTH_DISABLE_ORG_CREATION

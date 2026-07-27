@@ -25,10 +25,17 @@
  *    that channel — a sandboxed navigable may always navigate ITSELF, and
  *    navigation is covered by no `connect-src`/`form-action`. Verified in Chrome:
  *    a cross-origin self-navigation out of this frame is blocked with no network
- *    request to the target, while the initial load still succeeds. Navigation
- *    WITHIN the preview origin is still possible and is fine — that origin serves
- *    nothing but token-bound preview bytes. **Framing any NEW origin from the SPA
- *    therefore requires widening `frame-src` first**, or the frame will not load.
+ *    request to the target, while the initial load still succeeds. What it bounds
+ *    is cross-origin NAVIGATION and nothing more — it is not a general
+ *    exfiltration control (WebRTC/STUN is a named, pre-existing residual: see
+ *    `buildPreviewCsp` on the API). Navigation WITHIN the allowed origin stays
+ *    possible: in `USERCONTENT_URL` mode that origin is nothing but token-bound
+ *    preview bytes, and in the default mode (`frame-src 'self'`) it is the whole
+ *    app origin — still harmless, because the frame is opaque-origin so SameSite
+ *    cookies are not sent, and `frame-src` is re-enforced across a 302 so an open
+ *    redirect cannot launder the navigation back out. **Framing any NEW origin
+ *    from the SPA therefore requires widening `frame-src` first**, or the frame
+ *    will not load.
  *
  * The `pdf` iframe is DELIBERATELY sandboxless — Chrome refuses to render its
  * native PDF viewer inside a sandboxed iframe without `allow-same-origin`, and

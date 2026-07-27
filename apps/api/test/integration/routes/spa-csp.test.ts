@@ -4,20 +4,25 @@
  * Integration tests for the SPA document's `Content-Security-Policy`.
  *
  * The SPA shell is the PARENT document of the agent-HTML preview iframe, and its
- * `frame-src` is the only place the preview's last exfiltration channel can be
- * closed: the preview response's own CSP `sandbox allow-scripts` cannot stop the
- * frame navigating ITSELF, and navigation is not covered by `connect-src` or
+ * `frame-src` is the only place the preview frame's cross-origin NAVIGATION can
+ * be bounded: the preview response's own CSP `sandbox allow-scripts` cannot stop
+ * the frame navigating ITSELF, and navigation is not covered by `connect-src` or
  * `form-action`. Measured in Chrome against this exact header — a sandboxed
  * child's attempt to navigate itself to an origin outside `frame-src` is blocked
  * with no network request to the target, while its legitimate initial load still
- * succeeds.
+ * succeeds. (Navigation is all it bounds; exfiltration in general is not closed —
+ * see the WebRTC/STUN residual in `services/document-preview.ts`.)
  *
- * Two things are pinned here, and the second matters as much as the first:
+ * Three things are pinned here, and the last two matter as much as the first:
  *  - the header is present, and its single origin tracks `USERCONTENT_URL`;
  *  - the header carries `frame-src` and NOTHING ELSE. A full SPA CSP would break
  *    the Vite build's inline bootstrapping, so a `script-src` (or any other
  *    directive) appearing next to `frame-src` is a real breakage, not a
- *    tightening.
+ *    tightening;
+ *  - the handler is actually MOUNTED in `index.ts`. Every assertion above runs
+ *    against a locally-mounted handler, so on its own the suite stays green if
+ *    production reverts to the old inline `app.get("/*", …)` and the header
+ *    disappears from every real response.
  *
  * The handler is mounted on a bare Hono rather than reached through
  * `getTestApp()`: `getTestApp()` deliberately skips static serving, and the SPA
@@ -27,6 +32,8 @@
 
 import { describe, it, expect } from "bun:test";
 import { Hono } from "hono";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { _resetCacheForTesting } from "@appstrate/env";
 import { createSpaFallbackHandler } from "../../../src/routes/spa.ts";
 
@@ -136,5 +143,37 @@ describe("SPA document CSP", () => {
       // Injected inside <head>, before the closing tag — not appended after it.
       expect(body.indexOf("__APP_CONFIG__")).toBeLessThan(body.indexOf("</head>"));
     });
+  });
+});
+
+/**
+ * The production WIRING, pinned by reading `index.ts`'s source rather than by
+ * making a request — the same technique
+ * `apps/web/src/components/test/document-preview.test.ts` uses on its component.
+ *
+ * A request assertion is not available here: importing `index.ts` boots a real
+ * server (it default-exports a `Bun.serve` config and runs the boot sequence),
+ * and the SPA shell it reads (`apps/web/dist/index.html`) does not exist under
+ * `bun test`, so the handler would throw before any header could be inspected.
+ * Without this block the whole suite stays green after a revert to the old
+ * inline `app.get("/*", async (c) => …)`: every test above mounts the handler
+ * itself, so nothing else notices that no production response carries the CSP.
+ */
+const INDEX_TS = readFileSync(
+  fileURLToPath(new URL("../../../src/index.ts", import.meta.url)),
+  "utf-8",
+);
+
+describe("SPA fallback wiring in index.ts", () => {
+  it("mounts the SPA fallback via createSpaFallbackHandler", () => {
+    expect(INDEX_TS).toContain(`import { createSpaFallbackHandler } from "./routes/spa.ts"`);
+    expect(INDEX_TS).toContain(`app.get("/*", createSpaFallbackHandler(buildAppConfigScript))`);
+  });
+
+  it("does not serve the SPA shell from an inline handler (the CSP would vanish)", () => {
+    // The reverted shape: `app.get("/*", async (c) => { … index.html … })`.
+    // Any catch-all registered with an inline function body is the regression.
+    expect(INDEX_TS).not.toMatch(/app\.get\(\s*"\/\*"\s*,\s*(async\s*)?\(/);
+    expect(INDEX_TS).not.toContain("apps/web/dist/index.html");
   });
 });

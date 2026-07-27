@@ -568,17 +568,29 @@ const envSchema = z
     // grants a configured value any behavioural exemption:
     // `mayServeActiveHtml()` reads the loading context and nothing else, so
     // agent HTML is ACTIVE only for a proven `Sec-Fetch-Dest: iframe` load in
-    // every mode. What a same-host value costs is the LAST remaining layer.
-    // Agent-authored inline script (the CSP grants `script-src 'unsafe-inline'`
-    // — the page has to render) is parsed inside an iframe on the app's own
-    // host, with only the response's CSP `sandbox allow-scripts` between it and
-    // a real origin. That directive is invisible to the route once the response
-    // leaves: a reverse proxy or CDN that rewrites or strips response headers,
-    // or a UA that ignores `sandbox`, silently removes it and the script is
-    // back on the app's host with its localStorage and non-HttpOnly cookies.
-    // A separate host is the layer that outlives both, which is exactly why it
-    // is fail-boot rather than a warning; presence must never be mistaken for
-    // separation.
+    // every mode.
+    //
+    // What a same-host value costs is NOT what an earlier version of this note
+    // claimed. A proxy stripping the response CSP does not put agent script on
+    // the app's host with the SPA's localStorage and cookies: the only context
+    // that renders active HTML is the SPA's `<iframe sandbox="allow-scripts">`,
+    // and that ATTRIBUTE survives header stripping, so the document stays
+    // opaque-origin either way. The residuals that are actually real, and that a
+    // separate host is the only remaining layer against:
+    //  - a user agent that ignores sandboxing altogether — it would ignore the
+    //    iframe attribute exactly as it ignores the header, so neither copy of
+    //    the sandbox is a backstop for the other;
+    //  - a FUTURE same-origin embedder that frames the preview WITHOUT the
+    //    attribute. `frame-ancestors <appOrigin>` deliberately permits any
+    //    app-origin page to frame it, so for such an embedder the response
+    //    header is the only control — and a stripped header then leaves
+    //    agent-authored inline script (the CSP grants `script-src
+    //    'unsafe-inline'`; the page has to render) executing with a real origin
+    //    on the app's own host;
+    //  - and, independently of any failure at all, the ordinary benefit: a
+    //    distinct storage partition, cookie jar and process.
+    // A separate host outlives all three, which is exactly why it is fail-boot
+    // rather than a warning; presence must never be mistaken for separation.
     //
     // The bar is HOST inequality — deliberately ONE check, sitting between the
     // two obvious candidates:
@@ -798,10 +810,11 @@ const envSchema = z
     path: ["APP_URL"],
   })
   // The untrusted-preview origin must actually BE a different origin. See the
-  // long note on USERCONTENT_URL above: a same-host value silently parses
-  // agent-authored inline script on the app's own host, with only the response
-  // CSP's `sandbox` between it and a real origin. Host separation is the layer
-  // that outlives a stripped header or an unenforced sandbox directive.
+  // long note on USERCONTENT_URL above for what a same-host value costs: it is
+  // not "a stripped header puts script on the app's host" (the SPA iframe's
+  // own `sandbox` attribute survives that), it is a UA that ignores sandboxing
+  // at all, a future app-origin embedder that frames the preview without the
+  // attribute, and the storage/cookie/process partition itself.
   .refine(
     (env) => {
       if (!env.USERCONTENT_URL) return true;
@@ -813,7 +826,7 @@ const envSchema = z
     },
     {
       message:
-        "USERCONTENT_URL must be a DIFFERENT host than APP_URL — a copy of APP_URL (or the same host on another port/scheme) is not isolation. The document-preview route serves agent-authored HTML as ACTIVE content only for a proven iframe load, in every mode, so a configured value buys no extra execution context; what it buys is the isolation of the execution that does happen. The preview response's CSP `sandbox allow-scripts` denies that script an origin (no localStorage, no cookies, no popups) whatever host it is served from, but that directive is gone the moment a reverse proxy or CDN rewrites or strips response headers, or a user agent ignores it — and then untrusted inline script is executing on the app's own host, with the SPA's localStorage and non-HttpOnly cookies. A separate host is the layer that survives both, which is why it is enforced at boot rather than merely recommended: it is the one this route cannot verify at runtime. Point it at a separate domain resolving to the same server (ideally a separate registrable domain / eTLD+1, e.g. appstrate-usercontent.example vs app.example.com), or leave it unset to serve previews same-origin.",
+        "USERCONTENT_URL must be a DIFFERENT host than APP_URL — a copy of APP_URL (or the same host on another port/scheme) is not isolation. The document-preview route serves agent-authored HTML as ACTIVE content only for a proven iframe load, in every mode, so a configured value buys no extra execution context; what it buys is the isolation of the execution that does happen. Today that execution happens in the SPA's `<iframe sandbox=\"allow-scripts\">`, whose sandbox attribute holds even if the response CSP is stripped in transit — so the host separation is not about a stripped header. It is about the cases where nothing else is left: a user agent that ignores sandboxing altogether (it ignores the attribute too), and a future app-origin page that frames the preview WITHOUT the attribute — `frame-ancestors` permits any app-origin embedder, so there the response header is the only control, and untrusted inline script that escapes it is then executing with a real origin on the app's own host. A separate host also buys the ordinary partition: its own cookie jar, storage and process. Enforced at boot rather than merely recommended because none of it is verifiable at runtime. Point it at a separate domain resolving to the same server (ideally a separate registrable domain / eTLD+1, e.g. appstrate-usercontent.example vs app.example.com), or leave it unset to serve previews same-origin.",
       path: ["USERCONTENT_URL"],
     },
   )

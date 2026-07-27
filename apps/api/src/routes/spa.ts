@@ -22,7 +22,7 @@ const INDEX_HTML = "./apps/web/dist/index.html";
  * naming the single origin the platform embeds: the document-preview origin.
  *
  * This is the parent-side half of the agent-HTML preview containment. The
- * preview response's own CSP cannot close the last channel: its
+ * preview response's own CSP cannot close the NAVIGATION channel: its
  * `sandbox allow-scripts` denies the document an origin, but a sandboxed
  * navigable may ALWAYS navigate ITSELF (the sandboxed-top-level-navigation flags
  * gate navigating an ANCESTOR only), and `connect-src` / `form-action` do not
@@ -35,12 +35,29 @@ const INDEX_HTML = "./apps/web/dist/index.html";
  * navigate itself to an origin outside the list is blocked with **no network
  * request to the target**, while the frame's legitimate initial load succeeds.
  *
- * What this does NOT do, stated so nobody reads more into it: it does not stop
- * the frame navigating WITHIN the allowed origin. The agent document can still
- * replace itself with another document on the preview origin — but that origin
- * only ever serves token-bound preview bytes, i.e. the same trust level the
- * frame already had. What is now blocked is every CROSS-origin navigation, which
- * is the exfiltration channel.
+ * What this closes is every cross-origin NAVIGATION out of the frame. It is not
+ * a general exfiltration control — see `buildPreviewCsp` in
+ * `apps/api/src/services/document-preview.ts` for the named WebRTC/STUN
+ * residual, which no header here or on the preview response covers.
+ *
+ * It also does not stop the frame navigating WITHIN the allowed origin, and what
+ * that residual amounts to differs by mode:
+ *
+ *  - `USERCONTENT_URL` mode: the allowed origin serves nothing but token-bound
+ *    preview bytes, so the frame can only reach the trust level it already had.
+ *  - DEFAULT mode: the emitted value is `frame-src 'self'` — the WHOLE app
+ *    origin, i.e. the SPA, `/api/*`, `/login`. The frame may navigate itself to
+ *    any app-origin page. That is still not an exfiltration channel: the frame is
+ *    opaque-origin (the preview response's CSP `sandbox`), so SameSite cookies
+ *    are not sent on such a navigation, and `frame-src` is re-enforced ACROSS A
+ *    302 — measured in Chrome — so an open redirect on the app origin cannot
+ *    launder the navigation back out to an attacker's host.
+ *
+ * A path-scoped `frame-src <appOrigin>/preview/documents/` would tighten the
+ * default mode further. Deliberately not taken: `'self'` tracks whatever origin
+ * actually served this document, while a path source expression has to spell out
+ * a scheme + host, so it silently stops matching — and the preview frame silently
+ * stops loading — the moment `APP_URL` or the proxy in front of it drifts.
  *
  * Deliberately NOT a full SPA CSP: no `script-src`, no `default-src`, nothing
  * else. The Vite build bootstraps the app from inline markup, so a `script-src`

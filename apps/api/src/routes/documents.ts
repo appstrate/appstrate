@@ -346,10 +346,11 @@ export function createDocumentPreviewRouter() {
         "Referrer-Policy": "no-referrer",
         "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
         "Cache-Control": "private, no-store",
-        // On the active branch the CSP sandbox gives the document an opaque
-        // origin, which `same-origin` can never match — so it lands in its own
-        // browsing-context group. Stricter than the intended pairing, not a
-        // regression; keep it (the inert branch still matches normally).
+        // COOP is processed for TOP-LEVEL documents only, and the active branch
+        // is served exclusively to `Sec-Fetch-Dest: iframe` — so on that branch
+        // the header is simply INERT, neither helping nor hurting. It stays
+        // because the OTHER branch (inert `text/plain` source) IS reachable
+        // top-level, and there it does its normal job.
         "Cross-Origin-Opener-Policy": "same-origin",
         "Cross-Origin-Resource-Policy": corp,
         // The representation depends on the request header — say so, even
