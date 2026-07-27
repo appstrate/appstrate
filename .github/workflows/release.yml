@@ -35,7 +35,19 @@ permissions:
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # 90, not 30. These are multi-arch builds (`linux/amd64,linux/arm64`) whose
+    # `linux/arm64` half runs under QEMU emulation on an amd64 runner, and the
+    # only thing that normally keeps them short is the `type=gha` layer cache.
+    # That cache is a single repo-wide 10 GB LRU shared with every other
+    # workflow, so an ordinary run of Test/Firecracker/preview between two
+    # releases can evict it. A warm build of the `appstrate` image takes ~7-9
+    # min (beta.41: 6m44, beta.42: 8m41); the cold build that follows an
+    # eviction emulates the whole web bundle on arm64 and blew past 30 min,
+    # which cancelled v1.0.0-beta.43 mid-flight and burnt the tag (release.yml
+    # has no `workflow_dispatch`, so a cancelled release costs a version bump).
+    # The ceiling exists to catch a genuinely hung build, not to bound a cold
+    # cache — keep it well above the cold-build cost.
+    timeout-minutes: 90
     strategy:
       matrix:
         # ⚠️  DUPLICATED MATRIX — keep in lockstep with the identical `include:`
