@@ -294,12 +294,13 @@ describe("GET /api/agents/:scope/:name/map", () => {
     const ids = items.map((i) => i.id);
     // `note` is granted; `pin` is NOT, so it is absent rather than listed as a
     // greyed-out possibility — the card describes this agent, not the platform.
-    expect(ids).toEqual(["note", "recall_memory"]);
-    // Served by the sidecar on every run, independently of `runtime_tools`.
+    expect(ids).toEqual(["note", "run_history", "recall_memory"]);
+    // Wired by the sidecar on every run, independently of `runtime_tools`.
     expect(items.find((i) => i.id === "recall_memory")!.always).toBe(true);
+    expect(items.find((i) => i.id === "run_history")!.always).toBe(true);
   });
 
-  it("no runtime tool granted → only the always-on recall row", async () => {
+  it("no runtime tool granted → only the always-on injected rows", async () => {
     await seedAgentWith(agentManifest({}));
 
     const body = (await (await getMap()).json()) as MapBody;
@@ -307,7 +308,7 @@ describe("GET /api/agents/:scope/:name/map", () => {
     const items = body.nodes.find((n) => n.id === "system_tools")!.data.items as Array<
       Record<string, unknown>
     >;
-    expect(items.map((i) => i.id)).toEqual(["recall_memory"]);
+    expect(items.map((i) => i.id)).toEqual(["run_history", "recall_memory"]);
   });
 
   it("unknown agent → 404", async () => {

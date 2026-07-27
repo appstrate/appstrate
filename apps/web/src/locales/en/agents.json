@@ -62,6 +62,7 @@
   "map.systemTool.pin": "Pinned blocks",
   "map.systemTool.publish_document": "Document publishing",
   "map.systemTool.recall_memory": "Memory recall",
+  "map.systemTool.run_history": "Run history",
   "map.draftDefinition": "Working copy",
   "map.pinnedDefinition": "Version {{version}}",
   "map.issueCount_one": "{{count}} thing to fix",

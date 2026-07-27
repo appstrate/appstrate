@@ -40,6 +40,7 @@ import { resolveAgentConnectionReadiness } from "../services/integration-pins-se
 import { collectAgentReadinessErrors } from "../services/agent-readiness.ts";
 import { listOrgModels } from "../services/org-models.ts";
 import { RUNTIME_TOOL_CATALOG } from "@appstrate/core/runtime-tools-catalog";
+import { RUNTIME_INJECTED_TOOLS } from "@appstrate/runner-pi/runtime-tools";
 import { isToolsWildcard, parseManifestIntegrations } from "@appstrate/core/dependencies";
 import { asJSONSchemaObject, mergeWithDefaults } from "@appstrate/core/form";
 import { getAppScope } from "../lib/scope.ts";
@@ -384,21 +385,22 @@ export async function buildAgentMap(
   });
 
   // Platform runtime tools the manifest GRANTS (`output`, `log`, `note`, `pin`,
-  // `publish_document`), plus `recall_memory`, which the sidecar serves on every
-  // run regardless. Ungranted tools are deliberately absent: an empty card already
-  // says "you could add this here", so listing the possibilities inside it would
-  // describe the platform instead of this agent.
+  // `publish_document`), plus the runtime-INJECTED ones (`run_history`,
+  // `recall_memory`), which the sidecar wires on every run whatever the manifest
+  // says. Ungranted tools are deliberately absent: an empty card already says "you
+  // could add this here", so listing the possibilities inside it would describe the
+  // platform instead of this agent.
   //
-  // Ordered by the catalog rather than a local list, so a runtime tool added there
-  // shows up here untouched. And deliberately no counts of pinned blocks or
-  // archived notes — that is per-actor execution state, while the map projects the
-  // definition.
+  // Both halves come from their own registry rather than a local list, so a tool
+  // added to either shows up here untouched. And deliberately no counts of pinned
+  // blocks or archived notes — that is per-actor execution state, while the map
+  // projects the definition.
   const declaredRuntimeTools = agent.manifest.runtime_tools ?? [];
   const systemToolItems = [
     ...RUNTIME_TOOL_CATALOG.filter((tool) => declaredRuntimeTools.includes(tool.id)).map(
       (tool) => ({ id: tool.id, always: false }),
     ),
-    { id: "recall_memory", always: true },
+    ...RUNTIME_INJECTED_TOOLS.map((tool) => ({ id: tool.id, always: true })),
   ];
 
   const rightCards: Array<{ node: Omit<AgentMapNode, "position">; itemCount: number }> = [

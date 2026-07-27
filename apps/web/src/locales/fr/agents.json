@@ -62,6 +62,7 @@
   "map.systemTool.pin": "Blocs épinglés",
   "map.systemTool.publish_document": "Publication de documents",
   "map.systemTool.recall_memory": "Rappel de mémoire",
+  "map.systemTool.run_history": "Historique des exécutions",
   "map.draftDefinition": "Copie de travail",
   "map.pinnedDefinition": "Version {{version}}",
   "map.issueCount_one": "{{count}} point à corriger",
