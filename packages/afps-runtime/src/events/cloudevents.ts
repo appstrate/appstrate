@@ -74,6 +74,14 @@ export function buildCloudEventEnvelope(opts: BuildEnvelopeOptions): CloudEventE
   // event (e.g. `memory.added` without a string `content`) both fall
   // through without the attribute rather than pointing at a schema they
   // would fail. Omission is conformant — the attribute is OPTIONAL.
+  //
+  // `isCanonicalRunEvent` is a deliberate SUBSET of the published schemas:
+  // it mirrors every constraint they express and additionally rejects
+  // non-finite numbers, which `JSON.stringify` would turn into `null`.
+  // Rejecting more than the schema is always safe (it only omits an
+  // OPTIONAL attribute); accepting more would not be, so the two are kept
+  // in lockstep by `test/fixtures/canonical-event-corpus.ts` plus a
+  // coverage check derived from the generated JSON Schema documents.
   const dataschema = isCanonicalRunEvent(event) ? canonicalEventSchemaUri(event.type) : undefined;
 
   return {

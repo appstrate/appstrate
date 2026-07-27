@@ -1,6 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
 
+/**
+ * `isCanonicalRunEvent` against the shared fixture corpus.
+ *
+ * The accept/reject cases live in `test/fixtures/canonical-event-corpus.ts`
+ * and are shared verbatim with `test/events/canonical-event-schemas.test.ts`,
+ * which runs the same fixtures through the generated JSON Schemas. Both
+ * files assert against the same `valid` label, so guard↔schema parity is
+ * structural — neither file restates the other's verdict.
+ */
+
 import { describe, it, expect } from "bun:test";
+import {
+  CANONICAL_EVENT_CORPUS,
+  NON_CANONICAL_EVENTS,
+  NON_FINITE_DIVERGENCES,
+} from "../fixtures/canonical-event-corpus.ts";
 import type { RunEvent } from "@afps-spec/types";
 import {
   CANONICAL_EVENT_TYPES,
@@ -8,140 +23,26 @@ import {
   type CanonicalRunEvent,
 } from "../../src/types/canonical-events.ts";
 
-const baseEnvelope = { timestamp: 1, runId: "r1" };
-
 describe("isCanonicalRunEvent", () => {
-  it("accepts all canonical, well-formed events", () => {
-    const events: RunEvent[] = [
-      { ...baseEnvelope, type: "memory.added", content: "hello" },
-      { ...baseEnvelope, type: "memory.added", content: "scoped", scope: "shared" },
-      { ...baseEnvelope, type: "pinned.set", key: "checkpoint", content: { counter: 1 } },
-      { ...baseEnvelope, type: "pinned.set", key: "checkpoint", content: { c: 2 }, scope: "actor" },
-      { ...baseEnvelope, type: "pinned.set", key: "persona", content: "agent A" },
-      { ...baseEnvelope, type: "output.emitted", data: { ok: true } },
-      { ...baseEnvelope, type: "log.written", level: "info", message: "x" },
-      { ...baseEnvelope, type: "appstrate.progress", message: "running" },
-      { ...baseEnvelope, type: "appstrate.error", message: "boom" },
-      {
-        ...baseEnvelope,
-        type: "appstrate.metric",
-        usage: { input_tokens: 10, output_tokens: 5 },
-        cost: 0.01,
-      },
-    ];
-    for (const e of events) expect(isCanonicalRunEvent(e)).toBe(true);
+  it("returns the corpus verdict for every canonical-typed fixture", () => {
+    for (const { label, event, valid } of CANONICAL_EVENT_CORPUS) {
+      expect({ label, verdict: isCanonicalRunEvent(event) }).toEqual({ label, verdict: valid });
+    }
   });
 
-  it("rejects malformed scope on memory.added or pinned.set", () => {
-    expect(
-      isCanonicalRunEvent({
-        ...baseEnvelope,
-        type: "memory.added",
-        content: "x",
-        scope: "global",
-      } as RunEvent),
-    ).toBe(false);
-    expect(
-      isCanonicalRunEvent({
-        ...baseEnvelope,
-        type: "pinned.set",
-        key: "checkpoint",
-        content: 1,
-        scope: "everyone",
-      } as RunEvent),
-    ).toBe(false);
-    // pinned.set without `key` is rejected
-    expect(
-      isCanonicalRunEvent({
-        ...baseEnvelope,
-        type: "pinned.set",
-        content: 1,
-      } as RunEvent),
-    ).toBe(false);
-    // pinned.set without `content` is rejected
-    expect(
-      isCanonicalRunEvent({
-        ...baseEnvelope,
-        type: "pinned.set",
-        key: "checkpoint",
-      } as RunEvent),
-    ).toBe(false);
+  it("rejects event types outside the canonical vocabulary", () => {
+    for (const { label, event } of NON_CANONICAL_EVENTS) {
+      expect({ label, verdict: isCanonicalRunEvent(event) }).toEqual({ label, verdict: false });
+    }
   });
 
-  it("rejects third-party event types", () => {
-    expect(isCanonicalRunEvent({ ...baseEnvelope, type: "@my-org/audit.logged", payload: 1 })).toBe(
-      false,
-    );
-    expect(isCanonicalRunEvent({ ...baseEnvelope, type: "api_call.called", method: "GET" })).toBe(
-      false,
-    );
-    // `report.appended` was canonical until the report tool was retired in
-    // favour of durable `outputs/` documents — a stale emitter is now
-    // third-party as far as the runtime is concerned.
-    expect(
-      isCanonicalRunEvent({ ...baseEnvelope, type: "report.appended", content: "# Report" }),
-    ).toBe(false);
-  });
-
-  it("rejects malformed canonical events (tampered payloads)", () => {
-    // memory.added without content
-    expect(isCanonicalRunEvent({ ...baseEnvelope, type: "memory.added" } as RunEvent)).toBe(false);
-    // memory.added with non-string content
-    expect(
-      isCanonicalRunEvent({ ...baseEnvelope, type: "memory.added", content: 42 } as RunEvent),
-    ).toBe(false);
-    // log.written with bad level
-    expect(
-      isCanonicalRunEvent({
-        ...baseEnvelope,
-        type: "log.written",
-        level: "debug",
-        message: "x",
-      } as RunEvent),
-    ).toBe(false);
-    // log.written without message
-    expect(
-      isCanonicalRunEvent({
-        ...baseEnvelope,
-        type: "log.written",
-        level: "info",
-      } as RunEvent),
-    ).toBe(false);
-    // appstrate.progress without message
-    expect(isCanonicalRunEvent({ ...baseEnvelope, type: "appstrate.progress" } as RunEvent)).toBe(
-      false,
-    );
-    // appstrate.metric with non-object usage
-    expect(
-      isCanonicalRunEvent({ ...baseEnvelope, type: "appstrate.metric", usage: 42 } as RunEvent),
-    ).toBe(false);
-    // appstrate.metric with negative cost
-    expect(
-      isCanonicalRunEvent({ ...baseEnvelope, type: "appstrate.metric", cost: -1 } as RunEvent),
-    ).toBe(false);
-    // appstrate.metric with non-finite cost
-    expect(
-      isCanonicalRunEvent({
-        ...baseEnvelope,
-        type: "appstrate.metric",
-        cost: Number.POSITIVE_INFINITY,
-      } as RunEvent),
-    ).toBe(false);
-  });
-
-  it("accepts appstrate.metric with no payload (durationMs-only or empty)", () => {
-    // A runner with no LLM traffic still emits a metric event — usage
-    // and cost are both optional.
-    expect(isCanonicalRunEvent({ ...baseEnvelope, type: "appstrate.metric" } as RunEvent)).toBe(
-      true,
-    );
-    expect(
-      isCanonicalRunEvent({
-        ...baseEnvelope,
-        type: "appstrate.metric",
-        durationMs: 1234,
-      } as RunEvent),
-    ).toBe(true);
+  it("rejects non-finite numbers the wire cannot carry", () => {
+    // Deliberately stricter than an in-memory JSON Schema run — see
+    // NON_FINITE_DIVERGENCES. `canonical-event-schemas.test.ts` asserts the
+    // other half (ajv accepts them, JSON serialization does not).
+    for (const { label, event } of NON_FINITE_DIVERGENCES) {
+      expect({ label, verdict: isCanonicalRunEvent(event) }).toEqual({ label, verdict: false });
+    }
   });
 });
 
@@ -150,7 +51,13 @@ describe("isCanonicalRunEvent — type-guard narrowing", () => {
   // `foldEvent`'s switch be exhaustively typed. Assert it here so a widening of
   // the return type is caught by this file and not only by the reducer.
   it("uses the discriminant for type narrowing in switch statements", () => {
-    const event: RunEvent = { ...baseEnvelope, type: "log.written", level: "warn", message: "x" };
+    const event: RunEvent = {
+      timestamp: 1,
+      runId: "r1",
+      type: "log.written",
+      level: "warn",
+      message: "x",
+    };
     if (isCanonicalRunEvent(event) && event.type === "log.written") {
       // TypeScript narrowing — these accesses are typed.
       expect(event.level).toBe("warn");
@@ -165,9 +72,16 @@ describe("CANONICAL_EVENT_TYPES", () => {
   it("matches the union exhaustively (compile + runtime)", () => {
     // Compile-time: each entry must be a CanonicalRunEvent['type']
     const arr: ReadonlyArray<CanonicalRunEvent["type"]> = CANONICAL_EVENT_TYPES;
-    // 4 reserved AFPS namespaces (memory/pinned/output/log)
-    // + 3 appstrate.* platform-internal events (progress/error/metric).
+    // The one place the count is pinned to a literal: 4 reserved AFPS
+    // namespaces (memory/pinned/output/log) + 3 appstrate.* platform-internal
+    // events (progress/error/metric). Every other file derives from
+    // `CANONICAL_EVENT_TYPES.length` so the literal has a single home.
     expect(arr.length).toBe(7);
     expect(new Set(arr).size).toBe(arr.length);
+  });
+
+  it("is exercised end to end by the shared corpus", () => {
+    const covered = new Set(CANONICAL_EVENT_CORPUS.map((f) => f.event.type));
+    expect([...covered].sort()).toEqual([...CANONICAL_EVENT_TYPES].sort());
   });
 });

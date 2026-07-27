@@ -3,6 +3,9 @@
 
 import { describe, it, expect } from "bun:test";
 import { buildCloudEventEnvelope } from "../../src/events/cloudevents.ts";
+import { canonicalEventSchemaUri } from "../../src/events/canonical-event-schemas.ts";
+import { CANONICAL_EVENT_TYPES } from "../../src/types/canonical-events.ts";
+import { CANONICAL_EVENT_CORPUS } from "../fixtures/canonical-event-corpus.ts";
 import type { RunEvent } from "@afps-spec/types";
 
 function event(type: string, extra: Record<string, unknown> = {}): RunEvent {
@@ -78,40 +81,20 @@ describe("buildCloudEventEnvelope", () => {
   });
 
   it("stamps dataschema for every canonical event type", () => {
-    const wellFormed: ReadonlyArray<{ event: RunEvent; uri: string }> = [
-      {
-        event: event("memory.added", { content: "c" }),
-        uri: "https://schemas.afps.dev/v0/events/memory.added.schema.json",
-      },
-      {
-        event: event("pinned.set", { key: "checkpoint", content: { a: 1 } }),
-        uri: "https://schemas.afps.dev/v0/events/pinned.set.schema.json",
-      },
-      {
-        event: event("output.emitted", { data: { ok: true } }),
-        uri: "https://schemas.afps.dev/v0/events/output.emitted.schema.json",
-      },
-      {
-        event: event("log.written", { level: "warn", message: "m" }),
-        uri: "https://schemas.afps.dev/v0/events/log.written.schema.json",
-      },
-      {
-        event: event("appstrate.progress", { message: "m" }),
-        uri: "https://schemas.appstrate.dev/v0/events/appstrate.progress.schema.json",
-      },
-      {
-        event: event("appstrate.error", { message: "m" }),
-        uri: "https://schemas.appstrate.dev/v0/events/appstrate.error.schema.json",
-      },
-      {
-        event: event("appstrate.metric", { cost: 0.5 }),
-        uri: "https://schemas.appstrate.dev/v0/events/appstrate.metric.schema.json",
-      },
-    ];
-    expect(wellFormed).toHaveLength(7);
-    for (const { event: e, uri } of wellFormed) {
-      const env = buildCloudEventEnvelope({ event: e, sequence: 0, id: "id" });
-      expect(env.dataschema).toBe(uri);
+    // What is under test here is the WIRING — that a well-formed canonical
+    // event comes out carrying the registry's URI for its type. The URI
+    // literals themselves are pinned once, in
+    // `canonical-event-schemas.test.ts` ("addresses AFPS events on the spec
+    // host and appstrate.* on the vendor host"); re-listing all seven here
+    // would be a second table to keep in sync, not a second check.
+    for (const type of CANONICAL_EVENT_TYPES) {
+      const fixture = CANONICAL_EVENT_CORPUS.find((f) => f.event.type === type && f.valid);
+      if (fixture === undefined) throw new Error(`corpus has no valid fixture for ${type}`);
+      const env = buildCloudEventEnvelope({ event: fixture.event, sequence: 0, id: "id" });
+      expect({ type, dataschema: env.dataschema }).toEqual({
+        type,
+        dataschema: canonicalEventSchemaUri(type),
+      });
     }
   });
 

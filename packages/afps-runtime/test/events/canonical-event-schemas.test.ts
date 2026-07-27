@@ -4,24 +4,34 @@
 /**
  * Drift guards for the published CloudEvent payload schemas.
  *
- * Three layers:
+ * Four layers:
  *
  * 1. **Artifact parity** — the committed `schemas/v0/events/*.json` files
  *    must byte-equal a fresh generation from the Zod source. A
  *    hand-edited schema fails here.
  * 2. **JSON Schema validity** — every document compiles under ajv 2020-12.
- * 3. **Behavioral parity** — a shared fixture corpus (the same accept /
- *    reject cases `canonical-events.test.ts` runs through
- *    `isCanonicalRunEvent`) must get the same verdict from the generated
- *    schemas. This is the guard the compile-time assertions cannot give:
- *    the canonical interfaces carry `RunEvent`'s open index signature, so
- *    tsc cannot structurally diff them.
+ * 3. **Behavioral parity** — the shared fixture corpus in
+ *    `test/fixtures/canonical-event-corpus.ts` must get its labelled
+ *    verdict from the generated schemas. `test/types/canonical-events.test.ts`
+ *    asserts the SAME label against `isCanonicalRunEvent`, so parity between
+ *    the two implementations is structural, not restated here. This is the
+ *    guard the compile-time assertions cannot give: the canonical interfaces
+ *    carry `RunEvent`'s open index signature, so tsc cannot structurally
+ *    diff them.
+ * 4. **Coverage** — the set of constrained field paths is derived
+ *    mechanically from the generated documents, and every one of them must
+ *    be exercised by a wrong-typed fixture. Adding a constraint to a Zod
+ *    schema fails the suite until the corpus catches up, so the corpus
+ *    cannot silently go vacuous over a field again.
  */
 
 import { describe, it, expect } from "bun:test";
 import Ajv2020 from "ajv/dist/2020.js";
 import { readdir } from "node:fs/promises";
-import type { RunEvent } from "@afps-spec/types";
+import {
+  CANONICAL_EVENT_CORPUS,
+  NON_FINITE_DIVERGENCES,
+} from "../fixtures/canonical-event-corpus.ts";
 import {
   CANONICAL_EVENT_SCHEMAS,
   CANONICAL_EVENT_SCHEMA_VERSION,
@@ -30,11 +40,7 @@ import {
   serializeCanonicalEventJsonSchema,
 } from "../../src/events/canonical-event-schemas.ts";
 import { buildCloudEventEnvelope } from "../../src/events/cloudevents.ts";
-import {
-  CANONICAL_EVENT_TYPES,
-  isCanonicalRunEvent,
-  type CanonicalRunEvent,
-} from "../../src/types/canonical-events.ts";
+import { CANONICAL_EVENT_TYPES, type CanonicalRunEvent } from "../../src/types/canonical-events.ts";
 
 const SCHEMA_DIR = new URL(
   `../../schemas/${CANONICAL_EVENT_SCHEMA_VERSION}/events/`,
@@ -124,118 +130,118 @@ describe("published schemas are valid JSON Schema 2020-12", () => {
 // Behavioral parity with the runtime guard
 // ---------------------------------------------------------------------------
 
-const baseEnvelope = { timestamp: 1, runId: "r1" };
+const ajv = new Ajv2020({ strict: false });
+const validators = new Map(
+  buildCanonicalEventJsonSchemas().map((doc) => [
+    doc.filename.replace(/\.schema\.json$/, ""),
+    ajv.compile(doc.document),
+  ]),
+);
 
 /**
- * Corpus mirrored from `test/types/canonical-events.test.ts`. Every entry
- * must get the SAME verdict from `isCanonicalRunEvent` (which validates
- * the whole event) and from the generated JSON Schema (which validates
- * the CloudEvent `data` projection). Divergence means the published
- * contract no longer describes what the runtime treats as canonical.
+ * Every field path in a generated document that carries a violable
+ * constraint (`type` or `enum`), derived by walking `properties`
+ * recursively. `pinned.set.content` and `output.emitted.data` are
+ * deliberately absent: they are `z.unknown()`, so no value can violate
+ * their type — only their `required`-ness, which the omission fixtures
+ * cover.
  */
-const CORPUS: ReadonlyArray<{ event: RunEvent; valid: boolean }> = [
-  { event: { ...baseEnvelope, type: "memory.added", content: "hello" }, valid: true },
-  {
-    event: { ...baseEnvelope, type: "memory.added", content: "scoped", scope: "shared" },
-    valid: true,
-  },
-  { event: { ...baseEnvelope, type: "memory.added" }, valid: false },
-  { event: { ...baseEnvelope, type: "memory.added", content: 42 }, valid: false },
-  { event: { ...baseEnvelope, type: "memory.added", content: "x", scope: "global" }, valid: false },
+function constrainedPaths(node: unknown, prefix: string, out: Set<string>): void {
+  if (typeof node !== "object" || node === null) return;
+  const properties = (node as Record<string, unknown>).properties;
+  if (typeof properties !== "object" || properties === null) return;
+  for (const [key, sub] of Object.entries(properties as Record<string, unknown>)) {
+    const path = prefix ? `${prefix}.${key}` : key;
+    if (typeof sub !== "object" || sub === null) continue;
+    const subSchema = sub as Record<string, unknown>;
+    if (subSchema.type !== undefined || subSchema.enum !== undefined) out.add(path);
+    constrainedPaths(subSchema, path, out);
+  }
+}
 
-  {
-    event: { ...baseEnvelope, type: "pinned.set", key: "checkpoint", content: { counter: 1 } },
-    valid: true,
-  },
-  {
-    event: { ...baseEnvelope, type: "pinned.set", key: "persona", content: "agent A" },
-    valid: true,
-  },
-  { event: { ...baseEnvelope, type: "pinned.set", content: 1 }, valid: false },
-  { event: { ...baseEnvelope, type: "pinned.set", key: "checkpoint" }, valid: false },
-  {
-    event: { ...baseEnvelope, type: "pinned.set", key: "k", content: 1, scope: "everyone" },
-    valid: false,
-  },
-
-  { event: { ...baseEnvelope, type: "output.emitted", data: { ok: true } }, valid: true },
-  { event: { ...baseEnvelope, type: "output.emitted" }, valid: false },
-
-  { event: { ...baseEnvelope, type: "log.written", level: "info", message: "x" }, valid: true },
-  { event: { ...baseEnvelope, type: "log.written", level: "debug", message: "x" }, valid: false },
-  { event: { ...baseEnvelope, type: "log.written", level: "info" }, valid: false },
-
-  { event: { ...baseEnvelope, type: "appstrate.progress", message: "running" }, valid: true },
-  { event: { ...baseEnvelope, type: "appstrate.progress" }, valid: false },
-  { event: { ...baseEnvelope, type: "appstrate.error", message: "boom" }, valid: true },
-
-  { event: { ...baseEnvelope, type: "appstrate.metric" }, valid: true },
-  { event: { ...baseEnvelope, type: "appstrate.metric", durationMs: 1234 }, valid: true },
-  {
-    event: {
-      ...baseEnvelope,
-      type: "appstrate.metric",
-      usage: { input_tokens: 10, output_tokens: 5 },
-      cost: 0.01,
-    },
-    valid: true,
-  },
-  { event: { ...baseEnvelope, type: "appstrate.metric", usage: 42 }, valid: false },
-  { event: { ...baseEnvelope, type: "appstrate.metric", cost: -1 }, valid: false },
-];
-
-describe("schema ↔ isCanonicalRunEvent parity", () => {
-  const ajv = new Ajv2020({ strict: false });
-  const validators = new Map(
-    buildCanonicalEventJsonSchemas().map((doc) => [
-      doc.filename.replace(/\.schema\.json$/, ""),
-      ajv.compile(doc.document),
-    ]),
-  );
-
-  it("agrees on every corpus fixture", () => {
-    for (const { event, valid } of CORPUS) {
+describe("published schemas ↔ shared fixture corpus", () => {
+  it("returns the corpus verdict for every fixture's data projection", () => {
+    for (const { label, event, valid } of CANONICAL_EVENT_CORPUS) {
       const envelope = buildCloudEventEnvelope({ event, sequence: 1, id: "id" });
       const validate = validators.get(event.type)!;
-      const schemaVerdict = validate(envelope.data);
-      const guardVerdict = isCanonicalRunEvent(event);
-
-      expect({ type: event.type, schemaVerdict, guardVerdict }).toEqual({
-        type: event.type,
+      // `test/types/canonical-events.test.ts` asserts `isCanonicalRunEvent`
+      // against this same `valid` label — asserting it again here would be
+      // the same check twice. Parity is structural: one corpus, two readers.
+      expect({ label, schemaVerdict: validate(envelope.data) }).toEqual({
+        label,
         schemaVerdict: valid,
-        guardVerdict: valid,
       });
     }
-  });
-
-  it("exercises every canonical type", () => {
-    const covered = new Set(CORPUS.map((c) => c.event.type));
-    expect([...covered].sort()).toEqual([...CANONICAL_EVENT_TYPES].sort());
   });
 
   it("validates the data projection of a well-formed event of every type", () => {
     // Belt-and-braces: the accept half of the corpus, asserted per type so
     // a schema that silently accepts nothing is caught.
     for (const type of CANONICAL_EVENT_TYPES) {
-      const accepted = CORPUS.filter((c) => c.event.type === type && c.valid);
-      expect(accepted.length).toBeGreaterThan(0);
+      const accepted = CANONICAL_EVENT_CORPUS.filter((c) => c.event.type === type && c.valid);
+      expect({ type, accepted: accepted.length > 0 }).toEqual({ type, accepted: true });
     }
+  });
+
+  it("exercises every constrained field the published schemas declare", () => {
+    // The systematic half of the corpus guarantee. The expected set is not
+    // hand-written: it is read off the generated documents, so a new Zod
+    // constraint (a field, or a nested counter) fails here until a fixture
+    // puts a wrong-typed value at that exact path. Without this, a corpus
+    // can be large and still say nothing about a field — which is how
+    // `durationMs`, `usage`'s inner counters, and `progress`/`error`'s
+    // `data` went un-exercised while the guard silently disagreed with the
+    // schema about all three.
+    const missing: string[] = [];
+    for (const doc of buildCanonicalEventJsonSchemas()) {
+      const type = doc.filename.replace(/\.schema\.json$/, "");
+      const paths = new Set<string>();
+      constrainedPaths(doc.document, "", paths);
+      const exercised = new Set(
+        CANONICAL_EVENT_CORPUS.filter((f) => f.event.type === type && f.violates !== undefined).map(
+          (f) => f.violates!,
+        ),
+      );
+      for (const path of paths) if (!exercised.has(path)) missing.push(`${type}#${path}`);
+      // The reverse direction: a fixture naming a path the schemas no
+      // longer constrain is stale bookkeeping.
+      for (const path of exercised) {
+        if (!paths.has(path)) missing.push(`${type}#${path} (fixture names an unconstrained path)`);
+      }
+    }
+    expect(missing).toEqual([]);
+  });
+
+  it("derives a non-trivial path set (the coverage guard is not vacuous)", () => {
+    // Guards the guard: if `constrainedPaths` ever stopped finding
+    // anything, the assertion above would pass unconditionally.
+    const all = new Set<string>();
+    for (const doc of buildCanonicalEventJsonSchemas()) constrainedPaths(doc.document, "", all);
+    expect(all.has("usage.input_tokens")).toBe(true);
+    expect(all.has("durationMs")).toBe(true);
+    expect(all.size).toBeGreaterThanOrEqual(CANONICAL_EVENT_TYPES.length);
   });
 });
 
 describe("Number.isFinite divergence is documented, not accidental", () => {
-  // `isCanonicalRunEvent` rejects a non-finite cost; JSON has no Infinity
-  // literal, so an over-the-wire payload can never carry one. The guard is
-  // deliberately stricter than the wire schema here — assert the guard's
-  // behavior so the difference stays intentional.
-  it("guard rejects Infinity cost that JSON cannot represent", () => {
-    const event: RunEvent = {
-      ...baseEnvelope,
-      type: "appstrate.metric",
-      cost: Number.POSITIVE_INFINITY,
-    };
-    expect(isCanonicalRunEvent(event)).toBe(false);
-    expect(JSON.parse(JSON.stringify({ cost: Number.POSITIVE_INFINITY })).cost).toBeNull();
+  // The one place guard and schema legitimately disagree. `NaN` and
+  // `±Infinity` are `number`s in JS, so ajv accepts them against
+  // `{"type":"number"}` — but JSON cannot carry them, so the serialized
+  // payload holds `null` and fails the very same schema. The guard rejects
+  // them (asserted in `test/types/canonical-events.test.ts`); this file
+  // asserts the other half, so the asymmetry stays a decision rather than
+  // an oversight.
+  it("ajv accepts in-memory non-finite numbers that JSON serialization destroys", () => {
+    for (const { label, event } of NON_FINITE_DIVERGENCES) {
+      const envelope = buildCloudEventEnvelope({ event, sequence: 1, id: "id" });
+      const validate = validators.get(event.type)!;
+      expect({ label, inMemory: validate(envelope.data) }).toEqual({ label, inMemory: true });
+      // …and the same validator rejects what actually goes over the wire.
+      expect({ label, onWire: validate(JSON.parse(JSON.stringify(envelope.data))) }).toEqual({
+        label,
+        onWire: false,
+      });
+    }
   });
 });
 
@@ -246,6 +252,6 @@ describe("registry typing", () => {
     const keys: ReadonlyArray<CanonicalRunEvent["type"]> = Object.keys(
       CANONICAL_EVENT_SCHEMAS,
     ) as Array<CanonicalRunEvent["type"]>;
-    expect(keys).toHaveLength(7);
+    expect(keys).toHaveLength(CANONICAL_EVENT_TYPES.length);
   });
 });

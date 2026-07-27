@@ -33,8 +33,12 @@
  * - the `_…Parity` type aliases at the bottom of this file assert, at
  *   compile time, that an event assembled from a schema-inferred payload
  *   still satisfies its hand-written interface;
- * - a shared fixture corpus asserts the generated schemas agree with
- *   {@link isCanonicalRunEvent} on accept/reject.
+ * - a shared fixture corpus (`test/fixtures/canonical-event-corpus.ts`,
+ *   consumed by both this file's test and the guard's) asserts the
+ *   generated schemas and {@link isCanonicalRunEvent} reach the same
+ *   verdict, with a coverage check that derives the constrained field
+ *   paths from the generated documents so a newly added constraint cannot
+ *   go un-exercised.
  *
  * Publication status: the generated documents are committed here but the
  * `$id` hosts do not serve them yet — publishing
@@ -51,6 +55,7 @@
 
 import { z } from "zod";
 import type { TokenUsage } from "@appstrate/afps-shared/token-usage";
+import { TOKEN_USAGE_COUNTERS } from "../types/canonical-events.ts";
 import type {
   AppstrateErrorEvent,
   AppstrateMetricEvent,
@@ -369,18 +374,26 @@ type EventFrom<TType extends string, TSchema extends z.ZodType> = EnvelopeFields
  * `RunEvent`'s open index signature (`[key: string]: unknown`), so a
  * field *removed* from an interface but kept in the schema stays
  * assignable. The interfaces cannot be structurally diffed for that
- * direction — the fixture corpus in
- * `test/events/canonical-event-schemas.test.ts` covers it behaviorally.
+ * direction — the shared fixture corpus
+ * (`test/fixtures/canonical-event-corpus.ts`) covers it behaviorally.
  *
- * The tuple is exported purely so the compiler keeps checking it — every
- * member is an {@link Assert} whose constraint fails on drift. It carries
- * no runtime value and is not re-exported from the package barrel.
+ * This is a module-private annotation rather than an exported type alias.
+ * tsc checks `Assert<>` constraints identically either way, so exporting
+ * would only add a meaningless public type to a published package — but a
+ * *type alias* nothing references trips `noUnusedLocals` (TS6196) even
+ * when the constraints hold, and TS has no per-declaration suppression.
+ * Annotating a `_`-prefixed constant and voiding it keeps the checks
+ * running with no public surface; the value is an empty array, only its
+ * type is load-bearing.
  *
- * The last two members diff {@link TokenUsage} in BOTH directions: that
- * interface has no index signature, so a counter added to or removed from
- * either side breaks compilation.
+ * Members 8-9 diff {@link TokenUsage} against the schema in BOTH
+ * directions: that interface has no index signature, so a counter added to
+ * or removed from either side breaks compilation. Members 10-11 pin
+ * {@link TOKEN_USAGE_COUNTERS} — the runtime list `isCanonicalRunEvent`
+ * iterates — to exactly `keyof TokenUsage`, so a new counter cannot reach
+ * the published schema while escaping the guard.
  */
-export type CanonicalEventSchemaParity = [
+const _canonicalEventSchemaParity: [
   Assert<
     EventFrom<"memory.added", typeof memoryAddedDataSchema> extends MemoryAddedEvent ? true : false
   >,
@@ -413,4 +426,7 @@ export type CanonicalEventSchemaParity = [
   >,
   Assert<z.infer<typeof tokenUsageSchema> extends TokenUsage ? true : false>,
   Assert<TokenUsage extends z.infer<typeof tokenUsageSchema> ? true : false>,
-];
+  Assert<(typeof TOKEN_USAGE_COUNTERS)[number] extends keyof TokenUsage ? true : false>,
+  Assert<keyof TokenUsage extends (typeof TOKEN_USAGE_COUNTERS)[number] ? true : false>,
+] = [] as never;
+void _canonicalEventSchemaParity;
