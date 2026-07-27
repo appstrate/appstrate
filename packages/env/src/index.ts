@@ -370,6 +370,14 @@ const envSchema = z
     // coalesces to unset, i.e. the default set, per the compose `${VAR:-}`
     // pattern).
     MODULES: z.string().default("oidc,webhooks,mcp,core-providers,@appstrate/module-chat"),
+    // Boot policy when a loaded module declares an `@appstrate/core` range this
+    // platform's `CORE_VERSION` does not satisfy (issue #973):
+    //   - `fail` (default) — refuse to boot, naming the module and both versions.
+    //   - `warn` — log and boot anyway. Escape hatch for an operator running a
+    //     third-party module that lags a core release; the accepted risk is that
+    //     the stale module calls a platform service whose signature moved under
+    //     it, which fails silently rather than loudly.
+    MODULE_CONTRACT_ENFORCE: z.enum(["fail", "warn"]).default("fail"),
 
     // App
     APP_URL: z.string().default("http://localhost:3000"),

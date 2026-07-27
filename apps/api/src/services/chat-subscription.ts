@@ -223,6 +223,18 @@ export async function checkUsageAllowed(args: {
   sessionId: string | null;
   subscription: boolean;
 }): Promise<UsageRejection | null> {
+  // Fail-closed on a caller that omits `subscription` — the flag became
+  // REQUIRED in @appstrate/core 6.0.0, and only an out-of-tree module built
+  // against an older core can reach here without it (in-tree callers are
+  // typechecked). Denying the turn beats defaulting: a missing flag would fall
+  // through as `false`, reading a subscription turn as platform-funded — silent
+  // mispricing with no error and no log. A thrown turn is visible and
+  // recoverable; a mispriced one is neither.
+  if (typeof args.subscription !== "boolean") {
+    throw new Error(
+      "checkUsageAllowed: `subscription` is required (boolean) — caller built against @appstrate/core < 6.0.0",
+    );
+  }
   if (!hasHook("beforeUsage")) return null;
   const rejection = await callHook("beforeUsage", {
     orgId: args.orgId,

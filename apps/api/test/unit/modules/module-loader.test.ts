@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, it, expect, beforeEach, mock } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach, mock } from "bun:test";
+import { _resetCacheForTesting } from "@appstrate/env";
+import { CORE_VERSION } from "@appstrate/core/module";
 import {
   loadModulesFromInstances,
   getModules,
@@ -112,6 +114,76 @@ describe("module-loader", () => {
       await loadModulesFromInstances([mod], mockCtx());
       await loadModulesFromInstances([mod], mockCtx());
       expect(initFn).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  /**
+   * The module→platform half of the contract (#973): an out-of-tree module
+   * built against an older core is invisible to `tsc`, and a stale caller of a
+   * platform service fails SILENTLY (core 6.0.0 made
+   * `checkUsageAllowed.subscription` required — a 5.x caller omitting it reads
+   * a subscription turn as platform-funded). Ranges are derived from
+   * `CORE_VERSION` so the expectations survive the next major bump.
+   */
+  describe("core version contract", () => {
+    const currentRange = `^${CORE_VERSION}`;
+    const staleRange = `^${Number(CORE_VERSION.split(".")[0]) - 1}.0.0`;
+    const originalEnforce = process.env.MODULE_CONTRACT_ENFORCE;
+
+    afterEach(() => {
+      if (originalEnforce === undefined) delete process.env.MODULE_CONTRACT_ENFORCE;
+      else process.env.MODULE_CONTRACT_ENFORCE = originalEnforce;
+      _resetCacheForTesting();
+    });
+
+    it("refuses a module whose declared core range excludes the running core", async () => {
+      const mod = mockModule("stale", {
+        manifest: { id: "stale", name: "stale", version: "1.0.0", core_version: staleRange },
+      });
+      const promise = loadModulesFromInstances([mod], mockCtx());
+      // Both versions must appear: the operator has to see what the module
+      // wants AND what this platform ships to know which side to bump.
+      await expect(promise).rejects.toThrow(staleRange);
+      expect(getModules().size).toBe(0);
+    });
+
+    it("names the running core version in the failure", async () => {
+      const mod = mockModule("stale", {
+        manifest: { id: "stale", name: "stale", version: "1.0.0", core_version: staleRange },
+      });
+      await expect(loadModulesFromInstances([mod], mockCtx())).rejects.toThrow(CORE_VERSION);
+    });
+
+    it("loads a module whose declared range is satisfied by the running core", async () => {
+      const mod = mockModule("current", {
+        manifest: { id: "current", name: "current", version: "1.0.0", core_version: currentRange },
+      });
+      await loadModulesFromInstances([mod], mockCtx());
+      expect(getModules().get("current")).toBe(mod);
+    });
+
+    it("loads a module that declares no range (unknown is a blind spot, not a fault)", async () => {
+      const mod = mockModule("undeclared");
+      await loadModulesFromInstances([mod], mockCtx());
+      expect(getModules().get("undeclared")).toBe(mod);
+    });
+
+    it("loads an in-tree module (workspace protocol is gated by tsc, not semver)", async () => {
+      const mod = mockModule("in-tree", {
+        manifest: { id: "in-tree", name: "in-tree", version: "1.0.0", core_version: "workspace:*" },
+      });
+      await loadModulesFromInstances([mod], mockCtx());
+      expect(getModules().get("in-tree")).toBe(mod);
+    });
+
+    it("boots despite a mismatch under MODULE_CONTRACT_ENFORCE=warn", async () => {
+      process.env.MODULE_CONTRACT_ENFORCE = "warn";
+      _resetCacheForTesting();
+      const mod = mockModule("stale", {
+        manifest: { id: "stale", name: "stale", version: "1.0.0", core_version: staleRange },
+      });
+      await loadModulesFromInstances([mod], mockCtx());
+      expect(getModules().get("stale")).toBe(mod);
     });
   });
 

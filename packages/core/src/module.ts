@@ -28,6 +28,18 @@ import type { OrchestratorRegistration } from "./platform-types.ts";
 // Module contract
 // ---------------------------------------------------------------------------
 
+/**
+ * The `@appstrate/core` version this build ships — the platform half of the
+ * module contract, exported so the loader can compare it against the range a
+ * module declares (see {@link ModuleManifest.core_version}).
+ *
+ * Hardcoded rather than read from `package.json`: core is consumed over npm by
+ * external repos where an ESM JSON import is a portability hazard (import
+ * attributes, bundler support). `packages/core/test/core-version.test.ts`
+ * asserts it equals the published `version` field, so it cannot drift.
+ */
+export const CORE_VERSION = "6.0.0";
+
 /** Metadata describing a module. */
 export interface ModuleManifest {
   /** Unique identifier (e.g. "webhooks", "oidc"). */
@@ -38,6 +50,25 @@ export interface ModuleManifest {
   version: string;
   /** Module IDs this module depends on (loaded first). */
   dependencies?: string[];
+  /**
+   * Semver RANGE naming the `@appstrate/core` major this module was built
+   * against (e.g. `"^6.0.0"`). The platform loader checks it against
+   * {@link CORE_VERSION} at boot and refuses to load a module whose range this
+   * core does not satisfy (`MODULE_CONTRACT_ENFORCE=warn` downgrades that to a
+   * log line).
+   *
+   * Why it exists: the module→platform direction of the contract is invisible
+   * to `tsc` for an out-of-tree module. `PlatformServices.checkUsageAllowed`
+   * gained a REQUIRED `subscription` flag in core 6.0.0 — a 5.x-era caller
+   * omitting it does not error, it silently reports a subscription turn as
+   * platform-funded (issue #973).
+   *
+   * Optional on purpose: requiring it would break every existing module. When
+   * absent the loader falls back to the `@appstrate/core` range declared in the
+   * module's own `package.json`, and when that is unresolvable too it warns and
+   * loads the module anyway — an unknown range is a blind spot, not a fault.
+   */
+  core_version?: string;
 }
 
 /**

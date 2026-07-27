@@ -68,6 +68,14 @@ const myModule: AppstrateModule = {
 export default myModule;
 ```
 
+An **out-of-tree** module (its own repo, `@appstrate/core` from npm) should also declare the core major it was built against:
+
+```ts
+manifest: { id: "my-feature", name: "My Feature", version: "1.0.0", core_version: "^6.0.0" },
+```
+
+The loader checks that range against the platform's `CORE_VERSION` at boot and refuses to load a module the running core does not satisfy. It exists because the module→platform direction is invisible to `tsc`: a stale module calling a platform service whose signature moved (core 6.0.0 made `checkUsageAllowed`'s `subscription` flag required) fails **silently**, not loudly (issue #973). When the field is absent the loader falls back to the `@appstrate/core` range in the module's own `package.json`, and warns when neither is resolvable. In-tree modules (`workspace:*`) are exempt — `tsc` already gates them. Operators can downgrade a mismatch to a warning with `MODULE_CONTRACT_ENFORCE=warn`.
+
 Everything else (`hooks`, `events`, `openApiComponentSchemas`, `openApiSchemas`, `emailOverrides`, `publicPaths`, `manifest.dependencies`) is optional. Use `publicPaths` for routes that bypass auth (e.g. inbound webhook callbacks). Modules that need `X-Application-Id` context for their routes gate it themselves (e.g. an explicit `applicationId` body/query field validated against the caller's org).
 
 ## Database ownership rules

@@ -37,9 +37,20 @@
  *   transfer; the rationale for each of these lives in the JSDoc on the member
  *   itself, not duplicated here.
  *
+ * A FIFTH check covers the other direction — not the SHAPE of the contract but
+ * the VERSION each module compiles against. Every present module's declared
+ * `@appstrate/core` range must share a major with `packages/core/package.json`.
+ * The four surface audits above are blind to it: a module pinned a major behind
+ * satisfies every ledger while calling platform services whose signatures moved
+ * under it — `checkUsageAllowed` gained a REQUIRED `subscription` flag in
+ * 6.0.0, and a 5.x caller omitting it silently reports a subscription turn as
+ * platform-funded (issue #973). Declared data, so it is a HARD problem, not a
+ * scan warning.
+ *
  * Private repos absent in CI (cloud) never cause failure: the ledger records
- * their expected ownership, and the scanner only *adds* drift when a present
- * module declares a member the ledger did not expect.
+ * their expected ownership, the scanner only *adds* drift when a present module
+ * declares a member the ledger did not expect, and the version check skips
+ * absent modules entirely.
  *
  * Override via env: `MODULE_CONTRACT_POLICY=warn|fail|off`.
  */
@@ -414,6 +425,84 @@ auditNamedSurface("HOOK_LEDGER", HOOK_LEDGER, "ModuleHooks");
 auditNamedSurface("EVENT_LEDGER", EVENT_LEDGER, "ModuleEvents");
 auditNamedSurface("SERVICE_LEDGER", SERVICE_LEDGER, "PlatformServices");
 
+// ---------------------------------------------------------------------------
+// Core-version drift (hard) — the version half of the contract
+// ---------------------------------------------------------------------------
+
+const CORE_PACKAGE = "@appstrate/core";
+
+interface PackageJsonDeps {
+  dependencies?: Record<string, string>;
+  peerDependencies?: Record<string, string>;
+  devDependencies?: Record<string, string>;
+  version?: string;
+}
+
+/**
+ * Major of a semver RANGE as written in a package.json (`^6.0.0`, `~6.1`,
+ * `>=6 <7`, `6.x`), or of a plain version. Returns null for anything that is
+ * not major-anchored — `workspace:*`, `link:../core`, `*`, a git URL — which
+ * the caller skips: those resolve from this workspace and can never be stale.
+ */
+function declaredRangeMajor(range: string): number | null {
+  const cleaned = range.trim().replace(/^[\^~>=<v\s]+/, "");
+  const match = /^(\d+)(?:[.\s-]|$)/.exec(cleaned);
+  return match ? Number(match[1]) : null;
+}
+
+/** Nearest `package.json` walking up from `startDir` (a package root is the closest ancestor with one). */
+async function nearestPackageJson(startDir: string): Promise<PackageJsonDeps | null> {
+  let dir = startDir;
+  for (;;) {
+    const file = Bun.file(resolve(dir, "package.json"));
+    if (await file.exists()) return (await file.json()) as PackageJsonDeps;
+    const parent = dirname(dir);
+    if (parent === dir) return null;
+    dir = parent;
+  }
+}
+
+/**
+ * Every PRESENT module must compile against the same `@appstrate/core` major
+ * the workspace ships. A module a major behind still satisfies every ledger
+ * above while calling platform services whose signatures moved under it — the
+ * failure mode is silent (issue #973), so this is a hard problem.
+ */
+async function auditCoreVersionRanges(): Promise<void> {
+  const core = (await Bun.file(
+    resolve(ROOT, "packages/core/package.json"),
+  ).json()) as PackageJsonDeps;
+  const workspaceVersion = core.version ?? "";
+  const workspaceMajor = declaredRangeMajor(workspaceVersion);
+  if (workspaceMajor === null) {
+    problems.push(`unreadable ${CORE_PACKAGE} version in packages/core/package.json.`);
+    return;
+  }
+
+  for (const [moduleId, root] of Object.entries(DECLARER_ROOTS)) {
+    if (!presentModules.has(moduleId)) continue; // private repo absent in CI
+    const pkg = await nearestPackageJson(resolve(WORKSPACE, root));
+    if (!pkg) continue;
+    const range =
+      pkg.dependencies?.[CORE_PACKAGE] ??
+      pkg.peerDependencies?.[CORE_PACKAGE] ??
+      pkg.devDependencies?.[CORE_PACKAGE];
+    if (!range) continue; // built-in module inside the platform package itself
+    const major = declaredRangeMajor(range);
+    if (major === null) continue; // workspace:* / link: — in-tree, always current
+    if (major !== workspaceMajor) {
+      problems.push(
+        `core drift: \`${moduleId}\` declares ${CORE_PACKAGE} \`${range}\` but the workspace ships ` +
+          `\`${workspaceVersion}\`. A module built against another major calls platform services ` +
+          `whose signatures moved under it, and the failure is silent (cf. #973) — bump the module's ` +
+          `${CORE_PACKAGE} range and republish it.`,
+      );
+    }
+  }
+}
+
+await auditCoreVersionRanges();
+
 for (const w of warnings) console.warn(`⚠️  ${w}`);
 for (const p of problems) console.error(`❌ ${p}`);
 
@@ -426,7 +515,8 @@ if (problems.length === 0) {
   console.log(
     `✅ module contract clean — ${audited} entries audited across 4 surfaces ` +
       `(${Object.keys(LEDGER).length} AppstrateModule, ${Object.keys(HOOK_LEDGER).length} hooks, ` +
-      `${Object.keys(EVENT_LEDGER).length} events, ${Object.keys(SERVICE_LEDGER).length} services), no drift.`,
+      `${Object.keys(EVENT_LEDGER).length} events, ${Object.keys(SERVICE_LEDGER).length} services), ` +
+      `no drift — and ${presentModules.size} present module(s) on the workspace ${CORE_PACKAGE} major.`,
   );
 }
 

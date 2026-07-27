@@ -13,7 +13,10 @@ import type {
   AuthStrategy,
   ModulePermissionContribution,
 } from "@appstrate/core/module";
+import { CORE_VERSION } from "@appstrate/core/module";
 import { getErrorMessage } from "@appstrate/core/errors";
+import { isValidRange, matchVersion } from "@appstrate/core/semver";
+import { getEnv } from "@appstrate/env";
 import {
   CORE_RESOURCE_NAMES,
   setModulePermissionsProvider,
@@ -79,6 +82,145 @@ async function resolveSpecifier(specifier: string): Promise<{
   return import(/* webpackIgnore: true */ specifier);
 }
 
+/**
+ * Import one module specifier and return its exported module object. Any
+ * failure (unresolvable specifier, missing `manifest.id`) is fatal — all
+ * declared modules are required.
+ */
+async function importModule(specifier: string): Promise<AppstrateModule> {
+  try {
+    const raw = await resolveSpecifier(specifier);
+    // Support both default export and named `appstrateModule` export
+    const mod = (raw.default ?? raw.appstrateModule) as AppstrateModule | undefined;
+    if (!mod?.manifest?.id) {
+      throw new Error(`Module "${specifier}" is missing manifest.id`);
+    }
+    return mod;
+  } catch (err) {
+    throw new Error(`Module "${specifier}" could not be loaded: ${getErrorMessage(err)}`, {
+      cause: err,
+    });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Core-version contract guard (issue #973)
+// ---------------------------------------------------------------------------
+
+const CORE_PACKAGE = "@appstrate/core";
+
+/**
+ * Dependency protocols that mean "resolved from this workspace, not npm". Such
+ * a module compiles against the very core it will run on, so `tsc` already
+ * gates it — there is nothing for a semver check to add.
+ */
+const IN_TREE_RANGE_PREFIXES = ["workspace:", "link:", "file:"];
+
+/**
+ * Read the `@appstrate/core` range an npm-loaded module declares in its own
+ * `package.json`. `import.meta.resolve` yields the module's entry file (the
+ * same resolution {@link resolveSpecifier} performs), and a package's root is
+ * by definition the nearest ancestor directory carrying a `package.json`.
+ *
+ * Best-effort by design: an unresolvable specifier, an unreadable file or a
+ * missing entry all mean "unknown", never a crash — this guard must not be the
+ * thing that stops a working module from booting.
+ */
+async function coreRangeFromPackageJson(specifier: string): Promise<string | null> {
+  try {
+    let dir = dirname(fileURLToPath(import.meta.resolve(specifier)));
+    // Bounded walk: a package root is a handful of levels above its entry file
+    // at most, and an unbounded loop would climb out of the repo.
+    for (let depth = 0; depth < 10; depth++) {
+      const file = Bun.file(join(dir, "package.json"));
+      if (await file.exists()) {
+        const pkg = (await file.json()) as {
+          dependencies?: Record<string, string>;
+          peerDependencies?: Record<string, string>;
+          devDependencies?: Record<string, string>;
+        };
+        return (
+          pkg.dependencies?.[CORE_PACKAGE] ??
+          pkg.peerDependencies?.[CORE_PACKAGE] ??
+          pkg.devDependencies?.[CORE_PACKAGE] ??
+          null
+        );
+      }
+      const parent = dirname(dir);
+      if (parent === dir) break;
+      dir = parent;
+    }
+  } catch {
+    // Unresolvable — falls through to "unknown" (warned by the caller).
+  }
+  return null;
+}
+
+/**
+ * Resolve the `@appstrate/core` range a module declares, in precedence order:
+ * the manifest field, then the module's own package.json for an npm specifier.
+ * A built-in module is in-tree by construction, so it short-circuits to the
+ * workspace protocol instead of a filesystem lookup.
+ */
+async function resolveDeclaredCoreRange(
+  mod: AppstrateModule,
+  specifier: string | null,
+): Promise<string | null> {
+  if (mod.manifest.core_version) return mod.manifest.core_version;
+  if (specifier === null) return null; // instance-loaded: the manifest is the only source
+  if (getBuiltinModules().has(specifier)) return "workspace:*";
+  return coreRangeFromPackageJson(specifier);
+}
+
+/**
+ * Boot guard on the module→platform direction of the contract (#973).
+ *
+ * `tsc` cannot see an out-of-tree module, and the platform's `PlatformServices`
+ * surface changes shape between majors: `checkUsageAllowed` gained a REQUIRED
+ * `subscription` flag in core 6.0.0, and a 5.x-era caller that omits it does
+ * not error — it silently reports a subscription turn as platform-funded. So a
+ * declared-but-unsatisfied range is fatal by default; the operator running a
+ * lagging third-party module can downgrade to a warning with
+ * `MODULE_CONTRACT_ENFORCE=warn`.
+ */
+async function enforceCoreVersionContract(
+  mod: AppstrateModule,
+  specifier: string | null,
+): Promise<void> {
+  const id = mod.manifest.id;
+  const declared = await resolveDeclaredCoreRange(mod, specifier);
+
+  if (declared !== null && IN_TREE_RANGE_PREFIXES.some((p) => declared.startsWith(p))) {
+    logger.debug("Module resolves @appstrate/core from the workspace, skipping version gate", {
+      id,
+      declared,
+    });
+    return;
+  }
+  if (declared === null || !isValidRange(declared)) {
+    logger.warn("Module declares no usable @appstrate/core range — version contract unverified", {
+      id,
+      declared,
+      coreVersion: CORE_VERSION,
+    });
+    return;
+  }
+  // `matchVersion` is the satisfies check: the running core is the only
+  // candidate, so a null result means the range excludes it.
+  if (matchVersion([CORE_VERSION], declared) !== null) return;
+
+  const message =
+    `Module "${id}" was built against ${CORE_PACKAGE} ${declared}, but this platform ships ` +
+    `${CORE_VERSION}. Republish the module against ${CORE_VERSION}, or set ` +
+    `MODULE_CONTRACT_ENFORCE=warn to boot anyway (a stale module can call a platform service ` +
+    `whose signature moved under it — silently, without an error).`;
+  if (getEnv().MODULE_CONTRACT_ENFORCE === "warn") {
+    logger.warn(message, { id, declared, coreVersion: CORE_VERSION });
+    return;
+  }
+  throw new Error(message);
+}
+
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
@@ -103,19 +245,12 @@ export async function loadModules(specifiers: string[], ctx: ModuleInitContext):
   // Phase 1: Resolve all modules via dynamic import (built-in path first, then npm specifier)
   const resolved: AppstrateModule[] = [];
   for (const specifier of specifiers) {
-    try {
-      const raw = await resolveSpecifier(specifier);
-      // Support both default export and named `appstrateModule` export
-      const mod = (raw.default ?? raw.appstrateModule) as AppstrateModule | undefined;
-      if (!mod?.manifest?.id) {
-        throw new Error(`Module "${specifier}" is missing manifest.id`);
-      }
-      resolved.push(mod);
-    } catch (err) {
-      throw new Error(`Module "${specifier}" could not be loaded: ${getErrorMessage(err)}`, {
-        cause: err,
-      });
-    }
+    const mod = await importModule(specifier);
+    // Version gate lives outside `importModule`: a core-version mismatch is not
+    // an import failure, and its message already names the module — wrapping it
+    // in "could not be loaded" would say it twice.
+    await enforceCoreVersionContract(mod, specifier);
+    resolved.push(mod);
   }
 
   await initSortedModules(resolved, ctx);
@@ -133,6 +268,10 @@ export async function loadModulesFromInstances(
     logger.debug("Modules already initialized, skipping");
     return;
   }
+  // Same gate as the specifier path — a pre-resolved instance still carries its
+  // manifest, and the guard must not be something the entry point decides.
+  // There is no specifier here, so `manifest.core_version` is the only source.
+  for (const mod of modules) await enforceCoreVersionContract(mod, null);
   await initSortedModules(modules, ctx);
 }
 
