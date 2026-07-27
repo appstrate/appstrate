@@ -10,10 +10,6 @@
  * value }`, a bare content array, or a JSON string. `unwrapResult` peels these
  * layers down to the actual payload so the rest of the UI never has to know
  * which path produced it.
- *
- * (`auth-offer.ts` keeps its own deep *search* walker — it looks for an
- * `auth_url` anywhere in the tree, a different job from peeling to the single
- * payload here.)
  */
 
 /** Lifecycle phase of a tool call, derived from status + result. */

@@ -1,17 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Pure helper (no React) that pulls a connect offer (`{ connect_url }` for the
- * unified hosted-connect-portal op, or the legacy `{ auth_url, state }` OAuth
- * op) out of an `invoke_operation` tool result.
+ * Pure helper (no React) that pulls the connect offer out of an
+ * `invoke_operation` tool result.
  *
- * Primary channel: the typed `connectOffer` field both engines attach to the
+ * Single channel: the typed `connectOffer` field both engines attach to the
  * tool output ({@link ../connect-offer.ts}) — the only place the live URL
- * exists in a persisted result. The deep-walk below is a LEGACY fallback for
- * sessions persisted before that field shipped, where the URL still sits raw
- * somewhere in the payload (raw MCP CallToolResult `{content:[{text}]}`, the
- * AI SDK bridge `{type:"content",value:[{text}]}`, `{type:"json",value}`, a
- * bare content array, a JSON string, …).
+ * exists in a persisted result. The payload itself is never scraped; in the
+ * model channel every connect URL is replaced by the redaction placeholder, and
+ * scraping it rendered that placeholder as a relative href (issue #906).
  *
  * Kept React-free so it can be unit-tested without a DOM.
  */
@@ -127,60 +124,8 @@ export function parseResume(text: string): ResumeMeta | null {
   return { packageId: "" };
 }
 
-/**
- * LEGACY deep search — pre-`connectOffer` sessions only. Finds an
- * `{ auth_url|authUrl|connect_url|connectUrl }` bearing object anywhere in
- * `value`.
- */
-function deepFind(value: unknown, depth: number): AuthOffer | null {
-  if (depth > 8 || value == null) return null;
-
-  // JSON encoded as a string (MCP text parts carry the body this way).
-  if (typeof value === "string") {
-    const s = value.trim();
-    if (s[0] !== "{" && s[0] !== "[") return null;
-    try {
-      return deepFind(JSON.parse(s), depth + 1);
-    } catch {
-      return null;
-    }
-  }
-
-  if (Array.isArray(value)) {
-    for (const item of value) {
-      const hit = deepFind(item, depth + 1);
-      if (hit) return hit;
-    }
-    return null;
-  }
-
-  if (typeof value !== "object") return null;
-  const obj = value as Record<string, unknown>;
-
-  // Direct hit on this node (snake or camel). `connect_url` is the unified
-  // hosted-connect-portal offer (issue #769); `auth_url` is the legacy
-  // OAuth-only offer. Both open the same way and resume via the same signal.
-  // Absolute-URL guard: pre-`connectOffer` results carry the redaction
-  // placeholder under these same keys in the model channel — accepting it
-  // rendered the placeholder as a relative href (issue #906).
-  const url = obj.connect_url ?? obj.connectUrl ?? obj.auth_url ?? obj.authUrl;
-  if (typeof url === "string" && /^https?:\/\//.test(url)) {
-    const state = obj.state;
-    return { authUrl: url, state: typeof state === "string" ? state : undefined };
-  }
-
-  // Otherwise descend into every child value.
-  for (const child of Object.values(obj)) {
-    const hit = deepFind(child, depth + 1);
-    if (hit) return hit;
-  }
-  return null;
-}
-
 export function extractAuthOffer(result: unknown): AuthOffer | null {
-  // Typed channel first — the only place a post-split result carries the URL.
   const offer = readConnectOffer(result);
-  if (offer) return { authUrl: offer.connect_url, ...(offer.state ? { state: offer.state } : {}) };
-  // Legacy sessions persisted before the typed field existed.
-  return deepFind(result, 0);
+  if (!offer) return null;
+  return { authUrl: offer.connect_url, ...(offer.state ? { state: offer.state } : {}) };
 }
