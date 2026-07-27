@@ -78,10 +78,16 @@ describe("apiVersion middleware", () => {
     const app = createApp(async () => "2020-01-01");
     const res = await app.request("/test");
     expect(res.status).toBe(400);
-    const body = (await res.json()) as { code: string; param: string; detail: string };
+    const body = (await res.json()) as { code: string; param?: string; detail: string };
     expect(body.code).toBe("unsupported_api_version");
-    expect(body.param).toBe("settings.api_version");
     expect(body.detail).toContain("2020-01-01");
+    // No `param`: the convention (`@appstrate/core/api-errors`, mirroring
+    // Stripe) is that `param` names the REQUEST parameter at fault so a client
+    // can attach the message to the offending input. The pin is server-stored
+    // state and this request sent no parameter at all — naming one would point
+    // a consumer at a field that does not exist. The header path (above) keeps
+    // its `param` precisely because there the caller did send the value.
+    expect(body.param).toBeUndefined();
     // The response must not claim to be serving anything.
     expect(res.headers.get("Appstrate-Version")).toBeNull();
   });
@@ -92,9 +98,9 @@ describe("apiVersion middleware", () => {
     const app = createApp(async () => "not-a-date");
     const res = await app.request("/test");
     expect(res.status).toBe(400);
-    const body = (await res.json()) as { code: string; param: string };
+    const body = (await res.json()) as { code: string; param?: string };
     expect(body.code).toBe("unsupported_api_version");
-    expect(body.param).toBe("settings.api_version");
+    expect(body.param).toBeUndefined();
   });
 
   it("header takes priority over org-pinned version", async () => {

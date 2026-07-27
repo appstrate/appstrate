@@ -37,6 +37,8 @@
  * discovered mid-migration.
  */
 
+import { ApiError } from "./errors.ts";
+
 export const CURRENT_API_VERSION = "2026-03-21";
 
 /**
@@ -53,8 +55,34 @@ export const CURRENT_API_VERSION = "2026-03-21";
  * the SPA does not do, so the product is unusable for them until the data is fixed.
  *
  * Ship the backfill (`UPDATE organizations SET org_settings = ... `) with the removal.
+ *
+ * ## The same hazard applies to values ALREADY stored
+ *
+ * This is not only a forward constraint. Any org whose stored pin is not a
+ * member of this set fails every org-scoped route from the moment the read-side
+ * check ships — and a future removal is not the only way to get there. The
+ * write path accepted `api_version` as a bare `z.string()` until the guard in
+ * `routes/organizations.ts`, and the field is declared writable in the OpenAPI
+ * spec, so an admin or a third-party integrator could have persisted an
+ * arbitrary string by hand at any point before that guard.
+ *
+ * Neither source is detectable from the code alone, so `lib/boot.ts` reads the
+ * stored pins at startup and logs an `error` line naming every org holding an
+ * unserveable one (`warnOnUnserveableApiVersionPins`). That check is the
+ * standing signal for both — keep it when adding or dropping a version here.
  */
-const SUPPORTED_VERSIONS = new Set(["2026-03-21"]);
+const SUPPORTED_VERSIONS = new Set([CURRENT_API_VERSION]);
+
+/**
+ * Every version this build can serve, as a plain array.
+ *
+ * Exists for the boot-time diagnostic in `lib/boot.ts`, which has to *enumerate*
+ * the set — to hand it to SQL and to name it in the log line — rather than merely
+ * test membership. Returns a copy so no caller can mutate the registry.
+ */
+export function listSupportedVersions(): string[] {
+  return [...SUPPORTED_VERSIONS];
+}
 
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -64,4 +92,40 @@ export function isValidVersionFormat(v: string): boolean {
 
 export function isVersionSupported(v: string): boolean {
   return SUPPORTED_VERSIONS.has(v);
+}
+
+/**
+ * 400 `unsupported_api_version` — the rejection every {@link isVersionSupported}
+ * `false` branch raises.
+ *
+ * Three call sites reach it (the `Appstrate-Version` header, the org pin
+ * resolved by `middleware/api-version.ts`, and the org-settings write in
+ * `routes/organizations.ts`) and only the wording and the offending `param`
+ * differ; status, code and title are the same rejection in all three. Keeping
+ * them here means a client branching on `code` cannot be broken by one call
+ * site drifting. Pass the complete sentence as `detail` — the factory adds no
+ * suffix.
+ *
+ * `param` is OPTIONAL because one of the three has no request parameter to
+ * name. `packages/core/src/api-errors.ts` documents `param` as mirroring
+ * Stripe's convention — it identifies the *request* parameter at fault so a
+ * client can attach the message to the input that produced it. The header and
+ * the settings-write callers have one (`Appstrate-Version`, `api_version`); the
+ * org pin does not — that value is server-stored state, and the request that
+ * trips it (`GET /api/runs`, say) need not carry any parameter at all. Naming
+ * `settings.api_version` there would point a consumer at a request field that
+ * does not exist, so that site omits `param` entirely and leaves the offending
+ * value to `detail`.
+ *
+ * Mirrors the `conflict()` / `gone()` idiom in `lib/errors.ts`: a named factory
+ * per problem type, `code` fixed by construction.
+ */
+export function unsupportedApiVersion(detail: string, param?: string): ApiError {
+  return new ApiError({
+    status: 400,
+    code: "unsupported_api_version",
+    title: "Unsupported API Version",
+    detail,
+    param,
+  });
 }

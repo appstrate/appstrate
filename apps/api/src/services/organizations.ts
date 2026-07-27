@@ -17,7 +17,7 @@ import {
   documents,
   uploads,
 } from "@appstrate/db/schema";
-import { and, eq, inArray, count, sql } from "drizzle-orm";
+import { and, eq, inArray, notInArray, count, sql } from "drizzle-orm";
 import type { OrgRole } from "../types/index.ts";
 import { scopedWhere } from "../lib/db-helpers.ts";
 import { orgRunConcurrencyLockKey } from "./state/runs.ts";
@@ -154,6 +154,28 @@ export async function getOrgSettings(orgId: string): Promise<OrgSettings> {
     .limit(1);
 
   return (row?.orgSettings as OrgSettings) ?? {};
+}
+
+/**
+ * Orgs whose stored `org_settings.api_version` pin is not one of `supported`.
+ *
+ * Such an org 400s on every org-scoped route (`middleware/api-version.ts`), so
+ * this powers the boot-time diagnostic in `lib/boot.ts`. Filtered in SQL rather
+ * than in TS: on an instance with many orgs the unserveable set is expected to
+ * be empty, and streaming every org's settings back to filter them here would
+ * make a no-op check proportional to tenant count.
+ *
+ * Orgs with no pin at all are excluded — a missing pin falls back to
+ * `CURRENT_API_VERSION` and is not a fault.
+ */
+export async function listOrgsWithUnsupportedApiVersion(
+  supported: readonly string[],
+): Promise<Array<{ id: string; apiVersion: string }>> {
+  const pin = sql<string>`${organizations.orgSettings} ->> 'api_version'`;
+  return db
+    .select({ id: organizations.id, apiVersion: pin })
+    .from(organizations)
+    .where(and(sql`${pin} IS NOT NULL`, notInArray(pin, [...supported])));
 }
 
 export async function updateOrgSettings(

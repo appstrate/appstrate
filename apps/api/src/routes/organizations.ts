@@ -25,7 +25,11 @@ import {
 import { getErrorMessage } from "@appstrate/core/errors";
 import { toSlug, SLUG_REGEX } from "@appstrate/core/naming";
 import { ApiError, forbidden, invalidRequest, notFound } from "../lib/errors.ts";
-import { CURRENT_API_VERSION, isVersionSupported } from "../lib/api-versions.ts";
+import {
+  CURRENT_API_VERSION,
+  isVersionSupported,
+  unsupportedApiVersion,
+} from "../lib/api-versions.ts";
 import { readJsonBody } from "../lib/request-body.ts";
 import { listResponse } from "../lib/list-response.ts";
 import {
@@ -533,23 +537,35 @@ router.put("/:orgId/settings", async (c) => {
   const data = await readJsonBody(c, orgSettingsSchema.partial());
 
   // Write-side counterpart of the read-side check in `middleware/api-version.ts`.
-  // That middleware is mounted on `*` and 400s on a pin it cannot serve — this
-  // route included. So persisting an unsupported `api_version` would lock the
-  // org out of every authed endpoint, including the request needed to undo it,
-  // and the SPA never sends the `Appstrate-Version` header that would bypass
-  // the pin. Rejecting on write keeps the unserveable state unreachable.
+  // That middleware is mounted on `*` and 400s on a pin it cannot serve, so
+  // persisting an unsupported `api_version` breaks every org-scoped route until
+  // the value is repaired. Whether the org can repair it itself depends on how
+  // the caller authenticates, and the difference is what makes this guard
+  // necessary rather than merely tidy:
+  //
+  //   - **Session (cookie) callers can always recover.** `skipOrgContext()`
+  //     (`lib/auth-pipeline.ts`) returns true for `/api/orgs/`, so
+  //     `requireOrgContext` never runs on this route and `c.get("orgId")` is
+  //     unset — the middleware's org-pin branch is skipped entirely and the PUT
+  //     answers 200. Reproduced against an org pinned to "2020-01-01" directly
+  //     in the DB: `GET /api/runs` → 400, `PUT /api/orgs/:orgId/settings` → 200.
+  //   - **API-key callers cannot.** `applyAuthPipeline` sets `orgId` inline from
+  //     the key, before any path-based skip, so the pin branch runs on *every*
+  //     route including this one. Same reproduction: `PUT` → 400. A headless
+  //     operator with no dashboard session is locked out with no self-serve
+  //     remedy.
+  //
+  // So the guard exists for the API-key caller, not for a universal self-DoS.
+  // Rejecting on write keeps the unserveable state unreachable for both.
   //
   // The check lives here rather than as a `.refine()` on `orgSettingsSchema`:
   // that schema is exported from `@appstrate/core`, the published OSS package,
   // which must not learn this app's version registry.
   if (data.api_version !== undefined && !isVersionSupported(data.api_version)) {
-    throw new ApiError({
-      status: 400,
-      code: "unsupported_api_version",
-      title: "Unsupported API Version",
-      detail: `API version "${data.api_version}" is not supported. Current version: ${CURRENT_API_VERSION}.`,
-      param: "api_version",
-    });
+    throw unsupportedApiVersion(
+      `API version "${data.api_version}" is not supported. Current version: ${CURRENT_API_VERSION}.`,
+      "api_version",
+    );
   }
 
   const settings = await updateOrgSettings(orgId, data);

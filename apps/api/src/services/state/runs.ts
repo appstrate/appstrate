@@ -32,7 +32,6 @@ import {
   organizations,
   documents,
   documentLinks,
-  runStatusValues,
   activeRunStatusValues,
   terminalRunStatusValues,
   type RunStatus,
@@ -1260,17 +1259,25 @@ export async function listPackageRuns(
  * `GET /api/runs` view. Joins `packages.ephemeral` so the response carries
  * the inline flag — UI uses it for the "Inline" badge.
  */
-export type GlobalRunKind = "all" | "package" | "inline";
-
-function isRunStatus(value: string): value is RunStatus {
-  return (runStatusValues as readonly string[]).includes(value);
-}
+/**
+ * The closed set `?kind=` accepts, as a value — the route validates the query
+ * parameter against it, so the tuple and the type cannot drift.
+ */
+export const GLOBAL_RUN_KINDS = ["all", "package", "inline"] as const;
+export type GlobalRunKind = (typeof GLOBAL_RUN_KINDS)[number];
 
 export interface ListGlobalRunsOptions {
   limit?: number;
   offset?: number;
   kind?: GlobalRunKind;
-  status?: string;
+  /**
+   * `RunStatus`, not `string`. This used to take a `string` and quietly drop
+   * anything outside the enum (`if (status && isRunStatus(status))`), which
+   * turned a typo into "no status filter" — the whole list, read as filtered.
+   * The route now rejects an unknown value with a 400; the narrow type is what
+   * keeps a future caller from re-opening that hole.
+   */
+  status?: RunStatus;
   startDate?: Date;
   endDate?: Date;
   endUserId?: string | null;
@@ -1293,7 +1300,7 @@ export async function listGlobalRuns(
   } = options;
 
   const conditions = [eq(runs.orgId, scope.orgId), eq(runs.applicationId, scope.applicationId)];
-  if (status && isRunStatus(status)) conditions.push(eq(runs.status, status));
+  if (status) conditions.push(eq(runs.status, status));
   if (startDate) conditions.push(gte(runs.startedAt, startDate));
   if (endDate) conditions.push(lte(runs.startedAt, endDate));
   if (endUserId) conditions.push(eq(runs.endUserId, endUserId));

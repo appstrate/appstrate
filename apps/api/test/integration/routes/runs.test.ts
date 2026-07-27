@@ -874,6 +874,98 @@ describe("Runs API", () => {
     });
   });
 
+  // ─── GET /api/runs — ?kind and ?status are closed sets ─────
+
+  // Same failure mode `?user` had, in the same handler: an unrecognised value
+  // resolved to `undefined`, which applied NO filter and returned every kind /
+  // every status to a caller reading the list as narrowed. Both are now
+  // validated against the set the OpenAPI operation declares.
+  describe("GET /api/runs — ?kind and ?status validation", () => {
+    // One inline run and one package run, in two different statuses, so a
+    // dropped filter is visible as a wider `total` rather than a lucky match.
+    async function seedMixedRuns() {
+      await seedAgent({ id: "@runorg/kindstatus-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
+      await seedRun({
+        packageId: "@runorg/kindstatus-agent",
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        userId: ctx.user.id,
+        status: "success",
+      });
+      await seedRun({
+        packageId: "@runorg/kindstatus-agent",
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        userId: ctx.user.id,
+        status: "failed",
+      });
+    }
+
+    it("rejects an unknown ?kind with 400 naming the param", async () => {
+      await seedMixedRuns();
+
+      // The typo the previous code silently widened to "every kind".
+      const res = await app.request("/api/runs?kind=inlinee", { headers: authHeaders(ctx) });
+
+      expect(res.status).toBe(400);
+      expect(res.headers.get("content-type")).toContain("application/problem+json");
+      const body = (await res.json()) as { param?: string; code?: string };
+      expect(body.param).toBe("kind");
+      expect(body.code).toBe("invalid_request");
+    });
+
+    it("rejects an unknown ?status with 400 naming the param", async () => {
+      await seedMixedRuns();
+
+      const res = await app.request("/api/runs?status=bogus", { headers: authHeaders(ctx) });
+
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { param?: string; code?: string };
+      expect(body.param).toBe("status");
+      expect(body.code).toBe("invalid_request");
+    });
+
+    it("treats a present-but-empty ?kind= as absent (no filter)", async () => {
+      await seedMixedRuns();
+
+      const res = await app.request("/api/runs?kind=", { headers: authHeaders(ctx) });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { total: number };
+      expect(body.total).toBe(2);
+    });
+
+    it("treats a present-but-empty ?status= as absent (no filter)", async () => {
+      await seedMixedRuns();
+
+      const res = await app.request("/api/runs?status=", { headers: authHeaders(ctx) });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { total: number };
+      expect(body.total).toBe(2);
+    });
+
+    it("still applies the declared values", async () => {
+      await seedMixedRuns();
+
+      const failed = await app.request("/api/runs?status=failed", { headers: authHeaders(ctx) });
+      expect(failed.status).toBe(200);
+      const failedBody = (await failed.json()) as { data: { status: string }[]; total: number };
+      expect(failedBody.total).toBe(1);
+      expect(failedBody.data[0]!.status).toBe("failed");
+
+      // No inline runs were seeded, so `kind=inline` must come back empty —
+      // the assertion a widened filter would break.
+      const inline = await app.request("/api/runs?kind=inline", { headers: authHeaders(ctx) });
+      expect(inline.status).toBe(200);
+      expect(((await inline.json()) as { total: number }).total).toBe(0);
+
+      const pkg = await app.request("/api/runs?kind=package", { headers: authHeaders(ctx) });
+      expect(pkg.status).toBe(200);
+      expect(((await pkg.json()) as { total: number }).total).toBe(2);
+    });
+  });
+
   // ─── GET /api/runs/:id/logs ────────────────────────────────
 
   describe("GET /api/runs/:id/logs", () => {

@@ -447,6 +447,75 @@ describe("Organizations API", () => {
       });
       expect(recover.status).toBe(200);
     });
+
+    // What the write guard is actually FOR. The two auth methods do not fail
+    // the same way once an unserveable pin is stored, and only one of them can
+    // dig itself out. These plant the pin directly in the DB (the guard makes
+    // it unreachable over HTTP) to reproduce the state a pre-guard write left
+    // behind.
+    describe("with an unserveable pin already stored", () => {
+      async function pinDirectly(orgId: string, version: string) {
+        await db
+          .update(organizations)
+          .set({ orgSettings: { api_version: version } })
+          .where(eq(organizations.id, orgId));
+      }
+
+      it("session callers keep the recovery route: /api/orgs/ skips org context", async () => {
+        const ctx = await createTestContext();
+        await pinDirectly(ctx.orgId, "2020-01-01");
+
+        // Org-scoped route: the pin branch runs, so this 400s.
+        const runs = await app.request("/api/runs", {
+          headers: {
+            Cookie: ctx.cookie,
+            "X-Org-Id": ctx.orgId,
+            "X-Application-Id": ctx.defaultAppId,
+          },
+        });
+        expect(runs.status).toBe(400);
+        expect(((await runs.json()) as { code: string }).code).toBe("unsupported_api_version");
+
+        // The settings route does NOT: `skipOrgContext()` returns true for
+        // `/api/orgs/`, so `requireOrgContext` never runs, `c.get("orgId")` is
+        // unset, and the middleware skips the pin branch entirely.
+        const recover = await app.request(`/api/orgs/${ctx.orgId}/settings`, {
+          method: "PUT",
+          headers: { Cookie: ctx.cookie, "Content-Type": "application/json" },
+          body: JSON.stringify({ api_version: CURRENT_API_VERSION }),
+        });
+        expect(recover.status).toBe(200);
+        expect((await getOrgSettings(ctx.orgId)).api_version).toBe(CURRENT_API_VERSION);
+      });
+
+      it("API-key callers are locked out — including the recovery route", async () => {
+        const ctx = await createTestContext();
+        const key = await seedApiKey({
+          orgId: ctx.orgId,
+          applicationId: ctx.defaultAppId,
+          createdBy: ctx.user.id,
+          name: "pin-lockout-key",
+        });
+        await pinDirectly(ctx.orgId, "2020-01-01");
+
+        // `applyAuthPipeline` sets `orgId` inline from the key, before any
+        // path-based skip — so the pin branch runs on EVERY route, this one
+        // included. A headless operator has no self-serve remedy, which is
+        // exactly why the write path must refuse to create this state.
+        const recover = await app.request(`/api/orgs/${ctx.orgId}/settings`, {
+          method: "PUT",
+          headers: {
+            Authorization: `Bearer ${key.rawKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ api_version: CURRENT_API_VERSION }),
+        });
+        expect(recover.status).toBe(400);
+        expect(((await recover.json()) as { code: string }).code).toBe("unsupported_api_version");
+        // Still pinned — the write never landed.
+        expect((await getOrgSettings(ctx.orgId)).api_version).toBe("2020-01-01");
+      });
+    });
   });
 
   describe("POST /api/orgs/:orgId/members", () => {
