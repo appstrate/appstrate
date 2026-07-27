@@ -23,7 +23,6 @@ import { resolveCredentialModelIds } from "../../../src/services/model-providers
 import { registerModelProvider } from "../../../src/services/model-providers/registry.ts";
 import { registerCatalog } from "../../../src/services/pricing-catalog.ts";
 import { seedTestModelProviders } from "../../helpers/model-providers.ts";
-import claudeCodeModule from "@appstrate/module-claude-code";
 import type { CatalogModelEntry } from "@appstrate/shared-types";
 
 const CATALOG_ID = "test-credential-model-ids";
@@ -39,6 +38,17 @@ const ENTRY: CatalogModelEntry = {
 };
 
 beforeAll(() => {
+  // Reset the registry to the canonical baseline FIRST, then layer the
+  // synthetic providers on top. The root preload
+  // (`test/setup/preload.ts`) discovers `apps/api/src/modules/*` AND every
+  // `packages/module-*` workspace package — independently of the `MODULES`
+  // env var, which only gates the production loader — so the baseline already
+  // contains the real `claude-code` and `codex` definitions. Re-registering
+  // `claude-code` by hand would throw "already registered" as soon as any
+  // earlier file in the shared `bun test` process re-seeded, which is an
+  // order-dependent failure waiting to happen. Seeding gives us the same real
+  // definitions with no such coupling.
+  seedTestModelProviders();
   registerCatalog(CATALOG_ID, { "m-one": ENTRY, "m-two": ENTRY });
   const base = {
     displayName: "Synthetic",
@@ -60,16 +70,12 @@ beforeAll(() => {
     modelDiscovery: { mode: "static" },
   });
   registerModelProvider({ ...base, providerId: PROBE_PROVIDER, authMode: "api_key" });
-  // The real `claude-code` provider is NOT in the test `MODULES` list, so
-  // registering it here cannot collide. The regression below needs the real
-  // definition — a synthetic stand-in would pass while the shipped list rots.
-  for (const def of claudeCodeModule.modelProviders?.() ?? []) registerModelProvider(def);
 });
 
 afterAll(() => {
-  // Restore the canonical baseline: `bun test` shares one process, and the
-  // registry rejects duplicate ids, so leaving these behind would break the
-  // next file that re-registers a provider.
+  // Drop the synthetic providers again: `bun test` shares one process and the
+  // registry rejects duplicate ids, so leaving them behind would break any
+  // later file that registers a provider of its own on top of the baseline.
   seedTestModelProviders();
 });
 
@@ -108,6 +114,11 @@ describe("resolveCredentialModelIds — probe providers", () => {
   });
 });
 
+/**
+ * Runs against the REAL `claude-code` definition (from the baseline registry,
+ * see `beforeAll`) on purpose — a synthetic stand-in would keep passing while
+ * the shipped list rots, which is the exact failure this pins.
+ */
 describe("resolveCredentialModelIds — claude-code regression", () => {
   it("resolves a two-generations-old persisted array to the current catalog generation", () => {
     // The production shape: five `claude-code` credentials all carrying the
