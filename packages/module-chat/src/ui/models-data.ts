@@ -24,6 +24,7 @@ const orgModelOptionSchema = z.object({
   providerName: z.string().nullable().optional(),
   label: z.string().nullable(),
   is_default: z.boolean().optional(),
+  needs_reconnection: z.boolean().optional(),
   enabled: z.boolean().optional(),
   aliased: z.boolean().optional(),
 });
@@ -45,6 +46,12 @@ export interface OrgModelOption {
   label: string | null;
   /** snake_case to match the `/api/models` wire field (org-models.ts). */
   is_default?: boolean;
+  /**
+   * The model's credential can no longer serve inference (revoked OAuth, or a
+   * stored blob that no longer decrypts). Listed but not selectable — the
+   * picker shows it marked so the user can see WHY it disappeared from use.
+   */
+  needs_reconnection?: boolean;
   enabled?: boolean;
   /** Model-alias flag — selectable in chat without exposing the backing model. */
   aliased?: boolean;

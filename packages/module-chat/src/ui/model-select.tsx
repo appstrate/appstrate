@@ -11,6 +11,7 @@
 import { useEffect, useRef, useState } from "react";
 import { CheckIcon, ChevronDownIcon } from "lucide-react";
 import type { OrgModelOption } from "./models-data.ts";
+import { useChatHost } from "./runtime-context.ts";
 
 /** Group/button label for a managed model — provider-neutral, binding not exposed. */
 const MANAGED_LABEL = "Géré";
@@ -52,6 +53,7 @@ function groupByProvider(models: OrgModelOption[]): ProviderGroup[] {
 export function ModelSelect({ models, selectedId, onSelect }: Props) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const { t } = useChatHost();
 
   useEffect(() => {
     if (!open) return;
@@ -82,24 +84,37 @@ export function ModelSelect({ models, selectedId, onSelect }: Props) {
               </div>
               {group.models.map((m) => {
                 const isSelected = m.id === selectedId;
+                // Listed but unusable: its credential can no longer serve
+                // inference. Shown (so the model doesn't just vanish, and the
+                // user learns what to fix) but not pickable — the server's
+                // `pickModel` refuses it anyway.
+                const dead = m.needs_reconnection === true;
                 return (
                   <button
                     key={m.id}
                     type="button"
+                    disabled={dead}
                     onClick={() => {
                       onSelect(m.id);
                       setOpen(false);
                     }}
                     className={`flex w-full items-center justify-start gap-2 rounded-md px-2 py-1.5 text-left text-sm ${
-                      isSelected
-                        ? "bg-accent text-accent-foreground"
-                        : "hover:bg-accent hover:text-accent-foreground"
+                      dead
+                        ? "text-muted-foreground cursor-not-allowed"
+                        : isSelected
+                          ? "bg-accent text-accent-foreground"
+                          : "hover:bg-accent hover:text-accent-foreground"
                     }`}
                   >
                     <CheckIcon
                       className={`size-3.5 shrink-0 ${isSelected ? "opacity-100" : "opacity-0"}`}
                     />
                     <span className="flex-1 truncate text-left">{m.label ?? m.modelId}</span>
+                    {dead && (
+                      <span className="text-destructive shrink-0 text-[0.65rem] whitespace-nowrap">
+                        {t("model.needsReconnection")}
+                      </span>
+                    )}
                   </button>
                 );
               })}

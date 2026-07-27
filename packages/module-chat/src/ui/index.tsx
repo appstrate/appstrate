@@ -143,10 +143,14 @@ export function ChatPage({
   useEffect(() => {
     void fetchModels(getHeaders).then((list) => {
       setModels(list);
-      // Reconcile a stale/absent stored selection to the org default.
+      // Reconcile a stale/absent stored selection to the org default. A model
+      // whose credential went dead is listed (the picker marks it, unpickable)
+      // but must not be kept as the stored selection nor adopted as the
+      // fallback — the server would reject it on the next send.
+      const live = list.filter((m) => !m.needs_reconnection);
       const cur = getSelectedModel();
-      if (cur && list.some((m) => m.id === cur)) return;
-      setSelectedModel((list.find((m) => m.is_default) ?? list[0])?.id ?? null);
+      if (cur && live.some((m) => m.id === cur)) return;
+      setSelectedModel((live.find((m) => m.is_default) ?? live[0])?.id ?? null);
     });
   }, [getHeaders]);
 
