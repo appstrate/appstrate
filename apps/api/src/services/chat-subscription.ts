@@ -45,10 +45,14 @@ export async function resolveSubscriptionChatModel(
 ): Promise<SubscriptionChatResolution> {
   const resolved = await loadModel(orgId, presetId);
   if (!resolved) {
-    // A model that resolves to nothing because its oauth credential is flagged
-    // needs-reconnection surfaces as a reconnect prompt; anything else (unknown
+    // A model that resolves to nothing because its stored credential is dead —
+    // oauth flagged needs-reconnection, or (either auth mode) a secret that no
+    // longer decrypts — surfaces as a reconnect prompt; anything else (unknown
     // preset, disabled model) falls through to the ai-sdk path, which produces
-    // the appropriate "no such model" error.
+    // the appropriate "no such model" error. Reached only after `loadModel`
+    // already returned null, so nothing is resolvable and no spend can happen
+    // on either branch: this only decides which error the user is shown, and
+    // "reconnect that credential" is the actionable one.
     if (await modelNeedsReconnection(orgId, presetId)) {
       return { subscription: true, needsReconnection: true };
     }

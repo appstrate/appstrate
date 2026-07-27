@@ -7,17 +7,7 @@ export const modelsPaths = {
       tags: ["Models"],
       summary: "List organization models",
       description: "Returns all models (built-in + custom) for the current organization.",
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        {
-          name: "metadata_only",
-          in: "query",
-          required: false,
-          description:
-            "When true, resolve each model's protocol family and base URL from the provider registry WITHOUT decrypting its credential. Faster for callers that only need to pick a model (e.g. the chat model picker); a model whose secret is unusable is not filtered and surfaces an error only at inference time.",
-          schema: { type: "boolean" },
-        },
-      ],
+      parameters: [{ $ref: "#/components/parameters/XOrgId" }],
       responses: {
         "200": {
           description: "Model list",
@@ -55,6 +45,7 @@ export const modelsPaths = {
                     source: "built-in",
                     enabled: true,
                     is_default: false,
+                    needs_reconnection: false,
                     aliased: false,
                     credentialId: "pk_abc123",
                     contextWindow: 128000,
@@ -205,6 +196,15 @@ export const modelsPaths = {
         // `setDefaultModel` throws `notFound`. The pointer never silently keeps
         // a stale/absent default.
         "404": { $ref: "#/components/responses/NotFound" },
+        "409": {
+          description:
+            "The model's stored credential can no longer be used for inference (`model_needs_reconnection`) — see the `needs_reconnection` field on `OrgModel`. Such a model is listed so it can be inspected or detached, but it cannot become the organization default: every run and chat would fail at inference time.",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
       },
     },
   },

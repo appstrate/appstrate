@@ -675,6 +675,19 @@ export interface OrgModelInfo extends ModelMetadata {
   enabled: boolean;
   is_default: boolean;
   /**
+   * True when the model's stored credential can no longer be used for
+   * inference — an OAuth credential flagged `needsReconnection` (revoked
+   * refresh token), or, for either auth mode, a stored blob that no longer
+   * decrypts (e.g. a key rotation that retired a kid still in use). The model
+   * is listed (so it can be inspected/detached/deleted) but must never be
+   * selectable for inference. Always false for built-in/system models, which
+   * read their key from the environment and have no stored blob.
+   *
+   * snake_case on purpose: mirrors {@link ModelProviderCredentialInfo.needs_reconnection}
+   * and `IntegrationConnection.needs_reconnection` on the same wire.
+   */
+  needs_reconnection: boolean;
+  /**
    * Model-alias flag (LLM-gateway alias pattern). When true, the `id` is a
    * public alias; user-facing surfaces strip the real binding (`modelId`,
    * `apiShape`, `baseUrl`, `credentialId`, capabilities/cost). Clients render
