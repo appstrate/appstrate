@@ -104,7 +104,7 @@ An external repository can guarantee none of the three. Integrations therefore s
 - **`POST /api/runs/:runId/documents`** (`routes/runs-events.ts`) — guarded by `verifyRunUploadSignature` (sink HMAC over an empty body, agent-side), streaming raw bytes with metadata via headers. `createDocumentFromStream` enforces the per-file + per-run caps mid-stream (`createHashingCounter` with caps), the org quota transactionally, and dedups by `(run, sha256, name)` for at-least-once retries. Dedup is enforced in two layers: a fast-path pre-commit SELECT, and — for the concurrent-publish race where both callers pass that SELECT — a partial **unique index** `(run_id, sha256, name) WHERE purpose = 'agent_output'`, whose violation the commit path catches and resolves to the same existing row (dedup 200). A genuinely new publish (201) also emits a **`document.published`** audit event attributed to the run's actor; a dedup replay (200) does not.
 - **`publish_document` runtime tool** (opt-in via `manifest.runtime_tools`) — reads a workspace file, POSTs it to that route (signed), and emits the canonical **`document.published`** event via `_meta["dev.appstrate/events"]`. Unlike the pure event-emitter runtime tools it has an injected HTTP uploader (built in the entrypoint, not `buildRuntimeToolDefs`).
 - **`workspace/outputs/` sweep** — at finalize the entrypoint uploads any not-yet-published file in `outputs/` (dedup by sha256), emitting the events before `events/finalize` (OpenAI annotation-loss lesson). Uploads are bounded-concurrent (3 at a time) and each POST retries (3 attempts) on transient failures (network error, timeout, 5xx, 429 — honouring `Retry-After`); a file abandoned after retries is logged as a dropped deliverable and never blocks finalize.
-  - **Hidden files are excluded by default.** The sweep skips any entry whose relative path has a segment starting with `.` — dotfiles like `.env`/`.netrc` and everything under a hidden dir like `.git/`. Since it publishes to a wider, durable, org-visible surface, an agent that inadvertently writes a secret dotfile under `outputs/` must not have it exfiltrated automatically. The explicit `publish_document` tool is unaffected: a deliberate publish of a dotfile is still allowed.
+  - **Hidden files are excluded by default.** The sweep skips any entry whose relative path has a segment starting with `.` — dotfiles like `.env`/`.netrc` and everything under a hidden dir like `.git/`. Since it publishes to a wider, durable, org-visible surface, an agent that inadvertently writes a secret dotfile under `outputs/` must not have it exfiltrated automatically. The explicit `publish_document` tool is unaffected: a deliberate publish of a dotfile is still allowed — see "Hidden-file policy" under Hardening for why the asymmetry is deliberate.
 
 `document.published` is ingested into a `run_log` and forwarded over SSE (`run_update` / `run_log`), so run page and chat cards update live.
 
@@ -188,6 +188,22 @@ The platform MCP server (`apps/api/src/modules/mcp/`) surfaces documents to exte
 ## Hardening
 
 A cross-cutting summary of the guarantees the sections above rely on, and where they are enforced. The details are in the referenced sections; this is the map.
+
+### Hidden-file policy — implicit sweep filters, explicit tool does not
+
+The hidden-path filter (`runtime-pi/publish.ts`, any segment starting with `.`) is an **implicit-publish** control, not a containment boundary. It applies to the `outputs/` sweep and **deliberately does not apply to `publish_document`**; the tool publishes any regular file inside the workspace, dotfile or not (locked by a test in `runtime-pi/test/publish.test.ts`).
+
+The split is drawn on intent, because that is the only place it buys anything:
+
+- The **sweep** publishes whatever happens to be in a directory — including a `.env` an unrelated tool dropped there, which the agent never meant as a deliverable. Filtering is the difference between a mistake and a durable, org-visible document.
+- The **tool** is a per-call decision with an explicit path. Refusing hidden paths there (outright, or unless a `name` is passed) removes **no capability** from a prompt-injected agent: `cp .env outputs/notes.txt` — or `publish_document({ path: "copy.txt" })` after the same copy — publishes the identical bytes under a non-hidden name. It would only cost a legitimate publish of a dotfile, and it is the kind of control that reads as a boundary while enforcing nothing.
+
+**Threat model, stated plainly.** An agent whose manifest enables `publish_document` can surface any workspace file it can read as an org-visible `agent_output` document — that is the tool's purpose, and prompt injection can aim it. What bounds the exposure is not the path shape:
+
+- the document is attached to the run, so it inherits the run's container ACL (see "ACL") — never wider than who can already read the run;
+- reads are gated by `documents:read` and the capability matrix; preview goes through a short-lived signed token on a cookie-less route (see "Preview security").
+
+So the mitigation lives where the capability is granted (`manifest.runtime_tools` is opt-in per agent), not in a filename check. **Enable `publish_document` only on agents whose workspace you would accept seeing published.**
 
 ### Identity model — display name vs workspace name (D-naming)
 
