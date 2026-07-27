@@ -8,23 +8,24 @@
  *
  * Defense layers (in order):
  * 1. Must parse as an absolute URL.
- * 2. Scheme must be `https:` — `http:` is only allowed when pointing at
- *    `localhost`/`127.0.0.1` AND the platform itself is running in dev
- *    mode (`APP_URL` is HTTP/localhost). Production cannot register HTTP
- *    redirect URIs at all.
- * 3. Host must not resolve to a blocked network: SSRF targets (RFC1918,
- *    link-local `169.254.0.0/16`, cloud metadata, loopback in production,
- *    IPv6 variants), `javascript:`/`data:`/`file:` schemes. Enforced via
- *    `@appstrate/core/ssrf:isBlockedUrl`, which is the same helper used
- *    by the webhooks delivery path.
- *
- * Dev-mode localhost is explicitly re-allowed after the SSRF check so
- * satellites can register `http://localhost:5173/callback` etc. during
- * local development — only when `APP_URL` is itself a localhost URL.
+ * 2. `http:` is allowed only when the host is loopback (`localhost`,
+ *    `127.0.0.0/8`, `[::1]` — RFC 8252 §7.3), regardless of environment.
+ *    Native and CLI clients are loopback-only by construction, and a
+ *    redirect URI is a browser navigation target — never a URL the server
+ *    fetches — so the SSRF concern that gates outbound loopback does not
+ *    apply. This deliberately mirrors the Dynamic Client Registration path
+ *    (`@better-auth/oauth-provider`), so an admin-registered client accepts
+ *    exactly what DCR would accept.
+ * 3. Every other host must be `https:` AND must not resolve to a blocked
+ *    network: SSRF targets (RFC1918, link-local `169.254.0.0/16`, cloud
+ *    metadata, loopback, IPv6 variants). Enforced via
+ *    `@appstrate/core/ssrf:isBlockedUrl`, the same helper used by the
+ *    webhooks delivery path. Non-`http:`/`https:` schemes
+ *    (`javascript:`/`data:`/`file:`) fall through to `false`.
  */
 
 import { isBlockedUrl } from "@appstrate/core/ssrf";
-import { isDevEnvironment, LOCALHOST_HOSTS } from "../../../services/redirect-validation.ts";
+import { isLoopbackHost } from "../../../services/redirect-validation.ts";
 
 export function isValidRedirectUri(raw: string): boolean {
   let parsed: URL;
@@ -33,12 +34,11 @@ export function isValidRedirectUri(raw: string): boolean {
   } catch {
     return false;
   }
-  const isLocalhost = LOCALHOST_HOSTS.has(parsed.hostname);
+  if (parsed.protocol === "http:") {
+    return isLoopbackHost(parsed.hostname);
+  }
   if (parsed.protocol === "https:") {
     return !isBlockedUrl(raw);
-  }
-  if (parsed.protocol === "http:" && isLocalhost && isDevEnvironment()) {
-    return true;
   }
   return false;
 }

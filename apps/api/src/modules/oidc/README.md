@@ -295,7 +295,7 @@ export OIDC_INSTANCE_CLIENTS='[
 | `clientId`               | yes      | Operator-chosen stable identifier (`^[a-zA-Z0-9_-]+$`, 3–100 chars). Cannot start with `oauth_` — that prefix is reserved for the auto-provisioned platform client.      |
 | `clientSecret`           | yes      | Operator-supplied, minimum 32 chars. Hashed SHA-256 at rest — plaintext lives only in memory for the duration of the hash call and is NEVER logged.                      |
 | `name`                   | yes      | Human-readable name shown on the consent screen (when `skipConsent: false`).                                                                                             |
-| `redirectUris`           | yes      | At least one. Validated by `services/redirect-uri.ts → isValidRedirectUri` — `https://` only in production, `http://localhost` / `http://127.0.0.1` only in dev.         |
+| `redirectUris`           | yes      | At least one. Validated by `services/redirect-uri.ts → isValidRedirectUri` — `http://` only for loopback hosts (`localhost`, `127.0.0.0/8`, `[::1]` — RFC 8252 §7.3, any environment), `https://` (non-SSRF host) for everything else.         |
 | `postLogoutRedirectUris` | no       | Defaults to `[]`.                                                                                                                                                        |
 | `scopes`                 | no       | Defaults to `["openid", "profile", "email", "offline_access"]`. Must be a subset of `getAppstrateScopes()` — invalid scopes are rejected at the service validation step. |
 | `skipConsent`            | no       | Defaults to `false`. Set to `true` for trusted first-party satellites to skip the consent screen.                                                                        |
@@ -346,7 +346,7 @@ Tokens minted for env-provisioned instance clients carry `actor_type: "user"` an
 
 Two blockers identified at Phase 1:
 
-1. **`isValidRedirectUri` rejects loopback redirects in production** (`services/redirect-uri.ts:40`) — dev-mode only. A CLI cannot register `http://127.0.0.1:<port>/callback` in prod.
+1. ~~**`isValidRedirectUri` rejects loopback redirects in production** (`services/redirect-uri.ts`) — dev-mode only. A CLI cannot register `http://127.0.0.1:<port>/callback` in prod.~~ Resolved: `isValidRedirectUri` now accepts `http://` for any loopback host (`localhost`, `127.0.0.0/8`, `[::1]`) regardless of environment, matching the DCR path (RFC 8252 §7.3).
 2. **Better Auth `@better-auth/oauth-provider` strict-equality matches `redirect_uri`** — no RFC 8252 port-flexible matching. A CLI would have to register a fixed port or a list of fallback ports.
 
 Support for public clients (CLI / desktop / pure-SPA) is tracked as a follow-up. Better Auth oauth-provider DOES technically support public clients (`token_endpoint_auth_method: "none"`, `type: "native"`/`"user-agent-based"`, PKCE auto-enforced, no secret generated — see `utils-B9Pj9EPf.mjs:408` and `index.mjs:1182` in the plugin dist), so the future work is localized to `redirect-uri.ts` and `createClient`.
