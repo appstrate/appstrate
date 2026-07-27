@@ -24,28 +24,26 @@ import type { MapPanelKind } from "./map-panel-dialog";
 
 type Destination = { slot: "edit"; kind: MapEditKind } | { slot: "panel"; kind: MapPanelKind };
 
-/** Where a diagnostic gets fixed, by the card that owns it. */
+/**
+ * Where a diagnostic gets fixed: one destination per card, the same one its rows
+ * open.
+ *
+ * `integration_not_active` used to be special-cased to the integrations editor,
+ * because the Connections panel could only state the blockage. The panel can now
+ * activate in place, so the exception is gone — two ways in for two problems on
+ * the same card only invited the question "what is the difference?", and the
+ * honest answer had become "none".
+ */
 const BY_NODE: Record<string, Destination> = {
   agent: { slot: "edit", kind: "prompt" },
+  config: { slot: "panel", kind: "config" },
   skills: { slot: "edit", kind: "skills" },
   toolbox: { slot: "panel", kind: "connections" },
   model: { slot: "panel", kind: "model" },
 };
 
-/**
- * Codes whose cure is not on their card's usual panel.
- *
- * An integration that is not ACTIVE in this application cannot be connected —
- * the Connections panel says exactly that and offers nothing, which made "Fix"
- * a guided tour to a dead end. Activation happens in the integrations editor, so
- * that is where the row goes.
- */
-const BY_CODE: Record<string, Destination> = {
-  integration_not_active: { slot: "edit", kind: "integrations" },
-};
-
 function destinationFor(diagnostic: AgentMapDiagnostic): Destination | undefined {
-  return BY_CODE[diagnostic.code] ?? (diagnostic.node_id ? BY_NODE[diagnostic.node_id] : undefined);
+  return diagnostic.node_id ? BY_NODE[diagnostic.node_id] : undefined;
 }
 
 export function MapIssuesDialog({
