@@ -482,18 +482,14 @@ export async function buildAgentMap(
       node: {
         id: "agent",
         type: "agent",
+        // What the prose card actually renders, and nothing else: the model,
+        // proxy, config and the two schemas each ended up with a card of their
+        // own, leaving this payload shipping four fields no renderer read.
         data: {
           display_name: agent.manifest.display_name,
           description: agent.manifest.description ?? null,
           prompt: agent.prompt ?? null,
           timeout: agent.manifest.timeout ?? null,
-          modelId: packageConfig.modelId,
-          proxyId: packageConfig.proxyId,
-          // Input and output each have their own card now; a chip repeating
-          // "has an input schema" next to a card listing its fields is noise.
-          has_config_schema: !!(
-            configSchema?.properties && Object.keys(configSchema.properties).length > 0
-          ),
         },
       },
       itemCount: 1,

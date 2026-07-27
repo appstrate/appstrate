@@ -51,6 +51,16 @@ import { LibraryPicker, type LibraryCandidate } from "./library-picker";
 export type MapEditKind =
   "prompt" | "skills" | "integrations" | "runtime_tools" | "input" | "output" | "config";
 
+const TITLE_KEY: Record<MapEditKind, string> = {
+  prompt: "map.editPrompt",
+  skills: "map.addSkill",
+  runtime_tools: "map.systemTools",
+  integrations: "map.addIntegration",
+  input: "map.editInput",
+  output: "map.editOutput",
+  config: "map.editConfigSchema",
+};
+
 /**
  * The three AFPS schema wrappers (§3.4), which share one field editor. Kept as a
  * guard rather than a repeated union so adding a fourth touches one line.
@@ -83,19 +93,8 @@ export function MapEditDialog({ kind, packageId, onClose }: MapEditDialogProps) 
     onClose();
   };
 
-  const TITLES: Record<MapEditKind, string> = {
-    prompt: "map.editPrompt",
-    skills: "map.addSkill",
-    runtime_tools: "map.systemTools",
-    integrations: "map.addIntegration",
-    input: "map.editInput",
-    output: "map.editOutput",
-    config: "map.editConfigSchema",
-  };
-  const title = t(TITLES[kind]);
-
   return (
-    <Modal open onClose={closeAndRefresh} title={title} className="sm:max-w-2xl">
+    <Modal open onClose={closeAndRefresh} title={t(TITLE_KEY[kind])} className="sm:max-w-2xl">
       {detail?.manifest ? (
         // Keyed on the optimistic-lock token: a save bumps it, which remounts
         // the form on the freshly saved definition instead of keeping a draft

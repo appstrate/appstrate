@@ -173,11 +173,11 @@ function Card({
   wide,
   action,
   emptyLabel,
-  isEmpty,
 }: {
   title: string;
   /** i18n key suffix under `map.concept.` for the header's explanation dialog. */
   concept: string;
+  /** Rows listed. Omitted by the prose cards (agent, model), which are never empty. */
   count?: number;
   children: React.ReactNode;
   /** Sides edges arrive on. The agent has two: `left` from its triggers, `top` from its input. */
@@ -187,7 +187,6 @@ function Card({
   wide?: boolean;
   action?: CardAction | undefined;
   emptyLabel?: string;
-  isEmpty?: boolean;
 }) {
   return (
     <div
@@ -226,7 +225,9 @@ function Card({
         </span>
       </div>
       <div className={`${MAX_LIST_HEIGHT} overflow-y-auto p-2`}>
-        {isEmpty && emptyLabel ? (
+        {/* Emptiness is `count`, not a second prop saying the same thing: every
+            list card passed `count={list.length}` AND `isEmpty={length === 0}`. */}
+        {count === 0 && emptyLabel ? (
           <div className="text-muted-foreground px-2 py-1.5 text-[11px] italic">{emptyLabel}</div>
         ) : (
           children
@@ -429,7 +430,6 @@ export function SchedulesNode({ data }: NodeProps) {
       concept="schedules"
       count={list.length}
       sources={["right"]}
-      isEmpty={list.length === 0}
       emptyLabel={t("map.emptySchedules")}
       // Straight to the create form, agent pre-selected. It used to open a panel
       // that re-listed the schedules this card already shows and offered its own
@@ -528,7 +528,6 @@ export function ToolboxNode({ data }: NodeProps) {
       concept="toolbox"
       count={list.length}
       targets={["left"]}
-      isEmpty={list.length === 0}
       emptyLabel={t("map.emptyToolbox")}
       action={cardAction(data, "onEdit", "integrations", t("map.addIntegration"))}
     >
@@ -579,7 +578,6 @@ export function SkillsNode({ data }: NodeProps) {
       concept="skills"
       count={list.length}
       targets={["left"]}
-      isEmpty={list.length === 0}
       emptyLabel={t("map.emptySkills")}
       action={edit}
     >
@@ -658,7 +656,6 @@ export function SystemToolsNode({ data }: NodeProps) {
       concept="systemTools"
       count={list.length}
       targets={["left"]}
-      isEmpty={list.length === 0}
       emptyLabel={t("map.emptySystemTools")}
       // These are granted in the manifest (`runtime_tools`), so the affordance
       // opens the same checklist the editor uses.
@@ -716,7 +713,6 @@ function ContractNode({ data, side }: { data: Record<string, unknown>; side: "in
       concept={side}
       count={list.length}
       {...(side === "input" ? { sources: ["bottom" as const] } : { targets: ["top" as const] })}
-      isEmpty={list.length === 0}
       emptyLabel={side === "input" ? t("map.emptyInput") : t("map.emptyOutput")}
       action={edit}
     >
@@ -767,7 +763,6 @@ export function ConfigNode({ data }: NodeProps) {
       concept="config"
       count={list.length}
       sources={["right"]}
-      isEmpty={list.length === 0}
       emptyLabel={t("map.emptyConfig")}
       action={declare}
     >
@@ -806,7 +801,6 @@ export function McpServersNode({ data }: NodeProps) {
       concept="mcpServers"
       count={list.length}
       targets={["left"]}
-      isEmpty={list.length === 0}
       emptyLabel={t("map.emptyMcpServers")}
     >
       {list.map((item) => (
