@@ -606,7 +606,7 @@ program
   )
   .option(
     "-L, --location",
-    "Follow redirects (cross-origin hops strip Authorization per WHATWG fetch)",
+    "Follow redirects to whatever host the server names in Location. Cross-origin hops drop Authorization/Cookie (WHATWG fetch) but STILL forward your -H headers and X-Org-Id/X-Application-Id.",
   )
   .option(
     "-k, --insecure",
