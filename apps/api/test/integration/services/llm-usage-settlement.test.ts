@@ -29,7 +29,10 @@
  *      alone: the advance rule is two-level, so a zero-cost model — free tier,
  *      no catalog rate, cache-only turn — loses tokens while its cost delta
  *      stays flat at 0. A one-dimensional payload would render exactly that
- *      loss class indistinguishable from the #997 noise;
+ *      loss class indistinguishable from the #997 noise. And the reporting is
+ *      subordinate to the write: it may never cost a caller its transaction,
+ *      which is why the assessment's own failure is swallowed for exactly one
+ *      caller (the executor-less finalize barrier) and rethrown for every other;
  *   3. NO DURABLE QUEUE FOR RUNNER ROWS — a failed runner write propagates
  *      instead of being deferred, because a deferred replay could only land
  *      after settlement, where (2) refuses it.
@@ -49,7 +52,7 @@ import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage } from "../../helpers/seed.ts";
 import { logger } from "../../../src/lib/logger.ts";
-import { recordLlmUsage } from "../../../src/services/llm-usage-ledger.ts";
+import { recordLlmUsage, type LlmUsageEntry } from "../../../src/services/llm-usage-ledger.ts";
 import {
   recordLlmUsageReliably,
   initLlmUsageRetryWorker,
@@ -144,6 +147,48 @@ async function synthesisedFinalize(runId: string): Promise<void> {
  * cosmetic change.
  */
 const REFUSAL_MESSAGE = "llm_usage: refused a runner snapshot on an already-settled run";
+
+/**
+ * A settled run holding a $2 / 150-token cumulative snapshot, plus the late
+ * snapshot that would genuinely advance it ($9 / 600 tokens) — i.e. one the
+ * diagnostic is guaranteed to reach. Shared by the two diagnostic-failure tests,
+ * which are identical up to who supplies the executor.
+ */
+async function settledRunWithLateSnapshot(
+  ctx: TestContext,
+): Promise<{ runId: string; late: LlmUsageEntry }> {
+  const runId = await seedSinkRun(ctx, { tokenUsage: null });
+  const stored: LlmUsageEntry = {
+    source: "runner",
+    orgId: ctx.orgId,
+    runId,
+    credentialSource: "system",
+    inputTokens: 100,
+    outputTokens: 50,
+    costUsd: 2,
+  };
+  await recordLlmUsage(stored, { onConflict: "runner-monotonic" });
+  await synthesisedFinalize(runId);
+  return { runId, late: { ...stored, inputTokens: 400, outputTokens: 200, costUsd: 9 } };
+}
+
+/**
+ * The one-sided report both diagnostic-failure paths emit before they diverge.
+ * One-sided by necessity: the DB read is what failed, so only the entry's own
+ * values survive — no stored total, hence neither delta. The incoming token
+ * total (400 + 200, no cache buckets) is summed in TS on this path, the single
+ * place that formula is duplicated away from SQL.
+ */
+function expectUnassessedRefusal(call: unknown[] | undefined, runId: string, orgId: string): void {
+  expect(call?.[0]).toBe("llm_usage: could not assess a refused runner snapshot");
+  expect(call?.[1]).toEqual({
+    runId,
+    orgId,
+    incomingCostUsd: 9,
+    incomingTotalTokens: 600,
+    error: "connection terminated unexpectedly",
+  });
+}
 
 describe("llm_usage settlement — terminal barrier and post-settlement immutability", () => {
   let ctx: TestContext;
@@ -378,31 +423,27 @@ describe("llm_usage settlement — terminal barrier and post-settlement immutabi
     });
   });
 
-  it("a diagnostic that itself fails still reports the refusal, minus the stored-side figures", async () => {
-    // The diagnostic added a SELECT to a path that previously did no I/O at all,
-    // and it runs inside the terminal barrier, which calls the ledger with
-    // `required: true` — a throw here would fail `finalizeRun` and leave a
-    // finished run permanently unsettled. That is a strictly worse failure than
-    // the missing log line it was meant to produce.
+  // The next two tests are a PAIR. Both fault the diagnostic's SELECT on a
+  // settled run and both must produce the identical one-sided report; they
+  // differ only in who supplied the executor, which is what decides whether the
+  // error is then rethrown. Splitting hairs over one boolean is the point: it is
+  // the whole difference between "a finished run never settles" and "a 2xx
+  // response silently rolled back the caller's transaction".
+  it("a diagnostic failure inside a caller's transaction is reported AND rethrown", async () => {
+    // A caller-supplied executor means an OPEN transaction — the
+    // `appstrate.metric` ingestion path. Swallowing there is worse than a missing
+    // log line: the callback resolves, drizzle sends COMMIT, Postgres (measured
+    // on PGlite, which is what these tests run on) turns it into ROLLBACK, and
+    // the sink answers 2xx having lost the run_log row, the ledger write AND the
+    // sequence advance — with nobody informed. Rethrowing restores that path's
+    // documented recovery: the ingestion transaction aborts, the sequence does
+    // not advance, the runner re-POSTs, and its next cumulative snapshot
+    // supersedes.
     //
-    // Expressed through the service's own DI seam (`opts.executor`): an executor
-    // whose INSERT is real but whose SELECT faults isolates the diagnostic query
-    // as the single point of failure. No `mock.module()` (AGENTS.md).
-    const runId = await seedSinkRun(ctx, { tokenUsage: null });
-    await recordLlmUsage(
-      {
-        source: "runner",
-        orgId: ctx.orgId,
-        runId,
-        credentialSource: "system",
-        inputTokens: 100,
-        outputTokens: 50,
-        costUsd: 2,
-      },
-      { onConflict: "runner-monotonic" },
-    );
-    await synthesisedFinalize(runId);
-
+    // Faulted through the service's own DI seam (`opts.executor`): a real INSERT
+    // with a throwing SELECT isolates the diagnostic query as the single point
+    // of failure. No `mock.module()` (AGENTS.md).
+    const { runId, late } = await settledRunWithLateSnapshot(ctx);
     const diagnosticBlindExecutor = {
       insert: db.insert.bind(db),
       select() {
@@ -410,42 +451,44 @@ describe("llm_usage settlement — terminal barrier and post-settlement immutabi
       },
     } as unknown as Db;
 
-    // A genuinely advancing snapshot, so the diagnostic is definitely reached.
-    const late = await recordLlmUsage(
-      {
-        source: "runner",
-        orgId: ctx.orgId,
-        runId,
-        credentialSource: "system",
-        inputTokens: 400,
-        outputTokens: 200,
-        costUsd: 9,
-      },
-      { onConflict: "runner-monotonic", executor: diagnosticBlindExecutor },
-    );
-    // The write itself still reports its outcome normally — no throw reaches
-    // the barrier, and the settled row is untouched.
-    expect(late).toBeNull();
-    expect((await runnerRow(runId))!.costUsd).toBe(2);
+    await expect(
+      recordLlmUsage(late, { onConflict: "runner-monotonic", executor: diagnosticBlindExecutor }),
+    ).rejects.toThrow("connection terminated unexpectedly");
 
-    // The refusal is NOT downgraded to a warn and NOT swallowed: an unassessed
-    // refusal may be a real billing loss, so it stays at error level under a
-    // DISTINCT message — an operator can tell "we lost X" from "we could not
-    // work out whether we lost anything", and alert on both.
+    // The settled row is untouched either way — the refusal happened, only its
+    // explanation failed.
+    expect((await runnerRow(runId))!.costUsd).toBe(2);
     expect(errorSpy).toHaveBeenCalledTimes(1);
-    const [message, fields] = errorSpy.mock.calls[0]!;
-    expect(message).toBe("llm_usage: could not assess a refused runner snapshot");
-    // Honestly stated: the report is one-sided. The DB read is what failed, so
-    // only the entry's own values survive — no stored total, hence no delta.
-    // The incoming token total is summed in TS here (400 + 200, no cache
-    // buckets set), the one place that formula is duplicated.
-    expect(fields).toEqual({
-      runId,
-      orgId: ctx.orgId,
-      incomingCostUsd: 9,
-      incomingTotalTokens: 600,
-      error: "connection terminated unexpectedly",
+    expectUnassessedRefusal(errorSpy.mock.calls[0], runId, ctx.orgId);
+  });
+
+  it("the same failure on the finalize barrier's executor-less path is reported and SWALLOWED", async () => {
+    // No executor means no transaction: the terminal barrier calls the ledger
+    // with `required: true` outside one, so a throw would fail `finalizeRun`
+    // before its CAS and leave a finished run permanently unsettled — strictly
+    // worse than the log line it replaces. This is the one caller the swallow
+    // exists for, and the branch that carries the risk if the condition is ever
+    // simplified away.
+    //
+    // `executor === db` here by construction (`opts.executor ?? db`), so the
+    // fault has to be injected on `db` itself. Spying the method is narrower
+    // than the alternatives and is restored immediately — see the note in the
+    // comment below.
+    const { runId, late } = await settledRunWithLateSnapshot(ctx);
+    const selectSpy = spyOn(db, "select").mockImplementation(() => {
+      throw new Error("connection terminated unexpectedly");
     });
+    // Restored on BOTH outcomes: a leaked `db.select` would break every sibling
+    // test in this process, including the `runnerRow` read two lines down.
+    const refused = await recordLlmUsage(late, { onConflict: "runner-monotonic" }).finally(() =>
+      selectSpy.mockRestore(),
+    );
+
+    // Resolves normally, reporting the no-op outcome the barrier expects.
+    expect(refused).toBeNull();
+    expect((await runnerRow(runId))!.costUsd).toBe(2);
+    expect(errorSpy).toHaveBeenCalledTimes(1);
+    expectUnassessedRefusal(errorSpy.mock.calls[0], runId, ctx.orgId);
   });
 
   it("the same snapshot IS applied while the run is still open", async () => {

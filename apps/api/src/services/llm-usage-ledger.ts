@@ -131,60 +131,42 @@ const runNotTerminalSql = sql`NOT EXISTS (
     )})
 )`;
 
-/** The monotonic columns of one runner snapshot, as SQL expressions. */
-interface RunnerSnapshotSql {
+/**
+ * The two dimensions the advance rule compares, per side. The four token
+ * buckets never matter individually — only their COALESCE'd total does — so
+ * each side carries one pre-summed token expression rather than four columns.
+ */
+interface AdvanceableSql {
   costUsd: SQL;
-  inputTokens: SQL;
-  outputTokens: SQL;
-  cacheReadTokens: SQL;
-  cacheWriteTokens: SQL;
+  totalTokens: SQL<number | null>;
 }
 
-/** The stored side: the conflicting row's own columns. */
-const storedSnapshotSql: RunnerSnapshotSql = {
+/** The stored side: the conflicting row's own columns (NULL on no such row). */
+const storedAdvanceableSql: AdvanceableSql = {
   costUsd: sql`${llmUsage.costUsd}`,
-  inputTokens: sql`${llmUsage.inputTokens}`,
-  outputTokens: sql`${llmUsage.outputTokens}`,
-  cacheReadTokens: sql`${llmUsage.cacheReadTokens}`,
-  cacheWriteTokens: sql`${llmUsage.cacheWriteTokens}`,
+  totalTokens: sql<number | null>`(${llmUsage.inputTokens} + ${llmUsage.outputTokens}
+    + COALESCE(${llmUsage.cacheReadTokens}, 0) + COALESCE(${llmUsage.cacheWriteTokens}, 0))`,
 };
 
 /** The candidate side inside an upsert: Postgres' `EXCLUDED` pseudo-row. */
-const excludedSnapshotSql: RunnerSnapshotSql = {
+const excludedAdvanceableSql: AdvanceableSql = {
   costUsd: sql`EXCLUDED.cost_usd`,
-  inputTokens: sql`EXCLUDED.input_tokens`,
-  outputTokens: sql`EXCLUDED.output_tokens`,
-  cacheReadTokens: sql`EXCLUDED.cache_read_tokens`,
-  cacheWriteTokens: sql`EXCLUDED.cache_write_tokens`,
+  totalTokens: sql<number | null>`(EXCLUDED.input_tokens + EXCLUDED.output_tokens
+    + COALESCE(EXCLUDED.cache_read_tokens, 0) + COALESCE(EXCLUDED.cache_write_tokens, 0))`,
 };
 
 /**
- * The same candidate as bound parameters, so {@link runnerAdvancesSql} can be
- * evaluated outside an upsert. Every value is cast: a bound parameter reaches
- * Postgres untyped, and `$1 + $2` alone is not resolvable.
+ * Cumulative token total of an entry — the SINGLE definition of the incoming
+ * side's arithmetic, used both to build the comparison and to report it. `?? 0`
+ * is what `COALESCE(…, 0)` does on the stored side above.
  */
-function entrySnapshotSql(entry: LlmUsageEntry): RunnerSnapshotSql {
-  return {
-    costUsd: sql`${entry.costUsd}::double precision`,
-    inputTokens: sql`${entry.inputTokens}::integer`,
-    outputTokens: sql`${entry.outputTokens}::integer`,
-    cacheReadTokens: sql`${entry.cacheReadTokens ?? null}::integer`,
-    cacheWriteTokens: sql`${entry.cacheWriteTokens ?? null}::integer`,
-  };
-}
-
-/**
- * Cumulative token total of a snapshot — the measure the level-2 tiebreak
- * compares, and the one the refusal diagnostic reports. Shared so the figure an
- * operator reads is by construction the figure the predicate weighed; NULL for
- * an unmatched LEFT JOIN (no stored row), 0-COALESCED per cache arm otherwise.
- */
-function snapshotTotalTokensSql(snapshot: RunnerSnapshotSql): SQL<number | null> {
-  return sql<number | null>`(
-    ${snapshot.inputTokens} + ${snapshot.outputTokens}
-      + COALESCE(${snapshot.cacheReadTokens}, 0)
-      + COALESCE(${snapshot.cacheWriteTokens}, 0)
-  )`;
+function entryTotalTokens(entry: LlmUsageEntry): number {
+  return (
+    entry.inputTokens +
+    entry.outputTokens +
+    (entry.cacheReadTokens ?? 0) +
+    (entry.cacheWriteTokens ?? 0)
+  );
 }
 
 /**
@@ -203,18 +185,18 @@ function snapshotTotalTokensSql(snapshot: RunnerSnapshotSql): SQL<number | null>
  * and the finalize fallback can never regress either dimension.
  *
  * Built once for the two sites that MUST agree on it: the upsert's `setWhere`
- * (candidate = {@link excludedSnapshotSql}) and the refusal diagnostic
+ * (candidate = {@link excludedAdvanceableSql}) and the refusal diagnostic
  * {@link traceRejectedTerminalRunnerWrite} (candidate = the entry's bound
  * values), so the diagnostic can never contradict the write it explains.
  * Evaluates to NULL when there is no row to compare against (an unmatched LEFT
  * JOIN) — the diagnostic reads that as "would have inserted".
  */
-function runnerAdvancesSql(candidate: RunnerSnapshotSql): SQL<boolean | null> {
+function runnerAdvancesSql(candidate: AdvanceableSql): SQL<boolean | null> {
   return sql<boolean | null>`(
-    ${candidate.costUsd} > ${storedSnapshotSql.costUsd}
+    ${candidate.costUsd} > ${storedAdvanceableSql.costUsd}
     OR (
-      ${candidate.costUsd} = ${storedSnapshotSql.costUsd}
-      AND ${snapshotTotalTokensSql(candidate)} > ${snapshotTotalTokensSql(storedSnapshotSql)}
+      ${candidate.costUsd} = ${storedAdvanceableSql.costUsd}
+      AND ${candidate.totalTokens} > ${storedAdvanceableSql.totalTokens}
     )
   )`;
 }
@@ -283,7 +265,7 @@ export async function recordLlmUsage(
             // being non-terminal — see {@link runNotTerminalSql}: a settled row
             // has already been claimed by its serial id, so growing it strands
             // the delta.
-            setWhere: sql`${runNotTerminalSql} AND ${runnerAdvancesSql(excludedSnapshotSql)}`,
+            setWhere: sql`${runNotTerminalSql} AND ${runnerAdvancesSql(excludedAdvanceableSql)}`,
           })
           .returning({ id: llmUsage.id })
       : opts.onConflict === "proxy-idempotent"
@@ -341,14 +323,19 @@ export async function recordLlmUsage(
  * took the plain path.
  */
 async function traceRejectedTerminalRunnerWrite(executor: Db, entry: LlmUsageEntry): Promise<void> {
-  const incoming = entrySnapshotSql(entry);
+  const incomingTotalTokens = entryTotalTokens(entry);
+  // Bound parameters reach Postgres untyped; the casts pin them instead of
+  // leaning on the surrounding operands to resolve them.
+  const incoming: AdvanceableSql = {
+    costUsd: sql`${entry.costUsd}::double precision`,
+    totalTokens: sql<number | null>`${incomingTotalTokens}::integer`,
+  };
   try {
     const [row] = await executor
       .select({
         status: runs.status,
         storedCostUsd: llmUsage.costUsd,
-        storedTotalTokens: snapshotTotalTokensSql(storedSnapshotSql),
-        incomingTotalTokens: snapshotTotalTokensSql(incoming),
+        storedTotalTokens: storedAdvanceableSql.totalTokens,
         advances: runnerAdvancesSql(incoming),
       })
       .from(runs)
@@ -369,32 +356,33 @@ async function traceRejectedTerminalRunnerWrite(executor: Db, entry: LlmUsageEnt
       incomingCostUsd: entry.costUsd,
       refusedDeltaUsd: entry.costUsd - (row.storedCostUsd ?? 0),
       storedTotalTokens: row.storedTotalTokens,
-      incomingTotalTokens: row.incomingTotalTokens,
-      refusedDeltaTokens: (row.incomingTotalTokens ?? 0) - (row.storedTotalTokens ?? 0),
+      incomingTotalTokens,
+      refusedDeltaTokens: incomingTotalTokens - (row.storedTotalTokens ?? 0),
     });
   } catch (err) {
-    // Explaining a no-op must never break the write: `recordLlmUsageReliably`
-    // always rethrows for runner rows, and the finalize barrier calls it with
-    // `required: true` outside any transaction, so a throw here would fail
-    // `finalizeRun` and leave the run unsettled. It stays at `error` because an
-    // unassessed refusal may be a real billing loss and a diagnostic that cannot
-    // run in a billing path is itself actionable — noisy only if the SELECT
-    // breaks systematically, and bounded by a query that runs solely on a no-op.
-    // Catching cannot un-poison the `appstrate.metric` caller's ingestion
-    // transaction, which stays safe by its own design (the runner's next
-    // cumulative snapshot supersedes — see `run-launcher/appstrate-event-sink.ts`).
+    // Reported at `error`, not warn: an unassessed refusal may be a real billing
+    // loss, and a diagnostic that cannot run in a billing path is itself
+    // actionable. The honest cost — runner no-ops are NOT rare (every duplicate
+    // cumulative metric event is one, not just the #997 finalize replay), so a
+    // systematically failing SELECT reproduces #997 at a higher volume than
+    // #997 itself.
     logger.error("llm_usage: could not assess a refused runner snapshot", {
       runId: entry.runId,
       orgId: entry.orgId,
       incomingCostUsd: entry.costUsd,
-      // Summed in TS, not by {@link snapshotTotalTokensSql}: the DB read is what
-      // just failed, so only the entry's own values are still in hand.
-      incomingTotalTokens:
-        entry.inputTokens +
-        entry.outputTokens +
-        (entry.cacheReadTokens ?? 0) +
-        (entry.cacheWriteTokens ?? 0),
+      incomingTotalTokens,
       error: getErrorMessage(err),
     });
+    // Swallowing is for ONE caller: the finalize barrier passes no executor
+    // (`recordLlmUsage` resolves `opts.executor ?? db`) and runs outside any
+    // transaction, where a throw would fail a `required: true` write and leave a
+    // finished run permanently unsettled. A caller-supplied executor is an open
+    // transaction (`appstrate.metric` ingestion), and swallowing inside one is
+    // worse than a missing log line: on PGlite the callback then resolves,
+    // drizzle sends COMMIT, Postgres turns it into ROLLBACK, and the sink
+    // answers 2xx having lost the run_log row, the ledger write and the sequence
+    // advance. Rethrowing keeps that path's documented recovery — the runner
+    // re-POSTs and its next cumulative snapshot supersedes.
+    if (executor !== db) throw err;
   }
 }
