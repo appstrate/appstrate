@@ -793,6 +793,19 @@ describe("buildPublishDocumentDef (publish_document tool)", () => {
     expect(result.isError).toBe(true);
   });
 
+  it("leads its description with the publish-now + `document://` URI value", () => {
+    // The `outputs/` sweep is unconditional and shares the same uploader, so
+    // what the tool alone can do is publish DURING the run and hand back the
+    // durable URI. A description that reads "use this tool only to publish a
+    // deliverable that lives elsewhere" names the one replaceable case and
+    // hides that one, so an agent never calls it at the right moment.
+    const description = buildPublishDocumentDef(makeUploader(new Set())).descriptor.description!;
+
+    expect(description).toContain("document://");
+    expect(description.indexOf("document://")).toBeLessThan(description.indexOf("./outputs/"));
+    expect(description).not.toContain("use this tool only");
+  });
+
   it("still publishes an explicitly-chosen dotfile (hidden filter is sweep-only)", async () => {
     // The hidden-file exclusion applies ONLY to the implicit outputs sweep; an
     // agent deliberately publishing a dotfile via the tool is honoured.

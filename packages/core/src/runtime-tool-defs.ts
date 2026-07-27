@@ -412,10 +412,14 @@ export function buildPublishDocumentDef(uploader: DocumentUploader): RuntimeTool
     descriptor: {
       name: "publish_document",
       description:
-        "Publish a file you created in the workspace (e.g. an HTML report, a CSV, a PDF) as a " +
-        "durable document attached to this run. Returns a stable `document://` URI. Files written " +
-        "under `./outputs/` are published automatically at the end of the run — use this tool only " +
-        "to publish a deliverable that lives elsewhere in the workspace.",
+        "Publish a workspace file (e.g. an HTML report, a CSV, a PDF) as a durable document " +
+        "attached to this run, right now: the document appears while the run is still going and " +
+        "the call returns its stable `document://` URI. Use it whenever you need to reference, " +
+        "link or send the document within this same run — cite the URI in your output, hand it to " +
+        "another tool — or to see an upload failure in time to react. Files written under " +
+        "`./outputs/` are published automatically at the end of the run, which is enough for a " +
+        "plain end-of-run deliverable, but that happens after you are done: you never get their " +
+        "URIs.",
       inputSchema: {
         type: "object",
         additionalProperties: false,
