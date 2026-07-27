@@ -16,6 +16,15 @@
  *   2. POST-SETTLEMENT IMMUTABILITY — a snapshot arriving after the run went
  *      terminal (a durable-retry replay, a losing concurrent finalize) is
  *      REFUSED, not silently applied to a row someone already billed;
+ *   2b. AND THE REFUSAL IS REPORTED WITH A SIGNAL-TO-NOISE RATIO OF 1 — a
+ *      refusal that loses billable spend emits exactly one `logger.error`
+ *      carrying the two cumulative totals and the delta nobody will bill; a
+ *      refusal that loses NOTHING is silent. The distinction is the whole
+ *      point: `run-launcher/execute-background.ts` synthesises a finalize on
+ *      EVERY clean container exit, so every successful run replays its own
+ *      last snapshot at `costUsd: 0` after settling. A status-only test drowned
+ *      the real losses under one error per run (issue #997). Both halves are
+ *      asserted below — the noise floor as well as the alarm;
  *   3. NO DURABLE QUEUE FOR RUNNER ROWS — a failed runner write propagates
  *      instead of being deferred, because a deferred replay could only land
  *      after settlement, where (2) refuses it.
@@ -25,7 +34,7 @@
  * cursor read, not merely documented for consumers.
  */
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach, spyOn } from "bun:test";
 import { eq, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { llmUsage, runs } from "@appstrate/db/schema";
@@ -34,13 +43,18 @@ import type { Db } from "@appstrate/db/client";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage } from "../../helpers/seed.ts";
+import { logger } from "../../../src/lib/logger.ts";
 import { recordLlmUsage } from "../../../src/services/llm-usage-ledger.ts";
 import {
   recordLlmUsageReliably,
   initLlmUsageRetryWorker,
   _resetLlmUsageRetryWorkerForTests,
 } from "../../../src/services/llm-usage-retry.ts";
-import { getRunSinkContext, finalizeRun } from "../../../src/services/run-event-ingestion.ts";
+import {
+  getRunSinkContext,
+  finalizeRun,
+  synthesiseFinalize,
+} from "../../../src/services/run-event-ingestion.ts";
 import {
   computeRunCost,
   listLlmUsage,
@@ -104,22 +118,46 @@ async function runnerRow(runId: string) {
   return row;
 }
 
-/** Terminal closure exactly as the platform synthesises it: no cost, no usage. */
+/**
+ * Terminal closure exactly as the platform synthesises it (stall watchdog, boot
+ * orphan sweep, container crash): a `RunResult` that carries no `cost`.
+ *
+ * Delegates to the REAL entry point rather than re-deriving one, so these tests
+ * break if the synthesis path stops reconstructing the run's usage from
+ * `runs.tokenUsage` or stops going through finalize's terminal barrier.
+ */
 async function synthesisedFinalize(runId: string): Promise<void> {
-  const run = await getRunSinkContext(runId);
-  const result = emptyRunResult();
-  result.status = "failed";
-  result.error = { message: "Server restarted while run was in progress." };
-  await finalizeRun({ run: run!, result });
+  await synthesiseFinalize(runId, {
+    status: "failed",
+    error: { message: "Server restarted while run was in progress." },
+  });
 }
+
+/**
+ * The refusal alarm's exact message. Pinned as a constant because operators
+ * alert on the literal string — a reworded log is a broken alert, not a
+ * cosmetic change.
+ */
+const REFUSAL_MESSAGE = "llm_usage: refused a runner snapshot on an already-settled run";
 
 describe("llm_usage settlement — terminal barrier and post-settlement immutability", () => {
   let ctx: TestContext;
+  // The refusal diagnostic is observable ONLY through the logger, and its value
+  // is as much in what it does NOT say as in what it does — so it is spied on
+  // for every test here, and installed LAST so the fixture's own writes never
+  // count towards an assertion.
+  let errorSpy: ReturnType<typeof spyOn<typeof logger, "error">>;
 
   beforeEach(async () => {
     await truncateAll();
     ctx = await createTestContext({ orgSlug: "settleorg" });
     await seedPackage({ id: AGENT, orgId: ctx.orgId, type: "agent" });
+    errorSpy = spyOn(logger, "error").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    // Restored per test so sibling files sharing this process keep a real logger.
+    errorSpy.mockRestore();
   });
 
   it("a runner snapshot arriving after the run settled is refused, leaving the billed total intact", async () => {
@@ -180,6 +218,208 @@ describe("llm_usage settlement — terminal barrier and post-settlement immutabi
     expect(row!.costUsd).toBe(5);
     expect(row!.inputTokens).toBe(100);
     expect(await computeRunCost(runId, ctx.orgId)).toBe(5);
+
+    // …and it is LOUD. This is money the platform consumed and will never
+    // invoice, so the only way an operator learns about it is this line. It
+    // fires exactly once (nothing before it in this test refused anything real)
+    // and carries the whole picture: both cumulative totals plus the delta —
+    // $4 — which is the figure a human acts on. Asserting the arithmetic, not
+    // just the presence of a field, is what stops a future refactor from
+    // reporting the incoming total as the loss.
+    expect(errorSpy).toHaveBeenCalledTimes(1);
+    const [message, fields] = errorSpy.mock.calls[0]!;
+    expect(message).toBe(REFUSAL_MESSAGE);
+    expect(fields).toEqual({
+      runId,
+      orgId: ctx.orgId,
+      runStatus: "failed",
+      storedCostUsd: 5,
+      incomingCostUsd: 9,
+      refusedDeltaUsd: 4,
+    });
+  });
+
+  it("the platform's defensive second finalize of a settled run is refused SILENTLY (issue #997)", async () => {
+    // The whole production shape, end to end, on the real code path. A container
+    // exits 0 after POSTing its own finalize; `execute-background.ts` synthesises
+    // a success finalize anyway (it cannot know the container already did), and
+    // `synthesiseFinalize` carries no cost — so finalize's terminal barrier
+    // re-submits the run's OWN last snapshot at `costUsd: 0` onto a row that is
+    // already settled. The upsert refuses it, correctly: nothing is lost, the
+    // stored total already dominates. Reporting that as a billing loss produced
+    // ~25 bogus error lines per container lifetime in production (issue #997),
+    // every one of them with a refused amount of 0.
+    const runId = await seedSinkRun(ctx, { tokenUsage: { input_tokens: 100, output_tokens: 50 } });
+
+    // 1. The container's own finalize: cost + usage, barrier writes, CAS settles.
+    const run = await getRunSinkContext(runId);
+    const result = emptyRunResult();
+    result.status = "success";
+    result.cost = 5;
+    result.usage = { input_tokens: 100, output_tokens: 50 };
+    await finalizeRun({ run: run!, result });
+
+    const settled = await listLlmUsage({});
+    expect(settled).toHaveLength(1);
+    expect(settled[0]!.settled).toBe(true);
+    expect(settled[0]!.costUsd).toBe(5);
+
+    // 2. The defensive synthesis that follows every clean container exit.
+    await synthesiseFinalize(runId, { status: "success" });
+
+    // The row is untouched (post-settlement immutability holds) …
+    const row = await runnerRow(runId);
+    expect(row!.costUsd).toBe(5);
+    expect(row!.inputTokens).toBe(100);
+    expect(row!.outputTokens).toBe(50);
+    // … and the run keeps the terminal status its first finalize won.
+    const [runRow] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+    expect(runRow!.status).toBe("success");
+
+    // The assertion this test exists for: not one error line for the entire
+    // lifecycle. A benign trailing replay is not an incident.
+    expect(errorSpy).toHaveBeenCalledTimes(0);
+  });
+
+  it("an exact duplicate replay on a settled run is refused silently", async () => {
+    // Idempotence, seen from the diagnostic's side: the durable-retry replay of
+    // a snapshot that already landed loses nothing, so it must not page anyone.
+    // Both levels of the advance rule use STRICT inequalities precisely so this
+    // case is a no-op rather than a re-emitted row.
+    const runId = await seedSinkRun(ctx, { tokenUsage: null });
+    const entry = {
+      source: "runner" as const,
+      orgId: ctx.orgId,
+      runId,
+      credentialSource: "system" as const,
+      inputTokens: 100,
+      outputTokens: 50,
+      costUsd: 3,
+    };
+    await recordLlmUsage(entry, { onConflict: "runner-monotonic" });
+    await synthesisedFinalize(runId);
+
+    expect(await recordLlmUsage(entry, { onConflict: "runner-monotonic" })).toBeNull();
+
+    expect((await runnerRow(runId))!.costUsd).toBe(3);
+    expect(errorSpy).toHaveBeenCalledTimes(0);
+  });
+
+  it("a late EQUAL-cost snapshot with more cached tokens is still reported — the zero-cost-model loss", async () => {
+    // A model with no catalog rate (or a cache-only turn) holds `cost_usd` at a
+    // constant while the token columns keep climbing. The refused delta is $0,
+    // yet the loss is real: those tokens will never reach the ledger. A
+    // cost-only advance test would have called this benign and stayed quiet, so
+    // the diagnostic reuses the upsert's OWN two-level predicate — and this test
+    // is what proves the COALESCE'd cache arms are actually wired into it, by
+    // moving nothing but `cacheWriteTokens`.
+    const runId = await seedSinkRun(ctx, { tokenUsage: null });
+    await recordLlmUsage(
+      {
+        source: "runner",
+        orgId: ctx.orgId,
+        runId,
+        credentialSource: "system",
+        inputTokens: 100,
+        outputTokens: 50,
+        cacheWriteTokens: 10,
+        costUsd: 2,
+      },
+      { onConflict: "runner-monotonic" },
+    );
+    await synthesisedFinalize(runId);
+
+    const late = await recordLlmUsage(
+      {
+        source: "runner",
+        orgId: ctx.orgId,
+        runId,
+        credentialSource: "system",
+        inputTokens: 100,
+        outputTokens: 50,
+        cacheWriteTokens: 30,
+        costUsd: 2,
+      },
+      { onConflict: "runner-monotonic" },
+    );
+    expect(late).toBeNull();
+    expect((await runnerRow(runId))!.cacheWriteTokens).toBe(10);
+
+    expect(errorSpy).toHaveBeenCalledTimes(1);
+    const [message, fields] = errorSpy.mock.calls[0]!;
+    expect(message).toBe(REFUSAL_MESSAGE);
+    // NOTE the honest consequence of a token-only loss: `refusedDeltaUsd` is 0,
+    // exactly like the benign #997 replay. The two are distinguishable by the
+    // presence of the line, never by that field.
+    expect(fields).toEqual({
+      runId,
+      orgId: ctx.orgId,
+      runStatus: "failed",
+      storedCostUsd: 2,
+      incomingCostUsd: 2,
+      refusedDeltaUsd: 0,
+    });
+  });
+
+  it("a diagnostic that itself fails degrades to a warn and never fails the refused write", async () => {
+    // The diagnostic added a SELECT to a path that previously did no I/O at all,
+    // and it runs inside the terminal barrier, which calls the ledger with
+    // `required: true` — a throw here would fail `finalizeRun` and leave a
+    // finished run permanently unsettled. That is a strictly worse failure than
+    // the missing log line it was meant to produce.
+    //
+    // Expressed through the service's own DI seam (`opts.executor`): an executor
+    // whose INSERT is real but whose SELECT faults isolates the diagnostic query
+    // as the single point of failure. No `mock.module()` (AGENTS.md).
+    const runId = await seedSinkRun(ctx, { tokenUsage: null });
+    await recordLlmUsage(
+      {
+        source: "runner",
+        orgId: ctx.orgId,
+        runId,
+        credentialSource: "system",
+        inputTokens: 100,
+        outputTokens: 50,
+        costUsd: 2,
+      },
+      { onConflict: "runner-monotonic" },
+    );
+    await synthesisedFinalize(runId);
+
+    const diagnosticBlindExecutor = {
+      insert: db.insert.bind(db),
+      select() {
+        throw new Error("connection terminated unexpectedly");
+      },
+    } as unknown as Db;
+
+    const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      // A genuinely advancing snapshot, so the diagnostic is definitely reached.
+      const late = await recordLlmUsage(
+        {
+          source: "runner",
+          orgId: ctx.orgId,
+          runId,
+          credentialSource: "system",
+          inputTokens: 400,
+          outputTokens: 200,
+          costUsd: 9,
+        },
+        { onConflict: "runner-monotonic", executor: diagnosticBlindExecutor },
+      );
+      // The write itself still reports its outcome normally.
+      expect(late).toBeNull();
+      expect((await runnerRow(runId))!.costUsd).toBe(2);
+      // The failure is visible rather than swallowed …
+      expect(warnSpy.mock.calls.map(([m]) => m)).toContain("llm_usage: refusal diagnostic failed");
+      // … and, honestly stated: when the diagnostic cannot run, the real loss
+      // goes UNREPORTED. Silence here is a known consequence of not letting the
+      // explanation break the write, not evidence that nothing was lost.
+      expect(errorSpy).toHaveBeenCalledTimes(0);
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 
   it("the same snapshot IS applied while the run is still open", async () => {
