@@ -9,6 +9,30 @@
  * This middleware closes that hole: the header is either honoured or refused,
  * never quietly dropped.
  *
+ * ## What it covers — and what it does not
+ *
+ * It covers every route registered *after* it in `apps/api/src/index.ts`:
+ * all of `routes/` and every module router (`registerModuleRoutes`).
+ *
+ * It does **not** cover `/api/auth/*`. Better Auth is mounted as a terminal
+ * handler earlier in the pipeline (`lib/auth-pipeline.ts`, before this guard
+ * in `index.ts`), owns its own router, and answers the request without ever
+ * reaching here — so sign-up/sign-in/sign-out, the RFC 8628 device flow,
+ * `cli/token`, `cli/revoke` and `organization/create|update|delete` still
+ * accept an `Idempotency-Key` and ignore it. (Even mounted first, the
+ * registration is `/api/auth/*` and `isWildcardRoute` would exclude it.)
+ * Bringing that surface under the guard means reaching into Better Auth's
+ * routing, which buys a consistency this docblock can state for free.
+ *
+ * It covers module routers, but only **in-tree** modules can opt *in*.
+ * `idempotency()` lives in `apps/api/src/middleware/` and is exported from no
+ * package. Built-in dir modules import it by relative path (`webhooks` and
+ * `oidc` both do); `@appstrate/module-chat`, `@appstrate/cloud` and any
+ * operator-installed module cannot, so every mutating route they register is
+ * permanently in "refuse" mode. Nothing breaks today — none of them advertises
+ * the header — but they are held to a policy they have no way to satisfy. See
+ * `apps/api/src/modules/README.md` → "Idempotency".
+ *
  * ## Where the supported set comes from
  *
  * Nowhere but the mounts themselves. `idempotency()` stamps a marker on the
@@ -20,10 +44,11 @@
  * second thing to maintain, and the failure mode of it going stale is exactly
  * the silence this change exists to remove.
  *
- * The OpenAPI side (`$ref: IdempotencyKey` on the supported operations) is the
- * one hand-written mirror, and
- * `test/integration/middleware/idempotency-guard.test.ts` fails when it stops
- * matching the mounts.
+ * The OpenAPI side (the `Idempotency-Key` parameter on the supported
+ * operations) is the one hand-written mirror, and
+ * `test/integration/middleware/idempotency-contract.test.ts` fails when it
+ * stops matching the mounts — matching the parameter by *name*, so an inline
+ * declaration is caught as well as a `$ref` to the shared component.
  *
  * ## Why not `c.req.routePath`
  *

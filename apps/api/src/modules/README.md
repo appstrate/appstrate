@@ -258,11 +258,11 @@ Three seams dispatch it: run preflight (once per run launch), the chat surface (
 
 Modules can contribute custom authentication strategies that run in the request pipeline **before** core auth (Bearer ask\_ API key → session cookie). This is how OIDC/JWT, mTLS, SAML, webhook-HMAC, and similar auth mechanisms plug in without touching `apps/api/src/index.ts`.
 
-A strategy is a plain object implementing `AuthStrategy` from `@appstrate/core/module`:
+A strategy is a plain object implementing `AuthStrategy` from `@appstrate/core/module`. The `@appstrate/core/bearer` subpath used below first ships in core **6.0.0** — on an earlier core, parse the `Authorization` header yourself (same RFC 9110 §11.4 rule as the comment in the example).
 
 ```ts
 import type { AppstrateModule, AuthStrategy } from "@appstrate/core/module";
-import { parseBearer } from "@appstrate/core/bearer";
+import { parseBearer } from "@appstrate/core/bearer"; // core >= 6.0.0
 
 const jwtStrategy: AuthStrategy = {
   id: "my-jwt",
@@ -349,6 +349,22 @@ Applications embedding Appstrate headlessly that want an "admin dashboard" view 
 Modules that expose HTTP routes should also provide `openApiPaths()` (path items) and, if they use shared response/request shapes, `openApiComponentSchemas()` (component schemas) plus `openApiSchemas()` (Zod → OpenAPI registry entries for request-body validation). The loader merges contributions from every loaded module into the final spec; `scripts/verify-openapi.ts` replays the same merge at check time and flags any mismatch between declared paths and the baseline.
 
 Because discovery is filesystem-based, adding a new endpoint only requires touching the module's own `openapi/` directory — no central list to update.
+
+## Idempotency — in-tree modules can opt in, out-of-tree modules cannot
+
+The platform mounts `idempotencyGuard` (`apps/api/src/middleware/idempotency-guard.ts`) globally, **before** `registerModuleRoutes(app)`. Every mutating route a module registers is therefore subject to it: a request carrying `Idempotency-Key` on an unsafe method (`POST`/`PUT`/`PATCH`/`DELETE`) is refused with `400 idempotency_not_supported` unless the matched route mounts `idempotency()`.
+
+**Built-in dir modules opt in by relative import**, and two already do — `webhooks/routes.ts` (`POST /api/webhooks`) and `oidc/routes.ts` (`POST /api/oauth/clients`) both mount `idempotency()` from `../../middleware/idempotency.ts` and declare `$ref: "#/components/parameters/IdempotencyKey"` on that operation in their own `openapi/paths.ts`. Copy that pair — mount **and** declare — if a built-in route needs de-duplication.
+
+**Out-of-tree modules cannot.** `idempotency()` lives in `apps/api/src/middleware/` and is exported from no package — not `@appstrate/core`, not anywhere an npm module can import (unlike `services.http.rateLimit()`, which the same routes get through `PlatformServices`). So `@appstrate/module-chat`, `@appstrate/module-claude-code`, `@appstrate/module-codex`, `@appstrate/cloud` and any operator-installed module are permanently in "refuse" mode on every mutating route they expose. Nothing breaks today — none of them advertises the header — but the asymmetry is real: they are held to a policy they have no way to satisfy.
+
+Until that changes, for an out-of-tree module:
+
+- **Do not declare an `Idempotency-Key` parameter in your `openApiPaths()`.** It would be a promise the runtime refuses; the drift test (`apps/api/test/integration/middleware/idempotency-contract.test.ts`) matches the parameter by name — inline or `$ref` — and fails on a declaration with no mount. (`openapi/paths/llm-proxy.ts` carried exactly that false promise for three operations.)
+- **Do not tell clients to stamp the header on your routes.** They will get a `400`.
+- If you genuinely need request de-duplication, implement it in your own handler under your own header/body field, or open an issue: exposing `idempotency()` on `PlatformServices.http` next to `rateLimit()` is the obvious shape, and it is a deliberate core API-surface decision (a `@appstrate/core` minor + module lockstep), not something to work around locally.
+
+Note also that the drift test discovers modules through the test preload (built-ins under `apps/api/src/modules/*` plus workspace `packages/module-*`). An operator-installed out-of-tree module is not in that process and is not checked by it — sound only for as long as such a module has no way to mount `idempotency()`. Exposing the middleware to modules means giving that check a second, module-side home.
 
 ## Disabling a module
 
