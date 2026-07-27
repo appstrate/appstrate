@@ -90,12 +90,17 @@ export function invalidateIntegrationQueries(qc: QueryClient): Promise<void> {
   return qc.invalidateQueries({
     predicate: (query) => {
       const path = query.queryKey[1];
+      if (typeof path !== "string") return false;
+      // The integration package list is keyed `["packages","integrations",…]`
+      // and its `?active=true` variant is exactly what activation changes — so a
+      // row that just got activated has to stop being served from cache. Without
+      // this, activating left every "not active here" list still saying so.
+      if (query.queryKey[0] === "packages" && path === "integrations") return true;
       return (
-        typeof path === "string" &&
+        path.startsWith("/api/integrations") ||
         // The per-agent connection-readiness query lives under /api/agents but
         // is driven entirely by connection state, so refresh it here too.
-        (path.startsWith("/api/integrations") ||
-          path === "/api/agents/{scope}/{name}/connection-readiness")
+        path === "/api/agents/{scope}/{name}/connection-readiness"
       );
     },
   });

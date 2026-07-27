@@ -21,8 +21,10 @@ import {
   SelectValue,
 } from "@appstrate/ui/components/select";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
+import { Button } from "@appstrate/ui/components/button";
 import { ShieldCheck, AlertTriangle } from "lucide-react";
 import { Spinner } from "../spinner";
+import { useActivateIntegration } from "../../hooks/use-integrations";
 import type { ResourceEntry } from "./types";
 import { caretRange } from "./utils";
 import { IntegrationToolPicker } from "./integration-tool-picker";
@@ -110,6 +112,7 @@ export function ResourceSection({
     activeOnly: type === "integration",
   });
   const upload = useUploadPackage(type);
+  const activate = useActivateIntegration();
 
   const selectedMap = new Map(selectedEntries.map((e) => [e.id, e]));
 
@@ -253,12 +256,21 @@ export function ResourceSection({
             );
           })}
 
-          {/* Declared but no longer active in this app — flagged so the user
-              can drop them (or an admin can re-activate). Uncheck removes the
-              dependency from the manifest. */}
+          {/* Declared but not usable here: an integration that is not active in
+              this application, or a skill that is not installed. Flagged rather
+              than hidden, because the run gate rejects them.
+
+              For an integration the row also carries the cure. The message says
+              "activate it to connect it", and until now nothing on this screen
+              could: the checkbox only removes the dependency, and the map's
+              library picker skips anything already declared. So the one action
+              the sentence asks for had no button anywhere. */}
           {inactiveDeclaredIds.map((id) => (
-            <div key={id} className="border-destructive/40 bg-destructive/5 rounded-md border">
-              <label className="flex cursor-pointer items-center gap-2.5 px-3 py-2">
+            <div
+              key={id}
+              className="border-destructive/40 bg-destructive/5 flex items-center gap-2 rounded-md border pr-2"
+            >
+              <label className="flex flex-1 cursor-pointer items-center gap-2.5 px-3 py-2">
                 <Checkbox checked onCheckedChange={() => toggle(id)} />
                 <div className="flex min-w-0 flex-1 flex-col">
                   <span className="flex items-center gap-1.5 truncate text-sm font-medium">
@@ -272,6 +284,16 @@ export function ResourceSection({
                   </span>
                 </div>
               </label>
+              {type === "integration" && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={activate.isPending}
+                  onClick={() => activate.mutate({ params: { path: { packageId: id } } })}
+                >
+                  {activate.isPending ? <Spinner /> : t("editor.activateIntegration")}
+                </Button>
+              )}
             </div>
           ))}
         </div>

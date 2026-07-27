@@ -51,11 +51,21 @@ interface MapEditDialogProps {
 
 export function MapEditDialog({ kind, packageId, onClose }: MapEditDialogProps) {
   const { t } = useTranslation("agents");
+  const qc = useQueryClient();
   // Only fetched while open, and re-read on open so the draft starts from the
   // current definition rather than a stale cache entry.
   const { data: detail } = usePackageDetail("agent", kind ? packageId : undefined);
 
   if (!kind) return null;
+
+  // Saving already refreshes the map, but a save is not the only thing that can
+  // change it here: activating an integration takes effect immediately and
+  // server-side, so cancelling right after would leave the card still claiming
+  // the integration is inactive. Refreshing on the way out covers both.
+  const closeAndRefresh = () => {
+    void qc.invalidateQueries({ queryKey: agentMapQueryKeyPrefix });
+    onClose();
+  };
 
   const title =
     kind === "prompt"
@@ -67,7 +77,7 @@ export function MapEditDialog({ kind, packageId, onClose }: MapEditDialogProps) 
           : t("map.addIntegration");
 
   return (
-    <Modal open onClose={onClose} title={title} className="sm:max-w-2xl">
+    <Modal open onClose={closeAndRefresh} title={title} className="sm:max-w-2xl">
       {detail?.manifest ? (
         // Keyed on the optimistic-lock token: a save bumps it, which remounts
         // the form on the freshly saved definition instead of keeping a draft
@@ -79,7 +89,7 @@ export function MapEditDialog({ kind, packageId, onClose }: MapEditDialogProps) 
           manifest={detail.manifest}
           prompt={detail.prompt ?? ""}
           lockVersion={detail.lock_version ?? 0}
-          onClose={onClose}
+          onClose={closeAndRefresh}
         />
       ) : (
         <div className="flex justify-center py-8">

@@ -292,6 +292,7 @@
   "editor.skillsEmpty": "Aucun skill dans les packages. Ajoutez-en depuis la page Packages.",
   "editor.integrationsEmpty": "Aucune intégration importée. Visitez le marketplace Intégrations pour en importer une.",
   "editor.integrationInactive": "Non active dans cette application",
+  "editor.activateIntegration": "Activer",
   "editor.dependencyMissing": "Non installé dans cette organisation",
   "editor.tabGeneral": "Général",
   "editor.tabSchema": "Schémas",

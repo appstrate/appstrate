@@ -22,16 +22,31 @@ import type { AgentMapDiagnostic } from "../../hooks/use-agent-map";
 import type { MapEditKind } from "./map-edit-dialog";
 import type { MapPanelKind } from "./map-panel-dialog";
 
+type Destination = { slot: "edit"; kind: MapEditKind } | { slot: "panel"; kind: MapPanelKind };
+
 /** Where a diagnostic gets fixed, by the card that owns it. */
-const DESTINATION: Record<
-  string,
-  { slot: "edit"; kind: MapEditKind } | { slot: "panel"; kind: MapPanelKind }
-> = {
+const BY_NODE: Record<string, Destination> = {
   agent: { slot: "edit", kind: "prompt" },
   skills: { slot: "edit", kind: "skills" },
   toolbox: { slot: "panel", kind: "connections" },
   model: { slot: "panel", kind: "model" },
 };
+
+/**
+ * Codes whose cure is not on their card's usual panel.
+ *
+ * An integration that is not ACTIVE in this application cannot be connected —
+ * the Connections panel says exactly that and offers nothing, which made "Fix"
+ * a guided tour to a dead end. Activation happens in the integrations editor, so
+ * that is where the row goes.
+ */
+const BY_CODE: Record<string, Destination> = {
+  integration_not_active: { slot: "edit", kind: "integrations" },
+};
+
+function destinationFor(diagnostic: AgentMapDiagnostic): Destination | undefined {
+  return BY_CODE[diagnostic.code] ?? (diagnostic.node_id ? BY_NODE[diagnostic.node_id] : undefined);
+}
 
 export function MapIssuesDialog({
   diagnostics,
@@ -56,7 +71,7 @@ export function MapIssuesDialog({
     >
       <div className="flex max-h-[60vh] flex-col gap-2 overflow-y-auto">
         {diagnostics.map((d) => {
-          const destination = d.node_id ? DESTINATION[d.node_id] : undefined;
+          const destination = destinationFor(d);
           return (
             <div
               key={`${d.field}:${d.code}`}
