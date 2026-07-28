@@ -238,6 +238,56 @@ describe("POST /api/runs/remote — kind: registry", () => {
     expect(run!.versionRef).toBe(version);
   });
 
+  it("still runs a published version whose manifest carries a retired AFPS 1.x dependency key", async () => {
+    // Same doctrine as the retired-`runtime_tools` test above, applied to the
+    // `dependencies.tools` / `dependencies.providers` keys AFPS 2.0 retired
+    // (#1021). Author input rejects them; a PUBLISHED manifest carrying one
+    // must keep validating, because it is re-validated on every run and the
+    // artifact is immutable + integrity-checked — closing `dependencies` would
+    // make such an agent permanently unrunnable with no repair path.
+    const version = "2.2.0";
+    const manifest = {
+      ...publishedManifest(version),
+      dependencies: { tools: { "@appstrate/report": "^1.0.0" } },
+    } as unknown as Record<string, unknown>;
+
+    // Non-vacuity guard: the WRITE direction must still refuse this exact
+    // manifest, otherwise the 201 below proves nothing.
+    expect(validateManifest(manifest).valid).toBe(false);
+
+    await seedPackage({
+      orgId: ctx.orgId,
+      id: "@acme/briefing",
+      type: "agent",
+      draftManifest: manifest,
+      draftContent: PROMPT,
+    });
+    const versionRow = await seedPackageVersion({
+      packageId: "@acme/briefing",
+      version,
+      integrity: "sha256-test",
+      artifactSize: 1024,
+      manifest,
+    });
+    await db
+      .insert(packageDistTags)
+      .values({ packageId: "@acme/briefing", tag: "latest", versionId: versionRow.id });
+    await uploadPackageZip("@acme/briefing", version, buildMinimalZip(manifest, PROMPT));
+    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, "@acme/briefing");
+
+    const res = await post({
+      source: { kind: "registry", packageId: "@acme/briefing", stage: "published", spec: version },
+      applicationId: ctx.defaultAppId,
+      input: {},
+    });
+
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { id: string };
+    const [run] = await db.select().from(runs).where(eq(runs.id, body.id)).limit(1);
+    expect(run!.packageId).toBe("@acme/briefing");
+    expect(run!.versionRef).toBe(version);
+  });
+
   it("rejects a published version whose stored manifest is malformed with 500", async () => {
     // The counterpart of the test above, and what makes it mean something: a
     // stored manifest the validator refuses DOES fail the run. So the 201

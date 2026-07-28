@@ -196,6 +196,91 @@ describe("validateManifest", () => {
     expect(result.valid && result.droppedRuntimeTools).toEqual(["report"]);
   });
 
+  // AFPS 1.x had `dependencies.tools` / `dependencies.providers`; AFPS 2.0
+  // renamed them to `mcp_servers` / `integrations`. Every reader destructures
+  // exactly `{ skills, mcp_servers, integrations }`, so the retired spelling is
+  // inert — accepting it silently ships an agent whose dependency is never
+  // resolved (#1021). Same direction split as the runtime-tools policy:
+  // author input rejects, an already-persisted manifest is tolerated.
+  it("rejects dependencies.tools on the author path, naming the replacement key", () => {
+    const result = validateManifest(
+      validAgentManifest({ dependencies: { tools: { "@appstrate/report": "^1.0.0" } } }),
+    );
+    expect(result.valid).toBe(false);
+    expect(result.errors).toHaveLength(1);
+    expect(result.errors[0]).toStartWith("dependencies.tools:");
+    expect(result.errors[0]).toContain("dependencies.mcp_servers");
+  });
+
+  it("rejects dependencies.providers on the author path, naming the replacement key", () => {
+    const result = validateManifest(
+      validAgentManifest({ dependencies: { providers: { "@appstrate/gmail": "^1.0.0" } } }),
+    );
+    expect(result.valid).toBe(false);
+    expect(result.errors[0]).toStartWith("dependencies.providers:");
+    expect(result.errors[0]).toContain("dependencies.integrations");
+  });
+
+  it("rejects every retired dependency key at once", () => {
+    const result = validateManifest(
+      validAgentManifest({ dependencies: { tools: {}, providers: {}, skills: {} } }),
+    );
+    expect(result.valid).toBe(false);
+    expect(result.errors).toHaveLength(2);
+  });
+
+  // Not agent-specific: any package type may declare `dependencies`.
+  it("rejects a retired dependency key on a non-agent manifest", () => {
+    const result = validateManifest(
+      validSkillManifest({ dependencies: { tools: { "@test/x": "^1.0.0" } } }),
+    );
+    expect(result.valid).toBe(false);
+    expect(result.errors[0]).toStartWith("dependencies.tools:");
+  });
+
+  // THE anti-regression: a published manifest carrying the retired key is
+  // re-validated on every run (`registry-run-resolver`). Rejecting it there
+  // would 500 the run of an agent that can never be repaired in place, because
+  // a published artifact is immutable + integrity-checked.
+  it("tolerates a retired dependency key on the read path, untouched", () => {
+    const stored = validAgentManifest({
+      dependencies: {
+        tools: { "@appstrate/report": "^1.0.0" },
+        skills: { "@test/skill": "^1.0.0" },
+      },
+    });
+    const result = validateManifest(stored, { retiredRuntimeTools: "drop" });
+    expect(result.valid).toBe(true);
+    const deps = (result.manifest as Record<string, unknown>).dependencies as Record<
+      string,
+      unknown
+    >;
+    // Tolerated means LEFT ALONE — this validator never rewrites stored bytes.
+    expect(deps.tools).toEqual({ "@appstrate/report": "^1.0.0" });
+    expect(deps.skills).toEqual({ "@test/skill": "^1.0.0" });
+  });
+
+  // The fix must not close `dependencies`: AFPS §10 mandates extensibility for
+  // objects it does not explicitly close, so an unknown extension key stays legal.
+  it("accepts the three canonical dependency maps plus an unrelated extension key", () => {
+    const result = validateManifest(
+      validAgentManifest({
+        dependencies: {
+          skills: { "@test/skill": "^1.0.0" },
+          mcp_servers: { "@test/fetch": "^1.0.0" },
+          integrations: { "@test/gmail": "^1.0.0" },
+          _meta: { "dev.appstrate/note": "still legal" },
+        },
+      }),
+    );
+    expect(result.valid).toBe(true);
+    const deps = (result.manifest as Record<string, unknown>).dependencies as Record<
+      string,
+      unknown
+    >;
+    expect(deps._meta).toEqual({ "dev.appstrate/note": "still legal" });
+  });
+
   it("reports no dropped runtime tools when every id is known", () => {
     const result = validateManifest(validAgentManifest({ runtime_tools: ["log"] }), {
       retiredRuntimeTools: "drop",

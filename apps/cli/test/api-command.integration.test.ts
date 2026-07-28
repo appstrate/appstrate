@@ -334,6 +334,55 @@ describe("apiCommand integration — redirect + Authorization", () => {
     expect(redirects.length).toBe(1);
     const followed = primary.calls.filter((c) => c.path === "/json");
     expect(followed.length).toBe(0);
+    // …and the un-followed 3xx is explained on stderr, never on stdout
+    // (stdout stays pipe-safe).
+    const err = decode(captured.stderr);
+    expect(err).toContain("HTTP 302 redirect not followed");
+    expect(err).toContain("/json");
+    expect(err).toContain("-L");
+    expect(decode(captured.stdout)).not.toContain("redirect not followed");
+  });
+
+  it("307 with an empty body (the #1021 papercut) → 0 bytes, exit 0, stderr hint", async () => {
+    const outPath = join(tmpDir, "out.md");
+    const captured = makeIO();
+    await run({ method: "GET", path: "/redirect/307", output: outPath }, captured);
+    // Exit code deliberately unchanged: scripts depend on the default
+    // staying 0 (use -f / --fail-with-body for failure semantics).
+    expect(captured.exitCode.value).toBe(0);
+    expect((await readFile(outPath)).byteLength).toBe(0);
+    const err = decode(captured.stderr);
+    expect(err).toContain("HTTP 307 redirect not followed");
+    expect(err).toMatch(/Location: http:\/\/127\.0\.0\.1:\d+\/json/);
+    expect(err).toContain("Re-run with -L");
+    // The security caveat must not read as "-L is safe".
+    expect(err).toContain("-H");
+    // Nothing on stdout — the whole point of routing the hint to stderr.
+    expect(decode(captured.stdout)).toBe("");
+  });
+
+  it("-s suppresses the redirect hint", async () => {
+    const captured = makeIO();
+    await run({ method: "GET", path: "/redirect/307", silent: true }, captured);
+    expect(captured.exitCode.value).toBe(0);
+    expect(decode(captured.stderr)).toBe("");
+  });
+
+  it("-I/HEAD on a 3xx does not print the hint (bodyless is expected there)", async () => {
+    const captured = makeIO();
+    await run({ method: "HEAD", path: "/redirect/307", head: true, include: true }, captured);
+    expect(captured.exitCode.value).toBe(0);
+    expect(decode(captured.stdout)).toMatch(/^HTTP\/1\.1 307 /);
+    expect(decode(captured.stderr)).toBe("");
+  });
+
+  it("-L on the 307 follows it and delivers the real body", async () => {
+    const captured = makeIO();
+    await run({ method: "GET", path: "/redirect/307", location: true }, captured);
+    expect(captured.exitCode.value).toBe(0);
+    expect(decode(captured.stdout)).toContain('"ok":true');
+    // Followed → no hint.
+    expect(decode(captured.stderr)).toBe("");
   });
 });
 

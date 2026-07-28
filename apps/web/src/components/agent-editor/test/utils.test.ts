@@ -13,7 +13,7 @@ import {
   manifestToMetadata,
   metadataToManifestPatch,
   getRuntimeTools,
-  withNormalizedRuntimeTools,
+  withNormalizedManifest,
   setRuntimeTools,
 } from "../utils";
 import type { SchemaField } from "../schema-section";
@@ -602,16 +602,16 @@ describe("getRuntimeTools", () => {
   });
 });
 
-// ─── withNormalizedRuntimeTools ──────────────────
+// ─── withNormalizedManifest ──────────────────
 
-// Delegates to `dropRetiredRuntimeTools` (`@appstrate/core`), which is gated on
-// `type: "agent"` — the fixtures carry it because the only call site
-// (`package-editor.tsx`) runs in the agent branch on a stored AFPS manifest,
-// where `type` is required by the schema.
-describe("withNormalizedRuntimeTools", () => {
+// Delegates to `dropRetiredRuntimeTools` + `dropRetiredDependencyKeys`
+// (`@appstrate/core`). The former is gated on `type: "agent"` — the fixtures
+// carry it because the only call site (`package-editor.tsx`) runs in the agent
+// branch on a stored AFPS manifest, where `type` is required by the schema.
+describe("withNormalizedManifest", () => {
   it("strips a retired id from the manifest loaded into the editor", () => {
     const m = { type: "agent", name: "@o/a", runtime_tools: ["report", "log"] };
-    expect(withNormalizedRuntimeTools(m)).toEqual({
+    expect(withNormalizedManifest(m)).toEqual({
       type: "agent",
       name: "@o/a",
       runtime_tools: ["log"],
@@ -620,15 +620,15 @@ describe("withNormalizedRuntimeTools", () => {
 
   it("removes the field entirely when nothing valid remains", () => {
     expect(
-      withNormalizedRuntimeTools({ type: "agent", name: "@o/a", runtime_tools: ["report"] }),
+      withNormalizedManifest({ type: "agent", name: "@o/a", runtime_tools: ["report"] }),
     ).toEqual({ type: "agent", name: "@o/a" });
   });
 
   it("returns the same reference when there is nothing to drop", () => {
     const m = { type: "agent", name: "@o/a", runtime_tools: ["output"] };
-    expect(withNormalizedRuntimeTools(m)).toBe(m);
+    expect(withNormalizedManifest(m)).toBe(m);
     const noField = { type: "agent", name: "@o/a" };
-    expect(withNormalizedRuntimeTools(noField)).toBe(noField);
+    expect(withNormalizedManifest(noField)).toBe(noField);
   });
 
   // Settled empty-array representation, checked on the editor side of the
@@ -639,8 +639,55 @@ describe("withNormalizedRuntimeTools", () => {
   // editor and core cannot drift on the empty case again.
   it("leaves an author-written empty runtime_tools untouched on load", () => {
     const m = { type: "agent", name: "@o/a", runtime_tools: [] };
-    expect(withNormalizedRuntimeTools(m)).toBe(m);
-    expect(withNormalizedRuntimeTools(m)).toHaveProperty("runtime_tools");
+    expect(withNormalizedManifest(m)).toBe(m);
+    expect(withNormalizedManifest(m)).toHaveProperty("runtime_tools");
+  });
+
+  // A draft can acquire a retired AFPS 1.x dependency key by importing a bundle
+  // assembled from a legacy published version (that path tolerates it). The
+  // author-direction save then REJECTS it, on a field the editor cannot
+  // display — so it has to go on load, or the agent becomes uneditable (#1021).
+  it("strips a retired AFPS 1.x dependency key on load", () => {
+    const m = {
+      type: "agent",
+      name: "@o/a",
+      dependencies: { tools: { "@appstrate/report": "^1.0.0" }, skills: { "@o/s": "^1.0.0" } },
+    };
+    expect(withNormalizedManifest(m)).toEqual({
+      type: "agent",
+      name: "@o/a",
+      dependencies: { skills: { "@o/s": "^1.0.0" } },
+    });
+  });
+
+  it("leaves an emptied dependencies map as {} — the shape the editor itself mints", () => {
+    expect(
+      withNormalizedManifest({
+        type: "agent",
+        name: "@o/a",
+        dependencies: { providers: { "@o/gmail": "^1.0.0" } },
+      }),
+    ).toEqual({ type: "agent", name: "@o/a", dependencies: {} });
+  });
+
+  it("leaves the canonical dependency maps and an extension key untouched", () => {
+    const m = {
+      type: "agent",
+      name: "@o/a",
+      dependencies: { skills: {}, mcp_servers: {}, integrations: {}, _meta: { "dev.x/y": 1 } },
+    };
+    expect(withNormalizedManifest(m)).toBe(m);
+  });
+
+  it("strips a retired runtime tool and a retired dependency key in one pass", () => {
+    expect(
+      withNormalizedManifest({
+        type: "agent",
+        name: "@o/a",
+        runtime_tools: ["report", "log"],
+        dependencies: { tools: {} },
+      }),
+    ).toEqual({ type: "agent", name: "@o/a", runtime_tools: ["log"], dependencies: {} });
   });
 });
 

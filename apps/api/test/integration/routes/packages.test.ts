@@ -900,6 +900,148 @@ describe("Packages API", () => {
       expect(await readDraftRuntimeTools(id)).toEqual(["log"]);
     });
 
+    // ── retired AFPS 1.x dependency keys: same direction split (#1021) ──
+    //
+    // AFPS 1.x had `dependencies.tools` / `dependencies.providers`; AFPS 2.0
+    // renamed them to `mcp_servers` / `integrations`. Every reader destructures
+    // exactly the three canonical maps, so the retired spelling is INERT — it
+    // used to validate and then be silently ignored, shipping an agent whose
+    // declared dependency is never resolved. Author input must reject.
+    async function putManifestDependencies(
+      packageId: string,
+      lockVersion: number | null | undefined,
+      dependencies: Record<string, unknown>,
+    ): Promise<Response> {
+      return app.request(`/api/packages/agents/${packageId}`, {
+        method: "PUT",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          manifest: {
+            name: packageId,
+            version: "0.2.0",
+            type: "agent",
+            schema_version: "0.1",
+            display_name: "Dependency Vocabulary Agent",
+            dependencies,
+          },
+          content: "Updated prompt.",
+          lock_version: lockVersion,
+        }),
+      });
+    }
+
+    it("rejects an update whose manifest declares dependencies.tools", async () => {
+      const agent = await seedAgent({
+        id: "@pkgorg/retired-dep-tools",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+      });
+
+      const res = await putManifestDependencies("@pkgorg/retired-dep-tools", agent.lockVersion, {
+        tools: { "@appstrate/report": "^1.0.0" },
+      });
+
+      expect(res.status).toBe(400);
+      const body = JSON.stringify(await res.json());
+      // The error must name the retired key AND its replacement — a bare
+      // "invalid manifest" leaves the author with nowhere to go.
+      expect(body).toContain("dependencies.tools");
+      expect(body).toContain("dependencies.mcp_servers");
+
+      // Not a partial write — the seeded draft is untouched.
+      const [row] = await db
+        .select({ draftManifest: packages.draftManifest })
+        .from(packages)
+        .where(eq(packages.id, "@pkgorg/retired-dep-tools"))
+        .limit(1);
+      expect((row!.draftManifest as Record<string, unknown>).dependencies).toBeUndefined();
+    });
+
+    it("rejects an update whose manifest declares dependencies.providers", async () => {
+      const agent = await seedAgent({
+        id: "@pkgorg/retired-dep-providers",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+      });
+
+      const res = await putManifestDependencies(
+        "@pkgorg/retired-dep-providers",
+        agent.lockVersion,
+        { providers: { "@appstrate/gmail": "^1.0.0" } },
+      );
+
+      expect(res.status).toBe(400);
+      const body = JSON.stringify(await res.json());
+      expect(body).toContain("dependencies.providers");
+      expect(body).toContain("dependencies.integrations");
+    });
+
+    it("accepts the canonical dependency maps and an unrelated extension key", async () => {
+      // Control: the rejects above are caused by the retired KEYS, not by the
+      // mere presence of `dependencies`. `dependencies` stays a loose object
+      // (AFPS §10 extensibility) — closing it is explicitly NOT the fix.
+      const id = "@pkgorg/canonical-deps";
+      const agent = await seedAgent({ id, orgId: ctx.orgId, createdBy: ctx.user.id });
+
+      const res = await putManifestDependencies(id, agent.lockVersion, {
+        skills: {},
+        mcp_servers: {},
+        integrations: {},
+        _meta: { "dev.appstrate/note": "still legal" },
+      });
+
+      expect(res.status).toBe(200);
+      const [row] = await db
+        .select({ draftManifest: packages.draftManifest })
+        .from(packages)
+        .where(eq(packages.id, id))
+        .limit(1);
+      const deps = (row!.draftManifest as Record<string, unknown>).dependencies as Record<
+        string,
+        unknown
+      >;
+      expect(deps._meta).toEqual({ "dev.appstrate/note": "still legal" });
+    });
+
+    it("carries a stored draft with a retired dependency key forward untouched", async () => {
+      // Read direction: a draft written before the guard existed must stay
+      // editable. A content-only save carries it forward — tolerated, and NOT
+      // rewritten (this validator never mutates stored bytes).
+      const id = "@pkgorg/legacy-dep-agent";
+      const agent = await seedAgent({
+        id,
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        draftManifest: {
+          name: id,
+          version: "0.1.0",
+          type: "agent",
+          schema_version: "0.1",
+          display_name: "Legacy Dep Agent",
+          dependencies: { tools: { "@appstrate/report": "^1.0.0" } },
+        },
+      });
+
+      const res = await app.request(`/api/packages/agents/${id}`, {
+        method: "PUT",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          content: "Only the prompt changed.",
+          lock_version: agent.lockVersion,
+        }),
+      });
+
+      expect(res.status).toBe(200);
+      const [row] = await db
+        .select({ draftManifest: packages.draftManifest })
+        .from(packages)
+        .where(eq(packages.id, id))
+        .limit(1);
+      expect((row!.draftManifest as Record<string, unknown>).dependencies).toEqual({
+        tools: { "@appstrate/report": "^1.0.0" },
+      });
+    });
+
     it("deletes a package the org owns even when its scope differs from the org slug", async () => {
       await seedAgent({
         id: "@otherscope/deletable-agent",
@@ -1480,6 +1622,46 @@ describe("Packages API", () => {
       expect(res.status).toBe(400);
       const body = (await res.json()) as any;
       expect(JSON.stringify(body)).toContain("runtime_tools");
+    });
+
+    // Same WRITE direction, applied to the retired AFPS 1.x dependency keys
+    // (#1021). An uploaded .afps is author input and locally repairable — the
+    // error names the key and its replacement, so the operator edits one line.
+    it("returns 400 for a retired dependencies key (author input rejects)", async () => {
+      const enc = (s: string) => new TextEncoder().encode(s);
+      const afps = zipSync({
+        "manifest.json": enc(
+          JSON.stringify({
+            name: "@pkgorg/dep-vocab-agent",
+            version: "1.0.0",
+            type: "agent",
+            schema_version: "0.1",
+            display_name: "Dependency Vocabulary Agent",
+            dependencies: { tools: { "@appstrate/report": "^1.0.0" } },
+          }),
+        ),
+        "prompt.md": enc("You are an agent."),
+      });
+      const formData = new FormData();
+      formData.append("file", new File([new Uint8Array(afps)], "agent.afps"));
+      const res = await app.request("/api/packages/import", {
+        method: "POST",
+        headers: authHeaders(ctx),
+        body: formData,
+      });
+
+      expect(res.status).toBe(400);
+      const body = JSON.stringify(await res.json());
+      expect(body).toContain("dependencies.tools");
+      expect(body).toContain("dependencies.mcp_servers");
+
+      // Nothing was persisted — the reject is not a partial write.
+      const [row] = await db
+        .select({ id: packages.id })
+        .from(packages)
+        .where(eq(packages.id, "@pkgorg/dep-vocab-agent"))
+        .limit(1);
+      expect(row).toBeUndefined();
     });
 
     it("imports an agent whose runtime_tools are all still selectable", async () => {

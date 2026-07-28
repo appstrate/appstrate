@@ -20,7 +20,11 @@
  *   - apiFetchRaw injects `Content-Type: application/json` when a body
  *     is present — would corrupt multipart (kills the boundary) and
  *     binary payloads. We never set a default Content-Type.
- *   - apiFetchRaw hard-codes `redirect` and has no TLS-skip hook.
+ *   - apiFetchRaw never sets `redirect`, so it inherits fetch's
+ *     default (`follow`). We default to `manual`: a `Location` is
+ *     picked by the server and never re-validated against the profile
+ *     origin, so following it is opt-in (`-L`). apiFetchRaw also has
+ *     no TLS-skip hook.
  *
  * Known caveats (documented in --help + README):
  *   - Large stdin uploads: prefer `@file` over `@-` (Bun memory
@@ -59,6 +63,12 @@ export { isHttpMethod } from "./api/method.ts";
 export { HostMismatchError } from "./api/url.ts";
 export type { WriteOutMetrics } from "./api/write-out.ts";
 export type { ApiCommandIO, ApiCommandOptions } from "./api/types.ts";
+
+/**
+ * Statuses fetch treats as redirects (WHATWG fetch §4.4). Used to
+ * decide whether an un-followed response deserves the `-L` hint.
+ */
+const REDIRECT_STATUS = new Set([301, 302, 303, 307, 308]);
 
 export async function apiCommand(
   opts: ApiCommandOptions,
@@ -363,7 +373,31 @@ export async function apiCommand(
       io.stderr.write(`Session may be expired — run: appstrate login --profile ${profileName}\n`);
     }
 
-    // 9. Output.
+    // 9. Soft UX hint when a 3xx is surfaced un-followed. `redirect:
+    //    "manual"` is the deliberate default (see `api/retry.ts`), and
+    //    a redirect response usually carries no body at all (Hono's
+    //    `c.redirect()` sends none) — so without this the user gets a
+    //    0-byte file and exit 0 with nothing explaining why (#1021).
+    //    Skipped for `-I`/HEAD: a bodyless response is the expected
+    //    shape there, not an anomaly. The exit code is deliberately
+    //    left alone — `-f` / `--fail-with-body` already turn a 3xx
+    //    into exit 22, and scripts rely on the default staying 0.
+    //    Same gate as the 401 hint: silenced by `-s`, not restored by
+    //    `-sS`. Scoped to the fetch redirect statuses, not all of 3xx:
+    //    a 304 is bodyless by design and a 300 does carry a body —
+    //    neither is a papercut.
+    if (REDIRECT_STATUS.has(res.status) && !opts.location && !opts.head && !opts.silent) {
+      const location = res.headers.get("location");
+      io.stderr.write(
+        `HTTP ${res.status} redirect not followed — the response body is likely empty${
+          location ? ` (Location: ${location})` : ""
+        }.\n` +
+          `Re-run with -L to follow it. Cross-origin hops drop Authorization/Cookie, ` +
+          `but your -H headers and X-Org-Id/X-Application-Id are forwarded to that host.\n`,
+      );
+    }
+
+    // 10. Output.
     //    -f,  --fail (curl-aligned): non-2xx → body suppressed,
     //         exit 22 (4xx) / 25 (5xx).
     //    --fail-with-body: non-2xx → body still on stdout, exit 22/25.
@@ -423,7 +457,7 @@ export async function apiCommand(
     }
 
     cleanup();
-    // 10. Final exit code.
+    // 11. Final exit code.
     const code = failMode ? (res.status >= 500 ? 25 : 22) : 0;
     return exit(code);
   } finally {

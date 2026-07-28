@@ -53,6 +53,7 @@ import { logger } from "../lib/logger.ts";
 import {
   collectConnectLoginWarnings,
   collectMetaWarnings,
+  collectRetiredDependencyKeyWarnings,
 } from "./integration-install-warnings.ts";
 
 // Pinned mtime — must match the bundle writer exactly for cross-format
@@ -335,6 +336,16 @@ export async function importBundle(
     // "consumers MUST NOT reject unknown `_meta` keys"). Lift them to the
     // install-warning channel so publishers see them.
     for (const w of collectMetaWarnings(parsedZip.manifest)) {
+      warnings.push(`${identity}: ${w}`);
+    }
+
+    // Same READ-direction rationale as the runtime-tools drop above: this
+    // manifest was validated with `retiredRuntimeTools: "drop"`, so a retired
+    // AFPS 1.x `dependencies` key (`tools` / `providers`) is tolerated instead
+    // of rejected. It is inert — nothing reads it — so the import succeeds; the
+    // warning is how the operator learns the dependencies declared under it
+    // were never honoured and that a republish removes the key.
+    for (const w of collectRetiredDependencyKeyWarnings(parsedZip.manifest)) {
       warnings.push(`${identity}: ${w}`);
     }
 

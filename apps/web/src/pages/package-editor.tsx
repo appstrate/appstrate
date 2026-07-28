@@ -43,7 +43,7 @@ import {
   setResourceEntries,
   getRuntimeTools,
   setRuntimeTools,
-  withNormalizedRuntimeTools,
+  withNormalizedManifest,
   toResourceEntry,
   fieldsToSchema,
 } from "../components/agent-editor/utils";
@@ -575,7 +575,7 @@ export function PackageEditorPage({ type }: { type: PackageType }) {
     const initialState: AgentEditorState =
       isEdit && agentDetail
         ? {
-            manifest: withNormalizedRuntimeTools(agentDetail.manifest ?? {}),
+            manifest: withNormalizedManifest(agentDetail.manifest ?? {}),
             prompt: agentDetail.prompt || "",
             lock_version: agentDetail.lock_version,
           }

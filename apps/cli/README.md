@@ -458,7 +458,7 @@ Every row below is a direct drop-in: an agent can replace `curl` with `appstrate
 | `curl -T file`                  | `appstrate api -T file /x`            | PUT by default; `-T -` for stdin                  |
 | `curl -i`                       | `appstrate api -i`                    | status line + headers on stdout                   |
 | `curl -I`                       | `appstrate api -I`                    | HEAD only                                         |
-| `curl -L`                       | `appstrate api -L`                    | cross-origin hops strip `Authorization`           |
+| `curl -L`                       | `appstrate api -L`                    | cross-origin: `Authorization` dropped, `-H` kept  |
 | `curl -k`                       | `appstrate api -k`                    | skip TLS verification (this request)              |
 | `curl -o out`                   | `appstrate api -o out`                | body → file                                       |
 | `curl -s` / `-sS`               | `appstrate api -s` / `-sS`            | silence / silence-but-errors                      |
@@ -474,6 +474,8 @@ Every row below is a direct drop-in: an agent can replace `curl` with `appstrate
 | `curl -A 'UA'`                  | `appstrate api -A 'UA'`               | shortcut; `-H` still wins                         |
 | `curl -e https://ref`           | `appstrate api -e https://ref`        | Referer shortcut                                  |
 | `curl -b 'k=v'`                 | `appstrate api -b 'k=v'`              | literal only; cookie-jar files rejected           |
+
+**About `-L`.** A `Location` is chosen by the server and is never re-validated against your profile origin, so following it is opt-in. On a cross-origin hop the runtime drops `Authorization` and `Cookie`, but every custom `-H` header you pass — plus `X-Org-Id` / `X-Application-Id` — is forwarded to that host. Don't pass a second credential via `-H` and assume `-L` is safe. Without `-L`, a 3xx is surfaced un-followed (usually an empty body, exit 0) and the CLI prints a hint on stderr naming the `Location`.
 
 #### Write-out variables (`-w`)
 
