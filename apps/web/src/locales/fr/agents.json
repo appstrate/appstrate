@@ -495,5 +495,27 @@
   "api.responseTitle": "Réponse",
   "api.responseHint": "Le run est asynchrone. L'API retourne un ID de run immédiatement.",
   "api.manageKeys": "Gérer les clés API",
-  "api.keyCreated": "Clé injectée dans l'exemple ci-dessous. Copiez le curl maintenant — la clé ne sera plus visible après navigation."
+  "api.keyCreated": "Clé injectée dans l'exemple ci-dessous. Copiez le curl maintenant — la clé ne sera plus visible après navigation.",
+  "logicMap": {
+    "kind": {
+      "step": "étape",
+      "decision": "décision",
+      "loop": "boucle",
+      "toolCall": "appel d'outil",
+      "guard": "garde-fou",
+      "policy": "politique",
+      "emit": "sortie"
+    },
+    "inferredBadge": "Carte inférée du prompt, pas une spécification d'exécution",
+    "confidence": "Confiance {{percent}} %",
+    "stale": "Le prompt a changé depuis cette carte",
+    "aggregated": "résumé",
+    "until": "tant que : {{condition}}",
+    "expand": "Plein écran",
+    "collapse": "Réduire",
+    "empty": {
+      "title": "Pas encore de carte de logique",
+      "body": "Aucune carte n'a été produite pour cette version. Elle apparaîtra après le passage du cartographe."
+    }
+  }
 }
