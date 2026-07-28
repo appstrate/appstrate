@@ -78,6 +78,31 @@ const DECLARABLE = new Set(["toolbox", "skills", "mcp_servers", "system_tools"])
 /** Préfixes sans emplacement de déclaration : une référence non résolue n'y est qu'un indice. */
 const UNDECLARABLE = new Set(["runtime", "subagents", "context_files"]);
 
+/**
+ * Préfixe de `ref` vers l'identifiant du nœud de la carte de dépendances, pour que le
+ * diagnostic se route sur la bonne carte au rendu.
+ *
+ * Le décalage à connaître : les deux nœuds d'enveloppe ont pour identifiant `input` et
+ * `output` — `agent_input` et `agent_output` sont leurs *types*, renommés parce que React
+ * Flow réserve `input` et `output` pour ses nœuds intégrés.
+ */
+const NODE_ID_BY_PREFIX: Record<string, string> = {
+  toolbox: "toolbox",
+  skills: "skills",
+  mcp_servers: "mcp_servers",
+  system_tools: "system_tools",
+  config: "config",
+  model: "model",
+  schedules: "schedules",
+  agent_input: "input",
+  agent_output: "output",
+};
+
+/** `null` pour un préfixe qui ne correspond à aucune carte du volet 1. */
+function nodeIdFor(prefix: string): string | null {
+  return NODE_ID_BY_PREFIX[prefix] ?? null;
+}
+
 const DEFAULT_INVENTORY_THRESHOLD = 8;
 
 interface ParsedRef {
@@ -197,7 +222,7 @@ export function crossCheckLogicMap(
       findings.push({
         level: declarable ? "error" : "warning",
         code: declarable ? "ref_not_declared" : "envelope_field_unknown",
-        node_id: ref.node,
+        node_id: nodeIdFor(ref.node),
         item_id: ref.item,
         step_ids: steps,
         message: declarable
@@ -215,7 +240,7 @@ export function crossCheckLogicMap(
         findings.push({
           level: "error",
           code: "tool_not_granted",
-          node_id: ref.node,
+          node_id: nodeIdFor(ref.node),
           item_id: ref.item,
           step_ids: steps,
           message: `L'outil \`${ref.member}\` de \`${ref.item}\` n'est pas dans les outils accordés.`,
@@ -239,7 +264,7 @@ export function crossCheckLogicMap(
       findings.push({
         level: "inventory",
         code: "unreferenced_inventory",
-        node_id: node,
+        node_id: nodeIdFor(node),
         item_id: null,
         step_ids: [],
         message:
@@ -253,7 +278,7 @@ export function crossCheckLogicMap(
       findings.push({
         level: "hint",
         code: "declared_never_referenced",
-        node_id: node,
+        node_id: nodeIdFor(node),
         item_id: id,
         step_ids: [],
         message: `\`${id}\` est déclaré mais aucune étape ne le référence. À confirmer.`,

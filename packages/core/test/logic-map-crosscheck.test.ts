@@ -148,6 +148,24 @@ describe("logic map cross-check", () => {
     expect(out.some((f) => f.code === "schedule_without_rule")).toBe(true);
   });
 
+  it("routes findings to the node ids the dependency map actually emits", () => {
+    // `agent_input`/`agent_output` sont des TYPES de nœud ; les nœuds, eux, s'appellent
+    // `input` et `output`. Un diagnostic mal routé n'atterrit sur aucune carte au rendu.
+    const out = crossCheckLogicMap(
+      {
+        shape: "sequence",
+        steps: [
+          { id: "s1", kind: "step", label: "x", refs: ["agent_output:inconnu"] },
+          { id: "s2", kind: "tool_call", label: "y", refs: ["toolbox:@x/absent"] },
+        ],
+        edges: [],
+      },
+      { agent_output: ["summary"], toolbox: [] },
+    );
+    expect(out.find((f) => f.item_id === "inconnu")!.node_id).toBe("output");
+    expect(out.find((f) => f.item_id === "@x/absent")!.node_id).toBe("toolbox");
+  });
+
   it("separates the two families by flow-node ratio", () => {
     expect(flowNodeRatio(load("compta-gmail-harvest"))).toBeGreaterThan(0.7);
     expect(flowNodeRatio(load("fleet-on-call-copilot"))).toBeLessThan(0.15);
