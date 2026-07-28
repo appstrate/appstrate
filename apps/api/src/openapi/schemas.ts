@@ -339,6 +339,7 @@ export const schemas = {
       "running_runs",
       "last_run",
       "forked_from",
+      "effective_timeout_seconds",
     ],
     properties: {
       id: { type: "string" },
@@ -476,6 +477,11 @@ export const schemas = {
       has_unarchived_changes: {
         type: "boolean",
         description: "Whether the active version has changes not yet archived as a version",
+      },
+      effective_timeout_seconds: {
+        type: "integer",
+        description:
+          "Run timeout that will actually be enforced, in seconds: the manifest's `timeout` (or the platform default when it declares none) clamped to this deployment's `PLATFORM_RUN_LIMITS.timeout_ceiling_seconds`. Compare with `manifest.timeout` to detect a capped declaration. Emitted for system agents too, which do not expose `manifest`.",
       },
     },
   },

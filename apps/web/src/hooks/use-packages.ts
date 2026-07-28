@@ -65,6 +65,7 @@ function normalizeAgentDetail(d: components["schemas"]["AgentDetail"]): AgentDet
     updatedAt: d.updatedAt ?? null,
     lock_version: d.lock_version,
     running_runs: d.running_runs,
+    effective_timeout_seconds: d.effective_timeout_seconds,
     forked_from: d.forked_from,
     dependencies: d.dependencies,
     config: {

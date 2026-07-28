@@ -20,6 +20,7 @@ import { createTestContext, authHeaders, type TestContext } from "../../helpers/
 import { seedPackage, seedPackageVersion } from "../../helpers/seed.ts";
 import { getTestApp } from "../../helpers/app.ts";
 import { installPackage } from "../../../src/services/application-packages.ts";
+import { getPlatformRunLimits } from "../../../src/services/run-limits.ts";
 import {
   applicationPackages,
   auditEvents,
@@ -349,6 +350,41 @@ describe("POST /api/packages/import-bundle — import", () => {
     };
     expect(body.root_package_id).toBe(agentId);
     expect(body.imported).toHaveLength(1);
+  });
+
+  // The bundle path composes the same install-warning collectors as
+  // `POST /import` — including the platform timeout ceiling. Read the live
+  // ceiling instead of installing one: this file shares its process with every
+  // other integration file, and overriding the registry here would leak.
+  it("warns when a bundled agent declares a timeout above the platform ceiling", async () => {
+    const ceiling = getPlatformRunLimits().timeout_ceiling_seconds;
+    const declared = ceiling + 3600;
+    const agentId = "@importorg/over-ceiling" as const;
+    const manifest = {
+      name: agentId,
+      version: "1.0.0",
+      type: "agent",
+      schema_version: "0.1",
+      display_name: "Over Ceiling",
+      author: "tester",
+      timeout: declared,
+    };
+    const form = new FormData();
+    form.append(
+      "file",
+      new Blob([buildAfps({ manifest, content: "Over-ceiling prompt.", type: "agent" })]),
+      "over-ceiling.afps",
+    );
+    const res = await app.request("/api/packages/import-bundle", {
+      method: "POST",
+      body: form,
+      headers: authHeaders(ctx),
+    });
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { warnings: string[] };
+    expect(body.warnings).toContain(
+      `${agentId}@1.0.0: timeout: declared ${declared}s exceeds this deployment's ceiling — runs will be capped at ${ceiling}s.`,
+    );
   });
 
   // ── retired `runtime_tools` policy: import-bundle is the READ direction ──

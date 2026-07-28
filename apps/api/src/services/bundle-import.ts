@@ -55,6 +55,7 @@ import {
   collectMetaWarnings,
   collectRetiredDependencyKeyWarnings,
 } from "./integration-install-warnings.ts";
+import { collectAgentTimeoutWarnings } from "./agent-install-warnings.ts";
 
 // Pinned mtime — must match the bundle writer exactly for cross-format
 // integrity parity. Anchored at 1980-01-02T12:00Z so fflate's local-TZ
@@ -346,6 +347,13 @@ export async function importBundle(
     // warning is how the operator learns the dependencies declared under it
     // were never honoured and that a republish removes the key.
     for (const w of collectRetiredDependencyKeyWarnings(parsedZip.manifest)) {
+      warnings.push(`${identity}: ${w}`);
+    }
+
+    // Same channel for an agent whose declared `timeout` exceeds the platform
+    // ceiling — the run clamps it either way, so the author is told here rather
+    // than discovering it when a run stops short.
+    for (const w of collectAgentTimeoutWarnings(parsedZip.manifest)) {
       warnings.push(`${identity}: ${w}`);
     }
 
