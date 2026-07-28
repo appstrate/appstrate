@@ -39,7 +39,7 @@
       "label": "Exécuter `{{TEST_COMMAND}}`",
       "parent": null,
       "detail": "Première étape du flot déclaré en une ligne à l'ouverture du prompt : « test > build > deploy > verify-live > update state doc ».",
-      "refs": ["system_tools:Bash", "config:TEST_COMMAND"],
+      "refs": ["runtime:bash", "config:TEST_COMMAND"],
       "evidence": {
         "file": "corpus-web/claude-code-deploy-with-verification.md",
         "lines": [24, 27],
@@ -84,7 +84,7 @@
       "label": "Exécuter `{{BUILD_COMMAND}}`",
       "parent": null,
       "detail": "Aucun critère de succès n'est énoncé pour le build, contrairement au test (« All green required ») et au deploy (capture de la révision).",
-      "refs": ["system_tools:Bash", "config:BUILD_COMMAND"],
+      "refs": ["runtime:bash", "config:BUILD_COMMAND"],
       "evidence": {
         "file": "corpus-web/claude-code-deploy-with-verification.md",
         "lines": [30, 33],
@@ -99,7 +99,7 @@
       "label": "Exécuter `{{DEPLOY_COMMAND}}`",
       "parent": null,
       "detail": "Le prompt insiste ailleurs sur le fait que la réussite de cette commande ne vaut pas déploiement (l. 16 et 51).",
-      "refs": ["system_tools:Bash", "config:DEPLOY_COMMAND"],
+      "refs": ["runtime:bash", "config:DEPLOY_COMMAND"],
       "evidence": {
         "file": "corpus-web/claude-code-deploy-with-verification.md",
         "lines": [35, 38],
@@ -129,7 +129,7 @@
       "label": "Interroger `{{HEALTH_OR_VERSION_ENDPOINT}}` (`curl -s`)",
       "parent": null,
       "detail": "Sortie du processus vers le système en production. C'est le seul appel réseau du flot.",
-      "refs": ["system_tools:Bash", "config:HEALTH_OR_VERSION_ENDPOINT"],
+      "refs": ["runtime:bash", "config:HEALTH_OR_VERSION_ENDPOINT"],
       "evidence": {
         "file": "corpus-web/claude-code-deploy-with-verification.md",
         "lines": [41, 44],
@@ -174,7 +174,7 @@
       "label": "Ouvrir `{{STATE_DOC}}`",
       "parent": null,
       "detail": "Sous-étape 1 de l'étape 5, numérotée dans le prompt.",
-      "refs": ["system_tools:Read", "config:STATE_DOC"],
+      "refs": ["runtime:read_file", "config:STATE_DOC"],
       "evidence": {
         "file": "corpus-web/claude-code-deploy-with-verification.md",
         "lines": [58, 58],
@@ -189,7 +189,7 @@
       "label": "Écrire la révision confirmée à l'étape 4 dans les champs de version déployée",
       "parent": null,
       "detail": "La valeur écrite est celle confirmée par l'endpoint, pas celle capturée à l'étape 3 : le prompt distingue les deux.",
-      "refs": ["system_tools:Edit", "config:STATE_DOC"],
+      "refs": ["runtime:edit", "config:STATE_DOC"],
       "evidence": {
         "file": "corpus-web/claude-code-deploy-with-verification.md",
         "lines": [59, 59],
@@ -204,7 +204,7 @@
       "label": "Mettre à jour les entrées « current state » / tables de versions, par éditions ciblées uniquement",
       "parent": null,
       "detail": "« targeted edits only » : interdiction implicite de réécrire le document entier.",
-      "refs": ["system_tools:Edit", "config:STATE_DOC"],
+      "refs": ["runtime:edit", "config:STATE_DOC"],
       "evidence": {
         "file": "corpus-web/claude-code-deploy-with-verification.md",
         "lines": [60, 60],

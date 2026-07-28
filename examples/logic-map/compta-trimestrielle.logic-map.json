@@ -46,7 +46,7 @@
       "label": "Installer les dépendances : `pip install pdfplumber openpyxl` puis `bun install`",
       "parent": null,
       "detail": "Deux écosystèmes dans le même run : Python pour `chq-extractor` / `generate-xlsx` / `extract-pdf`, bun pour `mc-extractor.ts` (dépendance npm `pdf-parse`).",
-      "refs": ["system_tools:bash", "skills:@default/compta-references"],
+      "refs": ["runtime:bash", "skills:@default/compta-references"],
       "evidence": {
         "file": "prompt.md",
         "lines": [43, 49],
@@ -92,7 +92,7 @@
       "label": "Aucun appel LLM externe : les scripts ne font que du déterministe",
       "parent": null,
       "detail": "Classification des marchands, détection de mappings et parsing des factures sont faits dans le run ; les scripts du skill s'invoquent par bash et ne contiennent aucune IA.",
-      "refs": ["skills:@default/compta-references", "system_tools:bash"],
+      "refs": ["skills:@default/compta-references", "runtime:bash"],
       "evidence": {
         "file": "prompt.md",
         "lines": [25, 27],
@@ -305,7 +305,10 @@
       "label": "Naviguer sur Drive : année fiscale puis trimestre",
       "parent": null,
       "detail": "Deux listings `api_call` GET filtrés sur les dossiers depuis la racine `_Trimestres`.",
-      "refs": ["toolbox:@appstrate/google-drive#api_call", "config:drive_root_trimestres_folder_id"],
+      "refs": [
+        "toolbox:@appstrate/google-drive#api_call",
+        "config:drive_root_trimestres_folder_id"
+      ],
       "evidence": {
         "file": "prompt.md",
         "lines": [87, 94],
@@ -426,7 +429,10 @@
       "label": "Pour chaque PDF du centralisé compte chèque",
       "parent": null,
       "detail": "Même schéma que le centralisé MC, sur un autre dossier de configuration.",
-      "refs": ["config:drive_centralized_chq_folder_id", "toolbox:@appstrate/google-drive#api_call"],
+      "refs": [
+        "config:drive_centralized_chq_folder_id",
+        "toolbox:@appstrate/google-drive#api_call"
+      ],
       "evidence": {
         "file": "prompt.md",
         "lines": [140, 142],
@@ -501,7 +507,11 @@
       "label": "PATCH du seul champ `name`, puis consigner le renommage",
       "parent": null,
       "detail": "`api_call` PATCH sur `files/FILE_ID?fields=id,name`. Chaque renommage est loggé et la liste finit dans `output.renamed_pdfs`.",
-      "refs": ["toolbox:@appstrate/google-drive#api_call", "agent_output:renamed_pdfs", "system_tools:log"],
+      "refs": [
+        "toolbox:@appstrate/google-drive#api_call",
+        "agent_output:renamed_pdfs",
+        "system_tools:log"
+      ],
       "evidence": {
         "file": "prompt.md",
         "lines": [158, 169],
@@ -517,7 +527,7 @@
       "label": "Préparer la structure locale du trimestre",
       "parent": null,
       "detail": "`mkdir -p` de `1. Banque/Relevés MC/extraction` et `1. Banque/Relevés CHQ/extraction` : c'est la structure que les scripts d'extraction attendent.",
-      "refs": ["system_tools:bash"],
+      "refs": ["runtime:bash"],
       "evidence": {
         "file": "prompt.md",
         "lines": [179, 183],
@@ -562,7 +572,11 @@
       "label": "Résoudre `Paiements BNC` et charger le store `Paiements-BNC_{AF}.json`",
       "parent": null,
       "detail": "Find par `parents[0]` du dossier CHQ centralisé, sans clé de configuration dédiée. Store absent ou vide → warning non bloquant, matérialisation sautée, colonne Destinataire vide.",
-      "refs": ["toolbox:@appstrate/google-drive#api_call", "config:drive_centralized_chq_folder_id", "skills:@default/compta-references"],
+      "refs": [
+        "toolbox:@appstrate/google-drive#api_call",
+        "config:drive_centralized_chq_folder_id",
+        "skills:@default/compta-references"
+      ],
       "evidence": {
         "file": "prompt.md",
         "lines": [220, 222],
@@ -577,7 +591,7 @@
       "label": "Filtrer (3 mois + `accepted`) et matérialiser le CSV brut BNC",
       "parent": null,
       "detail": "Postdatés et rejetés restent dans le store mais ne comptent jamais dans un trimestre. Le CSV est écrit dans `1. Banque/` sous un nom de 14 chiffres, seule forme que `generate-xlsx.py::load_paiements_csv` détecte.",
-      "refs": ["skills:@default/compta-references", "system_tools:bash"],
+      "refs": ["skills:@default/compta-references", "runtime:bash"],
       "evidence": {
         "file": "skills/@default/compta-references/references/paiements-store.md",
         "lines": [105, 108],
@@ -592,7 +606,7 @@
       "label": "3.5bis — même matérialisation pour les virements Interac, fenêtre élargie",
       "parent": null,
       "detail": "Store `Virements-Interac-BNC_{AF}.json`, records sous la clé `transfers`, fenêtre = 3 mois du trimestre + le mois précédent, car un virement Interac est débité 0 à 3 jours après son initiation. CSV écrit sous `{14_chiffres}-interac.csv`.",
-      "refs": ["skills:@default/compta-references", "system_tools:bash"],
+      "refs": ["skills:@default/compta-references", "runtime:bash"],
       "evidence": {
         "file": "skills/@default/compta-references/references/virements-interac-store.md",
         "lines": [70, 76],
@@ -608,7 +622,7 @@
       "label": "Extraire les transactions Mastercard : `bun run mc-extractor.ts`",
       "parent": null,
       "detail": "Script TypeScript du skill, invoqué par bash. Le script attend une arborescence `bank/` + `transactions/` : l'agent la fabrique avec des liens symboliques temporaires puis les supprime. Produit `all_cc_transactions.json` et `.csv`.",
-      "refs": ["skills:@default/compta-references", "system_tools:bash"],
+      "refs": ["skills:@default/compta-references", "runtime:bash"],
       "evidence": {
         "file": "prompt.md",
         "lines": [246, 258],
@@ -638,7 +652,7 @@
       "label": "Gap-fill : `cc-csv-extractor.py --since --until`, puis fusion",
       "parent": null,
       "detail": "Bornes : lendemain de la dernière date couverte par les PDF → dernier jour du trimestre. Fusion dans `all_cc_transactions.json` avec dédup par `reference`, à défaut `dateTransaction` + `montantDebite`. Exclut les « En attente » et les montants nuls.",
-      "refs": ["skills:@default/compta-references", "system_tools:bash"],
+      "refs": ["skills:@default/compta-references", "runtime:bash"],
       "evidence": {
         "file": "prompt.md",
         "lines": [267, 268],
@@ -668,7 +682,7 @@
       "label": "Extraire les transactions compte chèque : `chq-extractor.py`",
       "parent": null,
       "detail": "Script Python du skill, invoqué par bash, seulement si des PDFs CHQ ont été téléchargés. Filtre lui-même le compte 92325. Produit `all_chq_transactions.json`.",
-      "refs": ["skills:@default/compta-references", "system_tools:bash"],
+      "refs": ["skills:@default/compta-references", "runtime:bash"],
       "evidence": {
         "file": "prompt.md",
         "lines": [274, 281],
@@ -774,7 +788,7 @@
       "label": "Extraire le texte (`extract-pdf.py --pages 1-3`)",
       "parent": "t32",
       "detail": "Même script de skill que `compta-inbox`, invoqué par bash.",
-      "refs": ["skills:@default/compta-references", "system_tools:bash"],
+      "refs": ["skills:@default/compta-references", "runtime:bash"],
       "evidence": {
         "file": "prompt.md",
         "lines": [335, 338],
@@ -789,7 +803,7 @@
       "label": "Produire l'objet JSON de la facture selon `facture-schema.md`",
       "parent": "t32",
       "detail": "Parsing structuré fait dans le run, pas par un service externe : vendor, vendor_normalized, date, amount, currency, description, invoice_number, confidence, filename, added_by_run, added_at. Texte vide (PDF scanné) → fallback multimodal PNG lu par `Read`, comme la Pass 2 de `compta-inbox`. L'entrée est ajoutée au JSON local, clé = nom de fichier.",
-      "refs": ["skills:@default/compta-references", "system_tools:Read"],
+      "refs": ["skills:@default/compta-references", "runtime:read_file"],
       "evidence": {
         "file": "prompt.md",
         "lines": [340, 361],
@@ -881,7 +895,7 @@
       "label": "Concilier par script : `match-factures.py` → `manifest.json`",
       "parent": null,
       "detail": "Script Python pur du skill, invoqué par bash. Barème CC : montant exact 50 pts + vendor 30/15 pts + même mois 20 pts ; CHQ : montant 50 + mois 20 + destinataire 30 ; score minimum 50. L'algorithme est explicitement hors du raisonnement de l'agent. Stats du résumé console capturées pour l'output.",
-      "refs": ["skills:@default/compta-references", "system_tools:bash", "agent_output:factures_stats"],
+      "refs": ["skills:@default/compta-references", "runtime:bash", "agent_output:factures_stats"],
       "evidence": {
         "file": "skills/@default/compta-references/SKILL.md",
         "lines": [103, 107],
@@ -912,7 +926,7 @@
       "label": "Générer le xlsx : `generate-xlsx.py`",
       "parent": null,
       "detail": "Script Python du skill, invoqué par bash. Produit `{QTR} - Transactions.xlsx` à la racine du dossier trimestre local (4 onglets : Résumé, CC Dépenses, CC Crédits, CHQ). Vérifier l'existence du fichier et logger sa taille.",
-      "refs": ["skills:@default/compta-references", "system_tools:bash", "system_tools:log"],
+      "refs": ["skills:@default/compta-references", "runtime:bash", "system_tools:log"],
       "evidence": {
         "file": "prompt.md",
         "lines": [502, 511],
@@ -957,7 +971,11 @@
       "label": "Uploader : PATCH `uploadType=media` si existant, sinon multipart",
       "parent": null,
       "detail": "Le prompt mentionne `api_upload` en repli « si volumineux », outil que le manifeste ne déclare pas. L'ID retourné va dans `output.xlsx_file_id`.",
-      "refs": ["toolbox:@appstrate/google-drive#api_call", "toolbox:@appstrate/google-drive#api_upload", "agent_output:xlsx_file_id"],
+      "refs": [
+        "toolbox:@appstrate/google-drive#api_call",
+        "toolbox:@appstrate/google-drive#api_upload",
+        "agent_output:xlsx_file_id"
+      ],
       "evidence": {
         "file": "prompt.md",
         "lines": [524, 533],
@@ -988,7 +1006,13 @@
       "label": "Rendre la sortie : summary markdown et tous les champs dans `data`",
       "parent": null,
       "detail": "Summary à sections imposées (pipeline, renommages, extraction bancaire, classification, nouveaux mappings, Excel, erreurs). Champs : `trimestre`, `etapes_completees`, `stats`, `xlsx_file_id`, `renamed_pdfs`, `erreurs`.",
-      "refs": ["system_tools:output", "agent_output:summary", "agent_output:trimestre", "agent_output:etapes_completees", "agent_output:stats"],
+      "refs": [
+        "system_tools:output",
+        "agent_output:summary",
+        "agent_output:trimestre",
+        "agent_output:etapes_completees",
+        "agent_output:stats"
+      ],
       "evidence": {
         "file": "prompt.md",
         "lines": [548, 610],
@@ -1071,7 +1095,11 @@
     { "from": "t22", "to": "t23", "condition": null },
     { "from": "t23", "to": "t24", "condition": null },
     { "from": "t24", "to": "t25", "condition": null },
-    { "from": "t25", "to": "t26", "condition": "couverture PDF incomplète et export CSV disponible" },
+    {
+      "from": "t25",
+      "to": "t26",
+      "condition": "couverture PDF incomplète et export CSV disponible"
+    },
     { "from": "t25", "to": "t27", "condition": "couverture complète" },
     { "from": "t26", "to": "t27", "condition": null },
     { "from": "t27", "to": "t28", "condition": null },

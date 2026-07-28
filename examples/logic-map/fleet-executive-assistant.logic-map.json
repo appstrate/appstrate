@@ -5,9 +5,7 @@
     "package_id": "langchain-fleet/executive-assistant",
     "version": null,
     "integrity": null,
-    "files": [
-      "configs/agents/executive-assistant/AGENT.md"
-    ]
+    "files": ["configs/agents/executive-assistant/AGENT.md"]
   },
   "generated_at": "2026-07-27T00:00:00Z",
   "generator": {
@@ -87,7 +85,7 @@
       "label": "Tout ce que l'utilisateur doit voir passe par `message_user`",
       "parent": null,
       "detail": "Dans un run déclenché (arrivée d'email, cron), le texte brut du modèle n'est affiché nulle part : `message_user` est le seul canal fiable.",
-      "refs": ["system_tools:message_user"],
+      "refs": ["runtime:message_user"],
       "evidence": {
         "file": "configs/agents/executive-assistant/AGENT.md",
         "lines": [55, 55],
@@ -394,7 +392,7 @@
       "label": "Notifier l'événement créé avec `message_user`",
       "parent": null,
       "detail": null,
-      "refs": ["system_tools:message_user"],
+      "refs": ["runtime:message_user"],
       "evidence": {
         "file": "configs/agents/executive-assistant/AGENT.md",
         "lines": [120, 120],
@@ -518,7 +516,7 @@
       "label": "Préférence exprimée en cours de tâche : demander « juste cette fois ou à l'avenir ? » avant de persister",
       "parent": null,
       "detail": "Le changement s'applique au tour courant dans tous les cas ; seule la persistance attend la confirmation. Signal de déclenchement : une instruction qui pourrait être une préférence permanente mais qui est formulée dans l'instant.",
-      "refs": ["system_tools:message_user"],
+      "refs": ["runtime:message_user"],
       "evidence": {
         "file": "configs/agents/executive-assistant/AGENT.md",
         "lines": [160, 160],
@@ -701,7 +699,7 @@
       "label": "Dans le doute sur la sûreté d'une information : ne pas l'utiliser, demander",
       "parent": null,
       "detail": "Défaut sûr explicite, qui ferme les quatre règles précédentes.",
-      "refs": ["system_tools:message_user"],
+      "refs": ["runtime:message_user"],
       "evidence": {
         "file": "configs/agents/executive-assistant/AGENT.md",
         "lines": [209, 209],

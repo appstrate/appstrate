@@ -46,7 +46,7 @@
       "label": "Installer `pdfplumber` et `PyMuPDF` (une fois par run)",
       "parent": null,
       "detail": "Sortie du processus par bash : `pip install`. Prérequis des deux passes de lecture PDF (texte puis image).",
-      "refs": ["system_tools:bash"],
+      "refs": ["runtime:bash"],
       "evidence": {
         "file": "prompt.md",
         "lines": [54, 56],
@@ -122,7 +122,7 @@
       "label": "Aucun appel LLM externe : la classification, c'est toi",
       "parent": null,
       "detail": "Les scripts du skill ne font que de l'extraction déterministe et s'invoquent par bash ; tout le raisonnement reste dans le run.",
-      "refs": ["skills:@default/compta-references", "system_tools:bash"],
+      "refs": ["skills:@default/compta-references", "runtime:bash"],
       "evidence": {
         "file": "skills/@default/compta-references/SKILL.md",
         "lines": [36, 38],
@@ -183,7 +183,11 @@
       "label": "Lister la racine de l'inbox et écarter les sous-dossiers",
       "parent": null,
       "detail": "`api_call` GET, `pageSize=200`. Les sous-dossiers `_needs-review/` et `_doublons/` restent intouchés au re-run. `log` : « Inbox : {N} fichier(s) à traiter ».",
-      "refs": ["toolbox:@appstrate/google-drive#api_call", "agent_input:drive_inbox_folder_id", "system_tools:log"],
+      "refs": [
+        "toolbox:@appstrate/google-drive#api_call",
+        "agent_input:drive_inbox_folder_id",
+        "system_tools:log"
+      ],
       "evidence": {
         "file": "prompt.md",
         "lines": [69, 78],
@@ -335,7 +339,7 @@
       "label": "Préparer `/workspace/inbox` et télécharger le fichier en streaming",
       "parent": "s6",
       "detail": "`mkdir -p` en bash, puis `api_call` GET `?alt=media` avec `responseMode: { toFile }` pour éviter l'inflation base64 en mémoire.",
-      "refs": ["toolbox:@appstrate/google-drive#api_call", "system_tools:bash"],
+      "refs": ["toolbox:@appstrate/google-drive#api_call", "runtime:bash"],
       "evidence": {
         "file": "prompt.md",
         "lines": [134, 144],
@@ -350,7 +354,7 @@
       "label": "Pass 1 — extraire le texte des 3 premières pages (`extract-pdf.py`)",
       "parent": "s6",
       "detail": "Script déterministe du skill invoqué par bash ; le texte sort sur stdout, préfixé `--- page N ---`.",
-      "refs": ["skills:@default/compta-references", "system_tools:bash"],
+      "refs": ["skills:@default/compta-references", "runtime:bash"],
       "evidence": {
         "file": "prompt.md",
         "lines": [150, 152],
@@ -380,7 +384,7 @@
       "label": "Pass 2 — convertir en JPEG dpi=100 (PyMuPDF) puis lire l'image via `Read`",
       "parent": "s6",
       "detail": "Snippet Python inline en bash, page 1 seulement par défaut. JPEG dpi=100 (~0,2 Mo) et non PNG dpi=150 (~2,3 Mo) pour tenir sous la limite multimodale de ~10,5 Mo ; les scans sont traités un par un. Conversion impossible → `ambiguous`.",
-      "refs": ["system_tools:bash", "system_tools:Read"],
+      "refs": ["runtime:bash", "runtime:read_file"],
       "evidence": {
         "file": "prompt.md",
         "lines": [160, 179],
@@ -530,7 +534,7 @@
       "label": "Parser le CSV en `cp1252` vers des enregistrements JSON",
       "parent": "s6",
       "detail": "Deux scripts Python inline strictement parallèles (agrégés ici) : `/tmp/paiements-records.json` et `/tmp/interac-records.json`. Colonnes positionnelles, statut normalisé, bénéficiaire séparé de sa référence entre crochets. Vérifier que le bénéficiaire n'est pas vide — sinon l'encodage a échoué.",
-      "refs": ["system_tools:bash", "skills:@default/compta-references"],
+      "refs": ["runtime:bash", "skills:@default/compta-references"],
       "evidence": {
         "file": "prompt.md",
         "lines": [247, 280],
@@ -576,7 +580,10 @@
       "label": "Résoudre les Drive IDs par navigation, mémoriser path → folder ID",
       "parent": "s7",
       "detail": "Listing successif depuis la racine `_Trimestres`. Le cache évite de re-chercher quand plusieurs fichiers visent le même dossier ; il est réutilisé aux étapes 3bis et 5.2.",
-      "refs": ["toolbox:@appstrate/google-drive#api_call", "config:drive_root_trimestres_folder_id"],
+      "refs": [
+        "toolbox:@appstrate/google-drive#api_call",
+        "config:drive_root_trimestres_folder_id"
+      ],
       "evidence": {
         "file": "prompt.md",
         "lines": [346, 347],
@@ -789,7 +796,11 @@
       "label": "Déplacer vers `_doublons/` (suffixe anti-collision) et y déposer le `.reason.txt`",
       "parent": "s10",
       "detail": "Run réel seulement. Conflit dans `_doublons/` → suffixe `__YYYY-MM-DD-HHMMSS`. PATCH `addParents`/`removeParents`, puis annexe texte uploadée en resumable. L'échec de l'annexe est non bloquant : le PDF est déjà déplacé.",
-      "refs": ["toolbox:@appstrate/google-drive#api_call", "toolbox:@appstrate/google-drive#api_upload", "system_tools:bash"],
+      "refs": [
+        "toolbox:@appstrate/google-drive#api_call",
+        "toolbox:@appstrate/google-drive#api_upload",
+        "runtime:bash"
+      ],
       "evidence": {
         "file": "prompt.md",
         "lines": [444, 483],
@@ -895,7 +906,12 @@
       "label": "Ajouter une entrée par facture déplacée, puis uploader le JSON fusionné",
       "parent": "s12",
       "detail": "Clé = nom final du PDF. `added_by_run` depuis `$APPSTRATE_RUN_ID` et `added_at` depuis `date -u` — jamais de date sans heure, jamais minuit. Upload : PATCH `uploadType=media` si le fichier existait, sinon `api_upload` resumable. `output.factures_parsed_updated` renseigné.",
-      "refs": ["toolbox:@appstrate/google-drive#api_call", "toolbox:@appstrate/google-drive#api_upload", "system_tools:bash", "agent_output:factures_parsed_updated"],
+      "refs": [
+        "toolbox:@appstrate/google-drive#api_call",
+        "toolbox:@appstrate/google-drive#api_upload",
+        "runtime:bash",
+        "agent_output:factures_parsed_updated"
+      ],
       "evidence": {
         "file": "prompt.md",
         "lines": [533, 584],
@@ -926,7 +942,10 @@
       "label": "Résoudre (ou créer) le dossier `Paiements BNC`",
       "parent": null,
       "detail": "Find-or-create sans clé de config dédiée : `parents[0]` du dossier CHQ centralisé, listé, on y cherche `Paiements BNC`.",
-      "refs": ["toolbox:@appstrate/google-drive#api_call", "config:drive_centralized_chq_folder_id"],
+      "refs": [
+        "toolbox:@appstrate/google-drive#api_call",
+        "config:drive_centralized_chq_folder_id"
+      ],
       "evidence": {
         "file": "prompt.md",
         "lines": [596, 596],
@@ -971,7 +990,10 @@
       "label": "Uploader le store, puis archiver le CSV brut dans `Paiements BNC/_raw-exports/`",
       "parent": "s14",
       "detail": "Store : PATCH `uploadType=media` si existant, sinon `api_upload` resumable. CSV : jamais supprimé, jamais laissé dans l'inbox — PATCH vers `_raw-exports/` (find-or-create) sous le nom `Paiements-BNC_{date_min}_{date_max}.csv`, suffixé si le nom est pris.",
-      "refs": ["toolbox:@appstrate/google-drive#api_call", "toolbox:@appstrate/google-drive#api_upload"],
+      "refs": [
+        "toolbox:@appstrate/google-drive#api_call",
+        "toolbox:@appstrate/google-drive#api_upload"
+      ],
       "evidence": {
         "file": "prompt.md",
         "lines": [604, 606],
@@ -1017,7 +1039,11 @@
       "label": "Consigner dans `output.ambiguous` puis déplacer sans renommer",
       "parent": "s16",
       "detail": "L'entrée `{name, reason}` est écrite toujours, `dry_run` inclus ; le PATCH n'a lieu qu'en run réel. Le nom original est conservé pour que l'utilisateur reconnaisse le fichier. Déjà présent dans `_needs-review/` → ne pas re-déplacer, note dans `output.erreurs`.",
-      "refs": ["toolbox:@appstrate/google-drive#api_call", "agent_output:ambiguous", "agent_output:erreurs"],
+      "refs": [
+        "toolbox:@appstrate/google-drive#api_call",
+        "agent_output:ambiguous",
+        "agent_output:erreurs"
+      ],
       "evidence": {
         "file": "prompt.md",
         "lines": [625, 632],
@@ -1033,7 +1059,12 @@
       "label": "Rendre la sortie : summary markdown et tous les champs dans `data`",
       "parent": null,
       "detail": "Summary à sections imposées (inbox, par catégorie, skipped, ambigus, erreurs) plus une section « Plan dry_run » quand `dry_run=true`. Champs : `moved`, `skipped`, `ambiguous`, `stats`, `factures_parsed_updated`, `paiements_store_updated`, `dry_run_plan`, `erreurs`.",
-      "refs": ["system_tools:output", "agent_output:summary", "agent_output:stats", "agent_output:dry_run_plan"],
+      "refs": [
+        "system_tools:output",
+        "agent_output:summary",
+        "agent_output:stats",
+        "agent_output:dry_run_plan"
+      ],
       "evidence": {
         "file": "prompt.md",
         "lines": [644, 706],

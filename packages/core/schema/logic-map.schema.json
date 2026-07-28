@@ -1,0 +1,236 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.appstrate.dev/logic-map.schema.json",
+  "title": "Appstrate Agent Logic Map",
+  "description": "Carte de logique d'un agent : projection inférée et EN LECTURE SEULE de son bundle (prompt, SKILL.md des skills déclarés et leurs fichiers de références). Ce n'est jamais une spécification d'exécution : le prompt reste la seule source de vérité. Format éprouvé à la main sur 18 cartes (5 agents Tractr, 2 core, 7 LangSmith Fleet, 4 agents publics) avant toute automatisation.",
+  "type": "object",
+  "required": ["map_version", "shape", "source", "generated_at", "generator", "summary", "steps", "edges"],
+  "additionalProperties": false,
+  "properties": {
+    "map_version": {
+      "description": "Version du format. Incrémentée à chaque changement cassant.",
+      "type": "integer",
+      "const": 1
+    },
+    "shape": {
+      "description": "Indice de mise en page dominant, jamais un mode exclusif. `sequence` déclenche un placement en couches, `policies` un placement en colonnes de grappes. Un hybride garde sa famille dominante ici et déclare le détail par groupe dans `groups[].shape`. Vérifiable sans modèle : la part de nœuds de flot (hors guard/policy) vaut 35-82 % pour une séquence, 0-43 % pour un document de politiques ; la zone de recouvrement signale un hybride.",
+      "enum": ["sequence", "policies"]
+    },
+    "source": {
+      "description": "Ce qui a été lu. Le prompt NE SUFFIT PAS : sur les agents Tractr les règles de décision vivent dans les fichiers de références d'un skill, et le prompt dit lui-même qu'elles font foi.",
+      "type": "object",
+      "required": ["package_id", "files"],
+      "additionalProperties": false,
+      "properties": {
+        "package_id": { "type": "string" },
+        "version": { "type": ["string", "null"] },
+        "integrity": {
+          "description": "SHA256 SRI de la version lue. Clé d'invalidation du mode balayage : hash identique, aucune régénération. `null` pour une carte non attachée à une version publiée.",
+          "type": ["string", "null"]
+        },
+        "files": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "generator": {
+      "description": "Qui a produit la carte. `kind: human` protège une carte écrite à la main d'une régénération par le balayage nocturne.",
+      "type": "object",
+      "required": ["kind"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "enum": ["human", "agent"] },
+        "author": { "type": ["string", "null"] },
+        "agent": { "type": ["string", "null"] },
+        "version": { "type": ["string", "null"] },
+        "model": { "type": ["string", "null"] }
+      }
+    },
+    "summary": { "type": "string", "minLength": 1 },
+    "groups": {
+      "description": "Déclaration des grappes. Sans elle, le rendu sait dans quelle boîte placer un nœud mais pas comment la dessiner — et une même grappe peut contenir un flot ET une pile de règles (cas `Codebase Work` de fleet-software-engineer, dix nœuds chaînés et quatre hors flot). Optionnel : à défaut, le rendu déduit la nature d'un groupe de la présence d'arêtes internes.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name"],
+        "additionalProperties": false,
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "shape": { "enum": ["sequence", "policies"] },
+          "order": {
+            "description": "Rang d'affichage. Évite d'encoder l'ordre dans le nom du groupe (« 1. », « 2. »), qui était le contournement des premières cartes.",
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      }
+    },
+    "steps": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/step" }
+    },
+    "edges": {
+      "description": "Unique source de vérité des arêtes, y compris conditionnelles. Le champ `branches` des esquisses initiales est supprimé : deux représentations d'une même arête divergent au premier producteur distrait. Un `loop` avec `until` peut produire un cycle : c'est licite.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/edge" }
+    },
+    "gaps": {
+      "description": "Ce que la source ne dit pas : chemins d'erreur absents, conditions de sortie implicites, règles contradictoires, précédences dont la cible n'est pas cartographiée. Souvent plus actionnable que les étapes elles-mêmes.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/gap" }
+    },
+    "overall_confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+  },
+  "$defs": {
+    "ref": {
+      "description": "Référence typée vers une capacité, du même vocabulaire que les nœuds de la carte de dépendances. Le producteur PROPOSE, le serveur VÉRIFIE contre le manifeste, sans modèle et sans correspondance textuelle. Grain fin possible avec `#` sur `toolbox`, `mcp_servers` et `skills` (`skills:@default/compta-references#scripts/match-factures.py`). La sévérité d'une référence non résolue dépend de l'existence d'un emplacement de déclaration : `toolbox`/`skills`/`mcp_servers`/`system_tools` en ont un, donc erreur ; `runtime` et `subagents` n'en ont pas, donc indice seulement.",
+      "type": "string",
+      "pattern": "^(toolbox|skills|mcp_servers|system_tools|runtime|subagents|context_files|config|agent_input|agent_output|model|schedules):[^\\s]+$"
+    },
+    "evidence": {
+      "description": "Ancrage obligatoire dans la source. C'est ce qui rend la carte auditable et ce qui permet de détecter mécaniquement une carte inventée : la citation doit se retrouver littéralement dans le fichier, aux lignes annoncées.",
+      "type": "object",
+      "required": ["file", "lines", "quote"],
+      "additionalProperties": false,
+      "properties": {
+        "file": {
+          "description": "Doit figurer dans `source.files`.",
+          "type": "string"
+        },
+        "lines": {
+          "description": "Indice de localisation, pas identifiant : sur les prompts denses plusieurs nœuds partagent les mêmes lignes (une ligne d'OpenHands porte 1 600 caractères et cinq prescriptions). C'est `quote` qui identifie.",
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": { "type": "integer", "minimum": 1 }
+        },
+        "quote": {
+          "description": "Extrait CONTIGU et littéral. Aucune élision : une citation à trous n'est pas vérifiable mécaniquement.",
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "step": {
+      "type": "object",
+      "required": ["id", "kind", "label", "evidence"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "kind": {
+          "description": "Vocabulaire FERMÉ. Ouvert, chaque exécution produirait un diagramme différent et rien ne serait comparable dans le temps. Le type dépend de QUAND la prescription s'exécute : à un point du flot (step, tool_call, decision, emit), à chaque tour d'un ensemble ou jusqu'à une condition (loop), ou partout (guard, policy). `guard` contre `policy` : que se passe-t-il si la règle n'est pas appliquée ? Un défaut de l'agent → guard ; un cas qui ne s'est pas présenté → policy.",
+          "enum": ["step", "decision", "loop", "tool_call", "guard", "policy", "emit"]
+        },
+        "label": { "type": "string", "minLength": 1 },
+        "group": {
+          "description": "Section ou domaine. Axe de regroupement DOCUMENTAIRE, distinct de `parent` qui porte l'imbrication de CONTRÔLE. Indispensable au placement d'un document de politiques.",
+          "type": ["string", "null"]
+        },
+        "parent": {
+          "description": "Imbrication de contrôle uniquement : une sous-étape porte l'id de sa boucle. Ne sert jamais à regrouper par section. Attention, un corps de boucle peut être une alternative et non une chaîne : deux sous-graphes disjoints sous un même parent ne coexistent pas forcément.",
+          "type": ["string", "null"]
+        },
+        "detail": { "type": ["string", "null"] },
+        "refs": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ref" }
+        },
+        "evidence": { "$ref": "#/$defs/evidence" },
+        "confidence": {
+          "description": "Mesure l'ambiguïté de la SOURCE, pas l'assurance du producteur.",
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "applies_to": {
+          "description": "Portée d'un `guard` : les étapes qu'il contraint ou neutralise. Réservé au type `guard`. Un garde-fou sans portée est indistinguable d'un principe directeur : c'est le discriminant entre une contrainte réelle et une posture. Une liste vide (ou l'absence du champ) signifie « partout ».",
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "until": {
+          "description": "Condition de sortie d'un `loop` sans collection (« continue jusqu'à ce que la requête soit résolue »). Réservé au type `loop`. Sans ce champ, la prescription centrale d'un agent de code n'a aucun type et disparaît du graphe.",
+          "type": ["string", "null"]
+        },
+        "over": {
+          "description": "Ensemble parcouru par un `loop`. `null` pour une boucle à condition. Réservé au type `loop`.",
+          "type": ["string", "null"]
+        },
+        "budget": {
+          "description": "Plafond d'itérations explicite (« max 10 actions », « jusqu'à 3 fois »). Réservé au type `loop`.",
+          "type": ["integer", "null"],
+          "minimum": 1
+        },
+        "terminal": {
+          "description": "Le run s'arrête ici. Distingue une fin d'exécution d'une carte inachevée : sans ce marqueur, une étape sans arête sortante est ambiguë au rendu.",
+          "type": "boolean"
+        },
+        "aggregated": {
+          "description": "Ce nœud en résume plusieurs. Sans ce champ, une carte de gros prompt passe pour exhaustive alors que c'est un sommaire : mesuré à environ 30 % d'agrégation sur les prompts de 700 lignes, qui passent de 1 nœud pour 2 lignes à 1 nœud pour 10.",
+          "type": "boolean"
+        },
+        "aggregates": {
+          "description": "Nombre approximatif de gestes repliés dans ce nœud.",
+          "type": "integer",
+          "minimum": 2
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "kind": { "const": "guard" } }, "required": ["kind"] },
+          "else": { "not": { "required": ["applies_to"] } }
+        },
+        {
+          "if": { "properties": { "kind": { "const": "loop" } }, "required": ["kind"] },
+          "else": {
+            "allOf": [
+              { "not": { "required": ["until"] } },
+              { "not": { "required": ["over"] } },
+              { "not": { "required": ["budget"] } }
+            ]
+          }
+        },
+        {
+          "if": { "required": ["aggregates"] },
+          "then": { "properties": { "aggregated": { "const": true } }, "required": ["aggregated"] }
+        }
+      ]
+    },
+    "edge": {
+      "type": "object",
+      "required": ["from", "to"],
+      "additionalProperties": false,
+      "properties": {
+        "from": { "type": "string", "minLength": 1 },
+        "to": { "type": "string", "minLength": 1 },
+        "condition": { "type": ["string", "null"] },
+        "confidence": {
+          "description": "Une arête peut être défendable dans les deux sens. Sans degré de certitude ici, deux runs du cartographe ne sont pas comparables.",
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      }
+    },
+    "gap": {
+      "type": "object",
+      "required": ["kind", "message"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "description": "Famille du trou. Chaîne libre plutôt qu'enum : le corpus en a produit une quinzaine, et figer la liste maintenant écraserait la matière.",
+          "type": "string",
+          "minLength": 1
+        },
+        "message": { "type": "string", "minLength": 1 },
+        "related_steps": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    }
+  }
+}

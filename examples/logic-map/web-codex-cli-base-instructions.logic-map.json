@@ -25,7 +25,11 @@
       "parent": null,
       "detail": "Le seul contenu prescriptif de la section : le reste décrit une posture.",
       "refs": [],
-      "evidence": { "file": "corpus-web/codex-cli-base-instructions.md", "lines": [15, 15], "quote": "Unless explicitly asked, you avoid excessively verbose explanations about your work." },
+      "evidence": {
+        "file": "corpus-web/codex-cli-base-instructions.md",
+        "lines": [15, 15],
+        "quote": "Unless explicitly asked, you avoid excessively verbose explanations about your work."
+      },
       "confidence": 0.96
     },
 
@@ -37,7 +41,11 @@
       "parent": null,
       "detail": "Obligation nominative (« you must obey »), portant sur le patch final et non sur les fichiers lus.",
       "refs": [],
-      "evidence": { "file": "corpus-web/codex-cli-base-instructions.md", "lines": [23, 23], "quote": "For every file you touch in the final patch, you must obey instructions in any AGENTS.md file whose scope includes that file." },
+      "evidence": {
+        "file": "corpus-web/codex-cli-base-instructions.md",
+        "lines": [23, 23],
+        "quote": "For every file you touch in the final patch, you must obey instructions in any AGENTS.md file whose scope includes that file."
+      },
       "confidence": 0.99
     },
     {
@@ -48,7 +56,11 @@
       "parent": null,
       "detail": "Définition opérationnelle de la portée, préalable à ag1.",
       "refs": [],
-      "evidence": { "file": "corpus-web/codex-cli-base-instructions.md", "lines": [22, 22], "quote": "The scope of an AGENTS.md file is the entire directory tree rooted at the folder that contains it." },
+      "evidence": {
+        "file": "corpus-web/codex-cli-base-instructions.md",
+        "lines": [22, 22],
+        "quote": "The scope of an AGENTS.md file is the entire directory tree rooted at the folder that contains it."
+      },
       "confidence": 0.99
     },
     {
@@ -59,7 +71,11 @@
       "parent": null,
       "detail": "Sauf si le fichier en dispose autrement.",
       "refs": [],
-      "evidence": { "file": "corpus-web/codex-cli-base-instructions.md", "lines": [24, 24], "quote": "Instructions about code style, structure, naming, etc. apply only to code within the AGENTS.md file's scope, unless the file states otherwise." },
+      "evidence": {
+        "file": "corpus-web/codex-cli-base-instructions.md",
+        "lines": [24, 24],
+        "quote": "Instructions about code style, structure, naming, etc. apply only to code within the AGENTS.md file's scope, unless the file states otherwise."
+      },
       "confidence": 0.97
     },
     {
@@ -70,7 +86,11 @@
       "parent": null,
       "detail": "",
       "refs": [],
-      "evidence": { "file": "corpus-web/codex-cli-base-instructions.md", "lines": [25, 25], "quote": "More-deeply-nested AGENTS.md files take precedence in the case of conflicting instructions." },
+      "evidence": {
+        "file": "corpus-web/codex-cli-base-instructions.md",
+        "lines": [25, 25],
+        "quote": "More-deeply-nested AGENTS.md files take precedence in the case of conflicting instructions."
+      },
       "confidence": 0.99
     },
     {
@@ -81,7 +101,11 @@
       "parent": null,
       "detail": "Hiérarchie d'autorité complète : prompt > AGENTS.md profond > AGENTS.md racine.",
       "refs": [],
-      "evidence": { "file": "corpus-web/codex-cli-base-instructions.md", "lines": [26, 26], "quote": "Direct system/developer/user instructions (as part of a prompt) take precedence over AGENTS.md instructions." },
+      "evidence": {
+        "file": "corpus-web/codex-cli-base-instructions.md",
+        "lines": [26, 26],
+        "quote": "Direct system/developer/user instructions (as part of a prompt) take precedence over AGENTS.md instructions."
+      },
       "confidence": 0.99
     },
     {
@@ -92,7 +116,11 @@
       "parent": null,
       "detail": "Ceux de la racine et du chemin CWD→racine sont déjà fournis avec le message développeur et n'ont pas à être relus.",
       "refs": [],
-      "evidence": { "file": "corpus-web/codex-cli-base-instructions.md", "lines": [27, 27], "quote": "When working in a subdirectory of CWD, or a directory outside the CWD, check for any AGENTS.md files that may be applicable." },
+      "evidence": {
+        "file": "corpus-web/codex-cli-base-instructions.md",
+        "lines": [27, 27],
+        "quote": "When working in a subdirectory of CWD, or a directory outside the CWD, check for any AGENTS.md files that may be applicable."
+      },
       "confidence": 0.97
     },
 
@@ -104,7 +132,11 @@
       "parent": null,
       "detail": "Huit exemples littéraux sont fournis (l. 43-50).",
       "refs": [],
-      "evidence": { "file": "corpus-web/codex-cli-base-instructions.md", "lines": [33, 33], "quote": "Before making tool calls, send a brief preamble to the user explaining what you" },
+      "evidence": {
+        "file": "corpus-web/codex-cli-base-instructions.md",
+        "lines": [33, 33],
+        "quote": "Before making tool calls, send a brief preamble to the user explaining what you"
+      },
       "confidence": 0.97
     },
     {
@@ -115,7 +147,11 @@
       "parent": null,
       "detail": "",
       "refs": [],
-      "evidence": { "file": "corpus-web/codex-cli-base-instructions.md", "lines": [35, 35], "quote": "**Logically group related actions**" },
+      "evidence": {
+        "file": "corpus-web/codex-cli-base-instructions.md",
+        "lines": [35, 35],
+        "quote": "**Logically group related actions**"
+      },
       "confidence": 0.97
     },
     {
@@ -126,7 +162,11 @@
       "parent": null,
       "detail": "Un des rares budgets chiffrés du document.",
       "refs": [],
-      "evidence": { "file": "corpus-web/codex-cli-base-instructions.md", "lines": [36, 36], "quote": "be no more than 1-2 sentences, focused on immediate, tangible next steps" },
+      "evidence": {
+        "file": "corpus-web/codex-cli-base-instructions.md",
+        "lines": [36, 36],
+        "quote": "be no more than 1-2 sentences, focused on immediate, tangible next steps"
+      },
       "confidence": 0.98
     },
     {
@@ -137,7 +177,11 @@
       "parent": null,
       "detail": "",
       "refs": [],
-      "evidence": { "file": "corpus-web/codex-cli-base-instructions.md", "lines": [37, 37], "quote": "**Build on prior context**" },
+      "evidence": {
+        "file": "corpus-web/codex-cli-base-instructions.md",
+        "lines": [37, 37],
+        "quote": "**Build on prior context**"
+      },
       "confidence": 0.96
     },
     {
@@ -148,7 +192,11 @@
       "parent": null,
       "detail": "",
       "refs": [],
-      "evidence": { "file": "corpus-web/codex-cli-base-instructions.md", "lines": [38, 38], "quote": "**Keep your tone light, friendly and curious**" },
+      "evidence": {
+        "file": "corpus-web/codex-cli-base-instructions.md",
+        "lines": [38, 38],
+        "quote": "**Keep your tone light, friendly and curious**"
+      },
       "confidence": 0.96
     },
     {
@@ -159,7 +207,11 @@
       "parent": null,
       "detail": "Sauf si elle fait partie d'un groupe d'actions plus large.",
       "refs": [],
-      "evidence": { "file": "corpus-web/codex-cli-base-instructions.md", "lines": [39, 39], "quote": "**Exception**: Avoid adding a preamble for every trivial read" },
+      "evidence": {
+        "file": "corpus-web/codex-cli-base-instructions.md",
+        "lines": [39, 39],
+        "quote": "**Exception**: Avoid adding a preamble for every trivial read"
+      },
       "confidence": 0.97
     },
 
@@ -170,8 +222,12 @@
       "label": "Tâche non triviale, à phases, ambiguë ou multi-demandes : établir un plan",
       "parent": null,
       "detail": "Sept déclencheurs énumérés (l. 64-70), dont « l'utilisateur a demandé plus d'une chose » et « tu génères des étapes supplémentaires en cours de route ».",
-      "refs": ["system_tools:update_plan"],
-      "evidence": { "file": "corpus-web/codex-cli-base-instructions.md", "lines": [64, 64], "quote": "- The task is non-trivial and will require multiple actions over a long time horizon." },
+      "refs": ["runtime:update_plan"],
+      "evidence": {
+        "file": "corpus-web/codex-cli-base-instructions.md",
+        "lines": [64, 64],
+        "quote": "- The task is non-trivial and will require multiple actions over a long time horizon."
+      },
       "confidence": 0.97
     },
     {
@@ -181,8 +237,12 @@
       "label": "Pas de plan pour une requête simple ou en une seule étape, ni d'étapes de remplissage",
       "parent": null,
       "detail": "Le prompt donne trois exemples de « low-quality plans » à ne pas produire (l. 101-119).",
-      "refs": ["system_tools:update_plan"],
-      "evidence": { "file": "corpus-web/codex-cli-base-instructions.md", "lines": [56, 56], "quote": "Do not use plans for simple or single-step queries that you can just do or answer immediately." },
+      "refs": ["runtime:update_plan"],
+      "evidence": {
+        "file": "corpus-web/codex-cli-base-instructions.md",
+        "lines": [56, 56],
+        "quote": "Do not use plans for simple or single-step queries that you can just do or answer immediately."
+      },
       "confidence": 0.98
     },
     {
@@ -193,7 +253,11 @@
       "parent": null,
       "detail": "Exemple donné : ne pas prévoir de tester ce qui ne peut pas être testé.",
       "refs": [],
-      "evidence": { "file": "corpus-web/codex-cli-base-instructions.md", "lines": [56, 56], "quote": "The content of your plan should not involve doing anything that you aren't capable of doing" },
+      "evidence": {
+        "file": "corpus-web/codex-cli-base-instructions.md",
+        "lines": [56, 56],
+        "quote": "The content of your plan should not involve doing anything that you aren't capable of doing"
+      },
       "confidence": 0.97
     },
     {
@@ -203,8 +267,12 @@
       "label": "Ne pas répéter le contenu du plan après un appel `update_plan`",
       "parent": null,
       "detail": "Le harnais l'affiche déjà. Résumer le changement et signaler le contexte important.",
-      "refs": ["system_tools:update_plan"],
-      "evidence": { "file": "corpus-web/codex-cli-base-instructions.md", "lines": [58, 58], "quote": "Do not repeat the full contents of the plan after an `update_plan` call" },
+      "refs": ["runtime:update_plan"],
+      "evidence": {
+        "file": "corpus-web/codex-cli-base-instructions.md",
+        "lines": [58, 58],
+        "quote": "Do not repeat the full contents of the plan after an `update_plan` call"
+      },
       "confidence": 0.98
     },
     {
@@ -214,8 +282,12 @@
       "label": "Avant chaque commande : vérifier que l'étape précédente est finie et la marquer terminée",
       "parent": null,
       "detail": "Point de rebouclage du travail : c'est cette prescription, jointe à up2, qui fait de l'exécution une boucle.",
-      "refs": ["system_tools:update_plan"],
-      "evidence": { "file": "corpus-web/codex-cli-base-instructions.md", "lines": [60, 60], "quote": "Before running a command, consider whether or not you have completed the previous step, and make sure to mark it as completed before moving on to the next step." },
+      "refs": ["runtime:update_plan"],
+      "evidence": {
+        "file": "corpus-web/codex-cli-base-instructions.md",
+        "lines": [60, 60],
+        "quote": "Before running a command, consider whether or not you have completed the previous step, and make sure to mark it as completed before moving on to the next step."
+      },
       "confidence": 0.98
     },
     {
@@ -225,8 +297,12 @@
       "label": "Changement de plan en cours de tâche : rappeler `update_plan` avec une `explanation`",
       "parent": null,
       "detail": "",
-      "refs": ["system_tools:update_plan"],
-      "evidence": { "file": "corpus-web/codex-cli-base-instructions.md", "lines": [60, 60], "quote": "call `update_plan` with the updated plan and make sure to provide an `explanation` of the rationale when doing so" },
+      "refs": ["runtime:update_plan"],
+      "evidence": {
+        "file": "corpus-web/codex-cli-base-instructions.md",
+        "lines": [60, 60],
+        "quote": "call `update_plan` with the updated plan and make sure to provide an `explanation` of the rationale when doing so"
+      },
       "confidence": 0.98
     },
     {
@@ -236,8 +312,12 @@
       "label": "N'écrire que des plans de haute qualité",
       "parent": null,
       "detail": "Adossé à six exemples littéraux, trois bons et trois mauvais. Aucun critère explicite ne distingue les deux séries : le prompt enseigne par l'exemple.",
-      "refs": ["system_tools:update_plan"],
-      "evidence": { "file": "corpus-web/codex-cli-base-instructions.md", "lines": [121, 121], "quote": "If you need to write a plan, only write high quality plans, not low quality ones." },
+      "refs": ["runtime:update_plan"],
+      "evidence": {
+        "file": "corpus-web/codex-cli-base-instructions.md",
+        "lines": [121, 121],
+        "quote": "If you need to write a plan, only write high quality plans, not low quality ones."
+      },
       "confidence": 0.93
     },
 
@@ -249,7 +329,11 @@
       "parent": null,
       "detail": "Boucle de travail non bornée : pas d'ensemble à parcourir (donc pas de `loop`), pas de compteur, pas de budget. La seule condition de sortie est une certitude subjective (« only terminate your turn when you are sure that the problem is solved »).",
       "refs": [],
-      "evidence": { "file": "corpus-web/codex-cli-base-instructions.md", "lines": [125, 125], "quote": "Please keep going until the query is completely resolved, before ending your turn and yielding back to the user. Only terminate your turn when you are sure that the problem is solved." },
+      "evidence": {
+        "file": "corpus-web/codex-cli-base-instructions.md",
+        "lines": [125, 125],
+        "quote": "Please keep going until the query is completely resolved, before ending your turn and yielding back to the user. Only terminate your turn when you are sure that the problem is solved."
+      },
       "confidence": 0.99
     },
     {
@@ -260,7 +344,11 @@
       "parent": null,
       "detail": "Contrepoids direct à te1 : la seule alternative à la résolution est de ne pas répondre.",
       "refs": [],
-      "evidence": { "file": "corpus-web/codex-cli-base-instructions.md", "lines": [125, 125], "quote": "Do NOT guess or make up an answer." },
+      "evidence": {
+        "file": "corpus-web/codex-cli-base-instructions.md",
+        "lines": [125, 125],
+        "quote": "Do NOT guess or make up an answer."
+      },
       "confidence": 0.99
     },
     {
@@ -271,7 +359,11 @@
       "parent": null,
       "detail": "Trois autorisations explicites, formulées comme des levées d'inhibition du modèle plutôt que comme des règles métier.",
       "refs": [],
-      "evidence": { "file": "corpus-web/codex-cli-base-instructions.md", "lines": [129, 129], "quote": "- Working on the repo(s) in the current environment is allowed, even if they are proprietary." },
+      "evidence": {
+        "file": "corpus-web/codex-cli-base-instructions.md",
+        "lines": [129, 129],
+        "quote": "- Working on the repo(s) in the current environment is allowed, even if they are proprietary."
+      },
       "confidence": 0.98
     },
     {
@@ -282,7 +374,11 @@
       "parent": null,
       "detail": "",
       "refs": [],
-      "evidence": { "file": "corpus-web/codex-cli-base-instructions.md", "lines": [130, 130], "quote": "- Analyzing code for vulnerabilities is allowed." },
+      "evidence": {
+        "file": "corpus-web/codex-cli-base-instructions.md",
+        "lines": [130, 130],
+        "quote": "- Analyzing code for vulnerabilities is allowed."
+      },
       "confidence": 0.98
     },
     {
@@ -293,7 +389,11 @@
       "parent": null,
       "detail": "",
       "refs": [],
-      "evidence": { "file": "corpus-web/codex-cli-base-instructions.md", "lines": [131, 131], "quote": "- Showing user code and tool call details is allowed." },
+      "evidence": {
+        "file": "corpus-web/codex-cli-base-instructions.md",
+        "lines": [131, 131],
+        "quote": "- Showing user code and tool call details is allowed."
+      },
       "confidence": 0.98
     },
     {
@@ -303,8 +403,12 @@
       "label": "Éditer les fichiers avec `apply_patch` — jamais `applypatch` ni `apply-patch`",
       "parent": null,
       "detail": "Le prompt donne la forme exacte de l'appel, y compris l'enveloppe `*** Begin Patch` / `*** End Patch`. Seul outil nommé du document avec `update_plan` et `rg`.",
-      "refs": ["system_tools:apply_patch"],
-      "evidence": { "file": "corpus-web/codex-cli-base-instructions.md", "lines": [132, 132], "quote": "Use the `apply_patch` tool to edit files (NEVER try `applypatch` or `apply-patch`, only `apply_patch`)" },
+      "refs": ["runtime:apply_patch"],
+      "evidence": {
+        "file": "corpus-web/codex-cli-base-instructions.md",
+        "lines": [132, 132],
+        "quote": "Use the `apply_patch` tool to edit files (NEVER try `applypatch` or `apply-patch`, only `apply_patch`)"
+      },
       "confidence": 0.99
     },
 
@@ -316,7 +420,11 @@
       "parent": null,
       "detail": "Les douze règles de ce groupe sont explicitement surchargeables par les instructions utilisateur, `AGENTS.md` compris.",
       "refs": [],
-      "evidence": { "file": "corpus-web/codex-cli-base-instructions.md", "lines": [136, 136], "quote": "- Fix the problem at the root cause rather than applying surface-level patches, when possible." },
+      "evidence": {
+        "file": "corpus-web/codex-cli-base-instructions.md",
+        "lines": [136, 136],
+        "quote": "- Fix the problem at the root cause rather than applying surface-level patches, when possible."
+      },
       "confidence": 0.98
     },
     {
@@ -327,7 +435,11 @@
       "parent": null,
       "detail": "",
       "refs": [],
-      "evidence": { "file": "corpus-web/codex-cli-base-instructions.md", "lines": [137, 137], "quote": "- Avoid unneeded complexity in your solution." },
+      "evidence": {
+        "file": "corpus-web/codex-cli-base-instructions.md",
+        "lines": [137, 137],
+        "quote": "- Avoid unneeded complexity in your solution."
+      },
       "confidence": 0.98
     },
     {
@@ -338,7 +450,11 @@
       "parent": null,
       "detail": "Écrit deux fois, ici et dans « Validating your work » (l. 157). L'agent peut les mentionner dans son message final.",
       "refs": [],
-      "evidence": { "file": "corpus-web/codex-cli-base-instructions.md", "lines": [138, 138], "quote": "- Do not attempt to fix unrelated bugs or broken tests. It is not your responsibility to fix them." },
+      "evidence": {
+        "file": "corpus-web/codex-cli-base-instructions.md",
+        "lines": [138, 138],
+        "quote": "- Do not attempt to fix unrelated bugs or broken tests. It is not your responsibility to fix them."
+      },
       "confidence": 0.98
     },
     {
@@ -349,7 +465,11 @@
       "parent": null,
       "detail": "Aucun critère de nécessité.",
       "refs": [],
-      "evidence": { "file": "corpus-web/codex-cli-base-instructions.md", "lines": [139, 139], "quote": "- Update documentation as necessary." },
+      "evidence": {
+        "file": "corpus-web/codex-cli-base-instructions.md",
+        "lines": [139, 139],
+        "quote": "- Update documentation as necessary."
+      },
       "confidence": 0.9
     },
     {
@@ -360,7 +480,11 @@
       "parent": null,
       "detail": "",
       "refs": [],
-      "evidence": { "file": "corpus-web/codex-cli-base-instructions.md", "lines": [140, 140], "quote": "- Keep changes consistent with the style of the existing codebase. Changes should be minimal and focused on the task." },
+      "evidence": {
+        "file": "corpus-web/codex-cli-base-instructions.md",
+        "lines": [140, 140],
+        "quote": "- Keep changes consistent with the style of the existing codebase. Changes should be minimal and focused on the task."
+      },
       "confidence": 0.98
     },
     {
@@ -370,8 +494,12 @@
       "label": "Contexte historique nécessaire : consulter `git log` et `git blame`",
       "parent": null,
       "detail": "",
-      "refs": ["system_tools:shell"],
-      "evidence": { "file": "corpus-web/codex-cli-base-instructions.md", "lines": [141, 141], "quote": "- Use `git log` and `git blame` to search the history of the codebase if additional context is required." },
+      "refs": ["runtime:shell"],
+      "evidence": {
+        "file": "corpus-web/codex-cli-base-instructions.md",
+        "lines": [141, 141],
+        "quote": "- Use `git log` and `git blame` to search the history of the codebase if additional context is required."
+      },
       "confidence": 0.97
     },
     {
@@ -382,7 +510,11 @@
       "parent": null,
       "detail": "",
       "refs": [],
-      "evidence": { "file": "corpus-web/codex-cli-base-instructions.md", "lines": [142, 142], "quote": "- NEVER add copyright or license headers unless specifically requested." },
+      "evidence": {
+        "file": "corpus-web/codex-cli-base-instructions.md",
+        "lines": [142, 142],
+        "quote": "- NEVER add copyright or license headers unless specifically requested."
+      },
       "confidence": 0.99
     },
     {
@@ -392,8 +524,12 @@
       "label": "Ne pas relire un fichier après `apply_patch` : l'appel échoue s'il n'a pas marché",
       "parent": null,
       "detail": "Vaut aussi pour la création et la suppression de dossiers. Règle d'économie de jetons adossée à une garantie du harnais.",
-      "refs": ["system_tools:apply_patch"],
-      "evidence": { "file": "corpus-web/codex-cli-base-instructions.md", "lines": [143, 143], "quote": "- Do not waste tokens by re-reading files after calling `apply_patch` on them. The tool call will fail if it didn't work." },
+      "refs": ["runtime:apply_patch"],
+      "evidence": {
+        "file": "corpus-web/codex-cli-base-instructions.md",
+        "lines": [143, 143],
+        "quote": "- Do not waste tokens by re-reading files after calling `apply_patch` on them. The tool call will fail if it didn't work."
+      },
       "confidence": 0.98
     },
     {
@@ -403,8 +539,12 @@
       "label": "Ne pas committer ni créer de branche sans demande explicite",
       "parent": null,
       "detail": "",
-      "refs": ["system_tools:shell"],
-      "evidence": { "file": "corpus-web/codex-cli-base-instructions.md", "lines": [144, 144], "quote": "- Do not `git commit` your changes or create new git branches unless explicitly requested." },
+      "refs": ["runtime:shell"],
+      "evidence": {
+        "file": "corpus-web/codex-cli-base-instructions.md",
+        "lines": [144, 144],
+        "quote": "- Do not `git commit` your changes or create new git branches unless explicitly requested."
+      },
       "confidence": 0.99
     },
     {
@@ -415,7 +555,11 @@
       "parent": null,
       "detail": "",
       "refs": [],
-      "evidence": { "file": "corpus-web/codex-cli-base-instructions.md", "lines": [145, 145], "quote": "- Do not add inline comments within code unless explicitly requested." },
+      "evidence": {
+        "file": "corpus-web/codex-cli-base-instructions.md",
+        "lines": [145, 145],
+        "quote": "- Do not add inline comments within code unless explicitly requested."
+      },
       "confidence": 0.99
     },
     {
@@ -426,7 +570,11 @@
       "parent": null,
       "detail": "",
       "refs": [],
-      "evidence": { "file": "corpus-web/codex-cli-base-instructions.md", "lines": [146, 146], "quote": "- Do not use one-letter variable names unless explicitly requested." },
+      "evidence": {
+        "file": "corpus-web/codex-cli-base-instructions.md",
+        "lines": [146, 146],
+        "quote": "- Do not use one-letter variable names unless explicitly requested."
+      },
       "confidence": 0.99
     },
     {
@@ -437,7 +585,11 @@
       "parent": null,
       "detail": "Le rendu du CLI ne les gère pas. À la place : des chemins valides, que l'utilisateur peut ouvrir d'un clic.",
       "refs": [],
-      "evidence": { "file": "corpus-web/codex-cli-base-instructions.md", "lines": [147, 147], "quote": "The CLI is not able to render these so they will just be broken in the UI." },
+      "evidence": {
+        "file": "corpus-web/codex-cli-base-instructions.md",
+        "lines": [147, 147],
+        "quote": "The CLI is not able to render these so they will just be broken in the UI."
+      },
       "confidence": 0.98
     },
 
@@ -448,8 +600,12 @@
       "label": "Codebase testable ou constructible : envisager de s'en servir pour vérifier",
       "parent": null,
       "detail": "Formulé en « consider », pas en obligation.",
-      "refs": ["system_tools:shell"],
-      "evidence": { "file": "corpus-web/codex-cli-base-instructions.md", "lines": [151, 151], "quote": "If the codebase has tests or the ability to build or run, consider using them to verify that your work is complete." },
+      "refs": ["runtime:shell"],
+      "evidence": {
+        "file": "corpus-web/codex-cli-base-instructions.md",
+        "lines": [151, 151],
+        "quote": "If the codebase has tests or the ability to build or run, consider using them to verify that your work is complete."
+      },
       "confidence": 0.95
     },
     {
@@ -459,8 +615,12 @@
       "label": "Tester du plus spécifique au plus large, à mesure que la confiance monte",
       "parent": null,
       "detail": "Stratégie d'escalade explicite.",
-      "refs": ["system_tools:shell"],
-      "evidence": { "file": "corpus-web/codex-cli-base-instructions.md", "lines": [153, 153], "quote": "start as specific as possible to the code you changed so that you can catch issues efficiently, then make your way to broader tests as you build confidence" },
+      "refs": ["runtime:shell"],
+      "evidence": {
+        "file": "corpus-web/codex-cli-base-instructions.md",
+        "lines": [153, 153],
+        "quote": "start as specific as possible to the code you changed so that you can catch issues efficiently, then make your way to broader tests as you build confidence"
+      },
       "confidence": 0.97
     },
     {
@@ -471,7 +631,11 @@
       "parent": null,
       "detail": "Interdiction inverse : ne jamais ajouter de tests à un dépôt qui n'en a pas.",
       "refs": [],
-      "evidence": { "file": "corpus-web/codex-cli-base-instructions.md", "lines": [153, 153], "quote": "However, do not add tests to codebases with no tests." },
+      "evidence": {
+        "file": "corpus-web/codex-cli-base-instructions.md",
+        "lines": [153, 153],
+        "quote": "However, do not add tests to codebases with no tests."
+      },
       "confidence": 0.97
     },
     {
@@ -481,8 +645,12 @@
       "label": "Formatage récalcitrant : itérer au plus 3 fois, puis livrer en signalant le problème",
       "parent": null,
       "detail": "Seule boucle de reprise chiffrée du document. Elle a un compteur (3), une condition de succès (le formateur passe) et une sortie dégradée explicite (présenter une solution correcte en mentionnant le formatage).",
-      "refs": ["system_tools:shell"],
-      "evidence": { "file": "corpus-web/codex-cli-base-instructions.md", "lines": [155, 155], "quote": "If there are issues you can iterate up to 3 times to get formatting right, but if you still can't manage it's better to save the user time and present them a correct solution where you call out the formatting in your final message." },
+      "refs": ["runtime:shell"],
+      "evidence": {
+        "file": "corpus-web/codex-cli-base-instructions.md",
+        "lines": [155, 155],
+        "quote": "If there are issues you can iterate up to 3 times to get formatting right, but if you still can't manage it's better to save the user time and present them a correct solution where you call out the formatting in your final message."
+      },
       "confidence": 0.98
     },
     {
@@ -493,7 +661,11 @@
       "parent": null,
       "detail": "",
       "refs": [],
-      "evidence": { "file": "corpus-web/codex-cli-base-instructions.md", "lines": [155, 155], "quote": "If the codebase does not have a formatter configured, do not add one." },
+      "evidence": {
+        "file": "corpus-web/codex-cli-base-instructions.md",
+        "lines": [155, 155],
+        "quote": "If the codebase does not have a formatter configured, do not add one."
+      },
       "confidence": 0.98
     },
     {
@@ -504,7 +676,11 @@
       "parent": null,
       "detail": "Redite de cg3 sous un autre angle.",
       "refs": [],
-      "evidence": { "file": "corpus-web/codex-cli-base-instructions.md", "lines": [157, 157], "quote": "For all of testing, running, building, and formatting, do not attempt to fix unrelated bugs." },
+      "evidence": {
+        "file": "corpus-web/codex-cli-base-instructions.md",
+        "lines": [157, 157],
+        "quote": "For all of testing, running, building, and formatting, do not attempt to fix unrelated bugs."
+      },
       "confidence": 0.98
     },
     {
@@ -515,7 +691,11 @@
       "parent": null,
       "detail": "Le comportement de validation dépend d'un état d'exécution du harnais, jamais nommé comme entrée de l'agent.",
       "refs": ["config:approval_policy"],
-      "evidence": { "file": "corpus-web/codex-cli-base-instructions.md", "lines": [161, 161], "quote": "- When running in the non-interactive approval mode **never**, proactively run tests, lint and do whatever you need to ensure you've completed the task." },
+      "evidence": {
+        "file": "corpus-web/codex-cli-base-instructions.md",
+        "lines": [161, 161],
+        "quote": "- When running in the non-interactive approval mode **never**, proactively run tests, lint and do whatever you need to ensure you've completed the task."
+      },
       "confidence": 0.97
     },
     {
@@ -526,7 +706,11 @@
       "parent": null,
       "detail": "Motif donné : ces commandes prennent du temps et ralentissent l'itération.",
       "refs": ["config:approval_policy"],
-      "evidence": { "file": "corpus-web/codex-cli-base-instructions.md", "lines": [162, 162], "quote": "hold off on running tests or lint commands until the user is ready for you to finalize your output" },
+      "evidence": {
+        "file": "corpus-web/codex-cli-base-instructions.md",
+        "lines": [162, 162],
+        "quote": "hold off on running tests or lint commands until the user is ready for you to finalize your output"
+      },
       "confidence": 0.97
     },
     {
@@ -537,7 +721,11 @@
       "parent": null,
       "detail": "Ajout, correction, reproduction d'un bug. L'appréciation est laissée au jugement de l'agent.",
       "refs": ["config:approval_policy"],
-      "evidence": { "file": "corpus-web/codex-cli-base-instructions.md", "lines": [163, 163], "quote": "you may proactively run tests regardless of approval mode" },
+      "evidence": {
+        "file": "corpus-web/codex-cli-base-instructions.md",
+        "lines": [163, 163],
+        "quote": "you may proactively run tests regardless of approval mode"
+      },
       "confidence": 0.97
     },
 
@@ -549,7 +737,11 @@
       "parent": null,
       "detail": "",
       "refs": [],
-      "evidence": { "file": "corpus-web/codex-cli-base-instructions.md", "lines": [167, 167], "quote": "For tasks that have no prior context (i.e. the user is starting something brand new), you should feel free to be ambitious and demonstrate creativity with your implementation." },
+      "evidence": {
+        "file": "corpus-web/codex-cli-base-instructions.md",
+        "lines": [167, 167],
+        "quote": "For tasks that have no prior context (i.e. the user is starting something brand new), you should feel free to be ambitious and demonstrate creativity with your implementation."
+      },
       "confidence": 0.97
     },
     {
@@ -560,7 +752,11 @@
       "parent": null,
       "detail": "Ne pas renommer fichiers ou variables sans nécessité.",
       "refs": [],
-      "evidence": { "file": "corpus-web/codex-cli-base-instructions.md", "lines": [169, 169], "quote": "you should make sure you do exactly what the user asks with surgical precision" },
+      "evidence": {
+        "file": "corpus-web/codex-cli-base-instructions.md",
+        "lines": [169, 169],
+        "quote": "you should make sure you do exactly what the user asks with surgical precision"
+      },
       "confidence": 0.98
     },
     {
@@ -571,7 +767,11 @@
       "parent": null,
       "detail": "Touches créatives à haute valeur quand le périmètre est vague ; ciblage strict quand il est précisé.",
       "refs": [],
-      "evidence": { "file": "corpus-web/codex-cli-base-instructions.md", "lines": [171, 171], "quote": "doing the right extras without gold-plating" },
+      "evidence": {
+        "file": "corpus-web/codex-cli-base-instructions.md",
+        "lines": [171, 171],
+        "quote": "doing the right extras without gold-plating"
+      },
       "confidence": 0.96
     },
 
@@ -583,7 +783,11 @@
       "parent": null,
       "detail": "Doit dire ce qui est fait, où on en est et où on va.",
       "refs": [],
-      "evidence": { "file": "corpus-web/codex-cli-base-instructions.md", "lines": [175, 175], "quote": "you should provide progress updates back to the user at reasonable intervals" },
+      "evidence": {
+        "file": "corpus-web/codex-cli-base-instructions.md",
+        "lines": [175, 175],
+        "quote": "you should provide progress updates back to the user at reasonable intervals"
+      },
       "confidence": 0.97
     },
     {
@@ -594,7 +798,11 @@
       "parent": null,
       "detail": "Exemple donné : écrire un nouveau fichier.",
       "refs": [],
-      "evidence": { "file": "corpus-web/codex-cli-base-instructions.md", "lines": [177, 177], "quote": "Don't start editing or writing large files before informing the user what you are doing and why." },
+      "evidence": {
+        "file": "corpus-web/codex-cli-base-instructions.md",
+        "lines": [177, 177],
+        "quote": "Don't start editing or writing large files before informing the user what you are doing and why."
+      },
       "confidence": 0.98
     },
 
@@ -606,7 +814,11 @@
       "parent": null,
       "detail": "Seule émission du document. Aucun schéma, aucun outil de sortie : la sortie de l'agent est du texte destiné au CLI, stylé après coup.",
       "refs": [],
-      "evidence": { "file": "corpus-web/codex-cli-base-instructions.md", "lines": [183, 183], "quote": "Your final message should read naturally, like an update from a concise teammate." },
+      "evidence": {
+        "file": "corpus-web/codex-cli-base-instructions.md",
+        "lines": [183, 183],
+        "quote": "Your final message should read naturally, like an update from a concise teammate."
+      },
       "confidence": 0.98
     },
     {
@@ -617,7 +829,11 @@
       "parent": null,
       "detail": "Redit en fin de section (l. 256) pour les salutations et accusés de réception.",
       "refs": [],
-      "evidence": { "file": "corpus-web/codex-cli-base-instructions.md", "lines": [183, 183], "quote": "For casual conversation, brainstorming tasks, or quick questions from the user, respond in a friendly, conversational tone." },
+      "evidence": {
+        "file": "corpus-web/codex-cli-base-instructions.md",
+        "lines": [183, 183],
+        "quote": "For casual conversation, brainstorming tasks, or quick questions from the user, respond in a friendly, conversational tone."
+      },
       "confidence": 0.97
     },
     {
@@ -628,7 +844,11 @@
       "parent": null,
       "detail": "Les réponses multi-sections sont réservées aux résultats qui exigent regroupement ou explication.",
       "refs": [],
-      "evidence": { "file": "corpus-web/codex-cli-base-instructions.md", "lines": [185, 185], "quote": "You can skip heavy formatting for single, simple actions or confirmations." },
+      "evidence": {
+        "file": "corpus-web/codex-cli-base-instructions.md",
+        "lines": [185, 185],
+        "quote": "You can skip heavy formatting for single, simple actions or confirmations."
+      },
       "confidence": 0.97
     },
     {
@@ -639,7 +859,11 @@
       "parent": null,
       "detail": "L'utilisateur travaille sur la même machine et a accès au travail.",
       "refs": [],
-      "evidence": { "file": "corpus-web/codex-cli-base-instructions.md", "lines": [187, 187], "quote": "there's no need to show the full contents of large files you have already written unless the user explicitly asks for them" },
+      "evidence": {
+        "file": "corpus-web/codex-cli-base-instructions.md",
+        "lines": [187, 187],
+        "quote": "there's no need to show the full contents of large files you have already written unless the user explicitly asks for them"
+      },
       "confidence": 0.98
     },
     {
@@ -650,7 +874,11 @@
       "parent": null,
       "detail": "Exemples : lancer les tests, committer, construire le composant suivant. Et pour ce que l'agent ne peut pas faire, donner les instructions à l'utilisateur.",
       "refs": [],
-      "evidence": { "file": "corpus-web/codex-cli-base-instructions.md", "lines": [189, 189], "quote": "Good examples of this are running tests, committing changes, or building out the next logical component." },
+      "evidence": {
+        "file": "corpus-web/codex-cli-base-instructions.md",
+        "lines": [189, 189],
+        "quote": "Good examples of this are running tests, committing changes, or building out the next logical component."
+      },
       "confidence": 0.97
     },
     {
@@ -661,7 +889,11 @@
       "parent": null,
       "detail": "",
       "refs": [],
-      "evidence": { "file": "corpus-web/codex-cli-base-instructions.md", "lines": [191, 191], "quote": "You should be very concise (i.e. no more than 10 lines), but can relax this requirement for tasks where additional detail and comprehensiveness is important" },
+      "evidence": {
+        "file": "corpus-web/codex-cli-base-instructions.md",
+        "lines": [191, 191],
+        "quote": "You should be very concise (i.e. no more than 10 lines), but can relax this requirement for tasks where additional detail and comprehensiveness is important"
+      },
       "confidence": 0.98
     },
 
@@ -673,7 +905,11 @@
       "parent": null,
       "detail": "Pas de ligne vide avant la première puce sous un en-tête.",
       "refs": [],
-      "evidence": { "file": "corpus-web/codex-cli-base-instructions.md", "lines": [201, 201], "quote": "Keep headers short (1–3 words) and in `**Title Case**`. Always start headers with `**` and end with `**`" },
+      "evidence": {
+        "file": "corpus-web/codex-cli-base-instructions.md",
+        "lines": [201, 201],
+        "quote": "Keep headers short (1–3 words) and in `**Title Case**`. Always start headers with `**` and end with `**`"
+      },
       "confidence": 0.98
     },
     {
@@ -684,7 +920,11 @@
       "parent": null,
       "detail": "Ordonnées par importance, phrasé et formatage cohérents d'une section à l'autre.",
       "refs": [],
-      "evidence": { "file": "corpus-web/codex-cli-base-instructions.md", "lines": [210, 210], "quote": "- Group into short lists (4–6 bullets) ordered by importance." },
+      "evidence": {
+        "file": "corpus-web/codex-cli-base-instructions.md",
+        "lines": [210, 210],
+        "quote": "- Group into short lists (4–6 bullets) ordered by importance."
+      },
       "confidence": 0.98
     },
     {
@@ -695,7 +935,11 @@
       "parent": null,
       "detail": "",
       "refs": [],
-      "evidence": { "file": "corpus-web/codex-cli-base-instructions.md", "lines": [215, 215], "quote": "- Wrap all commands, file paths, env vars, and code identifiers in backticks" },
+      "evidence": {
+        "file": "corpus-web/codex-cli-base-instructions.md",
+        "lines": [215, 215],
+        "quote": "- Wrap all commands, file paths, env vars, and code identifiers in backticks"
+      },
       "confidence": 0.98
     },
     {
@@ -706,7 +950,11 @@
       "parent": null,
       "detail": "",
       "refs": [],
-      "evidence": { "file": "corpus-web/codex-cli-base-instructions.md", "lines": [217, 217], "quote": "- Never mix monospace and bold markers" },
+      "evidence": {
+        "file": "corpus-web/codex-cli-base-instructions.md",
+        "lines": [217, 217],
+        "quote": "- Never mix monospace and bold markers"
+      },
       "confidence": 0.98
     },
     {
@@ -717,7 +965,11 @@
       "parent": null,
       "detail": "Sept sous-règles (l. 220-227), dont « Do not provide range of lines », en tension avec la rubrique de revue du même dépôt, qui exige un `line_range`.",
       "refs": [],
-      "evidence": { "file": "corpus-web/codex-cli-base-instructions.md", "lines": [226, 226], "quote": "* Do not provide range of lines" },
+      "evidence": {
+        "file": "corpus-web/codex-cli-base-instructions.md",
+        "lines": [226, 226],
+        "quote": "* Do not provide range of lines"
+      },
       "confidence": 0.97
     },
     {
@@ -728,7 +980,11 @@
       "parent": null,
       "detail": "Structure adaptée à la complexité du résultat.",
       "refs": [],
-      "evidence": { "file": "corpus-web/codex-cli-base-instructions.md", "lines": [232, 232], "quote": "- Order sections from general → specific → supporting info." },
+      "evidence": {
+        "file": "corpus-web/codex-cli-base-instructions.md",
+        "lines": [232, 232],
+        "quote": "- Order sections from general → specific → supporting info."
+      },
       "confidence": 0.97
     },
     {
@@ -739,7 +995,11 @@
       "parent": null,
       "detail": "Interdiction de renvoyer à « ci-dessus » ou « ci-dessous ».",
       "refs": [],
-      "evidence": { "file": "corpus-web/codex-cli-base-instructions.md", "lines": [243, 243], "quote": "- Keep descriptions self-contained" },
+      "evidence": {
+        "file": "corpus-web/codex-cli-base-instructions.md",
+        "lines": [243, 243],
+        "quote": "- Keep descriptions self-contained"
+      },
       "confidence": 0.97
     },
     {
@@ -750,7 +1010,11 @@
       "parent": null,
       "detail": "En tension avec la règle de sous-sections (l. 233), qui prescrit une puce à mot-clé gras suivie d'éléments listés en dessous.",
       "refs": [],
-      "evidence": { "file": "corpus-web/codex-cli-base-instructions.md", "lines": [249, 249], "quote": "nest bullets or create deep hierarchies" },
+      "evidence": {
+        "file": "corpus-web/codex-cli-base-instructions.md",
+        "lines": [249, 249],
+        "quote": "nest bullets or create deep hierarchies"
+      },
       "confidence": 0.96
     },
     {
@@ -761,7 +1025,11 @@
       "parent": null,
       "detail": "",
       "refs": [],
-      "evidence": { "file": "corpus-web/codex-cli-base-instructions.md", "lines": [250, 250], "quote": "output ANSI escape codes directly" },
+      "evidence": {
+        "file": "corpus-web/codex-cli-base-instructions.md",
+        "lines": [250, 250],
+        "quote": "output ANSI escape codes directly"
+      },
       "confidence": 0.98
     },
     {
@@ -772,7 +1040,11 @@
       "parent": null,
       "detail": "",
       "refs": [],
-      "evidence": { "file": "corpus-web/codex-cli-base-instructions.md", "lines": [256, 256], "quote": "For casual greetings, acknowledgements, or other one-off conversational messages that are not delivering substantive information or structured results, respond naturally without section headers or bullet formatting." },
+      "evidence": {
+        "file": "corpus-web/codex-cli-base-instructions.md",
+        "lines": [256, 256],
+        "quote": "For casual greetings, acknowledgements, or other one-off conversational messages that are not delivering substantive information or structured results, respond naturally without section headers or bullet formatting."
+      },
       "confidence": 0.98
     },
 
@@ -783,8 +1055,12 @@
       "label": "Préférer `rg` / `rg --files` à `grep` pour chercher texte et fichiers",
       "parent": null,
       "detail": "Avec repli sur les alternatives si `rg` est absent.",
-      "refs": ["system_tools:shell"],
-      "evidence": { "file": "corpus-web/codex-cli-base-instructions.md", "lines": [264, 264], "quote": "- When searching for text or files, prefer using `rg` or `rg --files` respectively because `rg` is much faster than alternatives like `grep`." },
+      "refs": ["runtime:shell"],
+      "evidence": {
+        "file": "corpus-web/codex-cli-base-instructions.md",
+        "lines": [264, 264],
+        "quote": "- When searching for text or files, prefer using `rg` or `rg --files` respectively because `rg` is much faster than alternatives like `grep`."
+      },
       "confidence": 0.98
     },
     {
@@ -794,8 +1070,12 @@
       "label": "Ne pas utiliser de script python pour afficher de gros morceaux de fichier",
       "parent": null,
       "detail": "",
-      "refs": ["system_tools:shell"],
-      "evidence": { "file": "corpus-web/codex-cli-base-instructions.md", "lines": [265, 265], "quote": "- Do not use python scripts to attempt to output larger chunks of a file." },
+      "refs": ["runtime:shell"],
+      "evidence": {
+        "file": "corpus-web/codex-cli-base-instructions.md",
+        "lines": [265, 265],
+        "quote": "- Do not use python scripts to attempt to output larger chunks of a file."
+      },
       "confidence": 0.98
     },
 
@@ -806,8 +1086,12 @@
       "label": "Créer le plan : appeler `update_plan` avec 1 à 7 étapes de 5 à 7 mots, chacune avec un statut",
       "parent": null,
       "detail": "Statuts admis : `pending`, `in_progress`, `completed`.",
-      "refs": ["system_tools:update_plan"],
-      "evidence": { "file": "corpus-web/codex-cli-base-instructions.md", "lines": [271, 271], "quote": "To create a new plan, call `update_plan` with a short list of 1‑sentence steps (no more than 5-7 words each) with a `status` for each step" },
+      "refs": ["runtime:update_plan"],
+      "evidence": {
+        "file": "corpus-web/codex-cli-base-instructions.md",
+        "lines": [271, 271],
+        "quote": "To create a new plan, call `update_plan` with a short list of 1‑sentence steps (no more than 5-7 words each) with a `status` for each step"
+      },
       "confidence": 0.98
     },
     {
@@ -817,8 +1101,12 @@
       "label": "Marquer les étapes terminées `completed` et la suivante `in_progress`",
       "parent": null,
       "detail": "Plusieurs étapes peuvent être closes en un seul appel.",
-      "refs": ["system_tools:update_plan"],
-      "evidence": { "file": "corpus-web/codex-cli-base-instructions.md", "lines": [273, 273], "quote": "When steps have been completed, use `update_plan` to mark each finished step as `completed` and the next step you are working on as `in_progress`." },
+      "refs": ["runtime:update_plan"],
+      "evidence": {
+        "file": "corpus-web/codex-cli-base-instructions.md",
+        "lines": [273, 273],
+        "quote": "When steps have been completed, use `update_plan` to mark each finished step as `completed` and the next step you are working on as `in_progress`."
+      },
       "confidence": 0.98
     },
     {
@@ -828,8 +1116,12 @@
       "label": "Exactement une étape `in_progress` à tout instant, jusqu'à la fin",
       "parent": null,
       "detail": "Invariant d'état vérifiable, le plus contrôlable du document.",
-      "refs": ["system_tools:update_plan"],
-      "evidence": { "file": "corpus-web/codex-cli-base-instructions.md", "lines": [273, 273], "quote": "There should always be exactly one `in_progress` step until everything is done." },
+      "refs": ["runtime:update_plan"],
+      "evidence": {
+        "file": "corpus-web/codex-cli-base-instructions.md",
+        "lines": [273, 273],
+        "quote": "There should always be exactly one `in_progress` step until everything is done."
+      },
       "confidence": 0.99
     },
     {
@@ -839,8 +1131,12 @@
       "label": "Toutes les étapes finies : appeler `update_plan` pour tout marquer `completed`",
       "parent": null,
       "detail": "Condition d'arrêt du plan — distincte de la condition d'arrêt du tour (te1), et rien ne dit qu'elles coïncident.",
-      "refs": ["system_tools:update_plan"],
-      "evidence": { "file": "corpus-web/codex-cli-base-instructions.md", "lines": [275, 275], "quote": "If all steps are complete, ensure you call `update_plan` to mark all steps as `completed`." },
+      "refs": ["runtime:update_plan"],
+      "evidence": {
+        "file": "corpus-web/codex-cli-base-instructions.md",
+        "lines": [275, 275],
+        "quote": "If all steps are complete, ensure you call `update_plan` to mark all steps as `completed`."
+      },
       "confidence": 0.98
     }
   ],

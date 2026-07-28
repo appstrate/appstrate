@@ -5,9 +5,7 @@
     "package_id": "langchain-fleet/gtm",
     "version": null,
     "integrity": null,
-    "files": [
-      "configs/agents/gtm/AGENT.md"
-    ]
+    "files": ["configs/agents/gtm/AGENT.md"]
   },
   "generated_at": "2026-07-27T00:00:00Z",
   "generator": {
@@ -121,7 +119,7 @@
       "parent": null,
       "detail": "Entrée : nom et prénom, société et/ou domaine, données CRM existantes. Un crédit Apollo par enrichissement. Aucun type du vocabulaire ne décrit une délégation à un sous-agent : `tool_call` est le moins mauvais. Les quatre refs sont les outils que le prompt attribue au SOUS-AGENT (l. 111), pas à l'agent principal : sans elles, quatre outils déclarés sur seize deviendraient « jamais référencés » à tort.",
       "refs": [
-        "system_tools:task",
+        "runtime:task",
         "toolbox:apollo#apollo_search_contacts",
         "toolbox:apollo#apollo_search_people",
         "toolbox:apollo#apollo_enrich_people",
@@ -157,7 +155,7 @@
       "parent": null,
       "detail": "Entrée : `account_name`, `channel_id`, fenêtre de rétrospection optionnelle. Retourne un résumé des mises à jour, actions, blocages et prochaines étapes. Même limite de typage que `sa1`. Refs = outils attribués au sous-agent (l. 117).",
       "refs": [
-        "system_tools:task",
+        "runtime:task",
         "toolbox:slack#slack_read_channel_history",
         "toolbox:slack#slack_read_thread_messages"
       ],
@@ -175,7 +173,7 @@
       "label": "Recherche parallèle : lancer plusieurs `task` ad hoc simultanément dès que possible",
       "parent": null,
       "detail": "Autorise des sous-agents non déclarés au manifeste, créés à la volée.",
-      "refs": ["system_tools:task"],
+      "refs": ["runtime:task"],
       "evidence": {
         "file": "configs/agents/gtm/AGENT.md",
         "lines": [119, 119],
@@ -535,7 +533,7 @@
       "label": "Recherche sur un canal interne de compte (discussions, actions, débriefs) : déléguer à `internal-channel-researcher`",
       "parent": null,
       "detail": "Déclencheur explicite pour la délégation décrite en `sa3`.",
-      "refs": ["system_tools:task"],
+      "refs": ["runtime:task"],
       "evidence": {
         "file": "configs/agents/gtm/AGENT.md",
         "lines": [179, 179],
@@ -1100,12 +1098,20 @@
     }
   ],
   "edges": [
-    { "from": "ai3", "to": "ai4", "condition": "puis, si des tables d'intelligence de compte sont configurées" },
+    {
+      "from": "ai3",
+      "to": "ai4",
+      "condition": "puis, si des tables d'intelligence de compte sont configurées"
+    },
 
     { "from": "ce0", "to": "ce1", "condition": null },
     { "from": "ce1", "to": "ce2", "condition": null },
     { "from": "ce2", "to": "ce3", "condition": "contact trouvé" },
-    { "from": "ce2", "to": "ce4", "condition": "contact non trouvé — aucune prescription du texte" },
+    {
+      "from": "ce2",
+      "to": "ce4",
+      "condition": "contact non trouvé — aucune prescription du texte"
+    },
     { "from": "ce3", "to": "ce4", "condition": null },
 
     { "from": "dd1", "to": "dd2", "condition": null },
@@ -1114,7 +1120,11 @@
     { "from": "tc4.1", "to": "tc4.2", "condition": "date d'activité future" },
     { "from": "tc4.1", "to": "tc4.3", "condition": "date d'activité passée" },
 
-    { "from": "sa2", "to": "sa1", "condition": "vérification CRM effectuée — préalable obligatoire" }
+    {
+      "from": "sa2",
+      "to": "sa1",
+      "condition": "vérification CRM effectuée — préalable obligatoire"
+    }
   ],
   "gaps": [
     {
