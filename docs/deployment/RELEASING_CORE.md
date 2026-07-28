@@ -98,23 +98,16 @@ _cancelled_ job forces a bump. Never re-point the tag at a new commit.
 
 ## The gate only bites with a token that can read private repos
 
-Both consumers are private, and the gate step passes
-`secrets.CONSUMER_LOCKSTEP_TOKEN` as `GITHUB_TOKEN` with **no fallback**. Unset,
-the script sends no `Authorization` header at all — the request goes out
-anonymous (60 req/h), the contents API answers 404 for a private repo, and the
-script logs `not present, skipping`, indistinguishable from a repo that
-genuinely has no `package.json` there. The gate then prints
-`0 failure(s), 0 warning(s)` having verified **nothing**. So the repository
-secret **`CONSUMER_LOCKSTEP_TOKEN`** must exist, holding a PAT or GitHub App
-token with `contents:read` on both consumer repos; it was added on 2026-07-28,
-so treat any green run from before that date as unverified.
+Both consumers are private, so the repository secret
+**`CONSUMER_LOCKSTEP_TOKEN`** must hold a PAT or GitHub App token with
+`contents:read` on both. Without it the gate passes having verified **nothing**
+— the comment above the gate step in `publish-core.yml` explains the mechanism.
+The secret was added on 2026-07-28; treat any green run from before that date as
+unverified.
 
-**The "Assert the lockstep gate can actually run" step does not police that.**
-It tests that the secret is a non-empty string — it never contacts the API and
-never checks scope, so a token that is present but can no longer read a consumer
-passes the assert, 404s on it, and leaves the gate silently inert exactly as an
-absent secret would. Full rationale for the step: the comment above it in
-`publish-core.yml`.
+The assert step guarding it only tests that the secret is a non-empty string. It
+never calls the API, so a token that still exists but has lost `contents:read`
+on a consumer passes the assert and leaves the gate silently inert (#1041).
 
 ## Bypassing — deliberate and auditable
 
@@ -127,4 +120,4 @@ script**: `resolvePolicy` coerces a typo, or wrong case like `FAIL`, back to
 `fail` with a warning. The workflow's assert step does not share that logic — it
 compares the raw string against `"fail"` literally and case-sensitively, so
 `CONSUMER_DRIFT_POLICY=FAIL` takes its warn branch and exits 0 while the script
-still treats the same value as `fail`.
+still treats the same value as `fail` (#1041).
