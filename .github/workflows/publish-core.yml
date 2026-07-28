@@ -61,9 +61,9 @@ jobs:
           fi
 
       # ── Precondition for the lockstep gate below ────────────────────────────
-      # `check-consumer-versions.ts` reads four consumer repos through the
-      # GitHub contents API. ALL FOUR ARE PRIVATE (registry, cloud, portal,
-      # connect-helper). `secrets.GITHUB_TOKEN` is scoped to
+      # `check-consumer-versions.ts` reads two consumer repos through the
+      # GitHub contents API. BOTH ARE PRIVATE (cloud, connect-helper).
+      # `secrets.GITHUB_TOKEN` is scoped to
       # THIS repo only, so for a private consumer the API answers 404 — and the
       # script treats 404 as "not present, skipping" (a legitimate outcome for a
       # repo that genuinely has no package.json at that path, so the script
@@ -71,8 +71,13 @@ jobs:
       #
       # Net effect without a cross-repo token: the gate prints
       # "0 failure(s), 0 warning(s)" and passes having verified NOTHING. That is
-      # worse than having no gate at all — a fail-closed check that has never
+      # worse than having no gate at all — a fail-closed check that had never
       # once closed. Make the missing precondition loud instead.
+      #
+      # The secret CONSUMER_LOCKSTEP_TOKEN was added on 2026-07-28, so that
+      # failure mode is currently held off — this step is what keeps it that
+      # way. It stays because the day the token expires, is revoked, or loses
+      # `contents:read` on a consumer, the gate would go silently inert again.
       #
       # Bypassing stays possible, but it must be a deliberate act (set the repo
       # variable CONSUMER_DRIFT_POLICY to `warn` or `off`), never the accident
@@ -87,7 +92,7 @@ jobs:
             echo "CONSUMER_LOCKSTEP_TOKEN is set — the lockstep gate can read the private consumer repos."
             exit 0
           fi
-          MSG="CONSUMER_LOCKSTEP_TOKEN is not set. Every consumer repo (appstrate/registry, cloud, portal, connect-helper) is private, so the fallback GITHUB_TOKEN gets a 404 on all of them and the lockstep gate verifies NOTHING while reporting success."
+          MSG="CONSUMER_LOCKSTEP_TOKEN is not set. Every consumer repo (appstrate/cloud, appstrate/connect-helper) is private, so the fallback GITHUB_TOKEN gets a 404 on both of them and the lockstep gate verifies NOTHING while reporting success."
           if [ "$CONSUMER_DRIFT_POLICY" = "fail" ]; then
             echo "::error title=Consumer lockstep gate cannot run::${MSG} Fix: add a repository secret CONSUMER_LOCKSTEP_TOKEN (PAT or GitHub App token with contents:read on those repos). To publish anyway, set the repository variable CONSUMER_DRIFT_POLICY to 'warn' or 'off' — a deliberate, auditable bypass."
             {
