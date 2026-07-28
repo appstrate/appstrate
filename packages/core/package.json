@@ -50,6 +50,7 @@
     "./errors": "./src/errors.ts",
     "./validation": "./src/validation.ts",
     "./integration": "./src/integration.ts",
+    "./logic-map-crosscheck": "./src/logic-map-crosscheck.ts",
     "./mcp-server": "./src/mcp-server.ts",
     "./mcp-server-bundle": "./src/mcp-server-bundle/index.ts",
     "./zip": "./src/zip.ts",
