@@ -5,6 +5,8 @@
  * core version goes out.
  *
  * Drift policy:
+ *   - major mismatch      → fail (block publish), EXCEPT one major behind on an
+ *                           X.0.0 release, which is a warning — see `assessDrift`.
  *   - >= 2 minors behind  → fail (block publish).
  *   - 1 minor behind      → warn.
  *   - in sync             → OK.
@@ -92,6 +94,62 @@ function compare(a: [number, number, number], b: [number, number, number]): numb
     if (a[i] !== b[i]) return (a[i] ?? 0) - (b[i] ?? 0);
   }
   return 0;
+}
+
+export type DriftVerdict = "ok" | "warn" | "fail";
+
+export interface DriftAssessment {
+  verdict: DriftVerdict;
+  /** Trailing half of the log line, printed after `<repo>/<path> pins <range> — `. */
+  detail: string;
+}
+
+/**
+ * Decide how bad one consumer's declared range is against the version being
+ * published. Pure — the caller owns fetching, policy and reporting.
+ */
+export function assessDrift(
+  local: [number, number, number],
+  consumer: [number, number, number],
+): DriftAssessment {
+  const [lMaj, lMin, lPatch] = local;
+  const [cMaj, cMin] = consumer;
+  const localLabel = local.join(".");
+
+  if (cMaj !== lMaj) {
+    const isMajorRelease = lMin === 0 && lPatch === 0;
+    const oneMajorBehind = cMaj === lMaj - 1;
+    // A consumer CANNOT declare `^X.0.0` before X.0.0 exists on npm — its own
+    // CI runs `bun install --frozen-lockfile`, which cannot resolve an
+    // unpublished version. So at an X.0.0 release, "exactly one major behind"
+    // is the only state a consumer can possibly be in, and failing it made
+    // every major publish impossible without disabling the whole gate via
+    // CONSUMER_DRIFT_POLICY (issue #1028). Tolerated here and only here: the
+    // next release of that major is not itself a major, so an unbumped
+    // consumer fails hard the very next time core publishes.
+    if (isMajorRelease && oneMajorBehind) {
+      return {
+        verdict: "warn",
+        detail:
+          `1 major behind ${localLabel} — expected during a major release, since the ` +
+          `range cannot be declared before this publish. Bump the consumer to ^${lMaj}.0.0 ` +
+          `right after; it will fail this gate on the next core release.`,
+      };
+    }
+    return { verdict: "fail", detail: `major mismatch with ${localLabel}` };
+  }
+
+  const minorDelta = lMin - cMin;
+  if (minorDelta >= 2) {
+    return { verdict: "fail", detail: `${minorDelta} minors behind ${localLabel}` };
+  }
+  if (minorDelta === 1) {
+    return { verdict: "warn", detail: `1 minor behind ${localLabel}` };
+  }
+  if (compare(consumer, local) < 0) {
+    return { verdict: "ok", detail: "patch-behind, OK" };
+  }
+  return { verdict: "ok", detail: "in sync" };
 }
 
 async function fetchPackageJson(
@@ -182,29 +240,16 @@ async function main(): Promise<void> {
         continue;
       }
 
-      const [cMaj, cMin] = consumerVersion;
-      if (cMaj !== lMaj) {
-        const msg = `${consumer.repo}/${path} pins ${range} but local is ${localPkg.version} (major mismatch)`;
-        console.error(`  ✗ ${msg}`);
+      const { verdict, detail } = assessDrift(localVersion, consumerVersion);
+      const line = `${consumer.repo}/${path} pins ${range} — ${detail}`;
+      if (verdict === "fail") {
+        console.error(`  ✗ ${line}`);
         failures++;
-        continue;
-      }
-
-      const minorDelta = lMin - cMin;
-      if (minorDelta >= 2) {
-        console.error(
-          `  ✗ ${consumer.repo}/${path} pins ${range} — ${minorDelta} minors behind ${localPkg.version}`,
-        );
-        failures++;
-      } else if (minorDelta === 1) {
-        console.warn(
-          `  ! ${consumer.repo}/${path} pins ${range} — 1 minor behind ${localPkg.version}`,
-        );
+      } else if (verdict === "warn") {
+        console.warn(`  ! ${line}`);
         warnings++;
-      } else if (compare(consumerVersion, localVersion) < 0) {
-        console.log(`  ✓ ${consumer.repo}/${path} pins ${range} — patch-behind, OK`);
       } else {
-        console.log(`  ✓ ${consumer.repo}/${path} pins ${range} — in sync`);
+        console.log(`  ✓ ${line}`);
       }
     }
   }
@@ -219,7 +264,11 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((err) => {
-  console.error(err instanceof Error ? err.stack : String(err));
-  process.exit(1);
-});
+// Guarded so the test file can import `assessDrift` without the module
+// hitting the GitHub API on import.
+if (import.meta.main) {
+  main().catch((err) => {
+    console.error(err instanceof Error ? err.stack : String(err));
+    process.exit(1);
+  });
+}
