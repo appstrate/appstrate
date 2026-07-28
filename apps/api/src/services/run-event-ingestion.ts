@@ -39,7 +39,7 @@ import {
   recordDocumentPartialPublication,
 } from "@appstrate/core/telemetry";
 import { persistRunEvent, writeRunnerLedgerRow } from "./run-launcher/appstrate-event-sink.ts";
-import { updateRun, appendRunLog, computeRunSpend } from "./state/runs.ts";
+import { updateRun, appendRunLog, computeRunSpend, readLastEmittedOutput } from "./state/runs.ts";
 import { createRunNotifications } from "./state/notifications.ts";
 import {
   addMemories as addUnifiedMemories,
@@ -827,7 +827,55 @@ export async function synthesiseFinalize(
   const lastKnownUsage = await readLastKnownUsage(runId);
   if (lastKnownUsage) result.usage = lastKnownUsage;
 
+  await applyRecoveredOutput(run, result);
+
   await finalizeRun({ run, result });
+}
+
+/**
+ * Attach the structured deliverable the agent already emitted to a terminal
+ * `RunResult` the PLATFORM synthesised — every path where the runner never
+ * posted its own finalize ({@link synthesiseFinalize}'s callers, plus the
+ * stall watchdog, which builds its own `emptyRunResult()`).
+ *
+ * WHY: the `output` runtime tool is persisted at emit time as a `run_logs`
+ * row, but `runs.result` is written only at finalize, from the RunResult the
+ * runner posts. A synthesised terminal carries an `emptyRunResult()`, so a
+ * run whose agent had ALREADY delivered its output ended with
+ * `runs.result = null` — the payload survived on disk but was invisible to
+ * `GET /api/runs/:id`, the dashboard and the CLI's `--output` (issue #1020).
+ *
+ * RECOVER, NEVER FABRICATE: only a payload that is actually persisted AND a
+ * plain record is attached. No row, or a row whose `data` is null, leaves
+ * `result.output` exactly as `emptyRunResult()` set it (null) — an agent
+ * that never called `output` must keep producing a null result, and the
+ * empty `{}` that output-schema validation reports as "never called the
+ * tool" must never be manufactured here.
+ *
+ * FILL IN, NEVER OVERWRITE: a `result` that already carries an `output` is
+ * returned untouched (and costs no DB round-trip). A runner-supplied output
+ * is the authoritative statement of what the run produced — including a
+ * deliberate re-emission ordering this helper's "last row" cannot see — and
+ * recovery never second-guesses it. Both call sites pass an
+ * `emptyRunResult()` today; the guard is what keeps that from being a
+ * precondition a third caller can silently violate.
+ *
+ * LAST ROW WINS: `output` has replace-on-emit semantics, so the highest
+ * `run_logs.id` (append-only) is the payload the agent last meant to
+ * deliver — see `readLastEmittedOutput`.
+ *
+ * PAYLOAD ONLY: the caller's terminal status is untouched. A cancelled run
+ * stays `cancelled`, a timeout stays `timeout`; recovering an output never
+ * feeds `mapTerminalStatus`. It does legitimately change the outcome of the
+ * output-schema validation `finalizeRunImpl` runs on a synthesised
+ * `success` — a run that really did emit a valid payload now stays
+ * `success` instead of being failed for "finished without calling the
+ * required `output` tool".
+ */
+export async function applyRecoveredOutput(run: RunSinkContext, result: RunResult): Promise<void> {
+  if (result.output !== null && result.output !== undefined) return;
+  const emitted = await readLastEmittedOutput({ runId: run.id, orgId: run.orgId });
+  if (isPlainRecord(emitted)) result.output = emitted;
 }
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {

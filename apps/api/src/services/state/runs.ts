@@ -1529,6 +1529,49 @@ export async function listRunLogs(args: {
 }
 
 /**
+ * Last structured payload the agent emitted through the `output` runtime
+ * tool, read back from the `run_logs` row the `output.emitted` ingestion
+ * path wrote (`type='result'`, `event='output'` — see `persistRunEvent`).
+ *
+ * WHY this read exists: `output` is persisted the moment it is emitted, but
+ * `runs.result` is only written at finalize from the RunResult the runner
+ * posts. Every platform-synthesised terminal (cancel, timeout, stall,
+ * orphan sweep) therefore has to recover the deliverable from here, or it
+ * drops a payload that is already on disk (issue #1020).
+ *
+ * Ordered by the append-only `run_logs.id` DESC: `output` has
+ * replace-on-emit semantics, so the highest id is the payload the agent
+ * last meant to deliver.
+ *
+ * Returns the raw JSONB value as `unknown` — the column's TS type is a
+ * write-side assertion, not a runtime guarantee, so the caller narrows.
+ * A row whose `data` is null reads back as `null` and MUST NOT be turned
+ * into an empty object by the caller.
+ *
+ * Org-scoped like {@link listRunLogs} — `run_logs` has no `applicationId`
+ * column; app-scoped callers verify run ownership separately.
+ */
+export async function readLastEmittedOutput(args: {
+  runId: string;
+  orgId: string;
+}): Promise<unknown> {
+  const [row] = await db
+    .select({ data: runLogs.data })
+    .from(runLogs)
+    .where(
+      and(
+        eq(runLogs.runId, args.runId),
+        eq(runLogs.orgId, args.orgId),
+        eq(runLogs.type, "result"),
+        eq(runLogs.event, "output"),
+      ),
+    )
+    .orderBy(desc(runLogs.id))
+    .limit(1);
+  return row?.data ?? null;
+}
+
+/**
  * List all in-flight run IDs at server startup. The caller (boot) feeds
  * each id through `synthesiseFinalize` so the same lifecycle that fires
  * for clean termination (terminal log, onRunStatusChange) also
