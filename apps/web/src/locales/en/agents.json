@@ -517,5 +517,11 @@
       "title": "No logic map yet",
       "body": "No map has been produced for this version. It will appear once the cartographer has run."
     }
+  },
+  "map": {
+    "tabs": {
+      "dependencies": "Dependencies",
+      "logic": "Logic"
+    }
   }
 }

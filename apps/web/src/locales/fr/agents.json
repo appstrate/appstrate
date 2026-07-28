@@ -517,5 +517,11 @@
       "title": "Pas encore de carte de logique",
       "body": "Aucune carte n'a été produite pour cette version. Elle apparaîtra après le passage du cartographe."
     }
+  },
+  "map": {
+    "tabs": {
+      "dependencies": "Dépendances",
+      "logic": "Logique"
+    }
   }
 }

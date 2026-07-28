@@ -45,7 +45,7 @@ import {
 } from "../components/package-detail/agent-tabs";
 import { AgentConnectionsSection } from "../components/package-detail/agent-connections-section";
 import { AgentConfigurationTab } from "../components/package-detail/agent-configuration-tab";
-import { AgentMapView } from "../components/agent-map/agent-map-view";
+import { AgentMapsTab } from "../components/agent-map/agent-maps-tab";
 import { RunAgentButton } from "../components/run-agent-button";
 import { PackageCard } from "../components/package-card";
 import { useAgentReadiness } from "../hooks/use-agent-readiness";
@@ -486,9 +486,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
         />
       )}
       {type === "agent" && tab === "map" && (
-        // Historical versions map the published manifest they pin, so the
-        // drawing matches the definition being inspected.
-        <AgentMapView packageId={packageId} version={versionLabel} />
+        <AgentMapsTab packageId={packageId} version={versionLabel} />
       )}
       {type === "agent" && tab === "connections" && agentDetail && (
         <AgentConnectionsSection packageId={packageId} detail={agentDetail} />
