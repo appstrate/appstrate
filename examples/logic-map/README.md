@@ -73,9 +73,30 @@ Le tri entre contrainte réelle et posture devient calculable.
   8 nœuds de deux cartes. Ni skill, ni configuration, ni outil. Sans ce terme, la relation
   d'autorité la plus structurante des agents de code (qui prime sur qui) reste invisible.
 
-Et **le grain outil doit valoir aussi pour `mcp_servers:`**, pas seulement pour `toolbox:`.
-Deux cartographes ont déjà divergé sur le même outil Notion, l'un écrivant
-`toolbox:notion#notion-search`, l'autre `mcp_servers:notion#notion-search`.
+**La sévérité d'une référence non résolue dépend de l'existence d'un emplacement de
+déclaration.** C'est la règle qui rend `runtime:` exploitable, et elle se lit sur un même
+agent :
+
+- `toolbox:@appstrate/google-drive#api_upload` : un emplacement existe
+  (`integrations_configuration.tools[]`), il ne contient que `api_call` → **erreur réelle**,
+  et pas marginale, c'est *la* méthode de création de fichier prescrite par `compta-inbox`.
+- `runtime:bash`, `runtime:read_file` : **aucun emplacement de déclaration n'existe**
+  (`runtime_tools` est le catalogue des outils de plateforme, pas des capacités d'hôte) →
+  **indice**, jamais erreur, sinon on remplace un faux négatif par un faux positif.
+
+Corollaire de mise en œuvre : **dédupliquer la sévérité par référence, pas par nœud.** Sur
+les cartes compta, `bash` porte 13 nœuds pour un seul défaut ; un croisement naïf sortirait
+13 erreurs identiques.
+
+**Le grain doit valoir pour deux autres porteurs :**
+
+- **`mcp_servers:<pkg>#<outil>`** — deux cartographes ont déjà divergé sur le même outil
+  Notion, l'un écrivant `toolbox:notion#notion-search`, l'autre `mcp_servers:notion#…`.
+- **`skills:<pkg>#scripts/<fichier>`** — sur les deux agents compta, la même paire de
+  références couvre 13 nœuds pour **six scripts distincts** (`mc-extractor.ts`,
+  `chq-extractor.py`, `extract-pdf.py`, `cc-csv-extractor.py`, `match-factures.py`,
+  `generate-xlsx.py`). Le constat « le prompt invoque un script absent de `scripts/` » est
+  inexprimable.
 
 ### 3. `groups[]` à la racine, avec `shape` et `order`
 
@@ -136,6 +157,28 @@ deux runs du cartographe ne sont pas comparables.
 sans arête sortante : au rendu, indistinguable d'une carte inachevée. Un `kind: terminate` ou
 un booléen `terminal`.
 
+### 8. Déclarer l'agrégation — le format ment par omission sans elle
+
+À grain constant (« un geste dont on peut dire s'il est fait ou pas »), les deux prompts
+compta donnaient **100 et 76 nœuds**. Ils en font 70 et 67 : **environ 30 % d'agrégation**,
+et **rien dans le fichier ne le signale**. Ces deux cartes passent pour exhaustives alors que
+ce sont des sommaires fidèles.
+
+La mesure est nette : la carte de référence tient **1 nœud pour 2 lignes** de prompt ; à 750
+lignes on tombe à **1 nœud pour 10**. Le grain « geste » tient jusqu'à ~250 lignes ; au-delà
+on cartographie des paragraphes. Signe clinique : les `detail` passent d'une phrase à trois
+ou quatre, et plusieurs contiennent une énumération — c'est là que la matière est passée.
+
+Ce qui a été perdu sur ces deux cartes, concrètement : les indices de détection par émetteur
+et les préfixes de nommage (`ARC`, `RAMQ`, `VILLE-MONTREAL`) d'une table de classification,
+et les six raisons normalisées d'un puits `ambiguous` réduit à un nœud.
+
+Un `aggregated: true` (avec `aggregates: N`) sur le nœud suffit. Sans lui, toute consigne de
+volume pousse mécaniquement le producteur à omettre en silence.
+
+**Le repli va au rendu, pas au producteur** : le producteur émet un seul grain, le rendu
+replie par `group`, qui est déjà obligatoire et porte déjà la numérotation des sections.
+
 ## Proposition examinée et **rejetée** : le type `criterion`
 
 L'hypothèse était que `guard` sert de fourre-tout aux critères de qualification (les huit
@@ -159,6 +202,23 @@ présenté » ne s'applique jamais, et tout tombe sur `guard` par construction. 
 des 35 garde-fous viennent de deux chapitres d'interdits consécutifs.
 
 **À lire comme un indicateur du document au rendu, pas comme un défaut.**
+
+Le mécanisme se lit à l'envers sur le corpus procédural, où le taux retombe à 17 % : **dans
+une séquence, un critère de qualification a une place, donc il devient une `decision`** — « le
+destinataire doit être Tractr », « au moins 50 caractères alphanumériques », « le compte
+est-il dans la liste connue ». Dans une constitution il n'a pas de place et retombe sur
+`guard`. C'est bien un effet de famille, pas un défaut du type.
+
+## Un revers de la lecture de sens, à connaître avant de la vendre
+
+Le §4.5 présente le rattachement par le sens comme un avantage sur la recherche textuelle, et
+le corpus le confirme largement. Mais il produit aussi un effet inverse, observé une fois et
+qui doit être documenté : sur `compta-trimestrielle`, `factures_stats` et `manifest_file_id`
+sont rattachés par le sens, donc le croisement conclura « couvert » — alors que le bloc
+« Format strict » du prompt **ne les liste ni l'un ni l'autre** et qu'une autre section range
+les mêmes chiffres ailleurs. **Le rattachement par le sens a masqué une contradiction du
+prompt** qu'un grep aurait fait ressortir. Rattrapé ici en `gap`, invisible à un croisement
+automatique.
 
 ## Deux indicateurs calculables sans modèle
 
@@ -213,6 +273,29 @@ mettre en avant.
 7. **L'enseignement par l'exemple est hors de portée.** `codex:72-121` : 48 lignes de plans
    « high-quality » et « low-quality » sans un seul critère énoncé. La prescription est le
    contraste entre deux blocs. Réduit à un nœud, 48 lignes sur 275 perdues.
+8. **`tool_call` ne distingue pas l'appel d'intégration de l'exécution locale.** Sur
+   `compta-trimestrielle`, ses 21 `tool_call` sont 13 appels Drive authentifiés (credential
+   injecté, déclarés au manifeste, faillibles réseau) et 8 scripts locaux (aucun credential,
+   code versionné dans le skill, faillibles par `stderr`). Le prompt lui-même les traite
+   différemment : « Script extracteur échoue : capturer la sortie stderr » contre « Upload
+   Drive échoue : inclure le résultat local dans l'output ». Le rendu les affichera à
+   l'identique.
+9. **Une abrogation se lit comme une contrainte active.** « **Plus de STOP sur un CSV de
+   paiements** » dit qu'une règle *n'existe plus*. Typée `guard`, elle prescrit exactement le
+   contraire de ce qu'elle dit. Même famille : « Créer des dossiers est autorisé » est une
+   permission bornée, pas une interdiction. Ni le test guard/policy ni aucun type ne les
+   attrape : la violer n'est ni un défaut ni un cas non présenté, il n'y a rien à violer.
+10. **Un corps de boucle peut être une alternative, pas une chaîne.** Dans la boucle de
+    lecture de `compta-inbox`, la branche PDF et la branche CSV sont deux sous-graphes
+    disjoints sous un même `parent`, qui dit « ces nœuds sont dans la boucle » sans jamais
+    dire « ces deux moitiés ne coexistent pas ». Un rendu qui empile les enfants suggérera un
+    enchaînement inexistant. Et rien ne dit que deux boucles parcourent le même ensemble : les
+    8 passes successives de `compta-inbox` sur la même collection apparaîtront comme 8
+    itérations indépendantes.
+11. **Des arêtes traversent la frontière d'une boucle.** `s5.6 → s6.13` fait pointer l'enfant
+    d'une boucle dans le corps d'une autre. Le contrôle de cohérence l'accepte et le format ne
+    l'interdit pas : à trancher explicitement, interdire ou documenter, avant que le rendu ne
+    dessine des flèches qui percent les boîtes.
 
 ## Portée du croisement, hors Appstrate
 
@@ -257,6 +340,21 @@ Trouvailles vérifiées une à une, qui existent indépendamment du chantier.
 - `wiki-brain` : le chemin `locked` ordonne d'abandonner sans rien écrire, mais l'étape 7
   supprime `.lock` — destruction du verrou d'un run concurrent.
 - `synthese-reunion` : l'entrée `contexte` est déclarée et jamais consommée.
+- **`compta-inbox` et `compta-trimestrielle` se contredisent sur la même intégration.** Le
+  premier écrit « n'utilise **PAS** le multipart (`uploadType=multipart`), qui échoue
+  souvent » ; le second le prescrit **trois fois**. Même pipeline, même credential, consignes
+  inverses. **Aucune carte mono-agent ne peut produire ce constat** : c'est l'argument direct
+  pour un croisement inter-paquets.
+- `compta-trimestrielle` : une branche est **non atteignable**. Le gap-fill CC est conditionné
+  à un CSV « déposé dans l'Inbox ou indiqué par l'utilisateur », alors que l'agent n'a ni
+  entrée de chemin ni configuration vers l'Inbox. Un tiers du dernier mois de chaque trimestre
+  en dépend.
+- `compta-inbox` : contradiction arithmétique en `dry_run`. Les compteurs `inserted`,
+  `updated`, `total` sont exigés « toujours, dry_run inclus », alors que l'étape suivante
+  saute la lecture du store : ils ne sont pas calculables, et la règle « ne jamais inventer de
+  chiffres » interdit de les deviner.
+- `compta-inbox` : `@default/compta-inbox-dispatch` dans le skill contre `@default/compta-inbox`
+  au manifeste. Même famille que le `@tractr/google-drive` du premier cas.
 
 **Agents tiers**
 
