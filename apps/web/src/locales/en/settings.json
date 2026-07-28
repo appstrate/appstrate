@@ -458,6 +458,8 @@
   "models.credentialUnavailableHint": "This model's credential can no longer be used for inference — reconnect or replace it in the Model Provider Keys tab.",
   "models.alias": "Managed",
   "models.aliasHidden": "Managed model",
+  "models.unpriced": "No pricing",
+  "models.unpricedHint": "No rates are known for this model, so every run on it is recorded with a cost of $0. Set them with PUT /api/models/{id} (\"cost\" field).",
   "models.setDefault": "Set as default",
   "models.test": "Test",
   "models.testSuccess": "OK ({{latency}}ms)",

@@ -458,6 +458,8 @@
   "models.credentialUnavailableHint": "Les identifiants de ce modèle ne peuvent plus être utilisés pour l'inférence — à reconnecter ou à remplacer dans l'onglet Clés de providers de modèles.",
   "models.alias": "Géré",
   "models.aliasHidden": "Modèle géré",
+  "models.unpriced": "Sans tarif",
+  "models.unpricedHint": "Aucun tarif n'est connu pour ce modèle : chaque exécution est donc enregistrée avec un coût de 0 $. Renseignez-les via PUT /api/models/{id} (champ « cost »).",
   "models.setDefault": "Définir par défaut",
   "models.test": "Tester",
   "models.testSuccess": "OK ({{latency}}ms)",

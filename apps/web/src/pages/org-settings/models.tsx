@@ -95,6 +95,18 @@ function ModelsList({
             <TableBody>
               {models.map((m) => {
                 const isBuiltIn = m.source === "built-in";
+                // Pre-spend counterpart of the run's `cost_pricing_status`,
+                // which only reports after the fact. `cost` is the catalog-
+                // resolved value, so null means no rates exist anywhere and
+                // every run on this model records $0.
+                //   - `aliased` rows are excluded because `projectAliasedModel`
+                //     nulls `cost` unconditionally (it would fingerprint the
+                //     backing) — a priced alias would otherwise always flag.
+                //   - `built-in` rows are excluded because their rates come
+                //     from `SYSTEM_PROVIDER_KEYS`, and `PUT /api/models/{id}`
+                //     answers `systemEntityForbidden` on a system id: the
+                //     viewer has no remedy to point at.
+                const isUnpriced = !isBuiltIn && !m.aliased && m.cost == null;
                 const ProviderIcon = getModelIcon(m, registry ?? []);
                 return (
                   <TableRow key={m.id} data-testid={`model-row-${m.id}`}>
@@ -108,6 +120,11 @@ function ModelsList({
                           </Badge>
                         )}
                         {m.needs_reconnection && <ModelUnavailableBadge />}
+                        {isUnpriced && (
+                          <Badge variant="warning" title={t("models.unpricedHint")}>
+                            {t("models.unpriced")}
+                          </Badge>
+                        )}
                       </div>
                     </TableCell>
                     <TableCell>
