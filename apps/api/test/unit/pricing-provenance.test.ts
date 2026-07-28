@@ -78,9 +78,12 @@ describe("resolvePricingStatus — warn de-dup key", () => {
   });
 
   it("does not collide when a component contains the separator the key encodes", () => {
-    // Naive concatenation would fold these two into one key.
-    resolvePricingStatus({ orgId: "org_sep", model: '","x', usage: USAGE, cost: null });
-    resolvePricingStatus({ orgId: 'org_sep","', model: "x", usage: USAGE, cost: null });
+    // Guards the plausible refactor: `JSON.stringify([...])` "simplified" into
+    // `[...].join(",")`. Both pairs below join to the identical
+    // `org_sep_a,b,c,unpriced`, so a joined key folds them into one warn;
+    // `JSON.stringify` keeps the comma inside its own quoted component.
+    resolvePricingStatus({ orgId: "org_sep_a,b", model: "c", usage: USAGE, cost: null });
+    resolvePricingStatus({ orgId: "org_sep_a", model: "b,c", usage: USAGE, cost: null });
 
     expect(warnSpy).toHaveBeenCalledTimes(2);
   });

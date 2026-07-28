@@ -485,7 +485,7 @@ function ModelFormBody({
     setValue("contextWindow", preset.contextWindow.toString());
     setValue("maxTokens", (preset.maxTokens ?? 0).toString());
     setValue("reasoning", caps.includes("reasoning"));
-    // Invariant, not a repair — every path into this handler already ran `resetModelFields()`.
+    // Not a repair — the only non-null writer (OpenRouter combobox) never renders with this Select.
     setImportedCost(null);
   };
 
