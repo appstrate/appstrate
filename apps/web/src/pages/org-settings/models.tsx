@@ -49,6 +49,7 @@ import { InlineEditableLabel } from "../../components/inline-editable-label";
 import { SourceBadge } from "../../components/source-badge";
 import { ModelUnavailableBadge } from "../../components/model-availability-badge";
 import { DefaultCell } from "../../components/default-cell";
+import { isModelUnpriced } from "./model-pricing";
 
 function ModelsList({
   models,
@@ -95,6 +96,10 @@ function ModelsList({
             <TableBody>
               {models.map((m) => {
                 const isBuiltIn = m.source === "built-in";
+                // Pre-spend counterpart of the run's `cost_pricing_status`,
+                // which only reports after the fact. Rule + exclusions live in
+                // `model-pricing.ts`, where they are covered.
+                const isUnpriced = isModelUnpriced(m);
                 const ProviderIcon = getModelIcon(m, registry ?? []);
                 return (
                   <TableRow key={m.id} data-testid={`model-row-${m.id}`}>
@@ -108,6 +113,11 @@ function ModelsList({
                           </Badge>
                         )}
                         {m.needs_reconnection && <ModelUnavailableBadge />}
+                        {isUnpriced && (
+                          <Badge variant="warning" title={t("models.unpricedHint")}>
+                            {t("models.unpriced")}
+                          </Badge>
+                        )}
                       </div>
                     </TableCell>
                     <TableCell>

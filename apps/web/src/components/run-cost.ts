@@ -11,7 +11,7 @@
  *
  * Split from the component because the web test runner has no DOM: the mapping
  * is the part worth testing, and it is testable only if it does not import the
- * component tree (same split as `model-form/cost-fields.ts`).
+ * component tree.
  *
  * The rule it enforces: `cost = 0` is not a fact until the ledger says the
  * model HAD rates. `unpriced` means the platform could not price the run at

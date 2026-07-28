@@ -26,8 +26,8 @@ name: Publish @appstrate/core to npm
 # Batching is a deliberate choice about consumer cost, not a workaround for a
 # broken release path: executing a major is cheap since #1032 removed the
 # structural deadlock (an `X.0.0` release tolerates a consumer exactly one
-# major behind — see the release-ordering blockquote in
-# packages/core/CHANGELOG.md).
+# major behind — see the release-ordering procedure in
+# docs/deployment/RELEASING_CORE.md).
 # ─────────────────────────────────────────────────────────────────────────────
 
 on:
@@ -91,6 +91,8 @@ jobs:
           fi
 
       # ── Precondition for the lockstep gate below ────────────────────────────
+      # Release procedure (ordering, bypass, token): docs/deployment/RELEASING_CORE.md
+      #
       # `check-consumer-versions.ts` reads two consumer repos through the
       # GitHub contents API. BOTH ARE PRIVATE (cloud, connect-helper).
       # `secrets.GITHUB_TOKEN` is scoped to

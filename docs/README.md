@@ -31,6 +31,7 @@ See [`../apps/cli/README.md`](../apps/cli/README.md) for the command reference a
 ## Deployment
 
 - [**deployment/PREVIEW_DEPLOY.md**](./deployment/PREVIEW_DEPLOY.md) — preview-environment deploys.
+- [**deployment/RELEASING_CORE.md**](./deployment/RELEASING_CORE.md) — publishing `@appstrate/core` to npm, and the consumer lockstep gate that guards it.
 
 For production self-hosting, see [`../examples/self-hosting/README.md`](../examples/self-hosting/README.md)
 and [`../examples/self-hosting/AUTH_MODES.md`](../examples/self-hosting/AUTH_MODES.md).
