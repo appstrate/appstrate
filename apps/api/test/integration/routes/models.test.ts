@@ -25,6 +25,23 @@ import { mintLoopbackToken } from "../../../../../packages/module-chat/src/loopb
 
 const app = getTestApp();
 
+// ─── OpenRouter catalog stub ──────────────────────────────
+// `GET /api/models/openrouter` proxies openrouter.ai through `globalThis.fetch`
+// (no DI seam at the route boundary). Pin the REAL fetch once at module load —
+// re-capturing it inside the helper would snapshot a stub as the "original" and
+// leak the override into unrelated tests.
+const realFetch: typeof fetch = globalThis.fetch;
+function mockOpenRouterCatalog(data: unknown[]): void {
+  globalThis.fetch = (async () =>
+    new Response(JSON.stringify({ data }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    })) as unknown as typeof fetch;
+}
+function restoreFetch(): void {
+  if (realFetch) globalThis.fetch = realFetch;
+}
+
 describe("Models API", () => {
   let ctx: TestContext;
 
@@ -146,6 +163,61 @@ describe("Models API", () => {
       expect(row.modelId).toBe(realModelId);
       expect(row.apiShape).not.toBeNull();
       expect(row.credentialId).toBe(credentialId);
+    });
+  });
+
+  describe("GET /api/models/openrouter", () => {
+    afterEach(() => {
+      restoreFetch();
+    });
+
+    it("omits a cache rate OpenRouter does not report instead of fabricating a 0 (#1042)", async () => {
+      mockOpenRouterCatalog([
+        {
+          id: "vendor/with-cache-read",
+          name: "With cache read",
+          pricing: { prompt: "0.000003", completion: "0.000015", input_cache_read: "0.0000003" },
+        },
+        {
+          id: "vendor/without-cache-read",
+          name: "Without cache read",
+          pricing: { prompt: "0.000001", completion: "0.000002" },
+        },
+      ]);
+
+      const res = await app.request("/api/models/openrouter", { headers: authHeaders(ctx) });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as any;
+
+      const withCacheRead = body.data.find((m: any) => m.id === "vendor/with-cache-read");
+      expect(withCacheRead.cost.input).toBeCloseTo(3);
+      expect(withCacheRead.cost.output).toBeCloseTo(15);
+      expect(withCacheRead.cost.cacheRead).toBeCloseTo(0.3);
+
+      // The whole point of #1042: the key must be ABSENT, not `undefined`-ish.
+      // `classifyTokenPricing` tests `cost.cacheRead == null`, and an explicit
+      // `0` reads as a real vendor price — so a fabricated zero would stamp an
+      // unpriceable model `priced` and silently drop its cached tokens.
+      const withoutCacheRead = body.data.find((m: any) => m.id === "vendor/without-cache-read");
+      expect(withoutCacheRead.cost.input).toBeCloseTo(1);
+      expect(withoutCacheRead.cost.output).toBeCloseTo(2);
+      expect("cacheRead" in withoutCacheRead.cost).toBe(false);
+
+      // `cacheWrite` is never reported by this endpoint — it is never invented
+      // for either entry.
+      expect("cacheWrite" in withCacheRead.cost).toBe(false);
+      expect("cacheWrite" in withoutCacheRead.cost).toBe(false);
+    });
+
+    it("returns a null cost when prompt/completion pricing is missing", async () => {
+      mockOpenRouterCatalog([
+        { id: "vendor/unpriced", name: "Unpriced", pricing: { completion: "0.000002" } },
+      ]);
+
+      const res = await app.request("/api/models/openrouter", { headers: authHeaders(ctx) });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as any;
+      expect(body.data.find((m: any) => m.id === "vendor/unpriced").cost).toBeNull();
     });
   });
 
@@ -470,6 +542,84 @@ describe("Models API", () => {
       expect(body.label).toBe("After");
       expect(body.enabled).toBe(false);
       expect(body.source).toBe("custom");
+    });
+
+    // Since #1040 removed the dashboard's pricing inputs, PUT is the ONLY way a
+    // human sets or clears a cost override. These three pin that escape hatch:
+    // `buildUpdateSet` skips `undefined` but writes `null`, so an explicit null
+    // clears back to the catalog while an omitted key preserves the override.
+    it("stores a cost override sent through PUT", async () => {
+      const credentialId = await createProviderKey();
+      const createRes = await app.request("/api/models", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ label: "Priced", modelId: "gpt-4o", credentialId }),
+      });
+      expect(createRes.status).toBe(201);
+      const { id } = (await createRes.json()) as { id: string };
+
+      const res = await app.request(`/api/models/${id}`, {
+        method: "PUT",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ cost: { input: 3, output: 15 } }),
+      });
+      expect(res.status).toBe(200);
+
+      const [row] = await db.select().from(orgModels).where(eq(orgModels.id, id));
+      expect(row!.cost).toEqual({ input: 3, output: 15 });
+    });
+
+    it("clears a cost override back to the catalog with an explicit null", async () => {
+      const credentialId = await createProviderKey();
+      const createRes = await app.request("/api/models", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          label: "Priced",
+          modelId: "gpt-4o",
+          credentialId,
+          cost: { input: 3, output: 15 },
+        }),
+      });
+      expect(createRes.status).toBe(201);
+      const { id } = (await createRes.json()) as { id: string };
+
+      const res = await app.request(`/api/models/${id}`, {
+        method: "PUT",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ cost: null }),
+      });
+      expect(res.status).toBe(200);
+
+      const [row] = await db.select().from(orgModels).where(eq(orgModels.id, id));
+      expect(row!.cost).toBeNull();
+    });
+
+    it("leaves an existing cost override intact when PUT does not mention cost", async () => {
+      const credentialId = await createProviderKey();
+      const createRes = await app.request("/api/models", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          label: "Priced",
+          modelId: "gpt-4o",
+          credentialId,
+          cost: { input: 3, output: 15 },
+        }),
+      });
+      expect(createRes.status).toBe(201);
+      const { id } = (await createRes.json()) as { id: string };
+
+      const res = await app.request(`/api/models/${id}`, {
+        method: "PUT",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ label: "Renamed" }),
+      });
+      expect(res.status).toBe(200);
+
+      const [row] = await db.select().from(orgModels).where(eq(orgModels.id, id));
+      expect(row!.label).toBe("Renamed");
+      expect(row!.cost).toEqual({ input: 3, output: 15 });
     });
 
     it("rejects switching to a needs-reconnection credential with 400, model unchanged", async () => {

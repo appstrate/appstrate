@@ -471,12 +471,17 @@ export function createModelsRouter() {
             ? ["text", "image"]
             : ["text"],
           reasoning: false,
+          // A rate OpenRouter does not report is left ABSENT, never `0`: a
+          // stored `0` is a positive claim that the vendor bills nothing, and
+          // `classifyTokenPricing` reads it as a real price — so a model with
+          // unknown cache-read rates would classify `priced` while its cached
+          // tokens (already carved out of the `input` bucket) are billed in no
+          // bucket at all. `cacheWrite` is never reported by this endpoint.
           cost: hasValidPricing
             ? {
                 input: promptPerToken * 1_000_000,
                 output: completionPerToken * 1_000_000,
-                cacheRead: isNaN(cacheReadPerToken) ? 0 : cacheReadPerToken * 1_000_000,
-                cacheWrite: 0,
+                ...(isNaN(cacheReadPerToken) ? {} : { cacheRead: cacheReadPerToken * 1_000_000 }),
               }
             : null,
         };
