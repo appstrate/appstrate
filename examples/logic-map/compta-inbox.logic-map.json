@@ -16,7 +16,7 @@
   },
   "generated_at": "2026-07-27T00:00:00Z",
   "generator": {
-    "kind": "agent",
+    "kind": "human",
     "author": "PR 3 — élargissement du corpus, agent cartographe",
     "agent": "cartographe-logic-map",
     "version": null,

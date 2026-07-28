@@ -5,13 +5,11 @@
     "package_id": "langchain-fleet/on-call-copilot",
     "version": null,
     "integrity": null,
-    "files": [
-      "configs/agents/on-call-copilot/AGENT.md"
-    ]
+    "files": ["configs/agents/on-call-copilot/AGENT.md"]
   },
   "generated_at": "2026-07-27T00:00:00Z",
   "generator": {
-    "kind": "agent",
+    "kind": "human",
     "author": "PR 3 — élargissement du corpus, agent cartographe",
     "agent": "cartographe-logic-map",
     "version": null,
@@ -251,13 +249,7 @@
       "label": "Outils natifs câblés aujourd'hui : Slack, GitHub (lecture), Linear, Pylon, Exa",
       "parent": null,
       "detail": "Inventaire, pas prescription — mais il borne ce que `yt1` autorise, donc il est cartographié. Le vocabulaire n'a pas de type pour un énoncé de fait : `policy` est un pis-aller.",
-      "refs": [
-        "toolbox:slack",
-        "toolbox:github",
-        "toolbox:linear",
-        "toolbox:pylon",
-        "toolbox:exa"
-      ],
+      "refs": ["toolbox:slack", "toolbox:github", "toolbox:linear", "toolbox:pylon", "toolbox:exa"],
       "evidence": {
         "file": "configs/agents/on-call-copilot/AGENT.md",
         "lines": [74, 74],
@@ -756,10 +748,7 @@
       "label": "8. Dédupliquer avant de créer : chercher dans le tracker par URL externe ou empreinte, lier-et-fermer plutôt que refiler",
       "parent": null,
       "detail": null,
-      "refs": [
-        "toolbox:linear#linear_list_issues",
-        "toolbox:pylon#pylon_list_issues"
-      ],
+      "refs": ["toolbox:linear#linear_list_issues", "toolbox:pylon#pylon_list_issues"],
       "evidence": {
         "file": "configs/agents/on-call-copilot/AGENT.md",
         "lines": [180, 180],
@@ -774,10 +763,7 @@
       "label": "9. Enquêter, pas seulement router : lire le code affecté sur GitHub, vérifier ce qui a changé. « Forward to the team » n'est pas un triage",
       "parent": null,
       "detail": null,
-      "refs": [
-        "toolbox:github#github_search_code",
-        "toolbox:github#github_get_file"
-      ],
+      "refs": ["toolbox:github#github_search_code", "toolbox:github#github_get_file"],
       "evidence": {
         "file": "configs/agents/on-call-copilot/AGENT.md",
         "lines": [181, 181],

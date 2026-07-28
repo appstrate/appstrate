@@ -12,7 +12,8 @@
     "test:unit": "bun test test/unit/",
     "test:watch": "bun test --watch",
     "test:integration": "bun test test/integration/",
-    "admin:bootstrap-org": "bun scripts/bootstrap-org.ts"
+    "admin:bootstrap-org": "bun scripts/bootstrap-org.ts",
+    "seed:logic-maps": "cd ../.. && bun apps/api/scripts/seed-logic-maps.ts"
   },
   "dependencies": {
     "@appstrate/afps-runtime": "workspace:*",
