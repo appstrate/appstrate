@@ -7,7 +7,89 @@ export interface LogEntry {
   type: string;
   level?: string;
   detail?: string;
+  /**
+   * Wall time of a tool call, in milliseconds, when the runner could pair the
+   * call's start and end (`data.durationMs`). Omitted otherwise — the runner
+   * deliberately emits nothing rather than a misleading zero.
+   *
+   * NOTE: live SSE `run_log` frames have their `data` stripped server-side
+   * (`stripPayload` in `apps/api/src/routes/realtime.ts`), so this — like the
+   * existing `detail` — only materializes once the rows come back from the
+   * REST logs query. That is expected, not a bug to work around here.
+   */
+  durationMs?: number;
   createdAt?: Date | string | null;
+}
+
+/**
+ * One settled assistant turn, projected from a `data.event === "turn"` run-log
+ * row (emitted by `buildTurnProgress` in `@appstrate/afps-runtime`).
+ *
+ * `contextTokens` is the prompt the provider actually saw that turn
+ * (`inputTokens + cacheReadTokens + cacheWriteTokens`, output excluded) — the
+ * number that reveals where a run started re-reading its whole context.
+ */
+export interface RunTurnRow {
+  index: number;
+  contextTokens: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  /** Omitted when the runner could not observe the turn's start. */
+  latencyMs?: number;
+}
+
+/** `data.event` discriminator carried by per-turn breadcrumb rows. */
+const TURN_EVENT = "turn";
+
+function isTurnRow(log: RawLog): boolean {
+  return !!log.data && log.data["event"] === TURN_EVENT;
+}
+
+/** Read a finite number, or fall back — tolerates malformed/absent payloads. */
+function readNumber(value: unknown, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+/**
+ * Project the raw run logs into the per-turn breakdown rendered by the run
+ * Info tab. Pure and total: rows that are not turn breadcrumbs, or whose
+ * payload is malformed/absent, are skipped rather than throwing.
+ *
+ * Runs that predate the breadcrumb emit no such rows at all — an empty array
+ * is the normal case, and the caller renders nothing for it.
+ */
+export function buildTurnRows(rawLogs: RawLog[]): RunTurnRow[] {
+  const rows: RunTurnRow[] = [];
+  for (const log of rawLogs) {
+    if (!isTurnRow(log)) continue;
+    const d = log.data!;
+    // `index` is the row's identity — without it there is nothing to plot.
+    if (typeof d["index"] !== "number" || !Number.isFinite(d["index"])) continue;
+
+    const inputTokens = readNumber(d["inputTokens"], 0);
+    const outputTokens = readNumber(d["outputTokens"], 0);
+    const cacheReadTokens = readNumber(d["cacheReadTokens"], 0);
+    const cacheWriteTokens = readNumber(d["cacheWriteTokens"], 0);
+    const latencyMs = d["latencyMs"];
+
+    rows.push({
+      index: d["index"],
+      // The emitter computes `contextTokens`; recompute only as a fallback so a
+      // row written by an older/partial emitter still plots the right bar.
+      contextTokens: readNumber(
+        d["contextTokens"],
+        inputTokens + cacheReadTokens + cacheWriteTokens,
+      ),
+      inputTokens,
+      outputTokens,
+      cacheReadTokens,
+      cacheWriteTokens,
+      ...(typeof latencyMs === "number" && Number.isFinite(latencyMs) ? { latencyMs } : {}),
+    });
+  }
+  return rows;
 }
 
 export interface RawLog {
@@ -55,12 +137,19 @@ export function buildLogEntries(rawLogs: RawLog[]): {
       lastWasPlainText = false;
     } else if (log.event === "run_completed") {
       lastWasPlainText = false;
+    } else if (isTurnRow(log)) {
+      // Per-turn breadcrumbs are a structured series, not narration: a heavy
+      // run emits ~108 of them and they would drown the agent's own log lines.
+      // They are rendered as a table in the run Info tab (`buildTurnRows`).
+      // Same precedent as the dead `report` channel above.
+      lastWasPlainText = false;
     } else {
       const logData = log.data ?? {};
       const message = (logData.message as string) || log.message || "";
       if (message) {
         const args = logData.args as Record<string, unknown> | undefined;
         const detail = args ? formatToolArgs(args) : undefined;
+        const durationMs = logData["durationMs"];
         const isPlainText = log.type === "progress" && !log.data;
 
         if (isPlainText && lastWasPlainText && entries.length > 0) {
@@ -71,6 +160,9 @@ export function buildLogEntries(rawLogs: RawLog[]): {
             type: log.type || "progress",
             level: log.level || "debug",
             detail,
+            ...(typeof durationMs === "number" && Number.isFinite(durationMs)
+              ? { durationMs }
+              : {}),
             createdAt: log.createdAt,
           });
         }

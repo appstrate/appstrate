@@ -10,10 +10,18 @@ import { EmptyState } from "./page-states";
 import { RunTrigger } from "./run-trigger";
 import { RunCostReadout } from "./run-cost-readout";
 import { formatDateField } from "../lib/markdown";
+import type { RunTurnRow } from "./log-utils";
 import { ACTIVE_RUN_STATUSES, type EnrichedRun, type TokenUsage } from "@appstrate/shared-types";
 
 interface RunInfoTabProps {
   run: EnrichedRun;
+  /**
+   * Per-turn breakdown, projected from the run's logs by `buildTurnRows`.
+   * Passed down rather than fetched here — `run-detail.tsx` already holds the
+   * logs query, and a second fetch would double the request for the same rows.
+   * Empty (or absent) for every run predating the turn breadcrumb.
+   */
+  turns?: RunTurnRow[];
 }
 
 function InfoCard({ label, value }: { label: string; value: React.ReactNode }) {
@@ -25,6 +33,70 @@ function InfoCard({ label, value }: { label: string; value: React.ReactNode }) {
   );
 }
 
+/**
+ * Per-turn breakdown. Totals alone hide WHERE a run started re-reading its
+ * whole context, which is what makes a long run expensive — this shows the
+ * trend, turn by turn.
+ *
+ * A table, not a chart: the shape is small, the numbers are the point, and no
+ * charting dependency is worth it. The proportional bar behind the context
+ * column is pure CSS, scaled to the run's own peak.
+ */
+function TurnsTable({ turns }: { turns: RunTurnRow[] }) {
+  const { t } = useTranslation("agents");
+  const maxContext = turns.reduce((max, turn) => Math.max(max, turn.contextTokens), 0);
+
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full border-collapse text-sm">
+        <thead>
+          <tr className="text-muted-foreground border-border border-b text-xs">
+            <th scope="col" className="py-1.5 pr-3 text-left font-medium">
+              {t("run.turnIndex")}
+            </th>
+            <th scope="col" className="py-1.5 pr-3 text-right font-medium">
+              {t("run.turnContextTokens")}
+            </th>
+            <th scope="col" className="py-1.5 pr-3 text-right font-medium">
+              {t("run.turnOutputTokens")}
+            </th>
+            <th scope="col" className="py-1.5 text-right font-medium">
+              {t("run.turnLatency")}
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {turns.map((turn) => (
+            <tr key={turn.index} className="border-border/40 border-b last:border-b-0">
+              <th scope="row" className="py-1 pr-3 text-left font-normal tabular-nums">
+                {turn.index}
+              </th>
+              <td className="relative py-1 pr-3 text-right tabular-nums">
+                <span
+                  aria-hidden
+                  className="bg-primary/15 absolute inset-y-0.5 right-0 rounded-sm"
+                  style={{
+                    width: maxContext > 0 ? `${(turn.contextTokens / maxContext) * 100}%` : "0%",
+                  }}
+                />
+                <span className="relative">{turn.contextTokens.toLocaleString()}</span>
+              </td>
+              <td className="py-1 pr-3 text-right tabular-nums">
+                {turn.outputTokens.toLocaleString()}
+              </td>
+              <td className="text-muted-foreground py-1 text-right tabular-nums">
+                {/* Omitted by the runner when it could not observe the turn's
+                    start — an em dash is honest, a 0 would read as instant. */}
+                {turn.latencyMs !== undefined ? formatDuration(turn.latencyMs) : "—"}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 function formatTimestamp(value: string | Date | null | undefined): string | null {
   if (!value) return null;
   const d = value instanceof Date ? value : new Date(value);
@@ -32,7 +104,7 @@ function formatTimestamp(value: string | Date | null | undefined): string | null
   return formatDateField(d, "datetime");
 }
 
-export function RunInfoTab({ run }: RunInfoTabProps) {
+export function RunInfoTab({ run, turns }: RunInfoTabProps) {
   const { t } = useTranslation(["agents", "settings"]);
   const input = run.input as Record<string, unknown> | null;
   const config = run.config as Record<string, unknown> | null;
@@ -164,6 +236,15 @@ export function RunInfoTab({ run }: RunInfoTabProps) {
         </SectionCard>
       ) : (
         <EmptyState message={t("run.emptyUsage")} icon={Coins} compact />
+      )}
+
+      {/* Per-turn breakdown — absent entirely (not an empty card) when the run
+          emitted no turn breadcrumbs, which is every run predating them. */}
+      {turns && turns.length > 0 && (
+        <SectionCard title={t("run.turnsTitle")}>
+          <p className="text-muted-foreground text-xs">{t("run.turnsHint")}</p>
+          <TurnsTable turns={turns} />
+        </SectionCard>
       )}
 
       {/* Connexions — connections resolved for this run, denormalized at

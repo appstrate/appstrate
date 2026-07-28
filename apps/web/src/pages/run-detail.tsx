@@ -22,7 +22,7 @@ import { useRunRealtime, type RunMetricEvent, type RunLogEvent } from "../hooks/
 import { useCurrentOrgId } from "../hooks/use-org";
 import { useCurrentApplicationId } from "../hooks/use-current-application";
 import { LogViewer } from "../components/log-viewer";
-import { buildLogEntries } from "../components/log-utils";
+import { buildLogEntries, buildTurnRows } from "../components/log-utils";
 import { RunModal } from "../components/run-modal";
 import { PageHeader } from "../components/page-header";
 import { LoadingState, ErrorState } from "../components/page-states";
@@ -89,12 +89,14 @@ export function RunDetailPage() {
   const runAgent = useRunAgent(packageId);
   const cancelRun = useCancelRun();
   const [inputOpen, setInputOpen] = useState(false);
-  const { historicalLogs, structuredOutput } = useMemo(() => {
+  const { historicalLogs, structuredOutput, turnRows } = useMemo(() => {
     if (!logs) {
-      return { historicalLogs: [], structuredOutput: null };
+      return { historicalLogs: [], structuredOutput: null, turnRows: [] };
     }
     const { entries, output } = buildLogEntries(logs);
-    return { historicalLogs: entries, structuredOutput: output };
+    // Turn breadcrumbs are filtered OUT of the log stream by `buildLogEntries`
+    // and projected here into the Info tab's per-turn table instead.
+    return { historicalLogs: entries, structuredOutput: output, turnRows: buildTurnRows(logs) };
   }, [logs]);
 
   // `EnrichedRun.result` mirrors the jsonb column as `unknown`; the generated
@@ -393,7 +395,7 @@ export function RunDetailPage() {
 
       {effectiveTab === "documents" && runId && <RunDocumentsTab runId={runId} />}
 
-      {effectiveTab === "info" && <RunInfoTab run={enrichedRun} />}
+      {effectiveTab === "info" && <RunInfoTab run={enrichedRun} turns={turnRows} />}
     </div>
   );
 }
