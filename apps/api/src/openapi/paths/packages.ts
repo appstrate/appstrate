@@ -1,5 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
+/**
+ * Shared tail of the four per-type list descriptions (skills / agents /
+ * integrations / mcp-servers) — only the leading noun differs.
+ */
+const listPackagesSharedDescription =
+  "system packages, plus organization packages installed in this application. " +
+  "Organization packages that exist but are not installed here are NOT returned — for " +
+  "the organization-wide catalogue with per-application install state, use " +
+  "`GET /api/library`.";
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Mutation response schemas (issue #657)
 //
@@ -423,10 +433,8 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "List skills",
       description:
-        "List the skills available to the current application (`X-Application-Id`): system " +
-        "packages, plus organization packages installed in this application. Organization " +
-        "packages that exist but are not installed here are NOT returned — for the " +
-        "organization-wide catalogue with per-application install state, use `GET /api/library`.",
+        "List the skills available to the current application (`X-Application-Id`): " +
+        listPackagesSharedDescription,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
@@ -893,10 +901,7 @@ export const packagesPaths = {
       summary: "List agent packages",
       description:
         "List the agent packages available to the current application (`X-Application-Id`): " +
-        "system packages, plus organization packages installed in this application. " +
-        "Organization packages that exist but are not installed here are NOT returned — for " +
-        "the organization-wide catalogue with per-application install state, use " +
-        "`GET /api/library`.",
+        listPackagesSharedDescription,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
@@ -1676,10 +1681,8 @@ export const packagesPaths = {
       summary: "List integration packages",
       description:
         "List the integration packages available to the current application " +
-        "(`X-Application-Id`): system packages, plus organization packages installed in this " +
-        "application. Organization packages that exist but are not installed here are NOT " +
-        "returned — for the organization-wide catalogue with per-application install state, " +
-        "use `GET /api/library`.",
+        "(`X-Application-Id`): " +
+        listPackagesSharedDescription,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
@@ -2261,10 +2264,8 @@ export const packagesPaths = {
       summary: "List MCP-server packages",
       description:
         "List the MCP-server packages available to the current application " +
-        "(`X-Application-Id`): system packages, plus organization packages installed in this " +
-        "application. Organization packages that exist but are not installed here are NOT " +
-        "returned — for the organization-wide catalogue with per-application install state, " +
-        "use `GET /api/library`.",
+        "(`X-Application-Id`): " +
+        listPackagesSharedDescription,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },

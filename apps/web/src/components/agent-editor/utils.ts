@@ -175,7 +175,7 @@ export function getRuntimeTools(m: Record<string, unknown>): string[] {
  * Returns the same reference when there is nothing to drop.
  */
 export function withNormalizedManifest(m: Record<string, unknown>): Record<string, unknown> {
-  return dropRetiredDependencyKeys(dropRetiredRuntimeTools(m).manifest).manifest;
+  return dropRetiredDependencyKeys(dropRetiredRuntimeTools(m).manifest);
 }
 
 /**

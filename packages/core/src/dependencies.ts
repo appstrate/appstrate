@@ -44,7 +44,7 @@ export interface Dependencies {
  * validating (and therefore keep running) forever. See
  * {@link import("./validation.ts").RetiredRuntimeToolsPolicy}.
  */
-export const RETIRED_DEPENDENCY_KEYS = {
+const RETIRED_DEPENDENCY_KEYS = {
   tools: "mcp_servers",
   providers: "integrations",
 } as const satisfies Record<string, keyof Dependencies>;
@@ -64,10 +64,7 @@ export interface RetiredDependencyKeyUse {
  * List the retired AFPS 1.x `dependencies` keys a manifest declares.
  *
  * Type-agnostic: every package type may carry `dependencies`, and the retired
- * spelling is equally inert on all of them — every reader in the platform
- * destructures exactly `{ skills, mcp_servers, integrations }` (see
- * {@link extractDependencies}), so a `dependencies.tools` entry declares a
- * dependency that is then silently ignored.
+ * spelling is equally inert on all of them ({@link RETIRED_DEPENDENCY_KEYS}).
  *
  * Pure and non-mutating: returns what was found, decides nothing. Callers
  * apply the direction-dependent policy — reject on author input, warn (never
@@ -100,31 +97,25 @@ export function findRetiredDependencyKeys(manifest: unknown): RetiredDependencyK
  * — where the key is rejected — would fail on a field the editor cannot even
  * display. Normalising on LOAD makes the key disappear on the next save
  * instead, while typing one into a raw-JSON tab still surfaces the rejection.
- *
- * Nothing is lost: the key is inert by definition — no reader has ever read it
- * (see {@link extractDependencies}) — so the dependencies declared under it
- * were never resolved.
+ * Nothing is lost — the key is inert ({@link RETIRED_DEPENDENCY_KEYS}).
  *
  * Purely structural: no Zod round-trip, surviving keys keep their order, and
  * the input is returned by the SAME reference when there is nothing to drop.
  * An emptied `dependencies` is left as `{}` rather than deleted — `{}` is the
  * shape the editor itself mints for a fresh agent, so both writers agree.
  *
- * NOT wired into any stored/published path: a published artifact is immutable
- * and integrity-checked, so rewriting its bytes to remove an inert key would
- * change its hash for no functional gain. There the key is tolerated and
- * surfaced as an install warning.
+ * NOT wired into any stored/published path — there the key is tolerated and
+ * surfaced as an install warning instead.
  */
-export function dropRetiredDependencyKeys(manifest: Record<string, unknown>): {
-  manifest: Record<string, unknown>;
-  dropped: RetiredDependencyKey[];
-} {
+export function dropRetiredDependencyKeys(
+  manifest: Record<string, unknown>,
+): Record<string, unknown> {
   const found = findRetiredDependencyKeys(manifest);
-  if (found.length === 0) return { manifest, dropped: [] };
+  if (found.length === 0) return manifest;
 
   const deps = { ...(manifest.dependencies as Record<string, unknown>) };
   for (const { key } of found) delete deps[key];
-  return { manifest: { ...manifest, dependencies: deps }, dropped: found.map((f) => f.key) };
+  return { ...manifest, dependencies: deps };
 }
 
 /**

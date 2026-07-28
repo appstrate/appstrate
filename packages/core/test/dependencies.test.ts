@@ -7,18 +7,11 @@ import {
   dropRetiredDependencyKeys,
   findRetiredDependencyKeys,
   parseManifestIntegrations,
-  RETIRED_DEPENDENCY_KEYS,
   writeManifestIntegrations,
 } from "../src/dependencies.ts";
 import type { DepEntry } from "../src/dependencies.ts";
 
 describe("findRetiredDependencyKeys", () => {
-  it("maps every retired AFPS 1.x key to its AFPS 2.0 replacement", () => {
-    // Pins the registry itself — the rejection and the install warning both
-    // enumerate it, so a silent change here changes both directions at once.
-    expect(RETIRED_DEPENDENCY_KEYS).toEqual({ tools: "mcp_servers", providers: "integrations" });
-  });
-
   it("finds dependencies.tools", () => {
     expect(findRetiredDependencyKeys({ dependencies: { tools: { "@a/b": "^1.0.0" } } })).toEqual([
       { key: "tools", replacement: "mcp_servers" },
@@ -67,26 +60,24 @@ describe("findRetiredDependencyKeys", () => {
 
 describe("dropRetiredDependencyKeys", () => {
   it("drops the retired key and keeps the canonical maps", () => {
-    const { manifest, dropped } = dropRetiredDependencyKeys({
+    const manifest = dropRetiredDependencyKeys({
       name: "@a/agent",
       dependencies: { tools: { "@a/t": "^1.0.0" }, skills: { "@a/s": "^1.0.0" } },
     });
-    expect(dropped).toEqual(["tools"]);
     expect(manifest.dependencies).toEqual({ skills: { "@a/s": "^1.0.0" } });
   });
 
   it("drops every retired key at once", () => {
-    const { dropped, manifest } = dropRetiredDependencyKeys({
+    const manifest = dropRetiredDependencyKeys({
       dependencies: { tools: {}, providers: {} },
     });
-    expect(dropped).toEqual(["tools", "providers"]);
     expect(manifest.dependencies).toEqual({});
   });
 
   // Structural, not a canonicaliser: surviving keys keep their order and
   // unknown fields survive, so the result can be serialised without surprises.
   it("preserves key order and unrelated fields", () => {
-    const { manifest } = dropRetiredDependencyKeys({
+    const manifest = dropRetiredDependencyKeys({
       name: "@a/agent",
       dependencies: { skills: {}, tools: {}, _meta: { "dev.x/y": 1 } },
       custom_field: "must-survive",
@@ -101,10 +92,9 @@ describe("dropRetiredDependencyKeys", () => {
 
   it("returns the same reference when there is nothing to drop", () => {
     const clean = { name: "@a/agent", dependencies: { skills: {} } };
-    expect(dropRetiredDependencyKeys(clean)).toEqual({ manifest: clean, dropped: [] });
-    expect(dropRetiredDependencyKeys(clean).manifest).toBe(clean);
+    expect(dropRetiredDependencyKeys(clean)).toBe(clean);
     const noDeps = { name: "@a/agent" };
-    expect(dropRetiredDependencyKeys(noDeps).manifest).toBe(noDeps);
+    expect(dropRetiredDependencyKeys(noDeps)).toBe(noDeps);
   });
 
   it("does not mutate the input", () => {

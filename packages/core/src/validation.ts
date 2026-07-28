@@ -429,7 +429,7 @@ export function dropRetiredRuntimeTools(manifest: Record<string, unknown>): {
  *
  *   1. `runtime_tools` ids the platform retired (or an author mistyped).
  *   2. `dependencies` keys AFPS 2.0 retired — `tools` (now `mcp_servers`) and
- *      `providers` (now `integrations`), see {@link RETIRED_DEPENDENCY_KEYS}.
+ *      `providers` (now `integrations`).
  *
  * The two policy values:
  *
@@ -495,15 +495,10 @@ export function validateManifest(
   const obj = raw as Record<string, unknown>;
   const type = obj.type;
 
-  // AFPS 1.x retired dependency vocabulary. `dependencies.tools` /
-  // `dependencies.providers` still PARSE — `dependencies` is a loose object by
-  // spec (§10 extensibility) and closing it would make every already-published
-  // manifest that carries one permanently unvalidatable, hence unrunnable, with
-  // no repair path. They are simply never read: every consumer destructures
-  // `{ skills, mcp_servers, integrations }`. So on the author direction they are
-  // rejected here, naming the replacement key, instead of being accepted and
-  // silently ignored (#1021). Checked before the type dispatch because every
-  // package type may declare `dependencies`.
+  // AFPS 1.x retired dependency vocabulary: on the author direction, reject
+  // and name the replacement key (#1021). See {@link RetiredRuntimeToolsPolicy}
+  // for why the keys still parse. Checked before the type dispatch because
+  // every package type may declare `dependencies`.
   if (options?.retiredRuntimeTools !== "drop") {
     const retiredDeps = findRetiredDependencyKeys(obj);
     if (retiredDeps.length > 0) {
