@@ -34,7 +34,8 @@ interface Consumer {
  *
  * That anecdote is now history: PR #460 (2026-05-14) moved the module in-tree
  * as `packages/module-claude-code`, and the standalone repo is dead. It is
- * therefore NOT in the list below, per rule 3.
+ * therefore NOT in the list below, per rule 3. `registry` and `portal` left the
+ * list the same way and for the same reason — not absorbed, retired.
  *
  * The rule, in three parts:
  *
@@ -43,18 +44,14 @@ interface Consumer {
  *   2. A package INSIDE this monorepo never does. It resolves `workspace:*`
  *      (see `packages/module-claude-code/package.json`) and cannot drift, so
  *      listing it would gate the publish on a version that does not exist.
- *   3. A repo absorbed in-tree must be REMOVED here, in the same pass that
- *      absorbs it. Its default branch keeps whatever range it last published
+ *   3. A repo that STOPS consuming core from npm must be REMOVED here, in the
+ *      same pass that stops it — whether it was absorbed in-tree, retired or
+ *      archived. Its default branch keeps whatever range it last published
  *      forever, and nothing consumes it any more — so leaving it in reports a
  *      permanent failure that no bump anywhere can clear.
  */
 const CONSUMERS: Consumer[] = [
-  {
-    repo: "appstrate/registry",
-    paths: ["package.json", "apps/api/package.json", "apps/web/package.json"],
-  },
   { repo: "appstrate/cloud", paths: ["package.json"] },
-  { repo: "appstrate/portal", paths: ["package.json"] },
   // Published to npm (public package, private source repo) — installed by
   // end users via `npx`, so a stale core range ships to them directly.
   { repo: "appstrate/connect-helper", paths: ["package.json"] },
