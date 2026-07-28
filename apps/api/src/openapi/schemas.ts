@@ -1460,6 +1460,141 @@ export const schemas = {
       item_id: { type: ["string", "null"] },
     },
   },
+  AgentLogicMap: {
+    type: "object",
+    description:
+      "Read-only, INFERRED map of an agent's logic: its prompt and the skill reference files the prompt says take precedence, projected as typed steps. Unlike AgentMap it is not computed on the fly — an agent produces it once per published version and this route replays it, lays it out and cross-checks it against what the manifest grants. It is never a specification of execution: the prompt remains the only source of truth, hence `meta.overall_confidence` and the per-step `evidence` that anchors each box to the exact lines it came from. `map` is null when the version has not been mapped yet.",
+    required: ["agent", "map", "nodes", "groups", "edges", "diagnostics", "meta"],
+    properties: {
+      agent: {
+        type: "object",
+        required: ["packageId", "version", "integrity"],
+        properties: {
+          packageId: { type: "string" },
+          version: { type: "string" },
+          integrity: { type: "string", description: "SRI hash of the mapped version." },
+        },
+      },
+      map: {
+        description:
+          "The stored logic map, as defined by `logic-map.schema.json`. Null when the version has never been mapped.",
+        type: ["object", "null"],
+        additionalProperties: true,
+      },
+      nodes: {
+        type: "array",
+        description:
+          "Server-computed placement — the client positions nothing, as for the dependency map.",
+        items: { $ref: "#/components/schemas/AgentLogicMapNode" },
+      },
+      groups: {
+        type: "array",
+        description:
+          "Clusters in placement order. A policy document is a disconnected graph by nature, and its clusters are what the renderer draws instead of a chain.",
+        items: {
+          type: "object",
+          required: ["name", "shape", "x", "width"],
+          properties: {
+            name: { type: "string" },
+            shape: { type: "string", enum: ["sequence", "policies"] },
+            x: { type: "number" },
+            width: { type: "number" },
+          },
+        },
+      },
+      edges: {
+        type: "array",
+        items: {
+          type: "object",
+          required: ["from", "to", "condition"],
+          properties: {
+            from: { type: "string" },
+            to: { type: "string" },
+            condition: { type: ["string", "null"] },
+          },
+        },
+      },
+      diagnostics: {
+        type: "array",
+        description:
+          "Cross-check of the references the map emits against what the manifest declares. Computed WITHOUT a model and without substring matching: the producer proposes, the server verifies against facts.",
+        items: { $ref: "#/components/schemas/AgentLogicMapDiagnostic" },
+      },
+      meta: {
+        type: "object",
+        required: ["generated_at", "generator_kind", "overall_confidence", "stale", "flow_ratio"],
+        properties: {
+          generated_at: { type: ["string", "null"], format: "date-time" },
+          generator_kind: {
+            type: ["string", "null"],
+            description: "`human` for a hand-written map, `agent` for an inferred one.",
+          },
+          overall_confidence: { type: ["number", "null"] },
+          stale: {
+            type: "boolean",
+            description:
+              "True when the map's integrity no longer matches the installed version: it describes a prompt that is no longer this one.",
+          },
+          flow_ratio: {
+            type: "number",
+            description:
+              "Share of nodes taking part in the flow. Separates the two families without a model (roughly 0.35-0.82 for a sequence, 0-0.43 for a policy document) and flags a hybrid in the overlap.",
+          },
+        },
+      },
+    },
+  },
+  AgentLogicMapNode: {
+    type: "object",
+    required: ["id", "type", "position", "parent_id", "width", "height", "rank", "group"],
+    properties: {
+      id: { type: "string" },
+      type: {
+        type: "string",
+        enum: ["step", "decision", "loop", "tool_call", "guard", "policy", "emit"],
+        description:
+          "Closed vocabulary. Left open, every run would produce a different diagram and nothing would be comparable over time.",
+      },
+      position: {
+        type: "object",
+        required: ["x", "y"],
+        properties: { x: { type: "number" }, y: { type: "number" } },
+      },
+      parent_id: {
+        type: ["string", "null"],
+        description: "Control nesting only (a loop body). Documentary grouping travels in `group`.",
+      },
+      width: { type: "number" },
+      height: {
+        type: "number",
+        description:
+          "Derived from the actual content, never a constant — an estimate that lies makes stacked cards overlap.",
+      },
+      rank: { type: "integer" },
+      group: { type: ["string", "null"] },
+    },
+  },
+  AgentLogicMapDiagnostic: {
+    type: "object",
+    required: ["level", "code", "node_id", "item_id", "step_ids", "message"],
+    properties: {
+      level: {
+        type: "string",
+        enum: ["error", "warning", "hint", "inventory"],
+        description:
+          "A reference that resolves to nothing is an ERROR only when a declaration slot exists for it; a runtime capability such as `bash` has none, so it stays a HINT. A declared-but-unreferenced capability is never an error, and past a threshold the list collapses into a single INVENTORY finding.",
+      },
+      code: { type: "string" },
+      node_id: {
+        type: ["string", "null"],
+        description:
+          "Dependency-map node the finding routes to, reusing the same diagnostics plumbing.",
+      },
+      item_id: { type: ["string", "null"] },
+      step_ids: { type: "array", items: { type: "string" } },
+      message: { type: "string" },
+    },
+  },
   AgentMap: {
     type: "object",
     description:

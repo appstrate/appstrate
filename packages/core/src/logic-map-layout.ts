@@ -37,7 +37,8 @@ export interface LayoutGroup {
 export interface LayoutMap {
   shape: "sequence" | "policies";
   steps: readonly LayoutStep[];
-  edges: readonly { from: string; to: string }[];
+  /** `condition` n'entre pas dans le placement, mais fait partie du format et voyage avec. */
+  edges: readonly { from: string; to: string; condition?: string | null }[];
   groups?: readonly LayoutGroup[];
 }
 

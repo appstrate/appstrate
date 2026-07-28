@@ -199,6 +199,10 @@ export const EXEMPT_SCHEMAS: Record<string, string> = {
   ResolutionFieldError: "ProblemDetail.errors[] item; never read through a shared-type",
   AgentConnectionReadiness:
     "bulk agent connection-readiness envelope; SPA uses the generated spec type (integrations[].resolution is the registered IntegrationAgentResolution)",
+  AgentLogicMap:
+    "agent logic-map envelope (read-only inferred prompt projection); SPA uses the generated spec type",
+  AgentLogicMapNode: "AgentLogicMap.nodes[] item; SPA uses the generated spec type",
+  AgentLogicMapDiagnostic: "AgentLogicMap.diagnostics[] item; SPA uses the generated spec type",
   AgentMap:
     "agent visual-map envelope (read-only manifest×install projection); SPA uses the generated spec type",
   AgentMapNode: "AgentMap.nodes[] item; node-type-dependent `data`, no shared-type twin",

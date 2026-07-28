@@ -301,6 +301,44 @@ export const agentsPaths = {
       },
     },
   },
+  "/api/agents/{scope}/{name}/logic-map": {
+    get: {
+      operationId: "getAgentLogicMap",
+      tags: ["Agents"],
+      summary: "Inferred logic map of an agent",
+      description:
+        "Replays the stored logic map of a published version — the agent's prompt and the skill reference files it says take precedence, projected as typed steps (step, decision, loop, tool_call, guard, policy, emit) — laid out server-side and cross-checked against what the manifest grants. Unlike the dependency map this is an INFERENCE, not a projection of structured data: every step carries an `evidence` anchor (file + lines + literal quote) so a reader can verify it, and `meta.overall_confidence` says how much the source itself was ambiguous. `map` is null when the version has never been mapped; `meta.stale` is true when the map was produced for a different bundle integrity. Read-only — the prompt remains the only source of truth, and this route never writes.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
+        {
+          name: "version",
+          in: "query",
+          required: false,
+          schema: { type: "string" },
+          description:
+            "Which published version to read the map of (exact version, dist-tag, or semver range). Defaults to `latest`. Unlike the dependency map there is no `draft`: a working copy changes at every edit and its map would be stale before it is read.",
+        },
+      ],
+      responses: {
+        "200": {
+          description: "Agent logic map",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
+          content: {
+            "application/json": { schema: { $ref: "#/components/schemas/AgentLogicMap" } },
+          },
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+  },
   "/api/agents/{scope}/{name}/persistence": {
     get: {
       operationId: "listAgentPersistence",

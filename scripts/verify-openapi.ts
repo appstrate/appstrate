@@ -143,6 +143,7 @@ const expectedEndpoints = [
   "GET /api/agents/{scope}/{name}/proxy",
   "GET /api/agents/{scope}/{name}/connection-readiness",
   "GET /api/agents/{scope}/{name}/map",
+  "GET /api/agents/{scope}/{name}/logic-map",
   "PUT /api/agents/{scope}/{name}/proxy",
 
   // Model Provider Credentials

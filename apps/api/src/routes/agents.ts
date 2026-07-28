@@ -36,6 +36,7 @@ import { asJSONSchemaObject, mergeWithDefaults } from "@appstrate/core/form";
 import { getAppScope } from "../lib/scope.ts";
 import { resolveAgentConnectionReadiness } from "../services/integration-pins-service.ts";
 import { buildAgentMap } from "../services/agent-map.ts";
+import { buildAgentLogicMap } from "../services/agent-logic-map.ts";
 import { assertExplicitModelExists } from "../services/org-models.ts";
 import {
   buildBundleForAgentExport,
@@ -193,6 +194,27 @@ export function createAgentsRouter() {
       const agent = c.get("package");
       const version = c.req.query("version");
       const map = await buildAgentMap(c, {
+        itemId: agent.id,
+        ...(version ? { version } : {}),
+      });
+      if (!map) throw notFound(`Agent '${agent.id}' not found`);
+      return c.json(map);
+    },
+  );
+
+  // GET /api/agents/:scope/:name/logic-map — inferred, READ-ONLY projection of
+  // the agent's prompt and of the skill reference files it says take precedence.
+  // Unlike the dependency map it is not computed on the fly: an agent produces it
+  // once, this route replays it, lays it out and cross-checks it. Never a
+  // specification of execution — the prompt stays the only source of truth.
+  router.get(
+    `/${SCOPED_PACKAGE_ROUTE}/logic-map`,
+    requireAgent(),
+    requirePermission("agents", "read"),
+    async (c) => {
+      const agent = c.get("package");
+      const version = c.req.query("version");
+      const map = await buildAgentLogicMap(c, {
         itemId: agent.id,
         ...(version ? { version } : {}),
       });

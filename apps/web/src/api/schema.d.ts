@@ -279,6 +279,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/agents/{scope}/{name}/logic-map": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Inferred logic map of an agent
+         * @description Replays the stored logic map of a published version — the agent's prompt and the skill reference files it says take precedence, projected as typed steps (step, decision, loop, tool_call, guard, policy, emit) — laid out server-side and cross-checked against what the manifest grants. Unlike the dependency map this is an INFERENCE, not a projection of structured data: every step carries an `evidence` anchor (file + lines + literal quote) so a reader can verify it, and `meta.overall_confidence` says how much the source itself was ambiguous. `map` is null when the version has never been mapped; `meta.stale` is true when the map was produced for a different bundle integrity. Read-only — the prompt remains the only source of truth, and this route never writes.
+         */
+        get: operations["getAgentLogicMap"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/agents/{scope}/{name}/map": {
         parameters: {
             query?: never;
@@ -4713,6 +4733,79 @@ export interface components {
                 };
             };
         };
+        /** @description Read-only, INFERRED map of an agent's logic: its prompt and the skill reference files the prompt says take precedence, projected as typed steps. Unlike AgentMap it is not computed on the fly — an agent produces it once per published version and this route replays it, lays it out and cross-checks it against what the manifest grants. It is never a specification of execution: the prompt remains the only source of truth, hence `meta.overall_confidence` and the per-step `evidence` that anchors each box to the exact lines it came from. `map` is null when the version has not been mapped yet. */
+        AgentLogicMap: {
+            agent: {
+                packageId: string;
+                version: string;
+                /** @description SRI hash of the mapped version. */
+                integrity: string;
+            };
+            /** @description The stored logic map, as defined by `logic-map.schema.json`. Null when the version has never been mapped. */
+            map: {
+                [key: string]: unknown;
+            } | null;
+            /** @description Server-computed placement — the client positions nothing, as for the dependency map. */
+            nodes: components["schemas"]["AgentLogicMapNode"][];
+            /** @description Clusters in placement order. A policy document is a disconnected graph by nature, and its clusters are what the renderer draws instead of a chain. */
+            groups: {
+                name: string;
+                /** @enum {string} */
+                shape: "sequence" | "policies";
+                x: number;
+                width: number;
+            }[];
+            edges: {
+                from: string;
+                to: string;
+                condition: string | null;
+            }[];
+            /** @description Cross-check of the references the map emits against what the manifest declares. Computed WITHOUT a model and without substring matching: the producer proposes, the server verifies against facts. */
+            diagnostics: components["schemas"]["AgentLogicMapDiagnostic"][];
+            meta: {
+                /** Format: date-time */
+                generated_at: string | null;
+                /** @description `human` for a hand-written map, `agent` for an inferred one. */
+                generator_kind: string | null;
+                overall_confidence: number | null;
+                /** @description True when the map's integrity no longer matches the installed version: it describes a prompt that is no longer this one. */
+                stale: boolean;
+                /** @description Share of nodes taking part in the flow. Separates the two families without a model (roughly 0.35-0.82 for a sequence, 0-0.43 for a policy document) and flags a hybrid in the overlap. */
+                flow_ratio: number;
+            };
+        };
+        AgentLogicMapDiagnostic: {
+            /**
+             * @description A reference that resolves to nothing is an ERROR only when a declaration slot exists for it; a runtime capability such as `bash` has none, so it stays a HINT. A declared-but-unreferenced capability is never an error, and past a threshold the list collapses into a single INVENTORY finding.
+             * @enum {string}
+             */
+            level: "error" | "warning" | "hint" | "inventory";
+            code: string;
+            /** @description Dependency-map node the finding routes to, reusing the same diagnostics plumbing. */
+            node_id: string | null;
+            item_id: string | null;
+            step_ids: string[];
+            message: string;
+        };
+        AgentLogicMapNode: {
+            id: string;
+            /**
+             * @description Closed vocabulary. Left open, every run would produce a different diagram and nothing would be comparable over time.
+             * @enum {string}
+             */
+            type: "step" | "decision" | "loop" | "tool_call" | "guard" | "policy" | "emit";
+            position: {
+                x: number;
+                y: number;
+            };
+            /** @description Control nesting only (a loop body). Documentary grouping travels in `group`. */
+            parent_id: string | null;
+            width: number;
+            /** @description Derived from the actual content, never a constant — an estimate that lies makes stacked cards overlap. */
+            height: number;
+            rank: number;
+            group: string | null;
+        };
         /** @description AFPS Agent manifest extended with Appstrate platform fields. Standard fields are defined by the AFPS Agent schema. Most extension fields use the x- prefix per AFPS §10, with the exception of the Appstrate-specific top-level `runtime_tools` field documented below. */
         AgentManifest: ({
             name: string;
@@ -6521,6 +6614,44 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AgentConnectionReadiness"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    getAgentLogicMap: {
+        parameters: {
+            query?: {
+                /** @description Which published version to read the map of (exact version, dist-tag, or semver range). Defaults to `latest`. Unlike the dependency map there is no `draft`: a working copy changes at every edit and its map would be stale before it is read. */
+                version?: string;
+            };
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
+                "X-Application-Id"?: components["parameters"]["XAppId"];
+            };
+            path: {
+                /** @description Package scope (e.g. @myorg) */
+                scope: components["parameters"]["PackageScope"];
+                /** @description Package name */
+                name: components["parameters"]["PackageName"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Agent logic map */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentLogicMap"];
                 };
             };
             401: components["responses"]["Unauthorized"];
