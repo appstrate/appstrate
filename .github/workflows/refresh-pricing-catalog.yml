@@ -36,6 +36,11 @@ jobs:
         uses: ./.github/actions/bun-setup
 
       - name: Refresh catalog (apply)
+        env:
+          # Per-provider cache-rate coverage + delta, for the PR body assembled
+          # below. Written to the runner temp dir, NEVER the worktree — see the
+          # body-path rationale in the drift step.
+          PRICING_COVERAGE_SUMMARY_PATH: ${{ runner.temp }}/pricing-coverage.md
         run: bun scripts/refresh-pricing-catalog.ts --apply
 
       # rationale: see .github/actions/bun-setup/action.yml
@@ -99,7 +104,21 @@ jobs:
             https://openai.com/api/pricing / https://www.anthropic.com/pricing.
           - Confirm no models we rely on were removed (search `model:`
             in `apps/api/src/services/llm-proxy/` if unsure).
+          - Read the cache-rate coverage table below. `cacheRead` coverage is
+            inherited from LiteLLM, so it drifts on its own, and a model with no
+            `cacheRead` prices its cached input tokens at zero.
           EOF
+
+          # Inlined verbatim so the coverage change is reviewed rather than merged
+          # blind. Written by the refresh step to $RUNNER_TEMP (outside the
+          # worktree, same reason as the body itself).
+          coverage="${RUNNER_TEMP}/pricing-coverage.md"
+          if [ -f "$coverage" ]; then
+            printf '\n'
+            cat "$coverage"
+          else
+            printf '\n_Coverage summary missing — the refresh step did not write %s._\n' "$coverage"
+          fi
           fi
 
           if [ "$watch" = true ]; then

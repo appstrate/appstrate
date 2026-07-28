@@ -12,6 +12,9 @@
  * accidentally compile the resolver/fetch-heavy modules.
  */
 
+// Type-only (erased at emit), so the "no runtime imports" rule above holds.
+import type { ModelCost } from "@appstrate/core/module";
+
 /**
  * Narrow projection of the `runs` row used for signature verification +
  * event dispatch on `POST /api/runs/:runId/events`.
@@ -40,4 +43,11 @@ export interface RunSinkContext {
    * module listeners can distinguish billable from non-billable runs.
    */
   modelSource: string | null;
+  /**
+   * Per-1M-token rates snapshotted at kickoff (`runs.model_cost`). The runner
+   * reports its own cost, so this is the only platform-side fact from which its
+   * ledger row's `pricing_status` can be derived. `null` = the run resolved no
+   * pricing (or, for a remote-origin run, no platform model at all).
+   */
+  modelCost: ModelCost | null;
 }

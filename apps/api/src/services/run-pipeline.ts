@@ -27,6 +27,7 @@ import {
 import { collectOverridableDependencyIds } from "@appstrate/core/dependencies";
 import type { ConnectionOverrides, ResolvedConnectionMap } from "@appstrate/core/integration";
 import { parseScopedName } from "@appstrate/core/naming";
+import type { ModelCost } from "@appstrate/core/module";
 import { mintSinkCredentials } from "../lib/mint-sink-credentials.ts";
 import { encrypt } from "@appstrate/connect";
 import { getEnv } from "@appstrate/env";
@@ -450,6 +451,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
   let proxyLabel: string | null;
   let modelLabel: string | null;
   let modelSource: string | null;
+  let modelCost: ModelCost | null;
   let contextMs: number;
   const contextStart = Date.now();
   try {
@@ -462,6 +464,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
       proxyLabel,
       modelLabel,
       modelSource,
+      modelCost,
     } = await runWithSpan("appstrate.run.context", { attributes: spanAttributes }, () =>
       buildRunContext({
         runId,
@@ -546,6 +549,10 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
         proxyLabel: proxyLabel ?? undefined,
         modelLabel: modelLabel ?? undefined,
         modelSource: modelSource ?? undefined,
+        // Kickoff pricing snapshot — see `run-context-builder.ts`. Persisted on
+        // the run row so the runner's ledger row (whose cost the container
+        // computes) can be classified without trusting the container.
+        modelCost,
         apiKeyId,
         agentScope: agentDenorm.scope,
         agentName: agentDenorm.name,

@@ -19309,7 +19309,7 @@
                     "preview_url": {
                       "type": ["string", "null"],
                       "format": "uri",
-                      "description": "Absolute URL of a hardened, cookie-less preview (short-lived signed token in the query). Minted ONLY on this single-document GET — the list rows and the `keep` response carry `previewable` instead. Non-null only for a previewable document. Load in a `sandbox=\"allow-scripts\"` iframe: for an `html` document served same-origin (no `USERCONTENT_URL`) that iframe is the ONLY context in which the markup is served as active HTML — a top-level navigation to the same URL is served as inert `text/plain` source so agent script can never run on the app origin. On the `USERCONTENT_URL` origin when the instance configures a separate preview domain, else same-origin."
+                      "description": "Absolute URL of a hardened, cookie-less preview (short-lived signed token in the query). Minted ONLY on this single-document GET — the list rows and the `keep` response carry `previewable` instead. Non-null only for a previewable document. Load in a `sandbox=\"allow-scripts\"` iframe: for an `html` document that iframe is the ONLY context in which the markup is served as active HTML, whether or not the instance configures a separate `USERCONTENT_URL` preview origin. Any other loading context — a top-level navigation to the same URL above all — is served as inert `text/plain` source, because a top-level agent document can navigate itself and so cannot be contained. Minted on the `USERCONTENT_URL` origin when the instance configures a separate preview domain, else same-origin."
                     }
                   }
                 }
@@ -22270,6 +22270,7 @@
           "completed_at",
           "duration",
           "cost",
+          "cost_pricing_status",
           "runNumber",
           "token_usage",
           "version_label",
@@ -22439,6 +22440,11 @@
           "cost": {
             "type": ["number", "null"],
             "description": "Run cost in dollars"
+          },
+          "cost_pricing_status": {
+            "type": ["string", "null"],
+            "enum": ["priced", "partial", "unpriced", null],
+            "description": "How much of `cost` is backed by real per-token rates. `priced`: every token bucket that carried usage had a rate, so the figure is complete. `partial`: part of the consumption (cached input) had no rate and was priced at zero, so the figure is a FLOOR, not the full amount. `unpriced`: no rates were available for the model at all — a `cost` of 0 alongside this value means \"not priced\", NOT \"free\"; do not bill or display it as zero spend. `null` on runs finalized before this field existed and on runs that produced no usage rows; never read `null` as `priced`."
           },
           "endUserId": {
             "type": ["string", "null"],

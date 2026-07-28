@@ -45,6 +45,7 @@
  */
 
 import { getErrorMessage } from "@appstrate/core/errors";
+import type { TokenPricingStatus } from "@appstrate/afps-runtime/runner";
 import { db, type Db } from "@appstrate/db/client";
 import { llmUsage, runs, terminalRunStatusValues } from "@appstrate/db/schema";
 import { and, eq, sql, type SQL } from "drizzle-orm";
@@ -80,6 +81,17 @@ export interface LlmUsageEntry {
   cacheReadTokens?: number | null;
   cacheWriteTokens?: number | null;
   costUsd: number;
+  /**
+   * Provenance of {@link costUsd} — REQUIRED, and required for a reason: a
+   * `cost_usd` of 0 is unattributable on its own (free model? unpriced model?
+   * cached tokens priced at zero?), and an optional field would let each new
+   * producer default back into that silence. Every caller decides, via the
+   * shared `pricing-provenance.ts` helper. `null` is a legitimate answer — it
+   * means "this row's pricing is not this platform's fact to state" (the runner
+   * mirror of a remote-origin run, whose spend was accounted elsewhere) — but
+   * it must be an answer, not an omission.
+   */
+  pricingStatus: TokenPricingStatus | null;
   durationMs?: number | null;
   /** Proxy dedup key — required on proxy rows, null on runner rows. */
   requestId?: string | null;
@@ -239,6 +251,7 @@ export async function recordLlmUsage(
     cacheReadTokens: entry.cacheReadTokens ?? null,
     cacheWriteTokens: entry.cacheWriteTokens ?? null,
     costUsd: entry.costUsd,
+    pricingStatus: entry.pricingStatus,
     durationMs: entry.durationMs ?? null,
     requestId: entry.requestId ?? null,
   };
@@ -260,6 +273,14 @@ export async function recordLlmUsage(
               cacheReadTokens: sql`EXCLUDED.cache_read_tokens`,
               cacheWriteTokens: sql`EXCLUDED.cache_write_tokens`,
               costUsd: sql`EXCLUDED.cost_usd`,
+              // The status travels WITH the snapshot that won, like the token
+              // columns. It describes the numbers now stored, so keeping the
+              // stored one would let a row claim `priced` over token counts
+              // that a later, differently-classified snapshot brought in.
+              // In practice it is invariant across a run's snapshots (the rates
+              // are a kickoff snapshot on `runs.model_cost`); overwriting is
+              // the rule that stays correct if that ever stops being true.
+              pricingStatus: sql`EXCLUDED.pricing_status`,
             },
             // The monotonic advance is additionally gated on the run still
             // being non-terminal — see {@link runNotTerminalSql}: a settled row

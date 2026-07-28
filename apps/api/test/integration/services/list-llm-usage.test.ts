@@ -76,6 +76,7 @@ describe("listLlmUsage / getSettledFrontierId", () => {
         "credentialSource",
         "id",
         "orgId",
+        "pricingStatus",
         "settled",
         "source",
       ].sort(),

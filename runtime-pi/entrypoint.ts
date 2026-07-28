@@ -116,6 +116,22 @@ function buildInContainerBundle(prompt: string): Bundle {
 }
 
 /**
+ * One pino-shaped JSON line on stdout — the shape every structured diagnostic
+ * in this file already uses (`{"level":…,"event":…,…}`). Factored out so a new
+ * caller cannot invent a second shape.
+ *
+ * Reach: the platform ring-buffers container stdout but only emits it when the
+ * container exits NON-ZERO (`run-launcher/pi.ts`), so on a successful run this
+ * line lives in the docker/Firecracker log only — same as the pre-existing
+ * `mcp_connect_retry` line. Enough for an operator reading container logs; it
+ * is NOT the run's audit trail. The queryable record of a pricing gap is
+ * `llm_usage.pricing_status`, written server-side.
+ */
+function logLine(level: "warn" | "error", event: string, data?: Record<string, unknown>): void {
+  process.stdout.write(`${JSON.stringify({ level, event, ...(data ?? {}) })}\n`);
+}
+
+/**
  * Last-resort operator diagnostic for fatal paths whose normal reporting
  * channel (the sink POST) failed or was deliberately skipped. Under
  * Firecracker the serial console captures stderr, so this single line is
@@ -160,6 +176,15 @@ try {
     lastResortStderr(1, "env validation failed", err);
   }
   process.exit(1);
+}
+
+// Non-fatal env diagnostics (`env.warnings`) — emitted the moment parsing
+// SUCCEEDS, before anything else runs, so a degraded-but-valid configuration is
+// visible at the top of the run's log. The fatal channel above is untouched:
+// these are conditions the run can legitimately proceed under (today: no
+// `MODEL_COST`, i.e. every cost this run reports will be 0).
+for (const warning of env.warnings) {
+  logLine("warn", "runtime_env_warning", { warning });
 }
 
 // Zero-knowledge, part 1 (part 2 is `delete process.env.SIDECAR_URL` below):
@@ -512,14 +537,8 @@ const runtimeDrainer: RuntimeEventDrainer | undefined = sidecarUrl
       url: `${sidecarUrl.replace(/\/$/, "")}/runtime-events`,
       headers: { Host: "sidecar" },
       logger: {
-        warn: (msg, data) =>
-          process.stdout.write(
-            `${JSON.stringify({ level: "warn", event: msg, ...(data ?? {}) })}\n`,
-          ),
-        error: (msg, data) =>
-          process.stdout.write(
-            `${JSON.stringify({ level: "error", event: msg, ...(data ?? {}) })}\n`,
-          ),
+        warn: (msg, data) => logLine("warn", msg, data),
+        error: (msg, data) => logLine("error", msg, data),
       },
     })
   : undefined;
@@ -559,20 +578,13 @@ if (sidecarUrl) {
           baseMs: 50,
           capMs: 1_000,
           onRetry: ({ url, attempt, delayMs, errorCode, error }) => {
-            // pino-shaped JSON line — stdout is captured by the platform's
-            // container log buffer, so this lands on the same audit trail
-            // operators use for run diagnostics.
-            process.stdout.write(
-              `${JSON.stringify({
-                level: "warn",
-                event: "mcp_connect_retry",
-                url,
-                attempt,
-                delayMs,
-                errorCode: errorCode ?? null,
-                error: error instanceof Error ? error.message : String(error),
-              })}\n`,
-            );
+            logLine("warn", "mcp_connect_retry", {
+              url,
+              attempt,
+              delayMs,
+              errorCode: errorCode ?? null,
+              error: error instanceof Error ? error.message : String(error),
+            });
           },
         },
       });
@@ -868,10 +880,7 @@ async function runOutputsSweep(): Promise<SweepResult | null> {
     emit: (event) => {
       void bridgedSink.handle(event as RunEvent);
     },
-    logWarn: (message, data) =>
-      process.stdout.write(
-        `${JSON.stringify({ level: "warn", event: message, ...(data ?? {}) })}\n`,
-      ),
+    logWarn: (message, data) => logLine("warn", message, data),
   }).catch((err) => {
     // sweepOutputs collects per-file failures itself; this guards the scan
     // itself so a sweep fault can never abort finalize.

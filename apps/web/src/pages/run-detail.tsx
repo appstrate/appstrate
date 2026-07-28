@@ -6,6 +6,13 @@ import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@appstrate/ui/components/button";
 import { Tabs, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@appstrate/ui/components/tooltip";
+import { totalTokens, type TokenUsage } from "@appstrate/core/token-usage";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
 import { usePackageDetail } from "../hooks/use-packages";
 import { useRun, useRunLogs } from "../hooks/use-runs";
@@ -23,6 +30,7 @@ import { RunInfoTab } from "../components/run-info-tab";
 import { RunDocumentsTab } from "../components/run-documents-tab";
 import { invalidateOrgStorage } from "../hooks/use-documents";
 import { RunRow } from "../components/run-row";
+import { RunCostReadout } from "../components/run-cost-readout";
 import { RunDegradedBanner } from "../components/run-degraded-banner";
 import { RunArtifactsBanner } from "../components/run-artifacts-banner";
 import { useMarkReadByRun } from "../hooks/use-notifications";
@@ -170,12 +178,18 @@ export function RunDetailPage() {
         // `cost_so_far` instead. The next terminal-status invalidation
         // refetches the canonical row so this in-cache shadow is
         // bounded by the run's lifetime.
+        //
+        // The provenance is patched WITH the number, never separately: a
+        // live `cost` paired with the stale (or absent) status of the
+        // previous read is how a run nothing could price ends up showing a
+        // confident $0.0000 for its whole duration.
         qc.setQueryData<EnrichedRun>(runKeys.detail(orgId, applicationId, runId), (prev) => {
           if (!prev) return prev;
           return {
             ...prev,
             token_usage: metric.tokenUsage ?? prev.token_usage,
             cost: metric.costSoFar,
+            cost_pricing_status: metric.costPricingStatus,
           };
         });
       },
@@ -295,21 +309,58 @@ export function RunDetailPage() {
               at the throttled 250 ms cadence; once finalized, the same
               fields hold the authoritative aggregate written by
               `finalizeRun`. Defaults to zeros for runs that never produced
-              tokens (the readout is structural, not conditional on data). */}
+              tokens (the readout is structural, not conditional on data).
+              The count goes through `totalTokens` so it covers the same four
+              buckets the `$` beside it prices — `input_tokens` is net of
+              cache, so an input+output sum would omit the bulk of the
+              consumption on any cached run and contradict the Info tab. */}
           {(() => {
-            const liveUsage = run.token_usage as {
-              input_tokens?: number;
-              output_tokens?: number;
-            } | null;
-            const totalTokens = (liveUsage?.input_tokens ?? 0) + (liveUsage?.output_tokens ?? 0);
+            const liveUsage = run.token_usage as TokenUsage | null;
+            const total = totalTokens(liveUsage ?? {});
             return (
               <div className="text-muted-foreground bg-muted/50 flex items-center gap-2 rounded-md px-2.5 py-1 text-xs tabular-nums">
                 {isRunning && (
                   <span className="bg-primary size-1.5 animate-pulse rounded-full" aria-hidden />
                 )}
-                <span>{totalTokens.toLocaleString()} tokens</span>
+                <TooltipProvider delayDuration={300}>
+                  <Tooltip>
+                    {/* Focusable trigger: the readout is otherwise plain text,
+                        so keyboard users would have no way to reach the
+                        breakdown. */}
+                    <TooltipTrigger asChild>
+                      <span tabIndex={0} className="cursor-default underline decoration-dotted">
+                        {total.toLocaleString()} tokens
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom" className="max-w-xs">
+                      <span className="block text-xs">
+                        {t("run.usageInputTokens")}:{" "}
+                        {(liveUsage?.input_tokens ?? 0).toLocaleString()}
+                      </span>
+                      <span className="block text-xs">
+                        {t("run.usageOutputTokens")}:{" "}
+                        {(liveUsage?.output_tokens ?? 0).toLocaleString()}
+                      </span>
+                      <span className="block text-xs">
+                        {t("run.usageCacheRead")}:{" "}
+                        {(liveUsage?.cache_read_input_tokens ?? 0).toLocaleString()}
+                      </span>
+                      <span className="block text-xs">
+                        {t("run.usageCacheCreation")}:{" "}
+                        {(liveUsage?.cache_creation_input_tokens ?? 0).toLocaleString()}
+                      </span>
+                      <span className="text-muted-foreground mt-1 block text-xs">
+                        {t("run.usageTokensCumulative")}
+                      </span>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
                 <span aria-hidden>·</span>
-                <span className="text-foreground font-medium">${(run.cost ?? 0).toFixed(4)}</span>
+                <RunCostReadout
+                  cost={run.cost}
+                  pricingStatus={run.cost_pricing_status}
+                  className="text-foreground font-medium"
+                />
               </div>
             );
           })()}

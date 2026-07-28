@@ -1287,6 +1287,24 @@ export interface LlmUsageLedgerRow {
   /** Which credential set reached the provider: platform-provided or the org's own. */
   credentialSource: "system" | "org" | null;
   /**
+   * How much of {@link costUsd} is backed by real per-token rates.
+   *
+   *  - `"priced"` — every token bucket that carried usage had a rate; the
+   *    number is complete.
+   *  - `"partial"` — part of the consumption (cached input) had no rate and was
+   *    priced at zero, so the number is a FLOOR — the real spend is higher.
+   *  - `"unpriced"` — no rates were available for the model at all. A
+   *    {@link costUsd} of `0` alongside this value means "the platform could not
+   *    price this call", NOT "this call was free": a consumer must not settle it
+   *    as zero spend without deciding what an unpriceable call is worth.
+   *  - `null` / absent — the row predates the field. NEVER read that as
+   *    `"priced"`.
+   *
+   * Optional so a consumer written before the field compiles unchanged; the
+   * platform stamps every row it writes.
+   */
+  pricingStatus?: "priced" | "partial" | "unpriced" | null;
+  /**
    * Whether the row's `costUsd` is final. Proxy/chat rows are immutable at
    * insert (always settled); a runner row's total GROWS during its run (one
    * cumulative row per run) and only settles once the run reaches a terminal

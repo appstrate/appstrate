@@ -9,7 +9,14 @@
  */
 
 import { describe, it, expect, afterEach } from "bun:test";
-import { aliasedBackings, buildFeatured } from "../refresh-pricing-catalog.ts";
+import {
+  aliasedBackings,
+  buildFeatured,
+  countCacheRates,
+  coverageRow,
+  formatCoverageSummary,
+  type CoverageRow,
+} from "../refresh-pricing-catalog.ts";
 
 const ORIG_EXCLUDE = process.env.FEATURED_MODELS_EXCLUDE;
 const ORIG_KEYS = process.env.SYSTEM_PROVIDER_KEYS;
@@ -88,5 +95,139 @@ describe("buildFeatured", () => {
     const snapshot = snap("a", "b");
     const models = md({ a: "2026-01-02", b: "2026-01-01" });
     expect(buildFeatured("openai", snapshot, models, new Set())).toEqual(["a", "b"]);
+  });
+});
+
+/**
+ * Cache-rate coverage — `cost.cacheRead` / `cost.cacheWrite` are only vendored
+ * when LiteLLM upstream carries them, so coverage drifts silently and a model
+ * without `cacheRead` prices its cached tokens at zero. These summaries are what
+ * put the drift in front of a reviewer in the weekly PR.
+ */
+const entry = (cost: Record<string, number>) =>
+  ({ contextWindow: 1, maxTokens: null, capabilities: [], cost }) as never;
+const catalog = (...costs: Record<string, number>[]) =>
+  Object.fromEntries(costs.map((c, i) => [`m${i}`, entry(c)]));
+
+describe("countCacheRates", () => {
+  it("counts each optional cache rate independently", () => {
+    const snapshot = catalog(
+      { input: 1, output: 2, cacheRead: 0.1, cacheWrite: 1.2 },
+      { input: 1, output: 2, cacheRead: 0.1 },
+      { input: 1, output: 2 },
+    );
+    expect(countCacheRates(snapshot)).toEqual({ entries: 3, cacheRead: 2, cacheWrite: 1 });
+  });
+
+  it("counts an explicit zero rate as covered — 'rate is 0' is not 'no rate'", () => {
+    expect(countCacheRates(catalog({ input: 1, output: 2, cacheRead: 0 }))).toEqual({
+      entries: 1,
+      cacheRead: 1,
+      cacheWrite: 0,
+    });
+  });
+
+  it("reports an empty provider without dividing by zero downstream", () => {
+    expect(countCacheRates({})).toEqual({ entries: 0, cacheRead: 0, cacheWrite: 0 });
+  });
+});
+
+describe("coverageRow", () => {
+  it("carries the previous counts so the summary can show a delta", () => {
+    const local = catalog({ input: 1, output: 2, cacheRead: 0.1 }, { input: 1, output: 2 });
+    const upstream = catalog(
+      { input: 1, output: 2, cacheRead: 0.1 },
+      { input: 1, output: 2, cacheRead: 0.1 },
+      { input: 1, output: 2, cacheWrite: 1 },
+    );
+    expect(coverageRow("openai", local, upstream)).toEqual({
+      provider: "openai",
+      entries: 3,
+      cacheRead: 2,
+      cacheWrite: 1,
+      prevEntries: 2,
+      prevCacheRead: 1,
+      prevCacheWrite: 0,
+    });
+  });
+});
+
+describe("formatCoverageSummary", () => {
+  const row = (over: Partial<CoverageRow>): CoverageRow => ({
+    provider: "p",
+    entries: 10,
+    cacheRead: 10,
+    cacheWrite: 10,
+    prevEntries: 10,
+    prevCacheRead: 10,
+    prevCacheWrite: 10,
+    ...over,
+  });
+
+  it("renders counts, shares and signed deltas", () => {
+    const md = formatCoverageSummary([
+      row({
+        provider: "openai",
+        entries: 89,
+        cacheRead: 58,
+        cacheWrite: 5,
+        prevEntries: 88,
+        prevCacheRead: 57,
+        prevCacheWrite: 5,
+      }),
+    ]);
+    expect(md).toContain("| `openai` | 89 | +1 | 58 (65%) | +1 | 5 (6%) | · |");
+  });
+
+  it("shows a negative delta when models lose their cache rate upstream", () => {
+    const md = formatCoverageSummary([row({ provider: "xai", cacheRead: 8, prevCacheRead: 12 })]);
+    expect(md).toContain("| 8 (80%) | -4 |");
+  });
+
+  it("flags a provider with zero cacheRead coverage in the row and in a footnote", () => {
+    const md = formatCoverageSummary([
+      row({
+        provider: "mistral",
+        entries: 51,
+        cacheRead: 0,
+        cacheWrite: 0,
+        prevEntries: 51,
+        prevCacheRead: 0,
+        prevCacheWrite: 0,
+      }),
+      row({
+        provider: "anthropic",
+        entries: 24,
+        cacheRead: 24,
+        cacheWrite: 24,
+        prevEntries: 24,
+        prevCacheRead: 24,
+        prevCacheWrite: 24,
+      }),
+    ]);
+    expect(md).toContain("| 0 (0%) ⚠️ |");
+    expect(md).toContain("No `cacheRead` rate at all: `mistral`");
+    expect(md).not.toContain("`anthropic`, ");
+  });
+
+  it("omits the footnote when every provider carries a cacheRead rate", () => {
+    const md = formatCoverageSummary([row({ provider: "anthropic" })]);
+    expect(md).not.toContain("No `cacheRead` rate at all");
+  });
+
+  it("renders an empty provider as — rather than NaN%", () => {
+    const md = formatCoverageSummary([
+      row({
+        provider: "new",
+        entries: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+        prevEntries: 0,
+        prevCacheRead: 0,
+        prevCacheWrite: 0,
+      }),
+    ]);
+    expect(md).toContain("| `new` | 0 | · | — | · | — | · |");
+    expect(md).not.toContain("NaN");
   });
 });

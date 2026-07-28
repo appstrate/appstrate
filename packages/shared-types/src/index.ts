@@ -52,6 +52,7 @@ export interface ListEnvelope<T> {
 }
 
 import type { RunStatus as _RunStatus } from "@appstrate/db/run-status";
+import type { PricingStatus as _PricingStatus } from "@appstrate/db/pricing-status";
 
 /**
  * Wire-shape Run DTO returned to API consumers. The Drizzle `Run` row keeps
@@ -89,6 +90,15 @@ export interface RunWireDto {
   completed_at: string | null;
   duration: number | null;
   cost: number | null;
+  /**
+   * How much of {@link cost} is backed by real per-token rates:
+   * `"priced"` (all of it), `"partial"` (part of the consumption had no rate
+   * and was priced at zero — the figure is a FLOOR), `"unpriced"` (nothing
+   * could be priced — a `0` here is an absence of pricing, not a free run).
+   * `null` on runs finalized before the column existed and on runs that
+   * produced no ledger rows; never assume `"priced"` from it.
+   */
+  cost_pricing_status: _PricingStatus | null;
   runNumber: number | null;
   token_usage: unknown;
   version_label: string | null;

@@ -64,7 +64,7 @@ import {
   synthesiseFinalize,
 } from "../../../src/services/run-event-ingestion.ts";
 import {
-  computeRunCost,
+  computeRunSpend,
   listLlmUsage,
   getSettledFrontierId,
 } from "../../../src/services/state/runs.ts";
@@ -168,6 +168,7 @@ async function settledRunWithLateSnapshot(
     inputTokens: 100,
     outputTokens: 50,
     costUsd: 2,
+    pricingStatus: "priced" as const,
   };
   await recordLlmUsage(stored, { onConflict: "runner-monotonic" });
   await synthesisedFinalize(runId);
@@ -232,6 +233,7 @@ describe("llm_usage settlement — terminal barrier and post-settlement immutabi
         inputTokens: 100,
         outputTokens: 50,
         costUsd: 5,
+        pricingStatus: "priced" as const,
       },
       { onConflict: "runner-monotonic" },
     );
@@ -266,6 +268,7 @@ describe("llm_usage settlement — terminal barrier and post-settlement immutabi
         inputTokens: 400,
         outputTokens: 200,
         costUsd: 9,
+        pricingStatus: "priced" as const,
       },
       { onConflict: "runner-monotonic" },
     );
@@ -274,7 +277,7 @@ describe("llm_usage settlement — terminal barrier and post-settlement immutabi
     const row = await runnerRow(runId);
     expect(row!.costUsd).toBe(5);
     expect(row!.inputTokens).toBe(100);
-    expect(await computeRunCost(runId, ctx.orgId)).toBe(5);
+    expect((await computeRunSpend(runId, ctx.orgId)).costUsd).toBe(5);
 
     // …and it is LOUD. This is money the platform consumed and will never
     // invoice, so the only way an operator learns about it is this line. It
@@ -356,6 +359,7 @@ describe("llm_usage settlement — terminal barrier and post-settlement immutabi
       inputTokens: 100,
       outputTokens: 50,
       costUsd: 3,
+      pricingStatus: "priced" as const,
     };
     await recordLlmUsage(entry, { onConflict: "runner-monotonic" });
     await synthesisedFinalize(runId);
@@ -391,6 +395,7 @@ describe("llm_usage settlement — terminal barrier and post-settlement immutabi
         outputTokens: 50,
         cacheWriteTokens: 10,
         costUsd: 2,
+        pricingStatus: "priced" as const,
       },
       { onConflict: "runner-monotonic" },
     );
@@ -406,6 +411,7 @@ describe("llm_usage settlement — terminal barrier and post-settlement immutabi
         outputTokens: 50,
         cacheWriteTokens: 30,
         costUsd: 2,
+        pricingStatus: "priced" as const,
       },
       { onConflict: "runner-monotonic" },
     );
@@ -510,6 +516,7 @@ describe("llm_usage settlement — terminal barrier and post-settlement immutabi
         inputTokens: 100,
         outputTokens: 50,
         costUsd: 5,
+        pricingStatus: "priced" as const,
       },
       { onConflict: "runner-monotonic" },
     );
@@ -522,6 +529,7 @@ describe("llm_usage settlement — terminal barrier and post-settlement immutabi
         inputTokens: 400,
         outputTokens: 200,
         costUsd: 9,
+        pricingStatus: "priced" as const,
       },
       { onConflict: "runner-monotonic" },
     );
@@ -553,6 +561,46 @@ describe("llm_usage settlement — terminal barrier and post-settlement immutabi
     expect(rows[0]!.settled).toBe(true);
   });
 
+  it("the cursor projection carries each row's pricing provenance", async () => {
+    // A metering consumer sweeping the ledger must be able to tell "$0 because
+    // the call was free" from "$0 because nothing could price it" — otherwise
+    // it settles an unpriceable call as zero spend. The projection is the only
+    // place it can learn that (it never sees the table).
+    const runId = await seedSinkRun(ctx, { runOrigin: "remote", modelSource: null });
+    await db.insert(llmUsage).values([
+      {
+        source: "proxy",
+        orgId: ctx.orgId,
+        runId,
+        credentialSource: "system",
+        costUsd: 0,
+        pricingStatus: "unpriced" as const,
+        requestId: "req_provenance_1",
+      },
+      {
+        source: "proxy",
+        orgId: ctx.orgId,
+        runId,
+        credentialSource: "system",
+        costUsd: 0.5,
+        pricingStatus: "priced" as const,
+        requestId: "req_provenance_2",
+      },
+      // No verdict at all — a row written before the column existed.
+      {
+        source: "proxy",
+        orgId: ctx.orgId,
+        runId,
+        credentialSource: "system",
+        costUsd: 0.25,
+        requestId: "req_provenance_3",
+      },
+    ]);
+
+    const rows = await listLlmUsage({});
+    expect(rows.map((r) => r.pricingStatus)).toEqual(["unpriced", "priced", null]);
+  });
+
   it("a run that consumed nothing mints no ledger row", async () => {
     const runId = await seedSinkRun(ctx, { tokenUsage: null });
     await synthesisedFinalize(runId);
@@ -582,6 +630,7 @@ describe("llm_usage settlement — terminal barrier and post-settlement immutabi
         inputTokens: 100,
         outputTokens: 50,
         costUsd: 3,
+        pricingStatus: "priced" as const,
       },
       { onConflict: "runner-monotonic" },
     );
@@ -668,6 +717,7 @@ describe("llm_usage durable retry — runner rows are never deferred", () => {
           inputTokens: 10,
           outputTokens: 5,
           costUsd: 0.5,
+          pricingStatus: "priced" as const,
         },
         { executor: failingExecutor, onConflict: "runner-monotonic" },
       ),
@@ -696,6 +746,7 @@ describe("llm_usage durable retry — runner rows are never deferred", () => {
         inputTokens: 10,
         outputTokens: 5,
         costUsd: 0.5,
+        pricingStatus: "priced" as const,
         requestId,
       },
       { executor: failingExecutor, onConflict: "proxy-idempotent" },
@@ -744,7 +795,7 @@ describe("llm_usage cursor read — the runner mirror of a proxy-metered run is 
     await seedPackage({ id: AGENT, orgId: ctx.orgId, type: "agent" });
   });
 
-  it("excludes the mirror from list + frontier, matching computeRunCost exactly", async () => {
+  it("excludes the mirror from list + frontier, matching computeRunSpend exactly", async () => {
     // A remote run metered per call by the llm-proxy: N proxy rows PLUS the
     // runner's cumulative mirror (credential_source NULL, because a remote run
     // resolves no platform model). Both describe the same spend.
@@ -756,6 +807,7 @@ describe("llm_usage cursor read — the runner mirror of a proxy-metered run is 
         runId,
         credentialSource: "system",
         costUsd: 0.4,
+        pricingStatus: "priced" as const,
         requestId: "req_mirror_1",
       },
       {
@@ -764,6 +816,7 @@ describe("llm_usage cursor read — the runner mirror of a proxy-metered run is 
         runId,
         credentialSource: "system",
         costUsd: 0.6,
+        pricingStatus: "priced" as const,
         requestId: "req_mirror_2",
       },
       { source: "runner", orgId: ctx.orgId, runId, credentialSource: null, costUsd: 1.0 },
@@ -774,7 +827,7 @@ describe("llm_usage cursor read — the runner mirror of a proxy-metered run is 
     const swept = rows.reduce((sum, r) => sum + r.costUsd, 0);
     // A consumer that applies no filter of its own now sums exactly what the
     // canonical run-cost read reports — no double count.
-    expect(swept).toBeCloseTo(await computeRunCost(runId, ctx.orgId), 10);
+    expect(swept).toBeCloseTo((await computeRunSpend(runId, ctx.orgId)).costUsd, 10);
     expect(swept).toBeCloseTo(1.0, 10);
 
     // The frontier is computed over the same visible set: the in-flight run's
@@ -792,6 +845,6 @@ describe("llm_usage cursor read — the runner mirror of a proxy-metered run is 
     const rows = await listLlmUsage({});
     expect(rows).toHaveLength(1);
     expect(rows[0]!.source).toBe("runner");
-    expect(await computeRunCost(runId, ctx.orgId)).toBe(2.5);
+    expect((await computeRunSpend(runId, ctx.orgId)).costUsd).toBe(2.5);
   });
 });

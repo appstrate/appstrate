@@ -130,7 +130,7 @@ export function createLlmProxyRouter() {
 /**
  * Validate a caller-supplied `X-Run-Id` against the calling principal
  * (CRIT-07). The header pins the call's `llm_usage` row to a run, and
- * `computeRunCost` rolls those rows up into `runs.cost` — so an unvalidated
+ * `computeRunSpend` rolls those rows up into `runs.cost` — so an unvalidated
  * id would let any principal holding `llm-proxy:call` inflate the cost of
  * any run whose id it knows, including runs of other tenants.
  *
@@ -203,7 +203,7 @@ async function handleProxy(
   const runIdHeader = c.req.header("X-Run-Id");
   const runId = runIdHeader && runIdHeader.length > 0 ? runIdHeader : null;
   // CRIT-07 guard — `X-Run-Id` is caller-supplied and feeds
-  // `llm_usage.run_id` → `computeRunCost` → `runs.cost`. Validate it against
+  // `llm_usage.run_id` → `computeRunSpend` → `runs.cost`. Validate it against
   // the principal BEFORE the upstream call so a caller with `llm-proxy:call`
   // cannot bill LLM cost onto an arbitrary (even cross-tenant) run.
   const runAttribution = runId ? await assertRunAttributable(c, runId, principal) : null;

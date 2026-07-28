@@ -14,12 +14,18 @@
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
-import { truncateAll } from "../../helpers/db.ts";
+import { eq } from "drizzle-orm";
+import { chatSessions, llmUsage } from "@appstrate/db/schema";
+import type { ChatUsageRecord } from "@appstrate/core/chat-contract";
+import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedOrgModelProviderOAuth } from "../../helpers/seed.ts";
 import { TEST_OAUTH_PROVIDER_ID } from "../../helpers/test-oauth-provider.ts";
 import { createOrgModel } from "../../../src/services/org-models.ts";
-import { resolveSubscriptionChatModel } from "../../../src/services/chat-subscription.ts";
+import {
+  recordChatUsage,
+  resolveSubscriptionChatModel,
+} from "../../../src/services/chat-subscription.ts";
 
 describe("resolveSubscriptionChatModel", () => {
   let ctx: TestContext;
@@ -84,5 +90,80 @@ describe("resolveSubscriptionChatModel", () => {
   it("returns { subscription: false } for an unknown preset", async () => {
     const resolution = await resolveSubscriptionChatModel(ctx.orgId, "no-such-preset");
     expect(resolution).toEqual({ subscription: false });
+  });
+});
+
+/**
+ * `recordChatUsage` — the in-process chat engine's own meter. Its rows must
+ * carry the same pricing provenance as the proxy's, and in particular a
+ * SUBSCRIPTION turn must not be mislabelled `unpriced`: codex/claude-code
+ * presets resolve their rates through `catalogProviderId` (→ openai/anthropic),
+ * so the platform prices them at an imputed API-equivalent on purpose.
+ */
+describe("recordChatUsage — pricing provenance", () => {
+  let ctx: TestContext;
+
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "chatpricing" });
+  });
+
+  async function seedSession(id: string): Promise<string> {
+    await db.insert(chatSessions).values({ id, orgId: ctx.orgId, userId: ctx.user.id });
+    return id;
+  }
+
+  function record(overrides: Partial<ChatUsageRecord> = {}): ChatUsageRecord {
+    return {
+      orgId: ctx.orgId,
+      userId: ctx.user.id,
+      chatSessionId: null,
+      presetId: "preset-chat",
+      modelId: "claude-sonnet-4-6",
+      apiShape: "anthropic-messages",
+      inputTokens: 1_000,
+      outputTokens: 500,
+      cost: { input: 3, output: 15, cacheRead: 0.3 },
+      durationMs: 42,
+      ...overrides,
+    };
+  }
+
+  async function storedRow(chatSessionId: string) {
+    const [row] = await db.select().from(llmUsage).where(eq(llmUsage.chatSessionId, chatSessionId));
+    return row;
+  }
+
+  it("a subscription-backed turn is `priced` — its imputed API-equivalent rates are real rates", async () => {
+    const sessionId = await seedSession("chs_pricing_sub");
+    await recordChatUsage(record({ chatSessionId: sessionId }));
+
+    const row = await storedRow(sessionId);
+    expect(row!.pricingStatus).toBe("priced");
+    // And the cost is the imputed equivalent, not zero.
+    expect(row!.costUsd).toBeGreaterThan(0);
+  });
+
+  it("marks a turn on a model with no rates `unpriced` instead of a silent $0", async () => {
+    const sessionId = await seedSession("chs_pricing_none");
+    await recordChatUsage(record({ chatSessionId: sessionId, cost: null }));
+
+    const row = await storedRow(sessionId);
+    expect(row!.pricingStatus).toBe("unpriced");
+    expect(row!.costUsd).toBe(0);
+  });
+
+  it("marks a cached turn `partial` when the model carries no cache-read rate", async () => {
+    const sessionId = await seedSession("chs_pricing_partial");
+    await recordChatUsage(
+      record({
+        chatSessionId: sessionId,
+        cacheReadTokens: 800,
+        cost: { input: 3, output: 15 },
+      }),
+    );
+
+    const row = await storedRow(sessionId);
+    expect(row!.pricingStatus).toBe("partial");
   });
 });

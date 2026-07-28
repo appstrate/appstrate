@@ -45,8 +45,11 @@ import type { RunResult } from "@appstrate/afps-runtime/runner";
 import { isPlainObject } from "@appstrate/core/safe-json";
 import { documentUri } from "@appstrate/core/document-uri";
 import { db, type Db } from "@appstrate/db/client";
+import { modelCostSchema, type ModelCost } from "@appstrate/core/module";
+import type { TokenPricingStatus } from "@appstrate/afps-runtime/runner";
 import { type CredentialSource } from "../llm-usage-ledger.ts";
 import { recordLlmUsageReliably } from "../llm-usage-retry.ts";
+import { resolvePricingStatus } from "../pricing-provenance.ts";
 import type { AppScope } from "../../lib/scope.ts";
 import { appendRunLog, updateRun } from "../state/runs.ts";
 import { logger } from "../../lib/logger.ts";
@@ -71,6 +74,13 @@ export interface PersistingEventSinkOptions {
    * attribution matches the proxy path. Only consulted when {@link writeLedger}.
    */
   modelSource?: string | null;
+  /**
+   * Run's kickoff pricing snapshot (`runs.model_cost`) — the rates the
+   * container was handed as `MODEL_COST`. The container computes the cost it
+   * reports, so this is what lets the row's `pricing_status` be derived
+   * SERVER-SIDE instead of trusted. Only consulted when {@link writeLedger}.
+   */
+  modelCost?: ModelCost | null;
 }
 
 /**
@@ -87,12 +97,14 @@ export class PersistingEventSink implements EventSink {
   protected lastAdapterError: string | null = null;
   private readonly writeLedger: boolean;
   private readonly modelSource: string | null;
+  private readonly modelCost: ModelCost | null;
 
   constructor(opts: PersistingEventSinkOptions) {
     this.scope = opts.scope;
     this.runId = opts.runId;
     this.writeLedger = opts.writeLedger ?? false;
     this.modelSource = opts.modelSource ?? null;
+    this.modelCost = opts.modelCost ?? null;
   }
 
   async handle(event: RunEvent): Promise<void> {
@@ -116,6 +128,7 @@ export class PersistingEventSink implements EventSink {
     const adapterError = await persistRunEvent(db, this.scope, this.runId, event, {
       writeLedger: this.writeLedger,
       modelSource: this.modelSource,
+      modelCost: this.modelCost,
     });
     if (adapterError !== null) this.lastAdapterError = adapterError;
   }
@@ -140,6 +153,7 @@ export async function persistRunEvent(
   opts: {
     writeLedger?: boolean;
     modelSource?: string | null;
+    modelCost?: ModelCost | null;
   } = {},
 ): Promise<string | null> {
   switch (event.type) {
@@ -249,7 +263,7 @@ export async function persistRunEvent(
         await writeRunnerLedgerRow(
           scope,
           runId,
-          { cost, usage, modelSource: opts.modelSource },
+          { cost, usage, modelSource: opts.modelSource, modelCost: opts.modelCost },
           { executor },
         );
         // Best-effort live broadcast — never blocks the ingestion hot
@@ -304,6 +318,8 @@ export async function writeRunnerLedgerRow(
     usage: TokenUsage | null;
     /** Run's model source — stamped as `credential_source` (see below). */
     modelSource?: string | null;
+    /** Run's kickoff rate snapshot — classifies `pricing_status` (see below). */
+    modelCost?: ModelCost | null;
   },
   opts: {
     /** Executor — pass the ingestion transaction on the metric hot path. */
@@ -318,7 +334,9 @@ export async function writeRunnerLedgerRow(
   } = {},
 ): Promise<void> {
   // Skip degenerate events with neither usage nor cost — nothing to bill
-  // or audit.
+  // or audit. NOTE the asymmetry the pricing status exists for: a run with
+  // tokens but a NULL cost is NOT skipped — it lands as a `costUsd: 0` row
+  // below, and that zero is precisely the one that must not read as "free".
   if (row.cost === null && !row.usage) return;
 
   try {
@@ -335,6 +353,7 @@ export async function writeRunnerLedgerRow(
         cacheReadTokens: row.usage?.cache_read_input_tokens ?? null,
         cacheWriteTokens: row.usage?.cache_creation_input_tokens ?? null,
         costUsd: row.cost ?? 0,
+        pricingStatus: resolveRunnerPricingStatus(scope.orgId, runId, row),
       },
       {
         executor: opts.executor,
@@ -354,4 +373,45 @@ export async function writeRunnerLedgerRow(
 /** Narrow a run's free-form `model_source` to the `credential_source` enum. */
 function coerceCredentialSource(modelSource: string | null | undefined): CredentialSource | null {
   return modelSource === "system" || modelSource === "org" ? modelSource : null;
+}
+
+/**
+ * Pricing provenance of a runner row, derived SERVER-SIDE.
+ *
+ * The container computed the `cost` this row carries, so the platform cannot
+ * ask it whether that number was backed by real rates — it answers from the
+ * snapshot it took at kickoff (`runs.model_cost`).
+ *
+ * `runs.model_source IS NULL` short-circuits to `null`, and that branch is not a
+ * defensive default: a NULL model source is precisely how a REMOTE-origin run is
+ * identified (it resolves no platform model — the same fact `notRunnerMirrorSql`
+ * keys on). Its inference was accounted elsewhere, typically as per-call proxy
+ * rows that carry their own status. Stamping `unpriced` there would mislabel
+ * every remote run as a platform pricing gap.
+ *
+ * The snapshot is a JSONB column, so it is NARROWED rather than trusted: a row
+ * whose `model_cost` is malformed (hand-edited, or written by an older shape)
+ * must classify as `unpriced`, not as `priced`. `classifyTokenPricing` only
+ * probes `cost == null` and `cost.cacheRead`, so an unvalidated `{}` would
+ * otherwise sail through as fully priced — the exact false confidence this
+ * column exists to remove.
+ */
+function resolveRunnerPricingStatus(
+  orgId: string,
+  runId: string,
+  row: { usage: TokenUsage | null; modelSource?: string | null; modelCost?: ModelCost | null },
+): TokenPricingStatus | null {
+  if (coerceCredentialSource(row.modelSource) === null) return null;
+  const parsedCost = modelCostSchema.safeParse(row.modelCost);
+  return resolvePricingStatus({
+    orgId,
+    // The run's model label is not part of the sink context, so the warn line
+    // is keyed on the org alone (one line per org+status per process) and names
+    // the run instead — `runs.model_label` is one lookup away, and the ledger
+    // column is the complete, queryable record either way.
+    model: null,
+    usage: row.usage ?? {},
+    cost: parsedCost.success ? parsedCost.data : null,
+    context: { source: "runner", runId },
+  });
 }

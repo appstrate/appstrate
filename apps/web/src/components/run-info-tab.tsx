@@ -8,6 +8,7 @@ import { JsonView } from "./json-view";
 import { SectionCard } from "./section-card";
 import { EmptyState } from "./page-states";
 import { RunTrigger } from "./run-trigger";
+import { RunCostReadout } from "./run-cost-readout";
 import { formatDateField } from "../lib/markdown";
 import { ACTIVE_RUN_STATUSES, type EnrichedRun, type TokenUsage } from "@appstrate/shared-types";
 
@@ -38,7 +39,8 @@ export function RunInfoTab({ run }: RunInfoTabProps) {
   const usage = run.token_usage as TokenUsage | null;
   const metadata = run.metadata as Record<string, unknown> | null;
   const connectionsUsed = run.connections_used ?? null;
-  const hasUsage = run.cost != null || usage != null || run.model_label != null;
+  const hasUsage =
+    run.cost != null || run.cost_pricing_status != null || usage != null || run.model_label != null;
   const runnerOriginLabel =
     run.runOrigin === "remote" ? t("run.infoRunnerRemote") : t("run.infoRunnerPlatform");
   // Append the runner name when present so the dashboard shows
@@ -124,8 +126,15 @@ export function RunInfoTab({ run }: RunInfoTabProps) {
           }
         >
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {run.cost != null && (
-              <InfoCard label={t("run.usageCost")} value={`$${run.cost.toFixed(4)}`} />
+            {/* Shown when there is a number OR a reason there isn't one: an
+                `unpriced` run finalizes with `cost = NULL` on purpose, and
+                silently dropping the card would hide exactly the case this
+                readout exists to report. */}
+            {(run.cost != null || run.cost_pricing_status != null) && (
+              <InfoCard
+                label={t("run.usageCost")}
+                value={<RunCostReadout cost={run.cost} pricingStatus={run.cost_pricing_status} />}
+              />
             )}
             {usage?.input_tokens != null && (
               <InfoCard

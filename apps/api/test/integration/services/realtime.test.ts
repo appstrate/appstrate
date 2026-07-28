@@ -50,6 +50,7 @@ const NOTIFY_DEFAULTS: Record<string, Record<string, unknown>> = {
     package_id: "pkg-default",
     token_usage: null,
     cost_so_far: 0,
+    cost_pricing_status: null,
   },
 };
 
@@ -453,6 +454,7 @@ describe("realtime service (integration)", () => {
         packageId: "@scope/agent",
         tokenUsage: { input_tokens: 10, output_tokens: 5 },
         costSoFar: 0.0042,
+        costPricingStatus: null,
       });
     });
 
