@@ -129,11 +129,10 @@ for (const file of mapFiles) {
   await db
     .insert(packages)
     .values({
+      // `@scope/name` EST la clé : la table ne porte ni colonne scope ni colonne name.
       id: packageId,
       orgId: org!.id,
-      scope: ORG_SLUG,
-      name: shortName,
-      type: "agent",
+      type: "agent" as const,
       source: "local",
       draftManifest: { ...manifest, name: packageId },
       draftContent: prompt,

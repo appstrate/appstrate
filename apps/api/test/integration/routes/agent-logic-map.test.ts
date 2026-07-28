@@ -27,6 +27,25 @@ import { createTestContext, authHeaders, type TestContext } from "../../helpers/
 import { seedAgent, seedPackageVersion } from "../../helpers/seed.ts";
 import { installPackage } from "../../../src/services/application-packages.ts";
 
+interface LogicMapBody {
+  map: unknown | null;
+  nodes: { position: { x: number; y: number }; height: number }[];
+  edges: { from: string; to: string; condition: string | null }[];
+  diagnostics: {
+    level: string;
+    code: string;
+    node_id: string | null;
+    item_id: string | null;
+    step_ids: string[];
+  }[];
+  meta: {
+    generated_at: string | null;
+    generator_kind: string | null;
+    stale: boolean;
+    flow_ratio: number;
+  };
+}
+
 const app = getTestApp();
 const AGENT = "@logicorg/agent";
 const [SCOPE, NAME] = ["logicorg", "agent"];
@@ -134,7 +153,7 @@ describe("GET /api/agents/:scope/:name/logic-map", () => {
       headers: authHeaders(ctx),
     });
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = (await res.json()) as LogicMapBody;
     expect(body.map).toBeNull();
     expect(body.nodes).toEqual([]);
     expect(body.meta.generated_at).toBeNull();
@@ -148,7 +167,7 @@ describe("GET /api/agents/:scope/:name/logic-map", () => {
       headers: authHeaders(ctx),
     });
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = (await res.json()) as LogicMapBody;
 
     expect(body.map).not.toBeNull();
     expect(body.nodes).toHaveLength(3);
@@ -171,7 +190,7 @@ describe("GET /api/agents/:scope/:name/logic-map", () => {
     const res = await app.request(MAP_URL, {
       headers: authHeaders(ctx),
     });
-    const body = await res.json();
+    const body = (await res.json()) as LogicMapBody;
     expect(body.meta.stale).toBe(true);
   });
 
@@ -192,14 +211,12 @@ describe("GET /api/agents/:scope/:name/logic-map", () => {
     const res = await app.request(MAP_URL, {
       headers: authHeaders(ctx),
     });
-    const body = await res.json();
-    const finding = body.diagnostics.find(
-      (d: { item_id: string }) => d.item_id === "@logicorg/absent",
-    );
+    const body = (await res.json()) as LogicMapBody;
+    const finding = body.diagnostics.find((d) => d.item_id === "@logicorg/absent");
     expect(finding).toBeDefined();
-    expect(finding.level).toBe("error");
-    expect(finding.node_id).toBe("toolbox");
-    expect(finding.step_ids).toContain("s1");
+    expect(finding!.level).toBe("error");
+    expect(finding!.node_id).toBe("toolbox");
+    expect(finding!.step_ids).toContain("s1");
   });
 
   it("keeps a runtime capability a hint, never an error", async () => {
@@ -213,11 +230,11 @@ describe("GET /api/agents/:scope/:name/logic-map", () => {
     const res = await app.request(MAP_URL, {
       headers: authHeaders(ctx),
     });
-    const body = await res.json();
-    const finding = body.diagnostics.find((d: { item_id: string }) => d.item_id === "bash");
+    const body = (await res.json()) as LogicMapBody;
+    const finding = body.diagnostics.find((d) => d.item_id === "bash");
     expect(finding).toBeDefined();
-    expect(finding.level).toBe("hint");
-    expect(body.diagnostics.some((d: { level: string }) => d.level === "error")).toBe(false);
+    expect(finding!.level).toBe("hint");
+    expect(body.diagnostics.some((d) => d.level === "error")).toBe(false);
   });
 
   it("does not leak another organisation's map", async () => {
@@ -229,7 +246,7 @@ describe("GET /api/agents/:scope/:name/logic-map", () => {
       headers: authHeaders(ctx),
     });
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = (await res.json()) as LogicMapBody;
     expect(body.map).toBeNull();
   });
 
