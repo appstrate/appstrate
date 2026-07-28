@@ -91,6 +91,8 @@ jobs:
           fi
 
       # ── Precondition for the lockstep gate below ────────────────────────────
+      # Release procedure (ordering, bypass, token): docs/deployment/RELEASING_CORE.md
+      #
       # `check-consumer-versions.ts` reads two consumer repos through the
       # GitHub contents API. BOTH ARE PRIVATE (cloud, connect-helper).
       # `secrets.GITHUB_TOKEN` is scoped to

@@ -79,7 +79,9 @@ by caret range. When a change spans both, **publish `afps-shared` first** —
 otherwise this package cannot resolve its own dependency on install.
 
 Publishing is triggered by pushing a `core@X.Y.Z` git tag; CI handles the rest
-(`.github/workflows/publish-core.yml`).
+(`.github/workflows/publish-core.yml`). The full procedure — release ordering,
+the consumer lockstep gate and how to bypass it — is in
+[docs/deployment/RELEASING_CORE.md](../../docs/deployment/RELEASING_CORE.md).
 
 See [CHANGELOG.md](./CHANGELOG.md) for the release history, including breaking
 changes between major versions.

@@ -19,57 +19,12 @@ break every READER of those fields, `ChatTurnFinishReason` gains a `"deadline"`
 member that breaks exhaustive switches, `isFinalChatStep` loses its `maxSteps`
 parameter, and a set of exports with no importer anywhere is deleted.
 
-> **Release ordering for a MAJOR — the tag FIRST, then the consumers.**
-> `@appstrate/afps-shared` stays at `^0.3.1` (already published, nothing to
-> release before this); a leaf whose range you _did_ move must still reach npm
-> before core references it.
->
-> 1. **Know who is on the hook.** `scripts/check-consumer-versions.ts` is the
->    authoritative list and reads each `package.json` off the repo's **default
->    branch** through the GitHub contents API. Today that is two repos: `cloud`
->    and `connect-helper`. Workspace packages inside this monorepo resolve
->    `workspace:*`, cannot drift, and need no bump.
-> 2. **Tag `core@X.0.0` and push it.** The gate _warns_ rather than blocks when
->    an `X.0.0` release finds a consumer exactly one major behind — a consumer
->    physically cannot declare `^X.0.0` before X.0.0 exists on npm, since its
->    own `bun install --frozen-lockfile` could not resolve it (issue #1028,
->    fixed in #1032).
-> 3. **Bump the consumers to `^X.0.0` right after**, and push to each default
->    branch. Not optional politeness: the carve-out is scoped to `X.0.0` alone,
->    so the very next core release — `X.0.1`, `X.1.0`, anything non-major —
->    fails hard on a consumer still pinned to `^(X-1)`. That is what keeps the
->    gate's teeth.
->
-> Do NOT invert this for a major. Bumping consumers first is the deadlock the
-> carve-out removed: `^X.0.0` does not resolve until core is on npm, so each
-> consumer's own CI goes red _and_ the gate blocks the very publish that would
-> unblock it. For a NON-major release there is no carve-out and no ordering
-> question — every consumer must already be on `^X` before you tag.
->
-> **The gate can block the publish.** `.github/workflows/publish-core.yml` runs
-> it **before** `npm publish`, and a `fail` verdict is `exit 1`. Deliberate —
-> but understand what it is: a _drift alarm_, not a compatibility guard.
-> Publishing a new major breaks no consumer at install time, because a `^2`
-> range keeps resolving 2.x. Bypassing is possible and must stay a deliberate,
-> auditable act: set the repository variable `CONSUMER_DRIFT_POLICY` to `warn`
-> or `off`, and delete it again once the publish is through.
->
-> **The gate only bites with a token that can read private repos.** Both
-> consumers are private; on a 404 the script logs `not present, skipping` and
-> counts nothing, so a missing or underscoped `CONSUMER_LOCKSTEP_TOKEN` (PAT /
-> GitHub App token with `contents:read`) makes it report
-> `0 failure(s), 0 warning(s)` having verified nothing. That secret exists as of
-> 2026-07-28; the workflow's "Assert the lockstep gate can actually run" step is
-> what turns its future absence — expiry, revocation, a scope it no longer
-> covers — back into a loud failure instead of a silent pass.
->
-> **What actually happened for `6.0.0`:** published 2026-07-27 through the
+> **How this one shipped:** published 2026-07-27 through the
 > `CONSUMER_DRIFT_POLICY=warn` bypass — variable set, tag pushed, variable
-> deleted immediately. The carve-out in step 2 did not exist yet, and three
+> deleted immediately. The `X.0.0` carve-out did not exist yet, and three
 > consumers (`registry`, `portal`, `connect-helper`) were four majors behind on
-> a list that still included them. The list has since been narrowed to the repos
-> actually kept in lockstep: `module-claude-code` left when it was absorbed
-> in-tree (#1026), `registry` and `portal` when those products were retired.
+> a list that still included them. The procedure lives in
+> [`docs/deployment/RELEASING_CORE.md`](../../docs/deployment/RELEASING_CORE.md).
 
 > **Deploy ordering — modules BEFORE the platform**, for the same reason as
 > `5.0.0`: a module implementing `beforeUsage` / `checkUsageAllowed` must be on
