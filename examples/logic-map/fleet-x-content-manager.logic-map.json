@@ -1,0 +1,314 @@
+{
+  "map_version": 1,
+  "shape": "policies",
+  "source": {
+    "package_id": "langchain-fleet/x-content-manager",
+    "version": null,
+    "integrity": null,
+    "files": [
+      "configs/agents/x-content-manager/AGENT.md"
+    ]
+  },
+  "generated_at": "2026-07-27T00:00:00Z",
+  "generator": {
+    "kind": "human",
+    "author": "PR 3 — élargissement du corpus, borne basse",
+    "agent": null,
+    "version": null,
+    "model": null
+  },
+  "summary": "Gestionnaire de contenu X : apprend la voix de la personne, suit ses sujets, alimente un wiki markdown et rédige tweets, threads et articles. Le prompt système est une table des matières : il énumère sept skills et une arborescence de fichiers, et délègue toute la logique de décision à ces skills. Aucune séquence, aucune sortie prescrite.",
+  "steps": [
+    {
+      "id": "id1",
+      "kind": "guard",
+      "group": "Identity",
+      "label": "Ne pas se comporter en community manager ni en bot marketing : être une extension de la personne",
+      "parent": null,
+      "detail": "Penser comme elle, remarquer ce qu'elle remarquerait, écrire comme elle écrit. Contrainte de posture qui borne tout ce que l'agent produit ; ne pas l'appliquer est un défaut, pas un cas non survenu.",
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/x-content-manager/AGENT.md",
+        "lines": [35, 38],
+        "quote": "You are not a social media manager. You are not a marketing bot."
+      },
+      "confidence": 0.92
+    },
+    {
+      "id": "sk1",
+      "kind": "guard",
+      "group": "Skills",
+      "label": "`writing-voice` : profil de voix par lequel TOUT contenu passe",
+      "parent": null,
+      "detail": "Comment la personne écrit, ce qu'elle ne fait jamais, exemples de calibrage. Autorité externe absolue sur la rédaction ; rien de cette voix n'est dans le prompt.",
+      "refs": ["skills:writing-voice"],
+      "evidence": {
+        "file": "configs/agents/x-content-manager/AGENT.md",
+        "lines": [42, 43],
+        "quote": "All content passes through this."
+      },
+      "confidence": 0.95
+    },
+    {
+      "id": "sk2",
+      "kind": "policy",
+      "group": "Skills",
+      "label": "`onboard` : construire et affiner la voix — à la première interaction, à relancer pour rester juste",
+      "parent": null,
+      "detail": "Analyse les publications existantes, identifie ce qui marche, met à jour le skill de voix et amorce la base de connaissance. Le prompt nomme ce skill `onboard` ; c'est ce nom qui est rapporté, conformément à la règle de fidélité (voir gaps).",
+      "refs": ["skills:onboard", "toolbox:x_com#x_get_user_posts"],
+      "evidence": {
+        "file": "configs/agents/x-content-manager/AGENT.md",
+        "lines": [44, 46],
+        "quote": "Runs on first interaction. Re-run to stay sharp."
+      },
+      "confidence": 0.9
+    },
+    {
+      "id": "sk3",
+      "kind": "policy",
+      "group": "Skills",
+      "label": "`scout-x` : balayer timeline, mentions et web pour du matériau à fort signal, puis compiler dans le wiki",
+      "parent": null,
+      "detail": "Collecte les sources brutes. « Runs on a schedule » sans dire lequel ; le cron déclaré est quotidien à 16 h. Outils rattachés par l'effet, le prompt n'en nomme aucun.",
+      "refs": [
+        "skills:scout-x",
+        "toolbox:x_com#x_get_timeline",
+        "toolbox:x_com#x_get_user_mentions",
+        "toolbox:exa#exa_web_search"
+      ],
+      "evidence": {
+        "file": "configs/agents/x-content-manager/AGENT.md",
+        "lines": [47, 48],
+        "quote": "Scan timeline, mentions, and the web for high-signal material."
+      },
+      "confidence": 0.88
+    },
+    {
+      "id": "sk4",
+      "kind": "policy",
+      "group": "Skills",
+      "label": "`workshop-x-posts` : brainstormer et rédiger le format court — tweets et threads",
+      "parent": null,
+      "detail": "Puise dans le wiki et la voix pour produire du contenu prêt à publier. Aucun déclencheur explicite : rien ne dit quand l'agent entre dans cet atelier.",
+      "refs": ["skills:workshop-x-posts"],
+      "evidence": {
+        "file": "configs/agents/x-content-manager/AGENT.md",
+        "lines": [49, 50],
+        "quote": "For tweets and short-form."
+      },
+      "confidence": 0.88
+    },
+    {
+      "id": "sk5",
+      "kind": "policy",
+      "group": "Skills",
+      "label": "`deep-write` : format long, repris de `workshop-x-posts` quand l'idée est trop grosse pour un tweet",
+      "parent": null,
+      "detail": "Boucle recherche → cadrage → brouillon → révision, notée contre une grille de qualité. Seule relation ordonnée du document.",
+      "refs": ["skills:deep-write"],
+      "evidence": {
+        "file": "configs/agents/x-content-manager/AGENT.md",
+        "lines": [51, 54],
+        "quote": "Hands off from workshop-x-posts when an"
+      },
+      "confidence": 0.9
+    },
+    {
+      "id": "sk6",
+      "kind": "guard",
+      "group": "Skills",
+      "label": "`humanizer` : passe finale obligatoire avant de présenter QUELQUE contenu que ce soit",
+      "parent": null,
+      "detail": "Retire les tics d'écriture d'IA. « Final pass before presenting any content » : contrainte de fin de chaîne, quel que soit le chemin emprunté.",
+      "refs": ["skills:humanizer"],
+      "evidence": {
+        "file": "configs/agents/x-content-manager/AGENT.md",
+        "lines": [55, 56],
+        "quote": "Strip AI-writing patterns from drafts. Final pass before"
+      },
+      "confidence": 0.93
+    },
+    {
+      "id": "sk7",
+      "kind": "guard",
+      "group": "Skills",
+      "label": "`wiki-markdown` : référence de formatage pour TOUTE écriture dans le wiki",
+      "parent": null,
+      "detail": "Wikilinks, frontmatter, embeds.",
+      "refs": ["skills:wiki-markdown"],
+      "evidence": {
+        "file": "configs/agents/x-content-manager/AGENT.md",
+        "lines": [57, 58],
+        "quote": "Formatting reference for all wiki writing."
+      },
+      "confidence": 0.93
+    },
+    {
+      "id": "kb1",
+      "kind": "guard",
+      "group": "Knowledge Base",
+      "label": "Arborescence imposée : `memories/raw/` (tweets par semaine, articles par slug) jamais édité après capture, `memories/wiki/` compilé depuis `raw/`",
+      "parent": null,
+      "detail": "Quatre chemins prescrits dans un bloc de code, plus la règle d'immuabilité du brut inscrite dans le commentaire de l'arborescence elle-même.",
+      "refs": ["skills:wiki-markdown"],
+      "evidence": {
+        "file": "configs/agents/x-content-manager/AGENT.md",
+        "lines": [62, 69],
+        "quote": "memories/raw/                  — source material, never edited after capture"
+      },
+      "confidence": 0.93
+    },
+    {
+      "id": "kb2",
+      "kind": "policy",
+      "group": "Knowledge Base",
+      "label": "Le wiki est le domaine de l'agent : tenir l'index à jour, lier agressivement, retirer les sujets périmés",
+      "parent": null,
+      "detail": "L'humain y touche rarement. « Les connexions entre sujets sont là où vivent les intuitions » : le liage n'est pas cosmétique, c'est la valeur produite. Aucun déclencheur temporel.",
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/x-content-manager/AGENT.md",
+        "lines": [71, 73],
+        "quote": "Keep the index current. Link aggressively"
+      },
+      "confidence": 0.92
+    },
+    {
+      "id": "kb3",
+      "kind": "policy",
+      "group": "Knowledge Base",
+      "label": "Matériau brut qui n'entre dans aucun sujet existant : signal qu'il faut créer un sujet",
+      "parent": null,
+      "detail": "Règle de création d'entrée du wiki, formulée comme un signal et non comme une obligation.",
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/x-content-manager/AGENT.md",
+        "lines": [73, 74],
+        "quote": "When raw material"
+      },
+      "confidence": 0.88
+    },
+    {
+      "id": "r1",
+      "kind": "guard",
+      "group": "Rules",
+      "label": "Wikilinks réservés à l'écriture de fichiers ; jamais dans une réponse à l'utilisateur",
+      "parent": null,
+      "detail": "Pages de wiki et captures brutes uniquement.",
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/x-content-manager/AGENT.md",
+        "lines": [78, 78],
+        "quote": "are for file writing only (wiki pages, raw captures). Never use them in responses to the user."
+      },
+      "confidence": 0.96
+    },
+    {
+      "id": "r2",
+      "kind": "policy",
+      "group": "Rules",
+      "label": "Doute sur la voix : par défaut, direct et sobre plutôt que malin",
+      "parent": null,
+      "detail": "Seule règle de fond sur la voix présente dans le prompt ; tout le reste est dans `writing-voice`.",
+      "refs": ["skills:writing-voice"],
+      "evidence": {
+        "file": "configs/agents/x-content-manager/AGENT.md",
+        "lines": [79, 79],
+        "quote": "When unsure about voice, default to direct and understated over clever"
+      },
+      "confidence": 0.95
+    },
+    {
+      "id": "r3",
+      "kind": "policy",
+      "group": "Rules",
+      "label": "Les sujets sont des documents vivants : créer, fusionner, retirer — ne pas thésauriser",
+      "parent": null,
+      "detail": "Deuxième formulation de kb2, depuis une autre section.",
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/x-content-manager/AGENT.md",
+        "lines": [80, 80],
+        "quote": "Topics are living documents — create, merge, retire. Don't hoard."
+      },
+      "confidence": 0.94
+    },
+    {
+      "id": "r4",
+      "kind": "guard",
+      "group": "Rules",
+      "label": "Le matériau brut est en ajout seul : ne jamais l'éditer après capture",
+      "parent": null,
+      "detail": "Deuxième formulation de la règle inscrite dans l'arborescence (kb1).",
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/x-content-manager/AGENT.md",
+        "lines": [81, 81],
+        "quote": "Raw material is append-only. Never edit after capture."
+      },
+      "confidence": 0.96
+    },
+    {
+      "id": "r5",
+      "kind": "guard",
+      "group": "Rules",
+      "label": "Toujours citer les sources brutes dans les articles du wiki, au moyen de wikilinks",
+      "parent": null,
+      "detail": "Traçabilité obligatoire entre `memories/wiki/` et `memories/raw/`.",
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/x-content-manager/AGENT.md",
+        "lines": [82, 82],
+        "quote": "Always cite raw sources in wiki articles using \\[\\[wikilinks\\]\\]"
+      },
+      "confidence": 0.95
+    }
+  ],
+  "edges": [
+    { "from": "sk4", "to": "sk5", "condition": "l'idée est trop grosse pour un tweet" }
+  ],
+  "gaps": [
+    {
+      "kind": "declared_capability_without_rule",
+      "message": "L'agent s'annonce « Posts on X in your voice » et reçoit `x_create_post`, `x_reply_to_post` et `x_quote_post`. Le prompt système ne prescrit JAMAIS de publier : ni quand, ni sous quelle validation, ni s'il faut demander à l'humain d'abord. Le seul mot qui approche la sortie est « presenting » (AGENT.md:55-56), et il désigne une présentation à l'utilisateur, pas une publication. La carte ne contient donc aucun nœud `emit`. Même famille que le cron non couvert de l'executive-assistant, mais plus grave : c'est la promesse produit qui est en défaut.",
+      "related_steps": ["sk6"]
+    },
+    {
+      "kind": "package_id_mismatch",
+      "message": "Le prompt nomme le skill d'onboarding `onboard` (AGENT.md:44) alors que la carte de dépendances déclare `onboard-x-content-manager`. La carte rapporte `skills:onboard` conformément à la règle de fidélité : le croisement fera remonter « référencé, non déclaré » d'un côté et « déclaré, jamais référencé » de l'autre. Même signature que `@tractr/google-drive` vs `@appstrate/google-drive` dans `compta-gmail-harvest`.",
+      "related_steps": ["sk2"]
+    },
+    {
+      "kind": "no_routing_rule",
+      "message": "La section « Skills » décrit sept capacités sans jamais dire QUAND en invoquer une. Une seule phrase du document porte un déclencheur d'enchaînement (`deep-write` reprend de `workshop-x-posts` quand l'idée est trop grosse pour un tweet, AGENT.md:53-54). Rien ne dit ce que fait l'agent quand l'utilisateur lui écrit simplement, ni comment il choisit entre atelier court et écriture longue à l'entrée. C'est la raison directe du graphe à 16 nœuds et 1 arête.",
+      "related_steps": ["sk2", "sk3", "sk4", "sk5"]
+    },
+    {
+      "kind": "external_authority",
+      "message": "Sept skills déclarés, sept skills sur lesquels repose toute la logique réelle : la voix (`writing-voice`), l'analyse des publications (`onboard`), la sélection du signal (`scout-x`), la rédaction courte (`workshop-x-posts`), la boucle longue et sa grille de qualité (`deep-write`), le nettoyage des tics d'IA (`humanizer`), le format des fichiers (`wiki-markdown`). Une carte tirée du seul prompt système est une coquille presque intégrale : elle décrit une arborescence de fichiers et cinq règles de wiki.",
+      "related_steps": ["sk1", "sk2", "sk3", "sk4", "sk5", "sk6", "sk7"]
+    },
+    {
+      "kind": "declared_trigger_partially_covered",
+      "message": "Le cron déclaré `0 16 * * *` (« Daily scout-x run ») est couvert par une demi-phrase : « Runs on a schedule » (AGENT.md:48). Le prompt ne dit ni ce que le run quotidien produit, ni où il atterrit au-delà de « compile into the wiki », ni s'il notifie l'utilisateur, ni ce qu'il fait un jour sans signal. À comparer au cron entièrement non couvert de l'executive-assistant : ici la sévérité est moindre, mais le constat est de même nature.",
+      "related_steps": ["sk3"]
+    },
+    {
+      "kind": "non_prescriptive_section",
+      "message": "Les lignes 31-33 et 38 (« You help people post consistently… », « Your job is to close the gap between \"I found this interesting\" and \"here's a post about it.\" ») énoncent une mission sans prescrire aucun geste : aucun nœud n'en sort. Signalé pour que le mode balayage ne compte pas cette absence comme un oubli du cartographe.",
+      "related_steps": []
+    },
+    {
+      "kind": "declared_capability_without_rule",
+      "message": "Six outils déclarés sur treize ne sont couverts par aucune règle du prompt : `x_get_me`, `x_get_user`, `x_search_posts`, `x_read_post`, `read_url_content` et `extract_images_from_url`. Le dernier est le plus parlant : la base de connaissance ne mentionne jamais d'images, et aucune règle ne dit d'en joindre à une publication.",
+      "related_steps": []
+    },
+    {
+      "kind": "unspecified_error_path",
+      "message": "Aucune règle ne couvre l'échec : API X indisponible, recherche Exa vide, profil de voix absent parce que l'onboarding n'a pas eu lieu. Ce dernier cas est notable : `writing-voice` est déclaré obligatoire pour tout contenu (AGENT.md:43) alors que le skill qui le remplit ne tourne qu'à la première interaction (AGENT.md:46), et rien ne décrit le comportement dans l'intervalle.",
+      "related_steps": ["sk1", "sk2"]
+    }
+  ],
+  "overall_confidence": 0.92
+}

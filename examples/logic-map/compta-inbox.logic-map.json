@@ -1,0 +1,1201 @@
+{
+  "map_version": 1,
+  "shape": "sequence",
+  "source": {
+    "package_id": "@default/compta-inbox",
+    "version": "1.5.0",
+    "integrity": null,
+    "files": [
+      "prompt.md",
+      "skills/@default/compta-references/SKILL.md",
+      "skills/@default/compta-references/references/vendor-rules.md",
+      "skills/@default/compta-references/references/fiscal-year.md",
+      "skills/@default/compta-references/references/paiements-store.md",
+      "skills/@default/compta-references/references/virements-interac-store.md"
+    ]
+  },
+  "generated_at": "2026-07-27T00:00:00Z",
+  "generator": {
+    "kind": "agent",
+    "author": "PR 3 — élargissement du corpus, agent cartographe",
+    "agent": "cartographe-logic-map",
+    "version": null,
+    "model": "claude-opus-4"
+  },
+  "summary": "Range les documents déposés à la racine d'une Inbox Drive vers leur destination compta Tractr : relevés BNC bruts routés par regex de nom vers les dossiers centralisés, CSV BNC parsés et mergés dans des stores annuels, factures / dépôts / revenus gouvernementaux / Stripe identifiés par lecture du contenu PDF puis routés vers le trimestre fiscal, non identifiables déplacés dans `_needs-review/`, doublons dans `_doublons/`.",
+  "steps": [
+    {
+      "id": "s1",
+      "kind": "step",
+      "group": "Préambule",
+      "label": "Lire le SKILL.md et les 5 fichiers de références désignés",
+      "parent": null,
+      "detail": "Les règles de décision (calcul du trimestre, classification des émetteurs, naming, contrats des deux stores annuels) vivent dans le skill, pas dans le prompt.",
+      "refs": ["skills:@default/compta-references"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [43, 48],
+        "quote": "3. `.pi/skills/@default/compta-references/references/vendor-rules.md` (catégories, naming, regex BNC bruts)"
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "s2",
+      "kind": "tool_call",
+      "group": "Préambule",
+      "label": "Installer `pdfplumber` et `PyMuPDF` (une fois par run)",
+      "parent": null,
+      "detail": "Sortie du processus par bash : `pip install`. Prérequis des deux passes de lecture PDF (texte puis image).",
+      "refs": ["system_tools:bash"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [54, 56],
+        "quote": "pip install pdfplumber PyMuPDF 2>&1 | tail -2"
+      },
+      "confidence": 0.98
+    },
+
+    {
+      "id": "g1",
+      "kind": "guard",
+      "group": "Règles absolues",
+      "label": "Ne jamais supprimer, ne jamais écraser un fichier existant",
+      "parent": null,
+      "detail": "Aucune opération DELETE. Nom cible déjà pris à la destination → skip avec warning dans `output.skipped`, pas d'écrasement et pas de suffixe automatique.",
+      "refs": ["agent_output:skipped"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [27, 28],
+        "quote": "**Ne JAMAIS supprimer de fichiers.** Aucune opération DELETE."
+      },
+      "confidence": 0.99
+    },
+    {
+      "id": "g2",
+      "kind": "guard",
+      "group": "Règles absolues",
+      "label": "Exceptions : les fichiers méta managés par l'agent sont réécrivables",
+      "parent": null,
+      "detail": "`factures-parsed.json` (5.2) et `Paiements-BNC_{AF}.json` (5.3) — plus, par extension de 5.3bis, `Virements-Interac-BNC_{AF}.json`.",
+      "refs": [],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [35, 35],
+        "quote": "**Exceptions à la règle \"no overwrite\"** : `factures-parsed.json` (étape 5.2) et `Paiements-BNC_{AF}.json` (étape 5.3, le store de paiements annuel) sont des fichiers de métadonnées gérés par cet agent"
+      },
+      "confidence": 0.97
+    },
+    {
+      "id": "g3",
+      "kind": "guard",
+      "group": "Règles absolues",
+      "label": "Créer un dossier n'est autorisé que dans trois cas",
+      "parent": null,
+      "detail": "Structure du trimestre cible si `auto_create_quarter_structure=true`, `_needs-review/` et `_doublons/` à la racine de l'inbox (toujours).",
+      "refs": ["config:auto_create_quarter_structure"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [30, 33],
+        "quote": "4. **Créer des dossiers est autorisé** :"
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "g4",
+      "kind": "guard",
+      "group": "Règles absolues",
+      "label": "Créer un fichier : `api_upload` resumable, jamais le multipart",
+      "parent": null,
+      "detail": "Le prompt nomme `api_upload` comme un outil de l'intégration `@appstrate/google-drive`, alors que le manifeste ne déclare que `api_call` dans `tools[]`.",
+      "refs": ["toolbox:@appstrate/google-drive#api_upload"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [14, 22],
+        "quote": "**n'utilise PAS le multipart** (`uploadType=multipart`), qui échoue souvent"
+      },
+      "confidence": 0.96
+    },
+    {
+      "id": "g5",
+      "kind": "guard",
+      "group": "Règles absolues",
+      "label": "Aucun appel LLM externe : la classification, c'est toi",
+      "parent": null,
+      "detail": "Les scripts du skill ne font que de l'extraction déterministe et s'invoquent par bash ; tout le raisonnement reste dans le run.",
+      "refs": ["skills:@default/compta-references", "system_tools:bash"],
+      "evidence": {
+        "file": "skills/@default/compta-references/SKILL.md",
+        "lines": [36, 38],
+        "quote": "Ils s'invoquent depuis le runtime de l'agent en bash. **Aucun appel LLM externe** — tout est déterministe."
+      },
+      "confidence": 0.97
+    },
+    {
+      "id": "g6",
+      "kind": "guard",
+      "group": "Règles absolues",
+      "label": "Toute communication passe par les outils, en français",
+      "parent": null,
+      "detail": "Tout texte libre hors appel d'outil n'est jamais délivré.",
+      "refs": ["system_tools:output", "system_tools:log", "system_tools:pin"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [5, 5],
+        "quote": "Toute communication passe par les outils : le résultat structuré via `output`, la progression via `log`, l'état de reprise via `pin`."
+      },
+      "confidence": 0.99
+    },
+    {
+      "id": "g7",
+      "kind": "guard",
+      "group": "Règles absolues",
+      "label": "Reprise : lire le checkpoint injecté, ne pas appeler `recall_memory`",
+      "parent": null,
+      "detail": "L'état du dernier run arrive par les sections auto-injectées du prompt système. L'agent est idempotent : un re-run sur la même inbox est inoffensif.",
+      "refs": [],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [751, 753],
+        "quote": "Cet agent est **idempotent** — un re-run sur le même inbox doit être inoffensif"
+      },
+      "confidence": 0.96
+    },
+    {
+      "id": "p1",
+      "kind": "policy",
+      "group": "Règles absolues",
+      "label": "Quand un PATCH Drive échoue : consigner et continuer",
+      "parent": null,
+      "detail": "Erreur non bloquante, locale au fichier : `log`, `output.erreurs`, on passe au suivant sans planter le run.",
+      "refs": ["agent_output:erreurs", "system_tools:log"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [746, 746],
+        "quote": "**Drive PATCH échoue** (réseau, permission) : `log` l'erreur, ajouter dans `output.erreurs`, continuer les autres fichiers, ne pas planter le run."
+      },
+      "confidence": 0.98
+    },
+
+    {
+      "id": "s3",
+      "kind": "tool_call",
+      "group": "0. Lister l'inbox",
+      "label": "Lister la racine de l'inbox et écarter les sous-dossiers",
+      "parent": null,
+      "detail": "`api_call` GET, `pageSize=200`. Les sous-dossiers `_needs-review/` et `_doublons/` restent intouchés au re-run. `log` : « Inbox : {N} fichier(s) à traiter ».",
+      "refs": ["toolbox:@appstrate/google-drive#api_call", "agent_input:drive_inbox_folder_id", "system_tools:log"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [69, 78],
+        "quote": "À partir de `input.drive_inbox_folder_id`, lister les fichiers à la **racine** du dossier (pas les sous-dossiers"
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "s4",
+      "kind": "decision",
+      "group": "0. Lister l'inbox",
+      "label": "L'inbox est-elle vide (`N = 0`) ?",
+      "parent": null,
+      "detail": "Court-circuit vers la sortie. L'inbox vide n'est pas une erreur (§ Gestion des erreurs).",
+      "refs": [],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [80, 80],
+        "quote": "Si `N = 0` → aller directement à l'étape 7 (output vide + summary \"Inbox vide\")."
+      },
+      "confidence": 0.99
+    },
+
+    {
+      "id": "s5",
+      "kind": "loop",
+      "group": "1. Tri rapide par regex de nom",
+      "label": "Pour chaque fichier de l'inbox, tester les motifs dans l'ordre",
+      "parent": null,
+      "detail": "Routage sans lecture de contenu des fichiers dont BNC garantit le format de nom : évite N téléchargements et N classifications.",
+      "refs": [],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [86, 88],
+        "quote": "Pour chaque fichier de l'inbox, tester dans cet ordre :"
+      },
+      "confidence": 0.99
+    },
+    {
+      "id": "s5.1",
+      "kind": "decision",
+      "group": "1. Tri rapide par regex de nom",
+      "label": "Brut Mastercard : `^CARTCRED_CREDCARD_\\d+_(\\d{8})\\.pdf$` ?",
+      "parent": "s5",
+      "detail": "Premier motif testé.",
+      "refs": [],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [92, 92],
+        "quote": "Regex : `^CARTCRED_CREDCARD_\\d+_(\\d{8})\\.pdf$`"
+      },
+      "confidence": 0.99
+    },
+    {
+      "id": "s5.2",
+      "kind": "step",
+      "group": "1. Tri rapide par regex de nom",
+      "label": "Catégorie `releve-cc` → `YYYY-MM-DD-CC-{4_derniers}.pdf`, centralisé MC",
+      "parent": "s5",
+      "detail": "Date = groupe 1 reformaté, 4 derniers chiffres lus dans le segment numérique du nom (défaut `5603`).",
+      "refs": ["config:drive_centralized_mc_folder_id"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [93, 97],
+        "quote": "- Destination : `config.drive_centralized_mc_folder_id`."
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "s5.3",
+      "kind": "decision",
+      "group": "1. Tri rapide par regex de nom",
+      "label": "Brut compte chèque : `^RELCPTE_ACCTSTMT_(\\d+)_(\\d{6})-?.*\\.pdf$` ?",
+      "parent": "s5",
+      "detail": "Date au format `MMDDYY`, préfixée `20` pour l'année.",
+      "refs": [],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [101, 101],
+        "quote": "Regex : `^RELCPTE_ACCTSTMT_(\\d+)_(\\d{6})-?.*\\.pdf$`"
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "s5.4",
+      "kind": "step",
+      "group": "1. Tri rapide par regex de nom",
+      "label": "Catégorie `releve-chq` → centralisé CHQ, les 3 comptes dispatchés",
+      "parent": "s5",
+      "detail": "`YYYY-MM-DD-Releve-{numero_compte}.pdf` pour `92325`, `24426` et `29223`. Contrairement à `compta-trimestrielle` qui ne traite que `92325`, aucun compte n'est skippé ici. Numéro hors liste → `ambiguous`.",
+      "refs": ["config:drive_centralized_chq_folder_id"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [103, 110],
+        "quote": "ici on **dispatche les 3 comptes** vers le centralisé. Aucun skip."
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "s5.5",
+      "kind": "decision",
+      "group": "1. Tri rapide par regex de nom",
+      "label": "CSV BNC : `^\\d{14}\\.csv$` ?",
+      "parent": "s5",
+      "detail": "Le nom ne dit pas s'il s'agit d'un export paiements ou d'un export virements Interac : les deux portent ce format.",
+      "refs": [],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [114, 114],
+        "quote": "Regex : `^\\d{14}\\.csv$` (ex: `20260331160917.csv`)."
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "s5.6",
+      "kind": "step",
+      "group": "1. Tri rapide par regex de nom",
+      "label": "Catégorie `csv-paiements` : aucun routage vers un trimestre",
+      "parent": "s5",
+      "detail": "Marqué pour download obligatoire à l'étape 2 : ses lignes seront parsées puis mergées dans un store annuel à l'étape 5.3.",
+      "refs": [],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [116, 116],
+        "quote": "Le CSV n'est **plus routé vers un trimestre**."
+      },
+      "confidence": 0.98
+    },
+
+    {
+      "id": "s6",
+      "kind": "loop",
+      "group": "2. Lecture et classification",
+      "label": "Pour chaque fichier de `needs_content_read[]`",
+      "parent": null,
+      "detail": "Tous les fichiers non matchés par les regex de nom, plus les CSV (dont les lignes doivent être parsées).",
+      "refs": [],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [122, 124],
+        "quote": "`needs_content_read[]` = fichiers à télécharger pour classification (incluant les CSV paiements pour extraction des dates)"
+      },
+      "confidence": 0.97
+    },
+    {
+      "id": "s6.1",
+      "kind": "tool_call",
+      "group": "2. Lecture et classification",
+      "label": "Préparer `/workspace/inbox` et télécharger le fichier en streaming",
+      "parent": "s6",
+      "detail": "`mkdir -p` en bash, puis `api_call` GET `?alt=media` avec `responseMode: { toFile }` pour éviter l'inflation base64 en mémoire.",
+      "refs": ["toolbox:@appstrate/google-drive#api_call", "system_tools:bash"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [134, 144],
+        "quote": "télécharger en streaming via `api_call` (GET) avec `responseMode: { toFile: \"$WORK_DIR/{FILENAME}\" }`"
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "s6.2",
+      "kind": "tool_call",
+      "group": "2. Lecture et classification",
+      "label": "Pass 1 — extraire le texte des 3 premières pages (`extract-pdf.py`)",
+      "parent": "s6",
+      "detail": "Script déterministe du skill invoqué par bash ; le texte sort sur stdout, préfixé `--- page N ---`.",
+      "refs": ["skills:@default/compta-references", "system_tools:bash"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [150, 152],
+        "quote": "python3 .pi/skills/@default/compta-references/scripts/extract-pdf.py \"$WORK_DIR/{FILENAME}\" --pages 1-3"
+      },
+      "confidence": 0.99
+    },
+    {
+      "id": "s6.3",
+      "kind": "decision",
+      "group": "2. Lecture et classification",
+      "label": "Le texte fait-il au moins 50 caractères alphanumériques ?",
+      "parent": "s6",
+      "detail": "Seuil qui départage un PDF texte d'un PDF image ; en dessous, on bascule sur la lecture visuelle.",
+      "refs": [],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [156, 156],
+        "quote": "Si le texte retourné contient au moins **50 caractères alphanumériques**"
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "s6.4",
+      "kind": "tool_call",
+      "group": "2. Lecture et classification",
+      "label": "Pass 2 — convertir en JPEG dpi=100 (PyMuPDF) puis lire l'image via `Read`",
+      "parent": "s6",
+      "detail": "Snippet Python inline en bash, page 1 seulement par défaut. JPEG dpi=100 (~0,2 Mo) et non PNG dpi=150 (~2,3 Mo) pour tenir sous la limite multimodale de ~10,5 Mo ; les scans sont traités un par un. Conversion impossible → `ambiguous`.",
+      "refs": ["system_tools:bash", "system_tools:Read"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [160, 179],
+        "quote": "Ensuite, lis le JPEG généré via le tool `Read` (qui supporte les images)"
+      },
+      "confidence": 0.95
+    },
+    {
+      "id": "s6.5",
+      "kind": "decision",
+      "group": "2. Lecture et classification",
+      "label": "Quel émetteur, donc quelle catégorie ?",
+      "parent": "s6",
+      "detail": "Table de classification à 6 entrées (TPS/TVQ combiné, Stripe, avis gouvernemental, reçu de dépôt, facture fournisseur, CSV) arbitrée sur le contenu lu, indices dans `vendor-rules.md`. Agrégée ici en un seul nœud d'aiguillage.",
+      "refs": ["skills:@default/compta-references"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [183, 193],
+        "quote": "Tu identifies l'émetteur puis tu décides catégorie + destination en t'appuyant sur les indices listés dans `vendor-rules.md`"
+      },
+      "confidence": 0.93
+    },
+    {
+      "id": "s6.6",
+      "kind": "decision",
+      "group": "2. Lecture et classification",
+      "label": "Avis gouvernemental d'un seul organisme : dépense ou revenu ?",
+      "parent": "s6",
+      "detail": "Indices DÉPENSE (« Solde à payer », « Échéance », taxes municipales, FSS dû) contre indices REVENU (« Remboursement », « Crédit », « Avis de versement »). Deux signaux présents ou aucun → `ambiguous`.",
+      "refs": ["skills:@default/compta-references"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [199, 208],
+        "quote": "Si les deux signaux sont présents ou aucun → catégorie `ambiguous` avec raison précise."
+      },
+      "confidence": 0.96
+    },
+    {
+      "id": "s6.7",
+      "kind": "step",
+      "group": "2. Lecture et classification",
+      "label": "Dépense → `facture`, destination `2. Dépenses/{QTR}-Factures/`",
+      "parent": "s6",
+      "detail": "Regroupe trois cas de même destination : facture fournisseur, avis gouvernemental à payer (préfixe = organisme en MAJUSCULES), et remise combinée TPS+TVQ (`FEDERAL-PROVINCIAL_<date>_TPS-<x>_TVQ-<y>.pdf`, toujours facture, jamais revenu).",
+      "refs": ["skills:@default/compta-references"],
+      "evidence": {
+        "file": "skills/@default/compta-references/references/vendor-rules.md",
+        "lines": [20, 20],
+        "quote": "les paiements gouvernementaux (TPS/TVQ à payer, taxe foncière, cotisation FSS due, etc.) sont des **dépenses**, pas des revenus"
+      },
+      "confidence": 0.95
+    },
+    {
+      "id": "s6.8",
+      "kind": "step",
+      "group": "2. Lecture et classification",
+      "label": "Revenu → `3. Revenus/{Stripe | Dépôts | Gouvernement et organismes}/`",
+      "parent": "s6",
+      "detail": "Regroupe trois catégories de même famille : `stripe` (en-tête Stripe Payments Canada), `depot` (reçu de dépôt BNC, encaissement), `revenu-federal` / `revenu-provincial` / `revenu-ville`.",
+      "refs": [],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [187, 206],
+        "quote": "Indices **REVENU** (catégorie `revenu-federal` / `revenu-provincial` / `revenu-ville`, dest `3. Revenus/Gouvernement et organismes/`) :"
+      },
+      "confidence": 0.93
+    },
+    {
+      "id": "s6.9",
+      "kind": "step",
+      "group": "2. Lecture et classification",
+      "label": "Extraire vendor + date + montant, aux formats imposés",
+      "parent": "s6",
+      "detail": "Vendor en MAJUSCULES sans espaces ni accents, date `YYYY-MM-DD`, montant `123.45` sans devise ni séparateur de milliers. Ces 3 champs composent le nom du fichier ; un seul manquant → `ambiguous`.",
+      "refs": ["skills:@default/compta-references"],
+      "evidence": {
+        "file": "skills/@default/compta-references/references/vendor-rules.md",
+        "lines": [24, 28],
+        "quote": "Format : `<Prefixe>_<YYYY-MM-DD>_<Montant>.pdf`"
+      },
+      "confidence": 0.97
+    },
+    {
+      "id": "s6.10",
+      "kind": "step",
+      "group": "2. Lecture et classification",
+      "label": "Pour les factures, extraire en plus le schéma étendu",
+      "parent": "s6",
+      "detail": "`vendor_complet`, `currency`, `description`, `invoice_number`, `confidence` — et `tps_amount` / `tvq_amount` pour le cas TPS/TVQ. Ces champs alimentent `factures-parsed.json` (5.2) et évitent un re-parsing à `compta-trimestrielle`.",
+      "refs": ["skills:@default/compta-references"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [219, 229],
+        "quote": "`invoice_number` : numéro de facture/référence si visible, sinon `null`"
+      },
+      "confidence": 0.97
+    },
+    {
+      "id": "s6.11",
+      "kind": "decision",
+      "group": "2. Lecture et classification",
+      "label": "La facture est-elle adressée à Tractr Québec ?",
+      "parent": "s6",
+      "detail": "Destinataire attendu : `Tractr`, `9186-0338 Québec Inc`, une adresse Tractr connue, ou Olivier Tarbès à une adresse Tractr. Autre personne morale évidente → `ambiguous`. En cas de doute, ne pas sur-filtrer : garder `facture`.",
+      "refs": [],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [235, 239],
+        "quote": "Pour toute facture (`facture`, TPS/TVQ combiné, avis gouv à payer), vérifier le **destinataire**"
+      },
+      "confidence": 0.96
+    },
+    {
+      "id": "s6.12",
+      "kind": "step",
+      "group": "2. Lecture et classification",
+      "label": "Marquer `ambiguous` avec une raison précise (destination `_needs-review/`)",
+      "parent": "s6",
+      "detail": "Nœud de convergence : PDF illisible, champ vendor/date/montant non extractible, avis gouvernemental indécidable, facture d'une autre entité, compte chèque inconnu, trimestre cible inexistant. Le nom original est conservé.",
+      "refs": ["agent_output:ambiguous"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [215, 215],
+        "quote": "Si **un** des 3 (vendor/date/montant) est non extractible avec certitude → catégorie `ambiguous`, raison précise à logger"
+      },
+      "confidence": 0.9
+    },
+    {
+      "id": "s6.13",
+      "kind": "decision",
+      "group": "2. Lecture et classification",
+      "label": "CSV : export Virements Interac ou export paiements ?",
+      "parent": "s6",
+      "detail": "Discrimination par le contenu, jamais par le nom : en-tête `No,Type,Date,` (ou 1re ligne `Virements Interac`) → Interac ; en-tête `No,Date,` → paiements.",
+      "refs": ["skills:@default/compta-references"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [245, 245],
+        "quote": "si une ligne d'en-tête commence par `No,Type,Date,` (ou 1re ligne `Virements Interac`) → export **Virements Interac**"
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "s6.14",
+      "kind": "tool_call",
+      "group": "2. Lecture et classification",
+      "label": "Parser le CSV en `cp1252` vers des enregistrements JSON",
+      "parent": "s6",
+      "detail": "Deux scripts Python inline strictement parallèles (agrégés ici) : `/tmp/paiements-records.json` et `/tmp/interac-records.json`. Colonnes positionnelles, statut normalisé, bénéficiaire séparé de sa référence entre crochets. Vérifier que le bénéficiaire n'est pas vide — sinon l'encodage a échoué.",
+      "refs": ["system_tools:bash", "skills:@default/compta-references"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [247, 280],
+        "quote": "**Encodage** : l'export BNC est en **Windows-1252 / latin-1**, PAS en UTF-8."
+      },
+      "confidence": 0.94
+    },
+
+    {
+      "id": "s7",
+      "kind": "loop",
+      "group": "3. Destination et conflits",
+      "label": "Pour chaque fichier classifié",
+      "parent": null,
+      "detail": "Hors relevés bruts déjà routés à l'étape 1, hors `csv-paiements` (étape 5.3) et hors ambigus (étape 6).",
+      "refs": [],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [321, 321],
+        "quote": "Pour chaque fichier classifié (sauf relevés bruts CC/CHQ déjà routés à l'étape 1, `csv-paiements` traité à l'étape 5.3, et ambigus à l'étape 6) :"
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "s7.1",
+      "kind": "step",
+      "group": "3. Destination et conflits",
+      "label": "Calculer le trimestre fiscal cible et le sous-dossier final",
+      "parent": "s7",
+      "detail": "Année fiscale du 1er septembre au 31 août ; path `_Trimestres/{annee-fiscale}/{YYYY-QX}/` puis sous-dossier par catégorie. Le prompt recopie la table de `fiscal-year.md`, qui fait foi.",
+      "refs": ["skills:@default/compta-references", "config:drive_root_trimestres_folder_id"],
+      "evidence": {
+        "file": "skills/@default/compta-references/references/fiscal-year.md",
+        "lines": [33, 37],
+        "quote": "Mois 3, 4, 5     (Mars-Mai)  → Q3, annee fiscale = annee_courante-1 - annee_courante"
+      },
+      "confidence": 0.96
+    },
+    {
+      "id": "s7.2",
+      "kind": "tool_call",
+      "group": "3. Destination et conflits",
+      "label": "Résoudre les Drive IDs par navigation, mémoriser path → folder ID",
+      "parent": "s7",
+      "detail": "Listing successif depuis la racine `_Trimestres`. Le cache évite de re-chercher quand plusieurs fichiers visent le même dossier ; il est réutilisé aux étapes 3bis et 5.2.",
+      "refs": ["toolbox:@appstrate/google-drive#api_call", "config:drive_root_trimestres_folder_id"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [346, 347],
+        "quote": "Naviguer dans `config.drive_root_trimestres_folder_id` jusqu'au sous-dossier final (listing via `api_call` GET)."
+      },
+      "confidence": 0.97
+    },
+    {
+      "id": "s7.3",
+      "kind": "decision",
+      "group": "3. Destination et conflits",
+      "label": "Le nom cible existe-t-il déjà à la destination ?",
+      "parent": "s7",
+      "detail": "Vérification faite sur les relevés bruts de l'étape 1 aussi. Destination pas encore créée → pas de conflit possible.",
+      "refs": ["toolbox:@appstrate/google-drive#api_call"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [353, 357],
+        "quote": "chercher un fichier nommé exactement comme `new_name`"
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "s7.4",
+      "kind": "step",
+      "group": "3. Destination et conflits",
+      "label": "Marquer `will_skip` (conflit de nom à destination)",
+      "parent": "s7",
+      "detail": "Le statut est consommé tel quel à l'étape 5, sans re-vérification.",
+      "refs": ["agent_output:skipped"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [356, 356],
+        "quote": "marquer ce fichier comme `will_skip` avec raison `\"Le nom cible '{new_name}' existe déjà à la destination\"`"
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "s7.5",
+      "kind": "step",
+      "group": "3. Destination et conflits",
+      "label": "Marquer `will_move`",
+      "parent": "s7",
+      "detail": "Statut par défaut à l'issue de l'étape 3, révisable par la dédup sémantique de l'étape 3bis.",
+      "refs": [],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [357, 359],
+        "quote": "**Si non trouvé** → marquer `will_move`."
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "g8",
+      "kind": "guard",
+      "group": "3. Destination et conflits",
+      "label": "La vérification de conflit s'exécute aussi en `dry_run`",
+      "parent": null,
+      "detail": "C'est ce qui rend le plan affiché fidèle à ce que fera le run réel. Portée : l'étape 3.4 seulement — le format n'a pas de champ pour dire qu'un garde s'applique à une étape précise.",
+      "refs": ["agent_input:dry_run", "agent_output:dry_run_plan"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [361, 361],
+        "quote": "**Cette vérification s'exécute en dry_run comme en run réel.**"
+      },
+      "confidence": 0.99
+    },
+
+    {
+      "id": "s8",
+      "kind": "tool_call",
+      "group": "3bis. Dédup sémantique des factures",
+      "label": "Charger le `factures-parsed.json` de chaque `{QTR}-Factures/` ciblé et construire les clés",
+      "parent": null,
+      "detail": "Clé d'identité = `vendor_normalized|invoice_number`, à défaut `vendor_normalized|date|amount` ; comparaison insensible à la casse et aux espaces. Le JSON chargé est mémorisé pour l'étape 5.2. Attrape la même facture arrivée sous des octets différents, ce que la dédup md5 amont de `compta-gmail-harvest` ne voit pas.",
+      "refs": ["toolbox:@appstrate/google-drive#api_call"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [375, 381],
+        "quote": "charger une fois son `factures-parsed.json` s'il existe (même lecture qu'à l'étape 5.2 — **mémorise-le pour ne pas le re-télécharger**)"
+      },
+      "confidence": 0.95
+    },
+    {
+      "id": "s8.1",
+      "kind": "decision",
+      "group": "3bis. Dédup sémantique des factures",
+      "label": "La clé est-elle déjà classée, ou déjà vue dans ce run ?",
+      "parent": null,
+      "detail": "Deux cas fusionnés ici : déjà présente dans `cles_classees` (rangée dans le trimestre), ou déjà vue pour une facture `will_move` de ce run — dans ce second cas on garde celle de meilleure `confidence`, égalité → la première rencontrée.",
+      "refs": [],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [384, 385],
+        "quote": "Si la clé d'une facture est **déjà dans `cles_classees`** (déjà rangée dans le trimestre) → marquer `will_skip`"
+      },
+      "confidence": 0.94
+    },
+    {
+      "id": "s8.2",
+      "kind": "step",
+      "group": "3bis. Dédup sémantique des factures",
+      "label": "Marquer `will_skip` (doublon facture) — même traitement qu'un conflit de nom",
+      "parent": null,
+      "detail": "Aucune machinerie nouvelle : le fichier part dans `_doublons/` à l'étape 5.0 avec son `.reason.txt` et figure dans `output.skipped`.",
+      "refs": ["agent_output:skipped"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [388, 388],
+        "quote": "Les fichiers passés à `will_skip` ici sont traités **exactement comme les conflits de nom**"
+      },
+      "confidence": 0.97
+    },
+
+    {
+      "id": "s9",
+      "kind": "decision",
+      "group": "4. Création des dossiers manquants",
+      "label": "`config.auto_create_quarter_structure` est-il vrai ?",
+      "parent": null,
+      "detail": "Faux → ne rien créer et reclasser le fichier en `ambiguous`.",
+      "refs": ["config:auto_create_quarter_structure"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [400, 401],
+        "quote": "**Si `config.auto_create_quarter_structure=true`** : créer la chaîne complète"
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "s9.1",
+      "kind": "tool_call",
+      "group": "4. Création des dossiers manquants",
+      "label": "Créer les dossiers manquants : structure du trimestre, `_needs-review/`, `_doublons/`",
+      "parent": null,
+      "detail": "`api_call` POST avec `Content-Type: application/json`. `_needs-review/` si au moins un ambigu, `_doublons/` si au moins un `will_skip` ; existence vérifiée avant création, IDs gardés en mémoire.",
+      "refs": ["toolbox:@appstrate/google-drive#api_call"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [403, 424],
+        "quote": "Pour créer un dossier, appelle `api_call` (POST) avec un header `Content-Type: application/json`"
+      },
+      "confidence": 0.96
+    },
+    {
+      "id": "g9",
+      "kind": "guard",
+      "group": "4. Création des dossiers manquants",
+      "label": "Vérifier le `mimeType` après chaque mkdir, un seul POST, ne pas retenter",
+      "parent": null,
+      "detail": "Un retour autre que `application/vnd.google-apps.folder` signale un mkdir échoué silencieusement (body interprété comme un upload) : `log` + `output.erreurs` + fichier cible en `ambiguous`. Retenter avec une variation crée des fichiers parasites.",
+      "refs": ["agent_output:erreurs"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [412, 416],
+        "quote": "**NE PAS retenter avec une variation différente** — l'erreur est dans le format, pas dans la commande."
+      },
+      "confidence": 0.9
+    },
+    {
+      "id": "g10",
+      "kind": "guard",
+      "group": "4. Création des dossiers manquants",
+      "label": "En `dry_run`, ne créer aucun dossier",
+      "parent": null,
+      "detail": "Ni structure trimestre, ni `_needs-review/`, ni `_doublons/`. Les créations planifiées sont listées dans `output.dry_run_plan`.",
+      "refs": ["agent_input:dry_run", "agent_output:dry_run_plan"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [428, 428],
+        "quote": "Si `input.dry_run=true`, **ne créer aucun dossier**"
+      },
+      "confidence": 0.99
+    },
+
+    {
+      "id": "s10",
+      "kind": "loop",
+      "group": "5. Exécution des déplacements",
+      "label": "Pour chaque fichier `will_skip`",
+      "parent": null,
+      "detail": "Conflits de nom (3.4) et doublons de facture (3bis) confondus.",
+      "refs": [],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [442, 442],
+        "quote": "Sinon, pour chaque fichier `will_skip` :"
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "s10.1",
+      "kind": "step",
+      "group": "5. Exécution des déplacements",
+      "label": "Persister `{name, reason}` dans `output.skipped` (toujours, `dry_run` inclus)",
+      "parent": "s10",
+      "detail": "C'est ce qui rend le `dry_run_plan` honnête.",
+      "refs": ["agent_output:skipped"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [436, 436],
+        "quote": "ajouter `{name, reason}` dans `output.skipped`. C'est ce qui rend le `dry_run_plan` honnête."
+      },
+      "confidence": 0.99
+    },
+    {
+      "id": "s10.2",
+      "kind": "tool_call",
+      "group": "5. Exécution des déplacements",
+      "label": "Déplacer vers `_doublons/` (suffixe anti-collision) et y déposer le `.reason.txt`",
+      "parent": "s10",
+      "detail": "Run réel seulement. Conflit dans `_doublons/` → suffixe `__YYYY-MM-DD-HHMMSS`. PATCH `addParents`/`removeParents`, puis annexe texte uploadée en resumable. L'échec de l'annexe est non bloquant : le PDF est déjà déplacé.",
+      "refs": ["toolbox:@appstrate/google-drive#api_call", "toolbox:@appstrate/google-drive#api_upload", "system_tools:bash"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [444, 483],
+        "quote": "Si présent → suffixer `__YYYY-MM-DD-HHMMSS` (datetime du run actuel) au nom pour éviter l'overwrite."
+      },
+      "confidence": 0.93
+    },
+    {
+      "id": "s11",
+      "kind": "loop",
+      "group": "5. Exécution des déplacements",
+      "label": "Pour chaque fichier `will_move` (hors ambigus et `csv-paiements`)",
+      "parent": null,
+      "detail": "Le corps de boucle vaut aussi en `dry_run`, à l'exception du PATCH.",
+      "refs": [],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [489, 489],
+        "quote": "#### 5.1 Pour chaque fichier (sauf ambigus et sauf `csv-paiements`) marqué `will_move`"
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "s11.1",
+      "kind": "step",
+      "group": "5. Exécution des déplacements",
+      "label": "Ajouter l'entrée dans `output.moved` (toujours)",
+      "parent": "s11",
+      "detail": "`original_name`, `new_name`, `destination_folder_id`, `destination_path`, `category`.",
+      "refs": ["agent_output:moved"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [491, 491],
+        "quote": "Cet ajout se fait **toujours**, dry_run comme run réel"
+      },
+      "confidence": 0.99
+    },
+    {
+      "id": "s11.2",
+      "kind": "decision",
+      "group": "5. Exécution des déplacements",
+      "label": "`input.dry_run` est-il vrai ?",
+      "parent": "s11",
+      "detail": "Vrai → fichier suivant, aucun PATCH.",
+      "refs": ["agent_input:dry_run"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [493, 493],
+        "quote": "**Si `input.dry_run=true`** → passer au fichier suivant, **pas de PATCH**."
+      },
+      "confidence": 0.99
+    },
+    {
+      "id": "s11.3",
+      "kind": "tool_call",
+      "group": "5. Exécution des déplacements",
+      "label": "PATCH unifié : déplacer et renommer en une seule requête",
+      "parent": "s11",
+      "detail": "`addParents=DEST&removeParents=INBOX` avec `body: {\"name\":\"NEW_NAME\"}`.",
+      "refs": ["toolbox:@appstrate/google-drive#api_call"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [495, 502],
+        "quote": "exécuter le PATCH unifié (déplace + renomme en une requête)"
+      },
+      "confidence": 0.98
+    },
+
+    {
+      "id": "s12",
+      "kind": "loop",
+      "group": "5.2 factures-parsed.json",
+      "label": "Pour chaque `{QTR}-Factures/` touché par le run",
+      "parent": null,
+      "detail": "Run réel uniquement. Seuls les déplacements de catégorie `facture` comptent.",
+      "refs": [],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [516, 516],
+        "quote": "**Pour chaque `{QTR}-Factures/` touché** (folder ID gardé en mémoire depuis l'étape 3.3)"
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "s12.1",
+      "kind": "tool_call",
+      "group": "5.2 factures-parsed.json",
+      "label": "Charger le JSON existant, ou réutiliser celui de l'étape 3bis",
+      "parent": "s12",
+      "detail": "Recherche par nom dans le dossier, download `?alt=media` vers `/tmp`. Absent → objet vide. Toutes les entrées existantes sont conservées.",
+      "refs": ["toolbox:@appstrate/google-drive#api_call"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [518, 531],
+        "quote": "Si tu as déjà chargé ce `factures-parsed.json` à l'étape 3bis (dédup), **réutilise-le** au lieu de le re-télécharger."
+      },
+      "confidence": 0.97
+    },
+    {
+      "id": "s12.2",
+      "kind": "tool_call",
+      "group": "5.2 factures-parsed.json",
+      "label": "Ajouter une entrée par facture déplacée, puis uploader le JSON fusionné",
+      "parent": "s12",
+      "detail": "Clé = nom final du PDF. `added_by_run` depuis `$APPSTRATE_RUN_ID` et `added_at` depuis `date -u` — jamais de date sans heure, jamais minuit. Upload : PATCH `uploadType=media` si le fichier existait, sinon `api_upload` resumable. `output.factures_parsed_updated` renseigné.",
+      "refs": ["toolbox:@appstrate/google-drive#api_call", "toolbox:@appstrate/google-drive#api_upload", "system_tools:bash", "agent_output:factures_parsed_updated"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [533, 584],
+        "quote": "La clé est le **nom final** du PDF (après renommage)."
+      },
+      "confidence": 0.93
+    },
+
+    {
+      "id": "s13",
+      "kind": "step",
+      "group": "5.3 Stores annuels BNC",
+      "label": "Persister `output.paiements_store_updated` (toujours, `dry_run` inclus)",
+      "parent": null,
+      "detail": "Un enregistrement `{fiscal_year, inserted, updated, total}` par année fiscale touchée.",
+      "refs": ["agent_output:paiements_store_updated"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [592, 592],
+        "quote": "pour chaque année fiscale touchée, `{fiscal_year, inserted, updated, total}`"
+      },
+      "confidence": 0.97
+    },
+    {
+      "id": "s13.1",
+      "kind": "tool_call",
+      "group": "5.3 Stores annuels BNC",
+      "label": "Résoudre (ou créer) le dossier `Paiements BNC`",
+      "parent": null,
+      "detail": "Find-or-create sans clé de config dédiée : `parents[0]` du dossier CHQ centralisé, listé, on y cherche `Paiements BNC`.",
+      "refs": ["toolbox:@appstrate/google-drive#api_call", "config:drive_centralized_chq_folder_id"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [596, 596],
+        "quote": "récupérer le `parents[0]` de `config.drive_centralized_chq_folder_id`"
+      },
+      "confidence": 0.97
+    },
+    {
+      "id": "s14",
+      "kind": "loop",
+      "group": "5.3 Stores annuels BNC",
+      "label": "Pour chaque année fiscale `{AF}` touchée",
+      "parent": null,
+      "detail": "Les records de tous les CSV du run sont d'abord groupés par année fiscale depuis leur date : un même export peut couvrir deux exercices.",
+      "refs": ["skills:@default/compta-references"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [598, 600],
+        "quote": "**Pour chaque année fiscale `{AF}`**"
+      },
+      "confidence": 0.97
+    },
+    {
+      "id": "s14.1",
+      "kind": "step",
+      "group": "5.3 Stores annuels BNC",
+      "label": "Charger `Paiements-BNC_{AF}.json` et upserter par `no`",
+      "parent": "s14",
+      "detail": "Absent → squelette `{_meta, payments}`. Insertion si `no` absent (`first_seen_run` = `last_seen_run`), sinon mise à jour des champs mutables en conservant `first_seen_run`. C'est ce qui gère le cycle de vie postdaté → accepté sans doublon.",
+      "refs": ["skills:@default/compta-references", "toolbox:@appstrate/google-drive#api_call"],
+      "evidence": {
+        "file": "skills/@default/compta-references/references/paiements-store.md",
+        "lines": [94, 95],
+        "quote": "Si `no` **absent** de `payments` → insérer l'entrée complète, `first_seen_run = last_seen_run = run_id`."
+      },
+      "confidence": 0.97
+    },
+    {
+      "id": "s14.2",
+      "kind": "tool_call",
+      "group": "5.3 Stores annuels BNC",
+      "label": "Uploader le store, puis archiver le CSV brut dans `Paiements BNC/_raw-exports/`",
+      "parent": "s14",
+      "detail": "Store : PATCH `uploadType=media` si existant, sinon `api_upload` resumable. CSV : jamais supprimé, jamais laissé dans l'inbox — PATCH vers `_raw-exports/` (find-or-create) sous le nom `Paiements-BNC_{date_min}_{date_max}.csv`, suffixé si le nom est pris.",
+      "refs": ["toolbox:@appstrate/google-drive#api_call", "toolbox:@appstrate/google-drive#api_upload"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [604, 606],
+        "quote": "**Archiver le CSV brut** (ne pas le laisser dans l'inbox, ne pas le supprimer)"
+      },
+      "confidence": 0.95
+    },
+    {
+      "id": "s15",
+      "kind": "step",
+      "group": "5.3 Stores annuels BNC",
+      "label": "5.3bis — rejouer le même merge pour les virements Interac",
+      "parent": null,
+      "detail": "Strictement parallèle à 5.3 : fichier `Virements-Interac-BNC_{AF}.json` dans le même dossier, records sous la clé `transfers`, upsert par `no`, archivage du CSV brut sous le nom `Virements-Interac-BNC_{date_min}_{date_max}.csv`.",
+      "refs": ["skills:@default/compta-references"],
+      "evidence": {
+        "file": "skills/@default/compta-references/references/virements-interac-store.md",
+        "lines": [57, 63],
+        "quote": "Clé de dédup = `no` (numéro de virement BNC, séquentiel global unique)."
+      },
+      "confidence": 0.94
+    },
+
+    {
+      "id": "s16",
+      "kind": "loop",
+      "group": "6. Ambigus → _needs-review/",
+      "label": "Pour chaque fichier en catégorie `ambiguous`",
+      "parent": null,
+      "detail": "`_needs-review/` reste hors-scope des runs suivants : l'étape 0 ignore les sous-dossiers, donc pas de boucle.",
+      "refs": [],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [623, 623],
+        "quote": "Pour chaque fichier en catégorie `ambiguous` :"
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "s16.1",
+      "kind": "tool_call",
+      "group": "6. Ambigus → _needs-review/",
+      "label": "Consigner dans `output.ambiguous` puis déplacer sans renommer",
+      "parent": "s16",
+      "detail": "L'entrée `{name, reason}` est écrite toujours, `dry_run` inclus ; le PATCH n'a lieu qu'en run réel. Le nom original est conservé pour que l'utilisateur reconnaisse le fichier. Déjà présent dans `_needs-review/` → ne pas re-déplacer, note dans `output.erreurs`.",
+      "refs": ["toolbox:@appstrate/google-drive#api_call", "agent_output:ambiguous", "agent_output:erreurs"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [625, 632],
+        "quote": "**sans changer le nom** (on garde `original_name` pour que l'utilisateur reconnaisse)"
+      },
+      "confidence": 0.96
+    },
+
+    {
+      "id": "s17",
+      "kind": "emit",
+      "group": "7. Output + checkpoint",
+      "label": "Rendre la sortie : summary markdown et tous les champs dans `data`",
+      "parent": null,
+      "detail": "Summary à sections imposées (inbox, par catégorie, skipped, ambigus, erreurs) plus une section « Plan dry_run » quand `dry_run=true`. Champs : `moved`, `skipped`, `ambiguous`, `stats`, `factures_parsed_updated`, `paiements_store_updated`, `dry_run_plan`, `erreurs`.",
+      "refs": ["system_tools:output", "agent_output:summary", "agent_output:stats", "agent_output:dry_run_plan"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [644, 706],
+        "quote": "**APPELLE LE TOOL `output` EXACTEMENT UNE SEULE FOIS, AVEC TOUS LES CHAMPS REMPLIS DANS LE WRAPPER `data`.**"
+      },
+      "confidence": 0.97
+    },
+    {
+      "id": "s18",
+      "kind": "tool_call",
+      "group": "7. Output + checkpoint",
+      "label": "Persister le checkpoint via `pin` (clé `checkpoint`, scope `shared`)",
+      "parent": null,
+      "detail": "`lastRun`, `inboxFolderId`, `lastStats`. Aucun autre appel d'outil après `pin`.",
+      "refs": ["system_tools:pin"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [717, 736],
+        "quote": "Persister l'état pour le prochain run via `pin` (clé `checkpoint`, scope `shared`)"
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "g11",
+      "kind": "guard",
+      "group": "7. Output + checkpoint",
+      "label": "Un seul appel `output`, et avant `pin`",
+      "parent": null,
+      "detail": "L'appel `output` marque le run `success` côté plateforme ; un second appel écrase entièrement le premier.",
+      "refs": ["system_tools:output", "system_tools:pin"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [640, 711],
+        "quote": "**OBLIGATOIRE — ORDRE STRICT :** appeler `output` AVANT `pin`."
+      },
+      "confidence": 0.99
+    },
+    {
+      "id": "g12",
+      "kind": "guard",
+      "group": "7. Output + checkpoint",
+      "label": "Ne jamais inventer de chiffres ni de dates",
+      "parent": null,
+      "detail": "Extraction impossible → ambigu. Stat non calculable → `null` ou `[]`.",
+      "refs": ["agent_output:stats"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [749, 749],
+        "quote": "**Ne JAMAIS inventer de chiffres ou de dates.** Si extraction impossible → ambigu."
+      },
+      "confidence": 0.99
+    }
+  ],
+  "edges": [
+    { "from": "s1", "to": "s2", "condition": null },
+    { "from": "s2", "to": "s3", "condition": null },
+    { "from": "s3", "to": "s4", "condition": null },
+    { "from": "s4", "to": "s17", "condition": "inbox vide" },
+    { "from": "s4", "to": "s5", "condition": "N > 0" },
+    { "from": "s5", "to": "s6", "condition": null },
+    { "from": "s6", "to": "s7", "condition": null },
+    { "from": "s7", "to": "s8", "condition": null },
+    { "from": "s8", "to": "s8.1", "condition": null },
+    { "from": "s8.1", "to": "s8.2", "condition": "doublon détecté" },
+    { "from": "s8.1", "to": "s9", "condition": "clé inédite" },
+    { "from": "s8.2", "to": "s9", "condition": null },
+    { "from": "s9", "to": "s9.1", "condition": "auto_create_quarter_structure = true" },
+    { "from": "s9", "to": "s6.12", "condition": "false → trimestre cible inexistant" },
+    { "from": "s9.1", "to": "s10", "condition": null },
+    { "from": "s10", "to": "s11", "condition": null },
+    { "from": "s11", "to": "s12", "condition": null },
+    { "from": "s12", "to": "s13", "condition": null },
+    { "from": "s13", "to": "s13.1", "condition": null },
+    { "from": "s13.1", "to": "s14", "condition": null },
+    { "from": "s14", "to": "s15", "condition": null },
+    { "from": "s15", "to": "s16", "condition": null },
+    { "from": "s16", "to": "s17", "condition": null },
+    { "from": "s17", "to": "s18", "condition": null },
+
+    { "from": "s5.1", "to": "s5.2", "condition": "oui" },
+    { "from": "s5.1", "to": "s5.3", "condition": "non" },
+    { "from": "s5.3", "to": "s5.4", "condition": "oui" },
+    { "from": "s5.3", "to": "s5.5", "condition": "non" },
+    { "from": "s5.4", "to": "s6.12", "condition": "numéro de compte hors 92325/24426/29223" },
+    { "from": "s5.5", "to": "s5.6", "condition": "oui" },
+    { "from": "s5.5", "to": "s6", "condition": "aucun motif : lecture de contenu" },
+    { "from": "s5.6", "to": "s6.13", "condition": null },
+
+    { "from": "s6.1", "to": "s6.2", "condition": "PDF" },
+    { "from": "s6.1", "to": "s6.13", "condition": "CSV" },
+    { "from": "s6.2", "to": "s6.3", "condition": null },
+    { "from": "s6.3", "to": "s6.5", "condition": "texte exploitable" },
+    { "from": "s6.3", "to": "s6.4", "condition": "moins de 50 caractères" },
+    { "from": "s6.4", "to": "s6.5", "condition": "image lue" },
+    { "from": "s6.4", "to": "s6.12", "condition": "conversion impossible" },
+    { "from": "s6.5", "to": "s6.7", "condition": "facture, avis gouv à payer ou TPS/TVQ combiné" },
+    { "from": "s6.5", "to": "s6.8", "condition": "Stripe ou reçu de dépôt" },
+    { "from": "s6.5", "to": "s6.6", "condition": "avis d'un seul organisme gouvernemental" },
+    { "from": "s6.6", "to": "s6.7", "condition": "dépense" },
+    { "from": "s6.6", "to": "s6.8", "condition": "revenu" },
+    { "from": "s6.6", "to": "s6.12", "condition": "deux signaux ou aucun" },
+    { "from": "s6.7", "to": "s6.9", "condition": null },
+    { "from": "s6.8", "to": "s6.9", "condition": null },
+    { "from": "s6.9", "to": "s6.10", "condition": "destination {QTR}-Factures/" },
+    { "from": "s6.9", "to": "s6.12", "condition": "vendor, date ou montant non extractible" },
+    { "from": "s6.10", "to": "s6.11", "condition": null },
+    { "from": "s6.11", "to": "s6.12", "condition": "autre personne morale évidente" },
+    { "from": "s6.13", "to": "s6.14", "condition": null },
+
+    { "from": "s7.1", "to": "s7.2", "condition": null },
+    { "from": "s7.2", "to": "s7.3", "condition": null },
+    { "from": "s7.3", "to": "s7.4", "condition": "nom cible déjà pris" },
+    { "from": "s7.3", "to": "s7.5", "condition": "libre, ou destination à créer" },
+
+    { "from": "s10.1", "to": "s10.2", "condition": "run réel" },
+    { "from": "s11.1", "to": "s11.2", "condition": null },
+    { "from": "s11.2", "to": "s11.3", "condition": "run réel" },
+
+    { "from": "s12.1", "to": "s12.2", "condition": null },
+    { "from": "s14.1", "to": "s14.2", "condition": null }
+  ],
+  "gaps": [
+    {
+      "kind": "undeclared_capability",
+      "message": "Le prompt prescrit `api_upload` (resumable) comme méthode fiable de création de fichier et interdit explicitement le multipart (prompt.md:14), mais `integrations_configuration.@appstrate/google-drive.tools[]` ne déclare que `api_call`. Cinq étapes de la carte en dépendent : `.reason.txt`, `factures-parsed.json`, les deux stores annuels.",
+      "related_steps": ["g4", "s10.2", "s12.2", "s14.2"]
+    },
+    {
+      "kind": "undeclared_capability",
+      "message": "Bash et le tool `Read` sont indispensables au pipeline (pip install, `extract-pdf.py`, deux parsers Python inline, conversion PyMuPDF, `date -u`, lecture multimodale du JPEG) mais `runtime_tools` ne déclare que `output`, `log`, `pin`. Un croisement mécanique sur le manifeste ne verra ni les scripts du skill ni la lecture d'image.",
+      "related_steps": ["s2", "s6.2", "s6.4", "s6.14", "s12.2"]
+    },
+    {
+      "kind": "contradiction",
+      "message": "L'étape 5.3.1 impose de renseigner `paiements_store_updated` avec `inserted`, `updated` et `total` « toujours, dry_run inclus », alors que 5.3.2 saute toute lecture du store en `dry_run`. Sans charger `Paiements-BNC_{AF}.json`, la répartition insertions/mises à jour n'est pas calculable — et la règle « ne jamais inventer de chiffres » (prompt.md:749) interdit de la deviner.",
+      "related_steps": ["s13", "s14.1", "g12"]
+    },
+    {
+      "kind": "contradiction",
+      "message": "Le schéma de sortie déclare `dry_run_plan` (markdown des actions planifiées) et l'étape 4.4 dit d'y lister les créations de dossiers, mais l'étape 7.1 place le plan dans une section `## Plan dry_run` du `summary` et l'exemple JSON de 7.2 montre `\"dry_run_plan\": null`. Rien ne tranche lequel des deux champs porte le plan.",
+      "related_steps": ["g10", "s17"]
+    },
+    {
+      "kind": "unspecified_case",
+      "message": "L'étape 3.4 impose la vérification de conflit « pour chaque fichier classifié (relevés bruts inclus, sauf ambigus) », mais un `csv-paiements` n'a ni `new_name` ni destination de trimestre : la vérification est inapplicable, et rien ne dit ce qu'il advient d'un CSV dont le nom d'archive existe déjà — la règle de suffixage n'apparaît qu'à l'étape 5.3.4.",
+      "related_steps": ["s7", "s7.3", "s14.2"]
+    },
+    {
+      "kind": "unspecified_case",
+      "message": "La dédup sémantique de l'étape 3bis ne connaît que les factures présentes dans `factures-parsed.json`. Une facture rangée dans `{QTR}-Factures/` par un dépôt manuel (cas que `compta-trimestrielle` 4.5.3 traite explicitement) n'est dans aucun index et ne sera pas vue comme doublon.",
+      "related_steps": ["s8", "s8.1"]
+    },
+    {
+      "kind": "stale_identifier",
+      "message": "Le `SKILL.md` et `vendor-rules.md` nomment l'agent `@default/compta-inbox-dispatch` alors que le manifeste le nomme `@default/compta-inbox`. Même famille que l'identifiant obsolète relevé sur `compta-gmail-harvest`.",
+      "related_steps": ["s1", "s6.7"]
+    },
+    {
+      "kind": "unused_capability",
+      "message": "La clé de configuration `org_name` (défaut `TRACTR`) est déclarée au manifeste ; ni le prompt ni les références ne disent quand l'utiliser. Aucune étape ne la référence.",
+      "related_steps": []
+    }
+  ],
+  "overall_confidence": 0.94
+}

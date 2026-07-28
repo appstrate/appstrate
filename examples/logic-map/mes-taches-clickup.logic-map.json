@@ -1,0 +1,216 @@
+{
+  "map_version": 1,
+  "shape": "sequence",
+  "source": {
+    "package_id": "@default/mes-taches-clickup",
+    "version": "1.0.0",
+    "integrity": null,
+    "files": [
+      "prompt.md"
+    ]
+  },
+  "generated_at": "2026-07-27T00:00:00Z",
+  "generator": {
+    "kind": "human",
+    "author": "PR 3 — élargissement du corpus, cas limite bas (prompt de 16 lignes)",
+    "agent": null,
+    "version": null,
+    "model": null
+  },
+  "summary": "Résout l'identifiant ClickUp d'Olivier, liste ses tâches ouvertes les plus récentes en un minimum d'appels, et rend `tasks` + `summary`. Procédure de trois étapes numérotées, chacune précédée d'un `log`.",
+  "steps": [
+    {
+      "id": "s1",
+      "kind": "tool_call",
+      "group": "1. Résolution du membre",
+      "label": "`log` « résolution du membre »",
+      "parent": null,
+      "detail": "Trace d'avancement, sans effet métier. Le prompt prescrit un `log` en tête de chacune des trois étapes.",
+      "refs": ["system_tools:log"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [8, 8],
+        "quote": "`log` \"résolution du membre\""
+      },
+      "confidence": 0.99
+    },
+    {
+      "id": "s2",
+      "kind": "tool_call",
+      "group": "1. Résolution du membre",
+      "label": "Obtenir l'identifiant de membre d'Olivier par son email",
+      "parent": null,
+      "detail": "`clickup_find_member_by_name` avec `olivier@tractr.net`, ou à défaut le nom « Olivier ». L'outil est nommé littéralement et déclaré au manifeste.",
+      "refs": ["toolbox:@appstrate/clickup-mcp#clickup_find_member_by_name"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [8, 8],
+        "quote": "Utilise clickup_find_member_by_name avec l'email olivier@tractr.net (ou le nom \"Olivier\") pour obtenir son identifiant de membre."
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "s3",
+      "kind": "tool_call",
+      "group": "2. Recherche des tâches",
+      "label": "`log` « recherche des tâches »",
+      "parent": null,
+      "detail": "Deuxième trace d'avancement.",
+      "refs": ["system_tools:log"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [9, 9],
+        "quote": "`log` \"recherche des tâches\""
+      },
+      "confidence": 0.99
+    },
+    {
+      "id": "s4",
+      "kind": "tool_call",
+      "group": "2. Recherche des tâches",
+      "label": "Lister les tâches ouvertes assignées à ce membre, ~15, plus récentes d'abord",
+      "parent": null,
+      "detail": "`clickup_filter_tasks` : assignées au membre résolu, statuts ouverts uniquement, tri décroissant par date de mise à jour **ou** de création (le prompt laisse le choix), plafond « environ 15 ». L'objectif de la ligne 3 formule les mêmes filtres autrement.",
+      "refs": ["toolbox:@appstrate/clickup-mcp#clickup_filter_tasks"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [9, 9],
+        "quote": "Utilise clickup_filter_tasks pour lister les tâches assignées à ce membre, non fermées (statuts ouverts uniquement), triées par date de mise à jour ou de création décroissante. Limite-toi à environ 15 tâches."
+      },
+      "confidence": 0.94
+    },
+    {
+      "id": "s5",
+      "kind": "decision",
+      "group": "2. Recherche des tâches",
+      "label": "`clickup_filter_tasks` exige-t-il un identifiant de liste ou d'espace que tu n'as pas ?",
+      "parent": null,
+      "detail": "Seule bifurcation de tout le prompt. Elle conditionne le seul appel d'outil facultatif.",
+      "refs": ["toolbox:@appstrate/clickup-mcp#clickup_filter_tasks"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [9, 9],
+        "quote": "N'utilise clickup_get_workspace_hierarchy QUE si clickup_filter_tasks exige un identifiant de liste ou d'espace que tu n'as pas."
+      },
+      "confidence": 0.97
+    },
+    {
+      "id": "s6",
+      "kind": "tool_call",
+      "group": "2. Recherche des tâches",
+      "label": "Récupérer la hiérarchie du workspace (appel de secours seulement)",
+      "parent": null,
+      "detail": "`clickup_get_workspace_hierarchy`, explicitement conditionné. Rien ne dit quoi faire de la hiérarchie une fois récupérée : le prompt ne prescrit pas de retour à `clickup_filter_tasks` avec l'identifiant obtenu, il est implicite.",
+      "refs": ["toolbox:@appstrate/clickup-mcp#clickup_get_workspace_hierarchy"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [9, 9],
+        "quote": "N'utilise clickup_get_workspace_hierarchy QUE si"
+      },
+      "confidence": 0.9
+    },
+    {
+      "id": "s7",
+      "kind": "tool_call",
+      "group": "3. Compte rendu",
+      "label": "`log` « N tâches trouvées »",
+      "parent": null,
+      "detail": "Troisième trace, avec substitution de N par le nombre effectivement trouvé.",
+      "refs": ["system_tools:log"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [10, 10],
+        "quote": "3. `log` \"N tâches trouvées\" (remplace N par le nombre)."
+      },
+      "confidence": 0.99
+    },
+    {
+      "id": "s8",
+      "kind": "emit",
+      "group": "3. Compte rendu",
+      "label": "Appeler l'outil `output` avec `tasks` et `summary`",
+      "parent": null,
+      "detail": "`tasks` : name, status, list si connue, due_date au format `YYYY-MM-DD` sinon chaîne vide, url. `summary` : 2-3 phrases en français — nombre de tâches ouvertes, urgences (échéances proches ou dépassées), projets concernés. Seul agent du corpus où l'outil `output` est nommé littéralement.",
+      "refs": ["system_tools:output", "agent_output:tasks", "agent_output:summary"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [12, 14],
+        "quote": "Quand tu as terminé, appelle l'outil output avec :"
+      },
+      "confidence": 0.99
+    },
+    {
+      "id": "g1",
+      "kind": "guard",
+      "group": "Garde-fous",
+      "label": "Faire le MINIMUM d'appels d'outils, idéalement 2 à 4 au total",
+      "parent": null,
+      "detail": "Motif : le serveur MCP ClickUp est rate-limité. Le budget est contredit par la procédure elle-même — voir le premier `gap` : la séquence prescrite exige au moins 6 appels d'outils.",
+      "refs": [],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [5, 5],
+        "quote": "Contrainte importante : le serveur MCP ClickUp est rate-limité. Fais le MINIMUM d'appels d'outils (idéalement 2 à 4 au total)."
+      },
+      "confidence": 0.99
+    },
+    {
+      "id": "g2",
+      "kind": "guard",
+      "group": "Garde-fous",
+      "label": "Échec d'un appel ClickUp : appeler `output` quand même, `tasks` vide, erreur exacte dans `summary`",
+      "parent": null,
+      "detail": "Chemin d'erreur unique, couvrant l'authentification et le rate limit. Il garantit qu'aucun run ne finit sans résultat. Typé `guard` par cohérence avec le chemin d'erreur de `compta-gmail-harvest` (`g7`), mais le test §2 ne le départage pas clairement d'un `policy` — voir rapport.",
+      "refs": ["system_tools:output", "agent_output:tasks", "agent_output:summary"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [16, 16],
+        "quote": "Si un appel ClickUp échoue (erreur d'authentification, rate limit), appelle quand même output avec tasks vide et explique l'erreur exacte dans summary."
+      },
+      "confidence": 0.98
+    }
+  ],
+  "edges": [
+    { "from": "s1", "to": "s2", "condition": null },
+    { "from": "s2", "to": "s3", "condition": null },
+    { "from": "s3", "to": "s4", "condition": null },
+    { "from": "s4", "to": "s5", "condition": null },
+    { "from": "s5", "to": "s6", "condition": "identifiant de liste ou d'espace manquant" },
+    { "from": "s5", "to": "s7", "condition": "sinon" },
+    { "from": "s6", "to": "s7", "condition": null },
+    { "from": "s7", "to": "s8", "condition": null }
+  ],
+  "gaps": [
+    {
+      "kind": "self_contradiction",
+      "message": "Le budget d'appels est irréalisable tel qu'écrit. La ligne 5 impose « idéalement 2 à 4 » appels d'outils au total ; la procédure des lignes 8 à 14 en prescrit nommément 6 au minimum (3 `log`, `clickup_find_member_by_name`, `clickup_filter_tasks`, `output`), 7 si la branche `clickup_get_workspace_hierarchy` se déclenche. Soit les `log` et `output` ne comptent pas dans le budget — et le prompt ne le dit pas —, soit la contrainte est fausse. C'est le constat le plus actionnable de cette carte, et il n'est visible qu'en comptant les nœuds.",
+      "related_steps": ["g1", "s1", "s3", "s7", "s8"]
+    },
+    {
+      "kind": "ambiguous_condition",
+      "message": "« triées par date de mise à jour ou de création décroissante » (l. 9) laisse le choix de la clé de tri à l'agent, alors que l'objectif (l. 3) demande « les plus récentes d'abord » sans dire récentes de quoi. Deux runs identiques peuvent rendre deux listes différentes.",
+      "related_steps": ["s4"]
+    },
+    {
+      "kind": "nondeterministic_truncation",
+      "message": "« Limite-toi à environ 15 tâches » plafonne sans définir le seuil exact ni imposer de signaler la troncature. Si Olivier a 40 tâches ouvertes, le `summary` annoncera « 15 tâches ouvertes » sans mentionner qu'il en manque 25. `compta-gmail-harvest` interdit explicitement ce comportement (« ne prétends pas avoir tout traité ») ; ici rien.",
+      "related_steps": ["s4", "s8"]
+    },
+    {
+      "kind": "unspecified_case",
+      "message": "« statuts ouverts uniquement » : les statuts ClickUp sont personnalisables par liste. Aucune liste de statuts considérés comme ouverts n'est donnée, ni au prompt ni au manifeste. Sur un workspace à statuts sur mesure (`en attente client`, `bloqué`, `à valider`), le périmètre est indéterminé.",
+      "related_steps": ["s4"]
+    },
+    {
+      "kind": "unspecified_case",
+      "message": "Le champ `list` de la sortie est demandé « si connue » sans dire d'où il vient. `clickup_filter_tasks` peut ne pas renvoyer le nom de liste ; le prompt n'autorise aucun appel supplémentaire pour le résoudre, et la contrainte de budget (l. 5) l'interdirait de fait.",
+      "related_steps": ["s4", "s8"]
+    },
+    {
+      "kind": "unspecified_case",
+      "message": "La branche `clickup_get_workspace_hierarchy` (l. 9) n'a pas de suite écrite : le prompt dit quand l'appeler, jamais qu'il faut ensuite rejouer `clickup_filter_tasks` avec l'identifiant obtenu. L'arête `s6 → s7` de cette carte suit la lettre du texte ; l'intention est manifestement `s6 → s4`.",
+      "related_steps": ["s5", "s6"]
+    }
+  ],
+  "overall_confidence": 0.96
+}

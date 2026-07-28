@@ -1,0 +1,731 @@
+{
+  "map_version": 1,
+  "shape": "policies",
+  "source": {
+    "package_id": "github.com/openai/codex — codex-rs/prompts/templates/review/rubric.md",
+    "version": "81de4f251cfdaf32ecb85e2160ebfc11a562d44b",
+    "integrity": null,
+    "files": ["corpus-web/codex-review-rubric.md"]
+  },
+  "generated_at": "2026-07-27T00:00:00Z",
+  "generator": {
+    "kind": "human",
+    "author": "PR 3 — élargissement du corpus, volet prompts publics",
+    "agent": null,
+    "version": null,
+    "model": null
+  },
+  "summary": "Rubrique de revue de code de Codex CLI : critères de qualification d'un bug, règles de rédaction des commentaires, attribution des règles du dépôt, échelle de priorité P0–P3 et schéma JSON de sortie strict. Document de critères, sans ordre global, terminé par une seule émission.",
+  "steps": [
+    {
+      "id": "meta1",
+      "kind": "guard",
+      "group": "0. Autorité et précédence",
+      "label": "Toute consigne plus spécifique rencontrée ailleurs prime sur cette rubrique",
+      "parent": null,
+      "detail": "Le prompt s'auto-déclare surchargeable par un message développeur, un message utilisateur, un fichier, ou même un autre passage du même message système. Équivalent public de la délégation d'autorité aux fichiers de références observée côté Tractr, mais dans l'autre sens : ici c'est le texte qui se dit subordonné.",
+      "refs": [],
+      "evidence": {
+        "file": "corpus-web/codex-review-rubric.md",
+        "lines": [8, 8],
+        "quote": "Those guidelines should be considered to override these general instructions."
+      },
+      "confidence": 0.98
+    },
+
+    {
+      "id": "q1",
+      "kind": "guard",
+      "group": "1. Qualifier un bug",
+      "label": "Impact réel sur exactitude, performance, sécurité ou maintenabilité",
+      "parent": null,
+      "detail": "Premier des huit critères cumulatifs qui décident si un constat mérite d'être signalé.",
+      "refs": [],
+      "evidence": {
+        "file": "corpus-web/codex-review-rubric.md",
+        "lines": [12, 12],
+        "quote": "1. It meaningfully impacts the accuracy, performance, security, or maintainability of the code."
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "q2",
+      "kind": "guard",
+      "group": "1. Qualifier un bug",
+      "label": "Le bug est discret et actionnable",
+      "parent": null,
+      "detail": "Exclut les problèmes généraux du dépôt et les combinaisons de plusieurs défauts.",
+      "refs": [],
+      "evidence": {
+        "file": "corpus-web/codex-review-rubric.md",
+        "lines": [13, 13],
+        "quote": "2. The bug is discrete and actionable (i.e. not a general issue with the codebase or a combination of multiple issues)."
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "q3",
+      "kind": "guard",
+      "group": "1. Qualifier un bug",
+      "label": "La correction n'exige pas une rigueur absente du reste du dépôt",
+      "parent": null,
+      "detail": "Critère relatif au contexte : le niveau d'exigence est celui du dépôt, pas un absolu.",
+      "refs": [],
+      "evidence": {
+        "file": "corpus-web/codex-review-rubric.md",
+        "lines": [14, 14],
+        "quote": "3. Fixing the bug does not demand a level of rigor that is not present in the rest of the codebase"
+      },
+      "confidence": 0.97
+    },
+    {
+      "id": "q4",
+      "kind": "guard",
+      "group": "1. Qualifier un bug",
+      "label": "Le bug a été introduit par le commit : ne pas signaler les bugs préexistants",
+      "parent": null,
+      "detail": "Délimite le périmètre au diff. C'est le critère le plus mécaniquement vérifiable des huit.",
+      "refs": [],
+      "evidence": {
+        "file": "corpus-web/codex-review-rubric.md",
+        "lines": [15, 15],
+        "quote": "4. The bug was introduced in the commit (pre-existing bugs should not be flagged)."
+      },
+      "confidence": 0.99
+    },
+    {
+      "id": "q5",
+      "kind": "guard",
+      "group": "1. Qualifier un bug",
+      "label": "L'auteur de la PR corrigerait probablement s'il en était informé",
+      "parent": null,
+      "detail": "Critère projectif : l'agent doit simuler la réaction d'un tiers. Aucun moyen de le vérifier au moment de la revue.",
+      "refs": [],
+      "evidence": {
+        "file": "corpus-web/codex-review-rubric.md",
+        "lines": [16, 16],
+        "quote": "5. The author of the original PR would likely fix the issue if they were made aware of it."
+      },
+      "confidence": 0.96
+    },
+    {
+      "id": "q6",
+      "kind": "guard",
+      "group": "1. Qualifier un bug",
+      "label": "Le bug ne repose pas sur des hypothèses non énoncées sur le dépôt ou l'intention de l'auteur",
+      "parent": null,
+      "detail": "Contre-mesure directe au faux positif spéculatif.",
+      "refs": [],
+      "evidence": {
+        "file": "corpus-web/codex-review-rubric.md",
+        "lines": [17, 17],
+        "quote": "6. The bug does not rely on unstated assumptions about the codebase or author's intent."
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "q7",
+      "kind": "guard",
+      "group": "1. Qualifier un bug",
+      "label": "Spéculer sur une rupture ailleurs ne suffit pas : identifier les parties prouvablement affectées",
+      "parent": null,
+      "detail": "Impose une charge de preuve explicite, pas seulement une plausibilité.",
+      "refs": [],
+      "evidence": {
+        "file": "corpus-web/codex-review-rubric.md",
+        "lines": [18, 18],
+        "quote": "7. It is not enough to speculate that a change may disrupt another part of the codebase, to be considered a bug, one must identify the other parts of the code that are provably affected."
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "q8",
+      "kind": "guard",
+      "group": "1. Qualifier un bug",
+      "label": "Le bug n'est manifestement pas un changement intentionnel de l'auteur",
+      "parent": null,
+      "detail": "Huitième et dernier critère de qualification.",
+      "refs": [],
+      "evidence": {
+        "file": "corpus-web/codex-review-rubric.md",
+        "lines": [19, 19],
+        "quote": "8. The bug is clearly not just an intentional change by the original author."
+      },
+      "confidence": 0.98
+    },
+
+    {
+      "id": "c1",
+      "kind": "guard",
+      "group": "2. Rédiger le commentaire",
+      "label": "Dire clairement pourquoi c'est un bug",
+      "parent": null,
+      "detail": "Premier des huit critères de rédaction, eux aussi explicitement surchargeables par des consignes ultérieures.",
+      "refs": [],
+      "evidence": {
+        "file": "corpus-web/codex-review-rubric.md",
+        "lines": [23, 23],
+        "quote": "1. The comment should be clear about why the issue is a bug."
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "c2",
+      "kind": "guard",
+      "group": "2. Rédiger le commentaire",
+      "label": "Communiquer la sévérité sans la surestimer",
+      "parent": null,
+      "detail": "Interdit explicitement de gonfler la gravité.",
+      "refs": [],
+      "evidence": {
+        "file": "corpus-web/codex-review-rubric.md",
+        "lines": [24, 24],
+        "quote": "2. The comment should appropriately communicate the severity of the issue. It should not claim that an issue is more severe than it actually is."
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "c3",
+      "kind": "guard",
+      "group": "2. Rédiger le commentaire",
+      "label": "Bref : un paragraphe au plus, pas de saut de ligne dans le fil du texte",
+      "parent": null,
+      "detail": "Contrainte de forme, redite en fin de document (« The finding description should be one paragraph. », l. 65).",
+      "refs": [],
+      "evidence": {
+        "file": "corpus-web/codex-review-rubric.md",
+        "lines": [25, 25],
+        "quote": "3. The comment should be brief. The body should be at most 1 paragraph."
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "c4",
+      "kind": "guard",
+      "group": "2. Rédiger le commentaire",
+      "label": "Aucun bloc de code de plus de 3 lignes, toujours balisé en markdown",
+      "parent": null,
+      "detail": "",
+      "refs": [],
+      "evidence": {
+        "file": "corpus-web/codex-review-rubric.md",
+        "lines": [26, 26],
+        "quote": "4. The comment should not include any chunks of code longer than 3 lines."
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "c5",
+      "kind": "guard",
+      "group": "2. Rédiger le commentaire",
+      "label": "Énoncer les scénarios, environnements ou entrées nécessaires à l'apparition du bug",
+      "parent": null,
+      "detail": "Et indiquer d'emblée que la sévérité dépend de ces facteurs.",
+      "refs": [],
+      "evidence": {
+        "file": "corpus-web/codex-review-rubric.md",
+        "lines": [27, 27],
+        "quote": "5. The comment should clearly and explicitly communicate the scenarios, environments, or inputs that are necessary for the bug to arise."
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "c6",
+      "kind": "guard",
+      "group": "2. Rédiger le commentaire",
+      "label": "Ton factuel, ni accusateur ni excessivement positif",
+      "parent": null,
+      "detail": "Doit se lire comme une suggestion d'assistant IA, pas comme un relecteur humain.",
+      "refs": [],
+      "evidence": {
+        "file": "corpus-web/codex-review-rubric.md",
+        "lines": [28, 28],
+        "quote": "6. The comment's tone should be matter-of-fact and not accusatory or overly positive."
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "c7",
+      "kind": "guard",
+      "group": "2. Rédiger le commentaire",
+      "label": "Compréhensible immédiatement, sans lecture attentive",
+      "parent": null,
+      "detail": "",
+      "refs": [],
+      "evidence": {
+        "file": "corpus-web/codex-review-rubric.md",
+        "lines": [29, 29],
+        "quote": "7. The comment should be written such that the original author can immediately grasp the idea without close reading."
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "c8",
+      "kind": "guard",
+      "group": "2. Rédiger le commentaire",
+      "label": "Pas de flatterie : bannir « Great job … », « Thanks for … »",
+      "parent": null,
+      "detail": "Seul critère de la série à donner des formulations littérales interdites.",
+      "refs": [],
+      "evidence": {
+        "file": "corpus-web/codex-review-rubric.md",
+        "lines": [30, 30],
+        "quote": "The comment should avoid phrasing like \"Great job ...\", \"Thanks for ...\"."
+      },
+      "confidence": 0.98
+    },
+
+    {
+      "id": "n1",
+      "kind": "decision",
+      "group": "3. Combien de constats",
+      "label": "Existe-t-il au moins un constat que l'auteur voudrait certainement voir et corriger ?",
+      "parent": null,
+      "detail": "Seuil global sur la sortie entière, distinct des huit critères par constat.",
+      "refs": [],
+      "evidence": {
+        "file": "corpus-web/codex-review-rubric.md",
+        "lines": [36, 36],
+        "quote": "If there is no finding that a person would definitely love to see and fix, prefer outputting no findings."
+      },
+      "confidence": 0.96
+    },
+    {
+      "id": "n2",
+      "kind": "step",
+      "group": "3. Combien de constats",
+      "label": "Ne retourner aucun constat",
+      "parent": null,
+      "detail": "Le silence est une sortie valide, pas un échec. Rien n'est dit de ce que devient alors `overall_correctness`.",
+      "refs": ["agent_output:findings"],
+      "evidence": {
+        "file": "corpus-web/codex-review-rubric.md",
+        "lines": [36, 36],
+        "quote": "prefer outputting no findings"
+      },
+      "confidence": 0.93
+    },
+    {
+      "id": "n3",
+      "kind": "guard",
+      "group": "3. Combien de constats",
+      "label": "Ne pas s'arrêter au premier constat qualifiant : continuer jusqu'à les avoir tous listés",
+      "parent": null,
+      "detail": "Formulation d'exhaustivité qui n'a ni compteur ni condition d'arrêt vérifiable — c'est une boucle « jusqu'à épuisement » énoncée en prose.",
+      "refs": ["agent_output:findings"],
+      "evidence": {
+        "file": "corpus-web/codex-review-rubric.md",
+        "lines": [36, 36],
+        "quote": "Do not stop at the first qualifying finding. Continue until you've listed every qualifying finding."
+      },
+      "confidence": 0.97
+    },
+
+    {
+      "id": "r1",
+      "kind": "guard",
+      "group": "4. Règles de revue",
+      "label": "Ignorer le style trivial, sauf s'il obscurcit le sens ou viole un standard documenté",
+      "parent": null,
+      "detail": "",
+      "refs": [],
+      "evidence": {
+        "file": "corpus-web/codex-review-rubric.md",
+        "lines": [40, 40],
+        "quote": "- Ignore trivial style unless it obscures meaning or violates documented standards."
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "r2",
+      "kind": "guard",
+      "group": "4. Règles de revue",
+      "label": "Un commentaire par problème distinct",
+      "parent": null,
+      "detail": "Ou une plage multi-lignes si nécessaire.",
+      "refs": [],
+      "evidence": {
+        "file": "corpus-web/codex-review-rubric.md",
+        "lines": [41, 41],
+        "quote": "- Use one comment per distinct issue (or a multi-line range if necessary)."
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "r3",
+      "kind": "guard",
+      "group": "4. Règles de revue",
+      "label": "Blocs ```suggestion réservés au code de remplacement concret",
+      "parent": null,
+      "detail": "Lignes minimales, aucun commentaire à l'intérieur du bloc.",
+      "refs": [],
+      "evidence": {
+        "file": "corpus-web/codex-review-rubric.md",
+        "lines": [42, 42],
+        "quote": "- Use ```suggestion blocks ONLY for concrete replacement code (minimal lines; no commentary inside the block)."
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "r4",
+      "kind": "guard",
+      "group": "4. Règles de revue",
+      "label": "Préserver exactement l'indentation initiale des lignes remplacées",
+      "parent": null,
+      "detail": "Espaces contre tabulations, nombre d'espaces.",
+      "refs": [],
+      "evidence": {
+        "file": "corpus-web/codex-review-rubric.md",
+        "lines": [43, 43],
+        "quote": "- In every ```suggestion block, preserve the exact leading whitespace of the replaced lines (spaces vs tabs, number of spaces)."
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "r5",
+      "kind": "guard",
+      "group": "4. Règles de revue",
+      "label": "Ne pas ajouter ni retirer de niveau d'indentation externe, sauf si c'est le correctif",
+      "parent": null,
+      "detail": "",
+      "refs": [],
+      "evidence": {
+        "file": "corpus-web/codex-review-rubric.md",
+        "lines": [44, 44],
+        "quote": "- Do NOT introduce or remove outer indentation levels unless that is the actual fix."
+      },
+      "confidence": 0.98
+    },
+
+    {
+      "id": "ra1",
+      "kind": "step",
+      "group": "5. Attribution des règles du dépôt",
+      "label": "Appliquer les fichiers d'instructions racine et scopés aux fichiers modifiés, selon la précédence du projet",
+      "parent": null,
+      "detail": "`AGENTS.override.md`, puis `AGENTS.md`, puis les noms de repli configurés. La guidance peut être en titres, listes, tableaux ou prose : ni identifiant formel ni schéma exigé.",
+      "refs": [],
+      "evidence": {
+        "file": "corpus-web/codex-review-rubric.md",
+        "lines": [48, 48],
+        "quote": "Use the root and scoped project instruction files applicable to changed files, respecting normal project-document precedence (`AGENTS.override.md`, `AGENTS.md`, then configured fallback filenames)."
+      },
+      "confidence": 0.96
+    },
+    {
+      "id": "ra2",
+      "kind": "step",
+      "group": "5. Attribution des règles du dépôt",
+      "label": "Revoir le diff indépendamment, puis dédupliquer par emplacement modifié et par couple défaut/remède",
+      "parent": null,
+      "detail": "Le seul geste du document qui suppose un ordre : la dédup suit la revue.",
+      "refs": [],
+      "evidence": {
+        "file": "corpus-web/codex-review-rubric.md",
+        "lines": [50, 50],
+        "quote": "Review the diff independently and deduplicate findings by changed location and defect/remedy."
+      },
+      "confidence": 0.96
+    },
+    {
+      "id": "ra3",
+      "kind": "decision",
+      "group": "5. Attribution des règles du dépôt",
+      "label": "Le constat est-il « rule-supported » ?",
+      "parent": null,
+      "detail": "Seulement si la guidance applicable apporte matériellement un périmètre propre au dépôt, un invariant, un remède, une convention ou un comportement de confirmation — au-delà d'un conseil générique d'exactitude.",
+      "refs": [],
+      "evidence": {
+        "file": "corpus-web/codex-review-rubric.md",
+        "lines": [50, 50],
+        "quote": "A finding is rule-supported only when applicable guidance materially contributes repository-specific scope, an invariant, remedy, convention, or confirmation behavior beyond generic correctness advice."
+      },
+      "confidence": 0.95
+    },
+    {
+      "id": "ra4",
+      "kind": "step",
+      "group": "5. Attribution des règles du dépôt",
+      "label": "En cas de fusion de candidats, unir leurs supports de règle, puis revérifier chaque candidat final",
+      "parent": null,
+      "detail": "Second geste ordonné : la revérification suit la fusion.",
+      "refs": [],
+      "evidence": {
+        "file": "corpus-web/codex-review-rubric.md",
+        "lines": [50, 50],
+        "quote": "Preserve and union rule support when candidates merge, then check every final candidate against the applicable rules."
+      },
+      "confidence": 0.95
+    },
+    {
+      "id": "ra5",
+      "kind": "guard",
+      "group": "5. Attribution des règles du dépôt",
+      "label": "Ne rien omettre ni inventer au seul motif qu'un fichier de règles existe",
+      "parent": null,
+      "detail": "Garde-fou symétrique : l'existence d'un `AGENTS.md` ne doit ni filtrer les constats ordinaires ni en fabriquer.",
+      "refs": [],
+      "evidence": {
+        "file": "corpus-web/codex-review-rubric.md",
+        "lines": [50, 50],
+        "quote": "Do not omit ordinary findings or invent findings solely because a rule file exists."
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "ra6",
+      "kind": "step",
+      "group": "5. Attribution des règles du dépôt",
+      "label": "Pour chaque constat rule-supported, citer le fichier d'instruction et sa plus petite plage de lignes",
+      "parent": null,
+      "detail": "Une seule référence compacte, en markdown ou en lien de fichier local, dans le corps du constat.",
+      "refs": [],
+      "evidence": {
+        "file": "corpus-web/codex-review-rubric.md",
+        "lines": [52, 52],
+        "quote": "For each rule-supported final finding, verify the applicable project instruction file that supplies the rule and its smallest supporting line range, then include one compact Markdown or local-file reference in the finding body."
+      },
+      "confidence": 0.96
+    },
+    {
+      "id": "ra7",
+      "kind": "guard",
+      "group": "5. Attribution des règles du dépôt",
+      "label": "Ne pas fabriquer de citations, ni ajouter de métadonnées ou champs de sortie cachés",
+      "parent": null,
+      "detail": "",
+      "refs": [],
+      "evidence": {
+        "file": "corpus-web/codex-review-rubric.md",
+        "lines": [52, 52],
+        "quote": "Do not fabricate citations or add hidden metadata or output fields."
+      },
+      "confidence": 0.99
+    },
+    {
+      "id": "ra8",
+      "kind": "guard",
+      "group": "5. Attribution des règles du dépôt",
+      "label": "Pas de détails de localisation superflus dans le corps du commentaire",
+      "parent": null,
+      "detail": "Les commentaires sont posés en ligne dans la revue : la position est déjà portée par l'ancrage.",
+      "refs": [],
+      "evidence": {
+        "file": "corpus-web/codex-review-rubric.md",
+        "lines": [54, 54],
+        "quote": "You should avoid providing unnecessary location details in the comment body."
+      },
+      "confidence": 0.97
+    },
+    {
+      "id": "ra9",
+      "kind": "guard",
+      "group": "5. Attribution des règles du dépôt",
+      "label": "Plage de lignes la plus courte possible, éviter au-delà de 5–10 lignes",
+      "parent": null,
+      "detail": "Répété mot pour mot dans les règles de sortie (l. 93).",
+      "refs": ["agent_output:code_location"],
+      "evidence": {
+        "file": "corpus-web/codex-review-rubric.md",
+        "lines": [54, 54],
+        "quote": "Avoid ranges longer than 5–10 lines; instead, choose the most suitable subrange that pinpoints the problem."
+      },
+      "confidence": 0.98
+    },
+
+    {
+      "id": "pr1",
+      "kind": "decision",
+      "group": "6. Priorité et verdict",
+      "label": "Classer le constat en P0, P1, P2 ou P3",
+      "parent": null,
+      "detail": "Table de décision à quatre issues : P0 « drop everything », réservé aux problèmes universels indépendants de toute hypothèse sur les entrées ; P1 urgent, prochain cycle ; P2 normal ; P3 nice to have. Aucune des quatre issues ne mène à une suite distincte — c'est une classification, pas un branchement.",
+      "refs": [],
+      "evidence": {
+        "file": "corpus-web/codex-review-rubric.md",
+        "lines": [56, 56],
+        "quote": "[P0] – Drop everything to fix.  Blocking release, operations, or major usage. Only use for universal issues that do not depend on any assumptions about the inputs. · [P1] – Urgent. Should be addressed in the next cycle · [P2] – Normal. To be fixed eventually · [P3] – Low. Nice to have."
+      },
+      "confidence": 0.94
+    },
+    {
+      "id": "pr2",
+      "kind": "step",
+      "group": "6. Priorité et verdict",
+      "label": "Préfixer le titre du constat par le niveau, ex. « [P1] … »",
+      "parent": null,
+      "detail": "La priorité est écrite deux fois dans la sortie : dans le titre en texte, et dans un champ numérique du JSON.",
+      "refs": ["agent_output:findings"],
+      "evidence": {
+        "file": "corpus-web/codex-review-rubric.md",
+        "lines": [56, 56],
+        "quote": "At the beginning of the finding title, tag the bug with priority level. For example \"[P1] Un-padding slices along wrong tensor dimensions\"."
+      },
+      "confidence": 0.97
+    },
+    {
+      "id": "pr3",
+      "kind": "step",
+      "group": "6. Priorité et verdict",
+      "label": "Renseigner le champ numérique `priority` (0–3), omis ou `null` si indéterminable",
+      "parent": null,
+      "detail": "Seul champ de la sortie explicitement facultatif.",
+      "refs": ["agent_output:priority"],
+      "evidence": {
+        "file": "corpus-web/codex-review-rubric.md",
+        "lines": [58, 58],
+        "quote": "If a priority cannot be determined, omit the field or use null."
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "pr4",
+      "kind": "step",
+      "group": "6. Priorité et verdict",
+      "label": "Rendre un verdict global : le patch est-il « correct » ?",
+      "parent": null,
+      "detail": "« Correct » signifie : le code et les tests existants ne casseront pas, et le patch est exempt de bugs et de bloquants.",
+      "refs": ["agent_output:overall_correctness"],
+      "evidence": {
+        "file": "corpus-web/codex-review-rubric.md",
+        "lines": [60, 61],
+        "quote": "At the end of your findings, output an \"overall correctness\" verdict of whether or not the patch should be considered \"correct\".\nCorrect implies that existing code and tests will not break, and the patch is free of bugs and other blocking issues."
+      },
+      "confidence": 0.97
+    },
+    {
+      "id": "pr5",
+      "kind": "guard",
+      "group": "6. Priorité et verdict",
+      "label": "Ignorer style, formatage, coquilles, documentation et nits dans le verdict",
+      "parent": null,
+      "detail": "Le verdict ne porte que sur les bloquants, alors que les constats, eux, peuvent inclure des P3 « nice to have ». Les deux échelles ne coïncident pas.",
+      "refs": ["agent_output:overall_correctness"],
+      "evidence": {
+        "file": "corpus-web/codex-review-rubric.md",
+        "lines": [62, 62],
+        "quote": "Ignore non-blocking issues such as style, formatting, typos, documentation, and other nits."
+      },
+      "confidence": 0.97
+    },
+
+    {
+      "id": "o1",
+      "kind": "emit",
+      "group": "7. Sortie",
+      "label": "Émettre le JSON conforme au schéma, exactement",
+      "parent": null,
+      "detail": "`findings[]` (title ≤ 80 car. impératif, body markdown, confidence_score flottant, priority optionnel, code_location), `overall_correctness`, `overall_explanation` (1–3 phrases), `overall_confidence_score`.",
+      "refs": ["agent_output:findings", "agent_output:overall_correctness", "agent_output:overall_explanation", "agent_output:overall_confidence_score"],
+      "evidence": {
+        "file": "corpus-web/codex-review-rubric.md",
+        "lines": [69, 69],
+        "quote": "## Output schema  — MUST MATCH *exactly*"
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "o2",
+      "kind": "guard",
+      "group": "7. Sortie",
+      "label": "Ne pas encadrer le JSON dans des balises markdown ni ajouter de prose",
+      "parent": null,
+      "detail": "",
+      "refs": [],
+      "evidence": {
+        "file": "corpus-web/codex-review-rubric.md",
+        "lines": [91, 91],
+        "quote": "* **Do not** wrap the JSON in markdown fences or extra prose."
+      },
+      "confidence": 0.99
+    },
+    {
+      "id": "o3",
+      "kind": "guard",
+      "group": "7. Sortie",
+      "label": "`code_location` obligatoire, avec `absolute_file_path` et `line_range`",
+      "parent": null,
+      "detail": "",
+      "refs": ["agent_output:code_location"],
+      "evidence": {
+        "file": "corpus-web/codex-review-rubric.md",
+        "lines": [92, 92],
+        "quote": "* The code_location field is required and must include absolute_file_path and line_range."
+      },
+      "confidence": 0.99
+    },
+    {
+      "id": "o4",
+      "kind": "guard",
+      "group": "7. Sortie",
+      "label": "`code_location` doit recouvrir le diff",
+      "parent": null,
+      "detail": "Version machine-vérifiable du critère q4 (« le bug a été introduit par le commit »).",
+      "refs": ["agent_output:code_location"],
+      "evidence": {
+        "file": "corpus-web/codex-review-rubric.md",
+        "lines": [94, 94],
+        "quote": "* The code_location should overlap with the diff."
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "o5",
+      "kind": "guard",
+      "group": "7. Sortie",
+      "label": "Ne pas produire de correctif de PR",
+      "parent": null,
+      "detail": "Frontière de responsabilité : cet agent constate, il ne corrige pas. Les blocs ```suggestion restent autorisés (r3) — le prompt ne dit pas où passe exactement la limite entre les deux.",
+      "refs": [],
+      "evidence": {
+        "file": "corpus-web/codex-review-rubric.md",
+        "lines": [95, 95],
+        "quote": "* Do not generate a PR fix."
+      },
+      "confidence": 0.96
+    }
+  ],
+  "edges": [
+    { "from": "n1", "to": "n2", "condition": "aucun constat que l'auteur voudrait certainement corriger" },
+    { "from": "n1", "to": "n3", "condition": "au moins un constat qualifiant" },
+    { "from": "ra2", "to": "ra3", "condition": null },
+    { "from": "ra3", "to": "ra6", "condition": "rule-supported" },
+    { "from": "ra4", "to": "ra6", "condition": null },
+    { "from": "pr1", "to": "pr2", "condition": null },
+    { "from": "pr2", "to": "pr3", "condition": null },
+    { "from": "pr4", "to": "o1", "condition": null }
+  ],
+  "gaps": [
+    {
+      "kind": "conflicting_policies",
+      "message": "L'échelle P0–P3 admet des constats « nice to have » (P3), alors que le verdict global doit ignorer style, formatage, coquilles et documentation. Un run qui ne trouve que des P3 doit-il conclure « patch is correct » tout en listant des constats ? Le prompt ne tranche pas.",
+      "related_steps": ["pr1", "pr5", "pr4"]
+    },
+    {
+      "kind": "unspecified_case",
+      "message": "Si aucun constat n'est retourné (n2), rien ne dit ce que valent `overall_correctness` et `overall_explanation`. Le schéma les rend obligatoires ; l'absence de constat n'implique pas mécaniquement « patch is correct », puisque des bugs préexistants ou hors périmètre peuvent exister.",
+      "related_steps": ["n2", "o1"]
+    },
+    {
+      "kind": "ambiguous_boundary",
+      "message": "« Do not generate a PR fix » (l. 95) coexiste avec l'obligation d'utiliser des blocs ```suggestion contenant « concrete replacement code » (l. 42-44). La frontière entre une suggestion en ligne et un correctif n'est définie nulle part.",
+      "related_steps": ["o5", "r3"]
+    },
+    {
+      "kind": "unbounded_criterion",
+      "message": "« Continue until you've listed every qualifying finding » n'a ni condition d'arrêt vérifiable, ni plafond, ni budget. C'est une boucle d'exhaustivité sur un ensemble non énumérable a priori — le format v1 n'a pas de `loop` pour cela, puisqu'il n'y a pas d'ensemble à parcourir.",
+      "related_steps": ["n3"]
+    },
+    {
+      "kind": "self_declared_subordination",
+      "message": "Le document se déclare surchargeable par « a developer message, a user message, a file, or even elsewhere in this system message » (l. 7). Une carte de ce prompt seul ne décrit donc jamais le comportement effectif : la moitié des règles peut être neutralisée par un `AGENTS.md` que la carte ne voit pas.",
+      "related_steps": ["meta1", "ra1"]
+    },
+    {
+      "kind": "unverifiable_criterion",
+      "message": "Deux des huit critères de qualification sont projectifs (« l'auteur corrigerait probablement », « ce n'est manifestement pas un changement intentionnel ») : aucun ne peut être évalué depuis le diff seul, et le prompt ne fournit aucune procédure de repli en cas de doute.",
+      "related_steps": ["q5", "q8"]
+    }
+  ],
+  "overall_confidence": 0.95
+}

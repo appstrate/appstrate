@@ -1,0 +1,1167 @@
+{
+  "map_version": 1,
+  "shape": "policies",
+  "source": {
+    "package_id": "langchain-fleet/gtm",
+    "version": null,
+    "integrity": null,
+    "files": [
+      "configs/agents/gtm/AGENT.md"
+    ]
+  },
+  "generated_at": "2026-07-27T00:00:00Z",
+  "generator": {
+    "kind": "agent",
+    "author": "PR 3 — élargissement du corpus, agent cartographe",
+    "agent": "cartographe-logic-map",
+    "version": null,
+    "model": "claude-opus-4"
+  },
+  "summary": "Agent Go-To-Market LangSmith Fleet : rédige de l'outbound personnalisé, traite les signaux de leads entrants, recherche comptes et contacts, et remonte l'intelligence de compte depuis le CRM, la plateforme d'enregistrement d'appels et l'entrepôt. Document de règles par domaine (18 sections balisées), sans ordre d'exécution global, mais avec quatre séquences courtes enfouies : l'enrichissement avant rédaction, la livraison de brouillon, l'ordre CRM-puis-entrepôt sur une question de compte, et la boucle de datation des événements CRM.",
+  "steps": [
+    {
+      "id": "id1",
+      "kind": "guard",
+      "group": "1. Identity",
+      "label": "Ton de sortie : direct, sans emphase ni jargon corporate",
+      "parent": null,
+      "detail": "Seule prescription de la section d'identité. Le reste (« You can: … ») est un inventaire de capacités, pas une règle.",
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/gtm/AGENT.md",
+        "lines": [38, 38],
+        "quote": "Be direct. No flowery language. No corporate jargon. Get to the point."
+      },
+      "confidence": 0.96
+    },
+    {
+      "id": "cc1",
+      "kind": "guard",
+      "group": "2. Company context",
+      "label": "Tant que `<company-context>` n'est pas rempli : métier GTM générique uniquement, et éviter explicitement toute affirmation produit",
+      "parent": null,
+      "detail": "Les cinq blocs (Company, Product, ICP and personas, Voice, Disqualifiers) sont tous `[not yet configured]` dans le fichier livré. Le skill `onboard-gtm` en est le seul remplisseur.",
+      "refs": ["skills:onboard-gtm"],
+      "evidence": {
+        "file": "configs/agents/gtm/AGENT.md",
+        "lines": [44, 44],
+        "quote": "Until then, rely only on generic GTM craft and explicitly avoid specific product claims."
+      },
+      "confidence": 0.96
+    },
+    {
+      "id": "cs1",
+      "kind": "policy",
+      "group": "3. Customer stories",
+      "label": "N'utiliser un cas client que s'il est réellement pertinent pour le secteur du prospect",
+      "parent": null,
+      "detail": null,
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/gtm/AGENT.md",
+        "lines": [65, 65],
+        "quote": "Only use when genuinely relevant to the prospect's industry."
+      },
+      "confidence": 0.95
+    },
+    {
+      "id": "cs2",
+      "kind": "guard",
+      "group": "3. Customer stories",
+      "label": "Liste vide ou `not yet configured` : omettre toute référence à un cas client plutôt que d'en fabriquer un",
+      "parent": null,
+      "detail": "Unique règle anti-fabrication explicite du document, et elle ne porte que sur les études de cas.",
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/gtm/AGENT.md",
+        "lines": [65, 65],
+        "quote": "omit case study references entirely rather than fabricating one"
+      },
+      "confidence": 0.97
+    },
+    {
+      "id": "crm1",
+      "kind": "guard",
+      "group": "4. CRM schema",
+      "label": "Tant que `<crm-schema>` n'est pas configuré, tout workflow qui en dépend REFUSE de s'exécuter et renvoie vers `@onboard-gtm`",
+      "parent": null,
+      "detail": "Porte nommément sur `inbound-lead-processing`. Les trois sous-blocs (CRM system, Lead-signal object, Key custom field names) sont vides dans le fichier livré.",
+      "refs": ["skills:inbound-lead-processing", "skills:onboard-gtm"],
+      "evidence": {
+        "file": "configs/agents/gtm/AGENT.md",
+        "lines": [73, 73],
+        "quote": "Until this section is configured, workflows that depend on CRM schema must refuse to execute and instruct the user to run `@onboard-gtm`."
+      },
+      "confidence": 0.97
+    },
+    {
+      "id": "wh1",
+      "kind": "guard",
+      "group": "5. Warehouse schema",
+      "label": "Tant que `<warehouse-schema>` n'est pas configuré, `account-health-research` et `buying-signal-research` refusent de s'exécuter",
+      "parent": null,
+      "detail": "Gate plus faible que le précédent : « should refuse », et la section est déclarée optionnelle. Quatre sous-blocs vides, dont le `project_id` que `bigquery_execute_query` exige (voir tg8).",
+      "refs": [
+        "skills:account-health-research",
+        "skills:buying-signal-research",
+        "skills:onboard-gtm"
+      ],
+      "evidence": {
+        "file": "configs/agents/gtm/AGENT.md",
+        "lines": [88, 88],
+        "quote": "Until configured, those skills should refuse to execute and instruct the user to run `@onboard-gtm`."
+      },
+      "confidence": 0.93
+    },
+    {
+      "id": "sa1",
+      "kind": "tool_call",
+      "group": "6. Subagents",
+      "label": "Déléguer à `apollo-researcher` : recherche et enrichissement de contacts Apollo",
+      "parent": null,
+      "detail": "Entrée : nom et prénom, société et/ou domaine, données CRM existantes. Un crédit Apollo par enrichissement. Aucun type du vocabulaire ne décrit une délégation à un sous-agent : `tool_call` est le moins mauvais. Les quatre refs sont les outils que le prompt attribue au SOUS-AGENT (l. 111), pas à l'agent principal : sans elles, quatre outils déclarés sur seize deviendraient « jamais référencés » à tort.",
+      "refs": [
+        "system_tools:task",
+        "toolbox:apollo#apollo_search_contacts",
+        "toolbox:apollo#apollo_search_people",
+        "toolbox:apollo#apollo_enrich_people",
+        "toolbox:apollo#apollo_create_contacts"
+      ],
+      "evidence": {
+        "file": "configs/agents/gtm/AGENT.md",
+        "lines": [108, 111],
+        "quote": "Finds and enriches contact info via Apollo."
+      },
+      "confidence": 0.9
+    },
+    {
+      "id": "sa2",
+      "kind": "guard",
+      "group": "6. Subagents",
+      "label": "TOUJOURS vérifier le CRM AVANT de déléguer à Apollo, pour ne pas gaspiller de crédits",
+      "parent": null,
+      "detail": "Seule contrainte de coût du document. Elle impose un ordre (CRM puis Apollo) sans que le document décrive nulle part la requête CRM correspondante.",
+      "refs": ["toolbox:salesforce#salesforce_query"],
+      "evidence": {
+        "file": "configs/agents/gtm/AGENT.md",
+        "lines": [112, 112],
+        "quote": "IMPORTANT: Always check the CRM BEFORE delegating to avoid wasting Apollo credits."
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "sa3",
+      "kind": "tool_call",
+      "group": "6. Subagents",
+      "label": "Déléguer à `internal-channel-researcher` : lecture des canaux Slack internes sur un compte client",
+      "parent": null,
+      "detail": "Entrée : `account_name`, `channel_id`, fenêtre de rétrospection optionnelle. Retourne un résumé des mises à jour, actions, blocages et prochaines étapes. Même limite de typage que `sa1`. Refs = outils attribués au sous-agent (l. 117).",
+      "refs": [
+        "system_tools:task",
+        "toolbox:slack#slack_read_channel_history",
+        "toolbox:slack#slack_read_thread_messages"
+      ],
+      "evidence": {
+        "file": "configs/agents/gtm/AGENT.md",
+        "lines": [114, 117],
+        "quote": "Reads internal Slack channels for recent team discussions about a customer account."
+      },
+      "confidence": 0.9
+    },
+    {
+      "id": "sa4",
+      "kind": "policy",
+      "group": "6. Subagents",
+      "label": "Recherche parallèle : lancer plusieurs `task` ad hoc simultanément dès que possible",
+      "parent": null,
+      "detail": "Autorise des sous-agents non déclarés au manifeste, créés à la volée.",
+      "refs": ["system_tools:task"],
+      "evidence": {
+        "file": "configs/agents/gtm/AGENT.md",
+        "lines": [119, 119],
+        "quote": "Launch multiple tasks concurrently whenever possible to maximize performance."
+      },
+      "confidence": 0.94
+    },
+    {
+      "id": "mem1",
+      "kind": "guard",
+      "group": "7. Memory guidelines",
+      "label": "Au DÉBUT de tout workflow : lire `/memories/rep-styles/` pour le rep courant",
+      "parent": null,
+      "detail": "Préalable obligatoire à tout workflow. Le document ne dit pas quoi faire si le répertoire est vide ni comment identifier « the user you're working with ».",
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/gtm/AGENT.md",
+        "lines": [125, 125],
+        "quote": "At the START of any workflow, check if memories exist for the user you're working with by reading from `/memories/rep-styles/`."
+      },
+      "confidence": 0.96
+    },
+    {
+      "id": "mem2",
+      "kind": "policy",
+      "group": "7. Memory guidelines",
+      "label": "Appliquer les préférences de style apprises lors de la rédaction d'emails",
+      "parent": null,
+      "detail": "Rien ne dit ce qui l'emporte quand une préférence de rep contredit les conventions `<email-style-conventions>`.",
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/gtm/AGENT.md",
+        "lines": [127, 127],
+        "quote": "Apply any learned style preferences when drafting emails."
+      },
+      "confidence": 0.95
+    },
+    {
+      "id": "mem3",
+      "kind": "policy",
+      "group": "7. Memory guidelines",
+      "label": "Écriture d'une nouvelle mémoire : chemin `/memories/rep-styles/{identifier}.md`, contenu markdown à `#` et `- `",
+      "parent": null,
+      "detail": "Le document impose le format mais ne dit jamais QUAND écrire une mémoire : aucun déclencheur d'apprentissage n'est décrit (voir gaps).",
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/gtm/AGENT.md",
+        "lines": [129, 129],
+        "quote": "use the path format `/memories/rep-styles/{identifier}.md` where `identifier` describes the user"
+      },
+      "confidence": 0.95
+    },
+    {
+      "id": "cg1",
+      "kind": "guard",
+      "group": "8. Communication guidelines",
+      "label": "Avant tout workflow : exposer le plan d'étapes, et le tenir à jour au fil de l'avancement",
+      "parent": null,
+      "detail": null,
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/gtm/AGENT.md",
+        "lines": [135, 135],
+        "quote": "Before beginning any workflow, outline the planned steps and keep them updated as you finish items."
+      },
+      "confidence": 0.96
+    },
+    {
+      "id": "cg2",
+      "kind": "guard",
+      "group": "8. Communication guidelines",
+      "label": "Après chaque étape ou appel d'outil : dire ce qui a été tenté, le résultat, et les données obtenues ou manquantes",
+      "parent": null,
+      "detail": null,
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/gtm/AGENT.md",
+        "lines": [136, 136],
+        "quote": "After each step or tool call, state what you just tried, the outcome, and any data retrieved or missing."
+      },
+      "confidence": 0.96
+    },
+    {
+      "id": "cg3",
+      "kind": "guard",
+      "group": "8. Communication guidelines",
+      "label": "Tenir un résumé courant des faits clés utiles au livrable final",
+      "parent": null,
+      "detail": null,
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/gtm/AGENT.md",
+        "lines": [137, 137],
+        "quote": "Keep a running summary of key facts that will matter for the final output."
+      },
+      "confidence": 0.95
+    },
+    {
+      "id": "es1",
+      "kind": "guard",
+      "group": "9. Email style conventions",
+      "label": "Salutation au prénom seul, jamais le nom de famille",
+      "parent": null,
+      "detail": null,
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/gtm/AGENT.md",
+        "lines": [144, 144],
+        "quote": "First name greeting only: \"Hi [FirstName],\" (never include last name)"
+      },
+      "confidence": 0.97
+    },
+    {
+      "id": "es2",
+      "kind": "guard",
+      "group": "9. Email style conventions",
+      "label": "Écrire À LA PLACE du rep, à la première personne (« I », « my », « me »)",
+      "parent": null,
+      "detail": null,
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/gtm/AGENT.md",
+        "lines": [145, 145],
+        "quote": "First person perspective: Write AS the rep, not about them. Use \"I\", \"my\", \"me\""
+      },
+      "confidence": 0.97
+    },
+    {
+      "id": "es3",
+      "kind": "guard",
+      "group": "9. Email style conventions",
+      "label": "Aucun tiret comme séparateur : virgules ou phrases courtes",
+      "parent": null,
+      "detail": null,
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/gtm/AGENT.md",
+        "lines": [146, 146],
+        "quote": "No dashes: Use commas or short sentences instead of em dashes or hyphens as separators"
+      },
+      "confidence": 0.97
+    },
+    {
+      "id": "es4",
+      "kind": "guard",
+      "group": "9. Email style conventions",
+      "label": "Aucun lien dans le premier email : CTA en texte seul",
+      "parent": null,
+      "detail": "Motif donné : délivrabilité.",
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/gtm/AGENT.md",
+        "lines": [147, 147],
+        "quote": "No links in first email: Hurts deliverability. Text-only CTAs"
+      },
+      "confidence": 0.97
+    },
+    {
+      "id": "es5",
+      "kind": "guard",
+      "group": "9. Email style conventions",
+      "label": "Objet : naturel, tout en minuscules, sans point d'interrogation ni emoji, jamais « Re: » sur un premier email, 7 mots maximum",
+      "parent": null,
+      "detail": "Cinq contraintes distinctes tenues sur une seule ligne du prompt ; elles ne sont séparables qu'au prix d'une citation partagée.",
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/gtm/AGENT.md",
+        "lines": [148, 148],
+        "quote": "Subject lines: natural, all lowercase, no question marks or emojis. NEVER use \"Re:\" in the first email subject line (first emails are not replies). Max 7 words."
+      },
+      "confidence": 0.96
+    },
+    {
+      "id": "es6",
+      "kind": "guard",
+      "group": "9. Email style conventions",
+      "label": "Ne pas mentionner que le prospect a assisté à une démo",
+      "parent": null,
+      "detail": null,
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/gtm/AGENT.md",
+        "lines": [151, 151],
+        "quote": "Don't mention they've been on a demo (obvious, adds no value)"
+      },
+      "confidence": 0.96
+    },
+    {
+      "id": "es7",
+      "kind": "guard",
+      "group": "9. Email style conventions",
+      "label": "Pas de langue fleurie ni de jargon corporate (« I hope this finds you well »)",
+      "parent": null,
+      "detail": "Redit `id1` depuis une autre section, restreint au corps d'email.",
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/gtm/AGENT.md",
+        "lines": [152, 152],
+        "quote": "Don't use flowery language or corporate jargon (\"I hope this finds you well\", \"I wanted to reach out\")"
+      },
+      "confidence": 0.96
+    },
+    {
+      "id": "es8",
+      "kind": "guard",
+      "group": "9. Email style conventions",
+      "label": "Une seule proposition de valeur par email",
+      "parent": null,
+      "detail": null,
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/gtm/AGENT.md",
+        "lines": [153, 153],
+        "quote": "Don't include multiple value props (pick ONE)"
+      },
+      "confidence": 0.97
+    },
+    {
+      "id": "es9",
+      "kind": "guard",
+      "group": "9. Email style conventions",
+      "label": "Ne jamais parler du rep à la troisième personne",
+      "parent": null,
+      "detail": "Corollaire de `es2`.",
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/gtm/AGENT.md",
+        "lines": [154, 154],
+        "quote": "Don't refer to the rep in third person (\"Worth connecting you with Sam\" → \"Worth connecting\")"
+      },
+      "confidence": 0.96
+    },
+    {
+      "id": "es10",
+      "kind": "guard",
+      "group": "9. Email style conventions",
+      "label": "Ne pas citer de collègue dans une grande organisation (5 000+ employés) sans vérification dans un appel enregistré",
+      "parent": null,
+      "detail": "Seule règle du document qui subordonne une affirmation à une source vérifiable. La vérification passe par les enregistrements d'appels, dont l'accès est décrit en `<meeting-transcripts>` et dépend d'un entrepôt non configuré.",
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/gtm/AGENT.md",
+        "lines": [155, 155],
+        "quote": "Don't mention colleagues at large orgs (5,000+ employees) unless verified in recorded calls"
+      },
+      "confidence": 0.95
+    },
+    {
+      "id": "es11",
+      "kind": "guard",
+      "group": "9. Email style conventions",
+      "label": "Aucun mot-valise IA générique (« exploring AI », « AI transformation journey »)",
+      "parent": null,
+      "detail": null,
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/gtm/AGENT.md",
+        "lines": [156, 156],
+        "quote": "Don't use generic AI buzzwords (\"exploring AI\", \"AI transformation journey\")"
+      },
+      "confidence": 0.97
+    },
+    {
+      "id": "ca1",
+      "kind": "policy",
+      "group": "10. Competitive analysis",
+      "label": "Si le CRM porte des champs concurrent sur les opportunités : les interroger sur les affaires gagnées et perdues",
+      "parent": null,
+      "detail": "Les noms de champs varient par organisation et sont renvoyés à `<crm-schema>`, qui est vide.",
+      "refs": ["toolbox:salesforce#salesforce_query"],
+      "evidence": {
+        "file": "configs/agents/gtm/AGENT.md",
+        "lines": [165, 165],
+        "quote": "If your CRM tracks competitor fields on opportunities, query them for won and lost deals against specific competitors."
+      },
+      "confidence": 0.93
+    },
+    {
+      "id": "ca2",
+      "kind": "policy",
+      "group": "10. Competitive analysis",
+      "label": "Si la plateforme d'enregistrement d'appels alimente l'entrepôt : l'interroger pour le paysage concurrentiel courant du compte",
+      "parent": null,
+      "detail": "Renvoie à `<warehouse-schema>` pour les noms de tables. Le prompt ne nomme pas l'outil ici ; le rattachement passe par l'effet (requête entrepôt) et par tg8.",
+      "refs": ["toolbox:google_bigquery#bigquery_execute_query"],
+      "evidence": {
+        "file": "configs/agents/gtm/AGENT.md",
+        "lines": [168, 168],
+        "quote": "If your call-recording platform syncs structured intelligence to your warehouse, query it for the current competitive landscape per account."
+      },
+      "confidence": 0.88
+    },
+    {
+      "id": "ca3",
+      "kind": "guard",
+      "group": "10. Competitive analysis",
+      "label": "Utiliser les deux sources ensemble : l'historique gagné/perdu du CRM et ce qui se dit maintenant en appel",
+      "parent": null,
+      "detail": null,
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/gtm/AGENT.md",
+        "lines": [170, 170],
+        "quote": "Use both sources together."
+      },
+      "confidence": 0.95
+    },
+    {
+      "id": "tg1",
+      "kind": "guard",
+      "group": "11. Tooling guidelines",
+      "label": "Être économe en outils : préférer l'outillage minimal, n'en ajouter que si nécessaire",
+      "parent": null,
+      "detail": null,
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/gtm/AGENT.md",
+        "lines": [176, 176],
+        "quote": "Be conservative with tool usage. Prefer a minimal toolset and only use additional tools when clearly necessary."
+      },
+      "confidence": 0.96
+    },
+    {
+      "id": "tg2",
+      "kind": "guard",
+      "group": "11. Tooling guidelines",
+      "label": "Ne pas supposer la présence d'un outil non fourni ; s'il manque, faire autrement et le dire",
+      "parent": null,
+      "detail": null,
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/gtm/AGENT.md",
+        "lines": [177, 177],
+        "quote": "Do not assume the presence of tools not explicitly provided. If a tool is required but unavailable, proceed with alternatives and call it out."
+      },
+      "confidence": 0.96
+    },
+    {
+      "id": "tg3",
+      "kind": "guard",
+      "group": "11. Tooling guidelines",
+      "label": "Trois erreurs sur le même outil : arrêter de l'appeler, sauter l'étape, continuer avec les données déjà obtenues",
+      "parent": null,
+      "detail": "Seule règle de gestion d'échec du document, et elle est quantifiée.",
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/gtm/AGENT.md",
+        "lines": [178, 178],
+        "quote": "If the same tool returns an error 3 or more times, stop calling it."
+      },
+      "confidence": 0.97
+    },
+    {
+      "id": "tg4",
+      "kind": "policy",
+      "group": "11. Tooling guidelines",
+      "label": "Recherche sur un canal interne de compte (discussions, actions, débriefs) : déléguer à `internal-channel-researcher`",
+      "parent": null,
+      "detail": "Déclencheur explicite pour la délégation décrite en `sa3`.",
+      "refs": ["system_tools:task"],
+      "evidence": {
+        "file": "configs/agents/gtm/AGENT.md",
+        "lines": [179, 179],
+        "quote": "For internal account channel research (team discussions, action items, debriefs), delegate to the `internal-channel-researcher` subagent."
+      },
+      "confidence": 0.96
+    },
+    {
+      "id": "tg5",
+      "kind": "guard",
+      "group": "11. Tooling guidelines",
+      "label": "Salesforce : seul `salesforce_query` est disponible, en SOQL brut pour TOUTES les consultations",
+      "parent": null,
+      "detail": null,
+      "refs": ["toolbox:salesforce#salesforce_query"],
+      "evidence": {
+        "file": "configs/agents/gtm/AGENT.md",
+        "lines": [182, 182],
+        "quote": "Only `salesforce_query` is available by default. Use raw SOQL for ALL Salesforce lookups."
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "tg6",
+      "kind": "policy",
+      "group": "11. Tooling guidelines",
+      "label": "Récupérer un enregistrement unique par Id : `SELECT fields FROM Object WHERE Id = 'xxxxx' LIMIT 1`",
+      "parent": null,
+      "detail": null,
+      "refs": ["toolbox:salesforce#salesforce_query"],
+      "evidence": {
+        "file": "configs/agents/gtm/AGENT.md",
+        "lines": [183, 183],
+        "quote": "To fetch a single record by ID: `SELECT fields FROM Object WHERE Id = 'xxxxx' LIMIT 1`"
+      },
+      "confidence": 0.95
+    },
+    {
+      "id": "tg7",
+      "kind": "guard",
+      "group": "11. Tooling guidelines",
+      "label": "Ne JAMAIS utiliser `FIELDS(ALL)` : énumérer les champs explicitement",
+      "parent": null,
+      "detail": "Motif : restrictions de l'API Salesforce.",
+      "refs": ["toolbox:salesforce#salesforce_query"],
+      "evidence": {
+        "file": "configs/agents/gtm/AGENT.md",
+        "lines": [184, 184],
+        "quote": "Do NOT use `FIELDS(ALL)` — specify fields explicitly to avoid API restrictions."
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "tg8",
+      "kind": "policy",
+      "group": "11. Tooling guidelines",
+      "label": "BigQuery : appeler `bigquery_execute_query` avec le `project_id` de `<warehouse-schema>`",
+      "parent": null,
+      "detail": "Conditionné à « only if your team uses BigQuery ». Le `project_id` requis vit dans un bloc `[not yet configured]`.",
+      "refs": ["toolbox:google_bigquery#bigquery_execute_query"],
+      "evidence": {
+        "file": "configs/agents/gtm/AGENT.md",
+        "lines": [188, 188],
+        "quote": "Use `bigquery_execute_query` with the `project_id` from `<warehouse-schema>`."
+      },
+      "confidence": 0.97
+    },
+    {
+      "id": "tg9",
+      "kind": "guard",
+      "group": "11. Tooling guidelines",
+      "label": "BigQuery en lecture seule : uniquement des SELECT, jamais INSERT/UPDATE/DELETE/DROP/CREATE/ALTER/TRUNCATE",
+      "parent": null,
+      "detail": null,
+      "refs": ["toolbox:google_bigquery#bigquery_execute_query"],
+      "evidence": {
+        "file": "configs/agents/gtm/AGENT.md",
+        "lines": [189, 189],
+        "quote": "Only SELECT queries are allowed. NEVER use INSERT, UPDATE, DELETE, DROP, CREATE, ALTER, or TRUNCATE."
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "tg10",
+      "kind": "guard",
+      "group": "11. Tooling guidelines",
+      "label": "Requêtes exploratoires BigQuery : petites valeurs de `LIMIT` (5 à 20)",
+      "parent": null,
+      "detail": null,
+      "refs": ["toolbox:google_bigquery#bigquery_execute_query"],
+      "evidence": {
+        "file": "configs/agents/gtm/AGENT.md",
+        "lines": [190, 190],
+        "quote": "Use small LIMIT values (5-20) for exploratory queries."
+      },
+      "confidence": 0.96
+    },
+    {
+      "id": "mt1",
+      "kind": "guard",
+      "group": "12. Meeting transcripts",
+      "label": "Intelligence d'appel : vérifier les deux formes (entrepôt pré-extrait, enregistrements bruts) si elles sont configurées",
+      "parent": null,
+      "detail": null,
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/gtm/AGENT.md",
+        "lines": [196, 196],
+        "quote": "Intelligence from recorded sales calls (Gong, Chorus, Fathom, etc.) is typically available in two forms. Check both if configured."
+      },
+      "confidence": 0.94
+    },
+    {
+      "id": "mt2",
+      "kind": "policy",
+      "group": "12. Meeting transcripts",
+      "label": "Intelligence pré-extraite (sentiment, parties prenantes, risques, stack) : interroger l'entrepôt via `bigquery_execute_query`",
+      "parent": null,
+      "detail": null,
+      "refs": ["toolbox:google_bigquery#bigquery_execute_query"],
+      "evidence": {
+        "file": "configs/agents/gtm/AGENT.md",
+        "lines": [199, 199],
+        "quote": "If configured in `<warehouse-schema>`, query these via `bigquery_execute_query`."
+      },
+      "confidence": 0.97
+    },
+    {
+      "id": "mt3",
+      "kind": "policy",
+      "group": "12. Meeting transcripts",
+      "label": "Notes d'appel ou réunion précise : récupérer les enregistrements bruts par le CRM en SOQL (ex. `Gong__Gong_Call__c`)",
+      "parent": null,
+      "detail": "Conditionné à ce que la plateforme d'appel se synchronise vers le CRM.",
+      "refs": ["toolbox:salesforce#salesforce_query"],
+      "evidence": {
+        "file": "configs/agents/gtm/AGENT.md",
+        "lines": [202, 202],
+        "quote": "Use `salesforce_query` with raw SOQL."
+      },
+      "confidence": 0.96
+    },
+    {
+      "id": "ai1",
+      "kind": "policy",
+      "group": "13. Account intelligence",
+      "label": "Le CRM fait foi pour : propriété du compte et contacts, pipeline et montants, réunions et activités consignées, historique gagné/perdu",
+      "parent": null,
+      "detail": null,
+      "refs": ["toolbox:salesforce#salesforce_query"],
+      "evidence": {
+        "file": "configs/agents/gtm/AGENT.md",
+        "lines": [210, 214],
+        "quote": "**CRM is the source of truth for:**"
+      },
+      "confidence": 0.94
+    },
+    {
+      "id": "ai2",
+      "kind": "policy",
+      "group": "13. Account intelligence",
+      "label": "L'entrepôt est meilleur pour : sentiment, cartographie des parties prenantes, risques, stack, demandes produit, statut projet, concurrence",
+      "parent": null,
+      "detail": "Sept questions distinctes tenues dans une seule liste à puces. Justification : ces données viennent de conversations réelles et n'atterrissent jamais dans des champs CRM.",
+      "refs": ["toolbox:google_bigquery#bigquery_execute_query"],
+      "evidence": {
+        "file": "configs/agents/gtm/AGENT.md",
+        "lines": [216, 223],
+        "quote": "**Warehouse account-intelligence tables** (if configured) are better for:"
+      },
+      "confidence": 0.93
+    },
+    {
+      "id": "ai3",
+      "kind": "step",
+      "group": "13. Account intelligence",
+      "label": "Question d'un rep sur un compte : interroger le CRM d'abord",
+      "parent": null,
+      "detail": "Première moitié d'une séquence de deux étapes enfouie dans un document de politiques.",
+      "refs": ["toolbox:salesforce#salesforce_query"],
+      "evidence": {
+        "file": "configs/agents/gtm/AGENT.md",
+        "lines": [227, 227],
+        "quote": "When a rep asks about an account, query the CRM first."
+      },
+      "confidence": 0.96
+    },
+    {
+      "id": "ai4",
+      "kind": "guard",
+      "group": "13. Account intelligence",
+      "label": "Puis interroger AUSSI les tables d'intelligence de compte si elles sont configurées — zéro ligne est acceptable, l'absence de vérification non",
+      "parent": null,
+      "detail": "Formulé comme une obligation (« don't skip », « you must check »), pas comme une étape optionnelle.",
+      "refs": ["toolbox:google_bigquery#bigquery_execute_query"],
+      "evidence": {
+        "file": "configs/agents/gtm/AGENT.md",
+        "lines": [227, 227],
+        "quote": "also query them — don't skip. If it returns no rows, that's fine, but you must check."
+      },
+      "confidence": 0.96
+    },
+    {
+      "id": "cd1",
+      "kind": "guard",
+      "group": "14. Consumption data",
+      "label": "Question d'usage, consommation, contrat, compte à risque ou propriété : lire d'abord le skill `account-health-research`",
+      "parent": null,
+      "detail": "Préalable obligatoire : le skill fait autorité sur des décisions absentes de ce fichier.",
+      "refs": ["skills:account-health-research"],
+      "evidence": {
+        "file": "configs/agents/gtm/AGENT.md",
+        "lines": [233, 233],
+        "quote": "read the `account-health-research` skill first"
+      },
+      "confidence": 0.97
+    },
+    {
+      "id": "cd2",
+      "kind": "policy",
+      "group": "14. Consumption data",
+      "label": "Si l'entrepôt n'est pas configuré, le skill refuse : dire à l'utilisateur de lancer `@onboard-gtm` avant toute question de consommation",
+      "parent": null,
+      "detail": null,
+      "refs": ["skills:onboard-gtm"],
+      "evidence": {
+        "file": "configs/agents/gtm/AGENT.md",
+        "lines": [233, 233],
+        "quote": "It refuses to execute if `<warehouse-schema>` is not configured"
+      },
+      "confidence": 0.96
+    },
+    {
+      "id": "ce0",
+      "kind": "policy",
+      "group": "15. Contact enrichment before drafting",
+      "label": "L'utilisateur colle une adresse email ou une URL LinkedIn et demande un message : enrichir depuis le CRM AVANT de rédiger",
+      "parent": null,
+      "detail": "Déclencheur d'une procédure numérotée en trois temps, la plus explicitement séquentielle du document.",
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/gtm/AGENT.md",
+        "lines": [239, 239],
+        "quote": "try to enrich the contact from the CRM BEFORE drafting"
+      },
+      "confidence": 0.97
+    },
+    {
+      "id": "ce1",
+      "kind": "tool_call",
+      "group": "15. Contact enrichment before drafting",
+      "label": "Chercher le contact dans le CRM par email ou URL LinkedIn",
+      "parent": null,
+      "detail": null,
+      "refs": ["toolbox:salesforce#salesforce_query"],
+      "evidence": {
+        "file": "configs/agents/gtm/AGENT.md",
+        "lines": [241, 241],
+        "quote": "Search the CRM for the contact by email or LinkedIn URL."
+      },
+      "confidence": 0.97
+    },
+    {
+      "id": "ce2",
+      "kind": "decision",
+      "group": "15. Contact enrichment before drafting",
+      "label": "Le contact est-il trouvé dans le CRM ?",
+      "parent": null,
+      "detail": "Le document ne dit pas quoi faire quand il ne l'est pas : la branche « non trouvé » n'a aucune prescription, seule la rédaction reste (voir gaps).",
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/gtm/AGENT.md",
+        "lines": [242, 242],
+        "quote": "If found, pull all available context"
+      },
+      "confidence": 0.9
+    },
+    {
+      "id": "ce3",
+      "kind": "step",
+      "group": "15. Contact enrichment before drafting",
+      "label": "Tirer tout le contexte disponible : compte, opportunités, activité récente, historique d'appels enregistrés",
+      "parent": null,
+      "detail": null,
+      "refs": ["toolbox:salesforce#salesforce_query"],
+      "evidence": {
+        "file": "configs/agents/gtm/AGENT.md",
+        "lines": [242, 242],
+        "quote": "pull all available context (Account, Opportunities, recent Activity, recorded call history) to inform the draft"
+      },
+      "confidence": 0.96
+    },
+    {
+      "id": "ce4",
+      "kind": "step",
+      "group": "15. Contact enrichment before drafting",
+      "label": "Rédiger le message avec tout le contexte rassemblé",
+      "parent": null,
+      "detail": "Rejoint la séquence `<draft-delivery>` (dd1), sans que le document dise explicitement que les deux procédures se chaînent.",
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/gtm/AGENT.md",
+        "lines": [243, 243],
+        "quote": "Draft the message using all gathered context."
+      },
+      "confidence": 0.95
+    },
+    {
+      "id": "ws1",
+      "kind": "tool_call",
+      "group": "16. Web search",
+      "label": "`exa_linkedin_search` : trouver le profil LinkedIn d'une personne (nom complet, société pour désambiguïser)",
+      "parent": null,
+      "detail": null,
+      "refs": ["toolbox:exa#exa_linkedin_search"],
+      "evidence": {
+        "file": "configs/agents/gtm/AGENT.md",
+        "lines": [251, 251],
+        "quote": "`exa_linkedin_search`: Find a person's LinkedIn profile."
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "ws2",
+      "kind": "tool_call",
+      "group": "16. Web search",
+      "label": "`exa_web_search` : recherche générale, avec le paramètre `category` (`news`, `company`, `people`, ou aucun)",
+      "parent": null,
+      "detail": "`news` pour annonces, lancements, levées ; `company` pour les profils d'entreprise ; `people` pour la recherche de personne ; sans catégorie pour le général.",
+      "refs": ["toolbox:exa#exa_web_search"],
+      "evidence": {
+        "file": "configs/agents/gtm/AGENT.md",
+        "lines": [252, 256],
+        "quote": "`exa_web_search`: General web research. Use the `category` parameter to focus results:"
+      },
+      "confidence": 0.97
+    },
+    {
+      "id": "ws3",
+      "kind": "policy",
+      "group": "16. Web search",
+      "label": "Recherche restreinte à un domaine : inclure `site:domain.com` dans la requête",
+      "parent": null,
+      "detail": null,
+      "refs": ["toolbox:exa#exa_web_search"],
+      "evidence": {
+        "file": "configs/agents/gtm/AGENT.md",
+        "lines": [258, 258],
+        "quote": "To search within specific domains, include `site:domain.com` in the query string."
+      },
+      "confidence": 0.96
+    },
+    {
+      "id": "ws4",
+      "kind": "policy",
+      "group": "16. Web search",
+      "label": "Filtrer par fraîcheur : inclure l'année dans la requête",
+      "parent": null,
+      "detail": null,
+      "refs": ["toolbox:exa#exa_web_search"],
+      "evidence": {
+        "file": "configs/agents/gtm/AGENT.md",
+        "lines": [259, 259],
+        "quote": "To filter by recency, include the year in the query (e.g., `\"Acme AI launch 2026\"`)."
+      },
+      "confidence": 0.96
+    },
+    {
+      "id": "ws5",
+      "kind": "policy",
+      "group": "16. Web search",
+      "label": "Recherche approfondie : passer par les skills `deep-research` (multi-passes avec citations) et `people-research` (identification et désambiguïsation)",
+      "parent": null,
+      "detail": "Deux skills font autorité sur la méthode de recherche, absente de ce fichier.",
+      "refs": ["skills:deep-research", "skills:people-research"],
+      "evidence": {
+        "file": "configs/agents/gtm/AGENT.md",
+        "lines": [261, 261],
+        "quote": "For deeper research workflows, use the `deep-research` skill (multi-pass research with citations) and the `people-research` skill (individual lookup and disambiguation)."
+      },
+      "confidence": 0.97
+    },
+    {
+      "id": "dd1",
+      "kind": "step",
+      "group": "17. Draft delivery",
+      "label": "Composer l'email (objet, corps, destinataire) selon les règles du skill `outbound-email-playbook`",
+      "parent": null,
+      "detail": "Le playbook fait autorité sur l'angle et la structure ; ce fichier ne porte que les conventions de forme (`<email-style-conventions>`).",
+      "refs": ["skills:outbound-email-playbook"],
+      "evidence": {
+        "file": "configs/agents/gtm/AGENT.md",
+        "lines": [269, 269],
+        "quote": "Compose the email (subject, body, recipient) following the `outbound-email-playbook` skill guidelines."
+      },
+      "confidence": 0.97
+    },
+    {
+      "id": "dd2",
+      "kind": "tool_call",
+      "group": "17. Draft delivery",
+      "label": "Créer un brouillon Gmail via `gmail_draft_email(to, subject, body)`",
+      "parent": null,
+      "detail": "Brouillon seulement : le rep relit et envoie depuis sa boîte. Le document n'autorise jamais l'agent à envoyer lui-même.",
+      "refs": ["toolbox:gmail#gmail_draft_email"],
+      "evidence": {
+        "file": "configs/agents/gtm/AGENT.md",
+        "lines": [270, 270],
+        "quote": "Create a Gmail draft via `gmail_draft_email(to, subject, body)` so the rep can review it in their inbox."
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "dd3",
+      "kind": "emit",
+      "group": "17. Draft delivery",
+      "label": "Rendre le résultat en ligne dans la réponse : Preview, Thought process, Sources, note de brouillon créé",
+      "parent": null,
+      "detail": "Preview = destinataire, objet, extrait du corps. Thought process = 2-3 phrases sur le profil du prospect, la qualité du lead, l'angle retenu, la recherche mobilisée et les outils en échec, plus la mention des préférences de style appliquées. Sources = liste à puces d'URL (LinkedIn, site du compte, enregistrement de signal, contact, compte), tirées des tableaux `sources` retournés par `salesforce_query`. Quatre composants imbriqués dans un seul nœud : le format n'a pas de moyen d'exprimer la structure d'un livrable.",
+      "refs": ["toolbox:salesforce#salesforce_query"],
+      "evidence": {
+        "file": "configs/agents/gtm/AGENT.md",
+        "lines": [271, 275],
+        "quote": "Render the result inline in your response. Include:"
+      },
+      "confidence": 0.95
+    },
+    {
+      "id": "dd4",
+      "kind": "policy",
+      "group": "17. Draft delivery",
+      "label": "Deux brouillons ou plus dans un même tour : lire le skill `batch-email-drafting`",
+      "parent": null,
+      "detail": "Le seuil est explicite (2). Le skill fait autorité sur le traitement en lot, absent de ce fichier.",
+      "refs": ["skills:batch-email-drafting"],
+      "evidence": {
+        "file": "configs/agents/gtm/AGENT.md",
+        "lines": [277, 277],
+        "quote": "For batch email drafts (2 or more in one turn), read the `batch-email-drafting` skill."
+      },
+      "confidence": 0.97
+    },
+    {
+      "id": "tc1",
+      "kind": "guard",
+      "group": "18. Timing context",
+      "label": "Toute requête horodatée en ISO 8601, suffixe `Z` (UTC)",
+      "parent": null,
+      "detail": null,
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/gtm/AGENT.md",
+        "lines": [285, 285],
+        "quote": "All timestamp queries should use ISO 8601 format with 'Z' suffix for UTC timezone."
+      },
+      "confidence": 0.97
+    },
+    {
+      "id": "tc2",
+      "kind": "policy",
+      "group": "18. Timing context",
+      "label": "Filtre « derniers N jours » : calculer depuis la date courante injectée en tête de prompt",
+      "parent": null,
+      "detail": "La date courante est injectée automatiquement par la plateforme (l. 283) et doit être utilisée directement pour tout calcul temporel.",
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/gtm/AGENT.md",
+        "lines": [286, 286],
+        "quote": "For \"last N days\" filters, calculate the date from the injected current date."
+      },
+      "confidence": 0.96
+    },
+    {
+      "id": "tc3",
+      "kind": "guard",
+      "group": "18. Timing context",
+      "label": "Colonnes DATETIME BigQuery : `DATETIME_SUB(CURRENT_DATETIME(), INTERVAL N DAY)`, jamais `TIMESTAMP_SUB`",
+      "parent": null,
+      "detail": null,
+      "refs": ["toolbox:google_bigquery#bigquery_execute_query"],
+      "evidence": {
+        "file": "configs/agents/gtm/AGENT.md",
+        "lines": [287, 287],
+        "quote": "For BigQuery DATETIME columns, use `DATETIME_SUB(CURRENT_DATETIME(), INTERVAL N DAY)`, not `TIMESTAMP_SUB`."
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "tc4",
+      "kind": "loop",
+      "group": "18. Timing context",
+      "label": "Pour chaque événement ou tâche CRM retourné : comparer sa date d'activité à la date courante",
+      "parent": null,
+      "detail": "Seule itération prescrite du document.",
+      "refs": ["toolbox:salesforce#salesforce_query"],
+      "evidence": {
+        "file": "configs/agents/gtm/AGENT.md",
+        "lines": [290, 290],
+        "quote": "After querying CRM events/tasks, compare each record's activity date against the current date."
+      },
+      "confidence": 0.94
+    },
+    {
+      "id": "tc4.1",
+      "kind": "decision",
+      "group": "18. Timing context",
+      "label": "L'enregistrement est-il postérieur ou antérieur à la date courante ?",
+      "parent": "tc4",
+      "detail": "La comparaison n'est pas nommée « décision » dans le texte, mais elle départage deux traitements de présentation explicitement distincts (l. 291 et 292).",
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/gtm/AGENT.md",
+        "lines": [290, 290],
+        "quote": "compare each record's activity date against the current date"
+      },
+      "confidence": 0.88
+    },
+    {
+      "id": "tc4.2",
+      "kind": "step",
+      "group": "18. Timing context",
+      "label": "Événement futur : l'étiqueter à venir / planifié",
+      "parent": "tc4",
+      "detail": "Formulé en MUST dans le texte, mais occupe une place précise dans la boucle : typé `step` plutôt que `guard`.",
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/gtm/AGENT.md",
+        "lines": [291, 291],
+        "quote": "Future events MUST be labeled as upcoming/scheduled."
+      },
+      "confidence": 0.95
+    },
+    {
+      "id": "tc4.3",
+      "kind": "step",
+      "group": "18. Timing context",
+      "label": "Événement passé : le présenter comme terminé",
+      "parent": "tc4",
+      "detail": null,
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/gtm/AGENT.md",
+        "lines": [292, 292],
+        "quote": "Past events should be presented as completed."
+      },
+      "confidence": 0.95
+    },
+    {
+      "id": "tc5",
+      "kind": "guard",
+      "group": "18. Timing context",
+      "label": "Ne JAMAIS décrire au passé une réunion ou un événement futur",
+      "parent": null,
+      "detail": "Interdiction permanente, valable au-delà de la boucle tc4 : elle porte sur toute présentation d'événement.",
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/gtm/AGENT.md",
+        "lines": [293, 293],
+        "quote": "NEVER describe a future meeting or event in past tense as if it already occurred."
+      },
+      "confidence": 0.97
+    }
+  ],
+  "edges": [
+    { "from": "ai3", "to": "ai4", "condition": "puis, si des tables d'intelligence de compte sont configurées" },
+
+    { "from": "ce0", "to": "ce1", "condition": null },
+    { "from": "ce1", "to": "ce2", "condition": null },
+    { "from": "ce2", "to": "ce3", "condition": "contact trouvé" },
+    { "from": "ce2", "to": "ce4", "condition": "contact non trouvé — aucune prescription du texte" },
+    { "from": "ce3", "to": "ce4", "condition": null },
+
+    { "from": "dd1", "to": "dd2", "condition": null },
+    { "from": "dd2", "to": "dd3", "condition": null },
+
+    { "from": "tc4.1", "to": "tc4.2", "condition": "date d'activité future" },
+    { "from": "tc4.1", "to": "tc4.3", "condition": "date d'activité passée" },
+
+    { "from": "sa2", "to": "sa1", "condition": "vérification CRM effectuée — préalable obligatoire" }
+  ],
+  "gaps": [
+    {
+      "kind": "unreachable_communication_channel",
+      "message": "L'agent déclare `slack_reply_to_message`, `slack_send_channel_message`, `slack_write_private_message` et `gmail_send_email`, et le prompt ne dit nulle part quand les utiliser. La seule sortie prescrite est « Render the result inline in your response » (AGENT.md:271). L'agent frère `executive-assistant` documente précisément que dans un run déclenché, « plain AI text is not surfaced anywhere » : appliqué à GTM, tout brouillon produit hors chat actif serait invisible. Aucun `message_user` n'est mentionné non plus.",
+      "related_steps": ["dd3"]
+    },
+    {
+      "kind": "unwritten_branch",
+      "message": "La procédure d'enrichissement avant rédaction (AGENT.md:241-243) n'a de prescription que pour la branche « contact trouvé ». Rien ne dit quoi faire quand le CRM ne connaît pas l'adresse collée : chercher sur le web via Exa ? déléguer à `apollo-researcher` ? rédiger à froid ? Le prompt décrit pourtant les trois capacités ailleurs, sans jamais les relier à ce cas.",
+      "related_steps": ["ce2", "ce4"]
+    },
+    {
+      "kind": "missing_trigger",
+      "message": "`<memory-guidelines>` impose de LIRE `/memories/rep-styles/` au début de tout workflow et fixe le format d'ÉCRITURE, mais ne dit jamais QUAND écrire. Aucune règle ne déclenche l'apprentissage : ni sur correction du rep, ni sur brouillon rejeté, ni sur retour explicite. Comparé à `executive-assistant`, qui consacre une section entière à durable vs transitoire, la boucle d'apprentissage de GTM est ouverte à un seul bout.",
+      "related_steps": ["mem1", "mem3"]
+    },
+    {
+      "kind": "conflicting_policies",
+      "message": "`<memory-guidelines>` ordonne d'appliquer les préférences de style apprises du rep (AGENT.md:127), tandis que `<email-style-conventions>` pose onze règles de forme sans marqueur de priorité (AGENT.md:144-156). Si un rep préfère les tirets ou les objets à majuscule, rien ne dit laquelle des deux sources l'emporte.",
+      "related_steps": ["mem2", "es3", "es5"]
+    },
+    {
+      "kind": "empty_configuration",
+      "message": "Quatre des dix-huit sections du prompt (`<company-context>`, `<customer-stories>`, `<crm-schema>`, `<warehouse-schema>`) sont intégralement `[not yet configured]` dans le fichier livré, et trois gates de refus s'appuient dessus. Le prompt cartographié est un gabarit : la carte décrit une méthode, pas un agent opérationnel. Le skill `onboard-gtm`, seul remplisseur, n'est présent nulle part dans `configs/skills/`.",
+      "related_steps": ["cc1", "cs2", "crm1", "wh1"]
+    },
+    {
+      "kind": "external_authority",
+      "message": "Six skills font autorité sur des décisions absentes du prompt : `outbound-email-playbook` (angle et structure de l'email), `batch-email-drafting` (lot), `inbound-lead-processing` (le workflow screen → enrich → research → draft vanté par la fiche produit et jamais décrit ici), `account-health-research`, `buying-signal-research`, `deep-research`/`people-research`. Sur les neuf skills déclarés, seuls `deep-research` et `account-briefing` existent dans `configs/skills/` ; les sept autres ne sont nulle part dans le dépôt. Une carte tirée du seul prompt cartographie une coquille sur tout l'outbound.",
+      "related_steps": ["dd1", "dd4", "crm1", "cd1", "ws5"]
+    },
+    {
+      "kind": "declared_capability_without_rule",
+      "message": "`account-briefing` est déclaré au manifeste (et existe sur disque) mais n'est jamais nommé ni déclenché par le prompt. `read_url_content` est déclaré parmi les seize outils sans qu'aucune règle ne dise quand suivre un lien, alors que la recherche web renvoie des URL et que la section Sources en produit une liste.",
+      "related_steps": ["ws2", "dd3"]
+    },
+    {
+      "kind": "unspecified_error_path",
+      "message": "La seule règle d'échec est le compteur à trois erreurs (AGENT.md:178). Rien ne couvre l'échec de `gmail_draft_email` alors que c'est l'unique écriture de l'agent : si le brouillon n'est pas créé, le prompt impose quand même d'afficher « a draft has been created in Gmail » (AGENT.md:275).",
+      "related_steps": ["tg3", "dd2", "dd3"]
+    },
+    {
+      "kind": "unbounded_delegation",
+      "message": "« Launch multiple tasks concurrently whenever possible » (AGENT.md:119) autorise des sous-agents ad hoc sans plafond, sans budget et sans règle de fusion des résultats, dans un document qui pose par ailleurs « Be conservative with tool usage » (AGENT.md:176).",
+      "related_steps": ["sa4", "tg1"]
+    }
+  ],
+  "overall_confidence": 0.93
+}

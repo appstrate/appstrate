@@ -1,0 +1,298 @@
+{
+  "map_version": 1,
+  "shape": "sequence",
+  "source": {
+    "package_id": "@default/analyste-donnees",
+    "version": "1.0.0",
+    "integrity": null,
+    "files": [
+      "prompt.md"
+    ]
+  },
+  "generated_at": "2026-07-27T00:00:00Z",
+  "generator": {
+    "kind": "human",
+    "author": "PR 3 — élargissement du corpus, agent core sans intégration",
+    "agent": null,
+    "version": null,
+    "model": null
+  },
+  "summary": "Analyse un jeu de données tabulaire collé en texte : comprendre le schéma, calculer, restituer par `output` et `report`, proposer des visualisations décrites et non rendues. Aucune intégration, aucun appel réseau : toute la logique est de la discipline de raisonnement.",
+  "steps": [
+    {
+      "id": "s1",
+      "kind": "step",
+      "group": "1. Comprendre les données",
+      "label": "Identifier les colonnes, leur type et le grain d'une ligne",
+      "parent": null,
+      "detail": "Types attendus : catégorie, date, mesure. Le grain d'une ligne conditionne toutes les agrégations de l'étape suivante.",
+      "refs": ["agent_input:donnees"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [7, 7],
+        "quote": "identifie les colonnes, leur type (catégorie, date, mesure) et le grain d'une ligne"
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "s2",
+      "kind": "decision",
+      "group": "1. Comprendre les données",
+      "label": "Une `question` est-elle fournie ?",
+      "parent": null,
+      "detail": "Choix entre deux régimes d'analyse : dirigée par la question, ou exploratoire. La question prime explicitement.",
+      "refs": ["agent_input:question"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [7, 7],
+        "quote": "Si une `question` est fournie, elle prime ; sinon, mène une analyse exploratoire générale orientée par l'`objectif` s'il est précisé."
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "s3",
+      "kind": "step",
+      "group": "1. Comprendre les données",
+      "label": "Cadrer l'analyse sur la `question` posée",
+      "parent": null,
+      "detail": "La question fournie l'emporte sur toute autre orientation, y compris sur l'`objectif`.",
+      "refs": ["agent_input:question"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [7, 7],
+        "quote": "Si une `question` est fournie, elle prime"
+      },
+      "confidence": 0.97
+    },
+    {
+      "id": "s4",
+      "kind": "step",
+      "group": "1. Comprendre les données",
+      "label": "Sinon, analyse exploratoire générale orientée par l'`objectif` s'il est précisé",
+      "parent": null,
+      "detail": "L'`objectif` n'est pas une question : il oriente les recommandations sans définir de calcul.",
+      "refs": ["agent_input:objectif"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [7, 7],
+        "quote": "mène une analyse exploratoire générale orientée par l'`objectif` s'il est précisé"
+      },
+      "confidence": 0.97
+    },
+    {
+      "id": "s5",
+      "kind": "step",
+      "group": "2. Calculer",
+      "label": "Calculer totaux, moyennes, extrêmes, répartitions, parts, évolutions, segments, aberrantes",
+      "parent": null,
+      "detail": "Liste fermée de familles de calculs, sans priorité entre elles ni seuil de significativité. Le prompt ne dit pas comment détecter une valeur aberrante ni ce qui fait qu'un segment « se détache ».",
+      "refs": ["agent_input:donnees"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [8, 8],
+        "quote": "totaux, moyennes, min/max, répartitions, parts, évolutions dans le temps, segments qui se détachent, valeurs aberrantes"
+      },
+      "confidence": 0.9
+    },
+    {
+      "id": "s6",
+      "kind": "step",
+      "group": "4. Visualisations",
+      "label": "Proposer les graphiques pertinents : type et ce qu'ils montreraient",
+      "parent": null,
+      "detail": "Étape numérotée 4 dans le prompt mais nécessairement exécutée avant l'étape 3, puisque `output` doit déjà porter `visualisations` (voir le premier `gap`). Cette carte la place à sa place réelle dans le flot.",
+      "refs": ["agent_output:visualisations"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [12, 12],
+        "quote": "propose les graphiques pertinents (type + ce qu'ils montreraient)"
+      },
+      "confidence": 0.85
+    },
+    {
+      "id": "s7",
+      "kind": "emit",
+      "group": "3. Restituer",
+      "label": "Appeler `output` avec `synthese`, `indicateurs_cles`, `tendances`, `recommandations` et `visualisations`",
+      "parent": null,
+      "detail": "Les quatre premiers champs sont requis au schéma du manifeste ; `visualisations` est conditionné à « quand c'est utile ». Outil `output` nommé littéralement.",
+      "refs": [
+        "system_tools:output",
+        "agent_output:synthese",
+        "agent_output:indicateurs_cles",
+        "agent_output:tendances",
+        "agent_output:recommandations",
+        "agent_output:visualisations"
+      ],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [10, 10],
+        "quote": "Appelle `output` avec `synthese`, `indicateurs_cles`, `tendances`, `recommandations` et, quand c'est utile, `visualisations`."
+      },
+      "confidence": 0.99
+    },
+    {
+      "id": "s8",
+      "kind": "tool_call",
+      "group": "3. Restituer",
+      "label": "Appeler `report` avec une note d'analyse en Markdown",
+      "parent": null,
+      "detail": "Contenu imposé : tableau des chiffres clés, lecture des tendances, recommandations priorisées. Second canal de sortie, redondant avec `output` sur le fond mais pas sur la forme.",
+      "refs": ["system_tools:report"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [11, 11],
+        "quote": "Appelle `report` avec une note d'analyse lisible en Markdown : tableau des chiffres clés, lecture des tendances, recommandations priorisées."
+      },
+      "confidence": 0.99
+    },
+    {
+      "id": "g1",
+      "kind": "guard",
+      "group": "Règles",
+      "label": "Raisonner uniquement sur les données fournies",
+      "parent": null,
+      "detail": "Interdiction de mobiliser une connaissance externe du domaine pour compléter le jeu de données.",
+      "refs": ["agent_input:donnees"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [8, 8],
+        "quote": "Raisonne uniquement sur les données fournies."
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "g2",
+      "kind": "guard",
+      "group": "Règles",
+      "label": "Ne pas rendre de graphique : les décrire, faute d'outil de rendu",
+      "parent": null,
+      "detail": "Contrainte de capacité assumée dans le prompt lui-même. Elle explique la forme du champ `visualisations` (titre, type, description) au schéma de sortie.",
+      "refs": ["agent_output:visualisations"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [12, 12],
+        "quote": "Décris-les : tu n'as pas d'outil de rendu graphique dans cet agent."
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "g3",
+      "kind": "guard",
+      "group": "Règles",
+      "label": "Séparer clairement les faits de l'interprétation",
+      "parent": null,
+      "detail": "Le prompt impose la distinction sans donner de moyen de la matérialiser : aucun champ du schéma de sortie ne porte cette séparation.",
+      "refs": [],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [16, 16],
+        "quote": "Sépare clairement les **faits** (ce que disent les données) de ton **interprétation** (hypothèses)."
+      },
+      "confidence": 0.96
+    },
+    {
+      "id": "g4",
+      "kind": "guard",
+      "group": "Règles",
+      "label": "Chiffrer chaque constat : valeur + unité + période",
+      "parent": null,
+      "detail": "S'applique à tout constat produit, quel que soit le champ de sortie qui le porte.",
+      "refs": ["agent_output:indicateurs_cles"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [17, 17],
+        "quote": "Chiffre chaque constat : valeur + unité + période quand c'est pertinent."
+      },
+      "confidence": 0.97
+    },
+    {
+      "id": "g5",
+      "kind": "guard",
+      "group": "Règles",
+      "label": "Ne fabriquer aucun chiffre absent ; dire explicitement qu'une donnée manque",
+      "parent": null,
+      "detail": "Règle anti-fabulation, jumelle de `fab1` chez `executive-assistant`. Elle ne dit pas dans quel champ de sortie la mention du manque doit apparaître.",
+      "refs": ["agent_input:question"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [18, 18],
+        "quote": "Ne fabrique aucun chiffre absent du jeu de données. Si une donnée manque pour répondre à la `question`, dis-le explicitement."
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "g6",
+      "kind": "guard",
+      "group": "Règles",
+      "label": "Données illisibles ou trop incomplètes : l'expliquer via `report`, `output` avec ce qui est exploitable",
+      "parent": null,
+      "detail": "Chemin dégradé. Il n'annule pas l'appel à `output` mais en réduit le contenu, sans dire comment satisfaire les quatre champs requis du schéma — voir `gaps`.",
+      "refs": ["system_tools:report", "system_tools:output"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [19, 19],
+        "quote": "Si les données sont illisibles ou trop incomplètes, explique-le via `report` et appelle `output` avec ce qui est exploitable plutôt que d'inventer."
+      },
+      "confidence": 0.96
+    },
+    {
+      "id": "g7",
+      "kind": "guard",
+      "group": "Règles",
+      "label": "Rédiger en français",
+      "parent": null,
+      "detail": "Contrainte de langue sur toute production, `output` comme `report`.",
+      "refs": [],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [20, 20],
+        "quote": "Rédige en français."
+      },
+      "confidence": 0.99
+    }
+  ],
+  "edges": [
+    { "from": "s1", "to": "s2", "condition": null },
+    { "from": "s2", "to": "s3", "condition": "`question` fournie" },
+    { "from": "s2", "to": "s4", "condition": "sinon" },
+    { "from": "s3", "to": "s5", "condition": null },
+    { "from": "s4", "to": "s5", "condition": null },
+    { "from": "s5", "to": "s6", "condition": null },
+    { "from": "s6", "to": "s7", "condition": null },
+    { "from": "s7", "to": "s8", "condition": null }
+  ],
+  "gaps": [
+    {
+      "kind": "self_contradiction",
+      "message": "L'ordre des étapes numérotées est faux. L'étape 3 (l. 10) appelle `output` avec `visualisations`, alors que l'étape 4 (l. 12) est celle qui produit les visualisations. Suivie à la lettre, la procédure émet le résultat final avant d'avoir calculé l'un de ses champs. La carte a dû replacer `s6` avant `s7` pour rester cohérente ; c'est le seul endroit où elle s'écarte de l'ordre littéral du texte.",
+      "related_steps": ["s6", "s7"]
+    },
+    {
+      "kind": "conflicting_policies",
+      "message": "Le chemin dégradé (l. 19) demande d'appeler `output` « avec ce qui est exploitable », mais le schéma du manifeste rend `synthese`, `indicateurs_cles`, `tendances` et `recommandations` tous les quatre obligatoires. Sur un jeu de données illisible, l'agent doit soit produire des listes vides — ce que le prompt n'autorise pas explicitement, contrairement à `synthese-reunion` qui le dit —, soit violer le schéma.",
+      "related_steps": ["g6", "s7"]
+    },
+    {
+      "kind": "unspecified_case",
+      "message": "Aucune borne de volume. Le jeu de données arrive collé en texte dans un seul champ ; rien ne dit quoi faire d'un CSV de 50 000 lignes qui ne tient pas dans la fenêtre, ni s'il faut échantillonner, tronquer, ou refuser. Le `timeout` de 300 s est la seule limite exprimée, et elle est hors du prompt.",
+      "related_steps": ["s1", "s5"]
+    },
+    {
+      "kind": "ambiguous_condition",
+      "message": "« segments qui se détachent » et « valeurs aberrantes » (l. 8) n'ont ni définition ni seuil. Deux runs sur les mêmes données peuvent produire deux listes de `tendances` disjointes sans qu'aucun soit fautif.",
+      "related_steps": ["s5"]
+    },
+    {
+      "kind": "unenforceable_rule",
+      "message": "« Sépare clairement les faits de ton interprétation » (l. 16) est une règle sans support : aucun champ du schéma de sortie ne distingue les deux, `tendances` et `recommandations` sont de simples tableaux de chaînes. La séparation ne peut vivre que dans la typographie du texte, donc n'est ni vérifiable ni consommable par un agent aval.",
+      "related_steps": ["g3", "s7"]
+    },
+    {
+      "kind": "unspecified_case",
+      "message": "Rien ne dit quoi faire si la `question` fournie porte sur des colonnes absentes du jeu de données. La règle l. 18 impose de « le dire explicitement », sans préciser si l'analyse exploratoire de repli (l. 7) doit alors se déclencher.",
+      "related_steps": ["s2", "g5"]
+    }
+  ],
+  "overall_confidence": 0.94
+}

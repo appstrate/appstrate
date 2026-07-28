@@ -1,0 +1,750 @@
+{
+  "map_version": 1,
+  "shape": "policies",
+  "source": {
+    "package_id": "langchain-fleet/competitor-intelligence-slack-bot",
+    "version": null,
+    "integrity": null,
+    "files": [
+      "configs/agents/competitor-intelligence-slack-bot/AGENT.md"
+    ]
+  },
+  "generated_at": "2026-07-27T00:00:00Z",
+  "generator": {
+    "kind": "human",
+    "author": "PR 3 — élargissement du corpus",
+    "agent": null,
+    "version": null,
+    "model": null
+  },
+  "summary": "Bot d'intelligence concurrentielle orienté Slack : répond aux questions de l'équipe, entretient une base markdown sourcée dans `memories/`, et maintient une page de battlecard Notion. Document de règles par domaine (surface Slack, rafraîchissement planifié, base de connaissance, barre de qualité) traversé par trois fragments ordonnés : la séquence de synchronisation Notion, l'« Answering Workflow » numéroté en sept points, et l'onboarding conditionnel.",
+  "steps": [
+    {
+      "id": "ps1",
+      "kind": "policy",
+      "group": "Primary Surface",
+      "label": "Invoqué depuis Slack : lire le fil quand le contexte est nécessaire",
+      "parent": null,
+      "detail": "Lecture conditionnelle, pas systématique.",
+      "refs": ["toolbox:slack#slack_read_thread_messages"],
+      "evidence": {
+        "file": "configs/agents/competitor-intelligence-slack-bot/AGENT.md",
+        "lines": [37, 37],
+        "quote": "Read the Slack thread when context is needed."
+      },
+      "confidence": 0.95
+    },
+    {
+      "id": "ps2",
+      "kind": "policy",
+      "group": "Primary Surface",
+      "label": "Répondre dans le fil avec `slack_reply_to_message` quand l'événement entrant porte des métadonnées de message",
+      "parent": null,
+      "detail": "Le prompt ne dit pas quoi faire quand l'événement n'en porte pas, alors que `slack_send_channel_message` est accordé.",
+      "refs": ["toolbox:slack#slack_reply_to_message"],
+      "evidence": {
+        "file": "configs/agents/competitor-intelligence-slack-bot/AGENT.md",
+        "lines": [38, 38],
+        "quote": "Reply in-thread with `slack_reply_to_message` when the incoming event includes message metadata."
+      },
+      "confidence": 0.96
+    },
+    {
+      "id": "ps3",
+      "kind": "guard",
+      "group": "Primary Surface",
+      "label": "Réponse Slack : concise, utile à une équipe au travail, réponse d'abord puis sources",
+      "parent": null,
+      "detail": "Ordre imposé à l'intérieur du message : la réponse précède les citations.",
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/competitor-intelligence-slack-bot/AGENT.md",
+        "lines": [39, 39],
+        "quote": "Keep Slack answers concise and useful for a working team: answer first, then cite sources."
+      },
+      "confidence": 0.95
+    },
+    {
+      "id": "ps4",
+      "kind": "guard",
+      "group": "Primary Surface",
+      "label": "Puces, sections courtes et liens ; jamais de `[[wikilinks]]` dans une réponse Slack",
+      "parent": null,
+      "detail": "Interdiction répétée deux fois de plus dans le document (l. 88 et implicitement l. 64).",
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/competitor-intelligence-slack-bot/AGENT.md",
+        "lines": [40, 40],
+        "quote": "Use bullets, short sections, and links. Do not use `[[wikilinks]]` in Slack responses."
+      },
+      "confidence": 0.97
+    },
+    {
+      "id": "ps5",
+      "kind": "policy",
+      "group": "Primary Surface",
+      "label": "Question nécessitant une recherche fraîche : dire ce qui a changé et mettre à jour markdown et Notion avant ou juste après la réponse",
+      "parent": null,
+      "detail": "Le document laisse explicitement le choix de l'ordre (« before or immediately after replying »), ce qui contredit l'ordre imposé par l'Answering Workflow, où la réponse Slack est l'étape 7, après la synchronisation Notion (étape 6).",
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/competitor-intelligence-slack-bot/AGENT.md",
+        "lines": [41, 41],
+        "quote": "If a question requires fresh research, say what changed and update the markdown and Notion records before or immediately after replying."
+      },
+      "confidence": 0.92
+    },
+    {
+      "id": "sr1",
+      "kind": "policy",
+      "group": "Scheduled Refreshes",
+      "label": "Invoqué par un déclencheur planifié : rafraîchir la base de connaissance UNIQUEMENT",
+      "parent": null,
+      "detail": "Second régime d'exécution, couvert par le cron déclaré `0 9 * * 1` (rafraîchissement hebdomadaire).",
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/competitor-intelligence-slack-bot/AGENT.md",
+        "lines": [45, 45],
+        "quote": "When invoked by a scheduled trigger, refresh the knowledge base only:"
+      },
+      "confidence": 0.96
+    },
+    {
+      "id": "sr2",
+      "kind": "step",
+      "group": "Scheduled Refreshes",
+      "label": "Rechercher les mises à jour récentes significatives pour le roster de concurrents par défaut",
+      "parent": null,
+      "detail": "Rattachement par l'effet : la recherche web est la seule capacité de recherche accordée. Le prompt ne nomme jamais Tavily et ne dit pas si le run planifié passe par `CompetitorResearchWorker` comme le fait l'étape 3 de l'Answering Workflow.",
+      "refs": ["toolbox:tavily#tavily_web_search"],
+      "evidence": {
+        "file": "configs/agents/competitor-intelligence-slack-bot/AGENT.md",
+        "lines": [47, 47],
+        "quote": "Research meaningful recent competitor updates for the default competitor roster."
+      },
+      "confidence": 0.85
+    },
+    {
+      "id": "sr3",
+      "kind": "step",
+      "group": "Scheduled Refreshes",
+      "label": "Mettre à jour `memories/raw/`, `memories/wiki/` et la battlecard Notion quand du renseignement sourcé nouveau est trouvé",
+      "parent": null,
+      "detail": null,
+      "refs": ["mcp_servers:notion#notion-update-page"],
+      "evidence": {
+        "file": "configs/agents/competitor-intelligence-slack-bot/AGENT.md",
+        "lines": [48, 48],
+        "quote": "Update `memories/raw/`, `memories/wiki/`, and the Notion battlecard when new sourced intelligence is found."
+      },
+      "confidence": 0.94
+    },
+    {
+      "id": "sr4",
+      "kind": "guard",
+      "group": "Scheduled Refreshes",
+      "label": "Aucun message Slack depuis un run planifié, sauf demande explicite de l'utilisateur",
+      "parent": null,
+      "detail": "Le seul garde-fou d'effet de bord du document.",
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/competitor-intelligence-slack-bot/AGENT.md",
+        "lines": [49, 49],
+        "quote": "Do not send Slack messages from scheduled runs unless a user explicitly asks you to."
+      },
+      "confidence": 0.97
+    },
+    {
+      "id": "ob1",
+      "kind": "decision",
+      "group": "Onboarding",
+      "label": "Le wiki contient-il la société par défaut et le roster de concurrents ?",
+      "parent": null,
+      "detail": "Test d'état, identique dans sa fonction au test `## Onboarded` de l'executive-assistant : il choisit entre deux régimes, il n'ouvre pas une séquence.",
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/competitor-intelligence-slack-bot/AGENT.md",
+        "lines": [53, 53],
+        "quote": "If the wiki does not contain the default company and competitor roster, run the `onboard-competitor-intelligence` skill before doing normal work."
+      },
+      "confidence": 0.96
+    },
+    {
+      "id": "ob2",
+      "kind": "guard",
+      "group": "Onboarding",
+      "label": "L'onboarding DOIT demander deux choses : la société par défaut et la liste des concurrents à suivre",
+      "parent": null,
+      "detail": "Le prompt fixe le contenu obligatoire de l'entretien, alors que le skill en est propriétaire. Contrainte, pas étape.",
+      "refs": ["skills:onboard-competitor-intelligence"],
+      "evidence": {
+        "file": "configs/agents/competitor-intelligence-slack-bot/AGENT.md",
+        "lines": [53, 56],
+        "quote": "Onboarding must ask for:"
+      },
+      "confidence": 0.95
+    },
+    {
+      "id": "ob3",
+      "kind": "policy",
+      "group": "Onboarding",
+      "label": "Après l'onboarding, ces réponses deviennent le contexte opérationnel durable",
+      "parent": null,
+      "detail": null,
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/competitor-intelligence-slack-bot/AGENT.md",
+        "lines": [58, 58],
+        "quote": "After onboarding, treat those answers as the durable operating context."
+      },
+      "confidence": 0.95
+    },
+    {
+      "id": "sk1",
+      "kind": "policy",
+      "group": "Skills",
+      "label": "`competitive-intel` porte le workflow de recherche : battlecards, positionnement, produit, prix, recrutement, financement, stratégie",
+      "parent": null,
+      "detail": "Autorité externe : la méthode de recherche n'est pas dans ce fichier. Le prompt ne dit jamais explicitement de charger ce skill, il se contente de le décrire.",
+      "refs": ["skills:competitive-intel"],
+      "evidence": {
+        "file": "configs/agents/competitor-intelligence-slack-bot/AGENT.md",
+        "lines": [63, 63],
+        "quote": "**competitive-intel** - Research workflow for battlecards, positioning, product, pricing, hiring, funding, and strategy."
+      },
+      "confidence": 0.9
+    },
+    {
+      "id": "sk2",
+      "kind": "guard",
+      "group": "Skills",
+      "label": "`wiki-markdown` : règles de formatage obligatoires pour TOUT fichier écrit sous `memories/wiki/` ou `memories/raw/`",
+      "parent": null,
+      "detail": "« Required » : ne pas les appliquer est un défaut de l'agent, pas un cas non survenu.",
+      "refs": ["skills:wiki-markdown"],
+      "evidence": {
+        "file": "configs/agents/competitor-intelligence-slack-bot/AGENT.md",
+        "lines": [64, 64],
+        "quote": "**wiki-markdown** - Required formatting rules for every file written under `memories/wiki/` or `memories/raw/`."
+      },
+      "confidence": 0.96
+    },
+    {
+      "id": "kb0",
+      "kind": "guard",
+      "group": "Knowledge Base",
+      "label": "Arborescence imposée de la base markdown : `raw/competitor-updates/{YYYY-Www}.md`, `wiki/index.md`, `default-company.md`, `competitors/`, `battlecards/current.md`, `notion-sync.md`",
+      "parent": null,
+      "detail": "Sept chemins prescrits, chacun avec un rôle défini. Une seule citation possible pour un bloc de code de treize lignes : le `detail` porte le reste.",
+      "refs": ["skills:wiki-markdown"],
+      "evidence": {
+        "file": "configs/agents/competitor-intelligence-slack-bot/AGENT.md",
+        "lines": [68, 82],
+        "quote": "Maintain the local markdown database using wiki-markdown conventions:"
+      },
+      "confidence": 0.9
+    },
+    {
+      "id": "kb1",
+      "kind": "guard",
+      "group": "Knowledge Base",
+      "label": "`memories/raw/` est en ajout seul : ne jamais réécrire une note de source capturée",
+      "parent": null,
+      "detail": null,
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/competitor-intelligence-slack-bot/AGENT.md",
+        "lines": [86, 86],
+        "quote": "`memories/raw/` is append-only. Never rewrite captured source notes."
+      },
+      "confidence": 0.97
+    },
+    {
+      "id": "kb2",
+      "kind": "policy",
+      "group": "Knowledge Base",
+      "label": "`memories/wiki/` est curé : fusionner les pages concurrents en double, retirer les pages périmées, garder `index.md` à jour",
+      "parent": null,
+      "detail": "Trois gestes d'entretien sans déclencheur temporel : rien ne dit quand ce ménage a lieu.",
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/competitor-intelligence-slack-bot/AGENT.md",
+        "lines": [87, 87],
+        "quote": "`memories/wiki/` is curated. Merge duplicate competitor pages, retire stale pages, and keep `memories/wiki/index.md` current."
+      },
+      "confidence": 0.93
+    },
+    {
+      "id": "kb3",
+      "kind": "guard",
+      "group": "Knowledge Base",
+      "label": "`[[wikilinks]]` dans les fichiers seulement, jamais dans Slack ni dans une réponse de chat",
+      "parent": null,
+      "detail": "Deuxième formulation de ps4, dans une autre section. Différence : ps4 ne parle que de Slack, celle-ci ajoute le chat.",
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/competitor-intelligence-slack-bot/AGENT.md",
+        "lines": [88, 88],
+        "quote": "Use `[[wikilinks]]` only in files, never in Slack or chat responses."
+      },
+      "confidence": 0.97
+    },
+    {
+      "id": "kb4",
+      "kind": "guard",
+      "group": "Knowledge Base",
+      "label": "Toute page concurrent doit contenir huit blocs : frontmatter, profil en un paragraphe, positionnement, forces/faiblesses produit, prix, mises à jour récentes, arguments de vente, sources",
+      "parent": null,
+      "detail": "Contrat de structure obligatoire de la page vivante par concurrent.",
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/competitor-intelligence-slack-bot/AGENT.md",
+        "lines": [89, 89],
+        "quote": "Every competitor page must include frontmatter, a one-paragraph profile, current positioning, product strengths/weaknesses, pricing/package notes, recent updates, sales talking points, and sources."
+      },
+      "confidence": 0.96
+    },
+    {
+      "id": "kb5",
+      "kind": "guard",
+      "group": "Knowledge Base",
+      "label": "Toute affirmation liée à un lancement, un changement de prix, une levée, un partenariat, un client ou une date exige une URL source",
+      "parent": null,
+      "detail": "Six déclencheurs énumérés ; hors de cette liste, la source n'est pas exigée.",
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/competitor-intelligence-slack-bot/AGENT.md",
+        "lines": [90, 90],
+        "quote": "Every claim tied to a launch, pricing change, funding event, partnership, customer, or date needs a source URL."
+      },
+      "confidence": 0.97
+    },
+    {
+      "id": "kb6",
+      "kind": "guard",
+      "group": "Knowledge Base",
+      "label": "Distinguer les faits vérifiés des inférences",
+      "parent": null,
+      "detail": "Aucune convention de marquage n'est prescrite.",
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/competitor-intelligence-slack-bot/AGENT.md",
+        "lines": [91, 91],
+        "quote": "Distinguish verified facts from inferences."
+      },
+      "confidence": 0.94
+    },
+    {
+      "id": "nb0",
+      "kind": "policy",
+      "group": "Notion Battlecard",
+      "label": "Maintenir une page Notion titrée `<Default Company> Competitor Intelligence Battlecard`",
+      "parent": null,
+      "detail": "Le titre est un gabarit exact, seul point d'ancrage de la recherche nb1.",
+      "refs": ["mcp_servers:notion"],
+      "evidence": {
+        "file": "configs/agents/competitor-intelligence-slack-bot/AGENT.md",
+        "lines": [95, 95],
+        "quote": "Maintain a Notion page titled `<Default Company> Competitor Intelligence Battlecard`."
+      },
+      "confidence": 0.95
+    },
+    {
+      "id": "nb1",
+      "kind": "tool_call",
+      "group": "Notion Battlecard",
+      "label": "`notion-search` : chercher une page existante AVANT d'en créer une",
+      "parent": null,
+      "detail": "Premier geste du fragment ordonné de synchronisation Notion.",
+      "refs": ["mcp_servers:notion#notion-search"],
+      "evidence": {
+        "file": "configs/agents/competitor-intelligence-slack-bot/AGENT.md",
+        "lines": [97, 97],
+        "quote": "Use `notion-search` to find an existing page before creating a new one."
+      },
+      "confidence": 0.97
+    },
+    {
+      "id": "nb2",
+      "kind": "tool_call",
+      "group": "Notion Battlecard",
+      "label": "`notion-fetch` avant toute mise à jour, pour ne pas écraser des éditions humaines utiles",
+      "parent": null,
+      "detail": "Lecture-avant-écriture explicite : c'est une contrainte d'ordre, pas un simple appel.",
+      "refs": ["mcp_servers:notion#notion-fetch"],
+      "evidence": {
+        "file": "configs/agents/competitor-intelligence-slack-bot/AGENT.md",
+        "lines": [98, 98],
+        "quote": "Use `notion-fetch` before updating so you do not overwrite useful human edits."
+      },
+      "confidence": 0.97
+    },
+    {
+      "id": "nb3",
+      "kind": "tool_call",
+      "group": "Notion Battlecard",
+      "label": "`notion-create-pages` si aucune page n'existe",
+      "parent": null,
+      "detail": null,
+      "refs": ["mcp_servers:notion#notion-create-pages"],
+      "evidence": {
+        "file": "configs/agents/competitor-intelligence-slack-bot/AGENT.md",
+        "lines": [99, 99],
+        "quote": "Use `notion-create-pages` if no page exists."
+      },
+      "confidence": 0.97
+    },
+    {
+      "id": "nb4",
+      "kind": "tool_call",
+      "group": "Notion Battlecard",
+      "label": "`notion-update-page` : ajouter les mises à jour datées, rafraîchir le résumé exécutif, tenir les sections concurrents à jour",
+      "parent": null,
+      "detail": null,
+      "refs": ["mcp_servers:notion#notion-update-page"],
+      "evidence": {
+        "file": "configs/agents/competitor-intelligence-slack-bot/AGENT.md",
+        "lines": [100, 100],
+        "quote": "Use `notion-update-page` to append dated updates, refresh the executive summary, and keep competitor sections current."
+      },
+      "confidence": 0.97
+    },
+    {
+      "id": "nb5",
+      "kind": "step",
+      "group": "Notion Battlecard",
+      "label": "Stocker l'URL ou l'ID de la page Notion dans `memories/wiki/notion-sync.md` après création ou découverte",
+      "parent": null,
+      "detail": "Ferme la boucle : sans ce fichier, nb1 doit rechercher à chaque run.",
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/competitor-intelligence-slack-bot/AGENT.md",
+        "lines": [101, 101],
+        "quote": "Store the Notion page URL or ID in `memories/wiki/notion-sync.md` after creation or discovery."
+      },
+      "confidence": 0.96
+    },
+    {
+      "id": "nb6",
+      "kind": "policy",
+      "group": "Notion Battlecard",
+      "label": "Notion indisponible : tenir la base markdown parfaitement à jour et dire à l'utilisateur que la synchro Notion est en attente",
+      "parent": null,
+      "detail": "Seul chemin d'erreur écrit du document, et il ne couvre qu'une intégration sur trois.",
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/competitor-intelligence-slack-bot/AGENT.md",
+        "lines": [102, 102],
+        "quote": "If Notion is unavailable, keep the markdown database fully current and tell the user that Notion sync is pending."
+      },
+      "confidence": 0.96
+    },
+    {
+      "id": "nb7",
+      "kind": "guard",
+      "group": "Notion Battlecard",
+      "label": "Structure préférée de la page Notion : Current Summary, Recent Updates par semaine, Competitors avec Updates Log et Battlecard Notes",
+      "parent": null,
+      "detail": "Gabarit complet donné en bloc de code (l. 106-129), lisible par les ventes, le produit et la direction. « Prefer » l'affaiblit : contrainte forte formulée en préférence.",
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/competitor-intelligence-slack-bot/AGENT.md",
+        "lines": [104, 129],
+        "quote": "The Notion page should be easy for sales, product, and leadership to scan. Prefer this structure:"
+      },
+      "confidence": 0.88
+    },
+    {
+      "id": "aw1",
+      "kind": "step",
+      "group": "Answering Workflow",
+      "label": "1. Analyser la question et identifier concurrent(s), période et format demandé",
+      "parent": null,
+      "detail": "Premier des sept points numérotés : l'unique séquence explicitement ordonnée du document.",
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/competitor-intelligence-slack-bot/AGENT.md",
+        "lines": [133, 133],
+        "quote": "Parse the Slack/user question and identify the relevant competitor(s), timeframe, and requested format."
+      },
+      "confidence": 0.96
+    },
+    {
+      "id": "aw2",
+      "kind": "step",
+      "group": "Answering Workflow",
+      "label": "2. Lire d'abord les fichiers wiki pertinents ; utiliser la connaissance existante si elle est assez à jour",
+      "parent": null,
+      "detail": null,
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/competitor-intelligence-slack-bot/AGENT.md",
+        "lines": [134, 134],
+        "quote": "Read the relevant wiki files first. Use existing knowledge when it is current enough."
+      },
+      "confidence": 0.96
+    },
+    {
+      "id": "aw3",
+      "kind": "decision",
+      "group": "Answering Workflow",
+      "label": "3. La question demande-t-elle de l'information à jour, ou le wiki est-il périmé ?",
+      "parent": null,
+      "detail": "Deux conditions en OU. « Assez à jour » et « périmé » ne sont définis nulle part.",
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/competitor-intelligence-slack-bot/AGENT.md",
+        "lines": [135, 135],
+        "quote": "If the question asks for latest/current information, or the wiki is stale"
+      },
+      "confidence": 0.93
+    },
+    {
+      "id": "aw4",
+      "kind": "loop",
+      "group": "Answering Workflow",
+      "label": "3b. Pour chaque concurrent ou fil de recherche",
+      "parent": null,
+      "detail": "Itération explicite sur l'ensemble des concurrents identifiés en aw1.",
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/competitor-intelligence-slack-bot/AGENT.md",
+        "lines": [135, 135],
+        "quote": "for each competitor or research thread"
+      },
+      "confidence": 0.95
+    },
+    {
+      "id": "aw4.1",
+      "kind": "tool_call",
+      "group": "Answering Workflow",
+      "label": "Lancer le sous-agent `CompetitorResearchWorker`",
+      "parent": "aw4",
+      "detail": "Aucun type du vocabulaire ne décrit une délégation à un sous-agent, et aucun préfixe de `refs` ne le désigne : `tool_call` avec `refs: []` est le moins mauvais, exactement comme `sub1` de l'executive-assistant.",
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/competitor-intelligence-slack-bot/AGENT.md",
+        "lines": [135, 135],
+        "quote": "spawn `CompetitorResearchWorker`"
+      },
+      "confidence": 0.93
+    },
+    {
+      "id": "aw5",
+      "kind": "step",
+      "group": "Answering Workflow",
+      "label": "4. Fusionner les trouvailles dans `memories/raw/competitor-updates/{YYYY-Www}.md` et les pages `memories/wiki/competitors/{slug}.md`, avec `wiki-markdown`",
+      "parent": null,
+      "detail": null,
+      "refs": ["skills:wiki-markdown"],
+      "evidence": {
+        "file": "configs/agents/competitor-intelligence-slack-bot/AGENT.md",
+        "lines": [136, 136],
+        "quote": "Merge new findings into `memories/raw/competitor-updates/{YYYY-Www}.md` and the relevant `memories/wiki/competitors/{slug}.md` pages using `wiki-markdown`."
+      },
+      "confidence": 0.96
+    },
+    {
+      "id": "aw6",
+      "kind": "step",
+      "group": "Answering Workflow",
+      "label": "5. Rafraîchir `memories/wiki/battlecards/current.md` quand une mise à jour significative change le tableau d'ensemble",
+      "parent": null,
+      "detail": "Étape conditionnelle à l'intérieur d'une séquence numérotée.",
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/competitor-intelligence-slack-bot/AGENT.md",
+        "lines": [137, 137],
+        "quote": "Refresh `memories/wiki/battlecards/current.md` when a meaningful update changes the overall picture."
+      },
+      "confidence": 0.95
+    },
+    {
+      "id": "aw7",
+      "kind": "step",
+      "group": "Answering Workflow",
+      "label": "6. Synchroniser la page Notion quand la battlecard ou les pages concurrents changent",
+      "parent": null,
+      "detail": "Point d'entrée du fragment ordonné nb1→nb5, jamais nommé comme tel par le texte.",
+      "refs": ["mcp_servers:notion#notion-update-page"],
+      "evidence": {
+        "file": "configs/agents/competitor-intelligence-slack-bot/AGENT.md",
+        "lines": [138, 138],
+        "quote": "Sync the Notion page when the battlecard or competitor pages change."
+      },
+      "confidence": 0.95
+    },
+    {
+      "id": "aw8",
+      "kind": "emit",
+      "group": "Answering Workflow",
+      "label": "7. Répondre dans Slack : réponse directe, réserves et liens sources — seulement si l'invocation vient de Slack",
+      "parent": null,
+      "detail": "Résultat final de l'agent sur le chemin conversationnel. Contredit ps5, qui autorise à répondre avant les mises à jour.",
+      "refs": ["toolbox:slack#slack_reply_to_message"],
+      "evidence": {
+        "file": "configs/agents/competitor-intelligence-slack-bot/AGENT.md",
+        "lines": [139, 139],
+        "quote": "Reply in Slack with the direct answer, caveats, and source links only when invoked from Slack."
+      },
+      "confidence": 0.95
+    },
+    {
+      "id": "qb1",
+      "kind": "guard",
+      "group": "Quality Bar",
+      "label": "Précis, sourcé, laconique",
+      "parent": null,
+      "detail": null,
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/competitor-intelligence-slack-bot/AGENT.md",
+        "lines": [143, 143],
+        "quote": "Be precise, sourced, and terse."
+      },
+      "confidence": 0.95
+    },
+    {
+      "id": "qb2",
+      "kind": "guard",
+      "group": "Quality Bar",
+      "label": "Ne pas inventer de faits concurrents ni combler les trous par de l'analyse générique",
+      "parent": null,
+      "detail": "Équivalent du `fab1` de l'executive-assistant, transposé à la veille.",
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/competitor-intelligence-slack-bot/AGENT.md",
+        "lines": [144, 144],
+        "quote": "Do not invent competitor facts or fill gaps with generic analysis."
+      },
+      "confidence": 0.97
+    },
+    {
+      "id": "qb3",
+      "kind": "guard",
+      "group": "Quality Bar",
+      "label": "Ne pas traiter une information ancienne comme actuelle ; si la fraîcheur n'est pas vérifiable, le dire",
+      "parent": null,
+      "detail": "C'est ce garde-fou qui donne son sens à « stale » dans aw3, sans le définir davantage.",
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/competitor-intelligence-slack-bot/AGENT.md",
+        "lines": [145, 145],
+        "quote": "Do not treat old information as current. If you cannot verify freshness, say so."
+      },
+      "confidence": 0.96
+    },
+    {
+      "id": "qb4",
+      "kind": "guard",
+      "group": "Quality Bar",
+      "label": "Éviter les noms de clients, sauf s'ils figurent dans une source publique ET sont nécessaires à la réponse",
+      "parent": null,
+      "detail": "Double condition conjointe. Seule règle de confidentialité du document.",
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/competitor-intelligence-slack-bot/AGENT.md",
+        "lines": [146, 146],
+        "quote": "Avoid customer names unless they appear in public source material and are necessary to answer the question."
+      },
+      "confidence": 0.96
+    },
+    {
+      "id": "qb5",
+      "kind": "policy",
+      "group": "Quality Bar",
+      "label": "Preuves contradictoires : expliquer le conflit et pondérer les sources primaires au-dessus du commentaire",
+      "parent": null,
+      "detail": null,
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/competitor-intelligence-slack-bot/AGENT.md",
+        "lines": [147, 147],
+        "quote": "When evidence conflicts, explain the conflict and weight primary sources above commentary."
+      },
+      "confidence": 0.96
+    },
+    {
+      "id": "qb6",
+      "kind": "policy",
+      "group": "Quality Bar",
+      "label": "Conseil stratégique : l'ancrer dans le positionnement de la société par défaut et dans les faits concurrents sourcés",
+      "parent": null,
+      "detail": "Renvoie implicitement à `memories/wiki/default-company.md`.",
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/competitor-intelligence-slack-bot/AGENT.md",
+        "lines": [148, 148],
+        "quote": "For strategic advice, ground the recommendation in the default company's positioning and the sourced competitor facts."
+      },
+      "confidence": 0.95
+    }
+  ],
+  "edges": [
+    { "from": "ob1", "to": "ob2", "condition": "le wiki ne contient pas la société par défaut et le roster" },
+    { "from": "ob2", "to": "ob3", "condition": null },
+
+    { "from": "sr1", "to": "sr2", "condition": null },
+    { "from": "sr2", "to": "sr3", "condition": "du renseignement sourcé nouveau a été trouvé" },
+
+    { "from": "nb1", "to": "nb2", "condition": "une page existante a été trouvée" },
+    { "from": "nb1", "to": "nb3", "condition": "aucune page n'existe" },
+    { "from": "nb2", "to": "nb4", "condition": null },
+    { "from": "nb3", "to": "nb5", "condition": null },
+    { "from": "nb4", "to": "nb5", "condition": null },
+
+    { "from": "aw1", "to": "aw2", "condition": null },
+    { "from": "aw2", "to": "aw3", "condition": null },
+    { "from": "aw3", "to": "aw4", "condition": "information à jour demandée, ou wiki périmé" },
+    { "from": "aw3", "to": "aw8", "condition": "la connaissance existante suffit" },
+    { "from": "aw4", "to": "aw5", "condition": null },
+    { "from": "aw5", "to": "aw6", "condition": null },
+    { "from": "aw6", "to": "aw7", "condition": null },
+    { "from": "aw7", "to": "nb1", "condition": "la battlecard ou les pages concurrents ont changé" },
+    { "from": "aw7", "to": "aw8", "condition": null },
+    { "from": "sr3", "to": "nb1", "condition": null }
+  ],
+  "gaps": [
+    {
+      "kind": "hybrid_shape",
+      "message": "Deuxième hybride du corpus, et plus déséquilibré que `software-engineer` : la séquence enfouie n'est pas une boucle secondaire mais la colonne vertébrale de l'agent. « Answering Workflow » (AGENT.md:133-139) est numéroté 1 à 7, va de la question à la réponse, et absorbe la moitié des grappes du document au passage. Étiqueté `policies` parce que 27 nœuds sur 44 sont hors flot, ce qui perd l'information la plus utile : ici l'ordre est le contenu, alors que chez `software-engineer` l'ordre est un détail. Un `shape` scalaire ne distingue pas ces deux situations.",
+      "related_steps": ["aw1", "aw8", "nb1", "nb5"]
+    },
+    {
+      "kind": "conflicting_policies",
+      "message": "Ordre de la réponse Slack contradictoire. « Primary Surface » autorise à mettre à jour markdown et Notion « before or immediately after replying » (AGENT.md:41), tandis que « Answering Workflow » place la réponse Slack en étape 7, après la fusion wiki (4), la battlecard (5) et la synchro Notion (6) (AGENT.md:136-139). Rien ne dit laquelle prime quand une question exige une recherche fraîche.",
+      "related_steps": ["ps5", "aw7", "aw8"]
+    },
+    {
+      "kind": "duplicated_rule",
+      "message": "L'interdiction des `[[wikilinks]]` hors fichiers est écrite trois fois avec des portées différentes : « in Slack responses » (AGENT.md:40), « in Slack or chat responses » (AGENT.md:88), et implicitement par le skill `wiki-markdown` déclaré « required » pour tout fichier du wiki (AGENT.md:64). La version la plus large (chat) est enterrée dans la section Knowledge Base.",
+      "related_steps": ["ps4", "kb3", "sk2"]
+    },
+    {
+      "kind": "unspecified_actor",
+      "message": "Le chemin planifié ne dit pas QUI fait la recherche. « Research meaningful recent competitor updates » (AGENT.md:47) n'appelle pas `CompetitorResearchWorker`, alors que le chemin conversationnel l'impose (AGENT.md:135). Rien ne dit si le run hebdomadaire délègue, ni s'il applique le skill `competitive-intel`, ni combien de concurrents il traite par run.",
+      "related_steps": ["sr2", "aw4.1"]
+    },
+    {
+      "kind": "declared_capability_without_rule",
+      "message": "Deux outils déclarés sur neuf ne sont couverts par aucune règle. `slack_send_channel_message` : le prompt ne prescrit que la réponse en fil, et interdit d'écrire depuis un run planifié — le seul cas où poster dans un canal aurait du sens (AGENT.md:38, 49). `read_url_content` : la base exige une URL source par affirmation datée (AGENT.md:90) sans jamais dire de lire la page, et la lecture est vraisemblablement faite par le sous-agent, dont la définition est hors du périmètre lu.",
+      "related_steps": ["ps2", "sr4", "kb5"]
+    },
+    {
+      "kind": "unspecified_error_path",
+      "message": "Une seule intégration sur trois a un chemin d'erreur écrit (Notion indisponible, AGENT.md:102). Rien ne couvre l'échec de la recherche web, un sous-agent qui ne rend rien, un fil Slack illisible, ni le cas où le roster de concurrents est vide au moment du cron.",
+      "related_steps": ["nb6", "sr2"]
+    },
+    {
+      "kind": "external_authority",
+      "message": "Trois skills font autorité sur des décisions absentes du prompt : `competitive-intel` porte la méthode de recherche (AGENT.md:63), `wiki-markdown` porte le format obligatoire de tout fichier écrit (AGENT.md:64), `onboard-competitor-intelligence` porte l'amorçage du wiki et de la page Notion (AGENT.md:62). Une carte tirée du seul prompt système ne dit rien de la manière dont l'agent recherche ni de la manière dont il écrit.",
+      "related_steps": ["sk1", "sk2", "ob2"]
+    },
+    {
+      "kind": "undefined_threshold",
+      "message": "Quatre seuils décisifs ne sont jamais définis : « current enough » et « stale » (AGENT.md:134-135), « meaningful » pour une mise à jour (AGENT.md:47, 137), et la fréquence du ménage du wiki (AGENT.md:87). Ce sont les seules conditions qui décident si un run coûte un appel de recherche ou zéro.",
+      "related_steps": ["aw2", "aw3", "aw6", "kb2"]
+    }
+  ],
+  "overall_confidence": 0.94
+}

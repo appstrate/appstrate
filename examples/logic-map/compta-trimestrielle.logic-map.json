@@ -1,0 +1,1152 @@
+{
+  "map_version": 1,
+  "shape": "sequence",
+  "source": {
+    "package_id": "@default/compta-trimestrielle",
+    "version": "2.4.0",
+    "integrity": null,
+    "files": [
+      "prompt.md",
+      "skills/@default/compta-references/SKILL.md",
+      "skills/@default/compta-references/references/fiscal-year.md",
+      "skills/@default/compta-references/references/prerequis-trimestre.md",
+      "skills/@default/compta-references/references/paiements-store.md",
+      "skills/@default/compta-references/references/virements-interac-store.md"
+    ]
+  },
+  "generated_at": "2026-07-27T00:00:00Z",
+  "generator": {
+    "kind": "agent",
+    "author": "PR 3 — élargissement du corpus, agent cartographe",
+    "agent": "cartographe-logic-map",
+    "version": null,
+    "model": "claude-opus-4"
+  },
+  "summary": "Pipeline comptable trimestriel Tractr en 9 étapes : valide la structure Drive du trimestre, renomme les relevés BNC bruts dans les dossiers centralisés, sélectionne et télécharge les relevés du trimestre, extrait les transactions Mastercard (bun) et compte chèque (python), matérialise les CSV paiements et Interac depuis les stores annuels, classe les marchands, parse et concilie les factures, puis génère et upload le xlsx récapitulatif. Exécutable en entier ou étape par étape.",
+  "steps": [
+    {
+      "id": "t1",
+      "kind": "step",
+      "group": "Préambule",
+      "label": "Lire le SKILL.md et les 6 fichiers de références désignés",
+      "parent": null,
+      "detail": "Année fiscale, formats des relevés BNC, contrats des deux stores annuels et prérequis du trimestre font foi dans le skill, pas dans le prompt.",
+      "refs": ["skills:@default/compta-references"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [31, 37],
+        "quote": "6. `.pi/skills/@default/compta-references/references/prerequis-trimestre.md` (prérequis du trimestre, préflight étape 1)"
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "t2",
+      "kind": "tool_call",
+      "group": "Préambule",
+      "label": "Installer les dépendances : `pip install pdfplumber openpyxl` puis `bun install`",
+      "parent": null,
+      "detail": "Deux écosystèmes dans le même run : Python pour `chq-extractor` / `generate-xlsx` / `extract-pdf`, bun pour `mc-extractor.ts` (dépendance npm `pdf-parse`).",
+      "refs": ["system_tools:bash", "skills:@default/compta-references"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [43, 49],
+        "quote": "pip install pdfplumber openpyxl 2>&1 | tail -2"
+      },
+      "confidence": 0.98
+    },
+
+    {
+      "id": "tg1",
+      "kind": "guard",
+      "group": "Règles absolues",
+      "label": "Ne jamais supprimer ; ne jamais écraser (suffixe daté si le nom est pris)",
+      "parent": null,
+      "detail": "Aucune opération DELETE, aucun PATCH de contenu hors fichiers méta. Le renommage in-place (PATCH du seul champ `name`) est autorisé : c'est l'opération de l'étape 2.",
+      "refs": [],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [18, 20],
+        "quote": "**Ne JAMAIS écraser un fichier existant** (pas de PATCH du contenu, pas de update). Si un fichier du même nom existe, ajouter un suffixe daté `_YYYY-MM-DD`."
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "tg2",
+      "kind": "guard",
+      "group": "Règles absolues",
+      "label": "Exceptions : les trois fichiers méta managés sont régénérés à chaque run",
+      "parent": null,
+      "detail": "`factures-parsed.json`, `manifest.json`, `{QTR} - Transactions.xlsx`.",
+      "refs": [],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [23, 23],
+        "quote": "les fichiers méta managés par l'agent (`factures-parsed.json`, `manifest.json`, `{QTR} - Transactions.xlsx`) peuvent être réécrits"
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "tg3",
+      "kind": "guard",
+      "group": "Règles absolues",
+      "label": "Aucun appel LLM externe : les scripts ne font que du déterministe",
+      "parent": null,
+      "detail": "Classification des marchands, détection de mappings et parsing des factures sont faits dans le run ; les scripts du skill s'invoquent par bash et ne contiennent aucune IA.",
+      "refs": ["skills:@default/compta-references", "system_tools:bash"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [25, 27],
+        "quote": "Les scripts du skill ne font que de l'extraction déterministe (parsing PDF, génération xlsx, conciliation) — pas d'IA dedans."
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "tg4",
+      "kind": "guard",
+      "group": "Règles absolues",
+      "label": "Toute communication passe par les outils, en français",
+      "parent": null,
+      "detail": "Tout texte libre hors appel d'outil n'est jamais délivré.",
+      "refs": ["system_tools:output", "system_tools:log", "system_tools:pin"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [5, 5],
+        "quote": "Toute communication passe par les outils : le résultat structuré via `output`, la progression via `log`, l'état de reprise via `pin`."
+      },
+      "confidence": 0.99
+    },
+    {
+      "id": "tg5",
+      "kind": "guard",
+      "group": "Règles absolues",
+      "label": "Reprise : lire le checkpoint injecté, ne pas appeler `recall_memory`",
+      "parent": null,
+      "detail": "Sert à ne pas reconfondre le dernier trimestre traité avec le courant et à récupérer le `qtrFolderId` sans re-chercher sur Drive.",
+      "refs": [],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [671, 675],
+        "quote": "N'appelle PAS `recall_memory` pour lire un pin"
+      },
+      "confidence": 0.97
+    },
+    {
+      "id": "tp1",
+      "kind": "policy",
+      "group": "Règles absolues",
+      "label": "Quand un script extracteur échoue : capturer stderr et continuer",
+      "parent": null,
+      "detail": "`log`, ajout à `output.erreurs`, poursuite des autres étapes si possible.",
+      "refs": ["agent_output:erreurs", "system_tools:log"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [666, 666],
+        "quote": "**Script extracteur échoue** : capturer la sortie stderr, `log`, ajouter à `output.erreurs`. Continuer les autres étapes si possible."
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "tp2",
+      "kind": "policy",
+      "group": "Règles absolues",
+      "label": "Quand l'upload Drive échoue : rendre le résultat local dans l'output",
+      "parent": null,
+      "detail": "`xlsx_file_id: null` plus la mention « fichier local généré, upload en échec ».",
+      "refs": ["agent_output:xlsx_file_id"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [667, 667],
+        "quote": "**Upload Drive échoue** : inclure le résultat local dans l'output (`xlsx_file_id: null`, mention \"fichier local généré, upload en échec\")."
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "tp3",
+      "kind": "policy",
+      "group": "Règles absolues",
+      "label": "Quand aucun PDF n'est trouvé pour le trimestre : output partiel explicite",
+      "parent": null,
+      "detail": "`log` d'erreur, summary explicatif, `xlsx_file_id: null`.",
+      "refs": ["agent_output:summary", "agent_output:xlsx_file_id"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [665, 665],
+        "quote": "**Aucun PDF trouvé pour le trimestre** : `log` d'erreur, summary explicatif, output partiel avec `xlsx_file_id: null`."
+      },
+      "confidence": 0.97
+    },
+
+    {
+      "id": "t3",
+      "kind": "decision",
+      "group": "Mode `etape`",
+      "label": "L'input `etape` est-il vide ?",
+      "parent": null,
+      "detail": "Vide → pipeline complet 0 → 6 (4.5 et 5.5 incluses). Non vide → sous-ensemble d'étapes.",
+      "refs": ["agent_input:etape"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [53, 53],
+        "quote": "Si l'input `etape` est vide, exécute toutes les étapes 0 à 6 (incluant 4.5 et 5.5) en séquence."
+      },
+      "confidence": 0.99
+    },
+    {
+      "id": "t4",
+      "kind": "step",
+      "group": "Mode `etape`",
+      "label": "Exécuter uniquement les étapes du tableau de mapping",
+      "parent": null,
+      "detail": "8 valeurs d'entrée, chacune dépliée en une liste d'étapes (`conciliation` = 0+1+3+4+4.5+5.5, `xlsx` = idem + 6, etc.). Table de correspondance agrégée en un nœud.",
+      "refs": ["agent_input:etape", "agent_output:etapes_completees"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [646, 657],
+        "quote": "| `conciliation` | 0 + 1 + 3 + 4 + 4.5 + 5.5 (parse + match factures↔transactions) |"
+      },
+      "confidence": 0.93
+    },
+    {
+      "id": "tg6",
+      "kind": "guard",
+      "group": "Mode `etape`",
+      "label": "Quel que soit le mode, toujours faire l'étape 7 (output + pin)",
+      "parent": null,
+      "detail": "Le format n'exprime pas qu'un garde neutralise ou impose des étapes précises du graphe ; celui-ci force la fin du pipeline quel que soit le chemin choisi en t3.",
+      "refs": [],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [659, 659],
+        "quote": "Toujours faire l'étape 7 (output + pin) à la fin."
+      },
+      "confidence": 0.99
+    },
+
+    {
+      "id": "t5",
+      "kind": "decision",
+      "group": "0. Trimestre cible",
+      "label": "L'input `trimestre` est-il fourni ?",
+      "parent": null,
+      "detail": "Format `YYYY-QX`. Fourni → utilisé tel quel, sans validation.",
+      "refs": ["agent_input:trimestre"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [61, 61],
+        "quote": "Si l'input `trimestre` est non-vide (ex: `2026-Q2`), l'utiliser tel quel."
+      },
+      "confidence": 0.99
+    },
+    {
+      "id": "t6",
+      "kind": "step",
+      "group": "0. Trimestre cible",
+      "label": "Calculer le trimestre fiscal courant depuis la date du jour",
+      "parent": null,
+      "detail": "Année fiscale du 1er septembre au 31 août ; le trimestre est nommé par l'année calendaire de son dernier mois. Le prompt recopie la table de `fiscal-year.md`, qui fait foi.",
+      "refs": ["skills:@default/compta-references"],
+      "evidence": {
+        "file": "skills/@default/compta-references/references/fiscal-year.md",
+        "lines": [33, 37],
+        "quote": "Mois 3, 4, 5     (Mars-Mai)  → Q3, annee fiscale = annee_courante-1 - annee_courante"
+      },
+      "confidence": 0.97
+    },
+    {
+      "id": "t7",
+      "kind": "step",
+      "group": "0. Trimestre cible",
+      "label": "Déterminer les 3 mois calendaires couverts et les journaliser",
+      "parent": null,
+      "detail": "Ces 3 mois servent de fenêtre à la sélection CHQ (3.3), au filtrage des paiements (3.5) et des virements Interac (3.5bis).",
+      "refs": ["system_tools:log"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [68, 69],
+        "quote": "Déterminer les 3 mois calendaires couverts (ex: Q2 = déc, jan, fév)."
+      },
+      "confidence": 0.98
+    },
+
+    {
+      "id": "t8",
+      "kind": "step",
+      "group": "1. Validation de la structure",
+      "label": "Préflight des prérequis, récapitulatif ✅/⚠️/❌",
+      "parent": null,
+      "detail": "6 intrants avec criticité distincte : relevés MC et CHQ 92325 bloquants, stores paiements et Interac recommandés, export transactions carte optionnel (gap-fill), factures non bloquantes.",
+      "refs": ["skills:@default/compta-references", "system_tools:log"],
+      "evidence": {
+        "file": "skills/@default/compta-references/references/prerequis-trimestre.md",
+        "lines": [12, 17],
+        "quote": "| 1 | Relevés **Mastercard** (PDF) couvrant le trimestre + marges mi-mois | BNC → relevés carte | **Bloquant** | pas de dépenses CC |"
+      },
+      "confidence": 0.95
+    },
+    {
+      "id": "t9",
+      "kind": "decision",
+      "group": "1. Validation de la structure",
+      "label": "Un prérequis bloquant manque-t-il (0 relevé MC, moins de 3 relevés CHQ) ?",
+      "parent": null,
+      "detail": "« Ne bloquer que sur un manquant bloquant » — le prompt ne dit pas ce que « bloquer » veut dire concrètement (arrêt du run, output partiel, étapes sautées).",
+      "refs": [],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [79, 81],
+        "quote": "Relevés **Mastercard** du trimestre dans le centralisé MC → ❌ bloquant si 0."
+      },
+      "confidence": 0.85
+    },
+    {
+      "id": "t10",
+      "kind": "tool_call",
+      "group": "1. Validation de la structure",
+      "label": "Naviguer sur Drive : année fiscale puis trimestre",
+      "parent": null,
+      "detail": "Deux listings `api_call` GET filtrés sur les dossiers depuis la racine `_Trimestres`.",
+      "refs": ["toolbox:@appstrate/google-drive#api_call", "config:drive_root_trimestres_folder_id"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [87, 94],
+        "quote": "À partir de `config.drive_root_trimestres_folder_id` :"
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "t11",
+      "kind": "decision",
+      "group": "1. Validation de la structure",
+      "label": "L'année fiscale ou le trimestre manque-t-il ?",
+      "parent": null,
+      "detail": "Contrairement à `compta-inbox`, aucune configuration ne conditionne la création : elle est toujours autorisée ici.",
+      "refs": [],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [96, 96],
+        "quote": "#### 1.2 Si l'année fiscale ou le trimestre n'existe pas"
+      },
+      "confidence": 0.97
+    },
+    {
+      "id": "t12",
+      "kind": "tool_call",
+      "group": "1. Validation de la structure",
+      "label": "Créer les dossiers manquants et mémoriser leurs IDs",
+      "parent": null,
+      "detail": "Sous-structure attendue : `1. Banque/`, `2. Dépenses/{QTR}-Factures/` et `Dépôts/`, `3. Revenus/Gouvernement et organismes/` et `Stripe/`. Au minimum les IDs du trimestre, de `1. Banque` et de `{QTR}-Factures` sont conservés pour la suite.",
+      "refs": ["toolbox:@appstrate/google-drive#api_call"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [98, 115],
+        "quote": "**Garde l'ID de chaque dossier en mémoire pour les étapes suivantes**"
+      },
+      "confidence": 0.97
+    },
+    {
+      "id": "tg7",
+      "kind": "guard",
+      "group": "1. Validation de la structure",
+      "label": "Plus de STOP bloquant sur le CSV de paiements (dépendance souple)",
+      "parent": null,
+      "detail": "Le store central annuel a remplacé le CSV rangé par trimestre : absent = colonne Destinataire vide, jamais bloquant.",
+      "refs": [],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [117, 119],
+        "quote": "**Plus de STOP sur un CSV de paiements** : les paiements sont lus depuis le store central annuel à l'étape 3.5"
+      },
+      "confidence": 0.98
+    },
+
+    {
+      "id": "t13",
+      "kind": "loop",
+      "group": "2. Renommage des bruts",
+      "label": "Pour chaque PDF du centralisé Mastercard",
+      "parent": null,
+      "detail": "Listing à plat, sans descendre dans les sous-dossiers.",
+      "refs": ["config:drive_centralized_mc_folder_id", "toolbox:@appstrate/google-drive#api_call"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [131, 133],
+        "quote": "Lister tous les fichiers PDF du dossier (sans descendre dans les sous-dossiers)."
+      },
+      "confidence": 0.97
+    },
+    {
+      "id": "t13.1",
+      "kind": "decision",
+      "group": "2. Renommage des bruts",
+      "label": "Nom brut `^CARTCRED_CREDCARD_\\d+_(\\d{8})\\.pdf$` ?",
+      "parent": "t13",
+      "detail": "Trois issues : brut à renommer, déjà renommé (skip silencieux), autre (warning + skip).",
+      "refs": [],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [136, 136],
+        "quote": "**Brut Mastercard** : nom matche `^CARTCRED_CREDCARD_\\d+_(\\d{8})\\.pdf$`"
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "t13.2",
+      "kind": "step",
+      "group": "2. Renommage des bruts",
+      "label": "Calculer le nouveau nom `YYYY-MM-DD-CC-XXXX.pdf`",
+      "parent": "t13",
+      "detail": "Date = groupe 1 au format `YYYYMMDD` ; XXXX = 4 derniers chiffres de la carte lus dans le segment numérique du nom brut, `5603` par défaut.",
+      "refs": [],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [136, 136],
+        "quote": "nouveau nom = `YYYY-MM-DD-CC-XXXX.pdf` (XXXX = 4 derniers chiffres de la carte"
+      },
+      "confidence": 0.97
+    },
+    {
+      "id": "t13.3",
+      "kind": "step",
+      "group": "2. Renommage des bruts",
+      "label": "Déjà renommé → skip silencieux ; autre → warning + skip",
+      "parent": "t13",
+      "detail": "Le motif `^\\d{4}-\\d{2}-\\d{2}-CC-\\d{4}\\.pdf$` marque un fichier déjà traité par un run précédent : c'est ce qui rend l'étape idempotente.",
+      "refs": [],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [137, 138],
+        "quote": "**Déjà renommé** : nom matche `^\\d{4}-\\d{2}-\\d{2}-CC-\\d{4}\\.pdf$` → skip silencieux."
+      },
+      "confidence": 0.97
+    },
+    {
+      "id": "t14",
+      "kind": "loop",
+      "group": "2. Renommage des bruts",
+      "label": "Pour chaque PDF du centralisé compte chèque",
+      "parent": null,
+      "detail": "Même schéma que le centralisé MC, sur un autre dossier de configuration.",
+      "refs": ["config:drive_centralized_chq_folder_id", "toolbox:@appstrate/google-drive#api_call"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [140, 142],
+        "quote": "#### 2.2 Centralisé CHQ (`config.drive_centralized_chq_folder_id`)"
+      },
+      "confidence": 0.97
+    },
+    {
+      "id": "t14.1",
+      "kind": "decision",
+      "group": "2. Renommage des bruts",
+      "label": "Brut `^RELCPTE_ACCTSTMT_(\\d+)_(\\d{6})-.*\\.pdf$` du compte 92325 ?",
+      "parent": "t14",
+      "detail": "Les comptes épargne `24426` et `29223` sont ignorés ici, alors que `compta-inbox` les dispatche tous les trois vers ce même dossier centralisé.",
+      "refs": [],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [145, 146],
+        "quote": "Extraire le numéro de compte (groupe 1) — **ignorer si différent de `92325`** (Tractr)."
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "t14.2",
+      "kind": "step",
+      "group": "2. Renommage des bruts",
+      "label": "Calculer le nouveau nom `YYYY-MM-DD-Releve-92325.pdf`",
+      "parent": "t14",
+      "detail": "Date = groupe 2 au format `MMDDYY`, recomposée en préfixant `20` à l'année. Déjà renommé ou autre → skip.",
+      "refs": [],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [147, 150],
+        "quote": "Nouveau nom = `YYYY-MM-DD-Releve-92325.pdf`."
+      },
+      "confidence": 0.97
+    },
+    {
+      "id": "t15",
+      "kind": "decision",
+      "group": "2. Renommage des bruts",
+      "label": "Le nouveau nom existe-t-il déjà dans le même dossier centralisé ?",
+      "parent": null,
+      "detail": "Appliqué aux seuls fichiers à renommer.",
+      "refs": [],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [156, 156],
+        "quote": "si un fichier avec exactement le nouveau nom existe déjà dans le même dossier centralisé → **skip avec warning**"
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "t16",
+      "kind": "step",
+      "group": "2. Renommage des bruts",
+      "label": "Conflit → skip avec warning, incident dans `output.erreurs`",
+      "parent": null,
+      "detail": "Ne renomme pas, ne supprime pas le brut.",
+      "refs": ["agent_output:erreurs"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [156, 156],
+        "quote": "Ne renomme pas, ne supprime pas le brut. Ajoute l'incident dans `output.erreurs`."
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "t17",
+      "kind": "tool_call",
+      "group": "2. Renommage des bruts",
+      "label": "PATCH du seul champ `name`, puis consigner le renommage",
+      "parent": null,
+      "detail": "`api_call` PATCH sur `files/FILE_ID?fields=id,name`. Chaque renommage est loggé et la liste finit dans `output.renamed_pdfs`.",
+      "refs": ["toolbox:@appstrate/google-drive#api_call", "agent_output:renamed_pdfs", "system_tools:log"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [158, 169],
+        "quote": "À la fin : ajouter la liste des renommages dans `output.renamed_pdfs`."
+      },
+      "confidence": 0.98
+    },
+
+    {
+      "id": "t18",
+      "kind": "tool_call",
+      "group": "3. Sélection et download",
+      "label": "Préparer la structure locale du trimestre",
+      "parent": null,
+      "detail": "`mkdir -p` de `1. Banque/Relevés MC/extraction` et `1. Banque/Relevés CHQ/extraction` : c'est la structure que les scripts d'extraction attendent.",
+      "refs": ["system_tools:bash"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [179, 183],
+        "quote": "QTR_DIR=\"/workspace/trimestre\""
+      },
+      "confidence": 0.97
+    },
+    {
+      "id": "t19",
+      "kind": "step",
+      "group": "3. Sélection et download",
+      "label": "Sélectionner les relevés : CC sur (M1-1)→(M3+1), CHQ sur les 3 mois",
+      "parent": null,
+      "detail": "Les relevés CC courent de mi-mois à mi-mois, d'où la fenêtre élargie d'un mois de chaque côté ; les relevés CHQ sont alignés sur le mois calendaire et filtrés sur `-Releve-92325.pdf`. Sélection sur la date portée par le nom, pas sur le contenu.",
+      "refs": ["config:drive_centralized_mc_folder_id", "config:drive_centralized_chq_folder_id"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [187, 200],
+        "quote": "télécharger les PDFs dont la date dans le nom va de **(M1 - 1) à (M3 + 1)**"
+      },
+      "confidence": 0.96
+    },
+    {
+      "id": "t20",
+      "kind": "tool_call",
+      "group": "3. Sélection et download",
+      "label": "Télécharger chaque PDF retenu (`responseMode.toFile`)",
+      "parent": null,
+      "detail": "Streaming vers le disque local pour éviter l'inflation base64. Moins de 3 relevés CC ou CHQ → warning explicite (relevés probablement manquants).",
+      "refs": ["toolbox:@appstrate/google-drive#api_call"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [206, 214],
+        "quote": "**Si N_cc < 3 ou N_chq < 3** : warning explicite (probablement des relevés manquants)."
+      },
+      "confidence": 0.97
+    },
+    {
+      "id": "t21",
+      "kind": "tool_call",
+      "group": "3. Sélection et download",
+      "label": "Résoudre `Paiements BNC` et charger le store `Paiements-BNC_{AF}.json`",
+      "parent": null,
+      "detail": "Find par `parents[0]` du dossier CHQ centralisé, sans clé de configuration dédiée. Store absent ou vide → warning non bloquant, matérialisation sautée, colonne Destinataire vide.",
+      "refs": ["toolbox:@appstrate/google-drive#api_call", "config:drive_centralized_chq_folder_id", "skills:@default/compta-references"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [220, 222],
+        "quote": "**Si store absent ou vide** : warning non bloquant, sauter la matérialisation (la colonne Destinataire restera vide)."
+      },
+      "confidence": 0.97
+    },
+    {
+      "id": "t22",
+      "kind": "step",
+      "group": "3. Sélection et download",
+      "label": "Filtrer (3 mois + `accepted`) et matérialiser le CSV brut BNC",
+      "parent": null,
+      "detail": "Postdatés et rejetés restent dans le store mais ne comptent jamais dans un trimestre. Le CSV est écrit dans `1. Banque/` sous un nom de 14 chiffres, seule forme que `generate-xlsx.py::load_paiements_csv` détecte.",
+      "refs": ["skills:@default/compta-references", "system_tools:bash"],
+      "evidence": {
+        "file": "skills/@default/compta-references/references/paiements-store.md",
+        "lines": [105, 108],
+        "quote": "Sélectionner les paiements dont `date` tombe dans un des **3 mois calendaires** du trimestre **ET** `status_normalized == \"accepted\"`"
+      },
+      "confidence": 0.96
+    },
+    {
+      "id": "t23",
+      "kind": "step",
+      "group": "3. Sélection et download",
+      "label": "3.5bis — même matérialisation pour les virements Interac, fenêtre élargie",
+      "parent": null,
+      "detail": "Store `Virements-Interac-BNC_{AF}.json`, records sous la clé `transfers`, fenêtre = 3 mois du trimestre + le mois précédent, car un virement Interac est débité 0 à 3 jours après son initiation. CSV écrit sous `{14_chiffres}-interac.csv`.",
+      "refs": ["skills:@default/compta-references", "system_tools:bash"],
+      "evidence": {
+        "file": "skills/@default/compta-references/references/virements-interac-store.md",
+        "lines": [70, 76],
+        "quote": "Un virement Interac est **débité 0 à 3 jours après** sa date d'initiation."
+      },
+      "confidence": 0.95
+    },
+
+    {
+      "id": "t24",
+      "kind": "tool_call",
+      "group": "4. Extraction des transactions",
+      "label": "Extraire les transactions Mastercard : `bun run mc-extractor.ts`",
+      "parent": null,
+      "detail": "Script TypeScript du skill, invoqué par bash. Le script attend une arborescence `bank/` + `transactions/` : l'agent la fabrique avec des liens symboliques temporaires puis les supprime. Produit `all_cc_transactions.json` et `.csv`.",
+      "refs": ["skills:@default/compta-references", "system_tools:bash"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [246, 258],
+        "quote": "cd \"$SKILL_DIR/scripts\" && bun run mc-extractor.ts \"$WORK_DIR\""
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "t25",
+      "kind": "decision",
+      "group": "4. Extraction des transactions",
+      "label": "Le dernier relevé CC couvre-t-il la fin du trimestre ?",
+      "parent": null,
+      "detail": "Sinon les charges des derniers jours manquent, et le gap-fill n'est possible que si un export CSV des transactions carte est disponible.",
+      "refs": [],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [264, 266],
+        "quote": "Si le relevé CC qui couvre la **fin du trimestre** n'est pas encore disponible (il se clôture après la date du jour), les charges des derniers jours du trimestre manquent"
+      },
+      "confidence": 0.95
+    },
+    {
+      "id": "t26",
+      "kind": "tool_call",
+      "group": "4. Extraction des transactions",
+      "label": "Gap-fill : `cc-csv-extractor.py --since --until`, puis fusion",
+      "parent": null,
+      "detail": "Bornes : lendemain de la dernière date couverte par les PDF → dernier jour du trimestre. Fusion dans `all_cc_transactions.json` avec dédup par `reference`, à défaut `dateTransaction` + `montantDebite`. Exclut les « En attente » et les montants nuls.",
+      "refs": ["skills:@default/compta-references", "system_tools:bash"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [267, 268],
+        "quote": "Fusionner `/tmp/ccgap/all_cc_transactions.json` dans `all_cc_transactions.json` (dédup par `reference`, à défaut `dateTransaction`+`montantDebite`)."
+      },
+      "confidence": 0.96
+    },
+    {
+      "id": "tg8",
+      "kind": "guard",
+      "group": "4. Extraction des transactions",
+      "label": "Ne jamais dépasser `--until` = dernier jour du trimestre",
+      "parent": null,
+      "detail": "Les charges postérieures appartiennent au trimestre suivant : dépasser la borne fabriquerait un double comptage entre deux trimestres.",
+      "refs": [],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [270, 270],
+        "quote": "**Ne jamais dépasser `--until` = dernier jour du trimestre** (les charges postérieures appartiennent au trimestre suivant)."
+      },
+      "confidence": 0.99
+    },
+    {
+      "id": "t27",
+      "kind": "tool_call",
+      "group": "4. Extraction des transactions",
+      "label": "Extraire les transactions compte chèque : `chq-extractor.py`",
+      "parent": null,
+      "detail": "Script Python du skill, invoqué par bash, seulement si des PDFs CHQ ont été téléchargés. Filtre lui-même le compte 92325. Produit `all_chq_transactions.json`.",
+      "refs": ["skills:@default/compta-references", "system_tools:bash"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [274, 281],
+        "quote": "python3 \"$SKILL_DIR/scripts/chq-extractor.py\" \"$QTR_DIR\""
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "t28",
+      "kind": "step",
+      "group": "4. Extraction des transactions",
+      "label": "Relire les JSONs produits et journaliser les compteurs",
+      "parent": null,
+      "detail": "Nombre de transactions CC (débits / crédits), nombre de CHQ, totaux. Vérification de sortie des deux scripts.",
+      "refs": ["system_tools:log"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [285, 288],
+        "quote": "Lire les JSONs et `log` :"
+      },
+      "confidence": 0.97
+    },
+
+    {
+      "id": "t29",
+      "kind": "tool_call",
+      "group": "4.5 Factures du trimestre",
+      "label": "Lister `{QTR}-Factures/` : `pdfs[]` et `existing_json`",
+      "parent": null,
+      "detail": "Tous les PDF du dossier, quel que soit leur nom, plus l'ID d'un éventuel `factures-parsed.json`.",
+      "refs": ["toolbox:@appstrate/google-drive#api_call"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [296, 306],
+        "quote": "`pdfs[]` : tous les fichiers PDF du dossier (peu importe le nom"
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "t30",
+      "kind": "tool_call",
+      "group": "4.5 Factures du trimestre",
+      "label": "Télécharger et parser le `factures-parsed.json` existant",
+      "parent": null,
+      "detail": "Cas nominal : `compta-inbox` l'a produit au fil de l'eau. Absent → partir de `{}`.",
+      "refs": ["toolbox:@appstrate/google-drive#api_call"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [309, 316],
+        "quote": "Si `existing_json` non null, télécharger son contenu via `api_call` (GET)"
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "t31",
+      "kind": "step",
+      "group": "4.5 Factures du trimestre",
+      "label": "Identifier `to_parse[]` : les PDF sans entrée dans le JSON",
+      "parent": null,
+      "detail": "Cas typique : facture déposée manuellement dans le dossier sans passer par `compta-inbox`.",
+      "refs": ["system_tools:log"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [320, 324],
+        "quote": "**Absent** → ajouter à la liste `to_parse[]` (cas typique : facture déposée manuellement dans le dossier sans passer par compta-inbox)"
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "t32",
+      "kind": "loop",
+      "group": "4.5 Factures du trimestre",
+      "label": "Pour chaque facture à parser en fallback",
+      "parent": null,
+      "detail": "Boucle vide dans le cas nominal.",
+      "refs": [],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [326, 328],
+        "quote": "Pour chaque facture à parser :"
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "t32.1",
+      "kind": "tool_call",
+      "group": "4.5 Factures du trimestre",
+      "label": "Télécharger le PDF de la facture",
+      "parent": "t32",
+      "detail": "`api_call` GET `?alt=media` avec `responseMode.toFile` vers le dossier local du trimestre.",
+      "refs": ["toolbox:@appstrate/google-drive#api_call"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [330, 333],
+        "quote": "**Download du PDF** via `api_call` (GET) avec `responseMode: { toFile:"
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "t32.2",
+      "kind": "tool_call",
+      "group": "4.5 Factures du trimestre",
+      "label": "Extraire le texte (`extract-pdf.py --pages 1-3`)",
+      "parent": "t32",
+      "detail": "Même script de skill que `compta-inbox`, invoqué par bash.",
+      "refs": ["skills:@default/compta-references", "system_tools:bash"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [335, 338],
+        "quote": "python3 .pi/skills/@default/compta-references/scripts/extract-pdf.py \"$QTR_DIR/2. Dépenses/{QTR}-Factures/{FILENAME}\" --pages 1-3"
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "t32.3",
+      "kind": "step",
+      "group": "4.5 Factures du trimestre",
+      "label": "Produire l'objet JSON de la facture selon `facture-schema.md`",
+      "parent": "t32",
+      "detail": "Parsing structuré fait dans le run, pas par un service externe : vendor, vendor_normalized, date, amount, currency, description, invoice_number, confidence, filename, added_by_run, added_at. Texte vide (PDF scanné) → fallback multimodal PNG lu par `Read`, comme la Pass 2 de `compta-inbox`. L'entrée est ajoutée au JSON local, clé = nom de fichier.",
+      "refs": ["skills:@default/compta-references", "system_tools:Read"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [340, 361],
+        "quote": "**Parsing structuré** par TOI (le LLM) — pas d'appel Anthropic externe."
+      },
+      "confidence": 0.94
+    },
+    {
+      "id": "t33",
+      "kind": "tool_call",
+      "group": "4.5 Factures du trimestre",
+      "label": "Si au moins un ajout : sauver et uploader le JSON enrichi",
+      "parent": null,
+      "detail": "Fichier méta managé, overwrite autorisé : PATCH `uploadType=media` si le fichier existait, sinon upload multipart. Le multipart est ici prescrit alors que `compta-inbox` l'interdit sur la même intégration.",
+      "refs": ["toolbox:@appstrate/google-drive#api_call"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [365, 374],
+        "quote": "Sinon → upload multipart : `api_call` (POST) sur `https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name`"
+      },
+      "confidence": 0.96
+    },
+
+    {
+      "id": "t34",
+      "kind": "step",
+      "group": "5. Classification des transactions",
+      "label": "Charger les transactions et grouper par marchand",
+      "parent": null,
+      "detail": "Sur les transactions CC, groupement par `nomCompagnie` : récurrent si ≥ 2 occurrences dans la période (facture mensuelle attendue), ponctuel sinon. Log du top 10 récurrents par montant décroissant.",
+      "refs": ["system_tools:log"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [386, 394],
+        "quote": "**Récurrent** s'il apparaît ≥ 2 fois dans la période (facture mensuelle attendue)."
+      },
+      "confidence": 0.97
+    },
+    {
+      "id": "t35",
+      "kind": "step",
+      "group": "5. Classification des transactions",
+      "label": "Détecter les compagnies non mappées et proposer un mapping",
+      "parent": null,
+      "detail": "Comparaison de `descriptionOriginale` aux clés de `company-mappings.json` (préfixe ou substring exact) ; pour chaque description sans match, inférer un nom propre sans ville, code pays ni téléphone. Les propositions sont collectées en mémoire et reportées dans `output.stats.nouveaux_mappings` — un seul appel `output`, pas N persistances unitaires.",
+      "refs": ["skills:@default/compta-references", "agent_output:stats"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [398, 404],
+        "quote": "**Collecter tous les mappings dans une liste en mémoire**"
+      },
+      "confidence": 0.96
+    },
+    {
+      "id": "tg9",
+      "kind": "guard",
+      "group": "5. Classification des transactions",
+      "label": "Ne pas modifier `company-mappings.json` (read-only)",
+      "parent": null,
+      "detail": "Le fichier du skill reste figé ; l'utilisateur intègre les mappings validés plus tard, à la main.",
+      "refs": ["skills:@default/compta-references"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [406, 406],
+        "quote": "**Ne pas modifier le fichier `company-mappings.json` du skill** (read-only)."
+      },
+      "confidence": 0.99
+    },
+
+    {
+      "id": "t36",
+      "kind": "decision",
+      "group": "5.5 Conciliation factures ↔ transactions",
+      "label": "L'étape 4.5 a-t-elle produit au moins une facture ?",
+      "parent": null,
+      "detail": "Zéro facture → étape entièrement sautée, rien à concilier.",
+      "refs": [],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [414, 414],
+        "quote": "**Skip cette étape si l'étape 4.5 a produit 0 facture** (rien à concilier)."
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "t37",
+      "kind": "tool_call",
+      "group": "5.5 Conciliation factures ↔ transactions",
+      "label": "Concilier par script : `match-factures.py` → `manifest.json`",
+      "parent": null,
+      "detail": "Script Python pur du skill, invoqué par bash. Barème CC : montant exact 50 pts + vendor 30/15 pts + même mois 20 pts ; CHQ : montant 50 + mois 20 + destinataire 30 ; score minimum 50. L'algorithme est explicitement hors du raisonnement de l'agent. Stats du résumé console capturées pour l'output.",
+      "refs": ["skills:@default/compta-references", "system_tools:bash", "agent_output:factures_stats"],
+      "evidence": {
+        "file": "skills/@default/compta-references/SKILL.md",
+        "lines": [103, 107],
+        "quote": "- **Match CC** : montant exact (50pts) + vendor (30pts complet, 15pts partial) + même mois (20pts) → score min 50 pour valider"
+      },
+      "confidence": 0.96
+    },
+    {
+      "id": "t38",
+      "kind": "tool_call",
+      "group": "5.5 Conciliation factures ↔ transactions",
+      "label": "Uploader `manifest.json` (overwrite si présent) et capturer son ID",
+      "parent": null,
+      "detail": "Listing puis PATCH `uploadType=media` si le fichier existe, sinon upload multipart. `manifest_file_id` conservé pour l'output.",
+      "refs": ["toolbox:@appstrate/google-drive#api_call", "agent_output:manifest_file_id"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [471, 480],
+        "quote": "Il faut l'uploader sur Drive (overwrite si déjà présent — fichier méta managé)"
+      },
+      "confidence": 0.97
+    },
+
+    {
+      "id": "t39",
+      "kind": "tool_call",
+      "group": "6. Génération xlsx",
+      "label": "Générer le xlsx : `generate-xlsx.py`",
+      "parent": null,
+      "detail": "Script Python du skill, invoqué par bash. Produit `{QTR} - Transactions.xlsx` à la racine du dossier trimestre local (4 onglets : Résumé, CC Dépenses, CC Crédits, CHQ). Vérifier l'existence du fichier et logger sa taille.",
+      "refs": ["skills:@default/compta-references", "system_tools:bash", "system_tools:log"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [502, 511],
+        "quote": "python3 \"$SKILL_DIR/scripts/generate-xlsx.py\" \"$QTR_DIR\""
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "t40",
+      "kind": "tool_call",
+      "group": "6. Génération xlsx",
+      "label": "Chercher un `{QTR} - Transactions.xlsx` à la racine du trimestre",
+      "parent": null,
+      "detail": "Nom canonique toujours identique, sans suffixe : le xlsx est un fichier méta managé, chaque run le régénère.",
+      "refs": ["toolbox:@appstrate/google-drive#api_call"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [515, 522],
+        "quote": "**Le xlsx est un fichier méta managé par l'agent — overwrite autorisé**"
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "t41",
+      "kind": "decision",
+      "group": "6. Génération xlsx",
+      "label": "Le fichier existe-t-il déjà ?",
+      "parent": null,
+      "detail": "Décide entre update de contenu et création.",
+      "refs": [],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [524, 524],
+        "quote": "**Si le fichier existe** (`existing_xlsx_id` non vide) → update du contenu (overwrite)"
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "t42",
+      "kind": "tool_call",
+      "group": "6. Génération xlsx",
+      "label": "Uploader : PATCH `uploadType=media` si existant, sinon multipart",
+      "parent": null,
+      "detail": "Le prompt mentionne `api_upload` en repli « si volumineux », outil que le manifeste ne déclare pas. L'ID retourné va dans `output.xlsx_file_id`.",
+      "refs": ["toolbox:@appstrate/google-drive#api_call", "toolbox:@appstrate/google-drive#api_upload", "agent_output:xlsx_file_id"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [524, 533],
+        "quote": "Capturer l'ID retourné et le mettre dans `output.xlsx_file_id`."
+      },
+      "confidence": 0.95
+    },
+    {
+      "id": "tg10",
+      "kind": "guard",
+      "group": "6. Génération xlsx",
+      "label": "Ne pas toucher aux versions historiques suffixées",
+      "parent": null,
+      "detail": "`{QTR} - Transactions_YYYY-MM-DD_vN.xlsx` sont des artefacts de l'ancien comportement : l'agent ne s'occupe que du nom canonique.",
+      "refs": [],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [535, 535],
+        "quote": "s'il existe déjà des versions historiques avec suffixes datés (`{QTR} - Transactions_YYYY-MM-DD_vN.xlsx`), **ne pas y toucher**"
+      },
+      "confidence": 0.98
+    },
+
+    {
+      "id": "t43",
+      "kind": "emit",
+      "group": "7. Output + checkpoint",
+      "label": "Rendre la sortie : summary markdown et tous les champs dans `data`",
+      "parent": null,
+      "detail": "Summary à sections imposées (pipeline, renommages, extraction bancaire, classification, nouveaux mappings, Excel, erreurs). Champs : `trimestre`, `etapes_completees`, `stats`, `xlsx_file_id`, `renamed_pdfs`, `erreurs`.",
+      "refs": ["system_tools:output", "agent_output:summary", "agent_output:trimestre", "agent_output:etapes_completees", "agent_output:stats"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [548, 610],
+        "quote": "**APPELLE LE TOOL `output` EXACTEMENT UNE SEULE FOIS, AVEC TOUS LES CHAMPS REMPLIS DANS LE WRAPPER `data`.**"
+      },
+      "confidence": 0.97
+    },
+    {
+      "id": "t44",
+      "kind": "tool_call",
+      "group": "7. Output + checkpoint",
+      "label": "Persister le checkpoint via `pin` (clé `checkpoint`, scope `shared`)",
+      "parent": null,
+      "detail": "`lastTrimestre`, `lastRun`, `qtrFolderId`, `xlsxFileId`, `stats`. Aucun autre appel d'outil après `pin`.",
+      "refs": ["system_tools:pin"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [618, 639],
+        "quote": "Persister l'état pour le prochain run via `pin` (clé `checkpoint`, scope `shared`)"
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "tg11",
+      "kind": "guard",
+      "group": "7. Output + checkpoint",
+      "label": "Un seul appel `output`, et avant `pin`",
+      "parent": null,
+      "detail": "L'appel `output` marque le run `success` côté plateforme ; un second appel écrase entièrement le premier.",
+      "refs": ["system_tools:output", "system_tools:pin"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [541, 546],
+        "quote": "**OBLIGATOIRE — ORDRE STRICT :** tu DOIS appeler `output` AVANT `pin` AVANT de finir le run."
+      },
+      "confidence": 0.99
+    },
+    {
+      "id": "tg12",
+      "kind": "guard",
+      "group": "7. Output + checkpoint",
+      "label": "Ne jamais inventer de chiffres",
+      "parent": null,
+      "detail": "Statistique non calculable → `null`.",
+      "refs": ["agent_output:stats"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [669, 669],
+        "quote": "**Ne JAMAIS inventer de chiffres.** Si une statistique n'est pas calculable, mettre `null`."
+      },
+      "confidence": 0.99
+    }
+  ],
+  "edges": [
+    { "from": "t1", "to": "t2", "condition": null },
+    { "from": "t2", "to": "t3", "condition": null },
+    { "from": "t3", "to": "t5", "condition": "vide : pipeline complet" },
+    { "from": "t3", "to": "t4", "condition": "étape spécifiée" },
+    { "from": "t4", "to": "t5", "condition": null },
+    { "from": "t5", "to": "t7", "condition": "trimestre fourni" },
+    { "from": "t5", "to": "t6", "condition": "vide" },
+    { "from": "t6", "to": "t7", "condition": null },
+    { "from": "t7", "to": "t8", "condition": null },
+    { "from": "t8", "to": "t9", "condition": null },
+    { "from": "t9", "to": "t10", "condition": "aucun manquant bloquant" },
+    { "from": "t10", "to": "t11", "condition": null },
+    { "from": "t11", "to": "t12", "condition": "année fiscale ou trimestre absent" },
+    { "from": "t11", "to": "t13", "condition": "structure présente" },
+    { "from": "t12", "to": "t13", "condition": null },
+    { "from": "t13", "to": "t14", "condition": null },
+    { "from": "t14", "to": "t15", "condition": null },
+    { "from": "t15", "to": "t16", "condition": "nouveau nom déjà pris" },
+    { "from": "t15", "to": "t17", "condition": "libre" },
+    { "from": "t17", "to": "t18", "condition": null },
+    { "from": "t18", "to": "t19", "condition": null },
+    { "from": "t19", "to": "t20", "condition": null },
+    { "from": "t20", "to": "t21", "condition": null },
+    { "from": "t21", "to": "t22", "condition": "store présent" },
+    { "from": "t21", "to": "t23", "condition": "store absent : matérialisation sautée" },
+    { "from": "t22", "to": "t23", "condition": null },
+    { "from": "t23", "to": "t24", "condition": null },
+    { "from": "t24", "to": "t25", "condition": null },
+    { "from": "t25", "to": "t26", "condition": "couverture PDF incomplète et export CSV disponible" },
+    { "from": "t25", "to": "t27", "condition": "couverture complète" },
+    { "from": "t26", "to": "t27", "condition": null },
+    { "from": "t27", "to": "t28", "condition": null },
+    { "from": "t28", "to": "t29", "condition": null },
+    { "from": "t29", "to": "t30", "condition": "`factures-parsed.json` présent" },
+    { "from": "t29", "to": "t31", "condition": "absent : partir de {}" },
+    { "from": "t30", "to": "t31", "condition": null },
+    { "from": "t31", "to": "t32", "condition": null },
+    { "from": "t32", "to": "t33", "condition": null },
+    { "from": "t33", "to": "t34", "condition": null },
+    { "from": "t34", "to": "t35", "condition": null },
+    { "from": "t35", "to": "t36", "condition": null },
+    { "from": "t36", "to": "t37", "condition": "au moins une facture" },
+    { "from": "t36", "to": "t39", "condition": "0 facture : étape sautée" },
+    { "from": "t37", "to": "t38", "condition": null },
+    { "from": "t38", "to": "t39", "condition": null },
+    { "from": "t39", "to": "t40", "condition": null },
+    { "from": "t40", "to": "t41", "condition": null },
+    { "from": "t41", "to": "t42", "condition": null },
+    { "from": "t42", "to": "t43", "condition": null },
+    { "from": "t43", "to": "t44", "condition": null },
+
+    { "from": "t13.1", "to": "t13.2", "condition": "brut à renommer" },
+    { "from": "t13.1", "to": "t13.3", "condition": "déjà renommé ou autre" },
+    { "from": "t14.1", "to": "t14.2", "condition": "brut 92325" },
+
+    { "from": "t32.1", "to": "t32.2", "condition": null },
+    { "from": "t32.2", "to": "t32.3", "condition": null }
+  ],
+  "gaps": [
+    {
+      "kind": "contradiction",
+      "message": "Trois étapes prescrivent l'upload multipart (`uploadType=multipart`) sur `@appstrate/google-drive` : 4.5.5 (factures-parsed.json), 5.5.2 (manifest.json) et 6.2 (xlsx). L'agent frère `compta-inbox`, sur la même intégration, écrit « n'utilise PAS le multipart (`uploadType=multipart`), qui échoue souvent » et impose `api_upload` resumable. Les deux prompts ne peuvent pas avoir raison en même temps.",
+      "related_steps": ["t33", "t38", "t42"]
+    },
+    {
+      "kind": "undeclared_capability",
+      "message": "Bash est la colonne vertébrale du pipeline (pip, bun install, 5 scripts de skill, symlinks, mkdir) et le tool `Read` est requis pour le fallback multimodal, mais `runtime_tools` ne déclare que `output`, `log`, `pin`. Le prompt mentionne aussi `api_upload` (l. 14 et 524) alors que `integrations_configuration.tools[]` ne déclare que `api_call`.",
+      "related_steps": ["t2", "t24", "t27", "t32.3", "t37", "t39", "t42"]
+    },
+    {
+      "kind": "unreachable_input",
+      "message": "L'étape 4.1bis conditionne le gap-fill CC à « un export CSV des transactions BNC fourni (déposé dans l'Inbox ou indiqué par l'utilisateur) ». Cet agent n'a ni entrée pour un chemin de fichier, ni clé de configuration vers l'Inbox compta : rien dans le manifeste ne lui donne accès à ce CSV. La branche est décrite mais non atteignable telle quelle.",
+      "related_steps": ["t25", "t26"]
+    },
+    {
+      "kind": "ambiguous_condition",
+      "message": "Le préflight 1.0 dit « ne bloquer que sur un manquant bloquant » sans jamais définir le comportement de blocage : arrêt immédiat, saut des étapes 3-6, ou simple avertissement ? L'étape 3.4 prévoit par ailleurs un simple warning quand N_cc < 3, ce qui recouvre partiellement le même cas avec une conséquence différente.",
+      "related_steps": ["t8", "t9", "t20"]
+    },
+    {
+      "kind": "output_mismatch",
+      "message": "Le manifeste déclare `factures_stats` (7 sous-champs) et `manifest_file_id`, mais le bloc « Format strict » de l'étape 7.2 ne les liste pas, et l'étape 5.5.3 range les statistiques de factures sous `output.stats.factures`. Deux emplacements concurrents pour la même donnée, et deux champs déclarés qu'aucune consigne de sortie ne remplit.",
+      "related_steps": ["t37", "t38", "t43"]
+    },
+    {
+      "kind": "contradiction",
+      "message": "Le `SKILL.md` (l. 156) prescrit de persister les nouveaux mappings de marchands via `add-memory`, alors que le prompt interdit toute persistance unitaire et impose de tout reporter dans l'output. `add-memory` n'est déclaré nulle part dans le manifeste.",
+      "related_steps": ["t35", "tg9"]
+    },
+    {
+      "kind": "unspecified_case",
+      "message": "Le mode `etape=xlsx` enchaîne 0+1+3+4+4.5+5.5+6 sans l'étape 5 : `stats.recurrents`, `stats.ponctuels` et `nouveaux_mappings` ne sont alors pas calculables, mais la règle « ne jamais inventer de chiffres » et le format d'output ne disent pas quoi mettre à la place.",
+      "related_steps": ["t4", "t34", "t43", "tg12"]
+    },
+    {
+      "kind": "unspecified_case",
+      "message": "Le CSV matérialisé à l'étape 3.5 doit porter un nom de 14 chiffres pour être détecté par `generate-xlsx.py`. Rien ne dit comment le composer ni ce qu'il advient si un fichier de même nom existe déjà dans `1. Banque/`, alors que ce dossier est aussi la destination historique des CSV rangés par trimestre.",
+      "related_steps": ["t22", "t23"]
+    },
+    {
+      "kind": "unused_capability",
+      "message": "La clé de configuration `org_name` (défaut `TRACTR`) est déclarée au manifeste ; aucune règle du prompt ni des références ne dit quand l'utiliser. Aucune étape ne la référence.",
+      "related_steps": []
+    }
+  ],
+  "overall_confidence": 0.94
+}

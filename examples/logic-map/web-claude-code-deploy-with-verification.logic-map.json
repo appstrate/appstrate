@@ -1,0 +1,349 @@
+{
+  "map_version": 1,
+  "shape": "sequence",
+  "source": {
+    "package_id": "github.com/wshobson/agents — plugins/operating-kit/agents/deploy-with-verification.md",
+    "version": "2f9990dd5337ddc88f10400c0e46893be603addf",
+    "integrity": null,
+    "files": ["corpus-web/claude-code-deploy-with-verification.md"]
+  },
+  "generated_at": "2026-07-27T00:00:00Z",
+  "generator": {
+    "kind": "human",
+    "author": "PR 3 — élargissement du corpus, volet prompts publics",
+    "agent": null,
+    "version": null,
+    "model": null
+  },
+  "summary": "Sous-agent Claude Code de déploiement : tests → build → deploy → vérification live → mise à jour du document d'état, avec arrêt dur si les tests échouent et interdiction de déclarer « shipped » avant confirmation par le système en production.",
+  "steps": [
+    {
+      "id": "g0",
+      "kind": "guard",
+      "group": "Garde-fous",
+      "label": "Travailler depuis `{{REPO_PATH}}`",
+      "parent": null,
+      "detail": "Préalable de contexte d'exécution, valable pour toutes les commandes du flot. Le prompt est un gabarit : les six `{{...}}` sont à substituer par l'intégrateur.",
+      "refs": ["config:REPO_PATH"],
+      "evidence": {
+        "file": "corpus-web/claude-code-deploy-with-verification.md",
+        "lines": [22, 22],
+        "quote": "Work from `{{REPO_PATH}}`."
+      },
+      "confidence": 0.97
+    },
+    {
+      "id": "s1",
+      "kind": "tool_call",
+      "group": "1. Test",
+      "label": "Exécuter `{{TEST_COMMAND}}`",
+      "parent": null,
+      "detail": "Première étape du flot déclaré en une ligne à l'ouverture du prompt : « test > build > deploy > verify-live > update state doc ».",
+      "refs": ["system_tools:Bash", "config:TEST_COMMAND"],
+      "evidence": {
+        "file": "corpus-web/claude-code-deploy-with-verification.md",
+        "lines": [24, 27],
+        "quote": "### 1: Test\n```bash\n{{TEST_COMMAND}}\n```"
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "s2",
+      "kind": "decision",
+      "group": "1. Test",
+      "label": "Tous les tests passent-ils ?",
+      "parent": null,
+      "detail": "Point de sortie dur du flot. Le prompt l'écrit deux fois : une fois comme règle absolue (l. 15), une fois comme mention laconique sous l'étape (l. 28).",
+      "refs": [],
+      "evidence": {
+        "file": "corpus-web/claude-code-deploy-with-verification.md",
+        "lines": [28, 28],
+        "quote": "All green required."
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "s3",
+      "kind": "emit",
+      "group": "1. Test",
+      "label": "Échec : s'arrêter, rapporter, ne pas continuer",
+      "parent": null,
+      "detail": "Terminaison alternative de l'agent. Rien n'est dit du contenu de ce rapport-là : le format de rapport décrit en fin de prompt suppose un run complet.",
+      "refs": [],
+      "evidence": {
+        "file": "corpus-web/claude-code-deploy-with-verification.md",
+        "lines": [15, 15],
+        "quote": "1. All tests must pass before deploying. Any failure: stop, report, do not proceed."
+      },
+      "confidence": 0.96
+    },
+    {
+      "id": "s4",
+      "kind": "tool_call",
+      "group": "2. Build",
+      "label": "Exécuter `{{BUILD_COMMAND}}`",
+      "parent": null,
+      "detail": "Aucun critère de succès n'est énoncé pour le build, contrairement au test (« All green required ») et au deploy (capture de la révision).",
+      "refs": ["system_tools:Bash", "config:BUILD_COMMAND"],
+      "evidence": {
+        "file": "corpus-web/claude-code-deploy-with-verification.md",
+        "lines": [30, 33],
+        "quote": "### 2: Build\n```bash\n{{BUILD_COMMAND}}\n```"
+      },
+      "confidence": 0.97
+    },
+    {
+      "id": "s5",
+      "kind": "tool_call",
+      "group": "3. Deploy",
+      "label": "Exécuter `{{DEPLOY_COMMAND}}`",
+      "parent": null,
+      "detail": "Le prompt insiste ailleurs sur le fait que la réussite de cette commande ne vaut pas déploiement (l. 16 et 51).",
+      "refs": ["system_tools:Bash", "config:DEPLOY_COMMAND"],
+      "evidence": {
+        "file": "corpus-web/claude-code-deploy-with-verification.md",
+        "lines": [35, 38],
+        "quote": "### 3: Deploy\n```bash\n{{DEPLOY_COMMAND}}\n```"
+      },
+      "confidence": 0.97
+    },
+    {
+      "id": "s6",
+      "kind": "step",
+      "group": "3. Deploy",
+      "label": "Capturer l'identifiant de révision/version depuis la sortie",
+      "parent": null,
+      "detail": "Valeur pivot du prompt : elle sert à la comparaison de l'étape 4 puis à l'écriture du document d'état à l'étape 5.",
+      "refs": [],
+      "evidence": {
+        "file": "corpus-web/claude-code-deploy-with-verification.md",
+        "lines": [39, 39],
+        "quote": "Capture the new revision/version identifier from the output."
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "s7",
+      "kind": "tool_call",
+      "group": "4. Verify live",
+      "label": "Interroger `{{HEALTH_OR_VERSION_ENDPOINT}}` (`curl -s`)",
+      "parent": null,
+      "detail": "Sortie du processus vers le système en production. C'est le seul appel réseau du flot.",
+      "refs": ["system_tools:Bash", "config:HEALTH_OR_VERSION_ENDPOINT"],
+      "evidence": {
+        "file": "corpus-web/claude-code-deploy-with-verification.md",
+        "lines": [41, 44],
+        "quote": "### 4: Verify live\n```bash\ncurl -s {{HEALTH_OR_VERSION_ENDPOINT}}\n```"
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "s8",
+      "kind": "decision",
+      "group": "4. Verify live",
+      "label": "La réponse est-elle saine ET reflète-t-elle la révision qui vient d'être déployée ?",
+      "parent": null,
+      "detail": "Double condition explicite. Le prompt énumère trois modes de défaillance visés : révision précédente encore servie, déploiement progressif partiel, image verte qui plante à la première requête réelle.",
+      "refs": [],
+      "evidence": {
+        "file": "corpus-web/claude-code-deploy-with-verification.md",
+        "lines": [46, 46],
+        "quote": "Confirm the response is healthy **and reflects what you just shipped**. This step catches:"
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "s9",
+      "kind": "step",
+      "group": "4. Verify live",
+      "label": "Endpoint discordant : le déploiement n'est pas terminé",
+      "parent": null,
+      "detail": "Le prompt qualifie l'état (« not done ») mais ne prescrit aucune action : ni relance, ni attente, ni rollback, ni escalade. Voir `gaps`.",
+      "refs": [],
+      "evidence": {
+        "file": "corpus-web/claude-code-deploy-with-verification.md",
+        "lines": [52, 52],
+        "quote": "If the endpoint doesn't show your build, the deploy is not done."
+      },
+      "confidence": 0.9
+    },
+    {
+      "id": "s10",
+      "kind": "tool_call",
+      "group": "5. Update state doc",
+      "label": "Ouvrir `{{STATE_DOC}}`",
+      "parent": null,
+      "detail": "Sous-étape 1 de l'étape 5, numérotée dans le prompt.",
+      "refs": ["system_tools:Read", "config:STATE_DOC"],
+      "evidence": {
+        "file": "corpus-web/claude-code-deploy-with-verification.md",
+        "lines": [58, 58],
+        "quote": "1. Open `{{STATE_DOC}}`."
+      },
+      "confidence": 0.97
+    },
+    {
+      "id": "s11",
+      "kind": "tool_call",
+      "group": "5. Update state doc",
+      "label": "Écrire la révision confirmée à l'étape 4 dans les champs de version déployée",
+      "parent": null,
+      "detail": "La valeur écrite est celle confirmée par l'endpoint, pas celle capturée à l'étape 3 : le prompt distingue les deux.",
+      "refs": ["system_tools:Edit", "config:STATE_DOC"],
+      "evidence": {
+        "file": "corpus-web/claude-code-deploy-with-verification.md",
+        "lines": [59, 59],
+        "quote": "2. Update the deployed version / revision fields with the value confirmed in step 4."
+      },
+      "confidence": 0.97
+    },
+    {
+      "id": "s12",
+      "kind": "tool_call",
+      "group": "5. Update state doc",
+      "label": "Mettre à jour les entrées « current state » / tables de versions, par éditions ciblées uniquement",
+      "parent": null,
+      "detail": "« targeted edits only » : interdiction implicite de réécrire le document entier.",
+      "refs": ["system_tools:Edit", "config:STATE_DOC"],
+      "evidence": {
+        "file": "corpus-web/claude-code-deploy-with-verification.md",
+        "lines": [60, 60],
+        "quote": "3. Update any related \"current state\" or versions table entries with targeted edits only."
+      },
+      "confidence": 0.96
+    },
+    {
+      "id": "s13",
+      "kind": "emit",
+      "group": "6. Report",
+      "label": "Rapporter : tests, build, deploy + révision, vérification live, document d'état",
+      "parent": null,
+      "detail": "Cinq lignes imposées, dont deux à contenu justifié : la réponse réelle de l'endpoint et le fait que le document d'état ait été mis à jour ou non, « and why ». Aucun schéma machine, aucun outil de sortie nommé.",
+      "refs": [],
+      "evidence": {
+        "file": "corpus-web/claude-code-deploy-with-verification.md",
+        "lines": [64, 69],
+        "quote": "## What to report\n- Tests: X/X passed\n- Build: success/failure\n- Deploy: success/failure + new revision/version id\n- Live verification: the actual endpoint response and whether it matches the shipped build\n- State doc: updated / not updated (and why)"
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "g1",
+      "kind": "guard",
+      "group": "Garde-fous",
+      "label": "Aucun déploiement tant qu'un test échoue",
+      "parent": null,
+      "detail": "Première des quatre « Hard rules ». Un manquement est un défaut de l'agent, pas un cas non présenté.",
+      "refs": [],
+      "evidence": {
+        "file": "corpus-web/claude-code-deploy-with-verification.md",
+        "lines": [15, 15],
+        "quote": "1. All tests must pass before deploying. Any failure: stop, report, do not proceed."
+      },
+      "confidence": 0.99
+    },
+    {
+      "id": "g2",
+      "kind": "guard",
+      "group": "Garde-fous",
+      "label": "Vérifier contre le système vivant, pas contre le code de retour du deploy",
+      "parent": null,
+      "detail": "Reformulé une seconde fois en fin d'étape 4 : « \"Exited 0\" and \"live and serving the new code\" are different claims. Confirm the second. »",
+      "refs": [],
+      "evidence": {
+        "file": "corpus-web/claude-code-deploy-with-verification.md",
+        "lines": [16, 16],
+        "quote": "2. Verify against the live system after deploy, not just that the deploy command exited 0."
+      },
+      "confidence": 0.99
+    },
+    {
+      "id": "g3",
+      "kind": "guard",
+      "group": "Garde-fous",
+      "label": "Ne pas toucher au document d'état si l'étape 4 échoue",
+      "parent": null,
+      "detail": "Écrit deux fois : en règle dure (l. 17) et en clause de sortie de l'étape 5 (l. 62).",
+      "refs": ["config:STATE_DOC"],
+      "evidence": {
+        "file": "corpus-web/claude-code-deploy-with-verification.md",
+        "lines": [62, 62],
+        "quote": "If step 4 fails, do not update the state doc."
+      },
+      "confidence": 0.99
+    },
+    {
+      "id": "g4",
+      "kind": "guard",
+      "group": "Garde-fous",
+      "label": "Ne jamais dire « deployed » ou « shipped » avant réussite des étapes 4 ET 5",
+      "parent": null,
+      "detail": "Contrainte sur le vocabulaire de la sortie, pas sur une action. Le format n'a pas de manière de dire qu'un garde porte sur le texte émis plutôt que sur un effet de bord.",
+      "refs": [],
+      "evidence": {
+        "file": "corpus-web/claude-code-deploy-with-verification.md",
+        "lines": [18, 18],
+        "quote": "4. Never emit \"deployed\" or \"shipped\" until steps 4 and 5 both succeed."
+      },
+      "confidence": 0.99
+    },
+    {
+      "id": "g5",
+      "kind": "guard",
+      "group": "Garde-fous",
+      "label": "Mise à jour du document d'état dans le même run, jamais différée en fin de session",
+      "parent": null,
+      "detail": "Contrainte temporelle sur s10–s12, énoncée dans le titre de section. Elle vise un comportement d'agent connu : repousser l'écriture en fin de conversation.",
+      "refs": ["config:STATE_DOC"],
+      "evidence": {
+        "file": "corpus-web/claude-code-deploy-with-verification.md",
+        "lines": [54, 54],
+        "quote": "### 5: Update the state doc (same run, not deferred to session-end)"
+      },
+      "confidence": 0.97
+    }
+  ],
+  "edges": [
+    { "from": "s1", "to": "s2", "condition": null },
+    { "from": "s2", "to": "s3", "condition": "un test échoue" },
+    { "from": "s2", "to": "s4", "condition": "tous verts" },
+    { "from": "s4", "to": "s5", "condition": null },
+    { "from": "s5", "to": "s6", "condition": null },
+    { "from": "s6", "to": "s7", "condition": null },
+    { "from": "s7", "to": "s8", "condition": null },
+    { "from": "s8", "to": "s9", "condition": "l'endpoint ne montre pas la révision déployée" },
+    { "from": "s8", "to": "s10", "condition": "réponse saine et conforme" },
+    { "from": "s9", "to": "s13", "condition": null },
+    { "from": "s10", "to": "s11", "condition": null },
+    { "from": "s11", "to": "s12", "condition": null },
+    { "from": "s12", "to": "s13", "condition": null }
+  ],
+  "gaps": [
+    {
+      "kind": "unspecified_error_path",
+      "message": "L'étape 4 qualifie l'échec (« the deploy is not done ») sans prescrire aucune action : ni ré-interrogation après délai, ni relance du deploy, ni rollback, ni escalade vers l'humain. Le déploiement progressif est explicitement cité comme cas attendu (l. 48) — c'est précisément un cas où la bonne réponse est d'attendre et de réessayer, ce que le prompt ne dit pas.",
+      "related_steps": ["s8", "s9"]
+    },
+    {
+      "kind": "unspecified_case",
+      "message": "Aucun critère de succès pour le build (étape 2). Si `{{BUILD_COMMAND}}` échoue, rien ne dit s'il faut s'arrêter comme pour les tests. La règle dure 1 ne couvre que les tests.",
+      "related_steps": ["s4"]
+    },
+    {
+      "kind": "unreachable_output_contract",
+      "message": "Le format de rapport (l. 64-69) suppose un run complet : il demande « Tests: X/X passed », « Deploy: … + new revision id », « Live verification: the actual endpoint response ». Sur la sortie précoce prescrite par la règle dure 1, trois de ces cinq lignes n'ont pas de valeur. Le prompt ne dit pas si le rapport court doit suivre le même gabarit.",
+      "related_steps": ["s3", "s13"]
+    },
+    {
+      "kind": "undeclared_capability",
+      "message": "Le frontmatter déclare `tools: Bash, Read, Edit`. Le corps du prompt suppose en plus la lecture d'un fichier d'état markdown arbitraire et l'exécution de `curl` — couvertes par Bash et Read — mais rien n'autorise ni n'interdit l'écriture d'un fichier nouveau. `Write` n'est pas déclaré, ce qui est cohérent avec « targeted edits only » sans que le prompt fasse le lien.",
+      "related_steps": ["s10", "s12"]
+    },
+    {
+      "kind": "template_not_instantiated",
+      "message": "Six variables `{{...}}` sont laissées à substituer par l'intégrateur (l. 10-11). Cartographié tel quel, l'agent n'a aucune capacité concrète : `refs` ne peut désigner que des clés de configuration, jamais un service ou un package. Le croisement avec un manifeste est structurellement impossible sur ce prompt.",
+      "related_steps": ["g0", "s1", "s4", "s5", "s7", "s10"]
+    }
+  ],
+  "overall_confidence": 0.96
+}

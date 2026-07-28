@@ -1,0 +1,299 @@
+{
+  "map_version": 1,
+  "shape": "sequence",
+  "source": {
+    "package_id": "@default/synthese-reunion",
+    "version": "1.0.0",
+    "integrity": null,
+    "files": [
+      "prompt.md"
+    ]
+  },
+  "generated_at": "2026-07-27T00:00:00Z",
+  "generator": {
+    "kind": "human",
+    "author": "PR 3 — élargissement du corpus, agent core à mémoire (pin/note)",
+    "agent": null,
+    "version": null,
+    "model": null
+  },
+  "summary": "Transforme un transcript de réunion en décisions, actions assignées et points d'attention, restitue par `output` et `report`, puis mémorise un checkpoint par `pin` et archive les décisions structurantes par `note`. Seul agent du corpus qui écrit dans sa propre mémoire.",
+  "steps": [
+    {
+      "id": "s1",
+      "kind": "decision",
+      "group": "1. Lire le contexte",
+      "label": "Une section `## Checkpoint` est-elle présente ?",
+      "parent": null,
+      "detail": "Elle contient la synthèse de la précédente réunion du même type. Le prompt ne dit pas dans quel champ d'entrée elle apparaît — voir `gaps`.",
+      "refs": [],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [7, 7],
+        "quote": "si une section `## Checkpoint` est présente, elle contient la synthèse de la précédente réunion du même type"
+      },
+      "confidence": 0.93
+    },
+    {
+      "id": "s2",
+      "kind": "step",
+      "group": "1. Lire le contexte",
+      "label": "S'en servir pour relier les sujets récurrents et repérer les actions encore ouvertes",
+      "parent": null,
+      "detail": "Seul usage prescrit du checkpoint. Rien ne dit quoi faire d'une action ouverte non reprise dans la réunion courante : ni la reconduire, ni la signaler.",
+      "refs": [],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [7, 7],
+        "quote": "sers-t'en pour relier les sujets récurrents et repérer les actions encore ouvertes"
+      },
+      "confidence": 0.95
+    },
+    {
+      "id": "g1",
+      "kind": "guard",
+      "group": "1. Lire le contexte",
+      "label": "Le checkpoint est déjà injecté : ne lancer aucun outil pour le récupérer",
+      "parent": null,
+      "detail": "Interdiction explicite. Elle ferme la boucle avec `s5` : l'agent écrit le checkpoint par `pin`, la plateforme le réinjecte, l'agent ne le relit jamais lui-même.",
+      "refs": [],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [7, 7],
+        "quote": "Elle est déjà injectée, ne lance aucun outil pour la récupérer."
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "s3",
+      "kind": "step",
+      "group": "2. Analyser le transcript",
+      "label": "Repérer les décisions réellement actées",
+      "parent": null,
+      "detail": "Critère discriminant explicite : une piste évoquée n'est pas une décision. Le prompt ne donne aucun marqueur linguistique pour trancher.",
+      "refs": ["agent_input:transcript", "agent_output:decisions"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [9, 9],
+        "quote": "les **décisions** réellement actées (pas les simples pistes évoquées)"
+      },
+      "confidence": 0.94
+    },
+    {
+      "id": "s4",
+      "kind": "step",
+      "group": "2. Analyser le transcript",
+      "label": "Repérer les actions : tâche, responsable et échéance uniquement s'ils sont nommés",
+      "parent": null,
+      "detail": "La condition « uniquement s'ils sont nommés » porte sur le responsable et l'échéance, pas sur la tâche. Elle est reprise en règle absolue à la ligne 21.",
+      "refs": ["agent_input:transcript", "agent_output:actions"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [10, 10],
+        "quote": "les **actions** : une tâche, son **responsable** et son **échéance** *uniquement* s'ils sont nommés"
+      },
+      "confidence": 0.96
+    },
+    {
+      "id": "s5",
+      "kind": "step",
+      "group": "2. Analyser le transcript",
+      "label": "Repérer les points d'attention : désaccords, questions ouvertes, sujets reportés",
+      "parent": null,
+      "detail": "Trois catégories fermées.",
+      "refs": ["agent_input:transcript", "agent_output:points_attention"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [11, 11],
+        "quote": "les **points d'attention** : désaccords, questions ouvertes, sujets reportés"
+      },
+      "confidence": 0.96
+    },
+    {
+      "id": "s6",
+      "kind": "emit",
+      "group": "3. Restituer",
+      "label": "Appeler `output` avec `resume`, `decisions`, `actions`, `points_attention`",
+      "parent": null,
+      "detail": "Le prompt renvoie au schéma du manifeste pour le détail, et n'est pas exhaustif sur la forme de `actions` (intitule, responsable, echeance). `resume` n'est prescrit nulle part ailleurs dans le prompt : sa longueur (3 à 5 phrases) n'existe que dans le manifeste.",
+      "refs": [
+        "system_tools:output",
+        "agent_output:resume",
+        "agent_output:decisions",
+        "agent_output:actions",
+        "agent_output:points_attention"
+      ],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [13, 13],
+        "quote": "Appelle `output` avec un objet conforme au schéma (`resume`, `decisions`, `actions`, `points_attention`)."
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "s7",
+      "kind": "tool_call",
+      "group": "3. Restituer",
+      "label": "Appeler `report` avec un compte-rendu Markdown et un tableau des actions",
+      "parent": null,
+      "detail": "Structure imposée : titre, résumé, liste des décisions, tableau Action · Responsable · Échéance, points d'attention.",
+      "refs": ["system_tools:report"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [14, 14],
+        "quote": "Appelle `report` avec un compte-rendu lisible en Markdown : titre, résumé, liste des décisions, **tableau des actions** (Action · Responsable · Échéance), puis points d'attention."
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "s8",
+      "kind": "tool_call",
+      "group": "4. Mémoriser",
+      "label": "Appeler `pin` avec `key: \"checkpoint\"` et un récapitulatif `{ date, sujets, actions_ouvertes }`",
+      "parent": null,
+      "detail": "Écriture de mémoire destinée au prochain run : c'est ce `pin` qui alimente la section `## Checkpoint` lue en `s1`. Clé fixe, donc écrasement du checkpoint précédent à chaque run.",
+      "refs": ["system_tools:pin"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [16, 16],
+        "quote": "Appelle `pin` avec `key: \"checkpoint\"` et, en contenu, un court récapitulatif `{ date, sujets, actions_ouvertes }` pour la prochaine réunion."
+      },
+      "confidence": 0.97
+    },
+    {
+      "id": "s9",
+      "kind": "decision",
+      "group": "4. Mémoriser",
+      "label": "Une décision est-elle structurante ?",
+      "parent": null,
+      "detail": "Trois exemples donnés : engagement ferme, budget, deadline contractuelle. C'est une liste d'illustrations, pas un critère.",
+      "refs": ["agent_output:decisions"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [17, 17],
+        "quote": "Si une décision est structurante (engagement ferme, budget, deadline contractuelle)"
+      },
+      "confidence": 0.9
+    },
+    {
+      "id": "s10",
+      "kind": "tool_call",
+      "group": "4. Mémoriser",
+      "label": "Appeler `note` pour l'archiver durablement",
+      "parent": null,
+      "detail": "Second canal de mémoire, distinct de `pin` : durable et non écrasé. Le prompt ne dit ni le format, ni la clé, ni s'il faut un `note` par décision ou un pour toutes.",
+      "refs": ["system_tools:note"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [17, 17],
+        "quote": "appelle `note` pour l'archiver durablement"
+      },
+      "confidence": 0.9
+    },
+    {
+      "id": "g2",
+      "kind": "guard",
+      "group": "Règles",
+      "label": "Ne jamais inventer un responsable ou une échéance : laisser le champ vide",
+      "parent": null,
+      "detail": "Règle anti-fabulation, formulée en absolu. Elle reprend et durcit la condition de `s4`.",
+      "refs": ["agent_output:actions"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [21, 21],
+        "quote": "N'invente **jamais** un responsable ou une échéance : laisse le champ vide s'il n'est pas dans le transcript."
+      },
+      "confidence": 0.99
+    },
+    {
+      "id": "g3",
+      "kind": "guard",
+      "group": "Règles",
+      "label": "Une action = un verbe d'action + un livrable clair",
+      "parent": null,
+      "detail": "Contre-exemple donné : « Voir pour X » n'est pas une action. Contrainte de forme sur chaque `intitule`.",
+      "refs": ["agent_output:actions"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [22, 22],
+        "quote": "Une action = un verbe d'action + un livrable clair (« Rédiger la spec X », pas « Voir pour X »)."
+      },
+      "confidence": 0.98
+    },
+    {
+      "id": "g4",
+      "kind": "guard",
+      "group": "Règles",
+      "label": "Transcript vide ou inintelligible : l'expliquer via `report`, `output` avec des listes vides",
+      "parent": null,
+      "detail": "Chemin dégradé explicite, et plus complet que celui de `analyste-donnees` : il autorise nommément les listes vides, donc reste compatible avec le schéma de sortie.",
+      "refs": ["system_tools:report", "system_tools:output"],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [23, 23],
+        "quote": "Si le transcript est vide ou inintelligible, explique-le via `report` et appelle `output` avec des listes vides plutôt que de combler les trous."
+      },
+      "confidence": 0.97
+    },
+    {
+      "id": "g5",
+      "kind": "guard",
+      "group": "Règles",
+      "label": "Rédiger en français",
+      "parent": null,
+      "detail": "Contrainte de langue sur toute production, quelle que soit la langue du transcript.",
+      "refs": [],
+      "evidence": {
+        "file": "prompt.md",
+        "lines": [24, 24],
+        "quote": "Rédige en français."
+      },
+      "confidence": 0.99
+    }
+  ],
+  "edges": [
+    { "from": "s1", "to": "s2", "condition": "section `## Checkpoint` présente" },
+    { "from": "s1", "to": "s3", "condition": "absente" },
+    { "from": "s2", "to": "s3", "condition": null },
+    { "from": "s3", "to": "s4", "condition": null },
+    { "from": "s4", "to": "s5", "condition": null },
+    { "from": "s5", "to": "s6", "condition": null },
+    { "from": "s6", "to": "s7", "condition": null },
+    { "from": "s7", "to": "s8", "condition": null },
+    { "from": "s8", "to": "s9", "condition": null },
+    { "from": "s9", "to": "s10", "condition": "décision structurante" }
+  ],
+  "gaps": [
+    {
+      "kind": "declared_input_without_rule",
+      "message": "Le manifeste déclare un champ d'entrée `contexte` (« Sujet, participants ou objectif de la réunion, pour affiner la synthèse ») avec un `ui_hints` et une place dans `property_order`. Le prompt ne le mentionne nulle part, sous aucune formulation. L'utilisateur remplit un champ que rien ne consomme. Même famille que le cron sans règle de `executive-assistant`.",
+      "related_steps": []
+    },
+    {
+      "kind": "unspecified_case",
+      "message": "La section `## Checkpoint` (l. 7) n'a pas d'emplacement documenté : ni le prompt ni le manifeste ne disent si elle est concaténée au `transcript`, au `contexte`, ou injectée hors des entrées déclarées. Un agent qui la cherche au mauvais endroit conclut « absente » et perd la continuité entre réunions, sans que rien ne le signale.",
+      "related_steps": ["s1", "g1"]
+    },
+    {
+      "kind": "unspecified_case",
+      "message": "« la précédente réunion du même type » (l. 7) suppose une notion de type de réunion. Aucune entrée ne la porte et la clé de `pin` est constante (`checkpoint`), donc toutes les réunions partagent le même emplacement de mémoire : la synthèse d'un comité produit sera présentée comme checkpoint d'un point client.",
+      "related_steps": ["s1", "s8"]
+    },
+    {
+      "kind": "unspecified_error_path",
+      "message": "Les quatre appels d'outils sont prescrits sans ordre de repli. Rien ne dit quoi faire si `pin` ou `note` échoue après un `output` déjà émis, ni si l'absence de `note` doit apparaître quelque part. Le run serait considéré comme réussi avec une mémoire muette.",
+      "related_steps": ["s8", "s10"]
+    },
+    {
+      "kind": "ambiguous_condition",
+      "message": "« Si une décision est structurante » (l. 17) n'est illustré que par trois exemples. Rien ne dit s'il faut un appel `note` par décision structurante ou un seul pour l'ensemble, ni quel format de contenu — alors que le format de `pin` est, lui, entièrement spécifié à la ligne du dessus.",
+      "related_steps": ["s9", "s10"]
+    },
+    {
+      "kind": "unspecified_case",
+      "message": "Les actions encore ouvertes venues du checkpoint (l. 7) sont à « repérer » sans suite prescrite : rien ne dit si elles doivent être reconduites dans `actions`, listées dans `points_attention`, ou seulement reportées dans le nouveau `pin`. Les trois choix produisent des sorties très différentes.",
+      "related_steps": ["s2", "s8"]
+    }
+  ],
+  "overall_confidence": 0.94
+}

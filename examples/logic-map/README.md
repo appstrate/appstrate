@@ -1,130 +1,298 @@
 # Cartes de logique écrites à la main (volet 2, PR 3)
 
-Deux `logic_map` écrites **à la main**, une par famille de prompts (§4.2 du brief
-`satellites/internal-docs/proposals/brief-cartographie-visuelle-agents.md`). Aucun LLM
-d'inférence, aucun agent cartographe, aucun code de rendu : le but est d'éprouver le format
-sur du réel **avant** de l'automatiser.
+Le jalon éprouve le format `logic_map` (§4.4 du brief
+`satellites/internal-docs/proposals/brief-cartographie-visuelle-agents.md`) sur du réel,
+**avant** de l'automatiser. Deux cartes de référence ont d'abord été écrites à la main, puis
+le corpus a été élargi à 18 cartes couvrant quatre origines indépendantes.
 
-| Fichier | Famille | Source lue | Étapes | Arêtes | Grappes |
-|---|---|---|---|---|---|
-| `compta-gmail-harvest.logic-map.json` | `sequence` | `prompt.md` (79 l.) + `SKILL.md` + 2 fichiers de références du skill | 38 | 32 | 8 |
-| `fleet-executive-assistant.logic-map.json` | `policies` | `AGENT.md` (243 l.) | 54 | 6 | 14 |
+Aucun agent cartographe, aucun schéma, aucun rendu produit : rien que le format, confronté à
+des documents que personne n'a écrits pour lui.
 
-Le contraste est déjà une mesure : 32 arêtes pour 38 étapes d'un côté, 6 pour 54 de l'autre.
-Le second graphe est presque entièrement non connexe, et c'est normal, pas une anomalie.
+## Le corpus
 
-Répartition par type :
-
-- séquence : 15 `step`, 7 `tool_call`, 7 `guard`, 6 `decision`, 2 `loop`, 1 `emit`, 0 `policy`
-- politiques : 32 `policy`, 9 `guard`, 5 `decision`, 4 `step`, 4 `tool_call`, 0 `loop`, 0 `emit`
-
-Les deux types absents de chaque colonne sont exactement les types que l'autre famille
-sature. Le vocabulaire fermé sépare correctement les deux familles.
-
-## Écarts assumés par rapport au format §4.4
-
-Ces cinq écarts sont le résultat de l'exercice, pas des libertés. Ils sont à intégrer au
-JSON Schema de la PR 4.
-
-1. **`refs: []` remplace `ref` (scalaire).** Une étape référence régulièrement deux nœuds à
-   la fois : « uploader à la racine de l'Inbox » porte `toolbox:@tractr/google-drive` **et**
-   `config:drive_inbox_folder_id` ; « `since` ET `until` sont-ils fournis ? » porte deux
-   champs d'entrée. Avec un scalaire, il faut choisir, et le croisement perd la moitié de sa
-   matière. 10 des 38 étapes du cas 1 portent 2 refs ou plus.
-2. **`edges` est l'unique source de vérité, `branches` n'est pas utilisé.** Le §4.4 propose
-   les deux : `branches[{condition,to}]` sur la décision et `edges[{from,to,condition}]` à la
-   racine. Deux représentations d'une même arête divergent au premier producteur distrait, et
-   le rendu doit lire deux endroits. Une arête conditionnelle est une arête qui porte une
-   condition, rien de plus.
-3. **`group` (chaîne libre) ajouté.** Le §4.2 dit « grappes groupées par domaine » et le §4.8
-   « colonnes de règles groupées par domaine », mais aucun champ ne porte ce domaine. Sans
-   lui, le rendu du cas 2 n'a aucun moyen de placer 54 nœuds. `parent` ne peut pas jouer ce
-   rôle, voir plus bas.
-4. **Le grain outil dans les refs du toolbox : `toolbox:<package>#<outil>`.** Le vocabulaire
-   §4.5 s'arrête au package, alors que les prompts raisonnent à l'outil
-   (`google_calendar_list_events_for_date`) et que le manifeste déclare `tools[]` par
-   intégration. Sans le grain outil, le constat « le prompt appelle un outil que
-   `integrations_configuration.tools[]` n'autorise pas » est inexprimable.
-5. **`generator.kind`.** Le format suppose un producteur machine (`agent`, `version`,
-   `model`). Une carte écrite à la main doit pouvoir le dire, sinon le mode balayage la
-   régénérera comme une carte périmée.
-
-## Limites constatées et **non** comblées ici
-
-Trois manques réels, laissés ouverts pour ne pas inventer plus que nécessaire.
-
-1. **Un `guard` n'a pas de portée.** `dry_run` (cas 1, `g3`) n'est pas une étape : c'est un
-   mode qui neutralise les effets de bord de trois étapes précises et en laisse neuf
-   s'exécuter. Écrit en `guard`, il flotte à côté du graphe sans dire ce qu'il modifie. Il
-   manque un `applies_to: [step_id]` sur `guard`, ou un type dédié.
-2. **`evidence` est singulier, la règle est parfois répartie.** « Calculer les bornes du
-   trimestre fiscal » est prescrite par le prompt (l. 18-19) *et* définie par
-   `fiscal-year.md` (l. 33-37). Une seule citation est possible : celle qui fait foi. Le lien
-   avec le passage du prompt qui délègue est perdu. `evidence` devrait être un tableau.
-3. **Une table de décision devient un seul nœud.** Le tableau « reminder policy » du cas 2
-   (5 types d'événement → 5 politiques) est écrasé dans un `policy` unique avec un `detail`
-   de cinq phrases. L'exploser en 5 nœuds sans lien serait pire.
-
-## Croisement §4.5, exécuté à la main
-
-Refs de la carte confrontées aux déclarations du manifeste, sans LLM et sans recherche
-textuelle.
-
-### `compta-gmail-harvest`
-
-| Constat | Sévérité | Vérifié |
+| Origine | Agents | Cartes |
 |---|---|---|
-| `toolbox:@tractr/google-drive` référencé, non déclaré | erreur | **Vrai.** Le prompt (l. 12) et `gmail-harvest-rules.md` (l. 100) nomment `@tractr/google-drive` ; le manifeste déclare `@appstrate/google-drive`. Identifiant de package obsolète dans la documentation de l'agent |
-| `@appstrate/google-drive` déclarée, jamais référencée | indice | Même cause que la ligne précédente, vue de l'autre côté |
-| `log` et `pin` accordés, jamais référencés | indice | **Vrai.** Aucune règle nulle part ne dit quand les utiliser. Signal connu du §4.5, confirmé par la lecture de sens |
-| `output.schema` déclaré, une étape `emit` présente | — | Aucun avertissement. Le prompt invoque l'outil `output` sans jamais le nommer (« Renseigne `summary`, … ») : le cartographe le rattache par le sens, là où une recherche de sous-chaîne concluait à tort à l'absence |
+| Tractr (`satellites/implantation/tractr`) | compta-gmail-harvest, compta-inbox, compta-trimestrielle, mes-taches-clickup, wiki-brain | 5 |
+| Core (`satellites/implantation/core`) | analyste-donnees, synthese-reunion | 2 |
+| LangSmith Fleet (benchmark) | executive-assistant, gtm, on-call-copilot, software-engineer, competitor-intelligence, x-content-manager, tavily-research | 7 |
+| Agents publics (récupérés à la source, SHA dans `corpus-web/PROVENANCE.md`) | Codex CLI + sa rubrique de revue, OpenHands, un sous-agent Claude Code | 4 |
 
-Couverture complète par ailleurs : 5 champs d'entrée sur 5, 7 champs de sortie sur 7, 2 clés
-de configuration sur 2, 1 skill sur 1.
+**18 cartes · 833 nœuds · 766 citations vérifiées mécaniquement.**
 
-### `executive-assistant`
+Prompts de 16 à 753 lignes. Familles : 9 `sequence`, 9 `policies`, dont 4 hybrides avérés.
 
-| Constat | Sévérité | Vérifié |
+## Verdict
+
+**Le format tient.** Les cinq lots concluent dans le même sens : les familles se séparent
+sans forcer, `evidence` tient sur des prompts de 750 lignes, `group` et `edges` passent sans
+concession, et aucun des sept types n'est inutile. Deux prompts de 296 et 237 lignes ont été
+absorbés sans qu'un seul passage soit forcé.
+
+Deux mesures le confirment sans avis humain :
+
+- **99,5 % des 766 citations sont littérales et aux lignes annoncées** (`verify-evidence.mjs`
+  relit chaque source). Les quatre échecs sont dans les cartes de référence, et pour une
+  seule cause : une citation à trous (« … ») n'est pas vérifiable. D'où la règle : `quote`
+  doit être un extrait **contigu**. Ce contrôle attrape mécaniquement une carte inventée,
+  c'est le garde-fou dont la PR 7 a besoin.
+- **Les 18 cartes passent le contrôle de cohérence interne** (`check.mjs`) : identifiants
+  uniques, `parent` existants, arêtes résolues, `evidence` complet.
+
+## Corrections à acter en PR 4, par ordre
+
+Cet ordre n'est pas arbitraire : la première correction en résout quatre à elle seule, et
+elle doit précéder la cinquième, qui perdrait sinon son intérêt.
+
+### 1. `applies_to` sur `guard` — bloquant
+
+Un garde-fou s'applique à une classe d'actions ; le format ne peut pas dire laquelle. Quatre
+manifestations indépendantes du même trou :
+
+- `dry_run` (compta-gmail-harvest) neutralise trois étapes et en laisse neuf s'exécuter ;
+- `wiki-brain` **marque littéralement** ses étapes d'écriture par le mot « Écriture. » en fin
+  de ligne : la donnée est écrite, le format ne peut pas la porter ;
+- la phase `3. TESTING` d'OpenHands contient six règles qui ne valent qu'à l'intérieur ;
+- « All content passes through this » (x-content-manager) désigne un point de passage obligé.
+
+Bénéfice décisif : **le champ manquant est aussi le discriminant manquant.** Un principe
+directeur est exactement un garde-fou dont `applies_to` vaudrait « tout », c'est-à-dire rien.
+Le tri entre contrainte réelle et posture devient calculable.
+
+### 2. `refs` : trois préfixes manquants
+
+- **`runtime:<capacité>`** — pour `bash`, `Read`, `Edit`, `shell`, `apply_patch`,
+  `browser_*` : capacités **natives du runtime**, ni intégration ni outil accordé par le
+  manifeste. Mesuré : **12 outils dans ce cas sur 7 cartes**, tous classés « erreur » par le
+  croisement, aucun n'étant un vrai défaut. `compta-inbox` et `compta-trimestrielle` en
+  dépendent entièrement (tous les scripts du skill passent par bash).
+- **`subagents:<nom>`** — manque le plus reproductible du corpus, quatre occurrences
+  (`calendar_context`, `CompetitorResearchWorker`, `CompanyResearchWorker`, les scouts de
+  `on-call`). Sans lui, le croisement produit un faux positif par sous-agent sur tout le
+  catalogue Fleet, alors que c'est souvent la capacité la plus sollicitée du document.
+- **`context_files:<motif>`** — `AGENTS.md`, `.cursorrules`, `AGENTS.override.md` : cités par
+  8 nœuds de deux cartes. Ni skill, ni configuration, ni outil. Sans ce terme, la relation
+  d'autorité la plus structurante des agents de code (qui prime sur qui) reste invisible.
+
+Et **le grain outil doit valoir aussi pour `mcp_servers:`**, pas seulement pour `toolbox:`.
+Deux cartographes ont déjà divergé sur le même outil Notion, l'un écrivant
+`toolbox:notion#notion-search`, l'autre `mcp_servers:notion#notion-search`.
+
+### 3. `groups[]` à la racine, avec `shape` et `order`
+
+`shape` racine dit qu'un document mélange les genres, pas **où**. Le point dur n'est pas la
+cohabitation entre grappes mais **dans** une grappe : `Codebase Work` de `software-engineer`
+contient dix nœuds chaînés **et** quatre hors flot, dont deux posés au milieu de la liste à
+puces. Un groupe doit déclarer sa nature et son rang.
+
+Ça supprime aussi un hack : les cartes de référence préfixent leurs noms de groupe par
+« 1. », « 2. » pour porter un ordre que le format ne sait pas exprimer.
+
+**`shape: hybrid` a été examiné et écarté** : un troisième scalaire aurait le défaut du
+binaire, et donnerait la même étiquette à deux documents opposés — `software-engineer`, où
+l'ordre est un détail (24 nœuds sur 40 hors flot), et `competitor-intelligence`, où le
+workflow numéroté **est** le contenu.
+
+### 4. `evidence` en tableau — confirmé sept fois
+
+Une règle vit régulièrement à deux endroits (`codex:138` et `:157`, `openhands:38` et `:61`,
+`api1` de wiki-brain réparti sur 15 lignes). Une seule citation est possible, l'autre source
+est perdue.
+
+Deux corollaires mesurés sur les prompts denses :
+
+- **La ligne ne discrimine plus.** `openhands:110` est une ligne unique de 1 600 caractères
+  portant cinq prescriptions. Dans la carte Codex, quatre nœuds partagent `[60,60]`. C'est la
+  **citation** qui identifie, pas le numéro de ligne : inverser la hiérarchie, `quote` devient
+  l'ancre normative.
+- **Une ligne porte souvent plusieurs gestes** : la ligne 63 de wiki-brain en porte quatre,
+  cartographiés en trois nœuds qui citent tous « l. 63 ».
+
+### 5. `loop` sans collection : `until` + `budget`
+
+La prescription **centrale** d'un agent de code n'a aucun type :
+
+> « Please keep going until the query is completely resolved » — Codex CLI, l. 125
+
+Pas de collection, donc pas un `loop` ; pas deux suites, donc pas une `decision`. Écrite en
+`guard`, elle fait disparaître du graphe le fait principal, que l'agent tourne. **Zéro `loop`
+sur les 213 nœuds du corpus public.**
+
+Un `loop` licite sans `over`, avec `until` et un `budget` optionnel, récupère au passage les
+trois budgets chiffrés aujourd'hui indistinguables de gardes ordinaires (« max 10 browser
+actions », « 20+ étapes sans converger », « itérer jusqu'à 3 fois »).
+
+Conséquence à prévoir : un `loop` de type « tant que » **produit un cycle dans `edges`**
+(`wl4→wl1` chez `software-engineer`). Le schéma et le placement en couches doivent l'accepter.
+
+### 6. `confidence` sur les arêtes
+
+`confidence` existe sur les nœuds, pas sur les arêtes. Sur les deux cartes Fleet les plus
+longues, exactement une arête était défendable dans les deux sens. Sans degré de certitude,
+deux runs du cartographe ne sont pas comparables.
+
+### 7. Un marqueur terminal
+
+« Abandonne proprement avec `status: locked`, sans rien écrire » (wiki-brain) est un `step`
+sans arête sortante : au rendu, indistinguable d'une carte inachevée. Un `kind: terminate` ou
+un booléen `terminal`.
+
+## Proposition examinée et **rejetée** : le type `criterion`
+
+L'hypothèse était que `guard` sert de fourre-tout aux critères de qualification (les huit
+conditions de qualification d'un bug chez Codex), et qu'un huitième type le dégonflerait.
+
+**Le décompte nœud par nœud la réfute** : `criterion` prendrait **1 garde-fou sur 81**, mais
+une dizaine de **politiques**. Il ferait donc *monter* la part de garde-fous. Sur `gtm` :
+49,3 % → 49,3 %.
+
+Le besoin est réel, la solution était fausse. `applies_to` (correction 1) le couvre.
+
+## Ce que la part de `guard` mesure vraiment
+
+Écart constaté : 18 % sur les cartes de référence, 42 % en moyenne sur le reste, jusqu'à 73 %.
+Ce n'est **pas** une dérive de cartographie.
+
+Le test qui départage `guard` de `policy` discrimine par la conséquence d'une violation. Sur
+un document à déclencheurs il tranche bien. Sur une **constitution** — la plupart des agents
+Fleet et publics en sont — les règles n'ont pas de déclencheur : « un cas qui ne s'est pas
+présenté » ne s'applique jamais, et tout tombe sur `guard` par construction. Sur `gtm`, 19
+des 35 garde-fous viennent de deux chapitres d'interdits consécutifs.
+
+**À lire comme un indicateur du document au rendu, pas comme un défaut.**
+
+## Deux indicateurs calculables sans modèle
+
+**La part de nœuds de flot** (hors `guard`/`policy`) sépare les familles :
+
+```
+sequence : 35 % à 82 %
+policies :  0 % à 43 %
+```
+
+Et la zone de recouvrement est exactement la zone hybride : les quatre cartes situées entre
+35 % et 43 % sont les quatre que les analyses ont signalées comme hybrides. Un `shape`
+déclaré peut donc être vérifié par le serveur.
+
+*(La densité d'arêtes, elle, ne mesure rien : rapportée aux seuls nœuds de flot elle vaut
+~1,0 dans les deux familles. Toute procédure courte à ceinture épaisse de garde-fous était
+lue comme cassée.)*
+
+**L'indicateur d'équivalence-grep** : part des `refs` dont l'identifiant est nommé
+littéralement dans la source. **Le gain du cartographe sur une recherche textuelle n'est pas
+constant, il dépend du style du prompt** :
+
+| Agent | outils nommés littéralement | rattachés par la carte |
 |---|---|---|
-| 10 outils déclarés sur 21 jamais référencés | indice | **Vrai, et pas une anomalie.** `gmail_send_email`, `gmail_draft_email`, `gmail_get_thread`, les trois outils de label, `google_calendar_get_event`, `read_url_content`, `slack_read_thread_messages` : le prompt décrit *quand* rédiger un email sans jamais dire *avec quel outil* |
-| `system_tools:message_user` référencé, non déclaré | erreur | **Faux positif.** `message_user` est un outil de plateforme Fleet, documenté à part (l. 222) et absent de la liste des 21. Le constat est artefact d'une source de déclaration incomplète, pas d'un défaut du prompt |
-| `calendar_context` : sous-agent déclaré, aucune ref | indice | **Faux positif.** C'est la capacité la plus sollicitée du document (4 règles la mobilisent), mais aucun type de `ref` ne désigne un sous-agent |
-| Cron « Daily calendar and email brief » déclaré, aucune règle | *non prévu* | **Vrai.** Voir ci-dessous |
+| `on-call-copilot` | 1 sur 41 | 11 |
+| `executive-assistant` | 6 sur 21 | 11 |
+| `gtm` | 11 sur 16 | 11 |
+| `mes-taches-clickup` | 5 sur 5 | 5 |
 
-Mesure de la lecture de sens : une recherche de sous-chaîne sur le prompt système ne trouve
-que **6 des 21 outils** nommés littéralement (`google_calendar_list_events_for_date`,
-`tavily_web_search`, `tavily_linkedin_search`, et les trois outils Slack). La carte en
-rattache **11** : les 5 autres (marquer lu, archiver, créer, modifier et supprimer un
-événement) sont désignés par leur effet, jamais par leur nom. C'est exactement l'écart que
-le §4.5 annonce entre un grep et un cartographe.
+Quand l'indicateur vaut 100 %, le croisement n'apporte rien qu'un grep : il ne faut pas le
+mettre en avant.
 
-### Un cinquième constat, absent du tableau §4.5
+## Manques identifiés, non comblés
 
-**Une planification déclarée qu'aucune règle du prompt ne couvre.** La carte de dépendances
-de `executive-assistant` porte un cron quotidien nommé « Daily calendar and email brief » et
-la fiche produit en fait un argument de vente. Le prompt système ne décrit ce brief nulle
-part : ni contenu, ni format, ni destinataire. La seule mention d'un run cron est incidente,
-pour dire que le texte brut n'y est pas affiché.
+1. **Une précédence peut viser une action qui n'est pas un nœud.** « Normalize before you
+   diagnose » (on-call), mais aucun passage ne prescrit de geste de diagnostic. Quatre cas.
+   C'est l'intersection de deux bonnes règles — interdire d'inventer un nœud rend la
+   précédence inexprimable. Signalé en `gaps`, faute de mieux.
+2. **L'imbrication de composition.** Un livrable à quatre composants imbriqués (Preview /
+   Thought process / Sources / note) n'est ni du contrôle (`parent`) ni une section (`group`).
+3. **Un énoncé de fait n'a pas de type.** « Record URLs are automatically included in the
+   `sources` array » borne une prescription sans rien prescrire. Le même agent l'a tranché de
+   deux façons différentes sur deux cartes.
+4. **Rien ne dit qu'une zone du prompt est mutable.** `software-engineer` a quatre blocs que
+   son skill d'onboarding réécrit : le balayage nocturne y verra un écart légitime et
+   régénérera pour rien. Touche la PR 8.
+5. **Rien ne dit qu'un nœud est le même qu'un autre dans une autre carte.** Trois règles
+   identiques écrites par deux auteurs dans deux agents de veille concurrentielle.
+6. **Une table de décision devient un nœud.** Confirmé hors corpus maison, et aggravé : chez
+   Codex et OpenHands, le résultat de la classification (P0-P3, LOW/MED/HIGH) est une *donnée
+   de sortie*, pas un aiguillage.
+7. **L'enseignement par l'exemple est hors de portée.** `codex:72-121` : 48 lignes de plans
+   « high-quality » et « low-quality » sans un seul critère énoncé. La prescription est le
+   contraste entre deux blocs. Réduit à un nœud, 48 lignes sur 275 perdues.
 
-C'est le croisement le plus fort des deux cartes, parce qu'il porte sur ce que l'agent est
-censé faire tous les jours à 16 h. Sévérité proposée : **avertissement**, même famille que
-« `output.schema` déclaré mais aucune étape `emit` ».
+## Portée du croisement, hors Appstrate
 
-## Périmètre de lecture
+> Le croisement §4.5 est une fonctionnalité qui **suppose un manifeste** ; c'est un avantage
+> d'Appstrate, pas une propriété du format.
 
-Le §4.3 est confirmé sur les deux familles, dans les deux sens :
+Sur les quatre agents publics, un seul offre un croisement réel : le sous-agent Claude Code
+et son frontmatter `tools:` — et là il est parfait, 3 sur 3 dans les deux sens, les six
+placeholders `{{TEST_COMMAND}}` se rattachant naturellement en `config:<clé>`. Codex déclare
+ses outils **en Rust**, OpenHands dans le **nom de fichier** de son snapshot.
 
-- Cas 1 : **14 des 38 étapes** citent un fichier de références du skill (13 `gmail-harvest-rules.md`, 1 `fiscal-year.md`), pas le prompt. Un
-  cartographe qui ne lirait que `prompt.md` produirait une coquille : la règle Stripe, les
-  filtres anti-bruit, la dédup md5 et la règle de collision de nom n'y sont pas.
-- Cas 1 : `SKILL.md` est dans `source.files` mais **aucune étape ne le cite**. Le périmètre
-  de lecture est plus large que les sources citées, et c'est normal.
-- Cas 2 : deux skills font autorité sur des décisions absentes du prompt (`inbox-triage`
-  porte les catégories de triage, `email-drafting` porte les conventions de rédaction). Le
-  cas s'observe donc aussi chez Fleet, pas seulement sur les agents Tractr.
+Corollaire pour les imports : une référence non résolue ne doit pas toujours être une erreur.
+Agent installé, manifeste connu → **erreur**. Agent importé d'ailleurs → **ligne de portage**.
+Même machinerie, sévérité contextuelle.
 
-## Ce que ces fichiers ne sont pas
+## Constats hors du tableau §4.5
 
-Ni schéma, ni fixture de test, ni sortie d'agent. Ce sont les deux cas de référence sur
-lesquels le JSON Schema (PR 4), le croisement (PR 5) et le rendu (PR 6) doivent tomber juste.
-`integrity` est `null` : ces cartes ne sont attachées à aucune version publiée.
+Trois formes de constat que le brief n'avait pas prévues, toutes vérifiées :
+
+| Constat | Sévérité proposée | Cas |
+|---|---|---|
+| Planification déclarée qu'aucune règle ne couvre | avertissement | Le cron quotidien « Daily calendar and email brief » d'`executive-assistant` n'est décrit nulle part |
+| Capacité accordée plus large que l'usage cartographié | avertissement | `wiki-brain` obtient le scope Drive complet alors que le prompt s'interdit toute écriture hors d'un dossier ; le scope Gmail, lui, est réduit à `readonly` |
+| Inventaire de capacités non référencées, à distinguer d'un indice | inventaire | 45 outils non référencés chez `software-engineer` ne sont pas une anomalie : le prompt prescrit délibérément le jugement (« act with the appropriate tools ») |
+
+## Bugs trouvés dans les agents, par la méthode
+
+Trouvailles vérifiées une à une, qui existent indépendamment du chantier.
+
+**Agents Tractr et core**
+
+- `compta-gmail-harvest` : le prompt et la référence du skill nomment `@tractr/google-drive`,
+  le manifeste déclare `@appstrate/google-drive`.
+- `mes-taches-clickup` : la ligne 5 impose « le MINIMUM d'appels (idéalement 2 à 4) », la
+  procédure en prescrit six au minimum, sept avec sa branche. **Trouvé par comptage des nœuds
+  `tool_call`**, inatteignable autrement.
+- `analyste-donnees` : l'étape 3 appelle `output` avec `visualisations`, l'étape 4 les
+  produit. La procédure émet son résultat avant d'avoir calculé l'un de ses champs.
+- `wiki-brain` : la règle « aucun secret » porte explicitement « **dans le wiki** », or
+  l'ingestion dépose les **corps de mails intégraux** dans `raw/gmail/items/` sans filtrage.
+  Un mot de passe reçu par courriel est écrit en clair pour `raw_retention_days`.
+- `wiki-brain` : le chemin `locked` ordonne d'abandonner sans rien écrire, mais l'étape 7
+  supprime `.lock` — destruction du verrou d'un run concurrent.
+- `synthese-reunion` : l'entrée `contexte` est déclarée et jamais consommée.
+
+**Agents tiers**
+
+- OpenHands s'autorise et s'interdit la même action : sa section sécurité liste « Open pull
+  requests » parmi ce qui est OK sans consentement, sa section PR l'interdit sans demande
+  explicite.
+- Codex se contredit entre ses deux prompts : le prompt de base interdit les plages de lignes
+  dans les références, la rubrique de revue les rend obligatoires.
+- `gtm` (Fleet) n'a pas de canal de sortie : sa seule sortie prescrite est « Render the result
+  inline », alors que trois outils d'écriture Slack et `gmail_send_email` sont câblés. Son
+  agent frère `executive-assistant` documente précisément ce piège.
+- `on-call-copilot` : **la méthodologie qui fait autorité contredit le prompt.** Le fichier
+  `memory/wiki/operations/intake-flow.md`, livré dans le même paquet, porte un algorithme en
+  neuf étapes dont l'ordre est déclaré « MANDATORY » et « load-bearing » ; le prompt donne dix
+  principes dans un ordre différent et n'introduit jamais l'étape `queue-union`. C'est le §4.3
+  dans sa forme la plus dure : lire le seul prompt produit un ordre qui **contredit** la page
+  qui fait foi.
+- `x-content-manager` : trois outils de publication accordés, agent annoncé « Posts on X in
+  your voice », et le prompt ne dit jamais de publier. Zéro nœud `emit`.
+
+## Corrections à apporter au brief
+
+- **§4.5 est inexact sur `wiki-brain`.** Le brief donne l'agent en exemple de faux positif au
+  motif que « le prompt dit Drive 27 fois, jamais l'identifiant du package ». La ligne 191
+  nomme bien `appstrate_google_drive__api_call`, en snake_case. Le grep échouait sur son motif
+  de recherche, pas sur une absence. La conclusion tient, la démonstration est plus faible que
+  ce qui est écrit.
+- **Le §4.2 sous-estime l'hybride.** Il en cite un (`software-engineer`) ; le corpus en compte
+  quatre, et l'enclave séquentielle la plus longue de `software-engineer` (`Codebase Work`,
+  dix nœuds chaînés) n'est pas celle que le brief mentionne.
+- **La règle « une famille sature les types que l'autre n'utilise pas » est fausse hors du
+  corpus maison** : la rubrique de revue de Codex est `policies` avec **zéro** nœud `policy`
+  (32 `guard`). Une rubrique est un document de *critères*, pas de déclencheurs.
+
+## Fichiers
+
+`*.logic-map.json` — 18 cartes · `corpus-web/` avec `PROVENANCE.md` (SHA de commit) ·
+`check.mjs` (cohérence) et `verify-evidence.mjs` (citations) dans le scratchpad de session.
+`integrity` est `null` partout : ces cartes ne sont attachées à aucune version publiée.

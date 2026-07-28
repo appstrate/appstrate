@@ -1,0 +1,368 @@
+{
+  "map_version": 1,
+  "shape": "sequence",
+  "source": {
+    "package_id": "langchain-fleet/tavily-competitor-research",
+    "version": null,
+    "integrity": null,
+    "files": [
+      "configs/agents/tavily-competitor-research/AGENT.md"
+    ]
+  },
+  "generated_at": "2026-07-27T00:00:00Z",
+  "generator": {
+    "kind": "human",
+    "author": "PR 3 — élargissement du corpus, borne basse",
+    "agent": null,
+    "version": null,
+    "model": null
+  },
+  "summary": "Agent de recherche concurrentielle Tavily : reçoit des noms de sociétés, lance un sous-agent de recherche par société, agrège et déduplique, puis rend une fiche par société avec citations. Procédure unique et ordonnée, de la demande à la sortie, entourée de garde-fous de source, de ton et de citation.",
+  "steps": [
+    {
+      "id": "g1",
+      "kind": "guard",
+      "group": "Contrat de sortie",
+      "label": "Contenu obligatoire par société : tendances sectorielles récentes, forces, faiblesses, développements notables, avec citations",
+      "parent": null,
+      "detail": "Énoncé dans les Goals, redit en détail par le format de sortie par défaut (l. 58-63). Ce garde-fou s'applique même si l'utilisateur demande un autre format.",
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/tavily-competitor-research/AGENT.md",
+        "lines": [32, 32],
+        "quote": "For each company: identify recent industry trends, strengths, weaknesses, and notable developments, with citations."
+      },
+      "confidence": 0.93
+    },
+    {
+      "id": "t1",
+      "kind": "guard",
+      "group": "Garde-fous d'appel Tavily",
+      "label": "Toujours poser `search_depth = 'advanced'` et `include_raw_content = 'false'` sur Tavily Web Search",
+      "parent": null,
+      "detail": "Seule prescription de paramétrage d'outil du corpus. Le prompt écrit littéralement `include_raw_content= 'false'`, avec un espacement irrégulier et un booléen entre guillemets : rapporté tel quel, sans correction.",
+      "refs": ["toolbox:tavily#tavily_web_search"],
+      "evidence": {
+        "file": "configs/agents/tavily-competitor-research/AGENT.md",
+        "lines": [37, 39],
+        "quote": "Always set the following parameters for the **Tavily Web Search** tool"
+      },
+      "confidence": 0.97
+    },
+    {
+      "id": "t2",
+      "kind": "guard",
+      "group": "Garde-fous d'appel Tavily",
+      "label": "Toujours passer par les outils Tavily pour la recherche web ET l'extraction de page",
+      "parent": null,
+      "detail": "Le prompt prescrit une extraction de page ; aucun outil d'extraction n'est accordé à l'agent (voir gaps). Rattachement limité au seul outil Tavily déclaré.",
+      "refs": ["toolbox:tavily#tavily_web_search"],
+      "evidence": {
+        "file": "configs/agents/tavily-competitor-research/AGENT.md",
+        "lines": [43, 43],
+        "quote": "Always use Tavily tools for web search and page extraction to ensure current information."
+      },
+      "confidence": 0.95
+    },
+    {
+      "id": "c1",
+      "kind": "guard",
+      "group": "Comportement de fond",
+      "label": "Un worker de recherche par société, pour garder le contexte focalisé",
+      "parent": null,
+      "detail": "Contrainte d'architecture, redite en étape 2 de la procédure avec la précision « exactement une fois ».",
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/tavily-competitor-research/AGENT.md",
+        "lines": [44, 44],
+        "quote": "Run one research worker per company to keep context focused."
+      },
+      "confidence": 0.95
+    },
+    {
+      "id": "c2",
+      "kind": "guard",
+      "group": "Comportement de fond",
+      "label": "Sources crédibles : salle de presse, grands médias tech ou business, publications de résultats, analystes réputés ; éviter réseaux sociaux et forums sauf demande explicite",
+      "parent": null,
+      "detail": "Hiérarchie de sources imposée, avec une seule dérogation possible, à la demande de l'utilisateur.",
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/tavily-competitor-research/AGENT.md",
+        "lines": [45, 45],
+        "quote": "avoid social media/forums unless explicitly requested"
+      },
+      "confidence": 0.96
+    },
+    {
+      "id": "c3",
+      "kind": "policy",
+      "group": "Comportement de fond",
+      "label": "Fenêtre par défaut : le dernier mois ; si les résultats sont maigres, étendre au dernier trimestre",
+      "parent": null,
+      "detail": "Déclencheur : une recherche qui ne rend pas grand-chose. « Sparse » n'est pas défini. Rien ne dit ce qui se passe si le trimestre est maigre à son tour — sinon la règle de traitement d'erreur e1.",
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/tavily-competitor-research/AGENT.md",
+        "lines": [46, 46],
+        "quote": "Default timeframe: last month; if results are sparse, extend to last quarter."
+      },
+      "confidence": 0.94
+    },
+    {
+      "id": "c4",
+      "kind": "policy",
+      "group": "Comportement de fond",
+      "label": "Nom de société ambigu : demander le site web, le domaine ou une autre désambiguïsation",
+      "parent": null,
+      "detail": "Déclencheur au niveau de l'analyse de la demande, mais écrit hors de la procédure numérotée : rien ne dit si l'agent bloque toute la requête ou seulement la société ambiguë.",
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/tavily-competitor-research/AGENT.md",
+        "lines": [47, 47],
+        "quote": "If a company name is ambiguous, ask for the website/domain or other disambiguation."
+      },
+      "confidence": 0.94
+    },
+    {
+      "id": "s1",
+      "kind": "step",
+      "group": "1. Analyser la demande",
+      "label": "Extraire de l'entrée la liste des sociétés et le contexte additionnel (région, gammes de produits, période)",
+      "parent": null,
+      "detail": null,
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/tavily-competitor-research/AGENT.md",
+        "lines": [51, 51],
+        "quote": "Parse the user’s input to get the list of companies (and any extra context like region, product lines, or timeframe)."
+      },
+      "confidence": 0.96
+    },
+    {
+      "id": "s2",
+      "kind": "loop",
+      "group": "2. Pour chaque société",
+      "label": "Pour chaque société de la liste",
+      "parent": null,
+      "detail": "Itération explicite sur l'ensemble extrait en s1.",
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/tavily-competitor-research/AGENT.md",
+        "lines": [52, 52],
+        "quote": "For each company, spawn the CompanyResearchWorker exactly once."
+      },
+      "confidence": 0.97
+    },
+    {
+      "id": "s2.1",
+      "kind": "tool_call",
+      "group": "2. Pour chaque société",
+      "label": "Lancer le sous-agent `CompanyResearchWorker`, exactement une fois",
+      "parent": "s2",
+      "detail": "« Exactement une fois » est une contrainte d'idempotence portée par l'étape elle-même. Aucun préfixe de `refs` ne désigne un sous-agent : `refs: []` comme pour `sub1` de l'executive-assistant. Toute la recherche réelle se passe ici, hors du périmètre lu.",
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/tavily-competitor-research/AGENT.md",
+        "lines": [52, 52],
+        "quote": "spawn the CompanyResearchWorker exactly once"
+      },
+      "confidence": 0.95
+    },
+    {
+      "id": "s3",
+      "kind": "step",
+      "group": "3. Agréger",
+      "label": "Agréger toutes les sorties des workers et dédupliquer les sources qui se recouvrent",
+      "parent": null,
+      "detail": "Barrière explicite : l'agrégation attend tous les workers.",
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/tavily-competitor-research/AGENT.md",
+        "lines": [53, 53],
+        "quote": "Aggregate all worker outputs and de-duplicate overlapping sources."
+      },
+      "confidence": 0.96
+    },
+    {
+      "id": "s4",
+      "kind": "decision",
+      "group": "4. Rendre le résultat",
+      "label": "Un format a-t-il été demandé ?",
+      "parent": null,
+      "detail": null,
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/tavily-competitor-research/AGENT.md",
+        "lines": [54, 54],
+        "quote": "Present results in the requested format; if none provided, use the default format below."
+      },
+      "confidence": 0.96
+    },
+    {
+      "id": "s5",
+      "kind": "emit",
+      "group": "4. Rendre le résultat",
+      "label": "Présenter les résultats dans le format demandé",
+      "parent": null,
+      "detail": "Le garde-fou g1 et l'exigence de citation ts3 restent applicables quel que soit le format.",
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/tavily-competitor-research/AGENT.md",
+        "lines": [54, 54],
+        "quote": "Present results in the requested format"
+      },
+      "confidence": 0.94
+    },
+    {
+      "id": "s6",
+      "kind": "emit",
+      "group": "4. Rendre le résultat",
+      "label": "Aucun format demandé : rendre le format par défaut, six blocs par société",
+      "parent": null,
+      "detail": "Overview en une phrase ; tendances sectorielles 3–5 puces ; forces 3–5 puces ; faiblesses/risques 3–5 puces ; développements récents notables 3–5 puces avec citation en ligne ; liste des liens sources.",
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/tavily-competitor-research/AGENT.md",
+        "lines": [58, 63],
+        "quote": "Overview: one concise sentence on what the company does."
+      },
+      "confidence": 0.96
+    },
+    {
+      "id": "ts1",
+      "kind": "guard",
+      "group": "Ton et style",
+      "label": "Neutre et professionnel ; aucun emballement, aucune spéculation",
+      "parent": null,
+      "detail": null,
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/tavily-competitor-research/AGENT.md",
+        "lines": [67, 67],
+        "quote": "Neutral and professional; no hype or speculation."
+      },
+      "confidence": 0.96
+    },
+    {
+      "id": "ts2",
+      "kind": "guard",
+      "group": "Ton et style",
+      "label": "Factuel et concis ; pas de remplissage",
+      "parent": null,
+      "detail": "Redit « Keep outputs brief, objective, and easy to scan » des Goals (l. 33).",
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/tavily-competitor-research/AGENT.md",
+        "lines": [68, 68],
+        "quote": "Factual and concise; avoid fluff."
+      },
+      "confidence": 0.95
+    },
+    {
+      "id": "ts3",
+      "kind": "guard",
+      "group": "Ton et style",
+      "label": "Toujours citer pour toute affirmation liée à un événement ou une donnée précise",
+      "parent": null,
+      "detail": "Même garde-fou que `kb5` du bot d'intelligence concurrentielle, formulé plus brièvement.",
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/tavily-competitor-research/AGENT.md",
+        "lines": [69, 69],
+        "quote": "Always include citations for claims tied to specific events/data."
+      },
+      "confidence": 0.96
+    },
+    {
+      "id": "e1",
+      "kind": "policy",
+      "group": "Traitement des erreurs",
+      "label": "Aucune information récente disponible : le dire clairement et signaler les derniers éléments disponibles",
+      "parent": null,
+      "detail": "Traite l'absence de résultat, pas l'échec de l'outil.",
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/tavily-competitor-research/AGENT.md",
+        "lines": [73, 73],
+        "quote": "If no recent information is available, state that clearly and note the last available items."
+      },
+      "confidence": 0.96
+    },
+    {
+      "id": "e2",
+      "kind": "policy",
+      "group": "Traitement des erreurs",
+      "label": "Informations contradictoires : exposer les deux versions et désigner la source la plus fiable",
+      "parent": null,
+      "detail": "Même règle que `qb5` du bot d'intelligence concurrentielle, sans la préférence explicite pour les sources primaires.",
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/tavily-competitor-research/AGENT.md",
+        "lines": [74, 74],
+        "quote": "If conflicting information is found, surface both views and indicate the most reliable source."
+      },
+      "confidence": 0.96
+    },
+    {
+      "id": "a1",
+      "kind": "policy",
+      "group": "Alias d'espace de travail",
+      "label": "« Exa » désigne exa.ai par défaut, sauf mention contraire de l'utilisateur",
+      "parent": null,
+      "detail": "Entrée de glossaire, pas une prescription d'action : elle fixe l'interprétation d'un mot de l'utilisateur. `policy` par défaut faute de type d'interprétation, avec une confiance basse. Aucune connexion ni aucun outil Exa n'est accordé à cet agent.",
+      "refs": [],
+      "evidence": {
+        "file": "configs/agents/tavily-competitor-research/AGENT.md",
+        "lines": [77, 77],
+        "quote": "\"Exa\" refers to exa.ai by default unless the user specifies otherwise."
+      },
+      "confidence": 0.75
+    }
+  ],
+  "edges": [
+    { "from": "s1", "to": "s2", "condition": null },
+    { "from": "s2", "to": "s3", "condition": null },
+    { "from": "s3", "to": "s4", "condition": null },
+    { "from": "s4", "to": "s5", "condition": "un format est demandé" },
+    { "from": "s4", "to": "s6", "condition": "aucun format fourni" }
+  ],
+  "gaps": [
+    {
+      "kind": "referenced_capability_not_declared",
+      "message": "Le prompt impose de passer par les outils Tavily « for web search and page extraction » (AGENT.md:43). Aucun outil d'extraction de page n'est accordé : les trois outils déclarés sont `tavily_web_search`, `slack_reply_to_message` et `slack_read_thread_messages`. Ni Tavily Extract, ni `read_url_content`. La règle prescrit une capacité que l'agent n'a pas.",
+      "related_steps": ["t2"]
+    },
+    {
+      "kind": "declared_capability_without_rule",
+      "message": "Slack est une connexion déclarée et fournit deux des trois outils de l'agent (`slack_reply_to_message`, `slack_read_thread_messages`). Le prompt système ne mentionne Slack NULLE PART : ni pour lire un fil, ni pour répondre. La seule trace est dans les étapes d'installation (« Optionally connect Slack to reply in threads »), hors du prompt. Les deux nœuds `emit` disent « présenter » sans nommer de canal.",
+      "related_steps": ["s5", "s6"]
+    },
+    {
+      "kind": "foreign_workspace_leftover",
+      "message": "La section « Workspace aliases/preferences » définit « Exa » comme exa.ai (AGENT.md:77) alors que cet agent n'a ni connexion ni outil Exa — c'est `x-content-manager` qui porte la connexion `exa`. Vestige d'un gabarit d'espace de travail, inerte ici, mais qui occupe une section entière du prompt.",
+      "related_steps": ["a1"]
+    },
+    {
+      "kind": "external_authority",
+      "message": "Toute la recherche réelle vit dans le sous-agent `CompanyResearchWorker` (AGENT.md:52), dont la définition est hors du périmètre lu. Le prompt principal fixe des règles (profondeur Tavily, fenêtre par défaut, hiérarchie de sources) sans dire si le worker en hérite ou s'il faut les lui transmettre. C'est la même limite que `calendar_context` chez l'executive-assistant : aucun type de `refs` ne désigne un sous-agent, donc le croisement ne peut pas le compter.",
+      "related_steps": ["s2.1", "t1", "c2", "c3"]
+    },
+    {
+      "kind": "duplicated_rule",
+      "message": "La section « Goals » (AGENT.md:31-33) réénonce trois choses déjà prescrites ailleurs : le contrat de contenu par société (repris en détail l. 58-63), la fraîcheur (reprise l. 43 et 46) et la concision (reprise l. 68). Elle ne produit qu'un seul nœud, le reste étant redondant.",
+      "related_steps": ["g1", "ts2", "s6"]
+    },
+    {
+      "kind": "unspecified_error_path",
+      "message": "Aucune règle ne couvre l'échec d'un appel : Tavily en erreur ou en quota, worker qui ne rend rien, entrée sans aucun nom de société exploitable. « If no recent information is available » (AGENT.md:73) traite le résultat vide, pas la panne. Rien ne borne non plus le nombre de sociétés par requête, alors qu'un worker est lancé par société.",
+      "related_steps": ["s2.1", "e1"]
+    },
+    {
+      "kind": "undefined_threshold",
+      "message": "« Sparse » (AGENT.md:46) décide seul du passage d'une fenêtre d'un mois à un trimestre, et n'est défini nulle part. C'est le seul paramètre qui change le coût d'un run.",
+      "related_steps": ["c3"]
+    }
+  ],
+  "overall_confidence": 0.94
+}
