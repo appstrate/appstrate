@@ -45,6 +45,7 @@ import {
   buildProgress,
   buildToolResultProgress,
   buildToolStartProgress,
+  buildTurnProgress,
   emptyRunResult,
   finalizeThrownFailure,
   reduceEvents,
@@ -903,10 +904,12 @@ export interface BridgeableSession {
  * canonical AFPS {@link RunEvent} emitted on the internal sink.
  *
  * Mapping:
+ *   - `message_start`  (assistant_message)     → (turn-start clock only, no event)
  *   - `message_end`    (assistant_message)     → `appstrate.progress`
+ *   - `message_end`    (turn usage deltas)     → `appstrate.progress` + data { event: "turn", … }
  *   - `message_end`    (stopReason=error)      → `appstrate.error`
  *   - `tool_execution_start`                   → `appstrate.progress` + data { tool, args }
- *   - `tool_execution_end`                     → `appstrate.progress` + data { tool, result, isError }
+ *   - `tool_execution_end`                     → `appstrate.progress` + data { tool, result, isError, durationMs? }
  *   - `agent_end` (last turn usage aggregate)  → `appstrate.metric`
  *
  * The bridge deliberately does NOT forward `message_update` / `text_delta`
@@ -938,6 +941,16 @@ interface PiAssistantMessage {
   stopReason?: string;
   errorMessage?: string;
   content?: Array<PiTextContent | { type: string }>;
+}
+interface PiMessageStartEvent {
+  type: "message_start";
+  /**
+   * The message the SDK is about to stream. `role` discriminates the
+   * assistant's own turn from the user / toolResult messages the agent loop
+   * also frames with `message_start` (verified in
+   * `@mariozechner/pi-agent-core/dist/agent-loop.js`).
+   */
+  message?: { role?: string };
 }
 interface PiToolExecutionStartEvent {
   type: "tool_execution_start";
@@ -1031,6 +1044,23 @@ export function installSessionBridge(
   // self-pruning: each promise removes itself on settle.
   const pendingFires = new Set<Promise<void>>();
 
+  // Start timestamps of in-flight tool calls, keyed by the SDK's `toolCallId`,
+  // so the result event can carry `durationMs` instead of making every operator
+  // self-join the start row to the result row. Bounded by concurrency, not by
+  // run length: each entry is deleted the moment its result lands. Keyed on
+  // `toolCallId` ONLY — a tool-name fallback would cross-attribute a parallel
+  // batch of two `bash` calls, which is worse than no timing at all.
+  const toolCallStarts = new Map<string, number>();
+
+  // Per-turn context-growth tracking. `settledTurnIndex` counts every settled
+  // assistant turn (1-based), so a gap in the emitted breadcrumbs is itself
+  // readable as "that turn reported no usage". `assistantTurnStartedAt` is the
+  // `message_start` timestamp of the turn currently streaming — consumed and
+  // cleared at `message_end` so a turn whose start we never saw cannot inherit
+  // the previous turn's clock.
+  let settledTurnIndex = 0;
+  let assistantTurnStartedAt: number | undefined;
+
   // Fire-and-forget emit. Rejections are swallowed so a transient sink
   // failure never propagates as an unhandled rejection out of the
   // synchronous Pi SDK callback. Authoritative data still reaches the
@@ -1048,11 +1078,26 @@ export function installSessionBridge(
   session.subscribe((rawEvent) => {
     const event = rawEvent as PiSubscribedEvent;
     switch (event.type) {
+      case "message_start": {
+        // Pure bookkeeping — emits nothing. The SDK frames user and toolResult
+        // messages with `message_start` too, so `role` is the discriminator;
+        // without it the "turn latency" would start ticking at the previous
+        // tool result rather than at the model call.
+        const e = event as PiMessageStartEvent;
+        if (e.message?.role === "assistant") assistantTurnStartedAt = Date.now();
+        break;
+      }
+
       case "message_end": {
         const entries = session.state.messages;
         if (!entries.length) break;
         const last = entries[entries.length - 1] as PiAssistantMessage | undefined;
         if (last?.role !== "assistant") break;
+
+        const turnIndex = ++settledTurnIndex;
+        const latencyMs =
+          assistantTurnStartedAt !== undefined ? Date.now() - assistantTurnStartedAt : undefined;
+        assistantTurnStartedAt = undefined;
 
         // Record this assistant turn's terminal outcome. Overwritten each
         // turn → ends as the FINAL assistant turn's stopReason once the
@@ -1087,6 +1132,30 @@ export function installSessionBridge(
           // a NOTIFY round-trip.
           if (inputDelta > 0 || outputDelta > 0) {
             fire(buildMetric({ runId, timestamp: Date.now() }, { ...totalUsage }, totalCost));
+
+            // Per-turn context-growth breadcrumb. Shares the metric's gate on
+            // purpose — a turn the SDK reported with no counters has nothing to
+            // plot, and two independently-drifting gates would make the
+            // breadcrumb trail disagree with the cost curve. Unlike the metric
+            // above (cumulative, and written to no `run_logs` row) this carries
+            // the turn's OWN deltas and IS persisted, which is the only way an
+            // author can see WHERE a run started re-reading 96k tokens a turn.
+            // Deliberately ONE row per settled turn — never per chunk: the
+            // bridge already refuses to forward `message_update` for exactly
+            // that reason (~108 rows on a heavy run, against ~135 tool rows).
+            fire(
+              buildTurnProgress(
+                { runId, timestamp: Date.now() },
+                {
+                  index: turnIndex,
+                  ...(latencyMs !== undefined ? { latencyMs } : {}),
+                  inputTokens: inputDelta,
+                  outputTokens: outputDelta,
+                  cacheReadTokens: u.cacheRead ?? 0,
+                  cacheWriteTokens: u.cacheWrite ?? 0,
+                },
+              ),
+            );
           }
         }
 
@@ -1130,6 +1199,7 @@ export function installSessionBridge(
         // sinks correlate start/end events when multiple tools run concurrently
         // (the LLM can dispatch a parallel batch and the results land
         // out-of-order). Optional — omitted from `data` when the SDK gave none.
+        if (e.toolCallId !== undefined) toolCallStarts.set(e.toolCallId, Date.now());
         fire(
           buildToolStartProgress(
             { runId, timestamp: Date.now() },
@@ -1153,6 +1223,12 @@ export function installSessionBridge(
         // marginal gain over the discriminator `data.result !== undefined`.
         const e = event as PiToolExecutionEndEvent;
         const tool = e.toolName ?? "unknown";
+        // Stamp the call's wall time when we saw its start. `delete` keeps the
+        // map bounded by in-flight calls; a result with no id, or one whose
+        // start we never observed, yields no `durationMs` at all — omission is
+        // honest, a zero would read as an instant call.
+        const startedAt = e.toolCallId !== undefined ? toolCallStarts.get(e.toolCallId) : undefined;
+        if (e.toolCallId !== undefined) toolCallStarts.delete(e.toolCallId);
         fire(
           buildToolResultProgress(
             { runId, timestamp: Date.now() },
@@ -1161,6 +1237,7 @@ export function installSessionBridge(
               result: truncateToolResult(e.result),
               isError: e.isError === true,
               ...(e.toolCallId !== undefined ? { toolCallId: e.toolCallId } : {}),
+              ...(startedAt !== undefined ? { durationMs: Date.now() - startedAt } : {}),
             },
           ),
         );
