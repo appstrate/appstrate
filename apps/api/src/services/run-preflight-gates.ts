@@ -20,7 +20,7 @@
  */
 
 import type { LoadedPackage } from "../types/index.ts";
-import { getPlatformRunLimits } from "./run-limits.ts";
+import { getPlatformRunLimits, resolveRunTimeout } from "./run-limits.ts";
 import { checkOrgRunRateLimit } from "./org-run-rate-limit.ts";
 import { getRunningRunCountForOrg } from "./state/runs.ts";
 import { callHook, hasHook } from "../lib/modules/module-loader.ts";
@@ -171,9 +171,14 @@ export async function runPreflightGates(input: PreflightGatesInput): Promise<Pre
   //    manifest's wish. An agent declaring a timeout above the platform ceiling
   //    can never occupy compute for longer than the ceiling, so quoting it on
   //    the declared value would over-charge.
-  const declaredTimeout = typeof agent.manifest.timeout === "number" ? agent.manifest.timeout : 300;
-  const effectiveTimeoutSeconds = Math.min(declaredTimeout, platformLimits.timeout_ceiling_seconds);
-  if (declaredTimeout > platformLimits.timeout_ceiling_seconds) {
+  //
+  //    The clamp itself lives in `run-limits.ts` (`resolveRunTimeout`) because
+  //    the import route and the agent detail DTO must report the SAME effective
+  //    value the run will get — three inlined `Math.min`s is how they drift.
+  const { effectiveSeconds: effectiveTimeoutSeconds, capped } = resolveRunTimeout(
+    agent.manifest.timeout,
+  );
+  if (capped) {
     agent = {
       ...agent,
       manifest: { ...agent.manifest, timeout: platformLimits.timeout_ceiling_seconds },

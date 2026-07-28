@@ -35,6 +35,7 @@ import {
   type KnownApi,
   type Model,
 } from "./pi-sdk.ts";
+import { scheduleDeadlineNudges } from "./deadline-nudges.ts";
 import type { ModelApiShape } from "@appstrate/core/sidecar-types";
 import { deriveResponseReserveTokens } from "@appstrate/core/token-budget";
 import type { RunEvent, ExecutionContext } from "@appstrate/afps-runtime/types";
@@ -44,6 +45,7 @@ import {
   buildProgress,
   buildToolResultProgress,
   buildToolStartProgress,
+  buildTurnProgress,
   emptyRunResult,
   finalizeThrownFailure,
   reduceEvents,
@@ -456,6 +458,10 @@ export class PiRunner implements Runner {
       }),
     });
 
+    // Widen the tool set BEFORE the first prompt — see {@link enableSearchTools}
+    // for why this placement is the cheap one.
+    enableSearchTools(session);
+
     const terminalTools = this.opts.terminalTools ?? [];
     const bridge = installSessionBridge(session, internalSink, context.runId, {
       terminalTools,
@@ -483,7 +489,35 @@ export class PiRunner implements Runner {
       ? <T>(promise: Promise<T>): Promise<T> => Promise.race([promise, abortPromise])
       : <T>(promise: Promise<T>): Promise<T> => promise;
 
-    await raceAbort(session.prompt(startMessage ?? systemPrompt));
+    // Mid-run wall-clock steering (#1029). The agent has no clock: the budget is
+    // stated once in the turn-1 system prompt and never again, so it over-explores
+    // and the watchdog kills it at 100% with nothing delivered.
+    //
+    // Timing asymmetry, stated rather than left implicit: the watchdog in `run()`
+    // counts from ITS `runStart`, while these checkpoints only start counting
+    // here, after session construction (SDK eval, auth storage, resource loader,
+    // MCP-backed extensions) — call that delta D. Each nudge therefore fires D
+    // late and advertises D seconds more runway than the watchdog will actually
+    // grant. Accepted, not ignored: D is bounded by session construction (sub-
+    // second on a warm SDK, a couple of seconds cold) against budgets of minutes,
+    // so the figure is honest at the granularity the agent plans in, and closing
+    // the gap would mean threading `runStart` through a protected method that
+    // exists to be overridden. Revisit if D ever becomes a visible share of a
+    // real budget.
+    const cancelDeadlineNudges = scheduleDeadlineNudges({
+      timeoutSeconds: context.timeoutSeconds ?? 0,
+      steer: (text) => session.steer(text),
+      emit: (event) => internalSink.emit(event),
+      runId: context.runId,
+    });
+    try {
+      await raceAbort(session.prompt(startMessage ?? systemPrompt));
+    } finally {
+      // Stand the nudges down the moment the loop settles — before the
+      // missing-`output` re-prompt below, so a checkpoint firing during that
+      // corrective turn cannot compete with it for the agent's attention.
+      cancelDeadlineNudges();
+    }
 
     // The agent loop settled on its own. When the agent owed a structured
     // `output` and never delivered one, this is the LAST moment its context
@@ -673,6 +707,77 @@ export async function maybeRepromptForOutput(opts: {
   return true;
 }
 
+// ─── Search-tool widening ──────────────────────────────────────────
+
+/**
+ * Read-only search tools the Pi SDK ships but does not activate.
+ *
+ * The SDK registry knows seven built-ins (`core/tools/index.js` →
+ * `allToolNames = ["read","bash","edit","write","grep","find","ls"]`) but
+ * `createAgentSession` activates only the first four (`core/sdk.js` →
+ * `defaultActiveToolNames`). With no `grep`/`find`/`ls` on the surface the model
+ * reaches for `bash` for every lookup: in the run that motivated #1029, 101 of
+ * 135 tool calls were `bash`, overwhelmingly `grep -rn …` and `sed -n 'A,Bp'`.
+ * Each of those pays a shell round-trip and returns unstructured output the
+ * model then has to parse.
+ *
+ * Exported so a test can assert the list rather than restate it.
+ */
+export const SEARCH_TOOL_NAMES = ["grep", "find", "ls"] as const;
+
+/**
+ * Minimal session surface needed to widen the active tool set. Structural (not
+ * the SDK's `ToolInfo`) for the same reason {@link BridgeableSession} and
+ * {@link PromptableSession} are: the runner's own session contracts stay
+ * vendor-type-free, and `ToolInfo` is `Pick<ToolDefinition, "name" | …>` so a
+ * real session satisfies this by construction.
+ */
+export interface ToolWideningSession {
+  getActiveToolNames(): string[];
+  /** Everything the SDK tool registry resolves — built-ins, extensions, MCP tools. */
+  getAllTools(): Array<{ name: string }>;
+  setActiveToolsByName(toolNames: string[]): void;
+}
+
+/**
+ * Add {@link SEARCH_TOOL_NAMES} to the session's active tools, additively.
+ *
+ * NOT via `createAgentSession({ tools })`: that option is an ALLOWLIST
+ * (`core/sdk.js` → `allowedToolNames`) applied to extension and custom tools
+ * too, so passing the search-tool list there would silently strip every
+ * Appstrate MCP / integration tool off the surface. `setActiveToolsByName` is
+ * the additive door.
+ *
+ * Two consequences of the {@link PromptableSession.setActiveToolsByName}
+ * contract shape this function:
+ *  - it REPLACES the active set, so the currently-active names (where the
+ *    extension / MCP / runtime tools live) must be carried over verbatim. The
+ *    post-condition is a superset, never a smaller surface.
+ *  - unresolvable names are silently dropped, so each search tool is admitted
+ *    only if the registry actually exposes it (`getAllTools()`). A registry
+ *    without `find` yields `grep` + `ls` and no phantom name.
+ *
+ * Called BEFORE the first `session.prompt(...)`, where the rewrite is free: the
+ * Anthropic prompt-cache prefix is built by the first request, so there is no
+ * cached prefix yet to invalidate. This is the opposite situation to the
+ * mid-session narrowing {@link PromptableSession.setActiveToolsByName} warns
+ * about — do not read that cost note as applying here.
+ *
+ * Exported for unit testing; the production caller is `PiRunner.executeSession`.
+ *
+ * @internal
+ */
+export function enableSearchTools(session: ToolWideningSession): void {
+  const registered = new Set(session.getAllTools().map((tool) => tool.name));
+  const widened = new Set(session.getActiveToolNames());
+  const activeCount = widened.size;
+  for (const name of SEARCH_TOOL_NAMES) {
+    if (registered.has(name)) widened.add(name);
+  }
+  if (widened.size === activeCount) return; // nothing to add — skip the system-prompt rebuild
+  session.setActiveToolsByName([...widened]);
+}
+
 /**
  * Maximum time to wait for a fire-and-forget Pi SDK compaction pass
  * before falling through. Compaction is a single LLM call against the
@@ -799,10 +904,12 @@ export interface BridgeableSession {
  * canonical AFPS {@link RunEvent} emitted on the internal sink.
  *
  * Mapping:
+ *   - `message_start`  (assistant_message)     → (turn-start clock only, no event)
  *   - `message_end`    (assistant_message)     → `appstrate.progress`
+ *   - `message_end`    (turn usage deltas)     → `appstrate.progress` + data { event: "turn", … }
  *   - `message_end`    (stopReason=error)      → `appstrate.error`
  *   - `tool_execution_start`                   → `appstrate.progress` + data { tool, args }
- *   - `tool_execution_end`                     → `appstrate.progress` + data { tool, result, isError }
+ *   - `tool_execution_end`                     → `appstrate.progress` + data { tool, result, isError, durationMs? }
  *   - `agent_end` (last turn usage aggregate)  → `appstrate.metric`
  *
  * The bridge deliberately does NOT forward `message_update` / `text_delta`
@@ -834,6 +941,16 @@ interface PiAssistantMessage {
   stopReason?: string;
   errorMessage?: string;
   content?: Array<PiTextContent | { type: string }>;
+}
+interface PiMessageStartEvent {
+  type: "message_start";
+  /**
+   * The message the SDK is about to stream. `role` discriminates the
+   * assistant's own turn from the user / toolResult messages the agent loop
+   * also frames with `message_start` (verified in
+   * `@mariozechner/pi-agent-core/dist/agent-loop.js`).
+   */
+  message?: { role?: string };
 }
 interface PiToolExecutionStartEvent {
   type: "tool_execution_start";
@@ -927,6 +1044,23 @@ export function installSessionBridge(
   // self-pruning: each promise removes itself on settle.
   const pendingFires = new Set<Promise<void>>();
 
+  // Start timestamps of in-flight tool calls, keyed by the SDK's `toolCallId`,
+  // so the result event can carry `durationMs` instead of making every operator
+  // self-join the start row to the result row. Bounded by concurrency, not by
+  // run length: each entry is deleted the moment its result lands. Keyed on
+  // `toolCallId` ONLY — a tool-name fallback would cross-attribute a parallel
+  // batch of two `bash` calls, which is worse than no timing at all.
+  const toolCallStarts = new Map<string, number>();
+
+  // Per-turn context-growth tracking. `settledTurnIndex` counts every settled
+  // assistant turn (1-based), so a gap in the emitted breadcrumbs is itself
+  // readable as "that turn reported no usage". `assistantTurnStartedAt` is the
+  // `message_start` timestamp of the turn currently streaming — consumed and
+  // cleared at `message_end` so a turn whose start we never saw cannot inherit
+  // the previous turn's clock.
+  let settledTurnIndex = 0;
+  let assistantTurnStartedAt: number | undefined;
+
   // Fire-and-forget emit. Rejections are swallowed so a transient sink
   // failure never propagates as an unhandled rejection out of the
   // synchronous Pi SDK callback. Authoritative data still reaches the
@@ -944,11 +1078,26 @@ export function installSessionBridge(
   session.subscribe((rawEvent) => {
     const event = rawEvent as PiSubscribedEvent;
     switch (event.type) {
+      case "message_start": {
+        // Pure bookkeeping — emits nothing. The SDK frames user and toolResult
+        // messages with `message_start` too, so `role` is the discriminator;
+        // without it the "turn latency" would start ticking at the previous
+        // tool result rather than at the model call.
+        const e = event as PiMessageStartEvent;
+        if (e.message?.role === "assistant") assistantTurnStartedAt = Date.now();
+        break;
+      }
+
       case "message_end": {
         const entries = session.state.messages;
         if (!entries.length) break;
         const last = entries[entries.length - 1] as PiAssistantMessage | undefined;
         if (last?.role !== "assistant") break;
+
+        const turnIndex = ++settledTurnIndex;
+        const latencyMs =
+          assistantTurnStartedAt !== undefined ? Date.now() - assistantTurnStartedAt : undefined;
+        assistantTurnStartedAt = undefined;
 
         // Record this assistant turn's terminal outcome. Overwritten each
         // turn → ends as the FINAL assistant turn's stopReason once the
@@ -983,6 +1132,30 @@ export function installSessionBridge(
           // a NOTIFY round-trip.
           if (inputDelta > 0 || outputDelta > 0) {
             fire(buildMetric({ runId, timestamp: Date.now() }, { ...totalUsage }, totalCost));
+
+            // Per-turn context-growth breadcrumb. Shares the metric's gate on
+            // purpose — a turn the SDK reported with no counters has nothing to
+            // plot, and two independently-drifting gates would make the
+            // breadcrumb trail disagree with the cost curve. Unlike the metric
+            // above (cumulative, and written to no `run_logs` row) this carries
+            // the turn's OWN deltas and IS persisted, which is the only way an
+            // author can see WHERE a run started re-reading 96k tokens a turn.
+            // Deliberately ONE row per settled turn — never per chunk: the
+            // bridge already refuses to forward `message_update` for exactly
+            // that reason (~108 rows on a heavy run, against ~135 tool rows).
+            fire(
+              buildTurnProgress(
+                { runId, timestamp: Date.now() },
+                {
+                  index: turnIndex,
+                  ...(latencyMs !== undefined ? { latencyMs } : {}),
+                  inputTokens: inputDelta,
+                  outputTokens: outputDelta,
+                  cacheReadTokens: u.cacheRead ?? 0,
+                  cacheWriteTokens: u.cacheWrite ?? 0,
+                },
+              ),
+            );
           }
         }
 
@@ -1026,6 +1199,7 @@ export function installSessionBridge(
         // sinks correlate start/end events when multiple tools run concurrently
         // (the LLM can dispatch a parallel batch and the results land
         // out-of-order). Optional — omitted from `data` when the SDK gave none.
+        if (e.toolCallId !== undefined) toolCallStarts.set(e.toolCallId, Date.now());
         fire(
           buildToolStartProgress(
             { runId, timestamp: Date.now() },
@@ -1049,6 +1223,12 @@ export function installSessionBridge(
         // marginal gain over the discriminator `data.result !== undefined`.
         const e = event as PiToolExecutionEndEvent;
         const tool = e.toolName ?? "unknown";
+        // Stamp the call's wall time when we saw its start. `delete` keeps the
+        // map bounded by in-flight calls; a result with no id, or one whose
+        // start we never observed, yields no `durationMs` at all — omission is
+        // honest, a zero would read as an instant call.
+        const startedAt = e.toolCallId !== undefined ? toolCallStarts.get(e.toolCallId) : undefined;
+        if (e.toolCallId !== undefined) toolCallStarts.delete(e.toolCallId);
         fire(
           buildToolResultProgress(
             { runId, timestamp: Date.now() },
@@ -1057,6 +1237,7 @@ export function installSessionBridge(
               result: truncateToolResult(e.result),
               isError: e.isError === true,
               ...(e.toolCallId !== undefined ? { toolCallId: e.toolCallId } : {}),
+              ...(startedAt !== undefined ? { durationMs: Date.now() - startedAt } : {}),
             },
           ),
         );

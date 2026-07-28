@@ -198,6 +198,19 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
       "If no available tool can carry a given piece of information, that information cannot reach " +
       "the user — do not assume a final text message will be read.\n",
   );
+  // Batching (#1029). Measured on a reference run: 1.24 tool calls per turn,
+  // 84 of 108 turns carrying exactly one, median turn latency 5.3s / p90
+  // 24.1s — serialised independent calls, not model thinking, dominate the
+  // wall clock. Models default to one call per turn unless told otherwise,
+  // and nothing else in the preamble says they may batch. Stays tool-agnostic
+  // per the #368 contract above; this text is paid for on every run.
+  sections.push(
+    "**Batch independent tool calls.** Every turn is a full round trip to the model, so a turn " +
+      "carrying one call costs the same as a turn carrying five: when several calls do not depend " +
+      "on each other's results, issue them together in the same turn — one turn per question, not " +
+      "one turn per file. Only a call whose input comes from a previous call's result has to wait " +
+      "for its own turn.\n",
+  );
 
   // Tools are advertised to the model via MCP `tools/list` (name +
   // description + input schema). The prompt deliberately does NOT list

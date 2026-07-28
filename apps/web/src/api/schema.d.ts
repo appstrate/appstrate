@@ -4661,6 +4661,8 @@ export interface components {
             forked_from: string | null;
             /** @description Whether the active version has changes not yet archived as a version */
             has_unarchived_changes?: boolean;
+            /** @description Run timeout that will actually be enforced, in seconds: the manifest's `timeout` (or the platform default when it declares none) clamped to this deployment's `PLATFORM_RUN_LIMITS.timeout_ceiling_seconds`. Compare with `manifest.timeout` to detect a capped declaration. Emitted for system agents too, which do not expose `manifest`. */
+            effective_timeout_seconds: number;
         };
         AgentListItem: {
             id: string;
@@ -15543,7 +15545,7 @@ export interface operations {
                         type: string;
                         /** @description Imported manifest version (semver). Omitted when the manifest carries no version field. */
                         version?: string;
-                        /** @description Non-blocking install warnings (e.g. connect.login engine-subset or _meta soft-fails). Present only when warnings were emitted. */
+                        /** @description Non-blocking install warnings (e.g. connect.login engine-subset, _meta soft-fails, or an agent `timeout` above this deployment's ceiling). Present only when warnings were emitted. */
                         warnings?: string[];
                     };
                 };
@@ -15621,7 +15623,7 @@ export interface operations {
                         root_installed: boolean;
                         root_package_id: string;
                         root_version: string;
-                        /** @description Non-blocking install-time warnings (AFPS §7.7) — e.g. `connect.login` selector/criteria patterns the runtime engine cannot evaluate. Empty when nothing is degraded. */
+                        /** @description Non-blocking install-time warnings (AFPS §7.7) — e.g. `connect.login` selector/criteria patterns the runtime engine cannot evaluate, or an agent `timeout` above this deployment's ceiling. Empty when nothing is degraded. */
                         warnings: string[];
                     };
                 };
@@ -15685,7 +15687,7 @@ export interface operations {
                         type: string;
                         /** @description Imported manifest version (semver). Omitted when the manifest carries no version field. */
                         version?: string;
-                        /** @description Non-blocking install warnings (e.g. connect.login engine-subset or _meta soft-fails). Present only when warnings were emitted. */
+                        /** @description Non-blocking install warnings (e.g. connect.login engine-subset, _meta soft-fails, or an agent `timeout` above this deployment's ceiling). Present only when warnings were emitted. */
                         warnings?: string[];
                     };
                 };

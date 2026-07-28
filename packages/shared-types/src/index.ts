@@ -507,6 +507,14 @@ export interface AgentDetail {
   version_count?: number;
   has_unarchived_changes?: boolean;
   forked_from: string | null;
+  /**
+   * Run timeout actually enforced, in seconds: the manifest's `timeout` (or the
+   * platform default when it declares none) clamped to this deployment's
+   * `PLATFORM_RUN_LIMITS.timeout_ceiling_seconds`. Compare with
+   * `manifest.timeout` to detect a capped declaration. Always emitted —
+   * including for system agents, which do not expose `manifest`.
+   */
+  effective_timeout_seconds: number;
 }
 
 // --- Organization Package Types ---

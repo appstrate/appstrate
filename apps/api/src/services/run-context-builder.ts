@@ -18,6 +18,7 @@ import { resolveProxy } from "./org-proxies.ts";
 import { resolveModel } from "./org-models.ts";
 import { extractManifestSchemas } from "../lib/manifest-utils.ts";
 import { resolveIntegrationSpawns } from "./integration-spawn-resolver.ts";
+import { DEFAULT_RUN_TIMEOUT_SECONDS } from "./run-limits.ts";
 import type { IntegrationManifestCache } from "./integration-service.ts";
 import type { ResolvedConnectionMap } from "@appstrate/core/integration";
 import type { ModelCost } from "@appstrate/core/module";
@@ -257,7 +258,9 @@ export async function buildRunContext(params: {
     llmConfig: modelResult,
     runToken: signRunToken(runId),
     proxyUrl,
-    timeout: (agent.manifest.timeout as number | undefined) ?? 300,
+    // The manifest reaching here is already ceiling-clamped by
+    // `runPreflightGates`; only the no-declaration default is left to apply.
+    timeout: (agent.manifest.timeout as number | undefined) ?? DEFAULT_RUN_TIMEOUT_SECONDS,
     files,
     ...(integrationSpawns.length > 0 ? { integrations: integrationSpawns } : {}),
   };

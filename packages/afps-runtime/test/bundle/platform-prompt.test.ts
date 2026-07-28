@@ -36,6 +36,27 @@ describe("renderPlatformPrompt", () => {
     expect(out).toContain("The only way to communicate with the user is by calling a tool.");
   });
 
+  it("tells the agent to batch independent tool calls (#1029)", () => {
+    const out = renderPlatformPrompt({ template: "TEMPLATE", context: ctx() });
+    expect(out).toContain("**Batch independent tool calls.**");
+    expect(out).toContain("issue them together in the same turn");
+    expect(out).toContain("one turn per question, not one turn per file");
+  });
+
+  it("keeps the batching guidance tool-agnostic (#368 section contract)", () => {
+    // Same rule as the rest of the Communication section: the platform owns
+    // the invariant ("independent calls may share a turn"), each tool's MCP
+    // descriptor `description` owns its own usage prose.
+    const out = renderPlatformPrompt({ template: "T", context: ctx() });
+    const start = out.indexOf("**Batch independent tool calls.**");
+    expect(start).toBeGreaterThan(-1);
+    const end = out.indexOf("\n\n", start);
+    const paragraph = out.slice(start, end > -1 ? end : undefined);
+    for (const toolName of ["bash", "grep", "curl", "output", "log", "note", "pin", "python"]) {
+      expect(paragraph).not.toContain(toolName);
+    }
+  });
+
   it("renders the Communication section and no Tools section (tools come from tools/list)", () => {
     const out = renderPlatformPrompt({ template: "T", context: ctx() });
     expect(out.indexOf("### Communication")).toBeGreaterThan(-1);

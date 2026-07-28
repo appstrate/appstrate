@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { cn } from "@appstrate/ui/cn";
+import { formatDuration } from "@appstrate/core/format";
 import { formatTimestamp, typeColors, levelColors, type LogEntry } from "./log-utils";
 
 const levelConfig: Record<string, { icon: typeof Info; className: string; label: string }> = {
@@ -87,7 +88,8 @@ export function LogViewer({ entries }: LogViewerProps) {
       .map((e) => {
         const ts = showTimestamps ? `[${formatTimestamp(e.createdAt, i18n.language)}] ` : "";
         const detail = e.detail ? ` ${e.detail}` : "";
-        return `${ts}${e.message}${detail}`;
+        const duration = e.durationMs !== undefined ? ` ${formatDuration(e.durationMs)}` : "";
+        return `${ts}${e.message}${detail}${duration}`;
       })
       .join("\n");
     navigator.clipboard.writeText(text);
@@ -189,6 +191,15 @@ export function LogViewer({ entries }: LogViewerProps) {
                   {entry.message}
                   {entry.detail && (
                     <span className="text-muted-foreground ml-2 text-xs">{entry.detail}</span>
+                  )}
+                  {/* Tool wall time. Subordinate to the message, like `detail`.
+                      Only present on rows fetched via the REST logs query — the
+                      live SSE frame strips `data` server-side (`stripPayload`),
+                      so a running run shows it once the rows are refetched. */}
+                  {entry.durationMs !== undefined && (
+                    <span className="text-muted-foreground/70 ml-2 text-xs tabular-nums">
+                      {formatDuration(entry.durationMs)}
+                    </span>
                   )}
                 </div>
               </div>

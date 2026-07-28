@@ -6,6 +6,8 @@ import {
   _setRunLimitsForTesting,
   getPlatformRunLimits,
   getInlineRunLimits,
+  resolveRunTimeout,
+  DEFAULT_RUN_TIMEOUT_SECONDS,
 } from "../../src/services/run-limits.ts";
 
 describe("run-limits registry", () => {
@@ -58,5 +60,71 @@ describe("run-limits registry", () => {
     expect(() => _setRunLimitsForTesting({ timeout_ceiling_seconds: 0 }, {})).toThrow();
     expect(() => _setRunLimitsForTesting({ max_concurrent_per_org: -1 }, {})).toThrow();
     expect(() => _setRunLimitsForTesting({}, { rate_per_min: 0 })).toThrow();
+  });
+});
+
+/**
+ * `resolveRunTimeout` is the single clamp shared by the run preflight (which
+ * rewrites the manifest), the import route (which warns the author), and the
+ * agent detail DTO (which shows `effective_timeout_seconds`). These cases pin
+ * the contract all three depend on — a change here silently retunes billing
+ * (`beforeUsage` is quoted on the effective bound) as well as the UI.
+ */
+describe("resolveRunTimeout", () => {
+  const CEILING = 900;
+
+  beforeEach(() => {
+    _setRunLimitsForTesting({ timeout_ceiling_seconds: CEILING }, {});
+  });
+
+  // Restore documented defaults — `bun test` shares one process and later
+  // integration files read the limits installed by `helpers/app.ts`.
+  afterAll(() => {
+    _setRunLimitsForTesting({}, {});
+  });
+
+  it("passes a declared timeout below the ceiling through untouched", () => {
+    expect(resolveRunTimeout(60)).toEqual({
+      declaredSeconds: 60,
+      effectiveSeconds: 60,
+      capped: false,
+    });
+  });
+
+  it("treats a declaration exactly at the ceiling as uncapped", () => {
+    expect(resolveRunTimeout(CEILING)).toEqual({
+      declaredSeconds: CEILING,
+      effectiveSeconds: CEILING,
+      capped: false,
+    });
+  });
+
+  it("caps a declaration above the ceiling and reports both values", () => {
+    expect(resolveRunTimeout(10800)).toEqual({
+      declaredSeconds: 10800,
+      effectiveSeconds: CEILING,
+      capped: true,
+    });
+  });
+
+  it("falls back to the platform default when no timeout is declared", () => {
+    expect(resolveRunTimeout(undefined)).toEqual({
+      declaredSeconds: DEFAULT_RUN_TIMEOUT_SECONDS,
+      effectiveSeconds: DEFAULT_RUN_TIMEOUT_SECONDS,
+      capped: false,
+    });
+  });
+
+  it("falls back to the default for a non-number declaration (no coercion)", () => {
+    // A string timeout is an authoring bug; honouring `"10800"` would make the
+    // manifest's meaning depend on its JSON type.
+    for (const bad of ["10800", null, {}, true]) {
+      expect(resolveRunTimeout(bad).declaredSeconds).toBe(DEFAULT_RUN_TIMEOUT_SECONDS);
+    }
+  });
+
+  it("throws before init() rather than defaulting to an unbounded timeout", () => {
+    _resetRunLimitsForTesting();
+    expect(() => resolveRunTimeout(60)).toThrow(/not initialized/i);
   });
 });

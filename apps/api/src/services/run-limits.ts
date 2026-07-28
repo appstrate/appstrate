@@ -88,6 +88,59 @@ export function getInlineRunLimits(): InlineRunLimits {
   return inlineLimits;
 }
 
+// ---------------------------------------------------------------------------
+// Timeout resolution
+// ---------------------------------------------------------------------------
+
+/**
+ * Timeout applied when an agent manifest declares none. AFPS leaves `timeout`
+ * optional, so every read path needs the same fallback — keeping it here, next
+ * to the ceiling that clamps it, stops the two drifting apart.
+ */
+export const DEFAULT_RUN_TIMEOUT_SECONDS = 300;
+
+export interface ResolvedRunTimeout {
+  /** What the manifest asked for (or {@link DEFAULT_RUN_TIMEOUT_SECONDS}). */
+  declaredSeconds: number;
+  /** What the run actually gets — `declaredSeconds` clamped to the ceiling. */
+  effectiveSeconds: number;
+  /** `true` when the ceiling won, i.e. the declared value is unreachable. */
+  capped: boolean;
+}
+
+/**
+ * Resolve a manifest's declared `timeout` against the platform ceiling.
+ *
+ * Single source for a rule that has three consumers with three different
+ * reactions: the run preflight (clamps the manifest before the prompt is built
+ * and before `beforeUsage` quotes it), the import route (warns the author), and
+ * the agent detail DTO (shows the author what a run will really get). Inlining
+ * `Math.min` at each of them is exactly how the three would drift.
+ *
+ * Takes the declared VALUE rather than the manifest: all three callers already
+ * hold the manifest and a property read is cheaper than a union parameter that
+ * has to re-narrow an `unknown` object at every call.
+ *
+ * Non-number declarations (absent, `null`, `"600"`) fall back to the default —
+ * the same narrowing the preflight has always applied, deliberately NOT a
+ * coercion: a string timeout is an authoring bug, and silently honouring it
+ * would make the manifest's meaning depend on its JSON type.
+ *
+ * Throws when run limits are not initialized (see {@link getPlatformRunLimits}) —
+ * a missing `initRunLimits()` is a boot-ordering bug, not a condition to paper
+ * over with an unbounded default.
+ */
+export function resolveRunTimeout(declaredTimeout: unknown): ResolvedRunTimeout {
+  const ceiling = getPlatformRunLimits().timeout_ceiling_seconds;
+  const declaredSeconds =
+    typeof declaredTimeout === "number" ? declaredTimeout : DEFAULT_RUN_TIMEOUT_SECONDS;
+  return {
+    declaredSeconds,
+    effectiveSeconds: Math.min(declaredSeconds, ceiling),
+    capped: declaredSeconds > ceiling,
+  };
+}
+
 /** Test-only: reset the cache so successive tests can install their own limits. */
 export function _resetRunLimitsForTesting(): void {
   platformLimits = null;

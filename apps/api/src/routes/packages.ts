@@ -68,6 +68,7 @@ import {
   collectConnectLoginWarnings,
   collectMetaWarnings,
 } from "../services/integration-install-warnings.ts";
+import { collectAgentTimeoutWarnings } from "../services/agent-install-warnings.ts";
 import {
   ApiError,
   invalidRequest,
@@ -1744,13 +1745,16 @@ export function createPackagesRouter() {
     // about unsupported `connect.login` selectors / criteria at install
     // time rather than chasing the runtime LoginError later. Also lift the
     // validator's `_meta` Appendix B regex soft-fail warnings to the same
-    // channel so publishers see them on import.
+    // channel so publishers see them on import. Same channel again for an
+    // agent's `timeout` declared above the platform ceiling — the run clamps it
+    // regardless, and import is the first moment the author can be told.
     // No retired-dependency-key warning here, unlike the bundle path: this
     // route parses through `parseZipWithSkillFallback`, which rejects them
     // outright, so such a manifest is a 400 long before this line.
     const installWarnings = [
       ...collectConnectLoginWarnings(manifest),
       ...collectMetaWarnings(manifest),
+      ...collectAgentTimeoutWarnings(manifest),
     ];
     return c.json(
       {
