@@ -32,10 +32,14 @@
  * loop also forces a record fetch on the first iteration so very short
  * runs (success in <1 tick) finalize without a wasted log-poll.
  *
- * Cancellation: on `signal` abort the runner POSTs `/api/runs/:id/cancel`
- * once and continues polling until the run reaches a terminal status.
- * Idempotency-Key on the trigger POST guards against accidental double
- * submission across CLI retries.
+ * Signal handling: what an abort means is the caller's decision, passed
+ * as `onSignal` (see `signal-policy.ts` for how it is resolved).
+ * `"cancel"` POSTs `/api/runs/:id/cancel` once and keeps polling until
+ * the run reaches a terminal status, so the user observes the final
+ * state. `"detach"` leaves the platform-side run untouched and stops
+ * tailing — the run outlives the CLI, exactly like closing a dashboard
+ * tab. Idempotency-Key on the trigger POST guards against accidental
+ * double submission across CLI retries.
  */
 
 import type { EventSink } from "@appstrate/afps-runtime/interfaces";
@@ -115,19 +119,36 @@ export interface RemoteRunLog {
   createdAt?: string;
 }
 
-export interface RemoteRunOutcome {
-  runId: string;
-  status: TerminalRunStatus;
-  /** Final run record fetched from `GET /api/runs/:id`. */
-  record: RemoteRunRecord;
-  /** All logs accumulated during the run. */
-  logs: RemoteRunLog[];
-  /**
-   * Process exit code suggested by the outcome. `0` for success,
-   * `1` for any non-success terminal status (cancelled / failed / timeout).
-   */
-  exitCode: number;
-}
+/**
+ * How the tail ended. A discriminated union rather than an optional
+ * `detached` flag: the detached variant genuinely has no terminal status,
+ * no final record, and no exit code, and the type system should say so —
+ * a caller cannot accidentally read a status the run never reached.
+ */
+export type RemoteRunOutcome =
+  | {
+      kind: "terminal";
+      runId: string;
+      status: TerminalRunStatus;
+      /** Final run record fetched from `GET /api/runs/:id`. */
+      record: RemoteRunRecord;
+      /** All logs accumulated during the run. */
+      logs: RemoteRunLog[];
+      /**
+       * Process exit code suggested by the outcome. `0` for success,
+       * `1` for any non-success terminal status (cancelled / failed / timeout).
+       */
+      exitCode: number;
+    }
+  | {
+      kind: "detached";
+      runId: string;
+      /** Logs accumulated up to the moment the CLI stopped tailing. */
+      logs: RemoteRunLog[];
+      // No `exitCode` on purpose: the run has no terminal state, and on
+      // the signal path the shutdown coordinator owns the process exit
+      // code (128 + signal number).
+    };
 
 export class RemoteRunError extends Error {
   override readonly name = "RemoteRunError";
@@ -170,6 +191,15 @@ export interface RunRemoteOptions {
 
   /** `Idempotency-Key` for the trigger POST. */
   idempotencyKey?: string | undefined;
+
+  /**
+   * What a `signal` abort means for the platform-side run — resolved by
+   * `resolveSignalPolicy` (see `signal-policy.ts`). `"cancel"` POSTs the
+   * cancel endpoint and keeps tailing to the terminal state; `"detach"`
+   * leaves the run running and stops tailing. Defaults to `"cancel"`,
+   * the historical behaviour.
+   */
+  onSignal?: "cancel" | "detach";
 
   /** When true, emit each event as JSONL on stdout. Otherwise human-format. */
   json: boolean;
@@ -223,7 +253,9 @@ export interface RunRemoteOptions {
 }
 
 /**
- * Trigger a remote run and tail it to terminal status.
+ * Trigger a remote run and tail it to terminal status — or, when
+ * `onSignal: "detach"` and a signal arrives, stop tailing and leave the
+ * run alive on the platform.
  *
  * Returns the outcome regardless of success/failure — the caller decides
  * whether to set `process.exitCode`. Throws only on hard failures
@@ -283,12 +315,26 @@ export async function runRemote(
     writeStdout,
   });
 
-  // ─── 2. Cancellation wiring ────────────────────────────────────────
-  // Single-shot cancel POST on the first `abort` event. Polling continues
-  // until the server flips status to `cancelled` (or any other terminal),
-  // so the user always observes the final state before the CLI exits.
+  // ─── 2. Signal wiring ──────────────────────────────────────────────
+  //
+  // `"cancel"`: single-shot cancel POST on the first `abort` event.
+  // Polling continues until the server flips status to `cancelled` (or
+  // any other terminal), so the user always observes the final state
+  // before the CLI exits.
+  //
+  // `"detach"`: no cancel POST at all. The abort only raises a flag the
+  // poll loop reads, so the CLI unwinds while the platform-side run
+  // keeps going. Cancelling here would destroy a healthy run on behalf
+  // of a caller (CI wrapper, supervisor, harness) that only ever asked
+  // the CLI process to go away.
+  const onSignal = opts.onSignal ?? "cancel";
   let cancelRequested = false;
+  let detachRequested = false;
   const onAbort = (): void => {
+    if (onSignal === "detach") {
+      detachRequested = true;
+      return;
+    }
     if (cancelRequested) return;
     cancelRequested = true;
     if (!opts.json) writeStderr(`\nshutdown received, cancelling remote run...\n`);
@@ -324,6 +370,37 @@ export async function runRemote(
   let lastLogId = 0;
   let tick = 0;
   let consecutiveRecordFailures = 0;
+
+  /**
+   * Unwind the detach path: tell the caller where the run went and
+   * return without a terminal state.
+   *
+   * Deliberately does NOT call `consoleSink.finalize(...)`, synthesize
+   * the trailing `appstrate.metric` line, or write the `--output` file.
+   * The run has no terminal status yet — printing `[run complete]` /
+   * `[run failed]` or persisting a RunResult would fabricate one, and a
+   * fabricated status is worse than a missing one for the scripted
+   * callers this path exists for.
+   */
+  const finishDetached = (): RemoteRunOutcome => {
+    if (opts.json) {
+      // Mirrors the kickoff `appstrate.remote.triggered` envelope so a
+      // `jq` pipeline can pair "run started here" with "CLI let go here".
+      writeStdout(
+        JSON.stringify({ type: "appstrate.remote.detached", runId, instance: opts.instance }) +
+          "\n",
+      );
+    } else {
+      writeStderr(`\ndetached — run ${runId} is still running on ${opts.instance}\n`);
+      writeStderr(`  follow it with: appstrate api GET /api/runs/${runId}\n`);
+    }
+    return { kind: "detached", runId, logs: allLogs };
+  };
+
+  // The signal can land before the first poll (a supervisor reaping the
+  // process while the trigger POST was in flight, or an already-aborted
+  // signal passed in). Unwind without opening the loop at all.
+  if (detachRequested) return finishDetached();
 
   while (true) {
     // Logs first — high-frequency, bounded by the cursor.
@@ -377,6 +454,11 @@ export async function runRemote(
       // Sleep aborts are normal once the user hits Ctrl-C — we still
       // want the next loop iteration to fetch the now-cancelled status.
     });
+
+    // Detach is checked here rather than at the top of the loop so the
+    // logs fetched by the iteration in flight when the signal landed are
+    // still rendered before the CLI lets go.
+    if (detachRequested) return finishDetached();
   }
 
   // ─── 4. Final fetch — make sure we have the freshest record + tail logs ──
@@ -432,7 +514,7 @@ export async function runRemote(
     await writeFile(opts.outputPath, JSON.stringify(reconstructedResult, null, 2) + "\n");
   }
 
-  return { runId, status, record: finalRecord, logs: allLogs, exitCode };
+  return { kind: "terminal", runId, status, record: finalRecord, logs: allLogs, exitCode };
 }
 
 // ---------------------------------------------------------------------------

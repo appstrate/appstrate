@@ -139,6 +139,33 @@ describe("ShutdownCoordinator", () => {
     expect(lateCalled).toBe(false);
   });
 
+  it("exposes the exit code chosen by trigger, per signal", async () => {
+    // Subcommands keep a `process.exit` backstop on the signal path and
+    // read this instead of hardcoding 130 — a CLI killed by SIGTERM must
+    // report 143 and by SIGHUP 129, which is what scripted callers (CI
+    // wrappers, supervisors) branch on.
+    for (const [signal, code] of [
+      ["SIGINT", 130],
+      ["SIGTERM", 143],
+      ["SIGHUP", 129],
+    ] as const) {
+      const { coordinator, exitCodes } = makeCoordinator();
+      await coordinator.trigger(signal, code);
+      expect(coordinator.exitCode).toBe(code);
+      expect(exitCodes()).toEqual([code]);
+    }
+  });
+
+  it("defaults the exit code to 130 before any trigger", async () => {
+    // An abort that did not come from a signal has no code of its own;
+    // the historical SIGINT value is the safe answer for a backstop
+    // reading the accessor.
+    const { coordinator } = makeCoordinator();
+    expect(coordinator.exitCode).toBe(130);
+    await coordinator.trigger("SIGHUP", 129);
+    expect(coordinator.exitCode).toBe(129);
+  });
+
   it("hook receives an aborted signal — hooks can branch on shutdown reason", async () => {
     // Hooks that need to know whether they're being called from a
     // signal vs a normal completion path can read `coordinator.signal`.

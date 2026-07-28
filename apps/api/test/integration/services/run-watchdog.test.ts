@@ -244,6 +244,55 @@ describe("run watchdog — unified stall detection", () => {
     expect(row?.cost).toBeCloseTo(0.0234, 5);
   });
 
+  // #1020 — the stall sweep builds its own `emptyRunResult()` (it does not
+  // go through `synthesiseFinalize`), so it has to recover the deliverable
+  // the agent already emitted or the payload stays invisible on a durable
+  // `run_logs` row. Recovery is payload-only: the terminal stays `failed`.
+  it("recovers an emitted output payload onto the failed terminal", async () => {
+    const runId = await seedRun(ctx, "@test/watchdog-agent", {
+      status: "running",
+      lastHeartbeatAt: new Date(Date.now() - 3600_000),
+    });
+    // The row the `output.emitted` ingestion path writes at emit time.
+    await db.insert(runLogs).values({
+      runId,
+      orgId: ctx.orgId,
+      type: "result",
+      event: "output",
+      data: { answer: "42" },
+      level: "info",
+    });
+
+    const finalizedCount = await runWatchdogTick({
+      intervalSeconds: 30,
+      stallThresholdSeconds: 60,
+      maxFinalizesPerTick: 100,
+    });
+
+    expect(finalizedCount).toBe(1);
+    const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+    expect(row?.status).toBe("failed");
+    expect(row?.error).toContain("Runner stopped reporting");
+    expect((row?.result as { output?: unknown } | null)?.output).toEqual({ answer: "42" });
+  });
+
+  it("leaves runs.result null when a stalled run emitted no output", async () => {
+    const runId = await seedRun(ctx, "@test/watchdog-agent", {
+      status: "running",
+      lastHeartbeatAt: new Date(Date.now() - 3600_000),
+    });
+
+    await runWatchdogTick({
+      intervalSeconds: 30,
+      stallThresholdSeconds: 60,
+      maxFinalizesPerTick: 100,
+    });
+
+    const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+    expect(row?.status).toBe("failed");
+    expect(row?.result).toBeNull();
+  });
+
   // B1 regression — a stalled runner is not necessarily a dead one. A
   // remote workload (e.g. a firecracker microVM that lost its event
   // path) keeps executing and billing after the row is finalized, so

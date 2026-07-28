@@ -14,6 +14,7 @@ import {
   runRemote,
   RemoteRunError,
   type RunRemoteOptions,
+  type RemoteRunOutcome,
   type RemoteRunRecord,
   type RemoteRunLog,
 } from "../src/commands/run/remote-runner.ts";
@@ -167,6 +168,23 @@ function withCapturedWriters(opts: RunRemoteOptions): RunRemoteOptions {
   };
 }
 
+/**
+ * Most tests drive the runner all the way to a terminal status.
+ * `runRemote` returns a discriminated union (terminal | detached), so
+ * narrow once here instead of repeating the `kind` check in every
+ * assertion block. Fails loudly if the runner detached unexpectedly.
+ */
+async function runToTerminal(
+  opts: RunRemoteOptions,
+  signal: AbortSignal,
+): Promise<Extract<RemoteRunOutcome, { kind: "terminal" }>> {
+  const outcome = await runRemote(opts, signal);
+  if (outcome.kind !== "terminal") {
+    throw new Error(`expected a terminal outcome, got kind="${outcome.kind}"`);
+  }
+  return outcome;
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -276,7 +294,7 @@ describe("runRemote — happy path", () => {
     );
 
     const opts = withCapturedWriters(buildBaseOpts({ fetchImpl }));
-    const outcome = await runRemote(opts, new AbortController().signal);
+    const outcome = await runToTerminal(opts, new AbortController().signal);
 
     expect(outcome.runId).toBe("run_test_1");
     expect(outcome.status).toBe("success");
@@ -337,7 +355,7 @@ describe("runRemote — happy path", () => {
     );
 
     const opts = withCapturedWriters(buildBaseOpts({ fetchImpl }));
-    const outcome = await runRemote(opts, new AbortController().signal);
+    const outcome = await runToTerminal(opts, new AbortController().signal);
 
     expect(outcome.status).toBe("success");
     expect(outcome.logs.map((l) => l.id)).toEqual([1, 2, 3]);
@@ -577,7 +595,7 @@ describe("runRemote — non-success terminals", () => {
     );
 
     const opts = withCapturedWriters(buildBaseOpts({ fetchImpl }));
-    const outcome = await runRemote(opts, new AbortController().signal);
+    const outcome = await runToTerminal(opts, new AbortController().signal);
     expect(outcome.status).toBe("failed");
     expect(outcome.exitCode).toBe(1);
     // Local sink renders failures as `[run failed] <message>` on stdout
@@ -602,7 +620,7 @@ describe("runRemote — non-success terminals", () => {
       calls,
     );
 
-    const outcome = await runRemote(
+    const outcome = await runToTerminal(
       withCapturedWriters(buildBaseOpts({ fetchImpl })),
       new AbortController().signal,
     );
@@ -653,15 +671,16 @@ describe("runRemote — cancellation", () => {
     };
     const wrapped = wrappedImpl as unknown as typeof fetch;
 
-    const outcome = await runRemote(
+    const outcome = await runToTerminal(
       withCapturedWriters(buildBaseOpts({ fetchImpl: wrapped })),
       ctrl.signal,
     );
 
     expect(outcome.status).toBe("cancelled");
     expect(outcome.exitCode).toBe(1);
-    const cancelCall = calls.find((c) => c.method === "POST" && c.url.endsWith("/cancel"));
-    expect(cancelCall).toBeDefined();
+    expect(outcome.kind).toBe("terminal");
+    const cancelCalls = calls.filter((c) => c.method === "POST" && c.url.endsWith("/cancel"));
+    expect(cancelCalls).toHaveLength(1);
   });
 
   it("does not double-fire cancel on repeated abort events", async () => {
@@ -688,6 +707,142 @@ describe("runRemote — cancellation", () => {
 
     const cancelCalls = calls.filter((c) => c.method === "POST" && c.url.endsWith("/cancel"));
     expect(cancelCalls).toHaveLength(1);
+  });
+});
+
+describe("runRemote — detach on signal (issue #1020)", () => {
+  /**
+   * Script a run that NEVER reaches a terminal status, so the only way
+   * out of the poll loop is the detach path. The wrapped fetch aborts
+   * after the first record poll — the same shape the cancel tests use.
+   */
+  function makeNeverTerminating(runId: string, calls: FetchCall[]): typeof fetch {
+    return makeFetchImpl(
+      {
+        [`POST /api/agents/@system/hello-world/run`]: { status: 201, body: { id: runId } },
+        [`GET /api/runs/${runId}/logs`]: {
+          status: 200,
+          body: { object: "list", data: [], hasMore: false },
+        },
+        [`GET /api/runs/${runId}`]: {
+          status: 200,
+          body: recordSummary({ id: runId, status: "running" }),
+        },
+        // Routed but never expected to be hit — an unrouted fetch would
+        // throw and mask the assertion we actually care about.
+        [`POST /api/runs/${runId}/cancel`]: { status: 200, body: { ok: true } },
+      },
+      calls,
+    );
+  }
+
+  function abortAfterFirstRecordPoll(
+    impl: typeof fetch,
+    runId: string,
+    ctrl: AbortController,
+  ): typeof fetch {
+    let recordHits = 0;
+    const wrapped = async (
+      input: string | URL | Request,
+      init?: RequestInit,
+    ): Promise<Response> => {
+      const res = await impl(input, init);
+      const url =
+        typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (url.endsWith(`/api/runs/${runId}`) && (init?.method ?? "GET").toUpperCase() === "GET") {
+        recordHits++;
+        if (recordHits === 1) ctrl.abort();
+      }
+      return res;
+    };
+    return wrapped as unknown as typeof fetch;
+  }
+
+  it("does not cancel, prints the detach notice, writes no --output file", async () => {
+    const calls: FetchCall[] = [];
+    const ctrl = new AbortController();
+    const fetchImpl = abortAfterFirstRecordPoll(
+      makeNeverTerminating("run_d", calls),
+      "run_d",
+      ctrl,
+    );
+
+    const outcome = await runRemote(
+      withCapturedWriters(
+        buildBaseOpts({
+          fetchImpl,
+          onSignal: "detach",
+          outputPath: "/tmp/appstrate-detach-should-not-exist.json",
+        }),
+      ),
+      ctrl.signal,
+    );
+
+    expect(outcome.kind).toBe("detached");
+    expect(outcome.runId).toBe("run_d");
+
+    // The whole point of the issue: a healthy platform-side run survives.
+    const cancelCalls = calls.filter((c) => c.method === "POST" && c.url.endsWith("/cancel"));
+    expect(cancelCalls).toHaveLength(0);
+
+    const stderr = writers.stderr.join("");
+    expect(stderr).toContain("detached — run run_d is still running on https://app.example.com");
+    expect(stderr).toContain("appstrate api GET /api/runs/run_d");
+    // No fabricated terminal state: no finalize line, no output file.
+    expect(writers.stdout.join("")).not.toMatch(/\[run (complete|failed)\]/);
+    expect(Object.keys(writers.files)).toHaveLength(0);
+  });
+
+  it("--json emits exactly one appstrate.remote.detached envelope and no finalize", async () => {
+    const calls: FetchCall[] = [];
+    const ctrl = new AbortController();
+    const fetchImpl = abortAfterFirstRecordPoll(
+      makeNeverTerminating("run_dj", calls),
+      "run_dj",
+      ctrl,
+    );
+
+    const outcome = await runRemote(
+      withCapturedWriters(buildBaseOpts({ fetchImpl, json: true, onSignal: "detach" })),
+      ctrl.signal,
+    );
+
+    expect(outcome.kind).toBe("detached");
+    const envelopes = writers.stdout
+      .join("")
+      .split("\n")
+      .filter((line) => line.length > 0)
+      .map((line) => JSON.parse(line) as { type?: string; runId?: string; instance?: string });
+    const detached = envelopes.filter((e) => e.type === "appstrate.remote.detached");
+    expect(detached).toHaveLength(1);
+    expect(detached[0]).toEqual({
+      type: "appstrate.remote.detached",
+      runId: "run_dj",
+      instance: "https://app.example.com",
+    });
+    // Pairs with the kickoff envelope, and nothing claims a result.
+    expect(envelopes.filter((e) => e.type === "appstrate.remote.triggered")).toHaveLength(1);
+    expect(envelopes.some((e) => e.type === "appstrate.finalize")).toBe(false);
+    expect(writers.stderr.join("")).toBe("");
+  });
+
+  it("detaches without polling at all when the signal already fired", async () => {
+    // A supervisor can reap the process while the trigger POST is still
+    // in flight: the run exists server-side, the CLI must let go without
+    // opening the tail loop (and without cancelling).
+    const calls: FetchCall[] = [];
+    const ctrl = new AbortController();
+    ctrl.abort();
+    const fetchImpl = makeNeverTerminating("run_da", calls);
+
+    const outcome = await runRemote(
+      withCapturedWriters(buildBaseOpts({ fetchImpl, onSignal: "detach" })),
+      ctrl.signal,
+    );
+
+    expect(outcome.kind).toBe("detached");
+    expect(calls.filter((c) => c.method === "POST" && c.url.endsWith("/cancel"))).toHaveLength(0);
+    expect(calls.filter((c) => c.url.includes("/logs"))).toHaveLength(0);
   });
 });
 
@@ -771,7 +926,7 @@ describe("runRemote — error paths", () => {
       calls,
     );
 
-    const outcome = await runRemote(
+    const outcome = await runToTerminal(
       withCapturedWriters(buildBaseOpts({ fetchImpl })),
       new AbortController().signal,
     );
@@ -817,7 +972,7 @@ describe("runRemote — log dedup", () => {
       calls,
     );
 
-    const outcome = await runRemote(
+    const outcome = await runToTerminal(
       withCapturedWriters(buildBaseOpts({ fetchImpl, recordPollEveryNTicks: 1 })),
       new AbortController().signal,
     );
@@ -863,7 +1018,7 @@ describe("runRemote — log cursor (?since=)", () => {
       calls,
     );
 
-    const outcome = await runRemote(
+    const outcome = await runToTerminal(
       withCapturedWriters(buildBaseOpts({ fetchImpl, recordPollEveryNTicks: 1 })),
       new AbortController().signal,
     );
@@ -911,7 +1066,7 @@ describe("runRemote — log cursor (?since=)", () => {
       calls,
     );
 
-    const outcome = await runRemote(
+    const outcome = await runToTerminal(
       withCapturedWriters(buildBaseOpts({ fetchImpl, recordPollEveryNTicks: 1 })),
       new AbortController().signal,
     );
@@ -1077,7 +1232,7 @@ describe("runRemote — trigger retry on transient 5xx", () => {
       calls,
     );
 
-    const outcome = await runRemote(
+    const outcome = await runToTerminal(
       withCapturedWriters(buildBaseOpts({ fetchImpl })),
       new AbortController().signal,
     );
@@ -1109,7 +1264,7 @@ describe("runRemote — trigger retry on transient 5xx", () => {
       calls,
     );
 
-    const outcome = await runRemote(
+    const outcome = await runToTerminal(
       withCapturedWriters(buildBaseOpts({ fetchImpl })),
       new AbortController().signal,
     );
@@ -1186,7 +1341,7 @@ describe("runRemote — record-poll resilience", () => {
       calls,
     );
 
-    const outcome = await runRemote(
+    const outcome = await runToTerminal(
       withCapturedWriters(
         buildBaseOpts({
           fetchImpl,

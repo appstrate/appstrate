@@ -93,7 +93,7 @@ describe("resolveExecutionMode — flag conflict", () => {
 });
 
 describe("validateOptsForMode — local mode", () => {
-  it("never rejects in local mode (every flag is supported locally)", () => {
+  it("accepts every local-execution flag", () => {
     expect(() =>
       validateOptsForMode("local", {
         snapshot: "/tmp/s.json",
@@ -108,11 +108,34 @@ describe("validateOptsForMode — local mode", () => {
       }),
     ).not.toThrow();
   });
+
+  it.each([
+    ["--cancel-on-exit", { cancelOnExit: true }],
+    ["--no-cancel-on-exit", { cancelOnExit: false }],
+  ])("rejects %s in local mode (no platform-side run to keep alive)", (flag, opts) => {
+    try {
+      validateOptsForMode("local", opts);
+      throw new Error("expected throw");
+    } catch (err) {
+      if (!(err instanceof ExecutionModeError)) throw err;
+      expect(err.message).toContain(flag);
+      expect(err.hint).toMatch(/--remote/);
+    }
+  });
+
+  it("stays silent when the tri-state flag is absent", () => {
+    expect(() => validateOptsForMode("local", { cancelOnExit: undefined })).not.toThrow();
+  });
 });
 
 describe("validateOptsForMode — remote mode", () => {
   it("accepts an empty opts object", () => {
     expect(() => validateOptsForMode("remote", {})).not.toThrow();
+  });
+
+  it("accepts --cancel-on-exit in both directions (remote-only flag)", () => {
+    expect(() => validateOptsForMode("remote", { cancelOnExit: true })).not.toThrow();
+    expect(() => validateOptsForMode("remote", { cancelOnExit: false })).not.toThrow();
   });
 
   it("accepts --integrations=remote (the implicit default)", () => {

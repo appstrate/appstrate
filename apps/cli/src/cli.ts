@@ -890,7 +890,15 @@ program
   )
   .option(
     "--remote",
-    'Force remote execution on the pinned instance (same path as the dashboard "Run" button). Default for @scope/agent ids. Path-mode bundles are not yet supported in remote mode.',
+    'Force remote execution on the pinned instance (same path as the dashboard "Run" button). Default for @scope/agent ids. Path-mode bundles are not yet supported in remote mode. Interactively the CLI owns the run\'s lifetime — Ctrl-C cancels it server-side (see --cancel-on-exit).',
+  )
+  .option(
+    "--cancel-on-exit",
+    "Cancel the platform-side run when the CLI receives SIGINT/SIGTERM/SIGHUP. Default: on when stdin is a TTY and --json is not set (interactive Ctrl-C means cancel); off otherwise — the CLI detaches and the run keeps going. --remote only.",
+  )
+  .option(
+    "--no-cancel-on-exit",
+    "Never cancel the platform-side run on a signal: the CLI detaches and the run keeps going on the instance. --remote only.",
   )
   .option(
     "--integrations <mode>",
@@ -981,6 +989,12 @@ program
       // `opts.inherit === false`. Default (no flag) is `undefined` →
       // inheritance enabled.
       noInherit: opts.inherit === false,
+      // Tri-state, unlike `--no-inherit` above: declaring BOTH the
+      // positive flag and its `--no-` negation makes commander leave the
+      // key unset when neither is passed, so `undefined` genuinely means
+      // "auto" (resolved from --json + stdin TTY) rather than "off".
+      // Proven end-to-end in test/run-signal-policy.test.ts.
+      cancelOnExit: typeof opts.cancelOnExit === "boolean" ? opts.cancelOnExit : undefined,
       verbose: opts.verbose === true,
       quiet: opts.quiet === true,
     });
