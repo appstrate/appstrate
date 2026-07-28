@@ -92,9 +92,10 @@ import {
   type ExecutionMode,
 } from "./run/mode.ts";
 import { runRemote, RemoteRunError } from "./run/remote-runner.ts";
+import { resolveSignalPolicy, readStdinIsTty } from "./run/signal-policy.ts";
 import { validateConfig } from "@appstrate/core/schema-validation";
 import type { JSONSchemaObject } from "@appstrate/core/form";
-import { onShutdown, shutdownSignal } from "../lib/shutdown.ts";
+import { onShutdown, shutdownSignal, shutdownExitCode } from "../lib/shutdown.ts";
 
 export interface RunCommandOptions {
   profile?: string;
@@ -170,6 +171,15 @@ export interface RunCommandOptions {
    * error. Mutually exclusive with `--local`.
    */
   remote?: boolean;
+  /**
+   * Tri-state `--cancel-on-exit` / `--no-cancel-on-exit`: whether a
+   * SIGINT/SIGTERM/SIGHUP cancels the platform-side run or merely
+   * detaches from it. `undefined` (no flag) auto-resolves from `--json`
+   * + stdin TTY — see `resolveSignalPolicy`. Remote-only: a local run
+   * dies with the CLI regardless, so `validateOptsForMode` rejects the
+   * flag in local mode.
+   */
+  cancelOnExit?: boolean | undefined;
 }
 
 export async function runCommand(opts: RunCommandOptions): Promise<void> {
@@ -584,7 +594,7 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
     // from `heartbeat?.stop()`. If that happens on the signal path,
     // propagating the rejection would race with — and beat, since
     // commander's path has fewer microtask hops — the coordinator's
-    // `process.exit(130)`, silently turning a user cancel into exit 1.
+    // `process.exit(<signal code>)`, silently turning a user cancel into exit 1.
     // Surface the failure on stderr instead so it remains visible, but
     // don't compete for the exit code.
     await runCleanup().catch((err) => {
@@ -596,12 +606,13 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
 
   // Defense in depth: the coordinator owns the exit on the signal path
   // (it awaits `runCleanup` via the registered hook, then calls
-  // `process.exit(130)`), and a microtask analysis says its exit fires
+  // `process.exit(…)`), and a microtask analysis says its exit fires
   // before node's natural exit. But that ordering is fragile — a future
   // change inside `coordinator.trigger` that adds an extra `await` could
   // flip the race. This guard is a no-op if the coordinator already
-  // exited, and a backstop if it hasn't.
-  if (shutdownSignal.aborted) process.exit(130);
+  // exited, and a backstop if it hasn't. The code comes from the
+  // coordinator so SIGTERM reports 143 and SIGHUP 129, not a blanket 130.
+  if (shutdownSignal.aborted) process.exit(shutdownExitCode());
 }
 
 // ---------------------------------------------------------------------------
@@ -655,6 +666,15 @@ async function runCommandRemote(
 
   const bundleLabel = `${target.packageId}${target.spec ? `@${target.spec}` : ""}`;
 
+  // What a signal means for the run we're about to trigger. Resolved
+  // before the trigger so the decision is fixed for the whole tail — a
+  // signal arriving mid-run can't race a re-probe of the TTY.
+  const onSignal = resolveSignalPolicy({
+    cancelOnExit: opts.cancelOnExit,
+    json: opts.json ?? false,
+    stdinIsTty: readStdinIsTty(),
+  });
+
   const outcome = await runRemote(
     {
       instance: resolverInputs.instance,
@@ -672,20 +692,27 @@ async function runCommandRemote(
       json: opts.json ?? false,
       ...(opts.output != null ? { outputPath: opts.output } : {}),
       bundleLabel,
+      onSignal,
     },
     shutdownSignal,
   );
 
-  // Match the local path: a non-success terminal status sets
-  // `process.exitCode` so shell `&& chain` works. The shutdown
-  // coordinator owns SIGINT exit (130); we only mark for the
-  // natural-completion path.
-  if (outcome.exitCode !== 0) process.exitCode = outcome.exitCode;
+  // A detached run has no terminal status, so there is nothing to map to
+  // an exit code — the signal that caused the detach owns it (backstop
+  // below). Setting `process.exitCode = 1` here would report a failure
+  // for a run that is very likely about to succeed.
+  if (outcome.kind === "terminal") {
+    // Match the local path: a non-success terminal status sets
+    // `process.exitCode` so shell `&& chain` works. The shutdown
+    // coordinator owns the signal exit; we only mark for the
+    // natural-completion path.
+    if (outcome.exitCode !== 0) process.exitCode = outcome.exitCode;
+  }
 
   // Defense-in-depth backstop matching the local path: if the abort
-  // fired between `runRemote` returning and us getting here, exit 130
-  // explicitly so the CLI doesn't claim natural completion.
-  if (shutdownSignal.aborted) process.exit(130);
+  // fired between `runRemote` returning and us getting here, exit with
+  // the signal's own code so the CLI doesn't claim natural completion.
+  if (shutdownSignal.aborted) process.exit(shutdownExitCode());
 }
 
 /**

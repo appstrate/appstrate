@@ -549,13 +549,14 @@ Run-config inheritance (model, proxy, agent config, version pin) is fetched from
 
 **Selected flags**
 
-| Flag            | Purpose                                                                                                                                                |
-| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `--proxy <id>`  | Proxy id to associate with the run (overrides the per-app inherited value).                                                                            |
-| `--no-inherit`  | Skip per-application run-config inheritance — flags + env vars + defaults only.                                                                        |
-| `--json`        | Emit canonical RunEvents as JSONL on stdout.                                                                                                           |
-| `-v, --verbose` | Verbose tool-call output: pretty-print args + reveal full results (~2 KB). Honoured only in human mode (without `--json`). Env: `APPSTRATE_VERBOSE=1`. |
-| `-q, --quiet`   | Suppress per-tool output lines (name, args, result). Errors and final summary still print. Mutually exclusive with `--verbose`.                        |
+| Flag                    | Purpose                                                                                                                                                                                                                                                      |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `--proxy <id>`          | Proxy id to associate with the run (overrides the per-app inherited value).                                                                                                                                                                                  |
+| `--[no-]cancel-on-exit` | Remote runs only: whether SIGINT/SIGTERM/SIGHUP cancels the platform-side run. Default: on when stdin is a TTY and `--json` is not set (interactive Ctrl-C cancels), off otherwise — the CLI detaches and the run keeps going, like closing a dashboard tab. |
+| `--no-inherit`          | Skip per-application run-config inheritance — flags + env vars + defaults only.                                                                                                                                                                              |
+| `--json`                | Emit canonical RunEvents as JSONL on stdout.                                                                                                                                                                                                                 |
+| `-v, --verbose`         | Verbose tool-call output: pretty-print args + reveal full results (~2 KB). Honoured only in human mode (without `--json`). Env: `APPSTRATE_VERBOSE=1`.                                                                                                       |
+| `-q, --quiet`           | Suppress per-tool output lines (name, args, result). Errors and final summary still print. Mutually exclusive with `--verbose`.                                                                                                                              |
 
 **Tool-call rendering**
 
