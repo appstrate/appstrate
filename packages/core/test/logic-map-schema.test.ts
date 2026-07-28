@@ -3,8 +3,7 @@
 import { describe, expect, it } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import Ajv2020 from "ajv/dist/2020.js";
-import addFormats from "ajv-formats";
+import { createAjv } from "../src/ajv.ts";
 
 // Le schéma de la carte de logique est le contrat entre le cartographe (qui produit) et le
 // croisement (qui vérifie). Les 18 cartes écrites à la main de `examples/logic-map/` sont sa
@@ -17,10 +16,8 @@ const EXAMPLES_DIR = join(REPO_ROOT, "examples/logic-map");
 const schema = JSON.parse(readFileSync(SCHEMA_PATH, "utf8")) as object;
 
 function makeValidator() {
-  // Même configuration que `@appstrate/core/ajv` : draft 2020-12, formats activés.
-  const ajv = new Ajv2020({ allErrors: true, strict: false });
-  addFormats(ajv);
-  return ajv.compile(schema);
+  // Le même AJV que la plateforme : draft 2020-12, formats activés, `strict: false`.
+  return createAjv().compile(schema);
 }
 
 const exampleFiles = readdirSync(EXAMPLES_DIR).filter((f) => f.endsWith(".logic-map.json"));
