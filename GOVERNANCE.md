@@ -8,7 +8,7 @@ Appstrate is an open-source platform for running autonomous AI agents in sandbox
 
 Appstrate follows a **corporate-backed open-source model** (similar to Supabase). The Appstrate team retains final authority over the project roadmap, architecture, and releases. Community input is welcomed and encouraged through GitHub Issues, Discussions, and the RFC process described below.
 
-The core platform is licensed under [Apache 2.0](./LICENSE). Commercial extensions (cloud billing, registry) are maintained separately in private repositories.
+The core platform is licensed under [Apache 2.0](./LICENSE). Commercial extensions (cloud billing) are maintained separately in private repositories.
 
 ## Roles
 

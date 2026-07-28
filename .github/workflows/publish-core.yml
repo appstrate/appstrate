@@ -1,5 +1,35 @@
 name: Publish @appstrate/core to npm
 
+# ── RELEASE POLICY for @appstrate/core ───────────────────────────────────────
+# Cadence, not numbering, is what costs consumers. Core shipped four majors in
+# nineteen days — 3.0.0 (2026-07-08), 4.0.0 (07-23), 5.0.0 (07-25), 6.0.0
+# (07-27) — and each one forced a lockstep cycle on every consumer. 6.0.0 is
+# the shape to copy: it grouped every contract change accumulated after 5.0.0
+# into ONE coordinated break.
+#
+# 1. BATCH. Breaking changes accumulate under `[Unreleased]` in
+#    packages/core/CHANGELOG.md until a deliberate major. One major per batch,
+#    not one per break. Why "this break is small, ship it now" is never the
+#    reason to skip the batch: out-of-tree modules import a WIDE surface. The
+#    in-tree modules — the only proxy we can measure — reach for 22 distinct
+#    `@appstrate/core/*` subpaths out of 48 exported (top: errors, module,
+#    permissions, platform-types, chat-turn-metadata, chat-contract). Nearly
+#    half the package faces module authors, and this repo cannot see who
+#    imports what.
+# 2. DECOUPLE FROM THE PLATFORM TRAIN. Publish core when a consumer or an
+#    out-of-tree module author needs the change — not on every platform
+#    release. Core's version is not the platform's.
+# 3. DELETING AN EXPORT WITH NO IMPORTER IS STILL TECHNICALLY BREAKING, but it
+#    does not have to TRIGGER a major — it rides in the next batch. And per (1),
+#    "no importer" only ever means none this repo can see.
+#
+# Batching is a deliberate choice about consumer cost, not a workaround for a
+# broken release path: executing a major is cheap since #1032 removed the
+# structural deadlock (an `X.0.0` release tolerates a consumer exactly one
+# major behind — see the release-ordering blockquote in
+# packages/core/CHANGELOG.md).
+# ─────────────────────────────────────────────────────────────────────────────
+
 on:
   push:
     tags:
