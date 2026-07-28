@@ -9,6 +9,7 @@ import type {
 } from "../../src/services/run-launcher/types.ts";
 import type { ExecutionContext } from "@appstrate/afps-runtime/types";
 import type { Bundle, BundlePackage, PackageIdentity } from "@appstrate/afps-runtime/bundle";
+import { _resetCacheForTesting } from "@appstrate/env";
 
 interface TestSchemas {
   input?: import("@appstrate/core/form").JSONSchemaObject;
@@ -226,6 +227,51 @@ describe("buildEnrichedPrompt — core structure", () => {
     const ctx = baseContext({ timeout: undefined });
     const prompt = await buildEnrichedPrompt(ctx);
     expect(prompt).not.toContain("**Timeout**");
+  });
+});
+
+// ─── Workspace disk cap (issue #1019) ──────────────────────
+
+describe("buildEnrichedPrompt — workspace disk cap", () => {
+  /** Render a prompt under a given backend + tmpfs cap, then restore the env. */
+  async function promptWithEnv(adapter: string, tmpfsMb?: string): Promise<string> {
+    const prevAdapter = process.env.RUN_ADAPTER;
+    const prevTmpfs = process.env.WORKSPACE_TMPFS_SIZE_MB;
+    process.env.RUN_ADAPTER = adapter;
+    if (tmpfsMb === undefined) delete process.env.WORKSPACE_TMPFS_SIZE_MB;
+    else process.env.WORKSPACE_TMPFS_SIZE_MB = tmpfsMb;
+    _resetCacheForTesting();
+    try {
+      return await buildEnrichedPrompt(baseContext());
+    } finally {
+      if (prevAdapter === undefined) delete process.env.RUN_ADAPTER;
+      else process.env.RUN_ADAPTER = prevAdapter;
+      if (prevTmpfs === undefined) delete process.env.WORKSPACE_TMPFS_SIZE_MB;
+      else process.env.WORKSPACE_TMPFS_SIZE_MB = prevTmpfs;
+      _resetCacheForTesting();
+    }
+  }
+
+  it("states the cap and points bulky work at /tmp on the docker backend", async () => {
+    // The docker backend mounts the workspace as tmpfs, so an agent that
+    // installs dependencies into it dies with ENOSPC unless the prompt says so.
+    const prompt = await promptWithEnv("docker");
+    expect(prompt).toContain("**Disk**: the workspace is a RAM-backed tmpfs capped at 512 MB");
+    expect(prompt).toContain("`/tmp`");
+  });
+
+  it("interpolates the operator's WORKSPACE_TMPFS_SIZE_MB, not a hardcoded default", async () => {
+    const prompt = await promptWithEnv("docker", "2048");
+    expect(prompt).toContain("capped at 2048 MB");
+    expect(prompt).not.toContain("512 MB");
+  });
+
+  it("stays silent when the docker workspace cap does not apply", async () => {
+    // WORKSPACE_TMPFS_SIZE_MB=0 disables the tmpfs even under docker; the
+    // process and Firecracker backends do not apply this docker mount setting.
+    expect(await promptWithEnv("docker", "0")).not.toContain("**Disk**");
+    expect(await promptWithEnv("process")).not.toContain("**Disk**");
+    expect(await promptWithEnv("firecracker")).not.toContain("**Disk**");
   });
 });
 
