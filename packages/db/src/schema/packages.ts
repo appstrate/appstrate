@@ -8,6 +8,7 @@ import {
   integer,
   jsonb,
   serial,
+  doublePrecision,
   uuid,
   index,
   uniqueIndex,
@@ -182,5 +183,52 @@ export const packageVersionDependencies = pgTable(
       table.depType,
     ),
     index("idx_pkg_ver_deps_version_id").on(table.versionId),
+  ],
+);
+
+/**
+ * Cartes de logique : projection inférée et EN LECTURE SEULE du bundle d'une version
+ * (prompt, `SKILL.md` des skills déclarés et leurs fichiers de références).
+ *
+ * Artefact **dérivé**, contrairement à la carte de dépendances qui se calcule à la demande
+ * depuis le manifeste et l'installation. Il faut donc le ranger : un agent le produit une
+ * fois, la lecture le relit ensuite.
+ *
+ * Clé naturelle `(versionId)` : un manifeste de version est immuable, sa carte l'est aussi.
+ * `orgId` est porté pour le cloisonnement — un agent local appartient à son organisation, et
+ * seul le catalogue système (`packages.org_id IS NULL`) est partagé.
+ *
+ * `integrity` recopie celui de la version : c'est la clé d'invalidation du balayage
+ * nocturne, qui compare les empreintes avant de dépenser le moindre appel de modèle. Hash
+ * identique, aucune régénération.
+ */
+export const packageLogicMaps = pgTable(
+  "package_logic_maps",
+  {
+    id: serial("id").primaryKey(),
+    versionId: integer("version_id")
+      .notNull()
+      .references(() => packageVersions.id, { onDelete: "cascade" }),
+    packageId: text("package_id")
+      .notNull()
+      .references(() => packages.id, { onDelete: "cascade" }),
+    /** `null` pour un package système, partagé par toute l'instance. */
+    orgId: uuid("org_id").references(() => organizations.id, { onDelete: "cascade" }),
+    /** Empreinte de la version cartographiée, recopiée pour comparer sans jointure. */
+    integrity: text("integrity").notNull(),
+    /** La carte elle-même, au format `logic-map.schema.json`. */
+    map: jsonb("map").notNull(),
+    /** `human` pour une carte écrite à la main, `agent` pour une carte inférée. */
+    generatorKind: text("generator_kind").notNull(),
+    generatorVersion: text("generator_version"),
+    /** Confiance globale, remontée en colonne pour filtrer les cartes douteuses sans lire le jsonb. */
+    overallConfidence: doublePrecision("overall_confidence"),
+    generatedAt: timestamp("generated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("pkg_logic_maps_version_unique").on(table.versionId),
+    index("idx_pkg_logic_maps_package_id").on(table.packageId),
+    index("idx_pkg_logic_maps_org_id").on(table.orgId),
+    index("idx_pkg_logic_maps_integrity").on(table.integrity),
   ],
 );
