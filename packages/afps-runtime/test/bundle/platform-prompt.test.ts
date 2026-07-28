@@ -96,6 +96,43 @@ describe("renderPlatformPrompt", () => {
     expect(out).not.toContain("**Timeout**");
   });
 
+  it("surfaces the workspace tmpfs cap and points bulky work at /tmp (#1019)", () => {
+    const out = renderPlatformPrompt({
+      template: "T",
+      context: ctx(),
+      workspaceTmpfsSizeMb: 512,
+    });
+    const diskLine = out.split("\n").find((line) => line.startsWith("- **Disk**"));
+    expect(diskLine).toBe(
+      "- **Disk**: the workspace is a RAM-backed tmpfs capped at 512 MB. " +
+        "Keep dependency installs, clones and other bulky scratch work under `/tmp`, " +
+        "outside this workspace cap. Write user deliverables under `./outputs/`.",
+    );
+  });
+
+  it("interpolates the operator's actual cap rather than a hardcoded default (#1019)", () => {
+    const out = renderPlatformPrompt({
+      template: "T",
+      context: ctx(),
+      workspaceTmpfsSizeMb: 2048,
+    });
+    expect(out).toContain("capped at 2048 MB");
+    expect(out).not.toContain("512 MB");
+  });
+
+  it("omits the disk line when the workspace is not tmpfs-backed (#1019)", () => {
+    // Absent option (unknown backing) and an explicit 0 (disk-backed volume)
+    // must both stay silent — a wrong cap is worse than no cap.
+    const withoutCap = renderPlatformPrompt({ template: "T", context: ctx() });
+    const withZeroCap = renderPlatformPrompt({
+      template: "T",
+      context: ctx(),
+      workspaceTmpfsSizeMb: 0,
+    });
+    expect(withoutCap).not.toContain("**Disk**");
+    expect(withZeroCap).toBe(withoutCap);
+  });
+
   it("lists skills (tools come from MCP tools/list, never the prompt)", () => {
     const out = renderPlatformPrompt({
       template: "T",
