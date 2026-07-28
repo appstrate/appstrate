@@ -35,6 +35,7 @@ import {
   type KnownApi,
   type Model,
 } from "./pi-sdk.ts";
+import { scheduleDeadlineNudges } from "./deadline-nudges.ts";
 import type { ModelApiShape } from "@appstrate/core/sidecar-types";
 import { deriveResponseReserveTokens } from "@appstrate/core/token-budget";
 import type { RunEvent, ExecutionContext } from "@appstrate/afps-runtime/types";
@@ -456,6 +457,10 @@ export class PiRunner implements Runner {
       }),
     });
 
+    // Widen the tool set BEFORE the first prompt — see {@link enableSearchTools}
+    // for why this placement is the cheap one.
+    enableSearchTools(session);
+
     const terminalTools = this.opts.terminalTools ?? [];
     const bridge = installSessionBridge(session, internalSink, context.runId, {
       terminalTools,
@@ -483,7 +488,35 @@ export class PiRunner implements Runner {
       ? <T>(promise: Promise<T>): Promise<T> => Promise.race([promise, abortPromise])
       : <T>(promise: Promise<T>): Promise<T> => promise;
 
-    await raceAbort(session.prompt(startMessage ?? systemPrompt));
+    // Mid-run wall-clock steering (#1029). The agent has no clock: the budget is
+    // stated once in the turn-1 system prompt and never again, so it over-explores
+    // and the watchdog kills it at 100% with nothing delivered.
+    //
+    // Timing asymmetry, stated rather than left implicit: the watchdog in `run()`
+    // counts from ITS `runStart`, while these checkpoints only start counting
+    // here, after session construction (SDK eval, auth storage, resource loader,
+    // MCP-backed extensions) — call that delta D. Each nudge therefore fires D
+    // late and advertises D seconds more runway than the watchdog will actually
+    // grant. Accepted, not ignored: D is bounded by session construction (sub-
+    // second on a warm SDK, a couple of seconds cold) against budgets of minutes,
+    // so the figure is honest at the granularity the agent plans in, and closing
+    // the gap would mean threading `runStart` through a protected method that
+    // exists to be overridden. Revisit if D ever becomes a visible share of a
+    // real budget.
+    const cancelDeadlineNudges = scheduleDeadlineNudges({
+      timeoutSeconds: context.timeoutSeconds ?? 0,
+      steer: (text) => session.steer(text),
+      emit: (event) => internalSink.emit(event),
+      runId: context.runId,
+    });
+    try {
+      await raceAbort(session.prompt(startMessage ?? systemPrompt));
+    } finally {
+      // Stand the nudges down the moment the loop settles — before the
+      // missing-`output` re-prompt below, so a checkpoint firing during that
+      // corrective turn cannot compete with it for the agent's attention.
+      cancelDeadlineNudges();
+    }
 
     // The agent loop settled on its own. When the agent owed a structured
     // `output` and never delivered one, this is the LAST moment its context
@@ -671,6 +704,77 @@ export async function maybeRepromptForOutput(opts: {
   const race = opts.race ?? (<T>(promise: Promise<T>): Promise<T> => promise);
   await race(session.prompt(OUTPUT_REPROMPT_INSTRUCTION));
   return true;
+}
+
+// ─── Search-tool widening ──────────────────────────────────────────
+
+/**
+ * Read-only search tools the Pi SDK ships but does not activate.
+ *
+ * The SDK registry knows seven built-ins (`core/tools/index.js` →
+ * `allToolNames = ["read","bash","edit","write","grep","find","ls"]`) but
+ * `createAgentSession` activates only the first four (`core/sdk.js` →
+ * `defaultActiveToolNames`). With no `grep`/`find`/`ls` on the surface the model
+ * reaches for `bash` for every lookup: in the run that motivated #1029, 101 of
+ * 135 tool calls were `bash`, overwhelmingly `grep -rn …` and `sed -n 'A,Bp'`.
+ * Each of those pays a shell round-trip and returns unstructured output the
+ * model then has to parse.
+ *
+ * Exported so a test can assert the list rather than restate it.
+ */
+export const SEARCH_TOOL_NAMES = ["grep", "find", "ls"] as const;
+
+/**
+ * Minimal session surface needed to widen the active tool set. Structural (not
+ * the SDK's `ToolInfo`) for the same reason {@link BridgeableSession} and
+ * {@link PromptableSession} are: the runner's own session contracts stay
+ * vendor-type-free, and `ToolInfo` is `Pick<ToolDefinition, "name" | …>` so a
+ * real session satisfies this by construction.
+ */
+export interface ToolWideningSession {
+  getActiveToolNames(): string[];
+  /** Everything the SDK tool registry resolves — built-ins, extensions, MCP tools. */
+  getAllTools(): Array<{ name: string }>;
+  setActiveToolsByName(toolNames: string[]): void;
+}
+
+/**
+ * Add {@link SEARCH_TOOL_NAMES} to the session's active tools, additively.
+ *
+ * NOT via `createAgentSession({ tools })`: that option is an ALLOWLIST
+ * (`core/sdk.js` → `allowedToolNames`) applied to extension and custom tools
+ * too, so passing the search-tool list there would silently strip every
+ * Appstrate MCP / integration tool off the surface. `setActiveToolsByName` is
+ * the additive door.
+ *
+ * Two consequences of the {@link PromptableSession.setActiveToolsByName}
+ * contract shape this function:
+ *  - it REPLACES the active set, so the currently-active names (where the
+ *    extension / MCP / runtime tools live) must be carried over verbatim. The
+ *    post-condition is a superset, never a smaller surface.
+ *  - unresolvable names are silently dropped, so each search tool is admitted
+ *    only if the registry actually exposes it (`getAllTools()`). A registry
+ *    without `find` yields `grep` + `ls` and no phantom name.
+ *
+ * Called BEFORE the first `session.prompt(...)`, where the rewrite is free: the
+ * Anthropic prompt-cache prefix is built by the first request, so there is no
+ * cached prefix yet to invalidate. This is the opposite situation to the
+ * mid-session narrowing {@link PromptableSession.setActiveToolsByName} warns
+ * about — do not read that cost note as applying here.
+ *
+ * Exported for unit testing; the production caller is `PiRunner.executeSession`.
+ *
+ * @internal
+ */
+export function enableSearchTools(session: ToolWideningSession): void {
+  const registered = new Set(session.getAllTools().map((tool) => tool.name));
+  const widened = new Set(session.getActiveToolNames());
+  const activeCount = widened.size;
+  for (const name of SEARCH_TOOL_NAMES) {
+    if (registered.has(name)) widened.add(name);
+  }
+  if (widened.size === activeCount) return; // nothing to add — skip the system-prompt rebuild
+  session.setActiveToolsByName([...widened]);
 }
 
 /**
