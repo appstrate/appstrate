@@ -84,4 +84,24 @@ describe("resolvePricingStatus — warn de-dup key", () => {
 
     expect(warnSpy).toHaveBeenCalledTimes(2);
   });
+
+  it("re-arms a key once the cap clears the set", () => {
+    const seed = { orgId: "org_cap_seed", model: "gpt-4o", usage: USAGE, cost: null };
+    resolvePricingStatus(seed);
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+
+    // WARNED_KEYS_CAP distinct keys is enough to drive the size past the cap and
+    // clear the whole set (the damper is a clear, not an LRU eviction).
+    for (let i = 0; i < 500; i++) {
+      resolvePricingStatus({
+        orgId: `org_cap_fill_${i}`,
+        model: "gpt-4o",
+        usage: USAGE,
+        cost: null,
+      });
+    }
+
+    resolvePricingStatus(seed);
+    expect(warnSpy).toHaveBeenCalledTimes(502);
+  });
 });

@@ -485,8 +485,7 @@ function ModelFormBody({
     setValue("contextWindow", preset.contextWindow.toString());
     setValue("maxTokens", (preset.maxTokens ?? 0).toString());
     setValue("reasoning", caps.includes("reasoning"));
-    // A catalog preset resolves server-side on read, so it must NOT be
-    // persisted as an override — drop any cost a previous OpenRouter pick left.
+    // Invariant, not a repair — every path into this handler already ran `resetModelFields()`.
     setImportedCost(null);
   };
 

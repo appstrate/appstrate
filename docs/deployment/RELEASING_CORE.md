@@ -19,16 +19,9 @@ API. Today that is exactly two repos:
 - `appstrate/cloud`
 - `appstrate/connect-helper`
 
-Two rules keep that list correct:
-
-- **A package inside this monorepo is never listed.** It resolves `workspace:*`,
-  cannot drift, and listing it would gate the publish on a version that does not
-  exist yet. `packages/module-claude-code` is in-tree for exactly this reason.
-- **A repo that stops consuming core from npm is removed in the same pass that
-  stops it** — absorbed in-tree, retired or archived alike. Its default branch
-  keeps whatever range it last published forever, so leaving it listed reports a
-  permanent failure that no bump anywhere can clear. `registry` and `portal`
-  left the list when those products were retired.
+Membership is not a release-time decision. The rule for adding and removing
+entries lives in the `CONSUMERS` doc-comment in that script — it addresses
+whoever retires, archives or absorbs a product, not whoever cuts a release.
 
 ## 1. Before you tag
 
@@ -70,48 +63,58 @@ unbumped consumer does not stay quiet, it blocks the next publish.
 
 `scripts/check-consumer-versions.ts` compares each consumer's declared
 `@appstrate/core` range (from `dependencies`, `devDependencies` **and**
-`peerDependencies`) against the version being published:
+`peerDependencies`) against the version being published. The verdicts below
+block the publish under the default `fail` policy; `warn` reports them without
+blocking, `off` skips the check entirely.
 
-| Consumer state                              | Verdict                                |
-| ------------------------------------------- | -------------------------------------- |
-| Major mismatch                              | fail                                   |
-| Exactly one major behind, **at an `X.0.0`** | warn (see step 2)                      |
-| ≥ 2 minors behind                           | fail                                   |
-| 1 minor behind                              | warn                                   |
-| In sync, or patch-behind                    | ok                                     |
-| Fetch error (403, rate limit, outage)       | fail — "could not verify" is a failure |
-| 404 on the path                             | skipped, counted as nothing            |
+| Consumer state                              | Verdict                                 |
+| ------------------------------------------- | --------------------------------------- |
+| Major mismatch                              | fail                                    |
+| Exactly one major behind, **at an `X.0.0`** | warn (see step 2)                       |
+| ≥ 2 minors behind                           | fail                                    |
+| 1 minor behind                              | warn                                    |
+| In sync, or patch-behind                    | ok                                      |
+| Ahead within the same major                 | ok — logged as `in sync`                |
+| Fetch error (403, rate limit, outage)       | fail — "could not verify" is a failure  |
+| 404 on the path                             | logged, counted as nothing              |
+| No `@appstrate/core` in the merged deps     | logged, counted as nothing              |
+| Unparsable range                            | logged, counted as nothing — not a warn |
 
-A clean run prints `Summary: 0 failure(s), 0 warning(s)`.
+A clean run prints `Summary: 0 failure(s), 0 warning(s)` — not proof every
+consumer was assessed: the last three rows produce it too, and an unparsable
+range leaves a listed consumer unassessed. Read the per-consumer lines above it.
 
 **It is a drift alarm, not a compatibility guard.** Publishing a new major
 breaks no consumer at install time — a `^2` range keeps resolving 2.x. What the
 gate buys is that nobody forgets the bump and discovers it months later.
 
 The workflow runs it **before** `npm publish`, and a `fail` verdict is `exit 1`
-— the publish does not happen. The tag, however, is pushed before the job runs,
-so a blocked release leaves the tag consumed: fix the consumer the gate names
-and release the next version rather than re-pointing the tag.
+— the publish does not happen. The tag is pushed before the job runs, so it is
+already consumed, but the version is not lost: the gate re-reads each consumer's
+**default branch** at run time, and the workflow re-runs against that same tag
+ref (`gh run rerun --failed`, or `workflow_dispatch` selecting the tag). Push
+the consumer bump the gate named, re-run, and the same version publishes. Only a
+_cancelled_ job forces a bump. Never re-point the tag at a new commit.
 
 ## The gate only bites with a token that can read private repos
 
-Both consumers are private. `secrets.GITHUB_TOKEN` is scoped to this repo only,
-so for a private consumer the contents API answers 404 — and the script treats
-404 as `not present, skipping`, which is also the legitimate outcome for a repo
-that genuinely has no `package.json` at that path. The script cannot tell the
-two apart.
+Both consumers are private, and the gate step passes
+`secrets.CONSUMER_LOCKSTEP_TOKEN` as `GITHUB_TOKEN` with **no fallback**. Unset,
+the script sends no `Authorization` header at all — the request goes out
+anonymous (60 req/h), the contents API answers 404 for a private repo, and the
+script logs `not present, skipping`, indistinguishable from a repo that
+genuinely has no `package.json` there. The gate then prints
+`0 failure(s), 0 warning(s)` having verified **nothing**. So the repository
+secret **`CONSUMER_LOCKSTEP_TOKEN`** must exist, holding a PAT or GitHub App
+token with `contents:read` on both consumer repos; it was added on 2026-07-28,
+so treat any green run from before that date as unverified.
 
-Net effect without a cross-repo token: the gate prints
-`0 failure(s), 0 warning(s)` and passes **having verified nothing**. Treat any
-green run from before 2026-07-28 as unverified — that is when the repository
-secret **`CONSUMER_LOCKSTEP_TOKEN`** (PAT or GitHub App token with
-`contents:read` on both consumer repos) was added.
-
-The workflow's **"Assert the lockstep gate can actually run"** step is what
-keeps it that way: the day the token expires, is revoked, or loses
-`contents:read` on a consumer, that step fails loudly instead of letting the
-gate go silently inert. The gate step itself deliberately has no
-`|| secrets.GITHUB_TOKEN` fallback.
+**The "Assert the lockstep gate can actually run" step does not police that.**
+It tests that the secret is a non-empty string — it never contacts the API and
+never checks scope, so a token that is present but can no longer read a consumer
+passes the assert, 404s on it, and leaves the gate silently inert exactly as an
+absent secret would. Full rationale for the step: the comment above it in
+`publish-core.yml`.
 
 ## Bypassing — deliberate and auditable
 
@@ -119,6 +122,9 @@ Set the repository **variable** `CONSUMER_DRIFT_POLICY` to `warn` or `off`, and
 **delete it again once the publish is through**. It relaxes both the assert step
 and the gate.
 
-`fail` is the default when the variable is unset, and also the fallback for an
-unrecognized value (a typo, or wrong case like `FAIL`) — a misconfigured
-environment can never fail open. `off` skips the check entirely.
+Unset, the policy is `fail` — and so is any unrecognized value, **in the
+script**: `resolvePolicy` coerces a typo, or wrong case like `FAIL`, back to
+`fail` with a warning. The workflow's assert step does not share that logic — it
+compares the raw string against `"fail"` literally and case-sensitively, so
+`CONSUMER_DRIFT_POLICY=FAIL` takes its warn branch and exits 0 while the script
+still treats the same value as `fail`.
