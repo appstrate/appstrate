@@ -42,7 +42,9 @@ describe("logic map layout", () => {
       detail: "Un détail de deux phrases, lui aussi long, pour vérifier que la hauteur suit.",
       evidence: { quote: "Une citation qui prend elle-même de la place dans la carte rendue." },
     });
-    expect(long).toBeGreaterThan(short * 2);
+    // La hauteur suit le contenu ; la base commune reste importante, donc on compare
+    // la part variable et non un rapport brut.
+    expect(long).toBeGreaterThan(short + 100);
   });
 
   it("is deterministic — two runs place the cards identically", () => {
@@ -137,11 +139,19 @@ describe("logic map layout", () => {
     expect(layoutLogicMap(map).groups.map((g) => g.name)).toEqual(["First", "Second"]);
   });
 
-  it("nests a loop body inside its loop", () => {
+  it("marks a loop body by indentation, never by React Flow parenting", () => {
+    // `parentId` ferait lire `position` comme RELATIVE au parent : tout le corps de la
+    // boucle se replierait sur un seul point, ce qui est exactement le défaut observé
+    // à l'écran. L'appartenance passe donc par le décalage horizontal.
     const map = load("compta-gmail-harvest.logic-map.json");
     const { nodes } = layoutLogicMap(map);
-    const child = nodes.find((n) => n.id === "s12.1");
-    expect(child?.parent_id).toBe("s12");
-    expect(child?.position.x).toBeGreaterThan(0);
+    const loop = nodes.find((n) => n.id === "s12")!;
+    const child = nodes.find((n) => n.id === "s12.1")!;
+    const grandChild = nodes.find((n) => n.id === "s12.7.1")!;
+    expect(child.parent_id).toBeNull();
+    expect(child.depth).toBe(loop.depth + 1);
+    expect(child.position.x).toBeGreaterThan(loop.position.x);
+    expect(grandChild.depth).toBe(2);
+    expect(grandChild.position.x).toBeGreaterThan(child.position.x);
   });
 });

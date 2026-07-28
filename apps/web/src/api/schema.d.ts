@@ -4798,13 +4798,15 @@ export interface components {
                 x: number;
                 y: number;
             };
-            /** @description Control nesting only (a loop body). Documentary grouping travels in `group`. */
+            /** @description Always null today. Setting it would make React Flow read `position` as relative to the parent, collapsing a loop body onto a single point; nesting is carried by `depth` instead. */
             parent_id: string | null;
             width: number;
             /** @description Derived from the actual content, never a constant — an estimate that lies makes stacked cards overlap. */
             height: number;
             rank: number;
             group: string | null;
+            /** @description Control-nesting level. Carries what `parent_id` deliberately does not: React Flow would read `position` as relative to the parent and collapse a whole loop body onto one point, so nesting is conveyed by indentation instead. */
+            depth: number;
         };
         /** @description AFPS Agent manifest extended with Appstrate platform fields. Standard fields are defined by the AFPS Agent schema. Most extension fields use the x- prefix per AFPS §10, with the exception of the Appstrate-specific top-level `runtime_tools` field documented below. */
         AgentManifest: ({

@@ -53,6 +53,8 @@ export interface PositionedNode {
   /** Rang topologique, exposé pour que le rendu puisse grouper ou replier par couche. */
   rank: number;
   group: string | null;
+  /** Niveau d'imbrication de contrôle, pour que le rendu marque l'appartenance. */
+  depth: number;
 }
 
 export interface LayoutResult {
@@ -62,30 +64,42 @@ export interface LayoutResult {
 }
 
 const CARD_WIDTH = 320;
-const CARD_PADDING = 28;
-const LINE_HEIGHT = 20;
-/** Largeur utile d'une ligne, en caractères, à la police du rendu. */
-const CHARS_PER_LINE = 42;
-const RANK_GAP = 48;
-const COLUMN_GAP = 56;
-const NESTED_INSET = 24;
+/** Décalage horizontal d'un cran d'imbrication. */
+const NESTED_INSET = 28;
+const RANK_GAP = 40;
+const COLUMN_GAP = 64;
+/** Écart entre deux nœuds parallèles d'un même rang. */
+const SIBLING_GAP = 32;
+
+// Constantes calibrées sur les hauteurs RÉELLES mesurées dans le navigateur, puis
+// majorées : le serveur ne peut pas connaître le rendu, et une estimation trop
+// courte fait se chevaucher les cartes tandis qu'une estimation trop généreuse ne
+// coûte que du vide. On se trompe donc délibérément vers le haut.
+const CARD_CHROME = 96;
+const LABEL_LINE = 22;
+const TEXT_LINE = 18;
+const LABEL_CHARS = 34;
+const TEXT_CHARS = 40;
+/** Marge de sûreté sur l'estimation totale. */
+const HEIGHT_SAFETY = 1.1;
 
 /**
- * Hauteur d'une carte, calculée depuis son contenu réel.
+ * Hauteur d'une carte, majorée depuis son contenu.
  *
- * Le volet 1 a payé une fois le prix d'une estimation qui mentait : une carte annoncée à
- * 100 px pour 248 réels fait se chevaucher tout ce qui la suit. Une carte de logique empile
- * beaucoup plus qu'une étoile, l'erreur y serait systématique — d'où un compte de lignes
- * plutôt qu'une constante.
+ * Le volet 1 a payé une fois le prix d'une estimation qui mentait : une carte
+ * annoncée à 100 px pour 248 réels fait se chevaucher tout ce qui la suit. Une carte
+ * de logique empile beaucoup plus qu'une étoile, l'erreur y serait systématique.
  */
 export function estimateStepHeight(step: LayoutStep): number {
-  const lines = (text: string | null | undefined, chars = CHARS_PER_LINE): number =>
-    text ? Math.max(1, Math.ceil(text.length / chars)) : 0;
-  const label = lines(step.label);
-  const detail = lines(step.detail ?? null, CHARS_PER_LINE + 8);
-  const quote = lines(step.evidence?.quote ?? null, CHARS_PER_LINE + 8);
-  const badge = 22;
-  return CARD_PADDING + badge + (label + detail + quote) * LINE_HEIGHT + (quote > 0 ? 12 : 0);
+  // Le rendu tronque le détail : le compter en entier gonflerait chaque carte, et la
+  // colonne avec elle.
+  const lines = (text: string | null | undefined, chars: number, cap = Infinity): number =>
+    text ? Math.min(cap, Math.max(1, Math.ceil(text.length / chars))) : 0;
+  const body =
+    lines(step.label, LABEL_CHARS) * LABEL_LINE +
+    lines(step.detail ?? null, TEXT_CHARS, 3) * TEXT_LINE +
+    lines(step.evidence?.quote ?? null, TEXT_CHARS, 3) * TEXT_LINE;
+  return Math.ceil((CARD_CHROME + body) * HEIGHT_SAFETY);
 }
 
 /**
@@ -159,9 +173,27 @@ function groupOrder(map: LayoutMap): string[] {
   });
 }
 
+/**
+ * Profondeur d'imbrication d'une étape, bornée contre un `parent` circulaire.
+ */
+function depthOf(id: string, parentOf: Map<string, string | null>): number {
+  let depth = 0;
+  let cur = parentOf.get(id) ?? null;
+  const seen = new Set<string>([id]);
+  while (cur && !seen.has(cur) && depth < 8) {
+    seen.add(cur);
+    depth++;
+    cur = parentOf.get(cur) ?? null;
+  }
+  return depth;
+}
+
 export function layoutLogicMap(map: LayoutMap): LayoutResult {
   const rank = computeRanks(map);
-  const byId = new Map(map.steps.map((s) => [s.id, s]));
+  const ids = new Set(map.steps.map((s) => s.id));
+  const parentOf = new Map(
+    map.steps.map((s) => [s.id, s.parent && ids.has(s.parent) ? s.parent : null]),
+  );
   const heights = new Map(map.steps.map((s) => [s.id, estimateStepHeight(s)]));
   const groupShape = new Map((map.groups ?? []).map((g) => [g.name, g.shape]));
   const order = groupOrder(map);
@@ -174,84 +206,105 @@ export function layoutLogicMap(map: LayoutMap): LayoutResult {
     const members = map.steps.filter((s) => (s.group ?? "") === name);
     if (members.length === 0) continue;
 
-    // Une grappe se place en couches si elle le déclare, ou à défaut si la carte est une
-    // séquence et que ses membres sont effectivement reliés.
     const memberIds = new Set(members.map((m) => m.id));
     const internalEdges = map.edges.filter((e) => memberIds.has(e.from) && memberIds.has(e.to));
     const shape =
       groupShape.get(name) ??
       (map.shape === "sequence" || internalEdges.length > 0 ? "sequence" : "policies");
 
-    const columnWidth = CARD_WIDTH + NESTED_INSET;
-    let y = 0;
+    // Une colonne est une PILE VERTICALE, jamais une grille : placer deux nœuds de
+    // même rang côte à côte faisait déborder la colonne sur la suivante. Le flot se
+    // lit dans les arêtes, l'imbrication dans le décalage horizontal.
+    const ordered =
+      shape === "sequence"
+        ? [...members].sort((a, b) => {
+            const ra = rank.get(a.id) ?? 0;
+            const rb = rank.get(b.id) ?? 0;
+            if (ra !== rb) return ra - rb;
+            return members.indexOf(a) - members.indexOf(b);
+          })
+        : members;
 
+    let y = 0;
+    let widest = CARD_WIDTH;
     if (shape === "sequence") {
-      // Une couche par rang, les rangs dans l'ordre, et à rang égal l'ordre de déclaration :
-      // deux exécutions du placement doivent rendre exactement la même carte.
-      const ranks = [...new Set(members.map((m) => rank.get(m.id) ?? 0))].sort((a, b) => a - b);
+      // Une couche par rang. Les nœuds d'un même rang sont PARALLÈLES — les deux
+      // branches d'une décision, par exemple — donc côte à côte, et la colonne
+      // s'élargit d'autant : c'est de ne pas l'élargir qui la faisait déborder sur sa
+      // voisine.
+      const ranks = [...new Set(ordered.map((m) => rank.get(m.id) ?? 0))].sort((a, b) => a - b);
       for (const r of ranks) {
-        const layer = members.filter((m) => (rank.get(m.id) ?? 0) === r);
-        let layerHeight = 0;
+        const layer = ordered.filter((m) => (rank.get(m.id) ?? 0) === r);
+        let tallest = 0;
         layer.forEach((step, i) => {
+          const depth = depthOf(step.id, parentOf);
+          const inset = depth * NESTED_INSET;
           const h = heights.get(step.id)!;
+          const nx = x + inset + i * (CARD_WIDTH + SIBLING_GAP);
           nodes.push({
             id: step.id,
             type: step.kind,
-            position: { x: x + (step.parent ? NESTED_INSET : 0) + i * (CARD_WIDTH + 24), y },
-            parent_id: step.parent && byId.has(step.parent) ? step.parent : null,
+            position: { x: nx, y },
+            parent_id: null,
             width: CARD_WIDTH,
             height: h,
             rank: r,
             group: name || null,
+            depth,
           });
-          layerHeight = Math.max(layerHeight, h);
+          widest = Math.max(widest, nx - x + CARD_WIDTH);
+          tallest = Math.max(tallest, h);
         });
-        y += layerHeight + RANK_GAP;
+        y += tallest + RANK_GAP;
       }
     } else {
-      for (const step of members) {
+      for (const step of ordered) {
+        const depth = depthOf(step.id, parentOf);
+        const inset = depth * NESTED_INSET;
         const h = heights.get(step.id)!;
         nodes.push({
           id: step.id,
           type: step.kind,
-          position: { x: x + (step.parent ? NESTED_INSET : 0), y },
-          parent_id: step.parent && byId.has(step.parent) ? step.parent : null,
+          position: { x: x + inset, y },
+          parent_id: null,
           width: CARD_WIDTH,
           height: h,
-          rank: 0,
+          rank: rank.get(step.id) ?? 0,
           group: name || null,
+          depth,
         });
+        widest = Math.max(widest, inset + CARD_WIDTH);
         y += h + 16;
       }
     }
 
-    groups.push({ name: name || "(sans domaine)", shape, x, width: columnWidth });
-    x += columnWidth + COLUMN_GAP;
+    groups.push({ name: name || "(sans domaine)", shape, x, width: widest });
+    x += widest + COLUMN_GAP;
   }
 
   return { nodes, groups };
 }
 
 /**
- * Chevauchements verticaux à l'intérieur d'une même colonne.
+ * Chevauchements entre cartes, comparés comme des rectangles.
  *
- * Sert de garde-fou de test : c'est le défaut qui est passé inaperçu au volet 1, invisible
- * tant qu'une carte est seule dans sa colonne.
+ * Sert de garde-fou de test : la première version ne comparait que les nœuds de même
+ * abscisse, et laissait donc passer exactement le défaut qu'elle devait attraper —
+ * une colonne qui déborde sur sa voisine.
  */
 export function findOverlaps(result: LayoutResult): { a: string; b: string }[] {
   const clashes: { a: string; b: string }[] = [];
-  const byColumn = new Map<number, PositionedNode[]>();
-  for (const n of result.nodes) {
-    const list = byColumn.get(n.position.x) ?? [];
-    list.push(n);
-    byColumn.set(n.position.x, list);
-  }
-  for (const list of byColumn.values()) {
-    const sorted = [...list].sort((p, q) => p.position.y - q.position.y);
-    for (let i = 1; i < sorted.length; i++) {
-      const prev = sorted[i - 1]!;
-      const cur = sorted[i]!;
-      if (prev.position.y + prev.height > cur.position.y) clashes.push({ a: prev.id, b: cur.id });
+  const n = result.nodes;
+  for (let i = 0; i < n.length; i++) {
+    for (let j = i + 1; j < n.length; j++) {
+      const a = n[i]!;
+      const b = n[j]!;
+      const overlap =
+        a.position.x < b.position.x + b.width &&
+        b.position.x < a.position.x + a.width &&
+        a.position.y < b.position.y + b.height &&
+        b.position.y < a.position.y + a.height;
+      if (overlap) clashes.push({ a: a.id, b: b.id });
     }
   }
   return clashes;

@@ -1546,7 +1546,7 @@ export const schemas = {
   },
   AgentLogicMapNode: {
     type: "object",
-    required: ["id", "type", "position", "parent_id", "width", "height", "rank", "group"],
+    required: ["id", "type", "position", "parent_id", "width", "height", "rank", "group", "depth"],
     properties: {
       id: { type: "string" },
       type: {
@@ -1562,7 +1562,8 @@ export const schemas = {
       },
       parent_id: {
         type: ["string", "null"],
-        description: "Control nesting only (a loop body). Documentary grouping travels in `group`.",
+        description:
+          "Always null today. Setting it would make React Flow read `position` as relative to the parent, collapsing a loop body onto a single point; nesting is carried by `depth` instead.",
       },
       width: { type: "number" },
       height: {
@@ -1572,6 +1573,11 @@ export const schemas = {
       },
       rank: { type: "integer" },
       group: { type: ["string", "null"] },
+      depth: {
+        type: "integer",
+        description:
+          "Control-nesting level. Carries what `parent_id` deliberately does not: React Flow would read `position` as relative to the parent and collapse a whole loop body onto one point, so nesting is conveyed by indentation instead.",
+      },
     },
   },
   AgentLogicMapDiagnostic: {

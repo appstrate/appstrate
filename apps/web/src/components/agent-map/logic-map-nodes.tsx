@@ -38,6 +38,8 @@ export interface LogicStepData extends Record<string, unknown> {
   diagnostics?: { level: string; message: string }[];
   aggregated?: boolean;
   terminal?: boolean;
+  /** Niveau d'imbrication de contrôle : le corps d'une boucle porte une marque. */
+  depth?: number;
   until?: string | null;
 }
 
@@ -102,7 +104,7 @@ function StepCard({ kind, data }: { kind: string; data: LogicStepData }) {
     <div
       className={`w-[320px] rounded border bg-neutral-950/90 ${style.ring} ${
         data.terminal ? "border-b-4" : ""
-      }`}
+      } ${(data.depth ?? 0) > 0 ? "border-l-4 border-l-sky-800" : ""}`}
     >
       <Handle type="target" position={Position.Top} className="!bg-neutral-600" />
       <div className="flex items-start gap-2 px-3 pt-2">
@@ -131,7 +133,11 @@ function StepCard({ kind, data }: { kind: string; data: LogicStepData }) {
           {t("logicMap.until", { condition: data.until })}
         </p>
       )}
-      {data.detail && <p className="px-3 pt-1 text-xs text-neutral-400">{data.detail}</p>}
+      {data.detail && (
+        // Tronqué : le détail situe l'étape, il n'a pas à être lu en entier — et une
+        // carte qui grandit sans limite fait exploser la hauteur de la colonne.
+        <p className="line-clamp-3 px-3 pt-1 text-xs text-neutral-400">{data.detail}</p>
+      )}
 
       {data.refs && data.refs.length > 0 && (
         <div className="flex flex-wrap gap-1 px-3 pt-2">

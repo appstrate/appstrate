@@ -25,6 +25,7 @@ import { join, resolve } from "node:path";
 import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import {
+  applicationPackages,
   applications,
   organizationMembers,
   organizations,
@@ -71,11 +72,15 @@ if (!org) {
     .insert(organizations)
     .values({ name: "Demo", slug: ORG_SLUG, createdBy: account!.id })
     .returning();
-  await db
-    .insert(organizationMembers)
-    .values({ orgId: org!.id, userId: account!.id, role: "owner" });
   console.log(`organisation created: ${ORG_SLUG}`);
 }
+// Toujours (ré)affirmer l'appartenance : `SEED_EMAIL` peut désigner un compte créé
+// ailleurs — par l'inscription de l'interface, par exemple — sur une organisation
+// que ce script avait déjà créée pour un autre compte.
+await db
+  .insert(organizationMembers)
+  .values({ orgId: org!.id, userId: account!.id, role: "owner" })
+  .onConflictDoNothing();
 
 let [app] = await db.select().from(applications).where(eq(applications.orgId, org!.id)).limit(1);
 if (!app) {
@@ -164,6 +169,13 @@ for (const file of mapFiles) {
       .values({ packageId, tag: "latest", versionId: row!.id })
       .onConflictDoNothing();
   }
+
+  // Créer le package ne suffit pas : la fiche d'agent et les deux cartes passent
+  // par le contexte d'application, donc l'agent doit y être INSTALLÉ.
+  await db
+    .insert(applicationPackages)
+    .values({ applicationId: app!.id, packageId, versionId: row!.id })
+    .onConflictDoNothing();
 
   await db.delete(packageLogicMaps).where(eq(packageLogicMaps.versionId, row!.id));
   await db.insert(packageLogicMaps).values({

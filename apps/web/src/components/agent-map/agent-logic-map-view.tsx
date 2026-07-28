@@ -20,6 +20,7 @@ import {
   Controls,
   ReactFlow,
   ReactFlowProvider,
+  useNodesInitialized,
   useReactFlow,
   type Edge,
   type Node,
@@ -39,7 +40,7 @@ import {
   ToolCallNode,
 } from "./logic-map-nodes";
 
-const FIT_VIEW_OPTIONS = { padding: 0.12 } as const;
+const FIT_VIEW_OPTIONS = { padding: 0.1, minZoom: 0.05 } as const;
 
 /** React Flow demands a stable identity, so this lives at module scope. */
 const NODE_TYPES = {
@@ -52,12 +53,22 @@ const NODE_TYPES = {
   emit: EmitNode,
 } as const;
 
-function FitOnCanvasResize() {
+/**
+ * Cadre la vue UNE FOIS les nœuds mesurés.
+ *
+ * La prop `fitView` seule cadre au premier rendu, quand les cartes n'ont pas encore
+ * de hauteur : sur une carte de logique, qui en empile des dizaines, le cadrage se
+ * calcule alors sur des tailles nulles. `useNodesInitialized` est le signal que
+ * React Flow expose exactement pour ça.
+ */
+function FitWhenMeasured({ signature }: { signature: string }) {
+  const initialised = useNodesInitialized();
   const { fitView } = useReactFlow();
   useEffect(() => {
+    if (!initialised) return;
     const id = requestAnimationFrame(() => void fitView(FIT_VIEW_OPTIONS));
     return () => cancelAnimationFrame(id);
-  });
+  }, [initialised, fitView, signature]);
   return null;
 }
 
@@ -98,7 +109,6 @@ export function AgentLogicMapView({
           id: n.id,
           type: n.type,
           position: n.position,
-          ...(n.parent_id ? { parentId: n.parent_id, extent: "parent" as const } : {}),
           data: {
             label: step["label"] ?? n.id,
             detail: step["detail"] ?? null,
@@ -108,6 +118,7 @@ export function AgentLogicMapView({
             aggregated: step["aggregated"] ?? false,
             terminal: step["terminal"] ?? false,
             until: step["until"] ?? null,
+            depth: n.depth,
             diagnostics: byStep.get(n.id) ?? [],
           },
           draggable: false,
@@ -165,7 +176,7 @@ export function AgentLogicMapView({
         </button>
       </div>
 
-      <div className={expanded ? "h-[calc(100%-2.5rem)]" : "h-[560px]"}>
+      <div className={expanded ? "h-[calc(100%-2.5rem)]" : "h-[70vh] min-h-[520px]"}>
         <ReactFlowProvider>
           <ReactFlow
             nodes={nodes}
@@ -179,7 +190,7 @@ export function AgentLogicMapView({
           >
             <Background />
             <Controls showInteractive={false} />
-            <FitOnCanvasResize />
+            <FitWhenMeasured signature={`${packageId}:${nodes.length}`} />
           </ReactFlow>
         </ReactFlowProvider>
       </div>
