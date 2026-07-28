@@ -142,6 +142,7 @@
   "run.usageModel": "Model",
   "run.usageCost": "Cost",
   "run.costUnpricedTooltip": "No pricing is available for this model, so this run's cost could not be computed. A zero here would mean \"no rates\", not \"free\".",
+  "run.costUnpricedFloorTooltip": "At least one call ran on a model with no pricing, so the real cost is higher than this figure.",
   "run.costPartialTooltip": "Part of the consumption (cached input) had no rate and was priced at zero. This amount is a floor — the real cost is higher.",
   "run.usageInputTokens": "Input tokens",
   "run.usageOutputTokens": "Output tokens",

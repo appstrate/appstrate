@@ -38,7 +38,7 @@
 
 import { db } from "@appstrate/db/client";
 import { runs } from "@appstrate/db/schema";
-import { and, eq, isNull, lt, or } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { notifyRunMetric, type RunMetricNotifyPayload } from "@appstrate/db/notify";
 import { computeRunSpend } from "./state/runs.ts";
 import { logger } from "../lib/logger.ts";
@@ -196,11 +196,33 @@ async function fireBroadcast(runId: string): Promise<void> {
     // caveat marker is the same class of lie as the `$0.0000` this issue is
     // about. Both are best-effort mid-run — `finalizeRun` writes the
     // authoritative pair.
-    if (payload.cost_so_far > 0) {
+    //
+    // Provenance must NOT inherit the cost's magnitude guard. The two facts
+    // move independently, and every way of coupling them loses the flagship
+    // case: an `unpriced` run accrues tokens and exactly ZERO dollars, so a
+    // `cost_so_far > 0` gate would leave `cost_pricing_status` NULL for the
+    // whole run and a mid-run refresh would render the confident `$0.0000`
+    // this is meant to kill — the live SSE stream being the only honest
+    // surface. Likewise a status can WORSEN while the total stands still (the
+    // first cached call on a model with no `cacheRead` rate is priced at zero),
+    // which a `WHERE cost < new` predicate would swallow.
+    //
+    // So the monotonicity moves INTO the value: `GREATEST` keeps `cost` from
+    // regressing on a late or out-of-order tick, and the row is free to be
+    // updated whenever the status needs it. The status itself is recomputed
+    // from the whole ledger on every tick, so the newest write is the most
+    // informed one; `finalizeRun` still writes the authoritative pair.
+    // Still nothing to say when the ledger holds neither dollars nor a verdict
+    // (a run that has not spent yet): writing `cost = 0` there would replace a
+    // meaningful NULL — "no accounting fact yet" — with a claim of zero spend.
+    if (payload.cost_so_far > 0 || payload.cost_pricing_status !== null) {
       await db
         .update(runs)
-        .set({ cost: payload.cost_so_far, costPricingStatus: payload.cost_pricing_status })
-        .where(and(eq(runs.id, runId), or(isNull(runs.cost), lt(runs.cost, payload.cost_so_far))));
+        .set({
+          cost: sql`GREATEST(COALESCE(${runs.cost}, 0), ${payload.cost_so_far})`,
+          costPricingStatus: payload.cost_pricing_status,
+        })
+        .where(eq(runs.id, runId));
     }
     await notifyRunMetric(db, payload);
   } catch (err) {

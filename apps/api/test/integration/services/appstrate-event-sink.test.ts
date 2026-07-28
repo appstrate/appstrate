@@ -317,6 +317,24 @@ describe("PersistingEventSink", () => {
       expect(row!.pricingStatus).toBe("unpriced");
     });
 
+    it("malformed `runs.model_cost` → `unpriced`, never a priced claim", async () => {
+      // JSONB is only typed by convention. `classifyTokenPricing` probes
+      // `cost == null` and `cost.cacheRead`, so an object that is neither —
+      // `{}` from an older shape, or a hand-edited row — would sail through as
+      // fully `priced`. The read path narrows with `modelCostSchema` so a
+      // snapshot nobody can read is treated as no snapshot at all.
+      const sink = ledgerSink({
+        modelSource: "system",
+        modelCost: {} as unknown as ModelCost,
+      });
+      await sink.handle(
+        event("appstrate.metric", { usage: { input_tokens: 900, output_tokens: 300 }, cost: 0 }),
+      );
+
+      const row = await runnerRow();
+      expect(row!.pricingStatus).toBe("unpriced");
+    });
+
     it("platform run with rates → `priced`", async () => {
       const sink = ledgerSink({ modelSource: "org", modelCost: { input: 3, output: 15 } });
       await sink.handle(

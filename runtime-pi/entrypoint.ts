@@ -116,6 +116,22 @@ function buildInContainerBundle(prompt: string): Bundle {
 }
 
 /**
+ * One pino-shaped JSON line on stdout — the shape every structured diagnostic
+ * in this file already uses (`{"level":…,"event":…,…}`). Factored out so a new
+ * caller cannot invent a second shape.
+ *
+ * Reach: the platform ring-buffers container stdout but only emits it when the
+ * container exits NON-ZERO (`run-launcher/pi.ts`), so on a successful run this
+ * line lives in the docker/Firecracker log only — same as the pre-existing
+ * `mcp_connect_retry` line. Enough for an operator reading container logs; it
+ * is NOT the run's audit trail. The queryable record of a pricing gap is
+ * `llm_usage.pricing_status`, written server-side.
+ */
+function logLine(level: "warn" | "error", event: string, data?: Record<string, unknown>): void {
+  process.stdout.write(`${JSON.stringify({ level, event, ...(data ?? {}) })}\n`);
+}
+
+/**
  * Last-resort operator diagnostic for fatal paths whose normal reporting
  * channel (the sink POST) failed or was deliberately skipped. Under
  * Firecracker the serial console captures stderr, so this single line is
@@ -126,16 +142,6 @@ function buildInContainerBundle(prompt: string): Bundle {
  * to exit with — `null` when the caller may not exit (non-fatal emitError).
  * Only pass error messages already destined for the sink — never secrets.
  */
-/**
- * One pino-shaped JSON line on stdout — the shape every structured diagnostic
- * in this file already uses (`{"level":…,"event":…,…}`), captured by the
- * platform's container log buffer and surfaced on the run's audit trail.
- * Factored out so a new caller cannot invent a second shape.
- */
-function logLine(level: "warn" | "error", event: string, data?: Record<string, unknown>): void {
-  process.stdout.write(`${JSON.stringify({ level, event, ...(data ?? {}) })}\n`);
-}
-
 function lastResortStderr(exitCode: number | null, reason: string, cause?: unknown): void {
   try {
     const line =

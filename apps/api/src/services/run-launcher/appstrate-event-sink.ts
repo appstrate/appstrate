@@ -45,7 +45,7 @@ import type { RunResult } from "@appstrate/afps-runtime/runner";
 import { isPlainObject } from "@appstrate/core/safe-json";
 import { documentUri } from "@appstrate/core/document-uri";
 import { db, type Db } from "@appstrate/db/client";
-import type { ModelCost } from "@appstrate/core/module";
+import { modelCostSchema, type ModelCost } from "@appstrate/core/module";
 import type { TokenPricingStatus } from "@appstrate/afps-runtime/runner";
 import { type CredentialSource } from "../llm-usage-ledger.ts";
 import { recordLlmUsageReliably } from "../llm-usage-retry.ts";
@@ -388,6 +388,13 @@ function coerceCredentialSource(modelSource: string | null | undefined): Credent
  * keys on). Its inference was accounted elsewhere, typically as per-call proxy
  * rows that carry their own status. Stamping `unpriced` there would mislabel
  * every remote run as a platform pricing gap.
+ *
+ * The snapshot is a JSONB column, so it is NARROWED rather than trusted: a row
+ * whose `model_cost` is malformed (hand-edited, or written by an older shape)
+ * must classify as `unpriced`, not as `priced`. `classifyTokenPricing` only
+ * probes `cost == null` and `cost.cacheRead`, so an unvalidated `{}` would
+ * otherwise sail through as fully priced — the exact false confidence this
+ * column exists to remove.
  */
 function resolveRunnerPricingStatus(
   orgId: string,
@@ -395,6 +402,7 @@ function resolveRunnerPricingStatus(
   row: { usage: TokenUsage | null; modelSource?: string | null; modelCost?: ModelCost | null },
 ): TokenPricingStatus | null {
   if (coerceCredentialSource(row.modelSource) === null) return null;
+  const parsedCost = modelCostSchema.safeParse(row.modelCost);
   return resolvePricingStatus({
     orgId,
     // The run's model label is not part of the sink context, so the warn line
@@ -403,7 +411,7 @@ function resolveRunnerPricingStatus(
     // column is the complete, queryable record either way.
     model: null,
     usage: row.usage ?? {},
-    cost: row.modelCost ?? null,
+    cost: parsedCost.success ? parsedCost.data : null,
     context: { source: "runner", runId },
   });
 }

@@ -26,7 +26,7 @@ export interface CostFields {
 }
 
 /** RHF field name backing each rate — the pricing section's only mapping. */
-export type CostFieldName = "costInput" | "costOutput" | "costCacheRead" | "costCacheWrite";
+type CostFieldName = "costInput" | "costOutput" | "costCacheRead" | "costCacheWrite";
 
 export const COST_FIELD_NAMES: Record<keyof CostFields, CostFieldName> = {
   input: "costInput",
@@ -71,7 +71,7 @@ export function costFromFields(fields: CostFields): ModelCost | null {
 }
 
 /** Loose cost shape as it arrives from the catalog registry / the models API. */
-export interface WireCost {
+interface WireCost {
   input?: number | null;
   output?: number | null;
   cacheRead?: number | null;

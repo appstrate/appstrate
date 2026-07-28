@@ -381,6 +381,59 @@ describe("run-metric-broadcaster (integration)", () => {
       // different place — the pair is written together or not at all.
       expect(row?.status).toBe("partial");
     });
+
+    it("is persisted for a ZERO-cost unpriced run — the flagship refresh case", async () => {
+      // An unpriced run accrues tokens and exactly $0, so any persistence
+      // gated on the amount (`cost_so_far > 0`) would leave the status NULL
+      // for the whole run: the live SSE tab would say "unpriced" while a hard
+      // refresh rendered the confident `$0.0000` this issue exists to kill.
+      await db.insert(llmUsage).values({
+        source: "runner",
+        orgId: ctx.orgId,
+        runId,
+        inputTokens: 900,
+        outputTokens: 300,
+        costUsd: 0,
+        pricingStatus: "unpriced",
+      });
+
+      scheduleRunMetricBroadcast(runId);
+      await wait(50);
+
+      const [row] = await db
+        .select({ cost: runs.cost, status: runs.costPricingStatus })
+        .from(runs)
+        .where(eq(runs.id, runId))
+        .limit(1);
+      expect(row?.status).toBe("unpriced");
+      expect(row?.cost).toBe(0);
+    });
+
+    it("a later zero-cost tick still cannot regress a higher persisted cost", async () => {
+      // The monotonicity moved into the value (`GREATEST`) when the write
+      // stopped being gated on the amount. This pins that it survived the move.
+      await db.update(runs).set({ cost: 5 }).where(eq(runs.id, runId));
+      await db.insert(llmUsage).values({
+        source: "runner",
+        orgId: ctx.orgId,
+        runId,
+        inputTokens: 10,
+        outputTokens: 5,
+        costUsd: 0,
+        pricingStatus: "unpriced",
+      });
+
+      scheduleRunMetricBroadcast(runId);
+      await wait(50);
+
+      const [row] = await db
+        .select({ cost: runs.cost, status: runs.costPricingStatus })
+        .from(runs)
+        .where(eq(runs.id, runId))
+        .limit(1);
+      expect(row?.cost).toBe(5);
+      expect(row?.status).toBe("unpriced");
+    });
   });
 
   // ── CRIT-07 — the mid-run ledger SUM is org-scoped ──────────

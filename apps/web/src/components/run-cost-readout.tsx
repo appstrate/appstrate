@@ -8,7 +8,7 @@ import {
   TooltipTrigger,
 } from "@appstrate/ui/components/tooltip";
 import { cn } from "@appstrate/ui/cn";
-import { describeRunCost, type RunPricingStatus } from "./run-cost";
+import { COST_UNAVAILABLE, describeRunCost, type RunPricingStatus } from "./run-cost";
 
 interface RunCostReadoutProps {
   /** `runs.cost` — the ledger aggregate. */
@@ -31,7 +31,7 @@ interface RunCostReadoutProps {
  */
 export function RunCostReadout({ cost, pricingStatus, className }: RunCostReadoutProps) {
   const { t } = useTranslation("agents");
-  const { text, caveat, tooltipKey } = describeRunCost(cost, pricingStatus);
+  const { text, tooltipKey } = describeRunCost(cost, pricingStatus);
 
   if (!tooltipKey) return <span className={className}>{text}</span>;
 
@@ -48,8 +48,9 @@ export function RunCostReadout({ cost, pricingStatus, className }: RunCostReadou
           >
             {text}
             {/* Visible marker so the caveat survives without hover/focus — a
-                tooltip alone would let a `partial` figure read as exact. */}
-            {caveat && <span aria-hidden>*</span>}
+                tooltip alone would let a floor figure read as exact. The
+                placeholder is already its own signal and takes no marker. */}
+            {text !== COST_UNAVAILABLE && <span aria-hidden>*</span>}
           </span>
         </TooltipTrigger>
         <TooltipContent side="bottom" className="max-w-xs">

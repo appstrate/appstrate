@@ -20,23 +20,31 @@
  * rate, so the amount shown is a floor and says so.
  */
 
-/** Pricing provenance as carried by the run DTO / the `run_metric` SSE frame. */
-export type RunPricingStatus = "priced" | "partial" | "unpriced";
+import type { RunWireDto } from "@appstrate/shared-types";
+
+/**
+ * Pricing provenance as carried by the run DTO / the `run_metric` SSE frame.
+ * Derived from the wire contract rather than restated — the vocabulary is owned
+ * by `@appstrate/db/pricing-status` and reaches here through `RunWireDto`.
+ */
+export type RunPricingStatus = NonNullable<RunWireDto["cost_pricing_status"]>;
+
+/** i18n key of the caveat a figure needs, or `null` when it stands on its own. */
+type CostTooltipKey =
+  "run.costUnpricedTooltip" | "run.costUnpricedFloorTooltip" | "run.costPartialTooltip";
 
 export interface RunCostDisplay {
   /** The value to render — a formatted amount, or the em-dash placeholder. */
   text: string;
   /**
-   * `true` when {@link text} is a real amount that is nonetheless incomplete,
-   * so the renderer appends its caveat marker. Never `true` alongside the
-   * placeholder: there is no figure left to qualify.
-   */
-  caveat: boolean;
-  /**
    * i18n key of the explanation the reader needs, or `null` when the figure
    * stands on its own. Flat dotted key — passed verbatim to `t()`.
+   *
+   * Doubles as the "is this figure qualified?" flag: every key here means the
+   * amount is a floor, and the placeholder key is the only one that is not an
+   * amount. A separate boolean would restate what this field already decides.
    */
-  tooltipKey: "run.costUnpricedTooltip" | "run.costPartialTooltip" | null;
+  tooltipKey: CostTooltipKey | null;
 }
 
 /** Rendered instead of an amount when nothing could be priced. */
@@ -55,14 +63,20 @@ export function describeRunCost(
   cost: number | null | undefined,
   pricingStatus: RunPricingStatus | null | undefined,
 ): RunCostDisplay {
-  if (pricingStatus === "unpriced") {
-    return { text: COST_UNAVAILABLE, caveat: false, tooltipKey: "run.costUnpricedTooltip" };
+  const amount = cost ?? 0;
+  // The placeholder is for having NOTHING to say, not for the status alone.
+  // `computeRunSpend` aggregates worst-of, so ONE unpriced row makes a whole
+  // run `unpriced` — and a run can mix a correctly-priced $12.50 of proxy
+  // calls with a single call nobody could price. Withholding the figure there
+  // would throw away a number the platform genuinely knows, to avoid
+  // overstating one it does not. Show it, and mark it a floor.
+  if (pricingStatus === "unpriced" && amount === 0) {
+    return { text: COST_UNAVAILABLE, tooltipKey: "run.costUnpricedTooltip" };
   }
   // Four decimals: a single cheap call rounds to $0.00 at two, and the readout
   // is the only place a per-run spend is visible.
-  const amount = `$${(cost ?? 0).toFixed(4)}`;
-  if (pricingStatus === "partial") {
-    return { text: amount, caveat: true, tooltipKey: "run.costPartialTooltip" };
-  }
-  return { text: amount, caveat: false, tooltipKey: null };
+  const text = `$${amount.toFixed(4)}`;
+  if (pricingStatus === "unpriced") return { text, tooltipKey: "run.costUnpricedFloorTooltip" };
+  if (pricingStatus === "partial") return { text, tooltipKey: "run.costPartialTooltip" };
+  return { text, tooltipKey: null };
 }

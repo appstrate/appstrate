@@ -17,6 +17,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import type { TokenUsage } from "@appstrate/afps-shared/token-usage";
+import type { ModelCost } from "@appstrate/core/module";
 import type { PricingStatus } from "../pricing-status.ts";
 import { runStatusEnum, llmUsageSourceEnum, runOriginEnum, credentialSourceEnum } from "./enums.ts";
 import { user } from "./auth.ts";
@@ -76,17 +77,14 @@ export type { PricingStatus };
 
 /**
  * Snapshot of the per-1M-token USD rates a run was launched with, persisted on
- * `runs.model_cost`. Structurally identical to `@appstrate/core`'s `ModelCost`
- * (and validated on read with its `modelCostSchema`); declared locally so the
- * schema package takes no dependency on the runtime — the same posture as
- * `TokenCost` in `@appstrate/afps-runtime/runner`.
+ * `runs.model_cost` — `@appstrate/core`'s `ModelCost`, imported rather than
+ * restated (this package already depends on core; see `auth.ts`).
+ *
+ * Column typing is a claim about intent, not a guarantee: the value is JSONB, so
+ * the read path narrows it with `modelCostSchema` before classifying
+ * (`appstrate-event-sink.ts:resolveRunnerPricingStatus`).
  */
-export type RunModelCost = {
-  input: number;
-  output: number;
-  cacheRead?: number;
-  cacheWrite?: number;
-};
+export type RunModelCost = ModelCost;
 
 export const runs = pgTable(
   "runs",
@@ -587,11 +585,19 @@ export const llmUsage = pgTable(
     // could not price" from an invisible zero into a `WHERE pricing_status =
     // 'unpriced'` query.
     //
-    // DELIBERATELY NOT BACKFILLED. A NULL here means "written before this
-    // column existed" and nothing else. Inventing `'priced'` for historical
-    // rows would manufacture exactly the false confidence the column exists to
-    // remove — and the information needed to classify them retroactively (the
-    // rates in force at the time of the call) was never recorded.
+    // NULL is "no claim", and it has TWO live populations — a query that
+    // treats it as one will misread the ledger:
+    //   1. rows written before this column existed. DELIBERATELY NOT
+    //      BACKFILLED: inventing `'priced'` for them would manufacture exactly
+    //      the false confidence the column exists to remove, and the rates in
+    //      force at the time of those calls were never recorded, so they
+    //      cannot be classified retroactively either;
+    //   2. the runner row of a REMOTE-origin run (`runs.model_source IS NULL`),
+    //      which resolves no platform model — its spend is accounted by the
+    //      per-call proxy rows that carry their own status, so claiming
+    //      `unpriced` would report a platform pricing gap that isn't one
+    //      (`appstrate-event-sink.ts:resolveRunnerPricingStatus`).
+    // What NULL never means is `priced`.
     pricingStatus: text("pricing_status").$type<PricingStatus>(),
     durationMs: integer("duration_ms"),
     // Proxy dedup key — one per upstream call minted by the proxy route.

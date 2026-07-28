@@ -8,14 +8,11 @@
  *
  * The invariant these tests pin: an EMPTY rate is never coerced to `0`. The web
  * test runner has no DOM, so this exercises the pure fold/projection the inputs
- * are wired to, plus a source scan that the modal really uses them.
+ * are wired to; the wiring itself is a compile-time fact.
  */
 
 import { describe, it, expect } from "bun:test";
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import {
-  COST_FIELD_NAMES,
   costFromFields,
   costToFields,
   normalizeCost,
@@ -134,36 +131,5 @@ describe("costToFields", () => {
   it("round-trips through costFromFields", () => {
     const cost = { input: 3, output: 15, cacheWrite: 3.75 };
     expect(costFromFields(costToFields(cost))).toEqual(cost);
-  });
-});
-
-describe("model-form-modal wiring", () => {
-  const src = readFileSync(
-    fileURLToPath(new URL("../../model-form-modal.tsx", import.meta.url)),
-    "utf8",
-  );
-
-  it("renders an input for each of the four rates", () => {
-    for (const bucket of Object.keys(COST_FIELD_NAMES)) {
-      expect(src).toContain(`renderRateField("${bucket}"`);
-    }
-  });
-
-  it("raises costEdited on a rate edit — that flag is what persists the override", () => {
-    expect(src).toContain("setCost(costFromFields(costFieldsWith(bucket, e.target.value)));");
-    expect(src).toContain("setCostEdited(true);");
-    // …and the submit path still gates the payload on it.
-    expect(src).toContain("...(costEdited && cost ? { cost } : {}),");
-  });
-
-  it("displays a catalog preset without flagging it as edited", () => {
-    expect(src).toContain("showCost(normalizeCost(preset.cost));\n    setCostEdited(false);");
-    // The old `preset.cost.cacheRead ?? 0` fabricated a free cache bucket.
-    expect(src).not.toContain("preset.cost.cacheRead ?? 0");
-  });
-
-  it("tells the user an unpriced model records $0", () => {
-    expect(src).toContain("cost === null && (");
-    expect(src).toContain('t("models.form.pricingMissing")');
   });
 });

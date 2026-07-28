@@ -15,63 +15,55 @@ import { fileURLToPath } from "node:url";
 import { describeRunCost, COST_UNAVAILABLE } from "../run-cost.ts";
 
 describe("describeRunCost", () => {
-  it("unpriced → the placeholder and an explanation, never a number", () => {
+  it("unpriced with nothing spent → the placeholder, never a number", () => {
     // The run finalized with `cost = NULL` on purpose; rendering `$0.0000`
     // here would claim the run was free.
     expect(describeRunCost(null, "unpriced")).toEqual({
       text: COST_UNAVAILABLE,
-      caveat: false,
       tooltipKey: "run.costUnpricedTooltip",
     });
+    expect(describeRunCost(0, "unpriced").text).toBe(COST_UNAVAILABLE);
   });
 
-  it("unpriced wins even when a partial amount was recorded", () => {
-    // A run whose ledger holds one priced call and one unpriced one has a
-    // non-zero total AND an unpriced verdict. The total is an undercount by an
-    // unknown amount, so showing it would be worse than withholding it.
-    expect(describeRunCost(0.0123, "unpriced").text).toBe(COST_UNAVAILABLE);
+  it("unpriced WITH a recorded amount → the amount, flagged as a floor", () => {
+    // `computeRunSpend` is worst-of, so one unpriced call among many priced
+    // ones makes the whole run `unpriced`. Withholding $12.50 the platform
+    // genuinely knows, to avoid overstating the part it doesn't, trades a
+    // small overstatement for a total loss of information.
+    expect(describeRunCost(12.5, "unpriced")).toEqual({
+      text: "$12.5000",
+      tooltipKey: "run.costUnpricedFloorTooltip",
+    });
   });
 
   it("partial → the amount, flagged as a floor", () => {
     expect(describeRunCost(0.1234, "partial")).toEqual({
       text: "$0.1234",
-      caveat: true,
       tooltipKey: "run.costPartialTooltip",
     });
   });
 
-  it("priced → today's rendering exactly: bare amount, no caveat, no tooltip", () => {
-    expect(describeRunCost(1.5, "priced")).toEqual({
-      text: "$1.5000",
-      caveat: false,
-      tooltipKey: null,
-    });
+  it("priced → today's rendering exactly: bare amount, no tooltip", () => {
+    expect(describeRunCost(1.5, "priced")).toEqual({ text: "$1.5000", tooltipKey: null });
   });
 
   it("no status → identical to priced (the whole back catalogue, not a warning)", () => {
-    expect(describeRunCost(0.02, null)).toEqual({
-      text: "$0.0200",
-      caveat: false,
-      tooltipKey: null,
-    });
-    expect(describeRunCost(0.02, undefined)).toEqual({
-      text: "$0.0200",
-      caveat: false,
-      tooltipKey: null,
-    });
+    expect(describeRunCost(0.02, null)).toEqual({ text: "$0.0200", tooltipKey: null });
+    expect(describeRunCost(0.02, undefined)).toEqual({ text: "$0.0200", tooltipKey: null });
   });
 
   it("a status-less null cost still reads $0.0000, unchanged from before", () => {
-    // Regression guard: only `unpriced` withholds the number. A run that
-    // simply spent nothing keeps the zero it always showed.
+    // Regression guard: only an unpriced run that spent NOTHING withholds the
+    // number. A run that simply spent nothing keeps the zero it always showed.
     expect(describeRunCost(null, null).text).toBe("$0.0000");
     expect(describeRunCost(0, "priced").text).toBe("$0.0000");
   });
 
-  it("never marks the placeholder with the floor caveat", () => {
-    // `caveat` qualifies a figure; there is no figure in the unpriced case.
-    for (const cost of [null, 0, 12.5]) {
-      expect(describeRunCost(cost, "unpriced").caveat).toBe(false);
+  it("qualifies every figure it cannot vouch for", () => {
+    // The tooltip key doubles as the "this is a floor" flag, so a qualified
+    // amount can never render bare.
+    for (const status of ["partial", "unpriced"] as const) {
+      expect(describeRunCost(9.99, status).tooltipKey).not.toBeNull();
     }
   });
 });
@@ -108,7 +100,11 @@ describe("cost readout wiring", () => {
 
   it("both locales define every tooltip key the mapping can return", () => {
     // Flat dotted keys: a missing entry renders the raw key string silently.
-    const keys = ["run.costUnpricedTooltip", "run.costPartialTooltip"];
+    const keys = [
+      "run.costUnpricedTooltip",
+      "run.costUnpricedFloorTooltip",
+      "run.costPartialTooltip",
+    ];
     for (const locale of ["en", "fr"]) {
       const messages = JSON.parse(read(`../../locales/${locale}/agents.json`)) as Record<
         string,
