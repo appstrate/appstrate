@@ -30,6 +30,12 @@ function serverlessSpec(): IntegrationSpawnSpec {
     sourceKind: "none",
     manifest: { name: "@tractr/google-drive", version: "1.0.0" },
     spawnEnv: {},
+    // An explicit (empty) allowlist, as the spawn resolver emits for every
+    // non-wildcard selection — it OMITS the field only for AFPS §4.4
+    // `tools: "*"`, which is a different diagnosis (see
+    // `integrations-boot-zero-tools.test.ts`). Set explicitly so the fixture
+    // does not accidentally read as a wildcard spec.
+    toolAllowlist: [],
   } as IntegrationSpawnSpec;
 }
 

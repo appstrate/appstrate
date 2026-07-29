@@ -82,6 +82,21 @@ function zeroToolSpec(): IntegrationSpawnSpec {
   } as IntegrationSpawnSpec;
 }
 
+/**
+ * Same integration under the AFPS §4.4 wildcard: the author selected EVERY
+ * upstream tool (`tools: "*"` → `toolAllowlist` omitted), and there still is
+ * nothing. The agent-side key is not the thing to fix here.
+ */
+function wildcardZeroToolSpec(): IntegrationSpawnSpec {
+  return {
+    integrationId: INTEGRATION_ID,
+    namespace: "gbp",
+    sourceKind: "none",
+    manifest: { name: INTEGRATION_ID, version: "1.0.0" },
+    spawnEnv: {},
+  } as IntegrationSpawnSpec;
+}
+
 /** Same integration, with `api_call` actually selected. */
 function healthySpec(): IntegrationSpawnSpec {
   return {
@@ -152,6 +167,24 @@ describe("bootIntegrations — zero callable tools is a boot failure", () => {
       const errorCrumbs = result.report.breadcrumbs.filter((b) => b.level === "error");
       expect(errorCrumbs).toHaveLength(1);
       expect(errorCrumbs[0]!.message).toContain(INTEGRATION_ID);
+    } finally {
+      await result.shutdown();
+    }
+  });
+
+  it("blames the integration, not the agent's tools key, under the wildcard", async () => {
+    // Under `tools: "*"` the author already selected everything; pointing them
+    // at `integrations_configuration[id].tools` would send them to fix the one
+    // field that is already correct.
+    const result = await boot(wildcardZeroToolSpec());
+    try {
+      expect(result.report.ok).toBe(false);
+      expect(result.failed).toHaveLength(1);
+      const error = result.failed[0]!.error;
+      expect(error).toContain('tools: "*"');
+      expect(error).toContain("advertised no tool");
+      expect(error).toContain("hidden_tools");
+      expect(error).not.toContain(`Check integrations_configuration["${INTEGRATION_ID}"].tools`);
     } finally {
       await result.shutdown();
     }

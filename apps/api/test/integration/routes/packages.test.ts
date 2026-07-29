@@ -1232,6 +1232,222 @@ describe("Packages API", () => {
       const body = (await res.json()) as { errors?: { code: string }[] };
       expect(body.errors?.[0]?.code).toBe("unknown_tool");
     });
+
+    // ── Declared-but-empty gate (`requireCallableTools`) ────────────────
+    // A declared integration whose EFFECTIVE selection is empty exposes
+    // nothing callable, so it is refused where the artifact is frozen
+    // (publish, import) — and deliberately NOT on the draft writes the
+    // editor autosaves through.
+
+    /** Seed a draft that declares `integrationId` with the given selection. */
+    async function seedDraftDeclaring(
+      id: string,
+      config: Record<string, unknown> | undefined,
+    ): Promise<void> {
+      await seedPackage({
+        id,
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        draftManifest: {
+          name: id,
+          version: "1.0.0",
+          type: "agent",
+          schema_version: "0.2",
+          display_name: "Zero tools",
+          description: "Declares an integration",
+          dependencies: { integrations: { [integrationId]: "^1.0.0" } },
+          ...(config ? { integrations_configuration: { [integrationId]: config } } : {}),
+        },
+        draftContent: "Prompt.",
+      });
+    }
+
+    it("draft POST accepts a declared integration with an explicitly empty tool selection", async () => {
+      // The editor's own flow: the dependency is added first, the tools are
+      // ticked after. Blocking the save here would make the editor unusable.
+      await seedGmailIntegration();
+      const res = await app.request("/api/packages/agents", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify(buildAgentBody({ version: "^1.0.0", tools: [] }, "empty-draft")),
+      });
+      expect(res.status).toBe(201);
+    });
+
+    it("draft PUT accepts a declared integration with an explicitly empty tool selection", async () => {
+      await seedGmailIntegration();
+      const agent = await seedAgent({
+        id: "@pkgorg/agent-put-empty",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+      });
+      const res = await app.request("/api/packages/agents/@pkgorg/agent-put-empty", {
+        method: "PUT",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          manifest: {
+            name: "@pkgorg/agent-put-empty",
+            version: "0.2.0",
+            type: "agent",
+            schema_version: "0.2",
+            display_name: "Updated",
+            dependencies: { integrations: { [integrationId]: "^1.0.0" } },
+            integrations_configuration: { [integrationId]: { tools: [] } },
+          },
+          content: "Updated prompt",
+          lock_version: agent.lockVersion,
+        }),
+      });
+      expect(res.status).toBe(200);
+    });
+
+    it("publish refuses a draft whose declared integration selects no tool", async () => {
+      await seedGmailIntegration();
+      await seedDraftDeclaring("@pkgorg/publish-empty-tools", { tools: [] });
+
+      const res = await app.request("/api/packages/agents/@pkgorg/publish-empty-tools/versions", {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as {
+        errors?: { code: string; field: string; message: string }[];
+      };
+      expect(body.errors?.[0]?.code).toBe("no_tools_selected");
+      expect(body.errors?.[0]?.field).toBe(`integrations_configuration.${integrationId}.tools`);
+      // The message must name BOTH ways out, not just the checkbox.
+      expect(body.errors?.[0]?.message).toContain("Select at least one tool");
+      expect(body.errors?.[0]?.message).toContain("dependencies.integrations");
+    });
+
+    it("publish refuses a draft that declares an integration with no configuration entry at all", async () => {
+      // No `integrations_configuration` block: the selection is undefined and
+      // this integration declares no `default_tools`, so it resolves to empty.
+      await seedGmailIntegration();
+      await seedDraftDeclaring("@pkgorg/publish-no-config", undefined);
+
+      const res = await app.request("/api/packages/agents/@pkgorg/publish-no-config/versions", {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { errors?: { code: string }[] };
+      expect(body.errors?.[0]?.code).toBe("no_tools_selected");
+    });
+
+    it("publish accepts a draft once a tool is selected", async () => {
+      await seedGmailIntegration();
+      await seedDraftDeclaring("@pkgorg/publish-with-tool", { tools: ["list_messages"] });
+
+      const res = await app.request("/api/packages/agents/@pkgorg/publish-with-tool/versions", {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+
+      expect(res.status).toBeLessThan(300);
+    });
+
+    it("publish accepts an unspecified selection when the integration declares default_tools", async () => {
+      // `tools` absent is NOT `tools: []` — it inherits `default_tools`
+      // (AFPS §4.4), which is what the ~60 api_call system integrations rely
+      // on. Publishing must not break the "add it and go" flow for those.
+      await seedPackage({
+        id: "@pkgorg/with-defaults",
+        orgId: ctx.orgId,
+        type: "integration",
+        source: "local",
+        draftManifest: {
+          type: "integration",
+          schema_version: "0.1",
+          name: "@pkgorg/with-defaults",
+          version: "1.0.0",
+          display_name: "Defaults (test)",
+          source: { kind: "none" },
+          default_tools: ["api_call"],
+          auths: {
+            primary: {
+              type: "oauth2",
+              authorization_endpoint: "https://idp/a",
+              token_endpoint: "https://idp/t",
+              authorized_uris: ["https://api/*"],
+              delivery: {
+                http: {
+                  in: "header",
+                  name: "Authorization",
+                  prefix: "Bearer ",
+                  value: "{$credential.access_token}",
+                },
+              },
+            },
+          },
+          _meta: { "dev.appstrate/api": { auths: { primary: {} } } },
+        },
+      });
+      await seedPackage({
+        id: "@pkgorg/publish-inherits-default",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        draftManifest: {
+          name: "@pkgorg/publish-inherits-default",
+          version: "1.0.0",
+          type: "agent",
+          schema_version: "0.2",
+          display_name: "Inherits default",
+          description: "No explicit selection",
+          dependencies: { integrations: { "@pkgorg/with-defaults": "^1.0.0" } },
+        },
+        draftContent: "Prompt.",
+      });
+
+      const res = await app.request(
+        "/api/packages/agents/@pkgorg/publish-inherits-default/versions",
+        {
+          method: "POST",
+          headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+          body: JSON.stringify({}),
+        },
+      );
+
+      expect(res.status).toBeLessThan(300);
+    });
+
+    it("ZIP import refuses an agent whose declared integration selects no tool", async () => {
+      await seedGmailIntegration();
+      const enc = (s: string) => new TextEncoder().encode(s);
+      const afps = zipSync({
+        "manifest.json": enc(
+          JSON.stringify({
+            name: "@pkgorg/imported-empty-tools",
+            version: "1.0.0",
+            type: "agent",
+            schema_version: "0.2",
+            display_name: "Imported empty",
+            description: "Declared but empty",
+            dependencies: { integrations: { [integrationId]: "^1.0.0" } },
+            integrations_configuration: { [integrationId]: { tools: [] } },
+          }),
+        ),
+        "prompt.md": enc("Prompt."),
+      });
+      const formData = new FormData();
+      formData.append("file", new File([new Uint8Array(afps)], "agent.afps"));
+
+      const res = await app.request("/api/packages/import", {
+        method: "POST",
+        headers: authHeaders(ctx),
+        body: formData,
+      });
+
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { errors?: { code: string }[] };
+      expect(body.errors?.[0]?.code).toBe("no_tools_selected");
+      await assertDbMissing(packages, eq(packages.id, "@pkgorg/imported-empty-tools"));
+    });
   });
 
   // ═══════════════════════════════════════════════

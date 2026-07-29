@@ -408,11 +408,14 @@ export interface IntegrationSpawnSpec {
    * (the agent's MCP client never learns of them, so they cannot be
    * named in a call; the sidecar's `McpHost` has no mapping for them
    * either, so a forged call would fail as an unknown tool). An empty
-   * array disables the namespace entirely (no tools surfaced).
+   * array surfaces no tool at all — which is not a supported end state:
+   * the boot gate `assertIntegrationExposesTools` fails the run, and
+   * publish/import refuse the manifest that produced it.
    *
-   * Usually an array — the platform builds it from
-   * `dependencies.integrations[id].tools` and defaults to `[]` when the
-   * agent author didn't pick any tool (least privilege).
+   * Usually an array — the platform builds it from the EFFECTIVE selection:
+   * `integrations_configuration[id].tools` when the agent declared one,
+   * otherwise the integration's own `default_tools` (AFPS §4.4). An absent
+   * agent selection does NOT default to `[]`.
    *
    * AFPS §4.4 wildcard — when the agent set `tools: "*"` (and the
    * integration declares `allow_undeclared_tools: true`, §7.8) the

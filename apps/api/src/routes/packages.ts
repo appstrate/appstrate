@@ -96,12 +96,24 @@ function manifestErrorsToFieldErrors(errors: string[]): ValidationFieldError[] {
  * non-agent types, integrations with no configuration entry, and
  * integrations not visible to the org (the latter handled by run-time dep
  * validation).
+ *
+ * `requireCallableTools` adds the declared-but-empty gate on top. It belongs
+ * to the paths that FREEZE an artifact (publish, import), never to a draft
+ * write: the editor's own add-integration → tick-a-tool flow autosaves
+ * through the empty state, and refusing it there would make the editor
+ * unusable. The runtime keeps its own backstop for drafts run directly from
+ * the editor and for packages published before this gate existed.
  */
 async function assertAgentIntegrationScopesValid(
   manifest: Record<string, unknown>,
   orgId: string,
+  requireCallableTools = false,
 ): Promise<void> {
-  const scopeErrors = await validateAgentIntegrationSelections({ manifest, orgId });
+  const scopeErrors = await validateAgentIntegrationSelections({
+    manifest,
+    orgId,
+    requireCallableTools,
+  });
   if (scopeErrors.length > 0) {
     throw validationFailed(scopeErrors);
   }
@@ -127,12 +139,18 @@ async function assertAgentIntegrationScopesValid(
  *   artifacts are tolerated on read (#983), and gating here would make a
  *   legacy drifted draft permanently un-publishable. Retired ids drop so such
  *   a draft stays editable and publishable.
+ *
+ * `direction` is orthogonal to `opts.requireCallableTools`: it says where the
+ * bytes came from, not whether they are being frozen. Publishing a draft is
+ * `"stored"` yet must run the declared-but-empty gate; a PUT carrying a
+ * manifest is `"author"` yet must not.
  */
 async function validateManifestForRoute(
   manifest: unknown,
   expectedType: PackageType,
   orgId: string,
   direction: "author" | "stored",
+  opts: { requireCallableTools?: boolean } = {},
 ): Promise<Record<string, unknown> & { name: string }> {
   const result = validateManifest(
     manifest,
@@ -158,7 +176,7 @@ async function validateManifestForRoute(
     ]);
   }
 
-  await assertAgentIntegrationScopesValid(validated, orgId);
+  await assertAgentIntegrationScopesValid(validated, orgId, opts.requireCallableTools);
   return validated;
 }
 
@@ -1179,7 +1197,15 @@ function makeCreateVersionHandler(rcfg: PackageRouteConfig) {
     // integration-scope subset gate the create/update paths apply comes along
     // with it — a draft must not be frozen into an immutable version with an
     // `integrations_configuration` selection outside the integration catalog.
-    await validateManifestForRoute(item.manifest, rcfg.cfg.type, orgId, "stored");
+    //
+    // `requireCallableTools` is switched ON here and NOT on the draft writes:
+    // this is where the artifact stops being editable. A declared integration
+    // with an empty tool selection boots with nothing callable and aborts the
+    // run, so freezing one produces a version that can only fail — the author
+    // must be told now, in the editor, not 30 seconds into a run.
+    await validateManifestForRoute(item.manifest, rcfg.cfg.type, orgId, "stored", {
+      requireCallableTools: true,
+    });
 
     // Parse optional version override from request body. The body itself is
     // optional (OpenAPI `requestBody.required: false` — the SPA omits it
@@ -1584,7 +1610,12 @@ export function createPackagesRouter() {
     // Phase 1 — for agent imports, cross-check integrations_configuration
     // selections against the referenced integration catalogs. `parsePackageZip`
     // already ran `validateManifest`; this is the niveau 2 follow-up.
-    await assertAgentIntegrationScopesValid(manifest as Record<string, unknown>, orgId);
+    //
+    // An import is a FINAL artifact, not an editing step — `postInstallPackage`
+    // below cuts a version from it — so the declared-but-empty gate applies
+    // here too. An older package carrying that state fails to import until its
+    // author picks a tool or drops the dependency; it was never runnable.
+    await assertAgentIntegrationScopesValid(manifest as Record<string, unknown>, orgId, true);
 
     // Check for existing user package
     const existing = await getPackageById(packageId);

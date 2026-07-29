@@ -220,11 +220,17 @@ export function extractDependencies(manifest: Record<string, unknown>): DepEntry
  * version range from `dependencies.integrations[id]` (§4.1) merged with the
  * tool/scope/auth selection from `integrations_configuration[id]` (§4.4).
  *
- * `tools === undefined` means the agent declared the dep but didn't
- * pick any tool — the runtime treats this as "0 tools used, integration
- * effectively inert". An explicit empty array carries the same meaning;
- * the distinction is preserved only so editor round-trips don't promote
- * `undefined` to `[]` on every save.
+ * `tools === undefined` and `tools === []` are DIFFERENT selections, and the
+ * difference is load-bearing — do not collapse them. `undefined` means the
+ * agent expressed no preference and inherits the integration's declared
+ * `default_tools` (§4.4, resolved by `resolveEffectiveToolSelection` in
+ * `./integration.ts`); `[]` is an explicit override that selects nothing.
+ *
+ * Neither is a shippable end state when it RESOLVES to nothing: an integration
+ * declared with an empty effective selection exposes no callable tool, which
+ * publish/import refuse (`no_tools_selected`) and the sidecar boot gate turns
+ * into a failed run. The way out is to select a tool or to drop the
+ * `dependencies.integrations` entry.
  */
 export interface ManifestIntegrationEntry {
   id: string;

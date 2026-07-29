@@ -539,11 +539,13 @@ async function resolveOne(
     ...(deliveries.httpDeliveryAuths && !isRemoteHttp
       ? { httpDeliveryAuths: deliveries.httpDeliveryAuths }
       : {}),
-    // Niveau 2 Phase 3 — least-privilege default: when the agent didn't
-    // pick any tool (undefined selection), the allowlist is `[]` and
-    // the sidecar's McpHost registers nothing for this integration.
-    // The agent author has to explicitly opt into each tool via the
-    // editor UI.
+    // Niveau 2 Phase 3 — the allowlist is the EFFECTIVE selection computed
+    // above: the agent's explicit `integrations_configuration[id].tools` when
+    // it declared one, otherwise the integration's `default_tools` (§4.4). An
+    // absent agent selection does NOT collapse to `[]`. When the effective
+    // selection really is empty the sidecar's McpHost registers nothing and
+    // `assertIntegrationExposesTools` fails the boot — publish/import already
+    // refuse that manifest, so reaching here means an older or draft artifact.
     //
     // AFPS §4.4 wildcard — `toolAllowlist === undefined` instructs the
     // sidecar (via the conditional spread below) to omit the field, which

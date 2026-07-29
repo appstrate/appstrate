@@ -790,7 +790,11 @@ async function spawnAndConnectLocalIntegration(params: {
    * wins when both are set (it already provides egress).
    */
   wantsEgress: boolean;
-  /** Allowlist for `host.register`. `[]` exposes nothing (connect-run). */
+  /**
+   * Allowlist for `host.register`. `undefined` = no allowlist (AFPS §4.4
+   * wildcard). `[]` exposes nothing, which {@link assertIntegrationExposesTools}
+   * then turns into a failed boot — it is a diagnosis, not a mode.
+   */
   allowedTools: readonly string[] | undefined;
   /**
    * R8a defensive filter — `manifest.hidden_tools` echoed back from the
@@ -1082,13 +1086,26 @@ export function hiddenToolsForNativeUpstream(
  * with zero callable tools. Shared by the diagnostic breadcrumb and the boot
  * failure below so both name the same manifest key to fix.
  *
- * Every reachable cause is a manifest/config one, so the message points at the
- * agent-side selection key: an agent that declared the dependency but selected
- * no tool (`integrations_configuration[id].tools` absent or `[]`), or an
- * integration manifest whose `hidden_tools` suppressed everything selected.
+ * The cause — and therefore the thing to fix — depends on which selection form
+ * produced the spec, so the message branches on it rather than always blaming
+ * the agent's `tools` key:
+ *
+ *  - **Wildcard** (`toolAllowlist === undefined`, AFPS §4.4 `tools: "*"`) —
+ *    the author already selected everything there is; telling them to fix
+ *    `integrations_configuration[id].tools` would be actively wrong. Nothing
+ *    was filtered out by the agent's choice, so the surface is empty because
+ *    the upstream advertised no tool, or because the integration's own
+ *    `hidden_tools` suppressed every one it did advertise. Both are
+ *    integration-side.
+ *  - **Explicit selection** (an array, possibly empty) — the agent-side key is
+ *    the one to fix: the dependency was declared but nothing was picked, or
+ *    what was picked no longer exists upstream.
  */
 function zeroToolReason(spec: IntegrationSpawnSpec): string {
   const key = `integrations_configuration["${spec.integrationId}"].tools`;
+  if (spec.toolAllowlist === undefined) {
+    return `0 tools registered under tools: "*" — nothing callable. The agent selected every upstream tool, so ${key} is not the problem: integration ${spec.integrationId} advertised no tool, or its manifest's hidden_tools suppressed all of them.`;
+  }
   return spec.sourceKind === "none" || !spec.manifest.server
     ? `api_call exposed 0 tools — nothing callable. Check ${key} (a serverless integration must list "api_call").`
     : `0 tools registered — nothing callable. Check ${key} (it must list at least one tool this integration advertises).`;
