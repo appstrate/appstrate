@@ -149,10 +149,25 @@ export function assessDrift(
   return { verdict: "ok", detail: "in sync" };
 }
 
-async function fetchPackageJson(
+/**
+ * Read one consumer's `package.json` from GitHub.
+ *
+ * Throws on ANY non-2xx, 404 included. That is the whole point: a 404 here is
+ * never "the file is absent". Every repo in {@link CONSUMERS} is a live npm
+ * package and therefore has a `package.json` — so a 404 means the READ failed,
+ * which for a private repo means the token cannot see it.
+ *
+ * Returning null on 404 is what let the gate report `Summary: 0 failure(s)`
+ * while verifying nothing: `CONSUMER_LOCKSTEP_TOKEN` was present but could not
+ * read either private consumer, both 404'd, both were logged as
+ * "not present, skipping", and core@6.1.0 published unverified. The caller
+ * already fails closed on fetch errors — 404 now takes that same path instead
+ * of routing around it.
+ */
+export async function fetchPackageJson(
   repo: string,
   path: string,
-): Promise<Record<string, unknown> | null> {
+): Promise<Record<string, unknown>> {
   const url = `https://api.github.com/repos/${repo}/contents/${path}`;
   const headers: Record<string, string> = {
     Accept: "application/vnd.github.raw+json",
@@ -162,9 +177,19 @@ async function fetchPackageJson(
   if (token) headers.Authorization = `Bearer ${token}`;
 
   const res = await fetch(url, { headers });
-  if (res.status === 404) return null;
   if (!res.ok) {
-    throw new Error(`GET ${url} → ${res.status} ${res.statusText}`);
+    // GitHub returns 404 rather than 403 for a repo the token cannot see, so
+    // it does not leak the repo's existence. Name that here: the message is
+    // the operator's only clue, and "404 Not Found" alone reads as "the file
+    // was deleted" — sending them to look in the wrong place.
+    const hint =
+      res.status === 404
+        ? ` — a listed consumer always has this file, so this is a READ failure, not an absent file.` +
+          ` Check that ${token ? "CONSUMER_LOCKSTEP_TOKEN" : "GITHUB_TOKEN"} still has contents:read on ${repo}` +
+          ` (expired PAT, missing scope, or SSO not authorized). If the repo genuinely stopped consuming` +
+          ` @appstrate/core, remove it from CONSUMERS instead.`
+        : "";
+    throw new Error(`GET ${url} → ${res.status} ${res.statusText}${hint}`);
   }
   return (await res.json()) as Record<string, unknown>;
 }
@@ -190,14 +215,18 @@ async function main(): Promise<void> {
 
   for (const consumer of CONSUMERS) {
     for (const path of consumer.paths) {
-      let pkg: Record<string, unknown> | null;
+      let pkg: Record<string, unknown>;
       try {
         pkg = await fetchPackageJson(consumer.repo, path);
       } catch (err) {
-        // Fail closed: a fetch error (403/rate-limit/outage) means we could
+        // Fail closed: a fetch error (404/403/rate-limit/outage) means we could
         // NOT verify this consumer. Under `fail` policy that is a blocking
         // failure — otherwise a transient GitHub error would let core publish
         // without ever checking its consumers. `warn`/`off` may still bypass.
+        //
+        // 404 reaches here too, deliberately. It used to return null and get
+        // logged as "not present, skipping", which is how a token that could
+        // read neither private consumer still produced `0 failure(s)`.
         const detail = err instanceof Error ? err.message : String(err);
         if (POLICY === "fail") {
           console.error(`  ✗ ${consumer.repo}/${path} — fetch failed, cannot verify (${detail})`);
@@ -206,10 +235,6 @@ async function main(): Promise<void> {
           console.warn(`  ! ${consumer.repo}/${path} — fetch failed (${detail})`);
           warnings++;
         }
-        continue;
-      }
-      if (!pkg) {
-        console.log(`  - ${consumer.repo}/${path} — not present, skipping`);
         continue;
       }
 
