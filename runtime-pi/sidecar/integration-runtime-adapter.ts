@@ -58,7 +58,7 @@ export interface RuntimeAdapterRunContext {
  *     termination); no CA needed, so the adapter sets only the proxy env block.
  */
 export interface RuntimeEgressContext {
-  /** Full HTTPS_PROXY URL the runner targets (e.g. `http://sidecar:39472`). */
+  /** Full HTTPS_PROXY URL the runner targets (e.g. `http://<sidecarAlias>:39472`). */
   readonly proxyUrl: string;
   /**
    * Absolute path on the sidecar's fs to the run-CA PEM file when a

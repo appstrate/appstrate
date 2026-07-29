@@ -58,16 +58,63 @@ export function sidecarSocketOverrides(
 }
 
 /**
- * Agent-visible sidecar endpoints on the Docker topology: the sidecar is
- * reachable through its DNS alias on the per-run bridge network. Static —
- * the alias and ports are identical for every run.
+ * Mint the per-run DNS alias under which the sidecar is published on the
+ * run's bridge network.
+ *
+ * Shape: `s` + a hyphen-stripped UUIDv4 as lowercase hex = 33 chars of
+ * `[a-z0-9]`. That is 122 random bits, not 128 — v4 pins 4 bits to the
+ * version and 2 to the variant. Far past any guessing concern either way —
+ * stated exactly because a security comment that rounds up teaches the next
+ * reader to trust the round number instead of the code.
+ * That is a valid RFC 1123 host label everywhere — well under the 63-char
+ * label limit, starts with a letter (never a digit), contains no hyphen at
+ * all so it can neither start nor end with one.
+ *
+ * What replacing the historical constant `sidecar` buys, precisely: the
+ * network boundary is UNCHANGED and the sidecar remains reachable from the
+ * agent container by design — its `/mcp` endpoint is deliberately
+ * unauthenticated because the agent container holds no run token, and the
+ * per-run Docker network is the security boundary. The agent still learns
+ * the alias for free (every `curl` prints it as part of `no_proxy`). What
+ * changes is only that the name is no longer a stable, well-known,
+ * cross-run constant: a prompt-injection payload cannot hard-code
+ * `http://sidecar:8080/mcp`, and a leaked alias is a meaningless per-run
+ * token. This is defence in depth, not a new boundary.
  */
-const DOCKER_SIDECAR_ENDPOINTS: SidecarEndpoints = {
-  sidecarUrl: "http://sidecar:8080",
-  llmProxyUrl: "http://sidecar:8080/llm",
-  forwardProxyUrl: "http://sidecar:8081",
-  noProxy: "sidecar,localhost,127.0.0.1",
-};
+export function generateSidecarAlias(): string {
+  return `s${crypto.randomUUID().replaceAll("-", "")}`;
+}
+
+/**
+ * Agent-visible sidecar endpoints on the Docker topology — all four fields
+ * derived from the ONE per-run alias, in one place. Every other consumer of
+ * the alias (the network alias attached to the sidecar container, and the
+ * `SIDECAR_DNS_ALIAS` the sidecar is told about itself) reads it back off
+ * the boundary via {@link sidecarAliasOf} rather than re-deriving it, so
+ * there is exactly one site where the name is chosen and no way to update
+ * one use and forget another.
+ */
+export function buildDockerSidecarEndpoints(alias: string): SidecarEndpoints {
+  return {
+    sidecarUrl: `http://${alias}:8080`,
+    llmProxyUrl: `http://${alias}:8080/llm`,
+    forwardProxyUrl: `http://${alias}:8081`,
+    noProxy: `${alias},localhost,127.0.0.1`,
+  };
+}
+
+/**
+ * Recover the per-run alias from a boundary built by
+ * {@link buildDockerSidecarEndpoints}. The boundary is the single carrier
+ * of the alias between `createIsolationBoundary` (which mints it) and
+ * `createSidecar` (which attaches it to the network and tells the sidecar
+ * its own name) — nothing downstream re-generates it. Deriving it from the
+ * URL rather than adding a field keeps `IsolationBoundary` (published in
+ * `@appstrate/core`) unchanged.
+ */
+export function sidecarAliasOf(boundary: IsolationBoundary): string {
+  return new URL(boundary.sidecarEndpoints.sidecarUrl).hostname;
+}
 
 export class DockerOrchestrator implements RunOrchestrator {
   /**
@@ -264,7 +311,7 @@ export class DockerOrchestrator implements RunOrchestrator {
       id: networkId,
       name,
       workspace: { kind: "volume", name: volumeName },
-      sidecarEndpoints: DOCKER_SIDECAR_ENDPOINTS,
+      sidecarEndpoints: buildDockerSidecarEndpoints(generateSidecarAlias()),
     };
   }
 
@@ -288,6 +335,11 @@ export class DockerOrchestrator implements RunOrchestrator {
     spec: SidecarLaunchSpec,
   ): Promise<WorkloadHandle> {
     const env = getEnv();
+    // The per-run DNS alias was minted once in createIsolationBoundary and
+    // baked into the boundary's endpoints. Read it back — never re-generate
+    // it here, or the name the agent was handed and the name the container
+    // actually answers to would diverge and every run would fail to resolve.
+    const sidecarAlias = sidecarAliasOf(boundary);
     // Resolve the egress network by name on every use (not a boot-time
     // cached ID): if it vanished mid-lifetime (`docker network prune`,
     // daemon restart, another Appstrate process), ensureNetwork recreates
@@ -315,9 +367,18 @@ export class DockerOrchestrator implements RunOrchestrator {
     // explicit operator override — the env schema validates the value and
     // defaults it to "docker".
     sidecarEnv.INTEGRATION_RUNTIME_ADAPTER = env.INTEGRATION_RUNTIME_ADAPTER;
+    // Tell the sidecar the name it answers to on the run bridge. Two
+    // sidecar-side consumers need it and neither can guess a per-run value:
+    // the `/mcp` + `/runtime-events` Host-header check (DNS-rebinding
+    // defence — the agent's Host is `<alias>:8080`), and the HTTPS_PROXY URL
+    // the sidecar hands to the integration runner containers it spawns.
+    // Absent on the process/firecracker topologies, which reach the sidecar
+    // over loopback and never publish a DNS alias.
+    sidecarEnv.SIDECAR_DNS_ALIAS = sidecarAlias;
 
     // Create sidecar on egress network (primary) so it has DNS + internet.
-    // Then connect to run network (internal) with "sidecar" alias for agent DNS.
+    // Then connect to run network (internal) under the per-run alias for
+    // agent DNS.
     //
     // When the run declares AFPS integrations, the sidecar needs to spawn
     // per-integration runner containers (`appstrate-mcp-runner-{node,python,
@@ -338,8 +399,9 @@ export class DockerOrchestrator implements RunOrchestrator {
       ...sidecarSocketOverrides(spec),
     });
 
-    // Connect to run network (agent reaches sidecar via "sidecar" DNS alias)
-    await docker.connectContainerToNetwork(boundary.id, containerId, ["sidecar"]);
+    // Connect to run network (agent reaches the sidecar via the per-run DNS
+    // alias it was handed in SIDECAR_URL / HTTP(S)_PROXY / NO_PROXY).
+    await docker.connectContainerToNetwork(boundary.id, containerId, [sidecarAlias]);
 
     if (platformNetwork) {
       await docker.connectContainerToNetwork(platformNetwork.networkId, containerId);
@@ -347,9 +409,9 @@ export class DockerOrchestrator implements RunOrchestrator {
 
     // #406 — parallel boot. Start the sidecar but DO NOT block on its
     // `/health` here. The agent (started in parallel by pi.ts) drives
-    // a retrying MCP handshake against `sidecar:8080/mcp`, which absorbs:
+    // a retrying MCP handshake against `<alias>:8080/mcp`, which absorbs:
     //   - ECONNREFUSED while the sidecar is wiring its listener
-    //   - ENOTFOUND while the Docker bridge propagates the "sidecar" alias
+    //   - ENOTFOUND while the Docker bridge propagates the per-run alias
     // Sidecar exit detection still happens loudly: a non-blocking watcher
     // races `waitForExit` against the run. If the sidecar dies before MCP
     // connects, the watcher logs `exitCode` + buffered stderr/stdout, so

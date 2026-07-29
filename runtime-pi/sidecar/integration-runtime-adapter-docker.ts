@@ -5,9 +5,10 @@
  *
  * One runner container per integration, on the per-run user-defined
  * bridge network (`appstrate-exec-<runId>`, created by the platform
- * launcher with the sidecar joined under the `sidecar` DNS alias).
+ * launcher with the sidecar joined under a per-run DNS alias, handed
+ * to us as `SIDECAR_DNS_ALIAS`).
  * MITM listeners bind 0.0.0.0 so the runner reaches them via
- * `http://sidecar:<port>`. CA cert is `docker cp`'d into the runner
+ * `http://<alias>:<port>`. CA cert is `docker cp`'d into the runner
  * at {@link CA_CONTAINER_PATH}.
  */
 
@@ -450,14 +451,16 @@ export function createDockerIntegrationRuntimeAdapter(): IntegrationRuntimeAdapt
 
     async prepare(runId: string): Promise<RuntimeAdapterRunContext> {
       // The per-run docker network is created by the platform launcher
-      // (`appstrate-exec-<runId>`) with the sidecar attached under the
-      // `sidecar` DNS alias. The runner joins the same network so its
-      // HTTPS_PROXY resolves via Docker's embedded DNS. RUN_ID is set
-      // on sidecar create; when it's absent (sidecar booted outside
-      // the platform launcher's path — dev / tests), we fall back to
-      // the default bridge with loopback URLs and skip the alias path.
+      // (`appstrate-exec-<runId>`) with the sidecar attached under a
+      // per-run DNS alias, handed to us as SIDECAR_DNS_ALIAS. The runner
+      // joins the same network so its HTTPS_PROXY resolves via Docker's
+      // embedded DNS. RUN_ID + SIDECAR_DNS_ALIAS are both set on sidecar
+      // create; when either is absent (sidecar booted outside the
+      // platform launcher's path — dev / tests), we fall back to the
+      // default bridge with loopback URLs and skip the alias path.
       const envRunId = process.env.RUN_ID;
-      runNetwork = envRunId ? `appstrate-exec-${envRunId}` : null;
+      const alias = process.env.SIDECAR_DNS_ALIAS;
+      runNetwork = envRunId && alias ? `appstrate-exec-${envRunId}` : null;
       // #779 — transparent egress plane for proxy-unaware HTTP clients.
       // Only meaningful on a per-run bridge (a routable sidecar IP exists).
       transparentEgress = runNetwork ? await setupTransparentEgress(runNetwork) : null;
@@ -469,7 +472,7 @@ export function createDockerIntegrationRuntimeAdapter(): IntegrationRuntimeAdapt
         // anyway, so 127.0.0.1 is the safe default.
         listenerBindHost: runNetwork ? "0.0.0.0" : "127.0.0.1",
         proxyUrlFor: (port: number) =>
-          runNetwork ? `http://sidecar:${port}` : `http://127.0.0.1:${port}`,
+          runNetwork ? `http://${alias}:${port}` : `http://127.0.0.1:${port}`,
       };
     },
 
@@ -488,7 +491,7 @@ export function createDockerIntegrationRuntimeAdapter(): IntegrationRuntimeAdapt
       const envFlags: string[] = [];
       if (egress) {
         // Proxy routing for BOTH listener kinds (MITM + plain CONNECT).
-        // The proxy URL is `http://sidecar:<port>` (non-secret routing info).
+        // The proxy URL is `http://<sidecarAlias>:<port>` (non-secret routing info).
         for (const [k, v] of Object.entries(buildProxyEnvBlock(egress.proxyUrl))) {
           envFlags.push("-e", `${k}=${v}`);
         }

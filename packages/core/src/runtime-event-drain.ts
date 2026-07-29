@@ -35,7 +35,13 @@ const NOOP_LOGGER: DrainLogger = { warn: () => {}, error: () => {} };
 export interface RuntimeEventDrainerOptions {
   /** Absolute URL of the sidecar `GET /runtime-events` endpoint. */
   url: string;
-  /** Headers sent with every drain request (e.g. `{ Host: "sidecar" }`). */
+  /**
+   * Extra headers sent with every drain request. Do NOT set `Host` here: the
+   * sidecar's hostname is per-run (a random DNS alias under Docker), so only
+   * the URL knows it — `fetch` derives the right `Host` from {@link url}, and
+   * an explicit one would override it and be refused by the sidecar's
+   * DNS-rebinding guard.
+   */
   headers?: Record<string, string>;
   /** Injected logger; defaults to a no-op (the drainer is silent in tests). */
   logger?: DrainLogger;

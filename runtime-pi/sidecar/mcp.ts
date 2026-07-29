@@ -139,10 +139,13 @@ const API_CALL_PREFLIGHT_META: Record<string, unknown> = {
 const MAX_MCP_REQUEST_BODY_SIZE = MAX_MCP_ENVELOPE_SIZE;
 
 /**
- * Hostnames the agent uses to reach the sidecar. The Docker bridge
- * exposes the sidecar under the `sidecar` alias on port 8080; the
- * process orchestrator (used by `appstrate run` and tests) exposes it
- * under `localhost`/`127.0.0.1` on a *dynamic* port.
+ * Hostnames the agent uses to reach the sidecar. The process orchestrator
+ * (used by `appstrate run` and tests) and the Firecracker guest expose it
+ * under `localhost`/`127.0.0.1` on a *dynamic* port. The Docker bridge
+ * publishes it under a **per-run** DNS alias on port 8080, handed to the
+ * sidecar as `SIDECAR_DNS_ALIAS` at launch — it replaced the historical
+ * constant `sidecar`, which every run shared and which a prompt-injection
+ * payload could therefore hard-code.
  *
  * The MCP SDK's built-in `allowedHosts` does an exact-match check
  * including port, which fails the dynamic-port case (Host header
@@ -152,8 +155,15 @@ const MAX_MCP_REQUEST_BODY_SIZE = MAX_MCP_ENVELOPE_SIZE;
  * rebinding defence is preserved because every legitimate caller
  * resolves to one of these hostnames; an attacker rebinding a public
  * domain to 127.0.0.1 still hits a Host header that does not match.
+ *
+ * `process.env` is read per call, not captured at import time: the alias
+ * is per-run and tests set it around a single request.
  */
-const ALLOWED_HOSTNAMES = new Set(["sidecar", "127.0.0.1", "localhost"]);
+function isAllowedSidecarHostname(hostname: string): boolean {
+  if (hostname === "127.0.0.1" || hostname === "localhost") return true;
+  const alias = process.env.SIDECAR_DNS_ALIAS;
+  return alias !== undefined && alias !== "" && hostname === alias;
+}
 
 function jsonRpcErrorResponse(status: number, code: number, message: string): Response {
   return new Response(JSON.stringify({ jsonrpc: "2.0", error: { code, message }, id: null }), {
@@ -173,7 +183,7 @@ export function validateMcpHostHeader(req: Request): Response | undefined {
   // split is sufficient here).
   const colonIdx = hostHeader.lastIndexOf(":");
   const hostname = colonIdx >= 0 ? hostHeader.slice(0, colonIdx) : hostHeader;
-  if (!ALLOWED_HOSTNAMES.has(hostname)) {
+  if (!isAllowedSidecarHostname(hostname)) {
     return jsonRpcErrorResponse(403, -32000, `Invalid Host header: ${hostHeader}`);
   }
   return undefined;
@@ -1944,7 +1954,7 @@ export function mountMcp(app: Hono, options: MountMcpOptions): void {
     // Host header validation (DNS-rebinding defence). Done here, not by
     // the SDK, so we accept dynamic-port Host values like
     // `localhost:51123` (process-orchestrator mode) while still
-    // rejecting anything outside `ALLOWED_HOSTNAMES`.
+    // rejecting anything outside `isAllowedSidecarHostname`.
     const hostError = validateMcpHostHeader(c.req.raw);
     if (hostError) return hostError;
 

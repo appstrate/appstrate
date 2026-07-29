@@ -532,10 +532,16 @@ const sidecarUrl = env.sidecarUrl;
 // a retrying final drain. One instance so the cursor stays consistent across
 // intermediate + final drains. Undefined when no sidecar is attached (no
 // journal to drain — the in-process Pi extension path emits its own events).
+// No explicit `Host` header: `fetch` derives it from the URL, which is the
+// only place that knows the sidecar's hostname on this topology (a per-run
+// DNS alias under Docker, `localhost:<port>` under the process orchestrator
+// and inside the Firecracker guest). Sending a literal here would override
+// the derived value and be rejected by the sidecar's DNS-rebinding guard on
+// every drain — the same guard `/mcp` uses, which likewise relies on the
+// URL-derived Host.
 const runtimeDrainer: RuntimeEventDrainer | undefined = sidecarUrl
   ? createRuntimeEventDrainer({
       url: `${sidecarUrl.replace(/\/$/, "")}/runtime-events`,
-      headers: { Host: "sidecar" },
       logger: {
         warn: (msg, data) => logLine("warn", msg, data),
         error: (msg, data) => logLine("error", msg, data),

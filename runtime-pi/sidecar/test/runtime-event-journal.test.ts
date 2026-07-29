@@ -73,14 +73,35 @@ describe("journalRuntimeToolDefs — single-execution wrap", () => {
 });
 
 describe("GET /runtime-events", () => {
-  const okHost = { Host: "sidecar" };
+  // On the Docker topology the sidecar answers on a per-run DNS alias handed
+  // to it as SIDECAR_DNS_ALIAS, so the agent's drain requests carry
+  // `Host: <alias>:8080`. There is no cross-run constant to pin here — the
+  // tests mint their own alias and restore the environment afterwards.
+  const RUN_ALIAS = "s0f1e2d3c4b5a697887766554433221100";
+  const okHost = { Host: `${RUN_ALIAS}:8080` };
+
+  // `fn` returns `T | PromiseLike<T>` because Hono's `app.request()` is typed
+  // `Response | Promise<Response>`.
+  async function withAlias<T>(alias: string | undefined, fn: () => T | PromiseLike<T>): Promise<T> {
+    const previous = process.env.SIDECAR_DNS_ALIAS;
+    if (alias === undefined) delete process.env.SIDECAR_DNS_ALIAS;
+    else process.env.SIDECAR_DNS_ALIAS = alias;
+    try {
+      return await fn();
+    } finally {
+      if (previous === undefined) delete process.env.SIDECAR_DNS_ALIAS;
+      else process.env.SIDECAR_DNS_ALIAS = previous;
+    }
+  }
 
   it("serves events after the cursor when a journal is wired", async () => {
     const journal = new RuntimeEventJournal();
     journal.append({ type: "log.written", message: "one" });
     const app = createApp(makeDeps({ runtimeEventJournal: journal }));
 
-    const res = await app.request("/runtime-events?after=0", { headers: okHost });
+    const res = await withAlias(RUN_ALIAS, () =>
+      app.request("/runtime-events?after=0", { headers: okHost }),
+    );
     expect(res.status).toBe(200);
     const body = (await res.json()) as { events: Array<{ message: string }>; cursor: number };
     expect(body.events.map((e) => e.message)).toEqual(["one"]);
@@ -89,14 +110,45 @@ describe("GET /runtime-events", () => {
 
   it("answers an empty batch when no journal is wired", async () => {
     const app = createApp(makeDeps());
-    const res = await app.request("/runtime-events?after=0", { headers: okHost });
+    const res = await withAlias(RUN_ALIAS, () =>
+      app.request("/runtime-events?after=0", { headers: okHost }),
+    );
     expect(res.status).toBe(200);
     expect(((await res.json()) as { events: unknown[] }).events).toEqual([]);
   });
 
   it("rejects a foreign Host header (same posture as /mcp)", async () => {
     const app = createApp(makeDeps({ runtimeEventJournal: new RuntimeEventJournal() }));
-    const res = await app.request("/runtime-events?after=0", { headers: { Host: "evil.example" } });
+    const res = await withAlias(RUN_ALIAS, () =>
+      app.request("/runtime-events?after=0", { headers: { Host: "evil.example" } }),
+    );
     expect(res.status).toBe(403);
+  });
+
+  it("rejects another run's alias (the alias is per-run, not a shared name)", async () => {
+    const app = createApp(makeDeps({ runtimeEventJournal: new RuntimeEventJournal() }));
+    const res = await withAlias(RUN_ALIAS, () =>
+      app.request("/runtime-events?after=0", {
+        headers: { Host: "sffffffffffffffffffffffffffffffff:8080" },
+      }),
+    );
+    expect(res.status).toBe(403);
+  });
+
+  it("rejects a non-loopback Host when no alias is set (fail-closed)", async () => {
+    // Process orchestrator / Firecracker guest: the agent reaches the sidecar
+    // over loopback, no DNS alias is published, and SIDECAR_DNS_ALIAS is unset.
+    // Anything other than localhost/127.0.0.1 must be refused — including the
+    // historical constant `sidecar`, which is no longer any container's name.
+    const app = createApp(makeDeps({ runtimeEventJournal: new RuntimeEventJournal() }));
+    const res = await withAlias(undefined, () =>
+      app.request("/runtime-events?after=0", { headers: { Host: "sidecar" } }),
+    );
+    expect(res.status).toBe(403);
+
+    const loopback = await withAlias(undefined, () =>
+      app.request("/runtime-events?after=0", { headers: { Host: "127.0.0.1:51123" } }),
+    );
+    expect(loopback.status).toBe(200);
   });
 });

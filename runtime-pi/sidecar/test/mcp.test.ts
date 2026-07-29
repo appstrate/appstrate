@@ -57,7 +57,7 @@ async function rpc(
       // Hono's `app.request()` does not synthesise a Host header. Real
       // HTTP/1.1 clients (the agent container, mcp-inspector, the SDK
       // Client) always send one. We set it explicitly here so the
-      // sidecar's DNS-rebinding guard (`ALLOWED_HOSTNAMES`) accepts
+      // sidecar's DNS-rebinding guard (`isAllowedSidecarHostname`) accepts
       // the test request.
       Host: "localhost",
     },
@@ -91,9 +91,49 @@ describe("ALL /mcp — Host header validation (DNS-rebinding defence)", () => {
     });
   }
 
-  it("accepts the docker bridge alias (sidecar:8080)", async () => {
-    const res = await rawMcp(createApp(makeDeps()), "sidecar:8080");
+  /**
+   * Run `fn` with `SIDECAR_DNS_ALIAS` set to `alias` (or unset when
+   * `undefined`), restoring the previous value afterwards so the surrounding
+   * suite stays order-independent. The guard reads `process.env` per call, so
+   * scoping it around the single request is enough. `fn` returns
+   * `T | PromiseLike<T>` because Hono's `app.request()` is typed
+   * `Response | Promise<Response>`.
+   */
+  async function withAlias<T>(alias: string | undefined, fn: () => T | PromiseLike<T>): Promise<T> {
+    const previous = process.env.SIDECAR_DNS_ALIAS;
+    if (alias === undefined) delete process.env.SIDECAR_DNS_ALIAS;
+    else process.env.SIDECAR_DNS_ALIAS = alias;
+    try {
+      return await fn();
+    } finally {
+      if (previous === undefined) delete process.env.SIDECAR_DNS_ALIAS;
+      else process.env.SIDECAR_DNS_ALIAS = previous;
+    }
+  }
+
+  it("accepts the per-run docker bridge alias it was launched with", async () => {
+    // The Docker orchestrator mints a fresh alias per run and hands it to the
+    // sidecar as SIDECAR_DNS_ALIAS; the agent's Host is `<alias>:8080`. Any
+    // shape of alias must work — there is no constant to pin.
+    const alias = "s5f3a1c9e7b2d4068159e2a7c3b0d6f84";
+    const res = await withAlias(alias, () => rawMcp(createApp(makeDeps()), `${alias}:8080`));
     expect(res.status).toBe(200);
+  });
+
+  it("rejects a different run's alias", async () => {
+    const res = await withAlias("s5f3a1c9e7b2d4068159e2a7c3b0d6f84", () =>
+      rawMcp(createApp(makeDeps()), "s00000000000000000000000000000000:8080"),
+    );
+    expect(res.status).toBe(403);
+  });
+
+  it("rejects any non-loopback host when no alias is set (fail-closed)", async () => {
+    // Process orchestrator / Firecracker guest reach the sidecar over
+    // loopback and publish no DNS alias, so an unset SIDECAR_DNS_ALIAS must
+    // narrow the allowlist to localhost/127.0.0.1 — including refusing the
+    // historical constant `sidecar`, which names no container any more.
+    const res = await withAlias(undefined, () => rawMcp(createApp(makeDeps()), "sidecar:8080"));
+    expect(res.status).toBe(403);
   });
 
   it("accepts localhost with a dynamic port (process orchestrator)", async () => {

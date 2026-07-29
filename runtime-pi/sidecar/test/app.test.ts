@@ -152,7 +152,7 @@ describe("GET /integrations/boot-report", () => {
 //
 // The Pi SDK in the agent container makes HTTP calls to
 // `${MODEL_BASE_URL}/v1/chat/completions` (or equivalent). The platform
-// wires `MODEL_BASE_URL = http://sidecar:8080/llm` (Docker mode) or
+// wires `MODEL_BASE_URL = http://<sidecarAlias>:8080/llm` (Docker mode) or
 // `http://localhost:<port>/llm` (process orchestrator). The sidecar
 // owns the real LLM API key and substitutes a per-run placeholder
 // embedded in the SDK-generated headers, then streams the upstream

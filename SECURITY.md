@@ -218,7 +218,7 @@ Inside the sidecar, the MCP `tools/call` handler delegates to the pure `executeA
 
 | Component   | Agent sees                                                           | Wire (to target API)                   |
 | ----------- | -------------------------------------------------------------------- | -------------------------------------- |
-| Tool call   | `{ns}__api_call({ method, target })`                                 | `POST http://sidecar:8080/mcp`         |
+| Tool call   | `{ns}__api_call({ method, target })`                                 | `POST http://<per-run-alias>:8080/mcp` |
 | URL         | `https://gmail.googleapis.com/...`                                   | `https://gmail.googleapis.com/...`     |
 | Auth header | (not supplied — injected server-side)                                | `Bearer ya29.a0AfH6SM...` (real token) |
 | Response    | MCP `CallToolResult` — text body or `resource_link` for binary/large | —                                      |
