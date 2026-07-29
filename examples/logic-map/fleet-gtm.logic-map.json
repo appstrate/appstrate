@@ -1128,27 +1128,27 @@
   ],
   "gaps": [
     {
-      "kind": "unreachable_communication_channel",
+      "kind": "capability_without_rule",
       "message": "L'agent déclare `slack_reply_to_message`, `slack_send_channel_message`, `slack_write_private_message` et `gmail_send_email`, et le prompt ne dit nulle part quand les utiliser. La seule sortie prescrite est « Render the result inline in your response » (AGENT.md:271). L'agent frère `executive-assistant` documente précisément que dans un run déclenché, « plain AI text is not surfaced anywhere » : appliqué à GTM, tout brouillon produit hors chat actif serait invisible. Aucun `message_user` n'est mentionné non plus.",
       "related_steps": ["dd3"]
     },
     {
-      "kind": "unwritten_branch",
+      "kind": "unhandled_case",
       "message": "La procédure d'enrichissement avant rédaction (AGENT.md:241-243) n'a de prescription que pour la branche « contact trouvé ». Rien ne dit quoi faire quand le CRM ne connaît pas l'adresse collée : chercher sur le web via Exa ? déléguer à `apollo-researcher` ? rédiger à froid ? Le prompt décrit pourtant les trois capacités ailleurs, sans jamais les relier à ce cas.",
       "related_steps": ["ce2", "ce4"]
     },
     {
-      "kind": "missing_trigger",
+      "kind": "capability_without_rule",
       "message": "`<memory-guidelines>` impose de LIRE `/memories/rep-styles/` au début de tout workflow et fixe le format d'ÉCRITURE, mais ne dit jamais QUAND écrire. Aucune règle ne déclenche l'apprentissage : ni sur correction du rep, ni sur brouillon rejeté, ni sur retour explicite. Comparé à `executive-assistant`, qui consacre une section entière à durable vs transitoire, la boucle d'apprentissage de GTM est ouverte à un seul bout.",
       "related_steps": ["mem1", "mem3"]
     },
     {
-      "kind": "conflicting_policies",
+      "kind": "contradiction",
       "message": "`<memory-guidelines>` ordonne d'appliquer les préférences de style apprises du rep (AGENT.md:127), tandis que `<email-style-conventions>` pose onze règles de forme sans marqueur de priorité (AGENT.md:144-156). Si un rep préfère les tirets ou les objets à majuscule, rien ne dit laquelle des deux sources l'emporte.",
       "related_steps": ["mem2", "es3", "es5"]
     },
     {
-      "kind": "empty_configuration",
+      "kind": "uninstantiated_template",
       "message": "Quatre des dix-huit sections du prompt (`<company-context>`, `<customer-stories>`, `<crm-schema>`, `<warehouse-schema>`) sont intégralement `[not yet configured]` dans le fichier livré, et trois gates de refus s'appuient dessus. Le prompt cartographié est un gabarit : la carte décrit une méthode, pas un agent opérationnel. Le skill `onboard-gtm`, seul remplisseur, n'est présent nulle part dans `configs/skills/`.",
       "related_steps": ["cc1", "cs2", "crm1", "wh1"]
     },
@@ -1158,17 +1158,17 @@
       "related_steps": ["dd1", "dd4", "crm1", "cd1", "ws5"]
     },
     {
-      "kind": "declared_capability_without_rule",
+      "kind": "capability_without_rule",
       "message": "`account-briefing` est déclaré au manifeste (et existe sur disque) mais n'est jamais nommé ni déclenché par le prompt. `read_url_content` est déclaré parmi les seize outils sans qu'aucune règle ne dise quand suivre un lien, alors que la recherche web renvoie des URL et que la section Sources en produit une liste.",
       "related_steps": ["ws2", "dd3"]
     },
     {
-      "kind": "unspecified_error_path",
+      "kind": "unhandled_failure",
       "message": "La seule règle d'échec est le compteur à trois erreurs (AGENT.md:178). Rien ne couvre l'échec de `gmail_draft_email` alors que c'est l'unique écriture de l'agent : si le brouillon n'est pas créé, le prompt impose quand même d'afficher « a draft has been created in Gmail » (AGENT.md:275).",
       "related_steps": ["tg3", "dd2", "dd3"]
     },
     {
-      "kind": "unbounded_delegation",
+      "kind": "unbounded_work",
       "message": "« Launch multiple tasks concurrently whenever possible » (AGENT.md:119) autorise des sous-agents ad hoc sans plafond, sans budget et sans règle de fusion des résultats, dans un document qui pose par ailleurs « Be conservative with tool usage » (AGENT.md:176).",
       "related_steps": ["sa4", "tg1"]
     }

@@ -616,7 +616,12 @@
       "label": "Émettre le JSON conforme au schéma, exactement",
       "parent": null,
       "detail": "`findings[]` (title ≤ 80 car. impératif, body markdown, confidence_score flottant, priority optionnel, code_location), `overall_correctness`, `overall_explanation` (1–3 phrases), `overall_confidence_score`.",
-      "refs": ["agent_output:findings", "agent_output:overall_correctness", "agent_output:overall_explanation", "agent_output:overall_confidence_score"],
+      "refs": [
+        "agent_output:findings",
+        "agent_output:overall_correctness",
+        "agent_output:overall_explanation",
+        "agent_output:overall_confidence_score"
+      ],
       "evidence": {
         "file": "corpus-web/codex-review-rubric.md",
         "lines": [69, 69],
@@ -686,7 +691,11 @@
     }
   ],
   "edges": [
-    { "from": "n1", "to": "n2", "condition": "aucun constat que l'auteur voudrait certainement corriger" },
+    {
+      "from": "n1",
+      "to": "n2",
+      "condition": "aucun constat que l'auteur voudrait certainement corriger"
+    },
     { "from": "n1", "to": "n3", "condition": "au moins un constat qualifiant" },
     { "from": "ra2", "to": "ra3", "condition": null },
     { "from": "ra3", "to": "ra6", "condition": "rule-supported" },
@@ -697,32 +706,32 @@
   ],
   "gaps": [
     {
-      "kind": "conflicting_policies",
+      "kind": "contradiction",
       "message": "L'échelle P0–P3 admet des constats « nice to have » (P3), alors que le verdict global doit ignorer style, formatage, coquilles et documentation. Un run qui ne trouve que des P3 doit-il conclure « patch is correct » tout en listant des constats ? Le prompt ne tranche pas.",
       "related_steps": ["pr1", "pr5", "pr4"]
     },
     {
-      "kind": "unspecified_case",
+      "kind": "unhandled_case",
       "message": "Si aucun constat n'est retourné (n2), rien ne dit ce que valent `overall_correctness` et `overall_explanation`. Le schéma les rend obligatoires ; l'absence de constat n'implique pas mécaniquement « patch is correct », puisque des bugs préexistants ou hors périmètre peuvent exister.",
       "related_steps": ["n2", "o1"]
     },
     {
-      "kind": "ambiguous_boundary",
+      "kind": "undefined_criterion",
       "message": "« Do not generate a PR fix » (l. 95) coexiste avec l'obligation d'utiliser des blocs ```suggestion contenant « concrete replacement code » (l. 42-44). La frontière entre une suggestion en ligne et un correctif n'est définie nulle part.",
       "related_steps": ["o5", "r3"]
     },
     {
-      "kind": "unbounded_criterion",
+      "kind": "unbounded_work",
       "message": "« Continue until you've listed every qualifying finding » n'a ni condition d'arrêt vérifiable, ni plafond, ni budget. C'est une boucle d'exhaustivité sur un ensemble non énumérable a priori — le format v1 n'a pas de `loop` pour cela, puisqu'il n'y a pas d'ensemble à parcourir.",
       "related_steps": ["n3"]
     },
     {
-      "kind": "self_declared_subordination",
+      "kind": "external_authority",
       "message": "Le document se déclare surchargeable par « a developer message, a user message, a file, or even elsewhere in this system message » (l. 7). Une carte de ce prompt seul ne décrit donc jamais le comportement effectif : la moitié des règles peut être neutralisée par un `AGENTS.md` que la carte ne voit pas.",
       "related_steps": ["meta1", "ra1"]
     },
     {
-      "kind": "unverifiable_criterion",
+      "kind": "undefined_criterion",
       "message": "Deux des huit critères de qualification sont projectifs (« l'auteur corrigerait probablement », « ce n'est manifestement pas un changement intentionnel ») : aucun ne peut être évalué depuis le diff seul, et le prompt ne fournit aucune procédure de repli en cas de doute.",
       "related_steps": ["q5", "q8"]
     }

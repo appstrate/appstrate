@@ -79,7 +79,7 @@
       "items": { "$ref": "#/$defs/edge" }
     },
     "gaps": {
-      "description": "Ce que la source ne dit pas : chemins d'erreur absents, conditions de sortie implicites, règles contradictoires, précédences dont la cible n'est pas cartographiée. Souvent plus actionnable que les étapes elles-mêmes.",
+      "description": "Ce que la source ne dit pas, ou dit mal. Souvent plus actionnable que les étapes elles-mêmes : c'est la partie de la carte qu'on corrige. Chaque trou porte une famille du vocabulaire fermé (voir `kind`) et, quand des étapes sont concernées, leurs identifiants dans `related_steps`, qu'un identifiant fantôme rendrait muets — le croisement les vérifie.",
       "type": "array",
       "items": { "$ref": "#/$defs/gap" }
     },
@@ -221,9 +221,21 @@
       "additionalProperties": false,
       "properties": {
         "kind": {
-          "description": "Famille du trou. Chaîne libre plutôt qu'enum : le corpus en a produit une quinzaine, et figer la liste maintenant écraserait la matière.",
-          "type": "string",
-          "minLength": 1
+          "description": "Vocabulaire FERMÉ, pour la même raison que le `kind` d'une étape. Laissé libre, il a produit 50 valeurs pour 131 trous sur les 18 cartes, et deux runs du cartographe sur le même agent n'avaient AUCUN trou en commun : le même défaut prenait deux noms. Les douze familles se départagent par une question ORDONNÉE, premier appariement retenu. (1) L'écart porte-t-il entre le manifeste et le texte ? `capability_without_rule` : déclaré, mais aucune règle ne dit quand s'en servir (outil, skill, entrée, cron, ou portée plus large que ce que les règles emploient). `rule_without_capability` : le texte prescrit ou suppose une capacité, un état ou une information que rien ne fournit ni ne déclare (bash non déclaré, horloge absente, marqueur qui n'existe pas). `declaration_mismatch` : les deux le portent, mais pas pareil (identifiant, champ de sortie, schéma). (2) Ce qui fait foi est-il hors du périmètre lu ? `external_authority` : la règle qui tranche vit ailleurs (skill non lu, sous-agent, AGENTS.md, message amont), une source déclarée n’a pas pu être lue (route qui rend un contenu vide, fichier absent), ou une partie de ce qui a été lu ne fait pas règle. `uninstantiated_template` : le document livré est un gabarit (ancrage vide, `{{variable}}`, bloc réécrit à l'onboarding, vestige d'un autre agent). (3) Deux passages se répondent-ils ? `contradiction` : incompatibles, ou applicables au même cas sans arbitre. `duplicated_rule` : la même règle deux fois, sans dire laquelle fait foi. (4) Le texte se tait-il sur une situation atteignable ? `unhandled_failure` pour une panne, un refus, une indisponibilité ; `unhandled_case` pour tout le reste. (5) La règle est-elle écrite mais inapplicable ? `undefined_criterion` : seuil, adjectif ou critère projectif qu'on ne décide pas deux fois pareil. `unbounded_work` : répétition, délégation ou troncature sans compteur, budget ni ordre. (6) `map_limitation` en dernier ressort, et c'est la seule famille qui parle de la CARTE et non de l'agent : le vocabulaire n'a pas su rendre la source (hybride, répétition conditionnelle), ou un passage lu ne prescrit aucun geste et ne produit aucun nœud. Un passage qui porte deux défauts de familles différentes donne DEUX trous, jamais un trou hybride.",
+          "enum": [
+            "capability_without_rule",
+            "rule_without_capability",
+            "declaration_mismatch",
+            "external_authority",
+            "uninstantiated_template",
+            "contradiction",
+            "duplicated_rule",
+            "unhandled_failure",
+            "unhandled_case",
+            "undefined_criterion",
+            "unbounded_work",
+            "map_limitation"
+          ]
         },
         "message": { "type": "string", "minLength": 1 },
         "related_steps": {

@@ -5,9 +5,7 @@
     "package_id": "langchain-fleet/competitor-intelligence-slack-bot",
     "version": null,
     "integrity": null,
-    "files": [
-      "configs/agents/competitor-intelligence-slack-bot/AGENT.md"
-    ]
+    "files": ["configs/agents/competitor-intelligence-slack-bot/AGENT.md"]
   },
   "generated_at": "2026-07-27T00:00:00Z",
   "generator": {
@@ -681,7 +679,11 @@
     }
   ],
   "edges": [
-    { "from": "ob1", "to": "ob2", "condition": "le wiki ne contient pas la société par défaut et le roster" },
+    {
+      "from": "ob1",
+      "to": "ob2",
+      "condition": "le wiki ne contient pas la société par défaut et le roster"
+    },
     { "from": "ob2", "to": "ob3", "condition": null },
 
     { "from": "sr1", "to": "sr2", "condition": null },
@@ -700,18 +702,22 @@
     { "from": "aw4", "to": "aw5", "condition": null },
     { "from": "aw5", "to": "aw6", "condition": null },
     { "from": "aw6", "to": "aw7", "condition": null },
-    { "from": "aw7", "to": "nb1", "condition": "la battlecard ou les pages concurrents ont changé" },
+    {
+      "from": "aw7",
+      "to": "nb1",
+      "condition": "la battlecard ou les pages concurrents ont changé"
+    },
     { "from": "aw7", "to": "aw8", "condition": null },
     { "from": "sr3", "to": "nb1", "condition": null }
   ],
   "gaps": [
     {
-      "kind": "hybrid_shape",
+      "kind": "map_limitation",
       "message": "Deuxième hybride du corpus, et plus déséquilibré que `software-engineer` : la séquence enfouie n'est pas une boucle secondaire mais la colonne vertébrale de l'agent. « Answering Workflow » (AGENT.md:133-139) est numéroté 1 à 7, va de la question à la réponse, et absorbe la moitié des grappes du document au passage. Étiqueté `policies` parce que 27 nœuds sur 44 sont hors flot, ce qui perd l'information la plus utile : ici l'ordre est le contenu, alors que chez `software-engineer` l'ordre est un détail. Un `shape` scalaire ne distingue pas ces deux situations.",
       "related_steps": ["aw1", "aw8", "nb1", "nb5"]
     },
     {
-      "kind": "conflicting_policies",
+      "kind": "contradiction",
       "message": "Ordre de la réponse Slack contradictoire. « Primary Surface » autorise à mettre à jour markdown et Notion « before or immediately after replying » (AGENT.md:41), tandis que « Answering Workflow » place la réponse Slack en étape 7, après la fusion wiki (4), la battlecard (5) et la synchro Notion (6) (AGENT.md:136-139). Rien ne dit laquelle prime quand une question exige une recherche fraîche.",
       "related_steps": ["ps5", "aw7", "aw8"]
     },
@@ -721,17 +727,17 @@
       "related_steps": ["ps4", "kb3", "sk2"]
     },
     {
-      "kind": "unspecified_actor",
+      "kind": "unhandled_case",
       "message": "Le chemin planifié ne dit pas QUI fait la recherche. « Research meaningful recent competitor updates » (AGENT.md:47) n'appelle pas `CompetitorResearchWorker`, alors que le chemin conversationnel l'impose (AGENT.md:135). Rien ne dit si le run hebdomadaire délègue, ni s'il applique le skill `competitive-intel`, ni combien de concurrents il traite par run.",
       "related_steps": ["sr2", "aw4.1"]
     },
     {
-      "kind": "declared_capability_without_rule",
+      "kind": "capability_without_rule",
       "message": "Deux outils déclarés sur neuf ne sont couverts par aucune règle. `slack_send_channel_message` : le prompt ne prescrit que la réponse en fil, et interdit d'écrire depuis un run planifié — le seul cas où poster dans un canal aurait du sens (AGENT.md:38, 49). `read_url_content` : la base exige une URL source par affirmation datée (AGENT.md:90) sans jamais dire de lire la page, et la lecture est vraisemblablement faite par le sous-agent, dont la définition est hors du périmètre lu.",
       "related_steps": ["ps2", "sr4", "kb5"]
     },
     {
-      "kind": "unspecified_error_path",
+      "kind": "unhandled_failure",
       "message": "Une seule intégration sur trois a un chemin d'erreur écrit (Notion indisponible, AGENT.md:102). Rien ne couvre l'échec de la recherche web, un sous-agent qui ne rend rien, un fil Slack illisible, ni le cas où le roster de concurrents est vide au moment du cron.",
       "related_steps": ["nb6", "sr2"]
     },
@@ -741,7 +747,7 @@
       "related_steps": ["sk1", "sk2", "ob2"]
     },
     {
-      "kind": "undefined_threshold",
+      "kind": "undefined_criterion",
       "message": "Quatre seuils décisifs ne sont jamais définis : « current enough » et « stale » (AGENT.md:134-135), « meaningful » pour une mise à jour (AGENT.md:47, 137), et la fréquence du ménage du wiki (AGENT.md:87). Ce sont les seules conditions qui décident si un run coûte un appel de recherche ou zéro.",
       "related_steps": ["aw2", "aw3", "aw6", "kb2"]
     }

@@ -5,9 +5,7 @@
     "package_id": "langchain-fleet/software-engineer",
     "version": null,
     "integrity": null,
-    "files": [
-      "configs/agents/software-engineer/AGENT.md"
-    ]
+    "files": ["configs/agents/software-engineer/AGENT.md"]
   },
   "generated_at": "2026-07-27T00:00:00Z",
   "generator": {
@@ -641,7 +639,11 @@
     { "from": "cw8", "to": "cw10", "condition": null },
     { "from": "cw9", "to": "cw10", "condition": null },
     { "from": "cw10", "to": "cw11", "condition": null },
-    { "from": "cw11", "to": "cw12", "condition": "sauf si l'utilisateur ou le contexte source appelle un autre livrable" },
+    {
+      "from": "cw11",
+      "to": "cw12",
+      "condition": "sauf si l'utilisateur ou le contexte source appelle un autre livrable"
+    },
     { "from": "cw12", "to": "co6", "condition": null },
 
     { "from": "wl1", "to": "wl2", "condition": null },
@@ -652,42 +654,42 @@
   ],
   "gaps": [
     {
-      "kind": "hybrid_shape",
+      "kind": "map_limitation",
       "message": "Document de politiques qui enferme DEUX enclaves ordonnées, pas une. « Codebase Work » (AGENT.md:53-57) est une procédure d'implémentation de dix gestes avec une bifurcation ; « Working Loop » (AGENT.md:63) est une boucle orient/agir/observer/adapter de quatre gestes avec un retour arrière. Les deux ne sont reliées par aucune phrase du texte, et coexistent avec 21 nœuds sans place dans le flot. `shape` étant scalaire, la carte est étiquetée `policies` et rien ne dit au rendu que les grappes « Codebase Work » et « Working Loop » sont des sous-graphes séquentiels alors que les cinq autres sont des piles de règles.",
       "related_steps": ["cw1", "cw12", "wl0", "wl4"]
     },
     {
-      "kind": "type_vocabulary_mismatch",
+      "kind": "map_limitation",
       "message": "`loop` est défini comme « ça se répète pour chaque élément d'un ensemble ». `wl0` est une boucle `while` : elle ne parcourt aucun ensemble, elle répète jusqu'à ce qu'une condition d'arrêt soit vraie (AGENT.md:63). C'est le seul type qui permet de porter le corps par `parent`, donc il a été retenu, mais le vocabulaire ne distingue pas itération et répétition conditionnelle. Conséquence directe : `edges` contient un cycle (wl4→wl1), cas qu'aucune des deux cartes de référence ne produisait.",
       "related_steps": ["wl0", "wl1", "wl4"]
     },
     {
-      "kind": "self_modifying_prompt",
+      "kind": "uninstantiated_template",
       "message": "Quatre blocs `<team-context>`, `<repository-defaults>`, `<engineering-preferences>`, `<handoff-preferences>` (AGENT.md:81-107) contiennent des « Current default » que le skill `onboard-software-engineer` réécrit à la première conversation. La carte ne décrit que l'état livré ; toute instance réellement onboardée porte des règles absentes d'ici. Un mode balayage qui compare une carte à un prompt en production trouvera un écart légitime.",
       "related_steps": ["cc1", "cc2", "cc3", "cc4", "cc5"]
     },
     {
-      "kind": "undeclared_capability",
+      "kind": "rule_without_capability",
       "message": "Le bac à sable Linux est la capacité centrale du prompt (cloner, explorer, éditer, exécuter des vérifications, préparer des branches — AGENT.md:41, 43, 51, 56) et il n'existe dans aucun des 58 outils déclarés : c'est une primitive de plateforme (`Sandbox: type=thread_scoped`) hors de `tools[]`. Aucun préfixe du vocabulaire des refs ne le désigne. Neuf étapes de la procédure d'implémentation portent donc `refs: []` alors qu'elles ont toutes un effet de bord réel.",
       "related_steps": ["cw0", "cw1", "cw3", "cw6", "cw8", "cw9", "cw10"]
     },
     {
-      "kind": "unspecified_error_path",
+      "kind": "unhandled_failure",
       "message": "Rien ne couvre l'échec : clone impossible, vérification qui ne passe pas après correction, push refusé, `AGENTS.md` absent ou contradictoire. « address relevant check failures » (AGENT.md:57) ne définit ni « pertinent » ni la suite en cas d'échec persistant. La seule règle voisine (AGENT.md:74) décrit comment RENDRE COMPTE d'un blocage, pas comment l'agent décide qu'il est bloqué.",
       "related_steps": ["cw11", "co5"]
     },
     {
-      "kind": "conflicting_policies",
+      "kind": "contradiction",
       "message": "`oe3` fait du `AGENTS.md` du dépôt une source d'instructions qui « étend ce contexte de rôle » (AGENT.md:47), tandis que `cb3` classe les fichiers du dépôt comme preuves et réserve l'autorité à l'intention de l'utilisateur et aux instructions système (AGENT.md:111). Un `AGENTS.md` hostile ou simplement contraire au prompt n'a pas d'arbitre écrit.",
       "related_steps": ["oe3", "cb3"]
     },
     {
-      "kind": "declared_capability_without_rule",
+      "kind": "capability_without_rule",
       "message": "Trois outils déclarés sortent du périmètre décrit par le prompt : `notion-search`, `tavily_web_search` et `read_url_content`. Le prompt ne mentionne jamais Notion, ni la recherche web, ni la lecture d'URL, et les connexions déclarées sont seulement github, slack, linear — aucune connexion Notion ni Tavily n'accompagne ces outils.",
       "related_steps": []
     },
     {
-      "kind": "undefined_reference",
+      "kind": "rule_without_capability",
       "message": "« configured approval gates » (AGENT.md:111) désigne un mécanisme de la plateforme que ni le prompt ni les métadonnées de l'agent ne décrivent. Rien ne dit quelles opérations sont effectivement derrière une porte, ni ce que fait l'agent quand une approbation est refusée.",
       "related_steps": ["cb1", "m2"]
     }

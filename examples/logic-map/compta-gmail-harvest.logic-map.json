@@ -638,27 +638,27 @@
   ],
   "gaps": [
     {
-      "kind": "ambiguous_condition",
+      "kind": "undefined_criterion",
       "message": "Le label est posé « une fois le message traité avec succès » (prompt.md:50), mais l'échec est déclaré non bloquant (prompt.md:53). Rien ne dit si un message dont un seul PDF sur trois a échoué à l'upload compte comme traité. Si le label est posé, le PDF manquant ne sera jamais rattrapé, le run suivant excluant le message.",
       "related_steps": ["s12.8", "g7"]
     },
     {
-      "kind": "nondeterministic_truncation",
+      "kind": "unbounded_work",
       "message": "`max_messages` plafonne le nombre de messages sans définir l'ordre de troncature (plus récents ? plus anciens ? ordre de l'API ?). Deux runs plafonnés sur la même fenêtre peuvent traiter des ensembles différents, et rien ne garantit que la suite sera reprise au run suivant.",
       "related_steps": ["s10", "s11"]
     },
     {
-      "kind": "unspecified_case",
+      "kind": "unhandled_case",
       "message": "La règle de collision de nom préfixe par la date du mail. Deux pièces jointes de même nom et de contenus différents provenant du *même* message produiraient le même préfixe, donc la même collision non résolue.",
       "related_steps": ["s12.7.6"]
     },
     {
-      "kind": "unspecified_case",
+      "kind": "unhandled_case",
       "message": "La sélection Stripe suppose un couple `Invoice-*` + `Receipt-*`. Rien ne dit quoi faire si le mail Stripe ne contient que le `Receipt-*` (cas plausible), alors que la règle 2 le retiendrait et que la règle 1 est prioritaire.",
       "related_steps": ["s12.2", "s12.3"]
     },
     {
-      "kind": "unused_capability",
+      "kind": "capability_without_rule",
       "message": "Le manifeste accorde les outils système `log` et `pin` ; ni le prompt ni les références ne disent quand les utiliser. Aucune étape de cette carte ne les référence.",
       "related_steps": []
     }

@@ -320,27 +320,27 @@
   ],
   "gaps": [
     {
-      "kind": "unspecified_error_path",
+      "kind": "unhandled_failure",
       "message": "L'étape 4 qualifie l'échec (« the deploy is not done ») sans prescrire aucune action : ni ré-interrogation après délai, ni relance du deploy, ni rollback, ni escalade vers l'humain. Le déploiement progressif est explicitement cité comme cas attendu (l. 48) — c'est précisément un cas où la bonne réponse est d'attendre et de réessayer, ce que le prompt ne dit pas.",
       "related_steps": ["s8", "s9"]
     },
     {
-      "kind": "unspecified_case",
+      "kind": "unhandled_failure",
       "message": "Aucun critère de succès pour le build (étape 2). Si `{{BUILD_COMMAND}}` échoue, rien ne dit s'il faut s'arrêter comme pour les tests. La règle dure 1 ne couvre que les tests.",
       "related_steps": ["s4"]
     },
     {
-      "kind": "unreachable_output_contract",
+      "kind": "unhandled_case",
       "message": "Le format de rapport (l. 64-69) suppose un run complet : il demande « Tests: X/X passed », « Deploy: … + new revision id », « Live verification: the actual endpoint response ». Sur la sortie précoce prescrite par la règle dure 1, trois de ces cinq lignes n'ont pas de valeur. Le prompt ne dit pas si le rapport court doit suivre le même gabarit.",
       "related_steps": ["s3", "s13"]
     },
     {
-      "kind": "undeclared_capability",
+      "kind": "capability_without_rule",
       "message": "Le frontmatter déclare `tools: Bash, Read, Edit`. Le corps du prompt suppose en plus la lecture d'un fichier d'état markdown arbitraire et l'exécution de `curl` — couvertes par Bash et Read — mais rien n'autorise ni n'interdit l'écriture d'un fichier nouveau. `Write` n'est pas déclaré, ce qui est cohérent avec « targeted edits only » sans que le prompt fasse le lien.",
       "related_steps": ["s10", "s12"]
     },
     {
-      "kind": "template_not_instantiated",
+      "kind": "uninstantiated_template",
       "message": "Six variables `{{...}}` sont laissées à substituer par l'intégrateur (l. 10-11). Cartographié tel quel, l'agent n'a aucune capacité concrète : `refs` ne peut désigner que des clés de configuration, jamais un service ou un package. Le croisement avec un manifeste est structurellement impossible sur ce prompt.",
       "related_steps": ["g0", "s1", "s4", "s5", "s7", "s10"]
     }

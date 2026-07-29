@@ -1189,22 +1189,22 @@
   ],
   "gaps": [
     {
-      "kind": "conflicting_policies",
+      "kind": "contradiction",
       "message": "ENVIRONMENT_SETUP prescrit d'installer sans rien demander les dépendances manquantes (l. 170-175), alors que PROBLEM_SOLVING_WORKFLOW impose de consulter l'utilisateur avant d'investir du temps à installer des dépendances pour faire tourner les tests (l. 69, 74). Rien ne dit laquelle l'emporte quand l'utilisateur demande de lancer les tests d'un dépôt non préparé.",
       "related_steps": ["en2", "w3f", "w5"]
     },
     {
-      "kind": "conflicting_policies",
+      "kind": "contradiction",
       "message": "SECURITY autorise sans consentement d'« ouvrir des pull requests sur les dépôts d'origine » (l. 102), tandis que PULL_REQUESTS interdit de pousser ou d'ouvrir une PR sans demande explicite (l. 53, marqué **Important**). Les deux sections se contredisent sur exactement la même action.",
       "related_steps": ["se2", "pr1"]
     },
     {
-      "kind": "conflicting_policies",
+      "kind": "contradiction",
       "message": "PULL_REQUESTS impose « ONE per session/issue » (l. 54) puis prescrit d'ouvrir une nouvelle PR si l'ancienne est fermée ou fusionnée (l. 57). Un run qui reprend après merge est donc à la fois conforme et non conforme.",
       "related_steps": ["pr2", "pr5"]
     },
     {
-      "kind": "unbounded_work_loop",
+      "kind": "unbounded_work",
       "message": "Deux budgets d'itération chiffrés existent (10 actions navigateur par sous-tâche, 20 étapes sans convergence) mais ils ne couvrent que le navigateur. La boucle principale — implémenter, tester, corriger, retester — n'a aucun plafond, aucun compteur, et sa seule sortie est TROUBLESHOOTING, déclenchée par un « repeated attempts » non quantifié.",
       "related_steps": ["bt3", "bt4", "tr1", "w5"]
     },
@@ -1214,12 +1214,12 @@
       "related_steps": ["cq4", "w1", "cq3", "w4"]
     },
     {
-      "kind": "declared_capability_without_rule",
+      "kind": "capability_without_rule",
       "message": "Le snapshot est nommé `browser-on__secana-on__cli-on` : trois capacités activées. Seul le navigateur reçoit des règles d'usage nommées (`browser_get_state`, `browser_click`, `browser_type`). Aucun outil d'édition ni d'exécution n'est jamais nommé dans les 199 lignes, alors que l'agent en dépend à chaque étape — ils sont désignés uniquement par leur effet.",
       "related_steps": ["bt2", "w4"]
     },
     {
-      "kind": "out_of_scope_source",
+      "kind": "external_authority",
       "message": "Les lignes 201 à 224 du fichier ne font pas partie du prompt système statique : c'est le second bloc de contexte, injecté à l'exécution, avec ici des valeurs de fixture de test (« Anthropic-only repo guidance. », date figée au 2025-01-01). Elles ne sont pas cartographiées. Un cartographe automatique lisant ce fichier sans le savoir produirait des règles inventées.",
       "related_steps": []
     }

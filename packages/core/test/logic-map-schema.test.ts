@@ -82,6 +82,31 @@ describe("logic-map schema", () => {
     expect(validate(map)).toBe(false);
   });
 
+  it("rejects a gap whose kind is outside the closed vocabulary", () => {
+    const validate = makeValidator();
+    const map = JSON.parse(readFileSync(join(EXAMPLES_DIR, "wiki-brain.logic-map.json"), "utf8"));
+    map.gaps[0].kind = "unspecified_error_path"; // l'un des 50 noms libres d'avant la fermeture
+    expect(validate(map)).toBe(false);
+  });
+
+  // Une famille qu'aucun trou du corpus n'occupe est une famille inventée : l'ontologie a été
+  // fermée EN PARTANT des 131 trous, elle doit le rester.
+  it("keeps every gap family grounded in the corpus", () => {
+    const families = new Set<string>(
+      (schema as { $defs: { gap: { properties: { kind: { enum: string[] } } } } }).$defs.gap
+        .properties.kind.enum,
+    );
+    const used = new Set<string>();
+    for (const file of exampleFiles) {
+      const map = JSON.parse(readFileSync(join(EXAMPLES_DIR, file), "utf8")) as {
+        gaps?: { kind: string }[];
+      };
+      for (const gap of map.gaps ?? []) used.add(gap.kind);
+    }
+    expect([...families].filter((f) => !used.has(f))).toEqual([]);
+    expect(families.size).toBe(12);
+  });
+
   it("requires `aggregated` when a node declares how many gestures it folds", () => {
     const validate = makeValidator();
     const map = JSON.parse(readFileSync(join(EXAMPLES_DIR, exampleFiles[0]!), "utf8"));

@@ -5,9 +5,7 @@
     "package_id": "@default/mes-taches-clickup",
     "version": "1.0.0",
     "integrity": null,
-    "files": [
-      "prompt.md"
-    ]
+    "files": ["prompt.md"]
   },
   "generated_at": "2026-07-27T00:00:00Z",
   "generator": {
@@ -182,32 +180,32 @@
   ],
   "gaps": [
     {
-      "kind": "self_contradiction",
+      "kind": "contradiction",
       "message": "Le budget d'appels est irréalisable tel qu'écrit. La ligne 5 impose « idéalement 2 à 4 » appels d'outils au total ; la procédure des lignes 8 à 14 en prescrit nommément 6 au minimum (3 `log`, `clickup_find_member_by_name`, `clickup_filter_tasks`, `output`), 7 si la branche `clickup_get_workspace_hierarchy` se déclenche. Soit les `log` et `output` ne comptent pas dans le budget — et le prompt ne le dit pas —, soit la contrainte est fausse. C'est le constat le plus actionnable de cette carte, et il n'est visible qu'en comptant les nœuds.",
       "related_steps": ["g1", "s1", "s3", "s7", "s8"]
     },
     {
-      "kind": "ambiguous_condition",
+      "kind": "undefined_criterion",
       "message": "« triées par date de mise à jour ou de création décroissante » (l. 9) laisse le choix de la clé de tri à l'agent, alors que l'objectif (l. 3) demande « les plus récentes d'abord » sans dire récentes de quoi. Deux runs identiques peuvent rendre deux listes différentes.",
       "related_steps": ["s4"]
     },
     {
-      "kind": "nondeterministic_truncation",
+      "kind": "unbounded_work",
       "message": "« Limite-toi à environ 15 tâches » plafonne sans définir le seuil exact ni imposer de signaler la troncature. Si Olivier a 40 tâches ouvertes, le `summary` annoncera « 15 tâches ouvertes » sans mentionner qu'il en manque 25. `compta-gmail-harvest` interdit explicitement ce comportement (« ne prétends pas avoir tout traité ») ; ici rien.",
       "related_steps": ["s4", "s8"]
     },
     {
-      "kind": "unspecified_case",
+      "kind": "undefined_criterion",
       "message": "« statuts ouverts uniquement » : les statuts ClickUp sont personnalisables par liste. Aucune liste de statuts considérés comme ouverts n'est donnée, ni au prompt ni au manifeste. Sur un workspace à statuts sur mesure (`en attente client`, `bloqué`, `à valider`), le périmètre est indéterminé.",
       "related_steps": ["s4"]
     },
     {
-      "kind": "unspecified_case",
+      "kind": "rule_without_capability",
       "message": "Le champ `list` de la sortie est demandé « si connue » sans dire d'où il vient. `clickup_filter_tasks` peut ne pas renvoyer le nom de liste ; le prompt n'autorise aucun appel supplémentaire pour le résoudre, et la contrainte de budget (l. 5) l'interdirait de fait.",
       "related_steps": ["s4", "s8"]
     },
     {
-      "kind": "unspecified_case",
+      "kind": "unhandled_case",
       "message": "La branche `clickup_get_workspace_hierarchy` (l. 9) n'a pas de suite écrite : le prompt dit quand l'appeler, jamais qu'il faut ensuite rejouer `clickup_filter_tasks` avec l'identifiant obtenu. L'arête `s6 → s7` de cette carte suit la lettre du texte ; l'intention est manifestement `s6 → s4`.",
       "related_steps": ["s5", "s6"]
     }

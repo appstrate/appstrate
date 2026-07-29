@@ -1188,12 +1188,12 @@
   ],
   "gaps": [
     {
-      "kind": "undeclared_capability",
+      "kind": "rule_without_capability",
       "message": "Le prompt prescrit `api_upload` (resumable) comme méthode fiable de création de fichier et interdit explicitement le multipart (prompt.md:14), mais `integrations_configuration.@appstrate/google-drive.tools[]` ne déclare que `api_call`. Cinq étapes de la carte en dépendent : `.reason.txt`, `factures-parsed.json`, les deux stores annuels.",
       "related_steps": ["g4", "s10.2", "s12.2", "s14.2"]
     },
     {
-      "kind": "undeclared_capability",
+      "kind": "rule_without_capability",
       "message": "Bash et le tool `Read` sont indispensables au pipeline (pip install, `extract-pdf.py`, deux parsers Python inline, conversion PyMuPDF, `date -u`, lecture multimodale du JPEG) mais `runtime_tools` ne déclare que `output`, `log`, `pin`. Un croisement mécanique sur le manifeste ne verra ni les scripts du skill ni la lecture d'image.",
       "related_steps": ["s2", "s6.2", "s6.4", "s6.14", "s12.2"]
     },
@@ -1203,27 +1203,27 @@
       "related_steps": ["s13", "s14.1", "g12"]
     },
     {
-      "kind": "contradiction",
+      "kind": "declaration_mismatch",
       "message": "Le schéma de sortie déclare `dry_run_plan` (markdown des actions planifiées) et l'étape 4.4 dit d'y lister les créations de dossiers, mais l'étape 7.1 place le plan dans une section `## Plan dry_run` du `summary` et l'exemple JSON de 7.2 montre `\"dry_run_plan\": null`. Rien ne tranche lequel des deux champs porte le plan.",
       "related_steps": ["g10", "s17"]
     },
     {
-      "kind": "unspecified_case",
+      "kind": "unhandled_case",
       "message": "L'étape 3.4 impose la vérification de conflit « pour chaque fichier classifié (relevés bruts inclus, sauf ambigus) », mais un `csv-paiements` n'a ni `new_name` ni destination de trimestre : la vérification est inapplicable, et rien ne dit ce qu'il advient d'un CSV dont le nom d'archive existe déjà — la règle de suffixage n'apparaît qu'à l'étape 5.3.4.",
       "related_steps": ["s7", "s7.3", "s14.2"]
     },
     {
-      "kind": "unspecified_case",
+      "kind": "unhandled_case",
       "message": "La dédup sémantique de l'étape 3bis ne connaît que les factures présentes dans `factures-parsed.json`. Une facture rangée dans `{QTR}-Factures/` par un dépôt manuel (cas que `compta-trimestrielle` 4.5.3 traite explicitement) n'est dans aucun index et ne sera pas vue comme doublon.",
       "related_steps": ["s8", "s8.1"]
     },
     {
-      "kind": "stale_identifier",
+      "kind": "declaration_mismatch",
       "message": "Le `SKILL.md` et `vendor-rules.md` nomment l'agent `@default/compta-inbox-dispatch` alors que le manifeste le nomme `@default/compta-inbox`. Même famille que l'identifiant obsolète relevé sur `compta-gmail-harvest`.",
       "related_steps": ["s1", "s6.7"]
     },
     {
-      "kind": "unused_capability",
+      "kind": "capability_without_rule",
       "message": "La clé de configuration `org_name` (défaut `TRACTR`) est déclarée au manifeste ; ni le prompt ni les références ne disent quand l'utiliser. Aucune étape ne la référence.",
       "related_steps": []
     }

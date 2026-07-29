@@ -5,9 +5,7 @@
     "package_id": "@default/analyste-donnees",
     "version": "1.0.0",
     "integrity": null,
-    "files": [
-      "prompt.md"
-    ]
+    "files": ["prompt.md"]
   },
   "generated_at": "2026-07-27T00:00:00Z",
   "generator": {
@@ -264,32 +262,32 @@
   ],
   "gaps": [
     {
-      "kind": "self_contradiction",
+      "kind": "contradiction",
       "message": "L'ordre des étapes numérotées est faux. L'étape 3 (l. 10) appelle `output` avec `visualisations`, alors que l'étape 4 (l. 12) est celle qui produit les visualisations. Suivie à la lettre, la procédure émet le résultat final avant d'avoir calculé l'un de ses champs. La carte a dû replacer `s6` avant `s7` pour rester cohérente ; c'est le seul endroit où elle s'écarte de l'ordre littéral du texte.",
       "related_steps": ["s6", "s7"]
     },
     {
-      "kind": "conflicting_policies",
+      "kind": "declaration_mismatch",
       "message": "Le chemin dégradé (l. 19) demande d'appeler `output` « avec ce qui est exploitable », mais le schéma du manifeste rend `synthese`, `indicateurs_cles`, `tendances` et `recommandations` tous les quatre obligatoires. Sur un jeu de données illisible, l'agent doit soit produire des listes vides — ce que le prompt n'autorise pas explicitement, contrairement à `synthese-reunion` qui le dit —, soit violer le schéma.",
       "related_steps": ["g6", "s7"]
     },
     {
-      "kind": "unspecified_case",
+      "kind": "unhandled_case",
       "message": "Aucune borne de volume. Le jeu de données arrive collé en texte dans un seul champ ; rien ne dit quoi faire d'un CSV de 50 000 lignes qui ne tient pas dans la fenêtre, ni s'il faut échantillonner, tronquer, ou refuser. Le `timeout` de 300 s est la seule limite exprimée, et elle est hors du prompt.",
       "related_steps": ["s1", "s5"]
     },
     {
-      "kind": "ambiguous_condition",
+      "kind": "undefined_criterion",
       "message": "« segments qui se détachent » et « valeurs aberrantes » (l. 8) n'ont ni définition ni seuil. Deux runs sur les mêmes données peuvent produire deux listes de `tendances` disjointes sans qu'aucun soit fautif.",
       "related_steps": ["s5"]
     },
     {
-      "kind": "unenforceable_rule",
+      "kind": "rule_without_capability",
       "message": "« Sépare clairement les faits de ton interprétation » (l. 16) est une règle sans support : aucun champ du schéma de sortie ne distingue les deux, `tendances` et `recommandations` sont de simples tableaux de chaînes. La séparation ne peut vivre que dans la typographie du texte, donc n'est ni vérifiable ni consommable par un agent aval.",
       "related_steps": ["g3", "s7"]
     },
     {
-      "kind": "unspecified_case",
+      "kind": "unhandled_case",
       "message": "Rien ne dit quoi faire si la `question` fournie porte sur des colonnes absentes du jeu de données. La règle l. 18 impose de « le dire explicitement », sans préciser si l'analyse exploratoire de repli (l. 7) doit alors se déclencher.",
       "related_steps": ["s2", "g5"]
     }

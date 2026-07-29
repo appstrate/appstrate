@@ -1155,37 +1155,37 @@
   ],
   "gaps": [
     {
-      "kind": "unbounded_work_loop",
+      "kind": "unbounded_work",
       "message": "La prescription centrale de l'agent — « keep going until the query is completely resolved » (l. 125) — n'a ni ensemble à parcourir, ni compteur, ni budget, ni critère objectif d'arrêt. Sa seule borne est « when you are sure that the problem is solved ». Le vocabulaire à sept types n'a rien pour cela : ce n'est pas un `loop` (aucune collection), et l'écrire en `guard` fait disparaître du graphe le fait principal, à savoir que l'agent tourne.",
       "related_steps": ["te1", "te2"]
     },
     {
-      "kind": "conflicting_policies",
+      "kind": "contradiction",
       "message": "« Do not provide range of lines » dans les références de fichiers du message final (l. 226) contredit la rubrique de revue du même dépôt (`rubric.md` l. 92-93), qui rend `line_range` obligatoire dans chaque constat. Les deux prompts sont chargés dans des contextes différents, mais rien dans l'un ni dans l'autre ne le dit.",
       "related_steps": ["ff5"]
     },
     {
-      "kind": "conflicting_policies",
+      "kind": "contradiction",
       "message": "« Don't nest bullets or create deep hierarchies » (l. 249) contredit la règle de sous-sections deux paragraphes plus haut (l. 233) : « For subsections …, introduce with a bolded keyword bullet, then list items under it. » Rien ne dit à quelle profondeur la première interdit ce que la seconde prescrit.",
       "related_steps": ["ff8"]
     },
     {
-      "kind": "undeclared_runtime_state",
+      "kind": "rule_without_capability",
       "message": "Trois règles de validation dépendent du mode d'approbation en cours (`never`, `untrusted`, `on-request`), qui n'est ni une entrée de l'agent, ni une configuration qu'il puisse lire : c'est un état du harnais. Le vocabulaire des `refs` n'a pas de terme pour un état d'exécution ; `config:approval_policy` est le rattachement le moins faux, pas le bon.",
       "related_steps": ["va7", "va8", "va9"]
     },
     {
-      "kind": "teaching_by_example",
+      "kind": "undefined_criterion",
       "message": "La section Planning consacre 48 de ses 70 lignes (l. 72-121) à six exemples de plans, trois « high-quality » et trois « low-quality », sans énoncer un seul critère qui les sépare. La prescription réelle est portée par le contraste entre les exemples. Une carte ne peut en retenir qu'un nœud (« n'écrire que des plans de haute qualité ») et perd la totalité de l'information.",
       "related_steps": ["pl7"]
     },
     {
-      "kind": "unspecified_case",
+      "kind": "unhandled_case",
       "message": "La condition d'arrêt du plan (« toutes les étapes `completed` », l. 275) et la condition d'arrêt du tour (« sure that the problem is solved », l. 125) sont énoncées séparément. Rien ne dit ce qui prime si le plan est épuisé alors que le problème ne l'est pas — le cas le plus fréquent en pratique.",
       "related_steps": ["up4", "te1"]
     },
     {
-      "kind": "no_failure_path",
+      "kind": "unhandled_failure",
       "message": "Aucune règle du document ne décrit ce que fait l'agent quand il ne parvient pas à résoudre la tâche : ni escalade vers l'humain, ni refus, ni reddition explicite. Le seul aveu d'échec prévu concerne le formatage (l. 155, après 3 tentatives). « Do NOT guess or make up an answer » interdit la sortie facile sans en fournir une autre.",
       "related_steps": ["te1", "te2", "va4"]
     }

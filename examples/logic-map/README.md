@@ -10,12 +10,12 @@ des documents que personne n'a écrits pour lui.
 
 ## Le corpus
 
-| Origine | Agents | Cartes |
-|---|---|---|
-| Tractr (`satellites/implantation/tractr`) | compta-gmail-harvest, compta-inbox, compta-trimestrielle, mes-taches-clickup, wiki-brain | 5 |
-| Core (`satellites/implantation/core`) | analyste-donnees, synthese-reunion | 2 |
-| LangSmith Fleet (benchmark) | executive-assistant, gtm, on-call-copilot, software-engineer, competitor-intelligence, x-content-manager, tavily-research | 7 |
-| Agents publics (récupérés à la source, SHA dans `corpus-web/PROVENANCE.md`) | Codex CLI + sa rubrique de revue, OpenHands, un sous-agent Claude Code | 4 |
+| Origine                                                                     | Agents                                                                                                                    | Cartes |
+| --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- | ------ |
+| Tractr (`satellites/implantation/tractr`)                                   | compta-gmail-harvest, compta-inbox, compta-trimestrielle, mes-taches-clickup, wiki-brain                                  | 5      |
+| Core (`satellites/implantation/core`)                                       | analyste-donnees, synthese-reunion                                                                                        | 2      |
+| LangSmith Fleet (benchmark)                                                 | executive-assistant, gtm, on-call-copilot, software-engineer, competitor-intelligence, x-content-manager, tavily-research | 7      |
+| Agents publics (récupérés à la source, SHA dans `corpus-web/PROVENANCE.md`) | Codex CLI + sa rubrique de revue, OpenHands, un sous-agent Claude Code                                                    | 4      |
 
 **18 cartes · 833 nœuds · 766 citations vérifiées mécaniquement.**
 
@@ -79,7 +79,7 @@ agent :
 
 - `toolbox:@appstrate/google-drive#api_upload` : un emplacement existe
   (`integrations_configuration.tools[]`), il ne contient que `api_call` → **erreur réelle**,
-  et pas marginale, c'est *la* méthode de création de fichier prescrite par `compta-inbox`.
+  et pas marginale, c'est _la_ méthode de création de fichier prescrite par `compta-inbox`.
 - `runtime:bash`, `runtime:read_file` : **aucun emplacement de déclaration n'existe**
   (`runtime_tools` est le catalogue des outils de plateforme, pas des capacités d'hôte) →
   **indice**, jamais erreur, sinon on remplace un faux négatif par un faux positif.
@@ -185,7 +185,7 @@ L'hypothèse était que `guard` sert de fourre-tout aux critères de qualificati
 conditions de qualification d'un bug chez Codex), et qu'un huitième type le dégonflerait.
 
 **Le décompte nœud par nœud la réfute** : `criterion` prendrait **1 garde-fou sur 81**, mais
-une dizaine de **politiques**. Il ferait donc *monter* la part de garde-fous. Sur `gtm` :
+une dizaine de **politiques**. Il ferait donc _monter_ la part de garde-fous. Sur `gtm` :
 49,3 % → 49,3 %.
 
 Le besoin est réel, la solution était fausse. `applies_to` (correction 1) le couvre.
@@ -233,23 +233,119 @@ Et la zone de recouvrement est exactement la zone hybride : les quatre cartes si
 35 % et 43 % sont les quatre que les analyses ont signalées comme hybrides. Un `shape`
 déclaré peut donc être vérifié par le serveur.
 
-*(La densité d'arêtes, elle, ne mesure rien : rapportée aux seuls nœuds de flot elle vaut
+_(La densité d'arêtes, elle, ne mesure rien : rapportée aux seuls nœuds de flot elle vaut
 ~1,0 dans les deux familles. Toute procédure courte à ceinture épaisse de garde-fous était
-lue comme cassée.)*
+lue comme cassée.)_
 
 **L'indicateur d'équivalence-grep** : part des `refs` dont l'identifiant est nommé
 littéralement dans la source. **Le gain du cartographe sur une recherche textuelle n'est pas
 constant, il dépend du style du prompt** :
 
-| Agent | outils nommés littéralement | rattachés par la carte |
-|---|---|---|
-| `on-call-copilot` | 1 sur 41 | 11 |
-| `executive-assistant` | 6 sur 21 | 11 |
-| `gtm` | 11 sur 16 | 11 |
-| `mes-taches-clickup` | 5 sur 5 | 5 |
+| Agent                 | outils nommés littéralement | rattachés par la carte |
+| --------------------- | --------------------------- | ---------------------- |
+| `on-call-copilot`     | 1 sur 41                    | 11                     |
+| `executive-assistant` | 6 sur 21                    | 11                     |
+| `gtm`                 | 11 sur 16                   | 11                     |
+| `mes-taches-clickup`  | 5 sur 5                     | 5                      |
 
 Quand l'indicateur vaut 100 %, le croisement n'apporte rien qu'un grep : il ne faut pas le
 mettre en avant.
+
+## L'ontologie des trous, fermée
+
+`gaps[].kind` était le seul vocabulaire resté libre. Il a produit **50 valeurs distinctes
+pour 131 trous**, et c'était la principale source de divergence entre deux runs du
+cartographe : sur `compta-gmail-harvest`, deux runs partageaient 9 ancrages sur 19 et
+**zéro trou** — le même défaut prenait deux noms.
+
+Les 131 trous ont été réaffectés un par un — pas par renommage des 50 valeurs : douze
+anciens noms se répartissent sur deux familles ou plus, et `unspecified_case` à lui seul
+sur quatre. Les messages n'ont pas été touchés : ils portent la preuve, la famille ne sert
+qu'à trier.
+
+| Famille                   | Corpus | Ce qu'elle recouvre                                                                                                                                                          |
+| ------------------------- | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `capability_without_rule` | 22     | Déclaré, aucune règle ne dit quand s'en servir. Absorbe `unused_capability`, `declared_trigger_without_rule`, `no_routing_rule`, `over_broad_capability`                     |
+| `contradiction`           | 21     | Incompatibles, ou applicables au même cas sans arbitre. Absorbe `conflicting_policies`, `self_contradiction`, `unaddressed_conflict`                                         |
+| `unhandled_case`          | 18     | Le texte se tait sur une situation atteignable                                                                                                                               |
+| `rule_without_capability` | 15     | Le texte suppose une capacité, un état, une information que rien ne fournit. Absorbe `undeclared_capability`, `unenforceable_rule`, `unreachable_input`, `no_time_semantics` |
+| `undefined_criterion`     | 11     | Seuil, adjectif ou critère projectif qu'on ne décide pas deux fois pareil                                                                                                    |
+| `unhandled_failure`       | 10     | Panne, refus, indisponibilité                                                                                                                                                |
+| `external_authority`      | 9      | Ce qui fait foi est hors du périmètre lu                                                                                                                                     |
+| `unbounded_work`          | 6      | Répétition, délégation, troncature sans compteur ni ordre                                                                                                                    |
+| `duplicated_rule`         | 5      | La même règle deux fois, sans dire laquelle fait foi                                                                                                                         |
+| `uninstantiated_template` | 5      | Gabarit livré : ancrage vide, `{{variable}}`, bloc réécrit à l'onboarding                                                                                                    |
+| `declaration_mismatch`    | 5      | Les deux le portent, mais pas pareil                                                                                                                                         |
+| `map_limitation`          | 4      | La carte, pas l'agent                                                                                                                                                        |
+
+Ce qui a demandé un arbitrage, et pourquoi il est tranché ainsi :
+
+- **`unenforceable_rule` a été fondu dans `rule_without_capability`.** « Une correction
+  manuelle vaut `confirmed` » (wiki-brain) et « sépare les faits de ton interprétation »
+  (analyste-données) ne sont pas des règles floues : elles exigent une information que
+  rien ne porte — un marqueur d'auteur, un champ de sortie. C'est la même chose qu'un
+  `bash` non déclaré, vue depuis le prompt au lieu du manifeste.
+- **L'ordre des questions fait le partage, pas la ressemblance.** Un défaut qui est à la
+  fois un écart au manifeste et un silence est classé au manifeste, parce que c'est le
+  seul des deux qu'une machine peut vérifier.
+- **`map_limitation` est la seule famille dont le sujet est la carte.** Elle recueille les
+  deux hybrides, la boucle conditionnelle sans ensemble, et le passage qui ne prescrit
+  rien. Sans elle, ces quatre constats — ceux qui ont fait naître `until`, `groups[]` et
+  `aggregated` — n'auraient nulle part où aller.
+- **Le trou qui rentre le moins bien** est `no_time_semantics` (on-call-copilot) : aucun
+  délai n'est opposable, l'agent n'a pas d'horloge, et les seuls engagements temporels
+  vivent dans un bloc vide. Trois familles s'en disputent des morceaux ; le message, lui,
+  ne perd rien.
+
+## Ce que la machine trouve, et ce qu'elle rate
+
+Huit runs du cartographe, cinq agents, confrontés aux cartes écrites à la main. Le partage
+est net et il se répète d'un agent à l'autre.
+
+**Elle trouve les défauts LOCAUX**, ceux qui tiennent dans un passage : un adjectif sans
+seuil (« pertinent », « proche », « utile »), un chemin d'échec absent, une capacité
+déclarée qu'aucune règle ne déclenche, un identifiant qui ne correspond pas. Sur ces
+familles elle ajoute même des trous que l'humain n'avait pas vus, et ils sont justes.
+
+**Elle rate les défauts qui demandent de COMPTER ou de RAPPROCHER deux passages
+éloignés** :
+
+| Trou manqué                                                                                       | Ce qu'il aurait fallu faire         |
+| ------------------------------------------------------------------------------------------------- | ----------------------------------- |
+| `mes-taches-clickup` : budget « 2 à 4 appels » alors que la procédure en prescrit 6               | compter les `tool_call` de la carte |
+| `analyste-donnees` : l'étape 3 émet le résultat avant que l'étape 4 ne calcule l'un de ses champs | lire la topologie du graphe         |
+| `analyste-donnees` : le chemin dégradé viole le schéma de sortie du manifeste                     | croiser deux documents              |
+| `compta-trimestrielle` : le multipart interdit par l'agent frère                                  | connaître un AUTRE agent            |
+
+Ce ne sont pas des défauts du modèle : ce sont des **calculs**. On a donc cherché à les
+faire faire au croisement, sans modèle — et **les deux contrôles ont été écartés sur
+mesure**, avant d'écrire une ligne de code.
+
+Le budget d'appels vit en texte libre dans un `guard` : la carte ne porte aucun champ qui
+l'exprime, et l'exprimer voudrait dire étendre `budget` aux `guard` pour un seul cas
+observé.
+
+L'ordre fautif d'`analyste-donnees` est pire : **la carte manuelle l'avait corrigé**. Son
+graphe est sain, le défaut n'y est plus. Le repérer demande de confronter l'ordre du graphe
+à l'ordre du texte — trois formulations essayées, la meilleure trouve 6 cas dont 1 vrai, et
+ne se distingue des faux que par un seuil arbitraire sur l'écart de lignes. Soit exactement
+l'`undefined_criterion` que ce format reproche aux prompts.
+
+Le manque à retenir n'est donc pas un contrôle non écrit, c'est un manque de format :
+**rien ne permet de déclarer « ici je m'écarte de la lettre du texte, et voici pourquoi »**.
+La note existe aujourd'hui en prose dans le message d'un trou ; elle mériterait un champ.
+
+**Un désaccord de famille instructif.** Sur `compta-trimestrielle`, la règle `add-memory`
+du `SKILL.md` que le prompt interdit : la carte manuelle la classe en `contradiction`, la
+machine en `rule_without_capability` (la capacité n'est déclarée nulle part). L'arbre
+tranche pour la machine, puisque l'écart au manifeste se teste avant la contradiction
+entre deux passages. Le trou porte en réalité deux défauts, et la règle « un trou = un
+défaut » veut qu'il en produise deux.
+
+**Le plafond flou reste disputé** : « limite-toi à environ 15 tâches » est un
+`unbounded_work` pour l'humain (la troncature n'est ni bornée ni signalée) et un
+`undefined_criterion` pour la machine (le seuil n'est pas chiffré). Les deux lectures sont
+défendables ; c'est la frontière la moins nette des douze familles.
 
 ## Manques identifiés, non comblés
 
@@ -268,8 +364,8 @@ mettre en avant.
 5. **Rien ne dit qu'un nœud est le même qu'un autre dans une autre carte.** Trois règles
    identiques écrites par deux auteurs dans deux agents de veille concurrentielle.
 6. **Une table de décision devient un nœud.** Confirmé hors corpus maison, et aggravé : chez
-   Codex et OpenHands, le résultat de la classification (P0-P3, LOW/MED/HIGH) est une *donnée
-   de sortie*, pas un aiguillage.
+   Codex et OpenHands, le résultat de la classification (P0-P3, LOW/MED/HIGH) est une _donnée
+   de sortie_, pas un aiguillage.
 7. **L'enseignement par l'exemple est hors de portée.** `codex:72-121` : 48 lignes de plans
    « high-quality » et « low-quality » sans un seul critère énoncé. La prescription est le
    contraste entre deux blocs. Réduit à un nœud, 48 lignes sur 275 perdues.
@@ -281,7 +377,7 @@ mettre en avant.
    Drive échoue : inclure le résultat local dans l'output ». Le rendu les affichera à
    l'identique.
 9. **Une abrogation se lit comme une contrainte active.** « **Plus de STOP sur un CSV de
-   paiements** » dit qu'une règle *n'existe plus*. Typée `guard`, elle prescrit exactement le
+   paiements** » dit qu'une règle _n'existe plus_. Typée `guard`, elle prescrit exactement le
    contraire de ce qu'elle dit. Même famille : « Créer des dossiers est autorisé » est une
    permission bornée, pas une interdiction. Ni le test guard/policy ni aucun type ne les
    attrape : la violer n'est ni un défaut ni un cas non présenté, il n'y a rien à violer.
@@ -315,11 +411,11 @@ Même machinerie, sévérité contextuelle.
 
 Trois formes de constat que le brief n'avait pas prévues, toutes vérifiées :
 
-| Constat | Sévérité proposée | Cas |
-|---|---|---|
-| Planification déclarée qu'aucune règle ne couvre | avertissement | Le cron quotidien « Daily calendar and email brief » d'`executive-assistant` n'est décrit nulle part |
-| Capacité accordée plus large que l'usage cartographié | avertissement | `wiki-brain` obtient le scope Drive complet alors que le prompt s'interdit toute écriture hors d'un dossier ; le scope Gmail, lui, est réduit à `readonly` |
-| Inventaire de capacités non référencées, à distinguer d'un indice | inventaire | 45 outils non référencés chez `software-engineer` ne sont pas une anomalie : le prompt prescrit délibérément le jugement (« act with the appropriate tools ») |
+| Constat                                                           | Sévérité proposée | Cas                                                                                                                                                           |
+| ----------------------------------------------------------------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Planification déclarée qu'aucune règle ne couvre                  | avertissement     | Le cron quotidien « Daily calendar and email brief » d'`executive-assistant` n'est décrit nulle part                                                          |
+| Capacité accordée plus large que l'usage cartographié             | avertissement     | `wiki-brain` obtient le scope Drive complet alors que le prompt s'interdit toute écriture hors d'un dossier ; le scope Gmail, lui, est réduit à `readonly`    |
+| Inventaire de capacités non référencées, à distinguer d'un indice | inventaire        | 45 outils non référencés chez `software-engineer` ne sont pas une anomalie : le prompt prescrit délibérément le jugement (« act with the appropriate tools ») |
 
 ## Bugs trouvés dans les agents, par la méthode
 
@@ -387,7 +483,7 @@ Trouvailles vérifiées une à une, qui existent indépendamment du chantier.
   dix nœuds chaînés) n'est pas celle que le brief mentionne.
 - **La règle « une famille sature les types que l'autre n'utilise pas » est fausse hors du
   corpus maison** : la rubrique de revue de Codex est `policies` avec **zéro** nœud `policy`
-  (32 `guard`). Une rubrique est un document de *critères*, pas de déclencheurs.
+  (32 `guard`). Une rubrique est un document de _critères_, pas de déclencheurs.
 
 ## Fichiers
 

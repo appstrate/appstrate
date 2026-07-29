@@ -5,9 +5,7 @@
     "package_id": "@default/synthese-reunion",
     "version": "1.0.0",
     "integrity": null,
-    "files": [
-      "prompt.md"
-    ]
+    "files": ["prompt.md"]
   },
   "generated_at": "2026-07-27T00:00:00Z",
   "generator": {
@@ -265,32 +263,32 @@
   ],
   "gaps": [
     {
-      "kind": "declared_input_without_rule",
+      "kind": "capability_without_rule",
       "message": "Le manifeste déclare un champ d'entrée `contexte` (« Sujet, participants ou objectif de la réunion, pour affiner la synthèse ») avec un `ui_hints` et une place dans `property_order`. Le prompt ne le mentionne nulle part, sous aucune formulation. L'utilisateur remplit un champ que rien ne consomme. Même famille que le cron sans règle de `executive-assistant`.",
       "related_steps": []
     },
     {
-      "kind": "unspecified_case",
+      "kind": "rule_without_capability",
       "message": "La section `## Checkpoint` (l. 7) n'a pas d'emplacement documenté : ni le prompt ni le manifeste ne disent si elle est concaténée au `transcript`, au `contexte`, ou injectée hors des entrées déclarées. Un agent qui la cherche au mauvais endroit conclut « absente » et perd la continuité entre réunions, sans que rien ne le signale.",
       "related_steps": ["s1", "g1"]
     },
     {
-      "kind": "unspecified_case",
+      "kind": "rule_without_capability",
       "message": "« la précédente réunion du même type » (l. 7) suppose une notion de type de réunion. Aucune entrée ne la porte et la clé de `pin` est constante (`checkpoint`), donc toutes les réunions partagent le même emplacement de mémoire : la synthèse d'un comité produit sera présentée comme checkpoint d'un point client.",
       "related_steps": ["s1", "s8"]
     },
     {
-      "kind": "unspecified_error_path",
+      "kind": "unhandled_failure",
       "message": "Les quatre appels d'outils sont prescrits sans ordre de repli. Rien ne dit quoi faire si `pin` ou `note` échoue après un `output` déjà émis, ni si l'absence de `note` doit apparaître quelque part. Le run serait considéré comme réussi avec une mémoire muette.",
       "related_steps": ["s8", "s10"]
     },
     {
-      "kind": "ambiguous_condition",
+      "kind": "undefined_criterion",
       "message": "« Si une décision est structurante » (l. 17) n'est illustré que par trois exemples. Rien ne dit s'il faut un appel `note` par décision structurante ou un seul pour l'ensemble, ni quel format de contenu — alors que le format de `pin` est, lui, entièrement spécifié à la ligne du dessus.",
       "related_steps": ["s9", "s10"]
     },
     {
-      "kind": "unspecified_case",
+      "kind": "unhandled_case",
       "message": "Les actions encore ouvertes venues du checkpoint (l. 7) sont à « repérer » sans suite prescrite : rien ne dit si elles doivent être reconduites dans `actions`, listées dans `points_attention`, ou seulement reportées dans le nouveau `pin`. Les trois choix produisent des sorties très différentes.",
       "related_steps": ["s2", "s8"]
     }

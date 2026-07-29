@@ -858,12 +858,12 @@
   ],
   "gaps": [
     {
-      "kind": "declared_trigger_without_rule",
+      "kind": "capability_without_rule",
       "message": "La carte de dépendances déclare un cron quotidien « Daily calendar and email brief » (AGENT.md:15) et la fiche produit en fait un argument de vente (AGENT.md:22). Le prompt système ne décrit nulle part ce qu'est ce brief : ni contenu, ni format, ni destinataire, ni comportement si l'agenda est vide. La seule mention d'un run cron est incidente (AGENT.md:55), pour dire que le texte brut n'y est pas affiché.",
       "related_steps": ["cc1"]
     },
     {
-      "kind": "conflicting_policies",
+      "kind": "contradiction",
       "message": "Archiving Workflow impose de montrer et de demander avant chaque archivage (AGENT.md:174), alors que les Email Preferences prescrivent de marquer lu silencieusement le spam et le marketing (AGENT.md:83-87) et que Calendar Event Intelligence interdit de demander avant d'agir (AGENT.md:114). Rien ne dit quelle règle l'emporte pour un email de spam qui mériterait l'archivage.",
       "related_steps": ["arch1", "pref1", "cal1"]
     },
@@ -873,7 +873,7 @@
       "related_steps": ["pref6", "cal7", "ig7"]
     },
     {
-      "kind": "unspecified_error_path",
+      "kind": "unhandled_failure",
       "message": "Aucune règle ne couvre l'échec d'un outil : quota Gmail dépassé, Slack déconnecté, recherche Tavily en erreur, `calendar_context` sans réponse. Le document dit seulement quoi faire quand une recherche ne trouve rien (AGENT.md:236), pas quand elle échoue.",
       "related_steps": []
     },

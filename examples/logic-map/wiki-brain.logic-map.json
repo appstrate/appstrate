@@ -5,9 +5,7 @@
     "package_id": "@appstrate/wiki-brain",
     "version": "0.1.0",
     "integrity": null,
-    "files": [
-      "prompt.md"
-    ]
+    "files": ["prompt.md"]
   },
   "generated_at": "2026-07-27T00:00:00Z",
   "generator": {
@@ -311,10 +309,7 @@
       "label": "Gmail : lire chaque nouveau message et déposer `raw/gmail/items/<date>-<messageId>.json`",
       "parent": "s2.0",
       "detail": "Expéditeur, destinataires, sujet, date, snippet et corps texte. Deux intégrations dans le même geste : Gmail pour la lecture (`?format=full`, corps en base64url), Drive pour le dépôt du fichier dans la destination.",
-      "refs": [
-        "toolbox:@appstrate/gmail#api_call",
-        "toolbox:@appstrate/google-drive#api_call"
-      ],
+      "refs": ["toolbox:@appstrate/gmail#api_call", "toolbox:@appstrate/google-drive#api_call"],
       "evidence": {
         "file": "prompt.md",
         "lines": [63, 63],
@@ -344,10 +339,7 @@
       "label": "Drive : lister les fichiers modifiés depuis le curseur, restreints aux dossiers sources",
       "parent": "s2.0",
       "detail": "`modifiedTime > cursor`, restreint à `drive_source_folders` si la liste est non vide, `fields=files(id,name,mimeType,modifiedTime,owners,webViewLink)`.",
-      "refs": [
-        "toolbox:@appstrate/google-drive#api_call",
-        "config:drive_source_folders"
-      ],
+      "refs": ["toolbox:@appstrate/google-drive#api_call", "config:drive_source_folders"],
       "evidence": {
         "file": "prompt.md",
         "lines": [65, 65],
@@ -1174,10 +1166,7 @@
       "label": "Passer tous les appels authentifiés par les outils `{namespace}__api_call`",
       "parent": null,
       "detail": "Le prompt nomme les deux namespaces attendus, `appstrate_gmail__api_call` et `appstrate_google_drive__api_call` : ce sont les identifiants de package `@appstrate/gmail` et `@appstrate/google-drive` en snake_case. Arguments : `target` (URL absolue), `method`, `headers`, `body`. Les credentials sont injectés côté sidecar. C'est ce passage qui rattache les deux intégrations par la règle §4.1 (le texte nomme le package), et non par déduction de sens — voir rapport.",
-      "refs": [
-        "toolbox:@appstrate/gmail#api_call",
-        "toolbox:@appstrate/google-drive#api_call"
-      ],
+      "refs": ["toolbox:@appstrate/gmail#api_call", "toolbox:@appstrate/google-drive#api_call"],
       "evidence": {
         "file": "prompt.md",
         "lines": [191, 191],
@@ -1262,52 +1251,52 @@
   ],
   "gaps": [
     {
-      "kind": "unspecified_error_path",
+      "kind": "contradiction",
       "message": "Le chemin `locked` est incohérent avec l'étape 7. La ligne 47 impose d'abandonner « sans rien écrire », mais l'étape 7 prescrit d'écrire `wiki/.last-update.json` puis de supprimer `.lock` — ce qui, sur un run verrouillé, détruirait le verrou d'un run concurrent en cours d'écriture. Rien ne dit que la clôture est sautée dans ce cas, ni comment la sortie `status: \"locked\"` est rendue sans passer par l'étape 7.",
       "related_steps": ["s0.3", "g_lock", "s7.1", "s7.2"]
     },
     {
-      "kind": "unspecified_case",
+      "kind": "unhandled_case",
       "message": "Le court-circuit de l'étape 3 (« Delta vide sur toutes les sources = passe directement à l'étape 7 en no-op », l. 69) saute l'étape 6, donc la purge du brut. Un wiki sans activité pendant plus de `raw_retention_days` ne purgerait jamais son `raw/`, alors que la purge est indépendante du delta. Vraisemblablement involontaire.",
       "related_steps": ["s3.3", "s6.1"]
     },
     {
-      "kind": "conflicting_policies",
+      "kind": "contradiction",
       "message": "« Marque `Stale` ce qui n'a plus reparu » (l. 173) exige de savoir depuis quand un sujet n'est plus apparu, alors que « Tu ne lis que le delta. Ne relis jamais le brut ancien » (l. 69) interdit d'aller le vérifier. La seule information disponible est ce que la page elle-même porte (`Seen`, `Dernière occurrence`), et aucune durée d'inactivité n'est fixée. La règle est appliquable au jugé, pas de façon reproductible.",
       "related_steps": ["ds9", "s3.2", "s4.5"]
     },
     {
-      "kind": "unenforceable_rule",
+      "kind": "rule_without_capability",
       "message": "« Une correction manuelle du propriétaire dans le wiki vaut `confirmed` : ne l'écrase jamais » (l. 157) suppose de distinguer une phrase écrite par l'humain d'une phrase écrite par l'agent. Rien dans le format des pages ne porte cette distinction : ni le frontmatter OKF, ni les labels de confiance, ni `log.md` qui n'enregistre que les modifications de l'agent. La protection la plus forte du prompt n'a aucun support technique.",
       "related_steps": ["ds2", "s4.4", "fm1"]
     },
     {
-      "kind": "conflicting_policies",
+      "kind": "contradiction",
       "message": "Le budget du premier run (8 pages maximum, fichiers canoniques compris, l. 102) est presque entièrement consommé par la structure canonique elle-même : `quickstart`, `open-questions`, `themes`, `commitments`, `index`, `log`, `sources/index`, `sources/gmail`, `sources/drive` font déjà 9 fichiers, 10 avec `personal-logistics` en mode perso. Si les fichiers canoniques comptent, aucun budget ne reste pour une page de domaine et le budget est dépassé avant d'avoir commencé. Le prompt tempère par « les fichiers canoniques pertinents » (l. 103) sans dire lesquels sont facultatifs.",
       "related_steps": ["fr2", "fr4", "sc1", "sc6"]
     },
     {
-      "kind": "unspecified_case",
+      "kind": "unhandled_case",
       "message": "L'interdiction de recopier un secret (l. 186) ne porte que sur le wiki. L'ingestion dépose pourtant les corps de mails intégraux dans `raw/gmail/items/` (l. 63), sans filtrage — c'est précisément le principe « ingestion bête ». Les credentials envoyés par mail sont donc écrits en clair dans le dossier de destination, et n'en sortent qu'après `raw_retention_days`. Aucune règle ne couvre ce cas.",
       "related_steps": ["sec2", "s2.3", "s6.1"]
     },
     {
-      "kind": "unspecified_case",
+      "kind": "unhandled_case",
       "message": "L'entrée `source` restreint l'ingestion à une source, mais le prompt ne dit pas ce que devient le curseur de l'autre source, ni si `wiki/.last-update.json` doit conserver le curseur non rafraîchi ou l'omettre. Le gabarit de la ligne 93 énumère `sources` sans traiter le cas partiel.",
       "related_steps": ["s1.3", "s2.0", "s7.1"]
     },
     {
-      "kind": "ambiguous_condition",
+      "kind": "contradiction",
       "message": "Trois budgets de volume coexistent sans hiérarchie : « au plus une ou deux pages » sous cinq éléments significatifs (l. 108), « plus de trois pages exige de te justifier » (l. 110) et le budget de 8 pages du premier run (l. 102). Rien ne dit lequel l'emporte sur un premier run à fort delta, ni ce qu'est un « élément significatif ».",
       "related_steps": ["bd1", "bd3", "fr2"]
     },
     {
-      "kind": "unused_capability",
+      "kind": "capability_without_rule",
       "message": "Le manifeste accorde l'outil système `log` ; le prompt ne dit nulle part quand l'utiliser, et aucune étape de cette carte ne le référence. Même signal que sur `compta-gmail-harvest`, où `log` et `pin` sont accordés sans règle d'emploi. Indice à confirmer, pas erreur.",
       "related_steps": []
     },
     {
-      "kind": "over_broad_capability",
+      "kind": "capability_without_rule",
       "message": "Le manifeste accorde le scope Drive complet (`https://www.googleapis.com/auth/drive`), alors que le prompt s'interdit toute écriture hors de `destination_folder_id` (l. 14) et toute modification des documents sources (l. 187). Le scope Gmail est correctement réduit à `gmail.readonly`, ce qui montre que la réduction était possible et n'a pas été faite côté Drive. La contrainte la plus critique de l'agent ne tient que par le prompt.",
       "related_steps": ["c1", "sec3", "ds11"]
     },

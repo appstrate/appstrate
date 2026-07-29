@@ -5,9 +5,7 @@
     "package_id": "langchain-fleet/tavily-competitor-research",
     "version": null,
     "integrity": null,
-    "files": [
-      "configs/agents/tavily-competitor-research/AGENT.md"
-    ]
+    "files": ["configs/agents/tavily-competitor-research/AGENT.md"]
   },
   "generated_at": "2026-07-27T00:00:00Z",
   "generator": {
@@ -329,17 +327,17 @@
   ],
   "gaps": [
     {
-      "kind": "referenced_capability_not_declared",
+      "kind": "rule_without_capability",
       "message": "Le prompt impose de passer par les outils Tavily « for web search and page extraction » (AGENT.md:43). Aucun outil d'extraction de page n'est accordé : les trois outils déclarés sont `tavily_web_search`, `slack_reply_to_message` et `slack_read_thread_messages`. Ni Tavily Extract, ni `read_url_content`. La règle prescrit une capacité que l'agent n'a pas.",
       "related_steps": ["t2"]
     },
     {
-      "kind": "declared_capability_without_rule",
+      "kind": "capability_without_rule",
       "message": "Slack est une connexion déclarée et fournit deux des trois outils de l'agent (`slack_reply_to_message`, `slack_read_thread_messages`). Le prompt système ne mentionne Slack NULLE PART : ni pour lire un fil, ni pour répondre. La seule trace est dans les étapes d'installation (« Optionally connect Slack to reply in threads »), hors du prompt. Les deux nœuds `emit` disent « présenter » sans nommer de canal.",
       "related_steps": ["s5", "s6"]
     },
     {
-      "kind": "foreign_workspace_leftover",
+      "kind": "uninstantiated_template",
       "message": "La section « Workspace aliases/preferences » définit « Exa » comme exa.ai (AGENT.md:77) alors que cet agent n'a ni connexion ni outil Exa — c'est `x-content-manager` qui porte la connexion `exa`. Vestige d'un gabarit d'espace de travail, inerte ici, mais qui occupe une section entière du prompt.",
       "related_steps": ["a1"]
     },
@@ -354,12 +352,12 @@
       "related_steps": ["g1", "ts2", "s6"]
     },
     {
-      "kind": "unspecified_error_path",
+      "kind": "unhandled_failure",
       "message": "Aucune règle ne couvre l'échec d'un appel : Tavily en erreur ou en quota, worker qui ne rend rien, entrée sans aucun nom de société exploitable. « If no recent information is available » (AGENT.md:73) traite le résultat vide, pas la panne. Rien ne borne non plus le nombre de sociétés par requête, alors qu'un worker est lancé par société.",
       "related_steps": ["s2.1", "e1"]
     },
     {
-      "kind": "undefined_threshold",
+      "kind": "undefined_criterion",
       "message": "« Sparse » (AGENT.md:46) décide seul du passage d'une fenêtre d'un mois à un trimestre, et n'est défini nulle part. C'est le seul paramètre qui change le coût d'un run.",
       "related_steps": ["c3"]
     }

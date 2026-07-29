@@ -5,9 +5,7 @@
     "package_id": "langchain-fleet/x-content-manager",
     "version": null,
     "integrity": null,
-    "files": [
-      "configs/agents/x-content-manager/AGENT.md"
-    ]
+    "files": ["configs/agents/x-content-manager/AGENT.md"]
   },
   "generated_at": "2026-07-27T00:00:00Z",
   "generator": {
@@ -265,22 +263,20 @@
       "confidence": 0.95
     }
   ],
-  "edges": [
-    { "from": "sk4", "to": "sk5", "condition": "l'idée est trop grosse pour un tweet" }
-  ],
+  "edges": [{ "from": "sk4", "to": "sk5", "condition": "l'idée est trop grosse pour un tweet" }],
   "gaps": [
     {
-      "kind": "declared_capability_without_rule",
+      "kind": "capability_without_rule",
       "message": "L'agent s'annonce « Posts on X in your voice » et reçoit `x_create_post`, `x_reply_to_post` et `x_quote_post`. Le prompt système ne prescrit JAMAIS de publier : ni quand, ni sous quelle validation, ni s'il faut demander à l'humain d'abord. Le seul mot qui approche la sortie est « presenting » (AGENT.md:55-56), et il désigne une présentation à l'utilisateur, pas une publication. La carte ne contient donc aucun nœud `emit`. Même famille que le cron non couvert de l'executive-assistant, mais plus grave : c'est la promesse produit qui est en défaut.",
       "related_steps": ["sk6"]
     },
     {
-      "kind": "package_id_mismatch",
+      "kind": "declaration_mismatch",
       "message": "Le prompt nomme le skill d'onboarding `onboard` (AGENT.md:44) alors que la carte de dépendances déclare `onboard-x-content-manager`. La carte rapporte `skills:onboard` conformément à la règle de fidélité : le croisement fera remonter « référencé, non déclaré » d'un côté et « déclaré, jamais référencé » de l'autre. Même signature que `@tractr/google-drive` vs `@appstrate/google-drive` dans `compta-gmail-harvest`.",
       "related_steps": ["sk2"]
     },
     {
-      "kind": "no_routing_rule",
+      "kind": "capability_without_rule",
       "message": "La section « Skills » décrit sept capacités sans jamais dire QUAND en invoquer une. Une seule phrase du document porte un déclencheur d'enchaînement (`deep-write` reprend de `workshop-x-posts` quand l'idée est trop grosse pour un tweet, AGENT.md:53-54). Rien ne dit ce que fait l'agent quand l'utilisateur lui écrit simplement, ni comment il choisit entre atelier court et écriture longue à l'entrée. C'est la raison directe du graphe à 16 nœuds et 1 arête.",
       "related_steps": ["sk2", "sk3", "sk4", "sk5"]
     },
@@ -290,22 +286,22 @@
       "related_steps": ["sk1", "sk2", "sk3", "sk4", "sk5", "sk6", "sk7"]
     },
     {
-      "kind": "declared_trigger_partially_covered",
+      "kind": "capability_without_rule",
       "message": "Le cron déclaré `0 16 * * *` (« Daily scout-x run ») est couvert par une demi-phrase : « Runs on a schedule » (AGENT.md:48). Le prompt ne dit ni ce que le run quotidien produit, ni où il atterrit au-delà de « compile into the wiki », ni s'il notifie l'utilisateur, ni ce qu'il fait un jour sans signal. À comparer au cron entièrement non couvert de l'executive-assistant : ici la sévérité est moindre, mais le constat est de même nature.",
       "related_steps": ["sk3"]
     },
     {
-      "kind": "non_prescriptive_section",
+      "kind": "map_limitation",
       "message": "Les lignes 31-33 et 38 (« You help people post consistently… », « Your job is to close the gap between \"I found this interesting\" and \"here's a post about it.\" ») énoncent une mission sans prescrire aucun geste : aucun nœud n'en sort. Signalé pour que le mode balayage ne compte pas cette absence comme un oubli du cartographe.",
       "related_steps": []
     },
     {
-      "kind": "declared_capability_without_rule",
+      "kind": "capability_without_rule",
       "message": "Six outils déclarés sur treize ne sont couverts par aucune règle du prompt : `x_get_me`, `x_get_user`, `x_search_posts`, `x_read_post`, `read_url_content` et `extract_images_from_url`. Le dernier est le plus parlant : la base de connaissance ne mentionne jamais d'images, et aucune règle ne dit d'en joindre à une publication.",
       "related_steps": []
     },
     {
-      "kind": "unspecified_error_path",
+      "kind": "unhandled_failure",
       "message": "Aucune règle ne couvre l'échec : API X indisponible, recherche Exa vide, profil de voix absent parce que l'onboarding n'a pas eu lieu. Ce dernier cas est notable : `writing-voice` est déclaré obligatoire pour tout contenu (AGENT.md:43) alors que le skill qui le remplit ne tourne qu'à la première interaction (AGENT.md:46), et rien ne décrit le comportement dans l'intervalle.",
       "related_steps": ["sk1", "sk2"]
     }

@@ -1266,12 +1266,12 @@
   ],
   "gaps": [
     {
-      "kind": "missing_escalation_trigger",
+      "kind": "capability_without_rule",
       "message": "L'agent est un copilote d'astreinte et il n'a AUCUNE règle d'escalade exécutable. L'échelle existe (solo → coéquipier → paginer le groupe → déclarer un incident, AGENT.md:103) mais entièrement à l'intérieur d'un bloc `[not yet configured]` ; le skill `escalate` est déclaré au manifeste et n'est jamais nommé dans le prompt ; l'identité pose seulement « investigate before you escalate » (AGENT.md:37) sans dire quand escalader. Aucune condition d'escalade — ni par gravité, ni par répétition, ni par absence de réponse — n'est prescrite.",
       "related_steps": ["t1d", "id2"]
     },
     {
-      "kind": "no_time_semantics",
+      "kind": "rule_without_capability",
       "message": "Aucun délai n'est opposable dans ce prompt. Les seuls engagements temporels (« Urgent 15m/4h, High 1h/1d », « clock starts when the on-call label is applied ») sont des EXEMPLES à l'intérieur du bloc vide `<severity-rubric>` (AGENT.md:109). L'agent est par ailleurs explicitement privé de toute horloge : « You don't track time » (AGENT.md:186), et les heures calmes comme la fréquence des crons vivent dans la configuration de la plateforme, « not here ». Il n'existe donc aucune règle du type « si pas de réponse en 15 minutes, escalader » : ni le prompt, ni le vocabulaire de la carte, ne peuvent l'exprimer.",
       "related_steps": ["t1e", "sc0", "sc6"]
     },
@@ -1281,12 +1281,12 @@
       "related_steps": ["rf7", "m5", "m6", "m7", "m8"]
     },
     {
-      "kind": "empty_configuration",
+      "kind": "uninstantiated_template",
       "message": "Les quinze ancrages de configuration sont `[not yet configured]` dans le fichier livré, et le prompt le revendique : « This template ships **empty of judgment** » (AGENT.md:47). Trois formulations du même gate (AGENT.md:47, 66, 90) rendent l'agent cartographié incapable de trier. Le skill `onboard`, seul remplisseur, n'existe nulle part dans `configs/skills/`. La carte décrit une méthodologie, pas un agent opérationnel.",
       "related_steps": ["rf1", "kb3", "t1a"]
     },
     {
-      "kind": "conflicting_policies",
+      "kind": "contradiction",
       "message": "L'ordre de lecture de début de garde (AGENT.md:49) commence par ce fichier puis `INDEX.md`, et ne mentionne jamais `memories/STATE.md`. Le bloc d'arborescence dit pourtant de `STATE.md` : « the live cockpit; read it first when you sit down » (AGENT.md:63). Deux « à lire en premier » différents, à quatorze lignes d'écart.",
       "related_steps": ["rf2", "kb2"]
     },
@@ -1296,22 +1296,22 @@
       "related_steps": ["rf1", "kb3", "t1a", "m11", "si3", "yt1", "yt5", "af1", "wd2"]
     },
     {
-      "kind": "declared_capability_without_rule",
+      "kind": "capability_without_rule",
       "message": "Huit des dix-sept skills déclarés ne sont jamais nommés par le prompt : `runbook-lookup`, `investigate`, `escalate`, `route-to-channel`, `draft-ticket`, `handoff`, `postmortem`, `historical-lookup`. Ce sont précisément les skills du cœur de métier — enquêter, escalader, router, rédiger le ticket, passer la main. Quatre des cinq sous-agents déclarés ne sont jamais nommés non plus (`observability-scout`, `tracker-scout`, `chat-scout`, `web-research`) ; seul `github-scout` l'est (AGENT.md:220), et `fleet-sweep` parle de « the read-only scouts » sans en désigner aucun.",
       "related_steps": ["sc1", "rt1", "fh3"]
     },
     {
-      "kind": "declared_trigger_without_rule",
+      "kind": "capability_without_rule",
       "message": "Cinq crons sont déclarés par la plateforme avec leurs horaires (`0 * * * *` sweep horaire, `0 9 * * *` brief matinal, `0 17 * * *` fin de journée, `0 */4 * * *` auto-amélioration, `0 16 * * 5` résumé hebdomadaire) plus deux Trigger IDs. Le prompt décrit ce que fait chaque skill mais refuse explicitement de porter les horaires (AGENT.md:186), et n'explique pas ce qu'est le second déclencheur non-cron. Rien ne dit non plus ce qui se passe si un run cron tombe pendant un incident en cours.",
       "related_steps": ["sc0", "sc1", "sc6", "sc8"]
     },
     {
-      "kind": "unwritten_branch",
+      "kind": "rule_without_capability",
       "message": "Le mode observation de la première rotation (AGENT.md:224) suppose que l'agent sait dans quelle rotation il est. Aucun ancrage, aucun fichier d'état, aucune configuration ne porte ce compteur, et `memories/STATE.md` n'est décrit que comme le cockpit de l'incident vivant.",
       "related_steps": ["w3"]
     },
     {
-      "kind": "unaddressed_conflict",
+      "kind": "contradiction",
       "message": "`fleet-sweep` autorise à poster une ligne dans le canal de journal de triage (AGENT.md:188), alors que `<signal-sources>` interdit à tout brouillon de s'auto-publier sur un canal visible du client (AGENT.md:98) et que ce même ancrage est vide. Sans la liste des rôles de canaux, rien ne permet de savoir si le canal visé par le sweep est publiable.",
       "related_steps": ["sc1", "t1c"]
     }

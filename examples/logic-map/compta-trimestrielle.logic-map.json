@@ -1136,22 +1136,22 @@
       "related_steps": ["t33", "t38", "t42"]
     },
     {
-      "kind": "undeclared_capability",
+      "kind": "rule_without_capability",
       "message": "Bash est la colonne vertébrale du pipeline (pip, bun install, 5 scripts de skill, symlinks, mkdir) et le tool `Read` est requis pour le fallback multimodal, mais `runtime_tools` ne déclare que `output`, `log`, `pin`. Le prompt mentionne aussi `api_upload` (l. 14 et 524) alors que `integrations_configuration.tools[]` ne déclare que `api_call`.",
       "related_steps": ["t2", "t24", "t27", "t32.3", "t37", "t39", "t42"]
     },
     {
-      "kind": "unreachable_input",
+      "kind": "rule_without_capability",
       "message": "L'étape 4.1bis conditionne le gap-fill CC à « un export CSV des transactions BNC fourni (déposé dans l'Inbox ou indiqué par l'utilisateur) ». Cet agent n'a ni entrée pour un chemin de fichier, ni clé de configuration vers l'Inbox compta : rien dans le manifeste ne lui donne accès à ce CSV. La branche est décrite mais non atteignable telle quelle.",
       "related_steps": ["t25", "t26"]
     },
     {
-      "kind": "ambiguous_condition",
+      "kind": "undefined_criterion",
       "message": "Le préflight 1.0 dit « ne bloquer que sur un manquant bloquant » sans jamais définir le comportement de blocage : arrêt immédiat, saut des étapes 3-6, ou simple avertissement ? L'étape 3.4 prévoit par ailleurs un simple warning quand N_cc < 3, ce qui recouvre partiellement le même cas avec une conséquence différente.",
       "related_steps": ["t8", "t9", "t20"]
     },
     {
-      "kind": "output_mismatch",
+      "kind": "declaration_mismatch",
       "message": "Le manifeste déclare `factures_stats` (7 sous-champs) et `manifest_file_id`, mais le bloc « Format strict » de l'étape 7.2 ne les liste pas, et l'étape 5.5.3 range les statistiques de factures sous `output.stats.factures`. Deux emplacements concurrents pour la même donnée, et deux champs déclarés qu'aucune consigne de sortie ne remplit.",
       "related_steps": ["t37", "t38", "t43"]
     },
@@ -1161,17 +1161,17 @@
       "related_steps": ["t35", "tg9"]
     },
     {
-      "kind": "unspecified_case",
+      "kind": "unhandled_case",
       "message": "Le mode `etape=xlsx` enchaîne 0+1+3+4+4.5+5.5+6 sans l'étape 5 : `stats.recurrents`, `stats.ponctuels` et `nouveaux_mappings` ne sont alors pas calculables, mais la règle « ne jamais inventer de chiffres » et le format d'output ne disent pas quoi mettre à la place.",
       "related_steps": ["t4", "t34", "t43", "tg12"]
     },
     {
-      "kind": "unspecified_case",
+      "kind": "unhandled_case",
       "message": "Le CSV matérialisé à l'étape 3.5 doit porter un nom de 14 chiffres pour être détecté par `generate-xlsx.py`. Rien ne dit comment le composer ni ce qu'il advient si un fichier de même nom existe déjà dans `1. Banque/`, alors que ce dossier est aussi la destination historique des CSV rangés par trimestre.",
       "related_steps": ["t22", "t23"]
     },
     {
-      "kind": "unused_capability",
+      "kind": "capability_without_rule",
       "message": "La clé de configuration `org_name` (défaut `TRACTR`) est déclarée au manifeste ; aucune règle du prompt ni des références ne dit quand l'utiliser. Aucune étape ne la référence.",
       "related_steps": []
     }
