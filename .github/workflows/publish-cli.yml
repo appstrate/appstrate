@@ -53,7 +53,22 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "22"
-          registry-url: "https://registry.npmjs.org"
+          # NO `registry-url`. It makes setup-node write
+          # `//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}` into ~/.npmrc,
+          # and npm then tries to authenticate with that value instead of
+          # falling back to OIDC. With NODE_AUTH_TOKEN unset the line resolves
+          # to an EMPTY token, which is worse than no line at all: npm sends it
+          # and the publish fails as unauthenticated rather than exchanging its
+          # OIDC id-token. registry.npmjs.org is already the default registry,
+          # so nothing is lost by dropping the input.
+
+      # Trusted publishing requires npm >= 11.5.1; Node 22 ships npm 10.x.
+      # Without this the publish fails with a confusing auth error rather
+      # than a version complaint.
+      - name: Upgrade npm for trusted publishing
+        run: |
+          npm install -g npm@latest
+          npm --version
 
       - name: Install dependencies
         run: bun install
@@ -112,9 +127,23 @@ jobs:
 
       - name: Publish to npm
         # Unscoped packages are public by default — no `--access public` needed.
+        #
+        # Authentication is OIDC trusted publishing, NOT a token. `appstrate`
+        # is an unscoped package, so it is owned by a personal account (npm
+        # only lets organizations own scoped packages), and that account runs
+        # 2FA in `auth-and-writes` mode — under which npm refuses every
+        # token-based write with `403 You may not perform that action with
+        # these credentials`. Granular and automation tokens both hit it; the
+        # package sat stuck on 1.0.0-beta.14 from 2026-05-16 for that reason.
+        # `@appstrate/core` is unaffected because it is org-owned, which is why
+        # the same NPM_TOKEN kept publishing core throughout.
+        #
+        # OIDC sidesteps 2FA by design: the identity is the workflow, not a
+        # person. It requires `id-token: write` (declared above) and a Trusted
+        # Publisher registered on npmjs.com for this package, pinned to THIS
+        # workflow filename — renaming this file breaks publishing until the
+        # npm-side configuration is updated to match.
         run: npm publish --provenance
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Post-publish smoke test (registry → bunx)
         # Belt-and-suspenders check: pull from the actual registry and
