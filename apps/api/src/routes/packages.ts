@@ -361,7 +361,19 @@ async function parsePackageUpload(
 }
 
 /** Create a version snapshot from files + manifest (non-fatal on error).
- *  All package types are zipped as-is. */
+ *  All package types are zipped as-is.
+ *
+ *  SNAPSHOT ONLY WHAT WOULD SURVIVE A PUBLISH. Both create routes call this
+ *  right after `createOrgItem`, and a version is immutable — so without the
+ *  `requireCallableTools` gate here, `POST /api/packages/agents` froze exactly
+ *  the artifact the publish route refuses. The create routes themselves must
+ *  stay ungated (they validate `direction: "author"`, and the editor's flow
+ *  legitimately passes through the empty state), which is why the gate belongs
+ *  on the snapshot rather than on the request.
+ *
+ *  Skipping is an already-supported outcome, not a new one: the missing/invalid
+ *  `version` branch below has always returned without a snapshot. The draft is
+ *  created either way and the author fixes it, then publishes. */
 async function createVersionSafe(params: {
   packageId: string;
   orgId: string;
@@ -373,6 +385,18 @@ async function createVersionSafe(params: {
   if (!version || !isValidVersion(version)) {
     logger.warn("Skipping version creation: missing or invalid version in manifest", {
       packageId: params.packageId,
+    });
+    return;
+  }
+  const gateErrors = await validateAgentIntegrationSelections({
+    manifest: params.manifest,
+    orgId: params.orgId,
+    requireCallableTools: true,
+  });
+  if (gateErrors.length > 0) {
+    logger.warn("Skipping version creation: manifest would be refused at publish", {
+      packageId: params.packageId,
+      codes: gateErrors.map((e) => e.code),
     });
     return;
   }

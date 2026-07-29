@@ -1350,6 +1350,46 @@ describe("Packages API", () => {
       expect(res.status).toBe(201);
     });
 
+    it("create does NOT freeze an initial version when the manifest would be refused at publish", async () => {
+      // The create route accepts the empty state (previous test) but then
+      // snapshots the draft into an IMMUTABLE version. Asserting only the 201
+      // is what hid this: the artifact the publish route refuses was being
+      // frozen anyway, one call earlier.
+      await seedGmailIntegration();
+      const res = await app.request("/api/packages/agents", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify(buildAgentBody({ version: "^1.0.0", tools: [] }, "no-frozen-version")),
+      });
+      expect(res.status).toBe(201);
+
+      const frozen = await db
+        .select()
+        .from(packageVersions)
+        .where(eq(packageVersions.packageId, "@pkgorg/agent-no-frozen-version"));
+      expect(frozen).toHaveLength(0);
+    });
+
+    it("create DOES freeze an initial version when the selection is callable", async () => {
+      // Positive control for the test above — without it, a snapshot that
+      // never happens for an unrelated reason would read as a passing gate.
+      await seedGmailIntegration();
+      const res = await app.request("/api/packages/agents", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify(
+          buildAgentBody({ version: "^1.0.0", tools: ["list_messages"] }, "frozen-version-ok"),
+        ),
+      });
+      expect(res.status).toBe(201);
+
+      const frozen = await db
+        .select()
+        .from(packageVersions)
+        .where(eq(packageVersions.packageId, "@pkgorg/agent-frozen-version-ok"));
+      expect(frozen).toHaveLength(1);
+    });
+
     it("draft PUT accepts a declared integration with an explicitly empty tool selection", async () => {
       await seedGmailIntegration();
       const agent = await seedAgent({
@@ -1375,6 +1415,48 @@ describe("Packages API", () => {
         }),
       });
       expect(res.status).toBe(200);
+    });
+
+    it("publish judges the tool catalog on the PINNED version, not the integration's draft", async () => {
+      // The failure this closes: the integration's author adds a tool to their
+      // draft, an agent pinned to ^1.0.0 selects it, publish passes because the
+      // subset check read the draft — and the run registers nothing, because
+      // the pinned v1.0.0 never advertised it. Judging emptiness on the pinned
+      // manifest while judging the catalog on the draft was incoherent.
+      await seedPackage({
+        id: integrationId,
+        orgId: ctx.orgId,
+        type: "integration",
+        source: "local",
+        // The DRAFT knows `archive_thread`…
+        draftManifest: gmailIntegrationManifest({
+          tools_policy: {
+            list_messages: { required_scopes: { primary: ["read"] } },
+            archive_thread: { required_scopes: { primary: ["read"] } },
+          },
+        }),
+      });
+      // …the PINNED v1.0.0 does not.
+      await seedPackageVersion({
+        packageId: integrationId,
+        version: "1.0.0",
+        manifest: gmailIntegrationManifest(),
+      });
+      await seedDraftDeclaring("@pkgorg/publish-draft-only-tool", { tools: ["archive_thread"] });
+
+      const res = await app.request(
+        "/api/packages/agents/@pkgorg/publish-draft-only-tool/versions",
+        {
+          method: "POST",
+          headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+          body: JSON.stringify({}),
+        },
+      );
+
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { errors?: { code: string; field: string }[] };
+      const codes = (body.errors ?? []).map((e) => e.code);
+      expect(codes).toContain("unknown_tool");
     });
 
     it("publish refuses a draft whose declared integration selects no tool", async () => {

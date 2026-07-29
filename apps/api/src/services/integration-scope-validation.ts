@@ -24,10 +24,11 @@
  *    catalog → the corresponding subset check is skipped (matches the
  *    Phase 0 schema semantics).
  *
- * The one check that is NOT a subset check — `requireCallableTools`, the
- * declared-but-empty gate — is opt-in per call site (a publish/import rule,
- * not a draft rule) and reads the PINNED integration manifest rather than the
- * draft the subset checks read. See {@link resolvePinnedIntegrationManifests}.
+ * `requireCallableTools` adds one more rule that is NOT a subset check — the
+ * declared-but-empty gate — and is opt-in per call site (a publish/import rule,
+ * not a draft rule). Turning it on also switches WHICH manifest every check
+ * above judges against: the PINNED version the run will resolve, instead of the
+ * integration author's live draft. See {@link resolvePinnedIntegrationManifests}.
  *
  * Only agent manifests go through this — other package types short-
  * circuit at the type check.
@@ -98,9 +99,12 @@ function selectsNoCallableTool(
  * An id absent from the returned map is NOT judged — an unsatisfiable pin
  * already fails loud upstream with `dependency_unresolved` (422).
  *
- * The SUBSET checks deliberately keep reading the draft (unchanged behaviour):
- * switching them here would turn a previously accepted publish into a 400
- * whenever a published version's catalog is narrower than the draft's.
+ * Every check in the loop judges against this manifest when it resolves, not
+ * only the emptiness gate. A publish this newly refuses — selection valid in
+ * the draft, absent from the pinned version — is a publish whose run would
+ * have registered nothing at boot; refusing it while the artifact is still
+ * editable is the whole point. Draft writes keep reading the draft: nothing is
+ * frozen there, and resolving pins on every autosave is not worth its cost.
  */
 async function resolvePinnedIntegrationManifests(
   manifest: Record<string, unknown>,
@@ -173,9 +177,19 @@ export async function validateAgentIntegrationSelections(
       // about scopes against a non-existent catalog.
       continue;
     }
-    // The PINNED manifest, not `integration.manifest` (the draft) — see
-    // `resolvePinnedIntegrationManifests`.
+    // THE manifest every check below judges against. At a freeze point that is
+    // the PINNED version — what the run will actually resolve and spawn (see
+    // `resolvePinnedIntegrationManifests`). The draft is the fallback, used
+    // when no pin resolves and on the ungated draft-write path.
+    //
+    // Judging the subset checks on the draft while judging emptiness on the
+    // pinned version was incoherent in both directions: an agent selecting a
+    // tool that exists in the author's draft but NOT in the pinned version
+    // published cleanly and then registered nothing at boot — the exact abort
+    // this validator exists to prevent — and the mirror case refused a publish
+    // that would have run fine.
     const pinnedManifest = pinnedManifests?.get(entry.id);
+    const judgedManifest = pinnedManifest ?? integration.manifest;
     if (pinnedManifest && selectsNoCallableTool(entry, pinnedManifest)) {
       errors.push({
         field: `integrations_configuration.${entry.id}.tools`,
@@ -191,7 +205,7 @@ export async function validateAgentIntegrationSelections(
     // mcp-server's MCPB tools. Fetch it best-effort — the validator falls
     // back to `integration.tools_policy` keys when undefined (mirrors the picker).
     let mcpServerTools: ReadonlyArray<{ name: string; description?: string }> | undefined;
-    const localRef = getLocalServerRef(integration.manifest);
+    const localRef = getLocalServerRef(judgedManifest);
     if (localRef) {
       const mcpServer = await fetchMcpServerManifest(localRef.name);
       if (mcpServer) {
@@ -208,7 +222,7 @@ export async function validateAgentIntegrationSelections(
     }
     const issues = validateAgentIntegrationScopes(
       { id: entry.id, tools: entry.tools, scopes: entry.scopes },
-      integration.manifest,
+      judgedManifest,
       mcpServerTools,
     );
     for (const issue of issues) {

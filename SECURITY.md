@@ -327,11 +327,11 @@ USER pi
 USER bun
 ```
 
-### Image contents — bundle only, no platform sources
+### Image contents — bundle only, no raw source tree
 
-The agent image ships a single pre-bundled `/runtime/dist/entrypoint.js`. The TypeScript sources it was built from (`runtime-pi/*.ts`, `runtime-pi/mcp/`, and the `@appstrate/*` workspace packages) exist only in the build stage and are not copied into the runtime stage, so no readable platform source is reachable from inside the sandbox.
+The agent image ships a single pre-bundled `/runtime/dist/entrypoint.js`. The TypeScript sources it was built from (`runtime-pi/*.ts`, `runtime-pi/mcp/`, and the `@appstrate/*` workspace packages) exist only in the build stage and are not copied into the runtime stage, so the raw source tree — the build inputs — is absent from the sandbox.
 
-**This is not a confidentiality boundary, and nothing here depends on it being one.** This document is public and describes the sidecar design in more detail than those comments ever did, and the minified bundle still contains the endpoint string literals (`/integrations/boot-report`, `/mcp`, `SIDECAR_URL`). Anyone auditing Appstrate can read all of it.
+**Readable platform code is still present, and this is not a confidentiality boundary.** The bundle is not minified: it keeps identifiers, string literals (`/integrations/boot-report`, `/mcp`, `SIDECAR_URL`), and a `// packages/core/src/…` banner above each inlined module, so it names the source tree it came from. Anything described as "removed" here means the raw `.ts` files and the comments in them, never the logic. This document is public and describes the sidecar design in more detail than those comments ever did — anyone auditing Appstrate can read all of it.
 
 What it changes is what an agent can read _without leaving the sandbox_. The agent container has no egress except through the sidecar, so it cannot fetch this page. Previously a confused agent that read `/runtime` could reconstruct the credential-injection design from source comments and act on that reconstruction. Removing the prose rationale is defence in depth against agent confusion and low-effort prompt injection — it removes a convenient local hint, not a secret.
 

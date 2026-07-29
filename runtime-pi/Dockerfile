@@ -79,25 +79,18 @@ COPY packages/runner-pi/src       packages/runner-pi/src
 COPY runtime-pi/mcp/              runtime-pi/mcp/
 COPY runtime-pi/*.ts              runtime-pi/
 
-# `--minify-whitespace` only. `bun build` already drops every comment by
-# default, but it still emits a `// packages/core/src/…` banner above each
-# inlined module — a readable map of the internal source tree. Whitespace
-# minification removes those banners.
-#
-# Note what this already costs, so nobody re-derives it under pressure: the
-# whole 1.28 MB bundle collapses to ~126 lines, so line/column fidelity in
-# stack traces is ALREADY gone, and no sourcemap is emitted to recover it —
-# emitting one would re-embed the very sources this stage exists to keep out
-# of the image. Function names are what survives, and they are what makes a
-# trace readable. That is the accepted trade: names yes, positions no.
-#
-# Identifier mangling (full `--minify`) is deliberately NOT enabled, because
-# it spends the one thing still left — it renames those functions, and it
-# breaks any name-dependent runtime lookup (`fn.name`, class-name dispatch).
-# It is a separate change with its own risk, not a free extension of this one.
+# NO minification. `--minify-whitespace` was tried here and reverted: it
+# collapses the whole bundle onto a couple of lines (measured: 1023 lines ->
+# 2 on a representative build), which destroys the line/column positions in
+# every production stack trace. It bought only the removal of the
+# `// packages/core/src/…` banner `bun build` emits above each inlined module.
+# Trading readable stack traces for the concealment of path strings is a bad
+# deal, and concealment was never the point of this stage — see the runtime
+# COPY below and SECURITY.md: the bundle is readable platform code either way.
+# `--minify` (identifier mangling) is worse still: it renames functions and
+# breaks name-dependent runtime lookups (`fn.name`, class-name dispatch).
 RUN bun build runtime-pi/entrypoint.ts \
         --target=bun \
-        --minify-whitespace \
         --external='@mariozechner/pi-ai' \
         --external='@mariozechner/pi-coding-agent' \
         --outfile=runtime-pi/dist/entrypoint.js
@@ -208,8 +201,8 @@ COPY --from=deps --chown=pi:pi /build/runtime-pi/node_modules             ./runt
 # anything outside the static graph `bun build` can see — will fail with
 # ERR_MODULE_NOT_FOUND in the image while working fine locally. Making it
 # work means bringing back both the `packages/<pkg>/{src,package.json}`
-# COPY and the symlink, which puts readable platform source back inside
-# the sandbox (see the comment on the entrypoint COPY below).
+# COPY and the symlink, which puts the raw platform SOURCE TREE back
+# inside the sandbox (see the comment on the entrypoint COPY below).
 
 # Pi SDK pair (@mariozechner/pi-ai, @mariozechner/pi-coding-agent) lands
 # in runtime-pi/node_modules per bun's hoisting decisions. The bundle at
@@ -233,15 +226,20 @@ RUN mkdir -p node_modules/@mariozechner \
 # architecture from the source comments — the sidecar endpoints, the
 # credential-injection design, the sentence "the agent connects
 # unauthenticated". No secrets were exposed, and this is NOT a
-# confidentiality boundary: the repo's public SECURITY.md documents
-# strictly more, and the bundle still carries the endpoint string
-# literals. It removes the prose rationale from inside the sandbox, which
-# is worth doing only because the sandbox cannot go read the public docs.
-# Defence in depth against agent confusion and low-effort injection.
+# confidentiality boundary — do not let anyone promote it into one.
+# What ships is still readable platform code: `bun build` drops comments
+# but keeps identifiers, string literals, and a `// packages/core/src/…`
+# banner above every inlined module, so the bundle names the source tree
+# it came from. The repo's public SECURITY.md documents the design in
+# more detail than any of it. What actually changes is that the PROSE
+# rationale — the comments explaining why the design is what it is — is
+# no longer sitting in the sandbox, and the sandbox has no egress to go
+# read it. Defence in depth against agent confusion and low-effort
+# injection; nothing more, and nothing should be built on top of it.
 COPY --from=deps --chown=pi:pi /build/runtime-pi/dist/entrypoint.js ./dist/entrypoint.js
 
 # Pre-warmed Bun transpiler cache (issue #835). Bun re-parses every JS file
-# >50 KB on each process start — for the ~1.3 MB bundled entrypoint plus the
+# >50 KB on each process start — for the ~1.6 MB bundled entrypoint plus the
 # external Pi SDK dist files that is a large share of the per-run cold start,
 # and on the firecracker adapter (VM-per-run, empty guest page cache) it is
 # paid on EVERY run. Baking the cache into the image turns that parse into a
