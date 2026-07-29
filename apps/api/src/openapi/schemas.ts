@@ -1509,11 +1509,16 @@ export const schemas = {
         type: "array",
         items: {
           type: "object",
-          required: ["from", "to", "condition"],
+          required: ["from", "to", "condition", "departs_from_source"],
           properties: {
             from: { type: "string" },
             to: { type: "string" },
             condition: { type: ["string", "null"] },
+            departs_from_source: {
+              type: ["string", "null"],
+              description:
+                "Why this edge does NOT follow the letter of the source. Same role as `aggregated` on a step: a map that silently repaired a wrong order would pass for faithful. Non-null edges are drawn dashed and carry the reason as their label.",
+            },
           },
         },
       },

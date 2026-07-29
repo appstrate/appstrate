@@ -4763,6 +4763,8 @@ export interface components {
                 from: string;
                 to: string;
                 condition: string | null;
+                /** @description Why this edge does NOT follow the letter of the source. Same role as `aggregated` on a step: a map that silently repaired a wrong order would pass for faithful. Non-null edges are drawn dashed and carry the reason as their label. */
+                departs_from_source: string | null;
             }[];
             /** @description Cross-check of the references the map emits against what the manifest declares. Computed WITHOUT a model and without substring matching: the producer proposes, the server verifies against facts. */
             diagnostics: components["schemas"]["AgentLogicMapDiagnostic"][];

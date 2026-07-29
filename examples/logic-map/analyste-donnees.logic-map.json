@@ -257,7 +257,12 @@
     { "from": "s3", "to": "s5", "condition": null },
     { "from": "s4", "to": "s5", "condition": null },
     { "from": "s5", "to": "s6", "condition": null },
-    { "from": "s6", "to": "s7", "condition": null },
+    {
+      "from": "s6",
+      "to": "s7",
+      "condition": null,
+      "departs_from_source": "Le texte numérote l'émission du résultat en étape 3 (l. 10) et la production des visualisations en étape 4 (l. 12), alors que l'émission consomme les visualisations. Suivi à la lettre, le graphe émettrait un champ avant de le calculer. L'ordre est rétabli ici ; le défaut de la source est relevé dans les trous."
+    },
     { "from": "s7", "to": "s8", "condition": null }
   ],
   "gaps": [

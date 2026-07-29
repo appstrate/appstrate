@@ -38,7 +38,12 @@ export interface AgentLogicMapResponse {
   map: unknown | null;
   nodes: ReturnType<typeof layoutLogicMap>["nodes"];
   groups: ReturnType<typeof layoutLogicMap>["groups"];
-  edges: { from: string; to: string; condition: string | null }[];
+  edges: {
+    from: string;
+    to: string;
+    condition: string | null;
+    departs_from_source: string | null;
+  }[];
   diagnostics: LogicMapFinding[];
   meta: {
     generated_at: string | null;
@@ -182,6 +187,7 @@ export async function buildAgentLogicMap(
       from: e.from,
       to: e.to,
       condition: e.condition ?? null,
+      departs_from_source: e.departs_from_source ?? null,
     })),
     diagnostics,
     meta: {

@@ -38,7 +38,13 @@ export interface LayoutMap {
   shape: "sequence" | "policies";
   steps: readonly LayoutStep[];
   /** `condition` n'entre pas dans le placement, mais fait partie du format et voyage avec. */
-  edges: readonly { from: string; to: string; condition?: string | null }[];
+  edges: readonly {
+    from: string;
+    to: string;
+    condition?: string | null;
+    /** Raison d'un écart délibéré à la lettre de la source. Le placement l'ignore, la route le sert. */
+    departs_from_source?: string | null;
+  }[];
   groups?: readonly LayoutGroup[];
 }
 
