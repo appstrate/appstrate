@@ -13,8 +13,9 @@ fichiers de références d'un skill, et le prompt dit lui-même qu'elles font fo
 cartographe qui ne lit que `prompt.md` cartographie une coquille.
 
 Tous les appels passent par l'outil `api_call` de l'intégration `@appstrate/platform-api`,
-qui injecte l'authentification. Remplace `{base}` par la valeur de `base_url` de sa
-configuration ; tu ne vois jamais la clé.
+qui injecte l'authentification. Tu ne vois jamais la clé, et tu ne peux appeler que les
+adresses que son manifeste autorise : `{base}` ci-dessous est l'hôte qui y est déclaré. Un
+appel ailleurs échoue en 403 avec la liste attendue — c'est un garde-fou, pas une panne.
 
 **a) Le manifeste et le prompt de l'agent** — un seul appel, le contenu arrive déjà extrait :
 

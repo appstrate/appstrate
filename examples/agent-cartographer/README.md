@@ -43,6 +43,40 @@ Pour les **fichiers de références d'un skill**, en revanche, il faut télécha
 et l'ouvrir : la route JSON ne rend que le `SKILL.md`. C'est une contrainte réelle, pas un
 détail — c'est dans ces fichiers que vivent les règles qui font foi.
 
+## Avant d'importer l'intégration : deux minutes de configuration
+
+`integration/manifest.json` est un **modèle**, pas un package prêt à l'emploi.
+
+1. **Remplacez l'hôte** dans `authorized_uris` par celui de votre instance :
+
+   ```jsonc
+   "authorized_uris": [
+     "http://localhost:3300/api/packages/**",   // au lieu de VOTRE-INSTANCE.example
+     "http://localhost:3300/api/agents/**"
+   ]
+   ```
+
+2. **Créez une clé API en lecture seule**, dédiée à cet usage. Jamais une clé
+   d'administration : elle donnerait à l'agent le droit de lancer des runs et de modifier
+   des agents, alors qu'il n'a besoin que de lire des définitions.
+
+3. Importez, connectez, et branchez la connexion sur le cartographe.
+
+### Pourquoi ce n'est pas automatique
+
+La liste d'URI autorisées est **littérale** : elle n'accepte aucune substitution, ni depuis
+la configuration de l'agent, ni depuis les credentials. C'est délibéré — sinon un agent mal
+réglé pourrait élargir lui-même ce qu'il a le droit d'appeler.
+
+La conséquence est qu'un manifeste générique, valable pour toutes les instances, devrait
+déclarer `allow_all_uris`. Le sidecar poserait alors l'en-tête d'authentification sur
+l'adresse que l'agent nomme, **quelle qu'elle soit** : un prompt détourné suffirait à
+expédier la clé ailleurs. L'agent n'aurait jamais vu le secret, mais le serveur d'en face
+le lirait dans l'en-tête.
+
+Personnaliser l'hôte supprime ce risque : la liste blanche redevient effective, et une
+mauvaise configuration se manifeste par un 403 explicite plutôt que par une porte ouverte.
+
 ## Ce que la plateforme fait, et que le skill n'a pas à refaire
 
 - **Valider le format** : `output.schema` est le JSON Schema de la carte, AJV le vérifie

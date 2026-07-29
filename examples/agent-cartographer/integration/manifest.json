@@ -4,8 +4,8 @@
   "type": "integration",
   "schema_version": "0.1",
   "display_name": "API Appstrate",
-  "description": "Donne à un agent un accès authentifié à l'API de sa propre plateforme : lire un manifeste, un prompt, les versions d'un package, télécharger le bundle d'un skill. La clé API porte les droits de son propriétaire — créez-la avec le minimum nécessaire.",
-  "long_description": "L'URL d'une instance Appstrate varie (localhost en développement, domaine propre en self-hosted, cloud), et la liste d'URI autorisées d'AFPS est littérale : elle n'accepte aucune substitution. Cette intégration déclare donc `allow_all_uris`, comme les autres intégrations à domaine variable du catalogue (WordPress, WooCommerce, ActiveCampaign). Conséquence à connaître : le sidecar injectera l'en-tête d'authentification vers l'hôte que l'agent nomme, quel qu'il soit. N'y branchez qu'une clé API à droits de lecture, et ne la donnez qu'à des agents dont vous lisez le prompt.",
+  "description": "MODÈLE À PERSONNALISER — remplacez VOTRE-INSTANCE par l'hôte de votre instance dans authorized_uris avant d'importer. Donne à un agent un accès en lecture à l'API de sa propre plateforme : manifestes, prompts, versions, archives de skills.",
+  "long_description": "La liste d'URI autorisées d'AFPS est littérale : elle n'accepte aucune substitution, ni depuis la configuration de l'agent, ni depuis les credentials de la connexion. C'est délibéré — l'utilisateur ne doit pas pouvoir élargir ce qu'une intégration a le droit d'appeler. Comme l'adresse d'une instance Appstrate varie, ce manifeste est donc un modèle : personnalisez-le, il devient une intégration qui vous appartient, et la liste blanche protège pleinement. Tant que l'hôte n'est pas remplacé, tout appel échoue en 403 avec la liste attendue dans le message — une erreur bruyante plutôt qu'une permission trop large et silencieuse.",
   "keywords": ["appstrate", "plateforme", "introspection", "packages"],
   "license": "Apache-2.0",
   "icon": "simple-icons:zapier",
@@ -16,22 +16,20 @@
   "auths": {
     "primary": {
       "type": "api_key",
-      "allow_all_uris": true,
-      "authorized_uris": [],
+      "authorized_uris": [
+        "https://VOTRE-INSTANCE.example/api/packages/**",
+        "https://VOTRE-INSTANCE.example/api/agents/**"
+      ],
       "credentials": {
         "schema": {
           "type": "object",
           "properties": {
             "api_key": {
               "type": "string",
-              "description": "Clé API Appstrate (préfixe ask_). Elle porte les droits de son propriétaire : la lecture des packages suffit pour cartographier."
-            },
-            "base_url": {
-              "type": "string",
-              "description": "URL de l'instance, sans barre oblique finale — par exemple http://localhost:3300. L'agent la substitue lui-même dans ses appels."
+              "description": "Clé API Appstrate (préfixe ask_) en LECTURE SEULE. La lecture des packages suffit pour cartographier ; n'y mettez jamais une clé d'administration."
             }
           },
-          "required": ["api_key", "base_url"]
+          "required": ["api_key"]
         }
       },
       "delivery": {
