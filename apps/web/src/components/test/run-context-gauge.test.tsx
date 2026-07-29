@@ -16,7 +16,7 @@ import agentsFr from "../../locales/fr/agents.json";
 import i18n, { i18nReady } from "../../i18n.ts";
 import type { RunTurnRow } from "../log-utils.ts";
 import { formatWindowPercent } from "../run-context.ts";
-import { ContextGaugeReadout } from "../run-context-gauge.tsx";
+import { ContextGaugeReadout, ContextGaugePeakHint } from "../run-context-gauge.tsx";
 
 await i18nReady;
 await i18n.changeLanguage("fr");
@@ -65,6 +65,56 @@ function classesOf(html: string, pattern: RegExp): string[] {
   return (pattern.exec(html)?.[1] ?? "").split(/\s+/).filter(Boolean);
 }
 
+/**
+ * Undo React's SSR escaping — it emits `&#x27;` for the apostrophe in
+ * `l'exécution`, so a raw HTML comparison against the locale string fails on
+ * French copy that is perfectly correct. React escapes exactly these five
+ * characters, so this is a complete inverse, not a best-effort one.
+ */
+function decodeEntities(s: string): string {
+  return s
+    .replace(/&#x27;/g, "'")
+    .replace(/&quot;/g, '"')
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&amp;/g, "&");
+}
+
+/**
+ * Everything a sighted user reads off the pill, tags stripped.
+ *
+ * The gauge used to prefix itself with a `ctx` / `pic ctx` word; it no longer
+ * does, and asserting the WHOLE visible string is what pins that down — a
+ * `not.toContain("ctx")` would be satisfied by a render that grew some other
+ * label, and would also break on any future copy that happens to contain those
+ * three letters.
+ */
+function visibleText(html: string): string {
+  return decodeEntities(html.replace(/<[^>]*>/g, ""));
+}
+
+/** The progressbar's `aria-valuetext` — the only carrier of the exact counts. */
+function valueTextOf(html: string): string {
+  return decodeEntities(/aria-valuetext="([^"]*)"/.exec(html)?.[1] ?? "");
+}
+
+/**
+ * The value text the component SHOULD emit for a given reading, rendered
+ * through the same i18n singleton the component uses.
+ *
+ * Not a re-implementation of the component: what is under test is WHICH of the
+ * two keys a state picks, and the two strings differ, so asserting equality
+ * with one and inequality with the other fails the moment the states are
+ * swapped. Interpolating by hand here would instead hardcode the copy.
+ */
+function expectedValueText(key: string, used: number): string {
+  return i18n.t(key, {
+    ns: "agents",
+    used: used.toLocaleString(i18n.language),
+    window: WINDOW.toLocaleString(i18n.language),
+  });
+}
+
 describe("ContextGaugeReadout — active run", () => {
   const html = render(<ContextGaugeReadout turns={TURNS} status="running" />);
 
@@ -73,11 +123,22 @@ describe("ContextGaugeReadout — active run", () => {
     expect(html).not.toContain("187k");
   });
 
-  it("labels it `ctx` and appends the share of the window", () => {
-    expect(html).toContain(agentsFr["run.contextGaugeLabel"]);
-    expect(html).not.toContain(agentsFr["run.contextGaugePeakLabel"]);
+  it("carries no text label — the bar, the counts and the share are the whole readout", () => {
     // Derived, never hardcoded: `Intl` spacing before `%` is locale/ICU bound.
-    expect(html).toContain(formatWindowPercent(0.64, i18n.language));
+    expect(visibleText(html)).toBe(`128k / 200k· ${formatWindowPercent(0.64, i18n.language)}`);
+  });
+
+  it("names the reading as the CURRENT context in the accessible value", () => {
+    // The visible `ctx` prefix is gone, so this is the assistive-tech carrier of
+    // the distinction and it must not silently become the peak wording.
+    expect(valueTextOf(html)).toBe(expectedValueText("run.contextGaugeValueText", 128_000));
+    expect(valueTextOf(html)).not.toBe(expectedValueText("run.contextGaugePeakValueText", 128_000));
+  });
+
+  it("adds no tooltip: a live reading is the unsurprising one", () => {
+    // The only focusable thing this component ever renders is the peak tooltip's
+    // trigger, so its absence is the assertion.
+    expect(html).not.toContain("tabindex");
   });
 
   it("exposes the bar as a progressbar carrying the same numbers as the text", () => {
@@ -162,11 +223,35 @@ describe("ContextGaugeReadout — 375px header budget", () => {
 describe("ContextGaugeReadout — terminal run", () => {
   const html = render(<ContextGaugeReadout turns={TURNS} status="success" />);
 
-  it("switches to the PEAK reading, labelled `pic ctx`", () => {
-    expect(html).toContain(agentsFr["run.contextGaugePeakLabel"]);
+  it("switches to the PEAK reading", () => {
     expect(html).toContain("187k / 200k");
     expect(html).not.toContain("128k");
     expect(html).toContain('aria-valuenow="187000"');
+  });
+
+  it("names it as the PEAK in the accessible value, not the current context", () => {
+    expect(valueTextOf(html)).toBe(expectedValueText("run.contextGaugePeakValueText", 187_000));
+    expect(valueTextOf(html)).not.toBe(expectedValueText("run.contextGaugeValueText", 187_000));
+  });
+
+  it("gives sighted users the same fact through a keyboard-reachable tooltip", () => {
+    // `title=` would be invisible to touch and to screen readers; the house
+    // pattern (`run-tokens-readout.tsx`) is a Radix tooltip on a `tabIndex={0}`
+    // trigger, and the trigger is what makes the peak wording reachable at all.
+    expect(html).toContain('tabindex="0"');
+    const trigger = /<span tabindex="0" class="([^"]*)"/.exec(html)?.[1] ?? "";
+    expect(trigger.split(/\s+/)).toContain("decoration-dotted");
+
+    // Radix keeps the content unmounted until opened and this runner has no DOM,
+    // so the wording is asserted on the exported content subcomponent — the same
+    // affordance `run-row.test.tsx` uses for `RunRowDetails`.
+    expect(visibleText(render(<ContextGaugePeakHint />))).toBe(
+      agentsFr["run.contextGaugePeakHint"],
+    );
+  });
+
+  it("carries no text label either — the tooltip replaced the `pic ctx` prefix", () => {
+    expect(visibleText(html)).toBe("187k / 200k");
   });
 
   it("drops the percentage — a peak share is a diagnostic, the counts carry it", () => {
@@ -211,9 +296,9 @@ describe("ContextGaugeReadout — nothing to render", () => {
   // on a run whose context is simply unknown.
   //
   // `toBe("")` is the whole assertion, and deliberately so: it SUBSUMES every
-  // "no progressbar / no width:0% / no `ctx` label" check, so listing those
-  // beside it adds assertions that cannot fail independently — coverage in
-  // appearance only. The contract under test is literally "emits nothing"; a
+  // "no progressbar / no width:0% / no counts" check, so listing those beside
+  // it adds assertions that cannot fail independently — coverage in appearance
+  // only. The contract under test is literally "emits nothing"; a
   // weaker set of checks would let a non-empty-but-gauge-less render pass, and
   // that is not the contract `ContextGaugeReadout` documents (it returns `null`).
   function assertNoGauge(html: string) {

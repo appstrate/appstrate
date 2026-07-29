@@ -1,6 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useTranslation } from "react-i18next";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@appstrate/ui/components/tooltip";
 import { ACTIVE_RUN_STATUSES } from "@appstrate/shared-types";
 import type { RunTurnRow } from "./log-utils";
 import { formatCompactTokens, formatWindowPercent, readRunContext } from "./run-context";
@@ -28,16 +34,47 @@ interface ContextGaugeReadoutProps {
  *
  * Two readings of the same series, because the useful question changes when the
  * run stops (#1046):
- *   - active   → `ctx  ▓▓▓▓░░  128k / 200k · 64 %` — the CURRENT context, i.e.
- *                how much headroom is left before auto-compaction.
- *   - terminal → `pic ctx  ▓▓▓▓▓░  187k / 200k`   — the PEAK, i.e. the
- *                post-mortem "did this run come close to compaction".
+ *   - active   → `▓▓▓▓░░  128k / 200k · 64 %` — the CURRENT context, i.e. how
+ *                much headroom is left before auto-compaction.
+ *   - terminal → `▓▓▓▓▓░  187k / 200k`        — the PEAK, i.e. the post-mortem
+ *                "did this run come close to compaction".
  *
  * The bar is kept in the terminal form even though the issue's sketch shows
  * text only: "how close to full did it get" is the post-mortem reading, and a
  * fill answers it at a glance where two numbers have to be divided. The
  * percentage is dropped there, per that sketch — a peak share is a diagnostic,
  * and the two absolute figures beside it already carry it.
+ *
+ * WHICH READING, AND HOW IT IS SIGNALLED — the two diverge exactly when the
+ * runner compacted: a run that peaked at 187k and ended at 40k prints `187k`,
+ * which is a high-water mark and not a stopping point. That distinction used to
+ * ride a permanent `ctx` / `pic ctx` text prefix. It no longer does: a label on
+ * every render is a heavy way to carry a fact that only surprises in one of the
+ * two states, and the bar plus `128k / 200k` is otherwise self-describing.
+ * It is carried instead by
+ *   - `aria-valuetext`, which NAMES the reading on both states. It is the AT
+ *     path and it costs no pixels, so there is no reason to make it selective.
+ *   - a tooltip, on the TERMINAL state only.
+ *
+ * Two judgement calls behind that tooltip, both deliberate:
+ *
+ *  1. It wraps the COUNTS, not the whole pill. The counts are the ambiguous
+ *     part; the bar already carries its own accessible name and `aria-valuetext`
+ *     and would become a focus stop nested inside an interactive trigger if the
+ *     pill were the trigger. It is also the shape `RunTokensReadout` uses one
+ *     element over — same dotted-underline trigger, same `tabIndex={0}`, so the
+ *     two readouts in this header teach the reader one affordance, not two.
+ *     `title=` is deliberately NOT used: it is invisible to touch and to screen
+ *     readers, which is the whole failure this replaces.
+ *
+ *  2. The ACTIVE state gets no tooltip. Its reading is the unsurprising one —
+ *     a running run has no "final" figure a live number could be mistaken for,
+ *     the bar is visibly moving, and the percentage that only the active state
+ *     renders already anchors the number as a share of the window RIGHT NOW.
+ *     A tooltip there would restate the screen, and an affordance that says
+ *     nothing trains people to ignore the one that does. The terminal state is
+ *     precisely the one that drops the percentage, i.e. the one with the least
+ *     on-screen context and the only misreadable number.
  *
  * LIVE CADENCE — `contextTokens` only exists at turn boundaries: the runner
  * emits one breadcrumb per settled assistant turn, and the per-run SSE stream
@@ -83,14 +120,24 @@ export function ContextGaugeReadout({ turns, status }: ContextGaugeReadoutProps)
   // `aria-valuetext` and the visible text carry, unclamped, exactly as
   // `readRunContext` leaves it (a window recorded at launch can legitimately
   // disagree with what the provider later billed).
-  const ariaValueText = t("run.contextGaugeValueText", {
-    used: value.toLocaleString(i18n.language),
-    window: reading.window.toLocaleString(i18n.language),
-  });
+  //
+  // It also NAMES the reading (current vs peak), which the removed text prefix
+  // used to do for everyone: `aria-valuetext` REPLACES the raw number in every
+  // AT announcement, so naming it there costs nothing and keeps the distinction
+  // on the assistive path in both states — including the active one, which
+  // renders no tooltip.
+  const ariaValueText = t(
+    isActive ? "run.contextGaugeValueText" : "run.contextGaugePeakValueText",
+    {
+      used: value.toLocaleString(i18n.language),
+      window: reading.window.toLocaleString(i18n.language),
+    },
+  );
+
+  const counts = `${formatCompactTokens(value)} / ${formatCompactTokens(reading.window)}`;
 
   return (
     <div className="text-muted-foreground bg-muted/50 flex shrink-0 items-center gap-1.5 rounded-md px-2.5 py-1 text-xs tabular-nums">
-      <span>{isActive ? t("run.contextGaugeLabel") : t("run.contextGaugePeakLabel")}</span>
       {/* The bar carries no meaning the text does not: the counts (and, while
           active, the percentage) sit beside it, and the ARIA values restate the
           same numbers for a reader that skips the decoration. */}
@@ -109,12 +156,45 @@ export function ContextGaugeReadout({ turns, status }: ContextGaugeReadoutProps)
           style={{ width: `${fraction * 100}%` }}
         />
       </span>
-      <span className="text-foreground font-medium">
-        {formatCompactTokens(value)} / {formatCompactTokens(reading.window)}
-      </span>
+      {isActive ? (
+        <span className="text-foreground font-medium">{counts}</span>
+      ) : (
+        <TooltipProvider delayDuration={300}>
+          <Tooltip>
+            {/* Focusable trigger: the counts are otherwise plain text, so
+                keyboard and touch users would have no way to reach the one
+                thing the removed label used to state. */}
+            <TooltipTrigger asChild>
+              <span
+                tabIndex={0}
+                className="text-foreground cursor-default font-medium underline decoration-dotted"
+              >
+                {counts}
+              </span>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" className="max-w-xs">
+              <ContextGaugePeakHint />
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      )}
       {isActive && (
         <span className="hidden sm:inline">· {formatWindowPercent(fraction, i18n.language)}</span>
       )}
     </div>
   );
+}
+
+/**
+ * What the terminal gauge's tooltip says: that the figure is a maximum, and why
+ * it can sit far above where the run actually ended.
+ *
+ * Exported as a testing affordance, exactly as `RunRowDetails` is: Radix keeps
+ * tooltip content unmounted until it is opened, and the web test runner has no
+ * DOM to open it with — so this is the only way to assert the sighted-user
+ * carrier of the current/peak distinction without adding a browser harness.
+ */
+export function ContextGaugePeakHint() {
+  const { t } = useTranslation("agents");
+  return <span className="block text-xs">{t("run.contextGaugePeakHint")}</span>;
 }
