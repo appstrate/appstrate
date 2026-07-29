@@ -125,8 +125,7 @@ describe("GET /runtime-events", () => {
   it("rejects a non-loopback Host when no alias is set (fail-closed)", async () => {
     // Process orchestrator / Firecracker guest: the agent reaches the sidecar
     // over loopback, no DNS alias is published, and SIDECAR_DNS_ALIAS is unset.
-    // Anything other than localhost/127.0.0.1 must be refused (the literal
-    // `sidecar` excepted — transitional shim, pinned below).
+    // Anything other than localhost/127.0.0.1 must be refused.
     const app = createApp(makeDeps({ runtimeEventJournal: new RuntimeEventJournal() }));
     const res = await withAlias(undefined, () =>
       app.request("/runtime-events?after=0", { headers: { Host: "attacker.example.com" } }),
@@ -137,17 +136,5 @@ describe("GET /runtime-events", () => {
       app.request("/runtime-events?after=0", { headers: { Host: "127.0.0.1:51123" } }),
     );
     expect(loopback.status).toBe(200);
-  });
-
-  it("SHIM (delete with LEGACY_SIDECAR_HOSTNAME): still accepts the literal `sidecar`", async () => {
-    // Not the contract — the same transitional shim `/mcp` carries, pinned
-    // here too because the drainer hits `/runtime-events` on every tool
-    // boundary and would 403 in lockstep. See `LEGACY_SIDECAR_HOSTNAME` in
-    // `mcp.ts` for why it re-opens nothing and when to delete it.
-    const app = createApp(makeDeps({ runtimeEventJournal: new RuntimeEventJournal() }));
-    const res = await withAlias(undefined, () =>
-      app.request("/runtime-events?after=0", { headers: { Host: "sidecar" } }),
-    );
-    expect(res.status).toBe(200);
   });
 });

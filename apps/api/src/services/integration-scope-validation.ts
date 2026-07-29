@@ -25,11 +25,9 @@
  *    Phase 0 schema semantics).
  *
  * The one check that is NOT a subset check — `requireCallableTools`, the
- * declared-but-empty gate — is opt-in per call site, because it is a
- * publish/import rule and NOT a draft rule. See
- * {@link ValidateAgentIntegrationSelectionsInput.requireCallableTools}.
- * It also reads a DIFFERENT manifest from the subset checks — the PINNED
- * one, not the draft. See {@link resolvePinnedIntegrationManifests}.
+ * declared-but-empty gate — is opt-in per call site (a publish/import rule,
+ * not a draft rule) and reads the PINNED integration manifest rather than the
+ * draft the subset checks read. See {@link resolvePinnedIntegrationManifests}.
  *
  * Only agent manifests go through this — other package types short-
  * circuit at the type check.
@@ -59,36 +57,22 @@ export interface ValidateAgentIntegrationSelectionsInput {
   orgId: string;
   /**
    * Also refuse a DECLARED integration whose effective tool selection is
-   * empty (AFPS §4.4: `tools` absent AND no inherited `default_tools`, or an
-   * explicit `[]`). Such an integration boots with nothing callable, which
-   * `assertIntegrationExposesTools` (`runtime-pi/sidecar/integrations-boot.ts`)
-   * turns into a failed run — so the artifact is already broken the moment it
-   * is frozen.
+   * empty (AFPS §4.4) — the state `assertIntegrationExposesTools` turns into
+   * a failed run.
    *
    * OFF by default, and that default is load-bearing: the agent editor's own
-   * flow passes THROUGH the empty state (add the dependency, then tick a
-   * tool), and it autosaves the draft in between. Gating draft writes would
-   * make the editor unusable. Turn it on only where an artifact becomes
-   * final — publishing a version, and ZIP/GitHub import + `.afps-bundle`
-   * import (both of which cut a version via `postInstallPackage`).
-   *
-   * Costs one extra version-resolution pass per call
-   * ({@link resolvePinnedIntegrationManifests}) — this check reads the PINNED
-   * integration manifest, not the draft the subset checks read.
+   * flow passes THROUGH the empty state (add the dependency, then tick a tool)
+   * and autosaves in between. Turn it on only where an artifact becomes final
+   * — publishing a version, and ZIP/GitHub/`.afps-bundle` import.
    */
   requireCallableTools?: boolean;
 }
 
 /**
  * True when the agent would end up with no callable tool from this
- * integration — the state the runtime boot gate refuses.
- *
- * Reads through {@link resolveEffectiveToolSelection}, the SAME resolver the
- * spawn resolver uses to build `toolAllowlist`, so "empty" means here exactly
- * what it will mean at boot: an absent selection inherits the integration's
- * declared `default_tools`, and only a genuinely empty result (or an explicit
- * `[]`, which overrides the default) counts. The wildcard `"*"` is never
- * empty — it is the opposite selection.
+ * integration. Reads through {@link resolveEffectiveToolSelection}, the SAME
+ * resolver that builds `toolAllowlist`, so "empty" means here exactly what it
+ * will mean at boot.
  */
 function selectsNoCallableTool(
   entry: ManifestIntegrationEntry,
@@ -103,43 +87,28 @@ function selectsNoCallableTool(
  * Resolve, for every integration the agent declares, the manifest AT the
  * version its `dependencies.integrations.<id>` pin will resolve to on a run.
  *
- * WHY NOT THE DRAFT. `getIntegration` reads `packages.draft_manifest`, but a run
- * never does: `resolveRunIntegrationVersions` freezes each pin onto
- * `runs.resolved_integration_versions` and the spawn resolver reads THAT
- * version's manifest. Judging "selects no callable tool" from the integration
- * author's live draft therefore refuses publishes the runtime would run
- * perfectly — an agent pinned to `@x/int: "^1.0.0"` whose v1 declares
- * `default_tools: ["api_call"]` stays callable after that author drops
- * `default_tools` from their current draft. The declared-but-empty gate is a
- * hard 400, so it must read exactly what boot will read; a false rejection
- * blocks a legitimate publish, which is strictly worse than missing a case the
- * boot gate (`assertIntegrationExposesTools`) still catches.
+ * WHY NOT THE DRAFT. `getIntegration` reads `packages.draft_manifest`, but a
+ * run never does: `resolveRunIntegrationVersions` freezes each pin and the
+ * spawn resolver reads THAT version's manifest. Judging from the integration
+ * author's live draft would refuse publishes the runtime would run perfectly —
+ * an agent pinned to `^1.0.0` stays callable after that author drops
+ * `default_tools` from their current draft. This calls THE run's own resolver,
+ * so the two cannot drift.
  *
- * This calls THE run's own resolver, so the two cannot drift.
- *
- * The returned map holds only the ids whose pin resolved to a concrete
- * published/system manifest. An id is absent when:
- *   - the pin is unsatisfiable / the package was never published — the run
- *     fails loud upstream with `dependency_unresolved` (422) and never boots,
- *     so this gate has no business raising a `no_tools_selected` on it; or
- *   - the package is missing / the wrong type / has an unparseable manifest —
- *     in which case `getIntegration` returns null at the call site too and the
- *     whole entry is skipped anyway.
- * Absent ⇒ NOT judged. That asymmetry is the no-false-rejection guarantee.
+ * An id absent from the returned map is NOT judged — an unsatisfiable pin
+ * already fails loud upstream with `dependency_unresolved` (422).
  *
  * The SUBSET checks deliberately keep reading the draft (unchanged behaviour):
- * they pre-date this gate and switching them here would turn a previously
- * accepted publish into a 400 whenever a published version's catalog is
- * narrower than the draft's. That drift is real but out of scope for this fix.
+ * switching them here would turn a previously accepted publish into a 400
+ * whenever a published version's catalog is narrower than the draft's.
  */
 async function resolvePinnedIntegrationManifests(
   manifest: Record<string, unknown>,
   orgId: string,
 ): Promise<Map<string, IntegrationManifest>> {
   const cache: IntegrationManifestCache = new Map();
-  // The `ok` flag reports unsatisfiable pins; irrelevant here — every id that
-  // DID resolve is seeded into the cache either way, and an unsatisfiable pin
-  // is not this gate's error to raise (see above).
+  // Return value ignored: every id that DID resolve is seeded into the cache
+  // either way.
   await resolveRunIntegrationVersions({ agentManifest: manifest, orgId, manifestCache: cache });
   const resolved = new Map<string, IntegrationManifest>();
   for (const [id, pending] of cache) {
@@ -183,15 +152,11 @@ export async function validateAgentIntegrationSelections(
   );
 
   // The declared-but-empty gate is precisely about the entries the subset
-  // filter above DROPS, so it needs the full declared list. Without it the
-  // lookup set stays what it always was — one DB read per configured entry,
-  // none for an unconfigured one.
+  // filter above DROPS, so it needs the full declared list.
   const inspected = requireCallableTools ? integrations : configuredEntries;
   if (inspected.length === 0) return [];
   const configuredIds = new Set(configuredEntries.map((e) => e.id));
 
-  // One extra resolution pass, and ONLY on the publish/import call sites —
-  // draft writes (the autosave hot path) pay nothing for it.
   const pinnedManifests = requireCallableTools
     ? await resolvePinnedIntegrationManifests(manifest, orgId)
     : undefined;
@@ -208,9 +173,8 @@ export async function validateAgentIntegrationSelections(
       // about scopes against a non-existent catalog.
       continue;
     }
-    // Judged against the PINNED manifest, not `integration.manifest` (the
-    // draft) — see `resolvePinnedIntegrationManifests`. An unresolved pin
-    // leaves the entry unjudged rather than rejected.
+    // The PINNED manifest, not `integration.manifest` (the draft) — see
+    // `resolvePinnedIntegrationManifests`.
     const pinnedManifest = pinnedManifests?.get(entry.id);
     if (pinnedManifest && selectsNoCallableTool(entry, pinnedManifest)) {
       errors.push({
@@ -219,12 +183,8 @@ export async function validateAgentIntegrationSelections(
         title: "Integration exposes no tool",
         message: `Integration ${entry.id} is declared but selects no tool, so it would expose nothing callable and the run would abort at boot. Select at least one tool in integrations_configuration.${entry.id}.tools, or remove ${entry.id} from dependencies.integrations.`,
       });
-      // Deliberately NO `continue`: an empty tool selection does not imply an
-      // empty ENTRY. `{ tools: [], scopes: ["bogus"] }` reaches
-      // `configuredEntries` on `scopes.length > 0` alone, and its scope is
-      // still checkable against the catalog. Short-circuiting here reported
-      // one error per publish attempt — the author fixed `tools`, republished,
-      // and only then learned about `scopes`. Report both in one pass.
+      // Deliberately NO `continue`: `{ tools: [], scopes: ["bogus"] }` still
+      // has a checkable scope, and both errors must land in one pass.
     }
     if (!configuredIds.has(entry.id)) continue;
     // For local-source integrations the catalog comes from the referenced

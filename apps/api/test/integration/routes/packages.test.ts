@@ -1105,14 +1105,9 @@ describe("Packages API", () => {
     }
 
     /**
-     * Seed the test integration as a DRAFT **and** as published `1.0.0`.
-     *
-     * The published row is load-bearing, not decoration: the declared-but-empty
-     * gate resolves `dependencies.integrations[id]` through the run's own
-     * version resolver and judges the PINNED manifest, so an integration that
-     * exists only as a draft is never judged (a `^1.0.0` pin against a
-     * never-published package is `dependency_unresolved` at run kickoff, not a
-     * tool-selection problem). Seeding both mirrors the runtime shape.
+     * Seed the test integration as a DRAFT **and** as published `1.0.0`. The
+     * published row is load-bearing: the gate judges the PINNED manifest, so a
+     * draft-only integration is never judged at all.
      */
     async function seedGmailIntegration(opts: { draftManifest?: Record<string, unknown> } = {}) {
       await seedPackage({
@@ -1467,13 +1462,10 @@ describe("Packages API", () => {
     });
 
     it("publish judges the PINNED integration manifest, not the integration author's draft", async () => {
-      // The regression this guards: the gate used to read
-      // `packages.draft_manifest`, but a run resolves the pin and boots the
-      // PUBLISHED manifest. Here v1.0.0 declares `default_tools: ["api_call"]`
-      // — so the agent's absent selection inherits a callable tool and the run
-      // works — while the integration author's CURRENT draft has dropped
-      // `default_tools`. Judging the draft 400s a publish the runtime would run
-      // perfectly.
+      // v1.0.0 declares `default_tools: ["api_call"]`, so the agent's absent
+      // selection inherits a callable tool and the run works — while the
+      // integration author's CURRENT draft has dropped `default_tools`.
+      // Judging the draft would 400 a publish the runtime runs perfectly.
       const draftWithoutDefaults = defaultsIntegrationManifest();
       delete draftWithoutDefaults.default_tools;
       await seedDefaultsIntegration({
@@ -1512,9 +1504,7 @@ describe("Packages API", () => {
 
     it("publish reports the empty selection AND the bad scope in one pass", async () => {
       // `{ tools: [], scopes: ["bogus"] }` reaches the configured-entry filter
-      // on `scopes.length > 0` alone, so both checks apply. Short-circuiting
-      // after `no_tools_selected` made the author fix `tools`, republish, and
-      // only then discover `scopes` — two round-trips for one broken entry.
+      // on `scopes.length > 0` alone, so both checks apply.
       await seedGmailIntegration();
       await seedPackage({
         id: "@pkgorg/publish-empty-and-bad-scope",

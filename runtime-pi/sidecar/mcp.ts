@@ -67,7 +67,6 @@ import {
 } from "@appstrate/runner-pi/runtime-tools";
 import {
   ABSOLUTE_MAX_RESPONSE_SIZE,
-  LEGACY_SIDECAR_HOSTNAME,
   MAX_MCP_ENVELOPE_SIZE,
   MAX_REQUEST_BODY_SIZE,
   MAX_RESPONSE_SIZE,
@@ -144,26 +143,9 @@ const MAX_MCP_REQUEST_BODY_SIZE = MAX_MCP_ENVELOPE_SIZE;
  * (used by `appstrate run` and tests) and the Firecracker guest expose it
  * under `localhost`/`127.0.0.1` on a *dynamic* port. The Docker bridge
  * publishes it under a **per-run** DNS alias on port 8080, handed to the
- * sidecar as `SIDECAR_DNS_ALIAS` at launch — it replaced the historical
- * constant `sidecar`, which every run shared and which a prompt-injection
- * payload could therefore hard-code.
- *
- * TRANSITIONAL COMPATIBILITY SHIM (site 1 of 2) — delete in `v1.0.0-beta.48`
- * together with {@link LEGACY_SIDECAR_HOSTNAME} and its sibling in
- * `integration-runtime-adapter-docker.ts`. The constant's doc comment carries
- * the lifecycle; what matters here is what accepting it means at THIS gate.
- * An OLD platform hands the agent `http://sidecar:8080` and sets no
- * `SIDECAR_DNS_ALIAS`, so every `/mcp` and `/runtime-events` request arrives
- * with `Host: sidecar`, which this gate would otherwise fail closed on —
- * surfacing as a 30 s "MCP connect deadline exceeded" with no platform-side
- * evidence. Accepting it re-opens nothing: this allowlist only ever judges
- * requests that have ALREADY resolved a name and connected — a Host header
- * is a label on an established connection, not a way to establish one. Under
- * the new platform nothing on the run bridge answers to `sidecar` (the sole
- * network alias is the per-run one and the container is named
- * `appstrate-sidecar-<runId>`), so Docker's embedded DNS has no `sidecar`
- * record to hand out and such a request cannot arrive unless an old platform
- * put that alias there — exactly the case being tolerated.
+ * sidecar as `SIDECAR_DNS_ALIAS` at launch — it replaced the constant
+ * `sidecar`, which every run shared and a prompt-injection payload could
+ * therefore hard-code.
  *
  * The MCP SDK's built-in `allowedHosts` does an exact-match check
  * including port, which fails the dynamic-port case (Host header
@@ -179,7 +161,6 @@ const MAX_MCP_REQUEST_BODY_SIZE = MAX_MCP_ENVELOPE_SIZE;
  */
 function isAllowedSidecarHostname(hostname: string): boolean {
   if (hostname === "127.0.0.1" || hostname === "localhost") return true;
-  if (hostname === LEGACY_SIDECAR_HOSTNAME) return true;
   const alias = process.env.SIDECAR_DNS_ALIAS;
   return alias !== undefined && alias !== "" && hostname === alias;
 }

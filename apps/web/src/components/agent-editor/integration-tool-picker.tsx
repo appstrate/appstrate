@@ -15,13 +15,10 @@
  * grain. The first toggle promotes the inherited default to an explicit
  * array so subsequent renders see the written form.
  *
- * "Select none" stays: clearing the grid before re-picking is a normal
- * editing move, and the draft it produces saves fine. What it cannot be
- * is the state you SHIP — a declared integration with an empty effective
- * selection exposes nothing callable, so publishing (and importing) is
- * refused server-side with `no_tools_selected`, and a run of such a draft
- * aborts at sidecar boot. `tools.noneNotice` says so in the panel rather
- * than letting the author discover it at publish time.
+ * "Select none" stays — clearing the grid before re-picking is a normal
+ * editing move and the draft saves fine — but it cannot be the state you
+ * SHIP: publish/import refuse it with `no_tools_selected` and a run aborts
+ * at sidecar boot. `tools.noneNotice` says so in the panel.
  *
  * The picker writes back through `onChange` (handed in by
  * `ResourceSection`); the resulting `ResourceEntry` is split into the
@@ -182,13 +179,11 @@ export function IntegrationToolPicker({ packageId, entry, onChange }: Integratio
     declaredToolNames.length > 0 && declaredToolNames.every((name) => selectedTools.has(name));
   // Disabled-state for the "Select none" button, which clears the NATIVE slice
   // only (`replaceNativeToolSelection` preserves visible synthetic api_call
-  // selections) — so it is spent exactly when no native tool is ticked.
+  // selections).
   const noneSelected = declaredToolNames.every((name) => !selectedTools.has(name));
-  // The state the server refuses at publish/import and the sidecar refuses at
-  // boot: nothing callable AT ALL. Mirrors `selectsNoCallableTool` on the API
-  // side — the whole effective selection, api_call rows included, not just the
-  // native slice. An api_call-only integration with its row unticked lands
-  // here even though there is no native catalog to speak of.
+  // Nothing callable AT ALL — mirrors `selectsNoCallableTool` on the API side:
+  // the whole effective selection, api_call rows included, not just the native
+  // slice.
   const selectsNothing = !wildcardSelected && arrayTools.length === 0;
 
   // Inferred OAuth scopes — exactly what Phase 2 `computeRequiredScopes`
@@ -358,10 +353,8 @@ export function IntegrationToolPicker({ packageId, entry, onChange }: Integratio
       className="bg-muted/30 mt-2 space-y-3 rounded-md border p-3"
       onClick={(e) => e.stopPropagation()}
     >
-      {/* Empty effective selection — the draft still saves, but it cannot be
-          published and a run of it aborts at boot. Say so here rather than let
-          the author find out at publish time. Sits above the pickers because it
-          applies to the whole integration, not to the native slice alone. */}
+      {/* Sits above the pickers because it applies to the whole integration,
+          not to the native slice alone. */}
       {selectsNothing && (
         <p
           className="text-[11px] text-amber-600 dark:text-amber-500"

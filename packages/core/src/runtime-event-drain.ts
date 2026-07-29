@@ -37,13 +37,10 @@ export interface RuntimeEventDrainerOptions {
    * Absolute URL of the sidecar `GET /runtime-events` endpoint.
    *
    * There is deliberately no `headers` option. The only header a caller ever
-   * wanted to set here was `Host`, and setting it is always wrong: the
-   * sidecar's hostname is per-run (a random DNS alias under Docker,
-   * `localhost:<port>` under the process orchestrator), so this URL is the
-   * only thing that knows it. `fetch` derives the right `Host` from the URL;
-   * Bun honours an explicit one over the derived value, so a literal would
-   * 403 against the sidecar's DNS-rebinding guard on every drain. Rather than
-   * warn about that in prose, the option does not exist.
+   * set here was `Host`, and a literal is always wrong: the sidecar's hostname
+   * is per-run, so this URL is the only thing that knows it. Bun honours an
+   * explicit `Host` over the URL-derived one, which would 403 against the
+   * sidecar's DNS-rebinding guard on every drain.
    */
   url: string;
   /** Injected logger; defaults to a no-op (the drainer is silent in tests). */

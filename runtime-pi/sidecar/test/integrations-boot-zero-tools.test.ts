@@ -4,12 +4,11 @@
  * Boot-contract coverage: a DECLARED integration that ends boot with zero
  * callable tools must fail the run, not warn.
  *
- * Reproduces the production shape that motivated the gate: an agent declared
+ * Reproduces the shape that motivated the gate: an agent declared
  * `dependencies.integrations["@scope/x"]` but shipped no
  * `integrations_configuration["@scope/x"]` entry, so the spawn resolver emitted
- * a serverless spec with no `apiCalls`. The integration "booted" with an empty
- * surface, the sidecar warned into the run log only (never into the model's
- * context), and the agent improvised unauthenticated HTTP for 40 turns.
+ * a serverless spec with no `apiCalls` and the integration "booted" with an
+ * empty surface, warning into the run log only.
  *
  * These tests assert the report the agent container actually reads
  * (`GET /integrations/boot-report`): `ok: false` + a `failed[]` entry is what

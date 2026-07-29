@@ -111,35 +111,11 @@ describe("ALL /mcp — Host header validation (DNS-rebinding defence)", () => {
   it("rejects any non-loopback host when no alias is set (fail-closed)", async () => {
     // Process orchestrator / Firecracker guest reach the sidecar over
     // loopback and publish no DNS alias, so an unset SIDECAR_DNS_ALIAS must
-    // narrow the allowlist to localhost/127.0.0.1 (plus the transitional
-    // `sidecar` shim, pinned separately below).
+    // narrow the allowlist to localhost/127.0.0.1.
     const res = await withAlias(undefined, () =>
       rawMcp(createApp(makeDeps()), "attacker.example.com:8080"),
     );
     expect(res.status).toBe(403);
-  });
-
-  it("SHIM (delete with LEGACY_SIDECAR_HOSTNAME): still accepts the literal `sidecar`", async () => {
-    // NOT the contract — a transitional compatibility shim for an OLD
-    // platform driving a NEW sidecar image, where the sidecar is joined to
-    // the run bridge under the constant alias `sidecar` and gets no
-    // SIDECAR_DNS_ALIAS. Without it every /mcp call 403s and the run dies
-    // with a 30 s "MCP connect deadline exceeded". Under the current
-    // platform nothing on the bridge answers to that name, so this accepts
-    // requests that cannot arrive. Delete this test together with
-    // LEGACY_SIDECAR_HOSTNAME in `mcp.ts` (see its doc comment for the
-    // release), NOT by loosening it.
-    const unsetAlias = await withAlias(undefined, () =>
-      rawMcp(createApp(makeDeps()), "sidecar:8080"),
-    );
-    expect(unsetAlias.status).toBe(200);
-
-    // Accepted even when a per-run alias IS set: an old platform can also be
-    // driving a sidecar whose env carries a stale value.
-    const withOtherAlias = await withAlias("s5f3a1c9e7b2d4068159e2a7c3b0d6f84", () =>
-      rawMcp(createApp(makeDeps()), "sidecar:8080"),
-    );
-    expect(withOtherAlias.status).toBe(200);
   });
 
   it("accepts localhost with a dynamic port (process orchestrator)", async () => {

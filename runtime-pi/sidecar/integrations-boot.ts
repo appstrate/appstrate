@@ -793,7 +793,7 @@ async function spawnAndConnectLocalIntegration(params: {
   /**
    * Allowlist for `host.register`. `undefined` = no allowlist (AFPS §4.4
    * wildcard). `[]` exposes nothing, which {@link assertIntegrationExposesTools}
-   * then turns into a failed boot — it is a diagnosis, not a mode.
+   * then turns into a failed boot.
    */
   allowedTools: readonly string[] | undefined;
   /**
@@ -1082,40 +1082,21 @@ export function hiddenToolsForNativeUpstream(
 }
 
 /**
- * Actionable reason string for a declared integration that ended registration
- * with zero callable tools. Shared by the diagnostic breadcrumb and the boot
- * failure below so both name the same manifest key to fix.
- *
- * The cause — and therefore the thing to fix — depends on which selection form
- * produced the spec, so the message branches on it rather than always blaming
- * the agent's `tools` key:
- *
- *  - **Wildcard** (`toolAllowlist === undefined`, AFPS §4.4 `tools: "*"`) —
- *    the author already selected everything there is; telling them to fix
- *    `integrations_configuration[id].tools` would be actively wrong. Nothing
- *    was filtered out by the agent's choice, so the surface is empty because
- *    the upstream advertised no tool, or because the integration's own
- *    `hidden_tools` suppressed every one it did advertise. Both are
- *    integration-side.
- *  - **Explicit selection** (an array, possibly empty) — the agent-side key is
- *    the one to fix: the dependency was declared but nothing was picked, or
- *    what was picked no longer exists upstream.
- */
-/**
- * Whether the spec's entire surface is the in-process `api_call` server — no
- * runner container, no remote MCP. The resolver signals this with
- * `sourceKind: "none"`, and also leaves `manifest.server` undefined for it, so
- * either is sufficient; both are checked because a hand-written spec in a test
+ * Whether the spec's entire surface is the in-process `api_call` server. The
+ * resolver signals it with `sourceKind: "none"` AND an absent
+ * `manifest.server`; both are checked because a hand-written spec in a test
  * has historically set only one.
- *
- * Named because the branch drives three separate decisions (which boot path
- * runs, how a zero-tool failure is phrased, and the `kind` a breadcrumb
- * reports) and they must not drift apart.
  */
 function isServerlessSpec(spec: IntegrationSpawnSpec): boolean {
   return spec.sourceKind === "none" || !spec.manifest.server;
 }
 
+/**
+ * Actionable reason string for a declared integration that ended registration
+ * with zero callable tools. Branches on the selection form rather than always
+ * blaming the agent's `tools` key: under the wildcard the author already
+ * selected everything, so an empty surface is integration-side.
+ */
 function zeroToolReason(spec: IntegrationSpawnSpec): string {
   const key = `integrations_configuration["${spec.integrationId}"].tools`;
   if (spec.toolAllowlist === undefined) {
@@ -1131,18 +1112,12 @@ function zeroToolReason(spec: IntegrationSpawnSpec): string {
  * launch as declared, so it fails the run.
  *
  * The contract behind `INTEGRATIONS_TO_SPAWN_JSON` is "declared ⇒ callable" —
- * the agent's prompt was written against that surface. An integration that
- * boots but registers nothing is indistinguishable, from the model's side,
- * from an integration that was never declared: the boot report is the only
- * channel the agent reads, and a `warn` breadcrumb goes to the platform run
- * log, never into the model's context. Observed failure mode: the agent has no
- * legitimate call path left, improvises unauthenticated HTTP from bash, and
- * burns the whole budget before a human cancels it.
+ * the agent's prompt was written against that surface. A `warn` breadcrumb is
+ * not enough: it goes to the platform run log, never into the model's context.
  *
  * Throwing routes the spec through the per-spec catch in
  * {@link bootIntegrations}, which records it in `failed[]` — the SAME abort
- * path a spawn/connect failure takes (`entrypoint.ts` reads `report.ok` from
- * `GET /integrations/boot-report` and dies). No second failure mechanism.
+ * path a spawn/connect failure takes. No second failure mechanism.
  */
 export function assertIntegrationExposesTools(spec: IntegrationSpawnSpec, toolCount: number): void {
   if (toolCount > 0) return;
@@ -1154,12 +1129,8 @@ export function assertIntegrationExposesTools(spec: IntegrationSpawnSpec, toolCo
  * the in-process `api_call` server is the integration's entire surface.
  *
  * Only ever called with `toolCount > 0`: {@link bootIntegrations} runs
- * {@link assertIntegrationExposesTools} first, so a zero-tool serverless
- * integration throws before reaching here and the failure path emits the one
- * `error` breadcrumb carrying {@link zeroToolReason}. This helper used to
- * carry its own zero branch, which printed the same failure twice — once as
- * `warn` here, once as `error` from the catch. Move the gate and you must
- * bring a zero case back, or the run log will read `ready (0 tools)`.
+ * {@link assertIntegrationExposesTools} first. Move that gate and you must
+ * bring a zero case back here, or the run log will read `ready (0 tools)`.
  */
 export function pushServerlessReadyBreadcrumb(
   spec: IntegrationSpawnSpec,
@@ -1466,21 +1437,14 @@ export async function bootIntegrations(
       // api_call server is its entire surface (registered as the primary).
       //
       // Bind `server` from the same predicate that decides the branch, so the
-      // dispatch and the narrowing cannot disagree: `isServerlessSpec` is true
-      // exactly when `manifest.server` is absent, so `undefined` here IS the
-      // serverless case and every path below this block has a defined server.
+      // dispatch and the narrowing cannot disagree.
       const server = isServerlessSpec(spec) ? undefined : spec.manifest.server;
       if (server === undefined) {
         const apiCallToolCount = await attachApiCall();
         const ms = Math.round(performance.now() - specStart);
-        // Contract gate FIRST, breadcrumb second. A zero-tool integration
-        // throws into the catch below, which records `zeroToolReason(spec)` —
-        // the full actionable sentence — on `failed[]` AND as the `error`
-        // breadcrumb. Pushing the `warn` crumb before the throw printed that
-        // same sentence twice in one run log, once at `warn` and once at
-        // `error`, for a single failure. Nothing is lost by dropping the
-        // `warn`: the `error` crumb carries the identical diagnosis and the
-        // spec lands on `failed[]` either way.
+        // Contract gate FIRST, breadcrumb second — otherwise a single failure
+        // prints the same diagnosis twice, at `warn` here and at `error` from
+        // the catch.
         assertIntegrationExposesTools(spec, apiCallToolCount);
         pushServerlessReadyBreadcrumb(spec, apiCallToolCount, ms, breadcrumbs);
         spawned.push({
@@ -1676,10 +1640,8 @@ export async function bootIntegrations(
         level: "error",
         data: {
           integrationId: spec.integrationId,
-          // Same `kind` the success crumbs carry, so a failure is filterable by
-          // spawn mode too. Load-bearing for the serverless zero-tool case:
-          // that path now fails before its own breadcrumb runs, and this is
-          // where the mode survives.
+          // Same `kind` the success crumbs carry — for the serverless
+          // zero-tool case this is the only crumb that reports the mode.
           kind: isServerlessSpec(spec) ? "serverless" : "local",
           durationMs: ms,
           error: msg,

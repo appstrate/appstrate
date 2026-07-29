@@ -100,9 +100,7 @@ function manifestErrorsToFieldErrors(errors: string[]): ValidationFieldError[] {
  * `requireCallableTools` adds the declared-but-empty gate on top. It belongs
  * to the paths that FREEZE an artifact (publish, import), never to a draft
  * write: the editor's own add-integration → tick-a-tool flow autosaves
- * through the empty state, and refusing it there would make the editor
- * unusable. The runtime keeps its own backstop for drafts run directly from
- * the editor and for packages published before this gate existed.
+ * through the empty state.
  */
 async function assertAgentIntegrationScopesValid(
   manifest: Record<string, unknown>,
@@ -1198,11 +1196,9 @@ function makeCreateVersionHandler(rcfg: PackageRouteConfig) {
     // with it — a draft must not be frozen into an immutable version with an
     // `integrations_configuration` selection outside the integration catalog.
     //
-    // `requireCallableTools` is switched ON here and NOT on the draft writes:
-    // this is where the artifact stops being editable. A declared integration
-    // with an empty tool selection boots with nothing callable and aborts the
-    // run, so freezing one produces a version that can only fail — the author
-    // must be told now, in the editor, not 30 seconds into a run.
+    // `requireCallableTools` is ON here and NOT on the draft writes: this is
+    // where the artifact stops being editable, and freezing an empty tool
+    // selection produces a version that can only fail at boot.
     await validateManifestForRoute(item.manifest, rcfg.cfg.type, orgId, "stored", {
       requireCallableTools: true,
     });
@@ -1613,8 +1609,7 @@ export function createPackagesRouter() {
     //
     // An import is a FINAL artifact, not an editing step — `postInstallPackage`
     // below cuts a version from it — so the declared-but-empty gate applies
-    // here too. An older package carrying that state fails to import until its
-    // author picks a tool or drops the dependency; it was never runnable.
+    // here too.
     await assertAgentIntegrationScopesValid(manifest as Record<string, unknown>, orgId, true);
 
     // Check for existing user package

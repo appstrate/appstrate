@@ -3,31 +3,21 @@
 /**
  * Per-run sidecar DNS alias — shape, uniqueness, and the same-host invariant.
  *
- * The Docker backend publishes the sidecar on the run's bridge network under
- * an unguessable per-run alias instead of the historical cross-run constant
- * `sidecar`. Two properties have to hold or runs break outright:
+ * Two properties have to hold or runs break outright:
  *
- *   1. The alias must be a legal RFC 1123 host label, or `connectContainerToNetwork`
- *      is rejected by the daemon and Docker's embedded DNS never publishes it.
+ *   1. The alias must be a legal RFC 1123 host label, or
+ *      `connectContainerToNetwork` is rejected by the daemon.
  *   2. The four `SidecarEndpoints` fields the agent is handed, the network
  *      alias the container is published under, and the `SIDECAR_DNS_ALIAS` the
- *      sidecar is told about itself must all name the SAME host. A mismatch
- *      between the last two is a total-run failure: the agent's `Host` is
- *      `<network alias>:8080`, the sidecar's guard compares it against
- *      `SIDECAR_DNS_ALIAS`, and a divergence 403s every `/mcp` call.
+ *      sidecar is told about itself must all name the SAME host. The agent's
+ *      `Host` is `<network alias>:8080` and the sidecar's guard compares it
+ *      against `SIDECAR_DNS_ALIAS`, so a divergence 403s every `/mcp` call.
  *
- * That second property is proven at its real seam: `sidecarAliasOverrides` is
- * the single function `DockerOrchestrator.createSidecar` calls to obtain BOTH
- * destinations, so this file asserts the two agree and both equal the alias
- * baked into the boundary. It does not — and cannot, without a live daemon —
- * assert that `createSidecar` still routes them to `createContainer` and
- * `connectContainerToNetwork`; that wiring is a two-line read of the call
- * site, and is why the helper returns a single object rather than a bare
- * string each caller re-derives.
+ * (2) is proven at `sidecarAliasOverrides`, the single function `createSidecar`
+ * calls for BOTH destinations. That `createSidecar` still routes them onward
+ * is only observable against a live daemon and stays a call-site read.
  *
- * Pure helpers — no Docker daemon, no DB. Same posture as
- * `sidecar-socket-gating.test.ts`, which unit-tests the other extracted
- * `DockerOrchestrator` helper.
+ * Pure helpers — no Docker daemon, no DB.
  */
 
 import { describe, it, expect } from "bun:test";
@@ -40,10 +30,9 @@ import {
 import type { IsolationBoundary } from "@appstrate/core/platform-types";
 
 /**
- * RFC 1123 host label: 1-63 chars from `[a-z0-9-]`, must not start or end
- * with a hyphen. We additionally require a non-digit first character (RFC 1123
- * relaxed RFC 952 here, but a leading digit still trips resolvers that treat a
- * fully-numeric first label as an IP fragment).
+ * RFC 1123 host label, plus a non-digit first character: RFC 1123 relaxed that
+ * from RFC 952, but a leading digit still trips resolvers that read a
+ * fully-numeric first label as an IP fragment.
  */
 const RFC_1123_LABEL = /^[a-z][a-z0-9]*(-[a-z0-9]+)*$/;
 
@@ -71,10 +60,8 @@ describe("generateSidecarAlias — DNS label validity", () => {
   });
 
   it("is exactly 33 chars — inside the 63-char single-label limit", () => {
-    // `s` + a hyphen-stripped UUIDv4. Pinned exactly rather than as a range:
-    // the generator is fixed-length, so a `>= 24` bound could not fail, while
-    // this catches any change to the shape (which would also move the 122
-    // bits of entropy the doc comment on `generateSidecarAlias` claims).
+    // `s` + a hyphen-stripped UUIDv4. Pinned exactly, not as a range, so any
+    // change to the shape (and to the 122 bits of entropy) fails here.
     expect(generateSidecarAlias()).toHaveLength(33);
     expect(generateSidecarAlias().length).toBeLessThanOrEqual(63);
   });

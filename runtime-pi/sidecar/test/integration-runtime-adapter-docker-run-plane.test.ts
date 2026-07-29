@@ -12,18 +12,11 @@
  * launcher is involved at all. So the fallback keys off "no `RUN_ID`" alone:
  * a launched run never lands there, whatever else is set.
  *
- * Two launched-run shapes exist while the compat shim lives — the current
- * platform's per-run `SIDECAR_DNS_ALIAS`, and a pre-`beta.47` platform that
- * sets none and publishes the sidecar under the constant `sidecar`. Both are
- * real planes. Only an alias that is present-but-empty is unknowable, and
- * that one still throws.
- *
  * Pure — no Docker daemon, no PostgreSQL.
  */
 
 import { describe, it, expect } from "bun:test";
 import { resolveRunPlane } from "../integration-runtime-adapter-docker.ts";
-import { LEGACY_SIDECAR_HOSTNAME } from "../helpers.ts";
 
 const env = (vars: Record<string, string>): NodeJS.ProcessEnv => vars as NodeJS.ProcessEnv;
 
@@ -60,40 +53,18 @@ describe("resolveRunPlane — dev/test fallback", () => {
   });
 });
 
-describe("resolveRunPlane — SHIM (delete with LEGACY_SIDECAR_HOSTNAME): legacy platform", () => {
-  // A pre-`beta.47` platform creates the same `appstrate-exec-<runId>` bridge
-  // but joins the sidecar to it under the constant alias and sets no
-  // `SIDECAR_DNS_ALIAS` (`connectContainerToNetwork(boundary.id, containerId,
-  // ["sidecar"])`). That is a real run plane, not a degradation — the Host
-  // shim in `mcp.ts` tolerates the same platform, and without this branch it
-  // would only ever rescue runs that declare zero integrations.
-  // When the shim is deleted these three flip back to `toThrow`.
-  it("RUN_ID without SIDECAR_DNS_ALIAS resolves the legacy plane", () => {
-    expect(resolveRunPlane(env({ RUN_ID: "run_abc123" }))).toEqual({
-      network: "appstrate-exec-run_abc123",
-      alias: LEGACY_SIDECAR_HOSTNAME,
-    });
+describe("resolveRunPlane — half-configured launcher", () => {
+  // A launched run with no usable alias has nothing left to infer a plane
+  // from, and must never degrade to the networkless dev path.
+  it("RUN_ID without SIDECAR_DNS_ALIAS throws", () => {
+    expect(() => resolveRunPlane(env({ RUN_ID: "run_abc123" }))).toThrow(
+      /RUN_ID is set but SIDECAR_DNS_ALIAS is missing/,
+    );
   });
 
-  it("the legacy alias is the literal the old platform published, not a mint", () => {
-    expect(LEGACY_SIDECAR_HOSTNAME).toBe("sidecar");
-    const plane = resolveRunPlane(env({ RUN_ID: "run_x" }));
-    expect(`http://${plane?.alias}:39472`).toBe("http://sidecar:39472");
-  });
-
-  it("never degrades to the networkless dev path — a launched run always has a plane", () => {
-    expect(resolveRunPlane(env({ RUN_ID: "run_abc123" }))).not.toBeNull();
-  });
-});
-
-describe("resolveRunPlane — impossible half-configured launcher", () => {
-  // Only ONE state is left here: an alias that is present but empty. No
-  // launcher produces it — the old platform sets the var not at all, the
-  // current one sets a minted alias — so there is nothing to infer a plane
-  // from, and guessing would be inventing evidence.
   it("RUN_ID with an empty SIDECAR_DNS_ALIAS throws", () => {
     expect(() => resolveRunPlane(env({ RUN_ID: "run_abc123", SIDECAR_DNS_ALIAS: "" }))).toThrow(
-      /RUN_ID is set but SIDECAR_DNS_ALIAS is not/,
+      /RUN_ID is set but SIDECAR_DNS_ALIAS is missing/,
     );
   });
 
