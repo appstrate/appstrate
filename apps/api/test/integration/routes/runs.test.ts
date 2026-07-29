@@ -26,15 +26,8 @@ import { installPackage } from "../../../src/services/application-packages.ts";
 import { createApiKeyCredential } from "../../../src/services/model-providers/credentials.ts";
 import { createOrgModel, setDefaultModel } from "../../../src/services/org-models.ts";
 import { waitForInFlight } from "../../../src/services/run-tracker.ts";
-import {
-  _setOrchestratorForTesting,
-  type RunOrchestrator,
-  type WorkloadHandle,
-  type WorkloadSpec,
-  type IsolationBoundary,
-  type CleanupReport,
-  type StopResult,
-} from "../../../src/services/orchestrator/index.ts";
+import { _setOrchestratorForTesting } from "../../../src/services/orchestrator/index.ts";
+import { createFakeOrchestrator } from "../../helpers/run-connection-fixtures.ts";
 
 const app = getTestApp();
 
@@ -378,56 +371,6 @@ describe("Runs API", () => {
   // orchestrator (no Docker) so it settles in-process within the test,
   // instead of a slow real image pull racing the next test's truncateAll.
   describe("POST /api/agents/:scope/:name/run — resolved model echo", () => {
-    /** Minimal no-op orchestrator: workloads "run" instantly and exit 0. */
-    function createFakeOrchestrator(): RunOrchestrator {
-      const handle = (runId: string, role: string): WorkloadHandle => ({
-        id: `${role}_${runId}`,
-        runId,
-        role,
-      });
-      return {
-        async initialize() {},
-        async shutdown() {},
-        async cleanupOrphans(): Promise<CleanupReport> {
-          return { workloads: 0, isolationBoundaries: 0, workspaces: 0 };
-        },
-        async ensureImages() {},
-        async createIsolationBoundary(runId: string): Promise<IsolationBoundary> {
-          return {
-            id: `net_${runId}`,
-            name: `appstrate-exec-${runId}`,
-            workspace: { kind: "directory", path: `/tmp/test-ws-${runId}` },
-            sidecarEndpoints: {
-              sidecarUrl: "http://sidecar:8080",
-              llmProxyUrl: "http://sidecar:8080/llm",
-              forwardProxyUrl: "http://sidecar:8081",
-              noProxy: "sidecar,localhost,127.0.0.1",
-            },
-          };
-        },
-        async removeIsolationBoundary() {},
-        async createSidecar(runId: string): Promise<WorkloadHandle> {
-          return handle(runId, "sidecar");
-        },
-        async createWorkload(spec: WorkloadSpec): Promise<WorkloadHandle> {
-          return handle(spec.runId, spec.role);
-        },
-        async startWorkload() {},
-        async stopWorkload() {},
-        async removeWorkload() {},
-        async waitForExit(): Promise<number> {
-          return 0;
-        },
-        async *streamLogs(): AsyncGenerator<string> {},
-        async stopByRunId(): Promise<StopResult> {
-          return "stopped";
-        },
-        async resolvePlatformApiUrl(): Promise<string> {
-          return "http://platform:3000";
-        },
-      };
-    }
-
     beforeAll(() => {
       _setOrchestratorForTesting(createFakeOrchestrator());
     });
