@@ -64,7 +64,21 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "22"
-          registry-url: "https://registry.npmjs.org"
+          # NO `registry-url`. It makes setup-node write
+          # `//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}` into ~/.npmrc,
+          # and npm then authenticates with that value instead of falling back
+          # to OIDC. With NODE_AUTH_TOKEN unset the line resolves to an EMPTY
+          # token, which npm sends anyway — failing as unauthenticated rather
+          # than exchanging its OIDC id-token. registry.npmjs.org is already
+          # the default registry, so the input bought nothing.
+
+      # Trusted publishing requires npm >= 11.5.1; Node 22 ships npm 10.x.
+      # Without this the publish fails with a confusing auth error rather
+      # than a version complaint.
+      - name: Upgrade npm for trusted publishing
+        run: |
+          npm install -g npm@latest
+          npm --version
 
       - name: Install dependencies
         run: bun install
@@ -170,9 +184,28 @@ jobs:
         run: bun scripts/verify-package-resolves.ts packages/core
 
       - name: Publish to npm
+        # Authentication is OIDC trusted publishing, NOT a token — same move as
+        # publish-cli.yml, for a different reason. The CLI HAD to migrate: its
+        # package is unscoped, therefore owned by a personal account whose 2FA
+        # is in `auth-and-writes` mode, and npm refuses every token-based write
+        # under it. `@appstrate/core` never hit that wall because it is
+        # org-owned and governed by the organization's policy instead — token
+        # publishes kept working here throughout. This migrates anyway, so the
+        # publish identity is the workflow rather than a long-lived shared
+        # credential, and so NPM_TOKEN can eventually leave the repository.
+        #
+        # No `--tag`: core versions are stable releases (6.0.0, …), and npm
+        # assigns `latest` to those by default. The CLI needs an explicit
+        # `--tag latest` only because every release on that line is a
+        # `1.0.0-beta.X` prerelease, which npm >= 11 refuses to tag
+        # implicitly. Should core ever publish a prerelease, this step will
+        # fail with that same error — which is the correct outcome: a core
+        # prerelease must NOT silently take over the `latest` dist-tag that
+        # every consumer's `^6.0.0` range resolves against.
+        #
+        # Requires a Trusted Publisher on npmjs.com for @appstrate/core,
+        # pinned to THIS workflow filename.
         run: npm publish --access public --provenance
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3.0.1
