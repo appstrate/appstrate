@@ -286,14 +286,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   the run with nothing callable from it, announced only by a `warn` in the
   platform run log that never reached the model's context — leaving the agent to
   improvise unauthenticated HTTP from bash. The state is now refused in two
-  places. At **publish and import**
+  places. **Wherever a version gets frozen**
   (`POST /api/packages/agents/{scope}/{name}/versions`,
-  `POST /api/packages/import`, `POST /api/packages/import-bundle`) it is a
-  `validation_failed` naming `integrations_configuration.<id>.tools` — the one
-  moment the artifact is still editable, since a published version is immutable.
-  At **run boot** it aborts the run as a backstop for drafts and pre-existing
-  packages. Draft writes are deliberately NOT gated: the editor passes through
-  the empty state between adding a dependency and ticking a tool.
+  `POST /api/packages/import`, `POST /api/packages/import-bundle`, and the
+  initial snapshot the create routes take) it is a `validation_failed` naming
+  `integrations_configuration.<id>.tools` — the one moment the artifact is
+  still editable, since a published version is immutable. At **run boot** it
+  aborts the run as a backstop. Draft writes are deliberately NOT gated: the
+  editor passes through the empty state between adding a dependency and
+  ticking a tool, and the create routes still accept that manifest — they
+  just no longer freeze a version from it.
+
+  The backstop is not redundant. An integration carried by an `.afps-bundle`
+  and not yet installed is invisible to a validator that reads the DB, so its
+  agent is not judged on that entry; and versions published before this gate
+  existed are still runnable. Read the publish-side rule as "every path that
+  freezes a version, for every integration the org already knows", not "every
+  import".
 
   Blast radius: an absent `tools` key still inherits the integration's
   `default_tools`, which 59 of the 65 system integrations declare — for those,
