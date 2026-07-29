@@ -18195,6 +18195,10 @@ export interface operations {
                     config?: Record<string, never>;
                     /** @description `document://doc_xxx` URIs to mount read-only into the run's `documents/` directory — fan-in by reference, without declaring a file field in the manifest. The platform declares a reserved `_context_documents` input field for them, so they go through the same ACL, byte/count caps and `document_links` chaining as any other document input, and are announced to the agent in its prompt. A manifest (or `input`) that already declares `_context_documents` is rejected with a `400` — the name is reserved. */
                     context_documents?: string[];
+                    /** @description Per-integration connection picks for THIS run (flat-connections mechanism #2). Flat map: `{ "@scope/integration": "<connection_id>" }` — one connection per integration; the chosen connection carries its own authKey. Loses to admin pins (mechanism #1), beats the schedule-frozen layer (#3) and the actor-fallback (#4). Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same pick. Returns 412 `missing_integration_connection` if the chosen id is not accessible to the actor. */
+                    connection_overrides?: {
+                        [key: string]: string;
+                    };
                     modelId?: string | null;
                     proxyId?: string | null;
                 };
@@ -18366,6 +18370,10 @@ export interface operations {
                     config?: Record<string, never>;
                     /** @description Same field as `POST /api/runs/inline` — validated here for shape and for the reserved `_context_documents` name collision, never mounted. */
                     context_documents?: string[];
+                    /** @description Same field as `POST /api/runs/inline` — applied to the integration readiness check so a pick that clears `must_choose_connection` here clears it on the real launch too. Never persisted; no run is created. */
+                    connection_overrides?: {
+                        [key: string]: string;
+                    };
                     modelId?: string | null;
                     proxyId?: string | null;
                 };

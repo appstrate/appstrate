@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `@appstrate/core/platform-types` — `InlineRunBody.connection_overrides`, the
+  flat `{ "@scope/integration": "<connection_id>" }` map (resolver mechanism #2).
+  `POST /api/runs/inline` and `/inline/validate` read it, so an inline caller can
+  escape a `412 must_choose_connection` by re-posting its pick — until now that
+  remedy existed only on the cataloged run route. Optional and NOT nullable:
+  both routes reject an explicit `null` on the wire.
+
+### Changed
+
+- `@appstrate/core/run-and-wait-client` — `launchRunAndWait` forwards the new
+  `connection_overrides` argument on BOTH kinds (`agent` and `inline`), and
+  refuses it pre-dispatch whenever it is present but is not a plain object
+  (a JSON-encoded string, an array, a number, a boolean, `null`). A dropped map
+  produces the identical `412` on retry with nothing saying the argument was
+  ignored, so the refusal — with a message naming the mistake — is the only
+  signal the caller can act on.
+
 ## [6.1.0] — 2026-07-29
 
 Additive release. It exists because `packages/core/src` had drifted from the

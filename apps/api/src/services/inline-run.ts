@@ -380,7 +380,14 @@ export async function triggerInlineRun(params: {
   traceparent?: string;
 }): Promise<{ runId: string; packageId: string }> {
   const { orgId, applicationId, actor, runId, preflight, parsed, apiKeyId, traceparent } = params;
-  const { manifest, prompt, effectiveConfig, modelIdOverride, proxyIdOverride } = preflight;
+  const {
+    manifest,
+    prompt,
+    effectiveConfig,
+    modelIdOverride,
+    proxyIdOverride,
+    connectionOverrides,
+  } = preflight;
 
   // `parseRequestInput` already collapses an effectively-empty input to
   // `undefined`; map that to NULL so an input-less inline run persists
@@ -427,6 +434,7 @@ export async function triggerInlineRun(params: {
       proxyId: proxyIdOverride,
       applicationId,
       apiKeyId,
+      connectionOverrides,
       traceparent,
     });
   } catch (err) {

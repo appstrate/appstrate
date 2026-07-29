@@ -82,12 +82,17 @@ describe("fetchPackageJson", () => {
     globalThis.fetch = realFetch;
   });
 
+  // The double assertion is deliberate: the stub implements `fetch`'s call
+  // signature and nothing else, while `typeof fetch` also carries runtime-only
+  // members (`preconnect`, …) these tests never touch. Widening through
+  // `unknown` keeps the stub from breaking every time the ambient type grows
+  // another member.
   function stubFetch(status: number, statusText: string, body?: unknown): void {
     globalThis.fetch = (async () =>
       new Response(body === undefined ? null : JSON.stringify(body), {
         status,
         statusText,
-      })) as typeof fetch;
+      })) as unknown as typeof fetch;
   }
 
   it("THROWS on 404 instead of reporting an absent file", async () => {
