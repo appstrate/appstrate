@@ -182,24 +182,32 @@ export const runs = pgTable(
     // column existed.
     costPricingStatus: text("cost_pricing_status").$type<PricingStatus>(),
     // Denominator of the run's context gauge: the model context window this run
-    // was actually LAUNCHED with (`llmConfig.contextWindow`, falling back to the
-    // shared `DEFAULT_CONTEXT_WINDOW` from `@appstrate/core/token-budget` — the
-    // same fallback the runner's compaction sizing applies). Persisted because
+    // was actually LAUNCHED with (`llmConfig.contextWindow`). Persisted because
     // the numerator (`contextTokens` on each `appstrate.progress` breadcrumb) is
     // meaningless without the window the run ran against, and the org's model
     // config can change under a finished run.
     //
-    // NULL = unknown, and it must stay readable as unknown: rows predating this
-    // column and runs that resolve no platform model (remote-origin runs execute
-    // on the caller's host with the caller's own model) have no honest value. A
-    // zeroed gauge would read as "context empty", which is a lie — consumers
+    // NULL = unknown, and it must stay readable as unknown. Three populations
+    // land here: rows predating this column; runs that resolve no platform model
+    // (remote-origin runs execute on the caller's host with the caller's own
+    // model); and — the deliberate one — runs whose resolved model declares NO
+    // context window. The platform does not guess one for that last case:
+    // `buildRuntimePiEnv` omits `MODEL_CONTEXT_WINDOW` when it is null and the
+    // container applies its own 128 000 default (runtime-pi/env.ts), which is
+    // NOT core's `DEFAULT_CONTEXT_WINDOW` (200 000), so any platform-side
+    // fallback would be a denominator no run ever used. See
+    // `apps/api/src/services/run-token-budget.ts` for why aligning the two
+    // constants was rejected instead.
+    //
+    // A zeroed gauge would read as "context empty", which is a lie — consumers
     // render NO gauge on NULL.
     contextWindow: integer("context_window"),
     // Token count at which the runner's auto-compaction kicks in, computed at
     // launch as `contextWindow - deriveResponseReserveTokens(contextWindow,
     // maxTokens)` — the exact expression `derivePiCompactionSettings`
-    // (packages/runner-pi/src/pi-runner.ts) feeds the Pi SDK, so platform and
-    // runner agree by construction.
+    // (packages/runner-pi/src/pi-runner.ts) feeds the Pi SDK. Platform and
+    // runner therefore agree WHENEVER the model declares a window; when it does
+    // not, both columns are NULL (above) rather than a guessed pair.
     //
     // KNOWN CAVEAT — do not "fix" this by plumbing more state: the runner also
     // honours `MODEL_COMPACTION_ENABLED=false` read from its OWN container env,
