@@ -1,0 +1,11 @@
+{
+  "$schema": "https://schemas.afps.dev/v0/skill.schema.json",
+  "name": "@appstrate/logic-map-tools",
+  "version": "0.1.0",
+  "type": "skill",
+  "schema_version": "0.2",
+  "display_name": "Outils de carte de logique",
+  "description": "Contrôles déterministes d'une carte de logique, exécutés pendant le run qui la produit : validation du format et vérification que chaque citation existe réellement dans la source, aux lignes annoncées. Aucun appel de modèle.",
+  "author": "appstrate",
+  "keywords": ["logic-map", "cartographe", "vérification", "evidence"]
+}
