@@ -33,6 +33,7 @@ import { EmptyState, ErrorState, LoadingState } from "../page-states";
 import {
   DecisionNode,
   EmitNode,
+  GroupFrame,
   GuardNode,
   LoopNode,
   PolicyNode,
@@ -51,6 +52,7 @@ const NODE_TYPES = {
   guard: GuardNode,
   policy: PolicyNode,
   emit: EmitNode,
+  group_frame: GroupFrame,
 } as const;
 
 /**
@@ -102,28 +104,43 @@ export function AgentLogicMapView({
         s,
       ]),
     );
+    // Les cadres viennent en tête : React Flow peint dans l'ordre du tableau, donc
+    // un cadre déclaré après ses cartes les recouvrirait.
+    const frames = data.groups.map<Node>((g) => ({
+      id: `frame:${g.name}`,
+      type: "group_frame",
+      position: { x: g.x - 16, y: g.y - 40 },
+      data: { name: g.name, shape: g.shape, count: g.count },
+      style: { width: g.width + 32, height: g.height + 56 },
+      draggable: false,
+      selectable: false,
+      zIndex: -1,
+    }));
+
     return {
-      nodes: data.nodes.map<Node>((n) => {
-        const step = steps.get(n.id) ?? {};
-        return {
-          id: n.id,
-          type: n.type,
-          position: n.position,
-          data: {
-            label: step["label"] ?? n.id,
-            detail: step["detail"] ?? null,
-            refs: step["refs"] ?? [],
-            evidence: step["evidence"] ?? null,
-            confidence: step["confidence"] ?? null,
-            aggregated: step["aggregated"] ?? false,
-            terminal: step["terminal"] ?? false,
-            until: step["until"] ?? null,
-            depth: n.depth,
-            diagnostics: byStep.get(n.id) ?? [],
-          },
-          draggable: false,
-        };
-      }),
+      nodes: frames.concat(
+        data.nodes.map<Node>((n) => {
+          const step = steps.get(n.id) ?? {};
+          return {
+            id: n.id,
+            type: n.type,
+            position: n.position,
+            data: {
+              label: step["label"] ?? n.id,
+              detail: step["detail"] ?? null,
+              refs: step["refs"] ?? [],
+              evidence: step["evidence"] ?? null,
+              confidence: step["confidence"] ?? null,
+              aggregated: step["aggregated"] ?? false,
+              terminal: step["terminal"] ?? false,
+              until: step["until"] ?? null,
+              depth: n.depth,
+              diagnostics: byStep.get(n.id) ?? [],
+            },
+            draggable: false,
+          };
+        }),
+      ),
       edges: data.edges.map<Edge>((e, i) => ({
         id: `${e.from}->${e.to}-${i}`,
         source: e.from,

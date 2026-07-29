@@ -4753,7 +4753,11 @@ export interface components {
                 /** @enum {string} */
                 shape: "sequence" | "policies";
                 x: number;
+                y: number;
                 width: number;
+                height: number;
+                /** @description Steps inside the cluster. */
+                count: number;
             }[];
             edges: {
                 from: string;

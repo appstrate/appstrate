@@ -184,6 +184,30 @@ function StepCard({ kind, data }: { kind: string; data: LogicStepData }) {
   );
 }
 
+/**
+ * Cadre d'un domaine, dessiné DERRIÈRE les cartes qu'il contient.
+ *
+ * Sans lui, une colonne de douze politiques ressemble à douze cartes sans rapport,
+ * alors que le domaine est précisément ce qui les relie — et sur un document de
+ * règles, ce regroupement est la seule structure qui existe.
+ */
+export function GroupFrame({ data }: NodeProps) {
+  const d = data as { name: string; shape: string; count: number };
+  const sequence = d.shape === "sequence";
+  return (
+    <div
+      className={`pointer-events-none h-full w-full rounded-lg border border-dashed ${
+        sequence ? "border-sky-900/70 bg-sky-950/10" : "border-violet-900/70 bg-violet-950/10"
+      }`}
+    >
+      <div className="flex items-baseline gap-2 px-3 pt-2">
+        <span className="text-[11px] tracking-wide text-neutral-400 uppercase">{d.name}</span>
+        <span className="text-[10px] text-neutral-600">{d.count}</span>
+      </div>
+    </div>
+  );
+}
+
 export function StepNode({ data }: NodeProps) {
   return <StepCard kind="step" data={data as LogicStepData} />;
 }

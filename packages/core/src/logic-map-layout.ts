@@ -59,8 +59,22 @@ export interface PositionedNode {
 
 export interface LayoutResult {
   nodes: PositionedNode[];
-  /** Grappes dans leur ordre de placement, pour un rendu qui dessine des cadres. */
-  groups: { name: string; shape: "sequence" | "policies"; x: number; width: number }[];
+  /**
+   * Grappes dans leur ordre de placement, avec leur boîte englobante.
+   *
+   * Le rendu en a besoin pour dessiner un cadre : sans lui, une colonne de douze
+   * politiques ressemble à douze cartes sans rapport, alors que le domaine est
+   * précisément ce qui les relie.
+   */
+  groups: {
+    name: string;
+    shape: "sequence" | "policies";
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    count: number;
+  }[];
 }
 
 const CARD_WIDTH = 320;
@@ -278,7 +292,17 @@ export function layoutLogicMap(map: LayoutMap): LayoutResult {
       }
     }
 
-    groups.push({ name: name || "(sans domaine)", shape, x, width: widest });
+    groups.push({
+      name: name || "(sans domaine)",
+      shape,
+      x,
+      y: 0,
+      width: widest,
+      // `y` repart de zéro à chaque colonne, donc la hauteur est le dernier `y`
+      // atteint, moins l'écart ajouté après la dernière carte.
+      height: Math.max(0, y - (shape === "sequence" ? RANK_GAP : 16)),
+      count: members.length,
+    });
     x += widest + COLUMN_GAP;
   }
 

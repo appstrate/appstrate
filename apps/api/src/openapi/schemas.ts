@@ -1493,12 +1493,15 @@ export const schemas = {
           "Clusters in placement order. A policy document is a disconnected graph by nature, and its clusters are what the renderer draws instead of a chain.",
         items: {
           type: "object",
-          required: ["name", "shape", "x", "width"],
+          required: ["name", "shape", "x", "y", "width", "height", "count"],
           properties: {
             name: { type: "string" },
             shape: { type: "string", enum: ["sequence", "policies"] },
             x: { type: "number" },
+            y: { type: "number" },
             width: { type: "number" },
+            height: { type: "number" },
+            count: { type: "integer", description: "Steps inside the cluster." },
           },
         },
       },
