@@ -1464,7 +1464,13 @@ export async function bootIntegrations(
 
       // Serverless integration (api_call-only, no MCP server) — the in-process
       // api_call server is its entire surface (registered as the primary).
-      if (isServerlessSpec(spec)) {
+      //
+      // Bind `server` from the same predicate that decides the branch, so the
+      // dispatch and the narrowing cannot disagree: `isServerlessSpec` is true
+      // exactly when `manifest.server` is absent, so `undefined` here IS the
+      // serverless case and every path below this block has a defined server.
+      const server = isServerlessSpec(spec) ? undefined : spec.manifest.server;
+      if (server === undefined) {
         const apiCallToolCount = await attachApiCall();
         const ms = Math.round(performance.now() - specStart);
         // Contract gate FIRST, breadcrumb second. A zero-tool integration
@@ -1485,7 +1491,6 @@ export async function bootIntegrations(
         });
         continue;
       }
-      const server = spec.manifest.server;
 
       // ─── Phase 7 — remote HTTP MCP path ───
       // When the spawn-spec declares `sourceKind: "remote"` the integration
