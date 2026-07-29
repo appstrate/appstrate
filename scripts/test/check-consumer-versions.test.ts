@@ -88,6 +88,10 @@ describe("fetchPackageJson", () => {
   // `unknown` keeps the stub from breaking every time the ambient type grows
   // another member.
   function stubFetch(status: number, statusText: string, body?: unknown): void {
+    // Double cast: `typeof fetch` carries React's `preconnect` augmentation in
+    // this tsconfig, which a bare arrow function cannot satisfy — and the stub
+    // has no business implementing it. The call signature is the only part
+    // under test.
     globalThis.fetch = (async () =>
       new Response(body === undefined ? null : JSON.stringify(body), {
         status,

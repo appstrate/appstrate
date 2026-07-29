@@ -18,25 +18,25 @@ import { derivePiCompactionSettings } from "../src/pi-runner.ts";
 describe("derivePiCompactionSettings — reserveTokens", () => {
   it("uses model.maxTokens when populated", () => {
     const result = derivePiCompactionSettings({ contextWindow: 200_000, maxTokens: 64_000 }, {});
-    if (result.enabled === false) throw new Error("compaction should be enabled");
+    if (result.compaction.enabled === false) throw new Error("compaction should be enabled");
     // Claude Sonnet 4.5 in thinking mode declares maxTokens=64000 —
     // reserveTokens MUST track this or the first post-compaction call
     // underflows and we see the same upstream 400.
-    expect(result.reserveTokens).toBe(64_000);
+    expect(result.compaction.reserveTokens).toBe(64_000);
   });
 
   it("derives max(16384, 20% × window) when model.maxTokens is null", () => {
     // Now routed through the shared `deriveResponseReserveTokens`, which
     // matches the sidecar's spill guard: 200k × 0.2 = 40 000.
     const result = derivePiCompactionSettings({ contextWindow: 200_000, maxTokens: null }, {});
-    if (result.enabled === false) throw new Error("compaction should be enabled");
-    expect(result.reserveTokens).toBe(40_000);
+    if (result.compaction.enabled === false) throw new Error("compaction should be enabled");
+    expect(result.compaction.reserveTokens).toBe(40_000);
   });
 
   it("derives max(16384, 20% × window) when model.maxTokens is undefined", () => {
     const result = derivePiCompactionSettings({ contextWindow: 200_000 }, {});
-    if (result.enabled === false) throw new Error("compaction should be enabled");
-    expect(result.reserveTokens).toBe(40_000);
+    if (result.compaction.enabled === false) throw new Error("compaction should be enabled");
+    expect(result.compaction.reserveTokens).toBe(40_000);
   });
 
   it("clamps an impossible maxTokens == contextWindow (Devstral 2512 regression)", () => {
@@ -44,9 +44,9 @@ describe("derivePiCompactionSettings — reserveTokens", () => {
     // pin the threshold at contextWindow - reserveTokens <= 0, which made
     // the agent compact on every turn. Falls back to the derived default.
     const result = derivePiCompactionSettings({ contextWindow: 256_000, maxTokens: 256_000 }, {});
-    if (result.enabled === false) throw new Error("compaction should be enabled");
-    expect(result.reserveTokens).toBe(51_200);
-    expect(result.reserveTokens).toBeLessThan(256_000);
+    if (result.compaction.enabled === false) throw new Error("compaction should be enabled");
+    expect(result.compaction.reserveTokens).toBe(51_200);
+    expect(result.compaction.reserveTokens).toBeLessThan(256_000);
   });
 });
 
@@ -54,40 +54,40 @@ describe("derivePiCompactionSettings — keepRecentTokens", () => {
   it("Claude 200k window → 20000 (floor wins, 10% == floor)", () => {
     // 10% × 200k = 20k, exactly at the floor.
     const result = derivePiCompactionSettings({ contextWindow: 200_000, maxTokens: 16_384 }, {});
-    if (result.enabled === false) throw new Error("compaction should be enabled");
-    expect(result.keepRecentTokens).toBe(20_000);
+    if (result.compaction.enabled === false) throw new Error("compaction should be enabled");
+    expect(result.compaction.keepRecentTokens).toBe(20_000);
   });
 
   it("GPT-4.1 1M window → 100000 (10% × 1M)", () => {
     const result = derivePiCompactionSettings({ contextWindow: 1_000_000, maxTokens: 32_000 }, {});
-    if (result.enabled === false) throw new Error("compaction should be enabled");
-    expect(result.keepRecentTokens).toBe(100_000);
+    if (result.compaction.enabled === false) throw new Error("compaction should be enabled");
+    expect(result.compaction.keepRecentTokens).toBe(100_000);
   });
 
   it("Gemini 2M window → 200000 (10% × 2M)", () => {
     const result = derivePiCompactionSettings({ contextWindow: 2_000_000, maxTokens: 8_192 }, {});
-    if (result.enabled === false) throw new Error("compaction should be enabled");
-    expect(result.keepRecentTokens).toBe(200_000);
+    if (result.compaction.enabled === false) throw new Error("compaction should be enabled");
+    expect(result.compaction.keepRecentTokens).toBe(200_000);
   });
 
   it("100k window → 20000 (floor wins over 10% = 10k)", () => {
     // Floor protects small-window models from over-compaction: 10% would
     // strip recent context below a useful tail.
     const result = derivePiCompactionSettings({ contextWindow: 100_000, maxTokens: 4_096 }, {});
-    if (result.enabled === false) throw new Error("compaction should be enabled");
-    expect(result.keepRecentTokens).toBe(20_000);
+    if (result.compaction.enabled === false) throw new Error("compaction should be enabled");
+    expect(result.compaction.keepRecentTokens).toBe(20_000);
   });
 
   it("null contextWindow → defaults to 200k path (keepRecentTokens=20000)", () => {
     const result = derivePiCompactionSettings({ contextWindow: null, maxTokens: 16_384 }, {});
-    if (result.enabled === false) throw new Error("compaction should be enabled");
-    expect(result.keepRecentTokens).toBe(20_000);
+    if (result.compaction.enabled === false) throw new Error("compaction should be enabled");
+    expect(result.compaction.keepRecentTokens).toBe(20_000);
   });
 
   it("undefined contextWindow → defaults to 200k path (keepRecentTokens=20000)", () => {
     const result = derivePiCompactionSettings({ maxTokens: 16_384 }, {});
-    if (result.enabled === false) throw new Error("compaction should be enabled");
-    expect(result.keepRecentTokens).toBe(20_000);
+    if (result.compaction.enabled === false) throw new Error("compaction should be enabled");
+    expect(result.compaction.keepRecentTokens).toBe(20_000);
   });
 });
 
@@ -99,7 +99,9 @@ describe("derivePiCompactionSettings — MODEL_COMPACTION_ENABLED opt-out", () =
       { contextWindow: 200_000, maxTokens: 64_000 },
       { MODEL_COMPACTION_ENABLED: "false" },
     );
-    expect(result).toEqual({ enabled: false });
+    // The window survives the opt-out — it is what the session runs against
+    // either way, and it is the gauge's denominator.
+    expect(result).toEqual({ compaction: { enabled: false }, contextWindow: 200_000 });
   });
 
   it("ignores other values of MODEL_COMPACTION_ENABLED (only 'false' opts out)", () => {
@@ -109,15 +111,15 @@ describe("derivePiCompactionSettings — MODEL_COMPACTION_ENABLED opt-out", () =
       { contextWindow: 200_000, maxTokens: 16_384 },
       { MODEL_COMPACTION_ENABLED: "true" },
     );
-    if (result.enabled === false) throw new Error("compaction should be enabled");
-    expect(result.reserveTokens).toBe(16_384);
+    if (result.compaction.enabled === false) throw new Error("compaction should be enabled");
+    expect(result.compaction.reserveTokens).toBe(16_384);
   });
 
   it("defaults to enabled when MODEL_COMPACTION_ENABLED is undefined", () => {
     const result = derivePiCompactionSettings({ contextWindow: 200_000, maxTokens: 16_384 }, {});
-    if (result.enabled === false) throw new Error("compaction should be enabled");
-    expect(result.reserveTokens).toBe(16_384);
-    expect(result.keepRecentTokens).toBe(20_000);
+    if (result.compaction.enabled === false) throw new Error("compaction should be enabled");
+    expect(result.compaction.reserveTokens).toBe(16_384);
+    expect(result.compaction.keepRecentTokens).toBe(20_000);
   });
 });
 
@@ -129,9 +131,58 @@ describe("derivePiCompactionSettings — full result shape", () => {
     // SDK default (4k or whatever) and the next call underflows.
     const result = derivePiCompactionSettings({ contextWindow: 200_000, maxTokens: 64_000 }, {});
     expect(result).toEqual({
-      enabled: true,
-      reserveTokens: 64_000,
-      keepRecentTokens: 20_000,
+      compaction: { enabled: true, reserveTokens: 64_000, keepRecentTokens: 20_000 },
+      contextWindow: 200_000,
     });
+  });
+
+  it("keeps `contextWindow` OUT of the object handed to the Pi SDK", () => {
+    // The whole reason the result is nested. The SDK's `CompactionSettings` is
+    // all-optional, so a flat result assigns to it with no compile error — a
+    // call site could post our key into a third party's settings object and
+    // nothing would say so. Here `compaction` is the SDK's shape and only that.
+    const { compaction } = derivePiCompactionSettings(
+      { contextWindow: 128_000, maxTokens: 16_384 },
+      {},
+    );
+    expect(Object.keys(compaction).sort()).toEqual([
+      "enabled",
+      "keepRecentTokens",
+      "reserveTokens",
+    ]);
+
+    const off = derivePiCompactionSettings(
+      { contextWindow: 128_000 },
+      {
+        MODEL_COMPACTION_ENABLED: "false",
+      },
+    ).compaction;
+    expect(Object.keys(off)).toEqual(["enabled"]);
+  });
+});
+
+describe("derivePiCompactionSettings — context budget reported to the breadcrumb", () => {
+  it("reports the DECLARED window verbatim", () => {
+    const result = derivePiCompactionSettings({ contextWindow: 128_000, maxTokens: 16_384 }, {});
+    expect(result.contextWindow).toBe(128_000);
+  });
+
+  it("reports the runner's OWN fallback when the model declares no window", () => {
+    // The load-bearing case. The runner is the layer that applies this
+    // fallback, so it is the only layer that can state the window the session
+    // really ran against — anything derived one layer up is a guess about a
+    // run that did not happen.
+    expect(derivePiCompactionSettings({ maxTokens: 16_384 }, {}).contextWindow).toBe(200_000);
+    expect(
+      derivePiCompactionSettings({ contextWindow: null, maxTokens: 16_384 }, {}).contextWindow,
+    ).toBe(200_000);
+  });
+
+  it("keeps the window on the opt-out path too, fallback included", () => {
+    const result = derivePiCompactionSettings(
+      { contextWindow: null },
+      { MODEL_COMPACTION_ENABLED: "false" },
+    );
+    expect(result).toEqual({ compaction: { enabled: false }, contextWindow: 200_000 });
   });
 });

@@ -118,6 +118,15 @@ export const TURN_PROGRESS_EVENT = "turn";
  * `outputTokens` — output is generated, not re-read, and folding it in would
  * hide the re-read cost this metric exists to expose.
  *
+ * `contextWindow` is that numerator's SCALE, and it rides here rather than on
+ * the run row for two reasons. The runner is the only layer that knows it — it
+ * is the code that applies its own fallback when the launcher declares no
+ * window, so a window guessed one layer up describes a run
+ * that never happened. And a denominator stored apart from its numerator is
+ * unreadable exactly where it would matter: terminal inline runs have their
+ * `run_logs` pruned while the `runs` row survives, leaving a window with no
+ * turns to divide. Same row, same lifetime, one writer.
+ *
  * Field casing is camelCase throughout, per the CloudEvents carve-out
  * (`docs/CASING_CONVENTIONS.md` §4i) that already governs `durationMs` /
  * `toolCallId` on this envelope. The snake_case counters on {@link TokenUsage}
@@ -138,6 +147,13 @@ export function buildTurnProgress(
     outputTokens: number;
     cacheReadTokens: number;
     cacheWriteTokens: number;
+    /**
+     * Context window (tokens) the runner ACTUALLY ran this turn against,
+     * fallback included — never the window some upstream layer intended.
+     * Omitted when the runner cannot state one; a zero would divide the gauge
+     * by zero and a guess would misreport saturation.
+     */
+    contextWindow?: number;
   },
 ): RunEvent {
   const contextTokens = input.inputTokens + input.cacheReadTokens + input.cacheWriteTokens;
@@ -155,6 +171,7 @@ export function buildTurnProgress(
       cacheReadTokens: input.cacheReadTokens,
       cacheWriteTokens: input.cacheWriteTokens,
       contextTokens,
+      ...(input.contextWindow !== undefined ? { contextWindow: input.contextWindow } : {}),
     },
   };
 }

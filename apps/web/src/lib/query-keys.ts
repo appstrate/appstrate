@@ -19,17 +19,45 @@
  * arrays these caches have always used (a pure refactor).
  */
 
+import type { QueryClient } from "@tanstack/react-query";
+
 type Id = string | null | undefined;
 
 /** Single run detail + its log list. Patched live by the run SSE stream. */
 export const runKeys = {
-  /** Prefix — every run-detail entry (terminal-status invalidation). */
+  /**
+   * Prefix — every run-detail entry (terminal-status invalidation).
+   *
+   * It does NOT reach {@link runKeys.logs}: React Query prefix-matches element
+   * by element, and `["run"]` is not a prefix of `["run-logs", …]`. The logs
+   * cache is a separate family that has to be invalidated by name — see
+   * {@link invalidateRunLogs}.
+   */
   all: ["run"] as const,
   detail: (orgId: Id, applicationId: Id, runId: Id) =>
     ["run", orgId, applicationId, runId] as const,
   logs: (orgId: Id, applicationId: Id, runId: Id) =>
     ["run-logs", orgId, applicationId, runId] as const,
 };
+
+/**
+ * Refetch one run's log list.
+ *
+ * Its own function, in the module that owns the key, because the global
+ * terminal-status invalidation (`invalidateRunAndNotificationQueries`, in
+ * `use-notifications.ts`) fires `runKeys.all` — which refetches the run row and
+ * silently leaves this family alone.
+ *
+ * That costs more than a stale log list. The run-detail page appends live SSE
+ * frames into this cache with `setQueryData`, and the per-turn breadcrumbs
+ * carrying BOTH the context gauge's numerator and its denominator ride in it: a
+ * frame arriving between the last render and the stream teardown is lost for
+ * good, leaving a run that peaked at 187k reporting whatever the last surviving
+ * turn said — or, with no window left in the cache, no gauge at all.
+ */
+export function invalidateRunLogs(qc: QueryClient, orgId: Id, applicationId: Id, runId: Id) {
+  return qc.invalidateQueries({ queryKey: runKeys.logs(orgId, applicationId, runId) });
+}
 
 /** Per-agent run list. Patched in place by the run SSE stream. */
 export const runsKeys = {
