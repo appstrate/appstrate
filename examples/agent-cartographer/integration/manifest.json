@@ -1,0 +1,61 @@
+{
+  "name": "@appstrate/platform-api",
+  "version": "0.1.0",
+  "type": "integration",
+  "schema_version": "0.1",
+  "display_name": "API Appstrate",
+  "description": "Donne à un agent un accès authentifié à l'API de sa propre plateforme : lire un manifeste, un prompt, les versions d'un package, télécharger le bundle d'un skill. La clé API porte les droits de son propriétaire — créez-la avec le minimum nécessaire.",
+  "long_description": "L'URL d'une instance Appstrate varie (localhost en développement, domaine propre en self-hosted, cloud), et la liste d'URI autorisées d'AFPS est littérale : elle n'accepte aucune substitution. Cette intégration déclare donc `allow_all_uris`, comme les autres intégrations à domaine variable du catalogue (WordPress, WooCommerce, ActiveCampaign). Conséquence à connaître : le sidecar injectera l'en-tête d'authentification vers l'hôte que l'agent nomme, quel qu'il soit. N'y branchez qu'une clé API à droits de lecture, et ne la donnez qu'à des agents dont vous lisez le prompt.",
+  "keywords": ["appstrate", "plateforme", "introspection", "packages"],
+  "license": "Apache-2.0",
+  "icon": "simple-icons:zapier",
+  "source": {
+    "kind": "none"
+  },
+  "default_tools": ["api_call"],
+  "auths": {
+    "primary": {
+      "type": "api_key",
+      "allow_all_uris": true,
+      "authorized_uris": [],
+      "credentials": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "api_key": {
+              "type": "string",
+              "description": "Clé API Appstrate (préfixe ask_). Elle porte les droits de son propriétaire : la lecture des packages suffit pour cartographier."
+            },
+            "base_url": {
+              "type": "string",
+              "description": "URL de l'instance, sans barre oblique finale — par exemple http://localhost:3300. L'agent la substitue lui-même dans ses appels."
+            }
+          },
+          "required": ["api_key", "base_url"]
+        }
+      },
+      "delivery": {
+        "http": {
+          "in": "header",
+          "name": "Authorization",
+          "value": "Bearer {$credential.api_key}"
+        }
+      },
+      "_meta": {
+        "dev.appstrate/auth": {
+          "required": true
+        }
+      }
+    }
+  },
+  "_meta": {
+    "dev.appstrate/package": {
+      "author": "Appstrate"
+    },
+    "dev.appstrate/api": {
+      "auths": {
+        "primary": {}
+      }
+    }
+  }
+}

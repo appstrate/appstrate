@@ -9,16 +9,50 @@ carte n'en est qu'une **lecture**, et elle doit pouvoir être vérifiée ligne �
 ## 1. Rassembler le périmètre de lecture
 
 Le prompt NE SUFFIT PAS. Sur beaucoup d'agents, les règles de décision vivent dans les
-fichiers de références d'un skill, et le prompt dit lui-même qu'elles font foi.
+fichiers de références d'un skill, et le prompt dit lui-même qu'elles font foi. Un
+cartographe qui ne lit que `prompt.md` cartographie une coquille.
 
-Via le serveur MCP de la plateforme, récupère pour `package_id` (et `version` si fournie) :
+Tous les appels passent par l'outil `api_call` de l'intégration `@appstrate/platform-api`,
+qui injecte l'authentification. Remplace `{base}` par la valeur de `base_url` de sa
+configuration ; tu ne vois jamais la clé.
 
-1. le **prompt** de l'agent ;
-2. le **manifeste**, pour connaître les skills déclarés ;
-3. pour chaque skill déclaré, son `SKILL.md` **et ses fichiers de références**.
+**a) Le manifeste et le prompt de l'agent** — un seul appel, le contenu arrive déjà extrait :
 
-Reporte l'ensemble des fichiers réellement lus dans `source.files`. Un fichier que tu
-cites sans l'y déclarer est une incohérence que le contrôle refusera.
+```
+GET {base}/api/packages/agents/{scope}/{name}/versions/{version}
+→ manifest (le manifeste)      → dependencies.skills, integrations, runtime_tools, input/output
+→ content  (le prompt)         → le texte à cartographier
+→ integrity                    → à reporter dans source.integrity
+```
+
+Sans `version`, résous d'abord la plus récente via
+`GET {base}/api/packages/agents/{scope}/{name}/versions`.
+
+**b) Les skills déclarés** — attention, c'est ici que ça se joue :
+
+```
+GET {base}/api/packages/skills/{scope}/{name}/versions/{version}
+→ content  = le SKILL.md, et RIEN D'AUTRE
+```
+
+Cette route ne rend que le fichier principal. Elle **ne suffit pas** : `compta-references`
+a neuf fichiers de références, et ce sont eux qui font foi. Pour les obtenir, télécharge
+l'archive du skill et ouvre-la :
+
+```bash
+curl -sL "{base}/api/packages/{scope}/{name}/{version}/download" -o skill.zip
+unzip -o skill.zip -d skill/
+ls skill/references/
+```
+
+L'en-tête d'authentification est injecté par l'intégration ; ne l'écris pas toi-même.
+
+**c) Déclarer ce que tu as lu.** Reporte dans `source.files` l'ensemble des fichiers
+réellement ouverts, avec des chemins cohérents avec ceux que tu citeras dans `evidence`.
+Un fichier cité sans être déclaré est une incohérence que le contrôle refusera.
+
+Si un skill est déclaré mais introuvable, ne l'invente pas : note-le dans `gaps` et
+continue avec ce que tu as.
 
 ## 2. Déterminer la famille AVANT de typer quoi que ce soit
 

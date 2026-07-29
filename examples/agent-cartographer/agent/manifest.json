@@ -12,10 +12,10 @@
   "timeout": 1800,
   "runtime_tools": ["output", "log"],
   "dependencies": {
-    "integrations": {},
-    "mcp_servers": {
-      "@appstrate/platform": "^1.0.0"
+    "integrations": {
+      "@appstrate/platform-api": "^0.1.0"
     },
+    "mcp_servers": {},
     "skills": {
       "@appstrate/logic-map-tools": "^0.1.0"
     }
@@ -388,6 +388,12 @@
           }
         }
       }
+    }
+  },
+  "integrations_configuration": {
+    "@appstrate/platform-api": {
+      "auth_key": "primary",
+      "tools": ["api_call"]
     }
   }
 }

@@ -3,6 +3,9 @@
 L'agent qui produit les cartes de logique, et le skill qui les vérifie avant publication.
 
 ```
+integration/    @appstrate/platform-api
+  manifest.json   accès authentifié à l'API de la plateforme elle-même
+
 agent/          @appstrate/agent-cartographer
   manifest.json   output.schema = le format logic_map, donc AJV valide la carte
                   gratuitement avant qu'elle soit persistée
@@ -23,6 +26,22 @@ carte, jamais les sources.
 C'est le seul contrôle qui attrape une carte inventée. Mesuré sur les 18 cartes écrites à
 la main : 99,5 % de citations exactes, et les quatre échecs étaient des citations à trous,
 c'est-à-dire non vérifiables par construction.
+
+## Comment l'agent lit ce qu'il cartographie
+
+Un agent tourne dans un conteneur isolé, **sans jeton de plateforme** — l'entrypoint
+supprime l'adresse du sidecar après la poignée de main, précisément pour qu'il ne puisse
+pas la lire. Il ne peut donc pas appeler l'API comme le fait le chat, qui, lui, s'exécute
+dans le processus de la plateforme et dispatche en interne.
+
+Le chemin existe quand même : le proxy sortant du sidecar autorise explicitement l'hôte de
+la plateforme. Il ne manquait qu'une identité, d'où l'intégration `@appstrate/platform-api`
+et sa clé API.
+
+Deux routes suffisent pour le manifeste et le prompt, qui arrivent déjà extraits du ZIP.
+Pour les **fichiers de références d'un skill**, en revanche, il faut télécharger l'archive
+et l'ouvrir : la route JSON ne rend que le `SKILL.md`. C'est une contrainte réelle, pas un
+détail — c'est dans ces fichiers que vivent les règles qui font foi.
 
 ## Ce que la plateforme fait, et que le skill n'a pas à refaire
 
