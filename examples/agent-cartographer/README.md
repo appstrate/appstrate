@@ -47,14 +47,22 @@ détail — c'est dans ces fichiers que vivent les règles qui font foi.
 
 `integration/manifest.json` est un **modèle**, pas un package prêt à l'emploi.
 
-1. **Remplacez l'hôte** dans `authorized_uris` par celui de votre instance :
+1. **Remplacez l'hôte** dans `authorized_uris` par celui de votre instance, **vu depuis un
+   conteneur**. En développement, ce n'est jamais `localhost` — qui y désigne le conteneur
+   lui-même et répond `ConnectionRefused` :
 
    ```jsonc
    "authorized_uris": [
-     "http://localhost:3300/api/packages/**",   // au lieu de VOTRE-INSTANCE.example
-     "http://localhost:3300/api/agents/**"
+     "http://host.docker.internal:3300/api/packages/**",   // au lieu de VOTRE-INSTANCE.example
+     "http://host.docker.internal:3300/api/agents/**"
    ]
    ```
+
+   Et pensez à la **plage de versions** : votre intégration personnalisée vit sous son
+   propre numéro, que `dependencies.integrations` du cartographe doit accepter. Un `^0.1.0`
+   laissé en place résout sur l'ancienne intégration, dont la liste blanche n'est plus la
+   bonne — l'agent tourne, échoue en 403 puis en `ConnectionRefused`, et part chercher
+   ailleurs. Mesuré : un run perdu.
 
 2. **Créez une clé API en lecture seule**, dédiée à cet usage. Jamais une clé
    d'administration : elle donnerait à l'agent le droit de lancer des runs et de modifier

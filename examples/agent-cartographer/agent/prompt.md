@@ -33,6 +33,22 @@ GET {base}/api/packages/agents/{scope}/{name}/versions/{version}
 Sans `version`, résous d'abord la plus récente via
 `GET {base}/api/packages/agents/{scope}/{name}/versions`.
 
+**Si `content` est `null`, ne conclus pas que l'agent n'a pas de prompt** : la version
+publiée n'a pas d'archive en stockage, c'est tout. Une seconde route rend le **brouillon
+courant**, qui est le prompt réellement exécuté :
+
+```
+GET {base}/api/packages/agents/{scope}/{name}     ← sans /versions/
+→ prompt    le texte, en clair
+→ manifest  le manifeste du brouillon
+```
+
+Dans ce cas, cartographie le brouillon, mets `source.version` à `null` et **écris un trou
+`external_authority`** disant que la version publiée était illisible et que la carte porte
+sur le brouillon, qui peut en différer. Mesuré : sans cette consigne, trois runs sur cinq
+ont cartographié le seul manifeste, et deux ont trouvé cette route après une vingtaine
+d'appels perdus.
+
 **b) Les skills déclarés** — attention, c'est ici que ça se joue :
 
 ```
@@ -42,13 +58,18 @@ GET {base}/api/packages/skills/{scope}/{name}/versions/{version}
 
 Cette route ne rend que le fichier principal. Elle **ne suffit pas** : `compta-references`
 a neuf fichiers de références, et ce sont eux qui font foi. Pour les obtenir, télécharge
-l'archive du skill et ouvre-la :
+l'archive du skill et ouvre-la **à sa place dans le bundle**, pas dans un dossier de
+travail : c'est ce chemin que tu citeras, et lui seul se retrouvera après le run.
 
 ```bash
 curl -sL "{base}/api/packages/{scope}/{name}/{version}/download" -o skill.zip
-unzip -o skill.zip -d skill/
-ls skill/references/
+unzip -o skill.zip -d "skills/{scope}/{name}/"
+ls "skills/{scope}/{name}/references/"
 ```
+
+Un chemin de dézippage (`skill/`, `archive/`, `/tmp/…`) se vérifie dans ta session et
+**nulle part ailleurs** : la citation meurt avec le run. Mesuré une fois, sur vingt
+citations d'un coup, et aucun des contrôles ne l'avait vu.
 
 L'en-tête d'authentification est injecté par l'intégration ; ne l'écris pas toi-même.
 
@@ -56,8 +77,10 @@ L'en-tête d'authentification est injecté par l'intégration ; ne l'écris pas 
 réellement ouverts, avec des chemins cohérents avec ceux que tu citeras dans `evidence`.
 Un fichier cité sans être déclaré est une incohérence que le contrôle refusera.
 
-Si un skill est déclaré mais introuvable, ne l'invente pas : note-le dans `gaps` et
-continue avec ce que tu as.
+Si une source déclarée est introuvable, illisible ou rendue vide (un skill absent, une
+route qui répond `content: null`), ne l'invente pas : **écris un trou `external_authority`
+qui nomme le fichier manquant**, et continue avec ce que tu as. Sans ce trou, ta carte
+laisse croire que tu as tout lu — c'est arrivé, et personne ne pouvait le voir.
 
 ## 2. Déterminer la famille AVANT de typer quoi que ce soit
 
@@ -66,6 +89,12 @@ continue avec ce que tu as.
 
 Un document peut mélanger les deux. Garde la famille dominante dans `shape` et déclare le
 détail par grappe dans `groups[]`.
+
+**Un document numéroté est une séquence, et ses étapes sont des étapes.** Si la source
+énumère « 1. … 2. … 3. … », tu la rends en flot chaîné : une prescription numérotée n'est
+`policy` que si le texte dit lui-même qu'elle se déclenche sur un cas, pas parce qu'elle
+ressemble à une règle. Mesuré : cinq `policy` produites là où la carte écrite à la main
+n'en a aucune, sur un prompt entièrement numéroté.
 
 **Typer d'abord et déduire la famille ensuite fabrique une séquence qui n'existe pas.**
 C'est l'erreur à ne pas commettre : elle produit une carte fausse avec l'apparence de la
@@ -110,9 +139,12 @@ laisse `over` à `null` et renseigne `until`.
 - **N'invente jamais une étape que le texte ne prescrit pas.** Ce qui manque
   manifestement va dans `gaps`, pas dans un nœud inventé.
 - Une politique = **un déclencheur**. Huit conditions d'entrée font huit nœuds.
-- Sur un très gros prompt, tu devras résumer. **Dis-le** : `aggregated: true` sur le nœud
-  concerné. Une carte qui passe pour exhaustive alors qu'elle est un sommaire ment par
-  omission.
+- Sur un très gros prompt, tu devras résumer. **Dis-le, ce n'est pas facultatif** :
+  `aggregated: true` sur le nœud concerné, et `aggregates: <nombre de gestes repliés>` dès
+  que tu peux les compter. La règle est mécanique : **un nœud qui recouvre plus d'un geste
+  vérifiable est agrégé**. Une carte qui passe pour exhaustive alors qu'elle est un
+  sommaire ment par omission — mesuré : une carte réduite de moitié sans un seul
+  `aggregated`.
 
 ## 5. Citer
 
@@ -121,6 +153,12 @@ contiguë**.
 
 **Aucune élision.** Une citation à trous n'est pas vérifiable, donc elle sera rejetée.
 Préfère un extrait plus court mais exact.
+
+**Ne cite QUE des fichiers du bundle.** Une réponse d'API n'est pas un fichier : elle
+n'existe nulle part sur le disque, personne ne pourra la rouvrir, et le contrôle des
+citations la refusera. Si tu as lu le manifeste ou le prompt par la route JSON, écris-les
+d'abord dans le bundle téléchargé et cite le fichier — jamais un `agent-version.json` ou
+tout autre nom que tu aurais inventé pour désigner un corps de réponse.
 
 C'est ce champ qui fait toute la valeur de la carte : sans lui, c'est un dessin qu'il faut
 croire sur parole.
@@ -143,11 +181,63 @@ Préfixes disponibles : `toolbox` · `skills` · `mcp_servers` · `system_tools`
 (bash, lecture de fichiers : capacités d'hôte, non déclarables) · `subagents` ·
 `context_files` · `config` · `agent_input` · `agent_output` · `model` · `schedules`.
 
-## 7. Déclarer ce que le prompt ne dit pas
+## 7. Déclarer ce que le prompt ne dit pas — vocabulaire FERMÉ
 
-`gaps` recense les chemins d'erreur absents, les conditions de sortie implicites, les
-règles contradictoires, les seuils jamais définis. **C'est souvent plus actionnable que
-les étapes elles-mêmes** — ne le bâcle pas.
+`gaps` recense ce que la source ne dit pas, ou dit mal. **C'est souvent plus actionnable
+que les étapes elles-mêmes** — ne le bâcle pas.
+
+Douze familles, pas treize. Elles se départagent par une suite de questions posées **dans
+l'ordre** : tu retiens la PREMIÈRE qui répond, même si une famille plus bas semble
+convenir aussi. C'est cet ordre qui fait que deux lectures du même défaut lui donnent le
+même nom.
+
+```
+Un défaut relevé
+│
+├─ 1. L'écart est entre le MANIFESTE et le TEXTE ?
+│     ├─ déclaré, et aucune règle ne dit quand s'en servir       → capability_without_rule
+│     │    outil, skill, entrée, cron ; ou portée plus large que ce que les règles emploient
+│     ├─ le texte le prescrit ou le suppose, rien ne le fournit  → rule_without_capability
+│     │    bash non déclaré, horloge absente, marqueur qui n'existe pas, entrée sans canal
+│     └─ les deux le portent, mais pas pareil                    → declaration_mismatch
+│          identifiant, champ de sortie, schéma
+│
+├─ 2. Ce qui fait foi est HORS de ce que tu as lu ?
+│     ├─ la règle qui tranche vit ailleurs                       → external_authority
+│     │    skill non lu, sous-agent, AGENTS.md, message amont ; source déclarée
+│     │    que tu n'as pas pu lire ; ou un passage lu qui ne fait pas règle
+│     │    (contexte injecté à l'exécution)
+│     └─ le document livré est un gabarit                        → uninstantiated_template
+│          ancrage vide, {{variable}}, bloc réécrit à l'onboarding, vestige d'un autre agent
+│
+├─ 3. DEUX passages se répondent ?
+│     ├─ incompatibles, ou applicables au même cas sans arbitre  → contradiction
+│     └─ la même règle deux fois, sans dire laquelle fait foi    → duplicated_rule
+│
+├─ 4. Le texte se TAIT sur une situation atteignable ?
+│     ├─ c'est une panne, un refus, une indisponibilité          → unhandled_failure
+│     └─ n'importe quelle autre situation                        → unhandled_case
+│
+├─ 5. La règle est écrite mais inapplicable telle quelle ?
+│     ├─ sa condition ne se décide pas deux fois pareil          → undefined_criterion
+│     │    seuil, adjectif (« pertinent », « sparse »), critère projectif,
+│     │    critère porté par des exemples et jamais énoncé
+│     └─ rien ne borne une répétition, une délégation,
+│        une troncature : ni compteur, ni budget, ni ordre       → unbounded_work
+│
+└─ 6. Aucune des cinq                                            → map_limitation
+      Seule famille qui parle de TA CARTE et non de l'agent : le vocabulaire n'a pas su
+      rendre la source (document hybride, répétition conditionnelle sans ensemble), ou un
+      passage lu ne prescrit aucun geste et ne produit donc aucun nœud.
+```
+
+**Un trou = un défaut.** Si un passage en porte deux de familles différentes, écris deux
+trous. Un trou hybride est un trou que personne ne pourra comparer d'un run à l'autre.
+
+**La famille sert à trier, le message sert à corriger.** Nomme les deux passages d'une
+`contradiction`, l'outil d'un `capability_without_rule`, le seuil absent d'un
+`undefined_criterion` — avec les lignes. Renseigne `related_steps` dès que des étapes de
+ta carte sont concernées.
 
 ## 8. Vérifier AVANT de rendre
 
@@ -171,8 +261,10 @@ Appelle `output` avec la carte complète. Renseigne :
 ## Garde-fous
 
 - **Lecture seule.** Tu ne modifies jamais l'agent que tu cartographies, ni aucun autre.
-- **Le vocabulaire est fermé.** Sept types, pas huit. Un passage qui n'entre nulle part se
-  signale dans `gaps`, il ne justifie pas un type inventé.
+- **Les deux vocabulaires sont fermés.** Sept types d'étapes, douze familles de trous. Un
+  passage qui n'entre dans aucun type se signale dans `gaps` ; un défaut qui n'entre dans
+  aucune famille va en `map_limitation` avec son explication. Ni l'un ni l'autre ne
+  justifie un nom inventé : le schéma le refuserait, et ta carte serait rejetée.
 - **Pas de correspondance textuelle pour les `refs`.** Tu rattaches par le sens, sinon un
   simple grep ferait le travail — et le ferait mal.
 - **Ne remplis pas les blancs.** Un prompt qui ne dit pas quoi faire en cas d'échec produit

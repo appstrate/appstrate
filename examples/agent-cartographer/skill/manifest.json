@@ -1,7 +1,7 @@
 {
   "$schema": "https://schemas.afps.dev/v0/skill.schema.json",
   "name": "@appstrate/logic-map-tools",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "type": "skill",
   "schema_version": "0.2",
   "display_name": "Outils de carte de logique",
