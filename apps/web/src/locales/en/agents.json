@@ -516,6 +516,27 @@
     "empty": {
       "title": "No logic map yet",
       "body": "No map has been produced for this version. It will appear once the cartographer has run."
+    },
+    "gaps": {
+      "badge": "{{count}} gap",
+      "badge_other": "{{count}} gaps",
+      "title": "{{count}} gap found",
+      "title_other": "{{count}} gaps found",
+      "hint": "What the source does not say, or says badly. Unlike capability findings, these come from reading the text: they are fixed in the prompt.",
+      "family": {
+        "capability_without_rule": "Declared, but no rule uses it",
+        "rule_without_capability": "Prescribed, but nothing provides it",
+        "declaration_mismatch": "Declared on both sides, but differently",
+        "contradiction": "Two incompatible passages",
+        "unhandled_failure": "No path when it fails",
+        "duplicated_rule": "The same rule written twice",
+        "unhandled_case": "Reachable situation left untreated",
+        "undefined_criterion": "Criterion nobody would decide the same way twice",
+        "unbounded_work": "Repetition with no bound or order",
+        "external_authority": "What settles it lives elsewhere",
+        "uninstantiated_template": "Template left unfilled",
+        "map_limitation": "A limit of the map, not of the agent"
+      }
     }
   },
   "map": {

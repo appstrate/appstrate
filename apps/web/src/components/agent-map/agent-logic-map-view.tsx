@@ -27,9 +27,10 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { useTranslation } from "react-i18next";
-import { AlertTriangle, Info, Maximize2, Minimize2 } from "lucide-react";
+import { AlertTriangle, Info, ListChecks, Maximize2, Minimize2 } from "lucide-react";
 import { useAgentLogicMap } from "../../hooks/use-agent-logic-map";
 import { EmptyState, ErrorState, LoadingState } from "../page-states";
+import { LogicMapGapsDialog, type LogicMapGap } from "./logic-map-gaps-dialog";
 import {
   DecisionNode,
   EmitNode,
@@ -84,7 +85,19 @@ export function AgentLogicMapView({
   const { t } = useTranslation("agents");
   const { data, isLoading, error } = useAgentLogicMap(packageId, version);
   const [expanded, setExpanded] = useState(false);
+  const [gapsOpen, setGapsOpen] = useState(false);
   const toggle = useCallback(() => setExpanded((v) => !v), []);
+
+  // Les trous vivent dans la carte, à côté des étapes, et non dans les diagnostics :
+  // ils viennent de la LECTURE du texte, pas du croisement avec le manifeste.
+  const gaps = (data?.map as { gaps?: LogicMapGap[] } | null)?.gaps ?? [];
+  const stepLabels = useMemo(() => {
+    const entries = ((data?.map as { steps?: Record<string, unknown>[] } | null)?.steps ?? []).map(
+      (s) => [s["id"] as string, (s["label"] as string) ?? (s["id"] as string)] as const,
+    );
+    return new Map(entries);
+  }, [data]);
+  const labelForStep = useCallback((id: string) => stepLabels.get(id) ?? id, [stepLabels]);
 
   const { nodes, edges } = useMemo(() => {
     if (!data?.map) return { nodes: [] as Node[], edges: [] as Edge[] };
@@ -141,13 +154,21 @@ export function AgentLogicMapView({
           };
         }),
       ),
-      edges: data.edges.map<Edge>((e, i) => ({
-        id: `${e.from}->${e.to}-${i}`,
-        source: e.from,
-        target: e.to,
-        ...(e.condition ? { label: e.condition } : {}),
-        animated: false,
-      })),
+      edges: data.edges.map<Edge>((e, i) => {
+        // Une arête qui s'écarte de la lettre de la source le DIT, sinon la carte passe
+        // pour fidèle alors qu'elle a réparé — le pendant d'`aggregated` sur les nœuds.
+        const label = e.departs_from_source
+          ? `⚠ ${e.departs_from_source}`
+          : (e.condition ?? undefined);
+        return {
+          id: `${e.from}->${e.to}-${i}`,
+          source: e.from,
+          target: e.to,
+          ...(label ? { label } : {}),
+          ...(e.departs_from_source ? { style: { strokeDasharray: "6 3" } } : {}),
+          animated: false,
+        };
+      }),
     };
   }, [data]);
 
@@ -183,6 +204,16 @@ export function AgentLogicMapView({
             {t("logicMap.stale")}
           </span>
         )}
+        {gaps.length > 0 && (
+          <button
+            type="button"
+            onClick={() => setGapsOpen(true)}
+            className="flex items-center gap-1.5 rounded bg-neutral-900 px-2 py-1 text-neutral-400 hover:text-neutral-200 focus:outline-none focus-visible:ring-1 focus-visible:ring-neutral-500"
+          >
+            <ListChecks className="h-3.5 w-3.5" aria-hidden />
+            {t("logicMap.gaps.badge", { count: gaps.length })}
+          </button>
+        )}
         <button
           type="button"
           onClick={toggle}
@@ -211,6 +242,14 @@ export function AgentLogicMapView({
           </ReactFlow>
         </ReactFlowProvider>
       </div>
+
+      {gapsOpen && (
+        <LogicMapGapsDialog
+          gaps={gaps}
+          labelForStep={labelForStep}
+          onClose={() => setGapsOpen(false)}
+        />
+      )}
     </div>
   );
 }

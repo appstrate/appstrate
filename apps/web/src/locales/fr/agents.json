@@ -516,6 +516,27 @@
     "empty": {
       "title": "Pas encore de carte de logique",
       "body": "Aucune carte n'a été produite pour cette version. Elle apparaîtra après le passage du cartographe."
+    },
+    "gaps": {
+      "badge": "{{count}} trou",
+      "badge_other": "{{count}} trous",
+      "title": "{{count}} trou relevé",
+      "title_other": "{{count}} trous relevés",
+      "hint": "Ce que la source ne dit pas, ou dit mal. Contrairement aux constats de capacités, ces trous viennent de la lecture du texte : ils se corrigent dans le prompt.",
+      "family": {
+        "capability_without_rule": "Déclaré, mais aucune règle ne l'emploie",
+        "rule_without_capability": "Prescrit, mais rien ne le fournit",
+        "declaration_mismatch": "Déclaré des deux côtés, mais pas pareil",
+        "contradiction": "Deux passages incompatibles",
+        "duplicated_rule": "La même règle écrite deux fois",
+        "unhandled_failure": "Aucun chemin en cas d'échec",
+        "unhandled_case": "Situation atteignable non traitée",
+        "undefined_criterion": "Critère qui ne se décide pas deux fois pareil",
+        "unbounded_work": "Répétition sans borne ni ordre",
+        "external_authority": "Ce qui fait foi est ailleurs",
+        "uninstantiated_template": "Gabarit non rempli",
+        "map_limitation": "Limite de la carte, pas de l'agent"
+      }
     }
   },
   "map": {
