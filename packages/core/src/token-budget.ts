@@ -31,6 +31,19 @@
  */
 
 /**
+ * Fallback context window when the resolved model omits it. Matches the
+ * Claude family's standard 200 k window — the most common runtime target.
+ *
+ * Lives here (not next to a single consumer) because three surfaces must
+ * agree on the same denominator for the same run: the runner's compaction
+ * sizing (`derivePiCompactionSettings`), the sidecar's spill guard, and the
+ * platform's persisted `runs.context_window` (the gauge denominator the
+ * dashboard renders). A second literal `200_000` anywhere makes those drift
+ * silently.
+ */
+export const DEFAULT_CONTEXT_WINDOW = 200_000;
+
+/**
  * Floor on the derived response reserve when no usable `maxTokens` is
  * available. 16384 covers the common "no thinking" Claude / GPT response
  * shape; larger budgets (Sonnet thinking @ 64 k) flow through an explicit

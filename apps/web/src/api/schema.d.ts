@@ -5486,6 +5486,10 @@ export interface components {
             model_label: string | null;
             /** @description Model source: 'system' (platform-provided) or 'org' (user-configured). Resolved at run creation — an org-default change between triggers applies to subsequent runs unless the run was pinned via the runAgent `modelId` override. */
             model_source: string | null;
+            /** @description Model context window (tokens) the run was LAUNCHED with — the denominator of the run's context gauge. The numerator is `contextTokens`, reported per turn on the run's `appstrate.progress` log breadcrumbs. Snapshotted at creation, so it stays correct after the org's model configuration changes. `null` means unknown — a run created before this field existed, or a remote-origin run that resolves no platform model (it executes on the caller's host with the caller's own model). Render no gauge on `null`; a zeroed gauge would read as 'context empty'. */
+            context_window: number | null;
+            /** @description Token count at which the runner's auto-compaction kicks in, always strictly between 0 and `context_window`. Derived at launch as `context_window - response_reserve` — the same arithmetic the runner feeds to the agent SDK. ADVISORY: an operator can disable compaction with `MODEL_COMPACTION_ENABLED=false` in the runtime container's own environment, which the platform cannot observe, so a threshold may be reported for a run that never compacts. `null` whenever `context_window` is null. */
+            compaction_threshold: number | null;
             /** @description Run cost in dollars */
             cost: number | null;
             /**
@@ -6926,6 +6930,8 @@ export interface operations {
                      *       "proxy_label": null,
                      *       "model_label": "Claude Sonnet 4",
                      *       "model_source": "org",
+                     *       "context_window": 200000,
+                     *       "compaction_threshold": 136000,
                      *       "runner_name": null,
                      *       "runner_kind": null,
                      *       "agent_scope": "@acme",
@@ -18245,6 +18251,8 @@ export interface operations {
                      *       "proxy_label": null,
                      *       "model_label": "Claude Sonnet 4",
                      *       "model_source": "org",
+                     *       "context_window": 200000,
+                     *       "compaction_threshold": 136000,
                      *       "runner_name": null,
                      *       "runner_kind": null,
                      *       "agent_scope": "@inline",
@@ -18611,6 +18619,8 @@ export interface operations {
                      *       "proxy_label": null,
                      *       "model_label": "Claude Sonnet 4",
                      *       "model_source": "system",
+                     *       "context_window": 200000,
+                     *       "compaction_threshold": 136000,
                      *       "runner_name": null,
                      *       "runner_kind": null,
                      *       "agent_scope": "@acme",
@@ -18716,6 +18726,8 @@ export interface operations {
                      *       "proxy_label": null,
                      *       "model_label": "Claude Sonnet 4",
                      *       "model_source": "org",
+                     *       "context_window": 200000,
+                     *       "compaction_threshold": 136000,
                      *       "runner_name": null,
                      *       "runner_kind": null,
                      *       "agent_scope": "@acme",

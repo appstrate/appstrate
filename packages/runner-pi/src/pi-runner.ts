@@ -37,7 +37,7 @@ import {
 } from "./pi-sdk.ts";
 import { scheduleDeadlineNudges } from "./deadline-nudges.ts";
 import type { ModelApiShape } from "@appstrate/core/sidecar-types";
-import { deriveResponseReserveTokens } from "@appstrate/core/token-budget";
+import { deriveResponseReserveTokens, DEFAULT_CONTEXT_WINDOW } from "@appstrate/core/token-budget";
 import type { RunEvent, ExecutionContext } from "@appstrate/afps-runtime/types";
 import {
   buildError,
@@ -125,11 +125,6 @@ export interface PiRunnerOptions {
   terminalTools?: string[];
 }
 
-/**
- * Fallback context window when the model omits it. Matches the Claude
- * family's standard 200 k window — the most common runtime target.
- */
-const DEFAULT_CONTEXT_WINDOW = 200_000;
 /**
  * Floor on `keepRecentTokens`. Below ~20k the agent loses meaningful
  * recent context (a few thousand tokens of recent tool calls + the last
