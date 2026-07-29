@@ -114,6 +114,46 @@ function asNonEmptyArray(value: unknown): unknown[] | undefined {
   return Array.isArray(value) && value.length > 0 ? value : undefined;
 }
 
+/**
+ * The tool's `connection_overrides` argument — the documented remedy for a
+ * `412 must_choose_connection`, where the model must name one connection per
+ * ambiguous integration and retry.
+ *
+ * Refused before dispatch whenever it is present but does not resolve to a
+ * plain object. The MCP transport does not validate tool arguments, so a
+ * wrong-typed value is otherwise dropped on the floor: the launch answers the
+ * IDENTICAL 412, with nothing in it saying the argument was ignored, and the
+ * retry loop has no exit. This is the only place that signal can exist. A
+ * string gets its own message because it names the real mistake (a JSON-encoded
+ * map); an array / number / boolean / `null` gets the generic one. Validating
+ * the map's VALUES stays server-side — the route answers those with a
+ * field-precise 400.
+ */
+function connectionOverridesArgument(args: Record<string, unknown>): {
+  overrides?: Record<string, unknown>;
+  error?: string;
+} {
+  const present = args.connection_overrides !== undefined;
+  if (typeof args.connection_overrides === "string") {
+    return {
+      error:
+        "`connection_overrides` must be a JSON object mapping each integration id to a " +
+        'connection id (`{"@scope/integration": "<connection_id>"}`), not a string. Pass the ' +
+        "object itself — do not JSON-encode it.",
+    };
+  }
+  const overrides = asRecord(args.connection_overrides);
+  if (!overrides && present) {
+    return {
+      error:
+        "`connection_overrides` must be a JSON object mapping each integration id to a " +
+        'connection id (`{"@scope/integration": "<connection_id>"}`). Omit the argument ' +
+        "entirely when you have no connection to pin.",
+    };
+  }
+  return { overrides };
+}
+
 export function isRunAndWaitTerminalStatus(status: unknown): boolean {
   return typeof status === "string" && RUN_AND_WAIT_TERMINAL_STATUSES.has(status);
 }
@@ -290,6 +330,14 @@ export async function launchRunAndWait(
   const kind = asString(args.kind);
   const headers = jsonHeaders(opts.headers);
 
+  const connectionOverrides = connectionOverridesArgument(args);
+  if (connectionOverrides.error) {
+    return {
+      ok: false,
+      step: { payload: { error: connectionOverrides.error }, isError: true },
+    };
+  }
+
   let launchPath: string;
   let launchBody: Record<string, unknown> | undefined;
   const contextDocuments = asNonEmptyArray(args.context_documents);
@@ -388,6 +436,11 @@ export async function launchRunAndWait(
       ok: false,
       step: { payload: { error: "`kind` must be 'agent' or 'inline'." }, isError: true },
     };
+  }
+
+  // Both run bodies carry the same field, so one forward covers both kinds.
+  if (connectionOverrides.overrides) {
+    launchBody = { ...launchBody, connection_overrides: connectionOverrides.overrides };
   }
 
   const launchRes = await opts.fetch(apiUrl(opts.origin, launchPath), {
