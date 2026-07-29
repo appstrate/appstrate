@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Per-run sidecar DNS alias — shape, uniqueness, and endpoint round-trip.
+ * Per-run sidecar DNS alias — shape, uniqueness, and the same-host invariant.
  *
  * The Docker backend publishes the sidecar on the run's bridge network under
  * an unguessable per-run alias instead of the historical cross-run constant
@@ -9,12 +9,21 @@
  *
  *   1. The alias must be a legal RFC 1123 host label, or `connectContainerToNetwork`
  *      is rejected by the daemon and Docker's embedded DNS never publishes it.
- *   2. The four `SidecarEndpoints` fields, the network alias attached to the
- *      container, and the `SIDECAR_DNS_ALIAS` the sidecar is told about itself
- *      must all name the SAME host. They are derived from one alias
- *      (`buildDockerSidecarEndpoints`) and recovered from the boundary
- *      (`sidecarAliasOf`), so this test pins the round-trip: nothing can update
- *      one use and silently leave another pointing at a dead name.
+ *   2. The four `SidecarEndpoints` fields the agent is handed, the network
+ *      alias the container is published under, and the `SIDECAR_DNS_ALIAS` the
+ *      sidecar is told about itself must all name the SAME host. A mismatch
+ *      between the last two is a total-run failure: the agent's `Host` is
+ *      `<network alias>:8080`, the sidecar's guard compares it against
+ *      `SIDECAR_DNS_ALIAS`, and a divergence 403s every `/mcp` call.
+ *
+ * That second property is proven at its real seam: `sidecarAliasOverrides` is
+ * the single function `DockerOrchestrator.createSidecar` calls to obtain BOTH
+ * destinations, so this file asserts the two agree and both equal the alias
+ * baked into the boundary. It does not — and cannot, without a live daemon —
+ * assert that `createSidecar` still routes them to `createContainer` and
+ * `connectContainerToNetwork`; that wiring is a two-line read of the call
+ * site, and is why the helper returns a single object rather than a bare
+ * string each caller re-derives.
  *
  * Pure helpers — no Docker daemon, no DB. Same posture as
  * `sidecar-socket-gating.test.ts`, which unit-tests the other extracted
@@ -25,7 +34,8 @@ import { describe, it, expect } from "bun:test";
 import {
   generateSidecarAlias,
   buildDockerSidecarEndpoints,
-  sidecarAliasOf,
+  dockerSidecarAliasOf,
+  sidecarAliasOverrides,
 } from "../../../src/services/orchestrator/docker-orchestrator.ts";
 import type { IsolationBoundary } from "@appstrate/core/platform-types";
 
@@ -60,10 +70,13 @@ describe("generateSidecarAlias — DNS label validity", () => {
     }
   });
 
-  it("stays within the 63-char single-label limit (and is long enough to be unguessable)", () => {
-    const alias = generateSidecarAlias();
-    expect(alias.length).toBeLessThanOrEqual(63);
-    expect(alias.length).toBeGreaterThanOrEqual(24);
+  it("is exactly 33 chars — inside the 63-char single-label limit", () => {
+    // `s` + a hyphen-stripped UUIDv4. Pinned exactly rather than as a range:
+    // the generator is fixed-length, so a `>= 24` bound could not fail, while
+    // this catches any change to the shape (which would also move the 122
+    // bits of entropy the doc comment on `generateSidecarAlias` claims).
+    expect(generateSidecarAlias()).toHaveLength(33);
+    expect(generateSidecarAlias().length).toBeLessThanOrEqual(63);
   });
 
   it("is a valid URL hostname (it is embedded in every endpoint URL)", () => {
@@ -83,10 +96,10 @@ describe("generateSidecarAlias — per-run uniqueness", () => {
   });
 });
 
-describe("buildDockerSidecarEndpoints ↔ sidecarAliasOf — round-trip", () => {
+describe("buildDockerSidecarEndpoints ↔ dockerSidecarAliasOf — round-trip", () => {
   it("recovers the exact alias the endpoints were built from", () => {
     const alias = generateSidecarAlias();
-    expect(sidecarAliasOf(boundaryWith(buildDockerSidecarEndpoints(alias)))).toBe(alias);
+    expect(dockerSidecarAliasOf(boundaryWith(buildDockerSidecarEndpoints(alias)))).toBe(alias);
   });
 
   it("derives all four endpoint fields from the one alias", () => {
@@ -100,12 +113,7 @@ describe("buildDockerSidecarEndpoints ↔ sidecarAliasOf — round-trip", () => 
       noProxy: `${alias},localhost,127.0.0.1`,
     });
 
-    // Nothing still carries the historical constant, and every field names the
-    // same host the container will actually answer to.
-    for (const value of Object.values(endpoints)) {
-      expect(value).toContain(alias);
-      expect(value).not.toContain("//sidecar:");
-    }
+    // Every field names the same host the container will actually answer to.
     expect(new URL(endpoints.llmProxyUrl).hostname).toBe(alias);
     expect(new URL(endpoints.forwardProxyUrl).hostname).toBe(alias);
     expect(endpoints.noProxy.split(",")[0]).toBe(alias);
@@ -115,11 +123,57 @@ describe("buildDockerSidecarEndpoints ↔ sidecarAliasOf — round-trip", () => 
     const first = buildDockerSidecarEndpoints(generateSidecarAlias());
     const second = buildDockerSidecarEndpoints(generateSidecarAlias());
 
-    const firstAlias = sidecarAliasOf(boundaryWith(first));
-    const secondAlias = sidecarAliasOf(boundaryWith(second));
+    const firstAlias = dockerSidecarAliasOf(boundaryWith(first));
+    const secondAlias = dockerSidecarAliasOf(boundaryWith(second));
 
     expect(firstAlias).not.toBe(secondAlias);
     expect(second.noProxy).not.toContain(firstAlias);
     expect(second.forwardProxyUrl).not.toContain(firstAlias);
+  });
+});
+
+describe("sidecarAliasOverrides — the container env and the network alias name one host", () => {
+  it("hands both destinations the alias baked into the boundary", () => {
+    const alias = generateSidecarAlias();
+    const boundary = boundaryWith(buildDockerSidecarEndpoints(alias));
+
+    const overrides = sidecarAliasOverrides(boundary);
+
+    // The name the sidecar is told it answers to…
+    expect(overrides.env.SIDECAR_DNS_ALIAS).toBe(alias);
+    // …the name the container is actually published under on the run bridge…
+    expect(overrides.networkAliases).toEqual([alias]);
+    // …and the name the agent was handed in SIDECAR_URL. All three, one host.
+    expect(overrides.env.SIDECAR_DNS_ALIAS).toBe(dockerSidecarAliasOf(boundary));
+    expect(overrides.networkAliases[0]).toBe(
+      new URL(boundary.sidecarEndpoints.sidecarUrl).hostname,
+    );
+  });
+
+  it("publishes exactly one alias — no leftover cross-run name alongside it", () => {
+    const overrides = sidecarAliasOverrides(
+      boundaryWith(buildDockerSidecarEndpoints(generateSidecarAlias())),
+    );
+    expect(overrides.networkAliases).toHaveLength(1);
+    expect(overrides.networkAliases).not.toContain("sidecar");
+  });
+
+  it("contributes only SIDECAR_DNS_ALIAS to the container env", () => {
+    const overrides = sidecarAliasOverrides(
+      boundaryWith(buildDockerSidecarEndpoints(generateSidecarAlias())),
+    );
+    expect(Object.keys(overrides.env)).toEqual(["SIDECAR_DNS_ALIAS"]);
+  });
+
+  it("two boundaries never share a name in either destination", () => {
+    const a = sidecarAliasOverrides(
+      boundaryWith(buildDockerSidecarEndpoints(generateSidecarAlias())),
+    );
+    const b = sidecarAliasOverrides(
+      boundaryWith(buildDockerSidecarEndpoints(generateSidecarAlias())),
+    );
+
+    expect(a.env.SIDECAR_DNS_ALIAS).not.toBe(b.env.SIDECAR_DNS_ALIAS);
+    expect(b.networkAliases).not.toContain(a.env.SIDECAR_DNS_ALIAS);
   });
 });

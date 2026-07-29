@@ -7,6 +7,7 @@ import {
   buildRuntimeToolDefs,
   RUNTIME_TOOL_EVENTS_META_KEY,
 } from "@appstrate/core/runtime-tool-defs";
+import { withAlias } from "./helpers/sidecar-alias-env.ts";
 
 function makeDeps(overrides?: Partial<AppDeps>): AppDeps {
   return {
@@ -80,20 +81,6 @@ describe("GET /runtime-events", () => {
   const RUN_ALIAS = "s0f1e2d3c4b5a697887766554433221100";
   const okHost = { Host: `${RUN_ALIAS}:8080` };
 
-  // `fn` returns `T | PromiseLike<T>` because Hono's `app.request()` is typed
-  // `Response | Promise<Response>`.
-  async function withAlias<T>(alias: string | undefined, fn: () => T | PromiseLike<T>): Promise<T> {
-    const previous = process.env.SIDECAR_DNS_ALIAS;
-    if (alias === undefined) delete process.env.SIDECAR_DNS_ALIAS;
-    else process.env.SIDECAR_DNS_ALIAS = alias;
-    try {
-      return await fn();
-    } finally {
-      if (previous === undefined) delete process.env.SIDECAR_DNS_ALIAS;
-      else process.env.SIDECAR_DNS_ALIAS = previous;
-    }
-  }
-
   it("serves events after the cursor when a journal is wired", async () => {
     const journal = new RuntimeEventJournal();
     journal.append({ type: "log.written", message: "one" });
@@ -138,11 +125,11 @@ describe("GET /runtime-events", () => {
   it("rejects a non-loopback Host when no alias is set (fail-closed)", async () => {
     // Process orchestrator / Firecracker guest: the agent reaches the sidecar
     // over loopback, no DNS alias is published, and SIDECAR_DNS_ALIAS is unset.
-    // Anything other than localhost/127.0.0.1 must be refused — including the
-    // historical constant `sidecar`, which is no longer any container's name.
+    // Anything other than localhost/127.0.0.1 must be refused (the literal
+    // `sidecar` excepted — transitional shim, pinned below).
     const app = createApp(makeDeps({ runtimeEventJournal: new RuntimeEventJournal() }));
     const res = await withAlias(undefined, () =>
-      app.request("/runtime-events?after=0", { headers: { Host: "sidecar" } }),
+      app.request("/runtime-events?after=0", { headers: { Host: "attacker.example.com" } }),
     );
     expect(res.status).toBe(403);
 
@@ -150,5 +137,17 @@ describe("GET /runtime-events", () => {
       app.request("/runtime-events?after=0", { headers: { Host: "127.0.0.1:51123" } }),
     );
     expect(loopback.status).toBe(200);
+  });
+
+  it("SHIM (delete with LEGACY_SIDECAR_HOSTNAME): still accepts the literal `sidecar`", async () => {
+    // Not the contract — the same transitional shim `/mcp` carries, pinned
+    // here too because the drainer hits `/runtime-events` on every tool
+    // boundary and would 403 in lockstep. See `LEGACY_SIDECAR_HOSTNAME` in
+    // `mcp.ts` for why it re-opens nothing and when to delete it.
+    const app = createApp(makeDeps({ runtimeEventJournal: new RuntimeEventJournal() }));
+    const res = await withAlias(undefined, () =>
+      app.request("/runtime-events?after=0", { headers: { Host: "sidecar" } }),
+    );
+    expect(res.status).toBe(200);
   });
 });

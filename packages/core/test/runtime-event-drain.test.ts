@@ -55,19 +55,23 @@ describe("createRuntimeEventDrainer — cursor advance", () => {
     expect(urls[1]).toContain("after=2");
   });
 
-  it("sends the configured Host header", async () => {
-    let seenHeaders: RequestInit["headers"];
+  it("sets no request headers — `Host` must stay the one `fetch` derives from the URL", async () => {
+    // The sidecar's hostname is per-run, so only the URL knows it; an
+    // explicit `Host` would override the derived value and 403 against the
+    // DNS-rebinding guard. `RuntimeEventDrainerOptions` has no `headers`
+    // field for exactly that reason — this pins that the drainer does not
+    // grow one implicitly.
+    let seenInit: RequestInit | undefined;
     const fn = (async (_url: string, init?: RequestInit) => {
-      seenHeaders = init?.headers;
+      seenInit = init;
       return new Response(JSON.stringify({ events: [], cursor: 0 }), { status: 200 });
     }) as unknown as typeof fetch;
     const d = createRuntimeEventDrainer({
-      url: "http://sidecar:8088/runtime-events",
-      headers: { Host: "sidecar" },
+      url: "http://s0f1e2d3c4b5a69788:8088/runtime-events",
       fetch: fn,
     });
     await d.drain();
-    expect((seenHeaders as Record<string, string>).Host).toBe("sidecar");
+    expect(seenInit?.headers).toBeUndefined();
   });
 });
 

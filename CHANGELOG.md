@@ -229,6 +229,38 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Security
 
+- **The sidecar's DNS alias is minted per run instead of the constant
+  `sidecar`** — on the Docker topology the sidecar was published on every run's
+  bridge network under the same well-known name, so a prompt-injection payload
+  could hard-code `http://sidecar:8080/mcp` and have it resolve in any run.
+  `generateSidecarAlias()` now mints an unguessable per-run label, and all four
+  agent-facing endpoints (`SIDECAR_URL`, `MODEL_BASE_URL`, `HTTP(S)_PROXY`,
+  `NO_PROXY`) plus the container's network alias and the sidecar's own
+  `SIDECAR_DNS_ALIAS` are derived from that one value. The network boundary is
+  unchanged — `/mcp` stays deliberately unauthenticated and the per-run Docker
+  network remains the boundary — and the agent still learns the name (`NO_PROXY`
+  carries it); what changes is that the name is no longer a cross-run constant,
+  and a leaked alias is meaningless outside its own run. **Anything talking to
+  the sidecar must take its `Host` from the URL, never hard-code one**; the
+  `headers` option on `@appstrate/core`'s runtime-event drainer is removed for
+  that reason (it had no remaining caller, and its only use was setting a
+  literal `Host`, which Bun's `fetch` honours over the URL-derived value).
+  **Note for operators — platform and sidecar image must be upgraded together.**
+  The alias is a contract between two separately-built images. Compose deploys
+  get this for free: `docker-compose.yml` and every `examples/self-hosting`
+  template pin each image to the same `${APPSTRATE_VERSION}`, and the CLI
+  installer writes an explicit `APPSTRATE_VERSION` into `.env`. A **local dev
+  loop** can drift, because `SIDECAR_IMAGE` defaults to the floating tag
+  `appstrate-sidecar:latest` and an image already present locally is never
+  re-pulled. The symptom of a mismatch, in either direction, is the agent
+  failing with `MCP connect deadline exceeded after 30000ms` 30 s into the run
+  with nothing logged platform-side; the fix is `bun run docker:build:sidecar`.
+  A stale _platform_ against a current sidecar image is additionally tolerated
+  for one release by a transitional shim that still accepts `Host: sidecar`
+  (`LEGACY_SIDECAR_HOSTNAME` in `runtime-pi/sidecar/mcp.ts`) — it grants no
+  reachability, since no container answers to that name under the current
+  platform. Detail: `docs/architecture/SIDECAR.md`.
+
 - **Full-codebase security review remediation (#855, #863)** — 9 P0 + 15 P1 +
   12 systemic findings closed (SSRF `guarded-fetch` + bounded unzip hardening
   in `@appstrate/afps-shared`, among others), followed by a DRY/KISS/YAGNI

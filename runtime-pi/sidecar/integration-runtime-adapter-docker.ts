@@ -439,11 +439,59 @@ async function setupTransparentEgress(runNetwork: string): Promise<TransparentEg
   }
 }
 
+/**
+ * The per-run bridge the sidecar and its runner containers share, plus the
+ * DNS alias the sidecar answers to on it. ONE nullable value, never two: the
+ * network and the alias are meaningful only together, and the runner's
+ * `HTTPS_PROXY` (`http://<alias>:<port>`) is built from the alias inside a
+ * closure that TypeScript cannot narrow across. Carrying them as a single
+ * non-nullable pair makes `http://undefined:39472` unrepresentable.
+ */
+export interface RunPlane {
+  /** `appstrate-exec-<runId>` — created by the platform launcher. */
+  readonly network: string;
+  /** The sidecar's per-run DNS alias on that network (`SIDECAR_DNS_ALIAS`). */
+  readonly alias: string;
+}
+
+/**
+ * Decide whether this sidecar is running under a platform launcher (→ a run
+ * plane) or standalone (→ dev/test fallback: default bridge, loopback URLs).
+ *
+ * `RUN_ID` alone is the signal, because `RUN_ID` alone is what the launcher
+ * guarantees. The fallback is security-relevant — a `delivery.env` runner
+ * spawned there gets NO `--network`, so `HTTPS_PROXY=http://127.0.0.1:<port>`
+ * points at the runner itself and it has full unfiltered egress while holding
+ * real credentials in its env. That is tolerable only when no MITM/allowlist
+ * plane was ever supposed to exist. It is NOT tolerable as the silent landing
+ * spot for a half-configured launcher, so `RUN_ID` present with
+ * `SIDECAR_DNS_ALIAS` missing throws instead: no supported topology produces
+ * it, and the platform sets both unconditionally on the same env object
+ * (`DockerOrchestrator.createSidecar`).
+ *
+ * Pure and env-injected (same shape as `selectIntegrationRuntimeAdapter`) so
+ * all three branches are unit-testable without a Docker daemon.
+ */
+export function resolveRunPlane(env: NodeJS.ProcessEnv): RunPlane | null {
+  const runId = env.RUN_ID;
+  if (runId === undefined || runId === "") return null;
+  const alias = env.SIDECAR_DNS_ALIAS;
+  if (alias === undefined || alias === "") {
+    throw new Error(
+      "RUN_ID is set but SIDECAR_DNS_ALIAS is not: the platform launcher started this sidecar " +
+        "but did not tell it its DNS alias on the run network. Refusing to fall back to the " +
+        "networkless dev path, which would give integration runners unfiltered egress with " +
+        "real credentials. Check DockerOrchestrator.createSidecar.",
+    );
+  }
+  return { network: `appstrate-exec-${runId}`, alias };
+}
+
 export function createDockerIntegrationRuntimeAdapter(): IntegrationRuntimeAdapter {
   const containerIds: string[] = [];
   /** Per-spawn host temp directories holding decoded fileMounts bytes. */
   const hostTempDirsByContainer: Map<string, string[]> = new Map();
-  let runNetwork: string | null = null;
+  let runPlane: RunPlane | null = null;
   let transparentEgress: TransparentEgressInfra | null = null;
 
   return {
@@ -451,28 +499,26 @@ export function createDockerIntegrationRuntimeAdapter(): IntegrationRuntimeAdapt
 
     async prepare(runId: string): Promise<RuntimeAdapterRunContext> {
       // The per-run docker network is created by the platform launcher
-      // (`appstrate-exec-<runId>`) with the sidecar attached under a
-      // per-run DNS alias, handed to us as SIDECAR_DNS_ALIAS. The runner
-      // joins the same network so its HTTPS_PROXY resolves via Docker's
-      // embedded DNS. RUN_ID + SIDECAR_DNS_ALIAS are both set on sidecar
-      // create; when either is absent (sidecar booted outside the
-      // platform launcher's path — dev / tests), we fall back to the
-      // default bridge with loopback URLs and skip the alias path.
-      const envRunId = process.env.RUN_ID;
-      const alias = process.env.SIDECAR_DNS_ALIAS;
-      runNetwork = envRunId && alias ? `appstrate-exec-${envRunId}` : null;
+      // (`appstrate-exec-<runId>`) with the sidecar attached under a per-run
+      // DNS alias, handed to us as SIDECAR_DNS_ALIAS. The runner joins the
+      // same network so its HTTPS_PROXY resolves via Docker's embedded DNS.
+      const plane = resolveRunPlane(process.env);
+      runPlane = plane;
       // #779 — transparent egress plane for proxy-unaware HTTP clients.
       // Only meaningful on a per-run bridge (a routable sidecar IP exists).
-      transparentEgress = runNetwork ? await setupTransparentEgress(runNetwork) : null;
-      logger.info("docker integration adapter ready", { runId, runNetwork });
+      transparentEgress = plane ? await setupTransparentEgress(plane.network) : null;
+      logger.info("docker integration adapter ready", {
+        runId,
+        runNetwork: plane?.network ?? null,
+      });
       return {
         // Bind 0.0.0.0 when we have a per-run network — the runner
         // reaches the listener via the bridge. Without a network we
         // can't make the listener routable from a sibling container
         // anyway, so 127.0.0.1 is the safe default.
-        listenerBindHost: runNetwork ? "0.0.0.0" : "127.0.0.1",
+        listenerBindHost: plane ? "0.0.0.0" : "127.0.0.1",
         proxyUrlFor: (port: number) =>
-          runNetwork ? `http://${alias}:${port}` : `http://127.0.0.1:${port}`,
+          plane ? `http://${plane.alias}:${port}` : `http://127.0.0.1:${port}`,
       };
     },
 
@@ -551,14 +597,14 @@ export function createDockerIntegrationRuntimeAdapter(): IntegrationRuntimeAdapt
         `appstrate.integration=${spec.integrationId}`,
       ];
 
-      const networkFlags: string[] = runNetwork ? ["--network", runNetwork] : [];
+      const networkFlags: string[] = runPlane ? ["--network", runPlane.network] : [];
 
       // #779 — transparent egress for `delivery.env` runners (plain CONNECT
       // egress, `caCertHostPath === null`). `--dns` points the embedded DNS
       // forwarder (127.0.0.11) at the sidecar's responder, so external names
       // resolve to the sidecar's SNI-passthrough splicer and proxy-unaware
       // HTTP clients (undici/fetch, axios) get egress without cooperating.
-      // Network aliases (`sidecar`) keep resolving locally in the embedded
+      // The run's sidecar alias keeps resolving locally in the embedded
       // DNS — only external lookups are forwarded. MITM-delivery runners are
       // deliberately excluded: splicing their traffic would silently bypass
       // credential injection; their contract stays proxy-env + CA trust.

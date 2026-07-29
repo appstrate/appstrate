@@ -33,16 +33,19 @@ export interface DrainLogger {
 const NOOP_LOGGER: DrainLogger = { warn: () => {}, error: () => {} };
 
 export interface RuntimeEventDrainerOptions {
-  /** Absolute URL of the sidecar `GET /runtime-events` endpoint. */
-  url: string;
   /**
-   * Extra headers sent with every drain request. Do NOT set `Host` here: the
-   * sidecar's hostname is per-run (a random DNS alias under Docker), so only
-   * the URL knows it — `fetch` derives the right `Host` from {@link url}, and
-   * an explicit one would override it and be refused by the sidecar's
-   * DNS-rebinding guard.
+   * Absolute URL of the sidecar `GET /runtime-events` endpoint.
+   *
+   * There is deliberately no `headers` option. The only header a caller ever
+   * wanted to set here was `Host`, and setting it is always wrong: the
+   * sidecar's hostname is per-run (a random DNS alias under Docker,
+   * `localhost:<port>` under the process orchestrator), so this URL is the
+   * only thing that knows it. `fetch` derives the right `Host` from the URL;
+   * Bun honours an explicit one over the derived value, so a literal would
+   * 403 against the sidecar's DNS-rebinding guard on every drain. Rather than
+   * warn about that in prose, the option does not exist.
    */
-  headers?: Record<string, string>;
+  url: string;
   /** Injected logger; defaults to a no-op (the drainer is silent in tests). */
   logger?: DrainLogger;
   /** Injectable fetch for tests. Defaults to the global `fetch`. */
@@ -98,7 +101,6 @@ export function createRuntimeEventDrainer(
     try {
       const sep = options.url.includes("?") ? "&" : "?";
       const res = await doFetch(`${options.url}${sep}after=${cursor}`, {
-        headers: options.headers ?? {},
         signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       });
       if (!res.ok) {

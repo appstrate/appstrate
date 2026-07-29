@@ -16,6 +16,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { createApp, buildSidecarRuntimeDeps, type AppDeps } from "../app.ts";
 import { buildApiCallHost } from "./helpers/api-call-host.ts";
+import { withAlias } from "./helpers/sidecar-alias-env.ts";
 import { MAX_MCP_ENVELOPE_SIZE } from "../helpers.ts";
 
 function makeDeps(overrides?: Partial<AppDeps>): AppDeps {
@@ -91,26 +92,6 @@ describe("ALL /mcp — Host header validation (DNS-rebinding defence)", () => {
     });
   }
 
-  /**
-   * Run `fn` with `SIDECAR_DNS_ALIAS` set to `alias` (or unset when
-   * `undefined`), restoring the previous value afterwards so the surrounding
-   * suite stays order-independent. The guard reads `process.env` per call, so
-   * scoping it around the single request is enough. `fn` returns
-   * `T | PromiseLike<T>` because Hono's `app.request()` is typed
-   * `Response | Promise<Response>`.
-   */
-  async function withAlias<T>(alias: string | undefined, fn: () => T | PromiseLike<T>): Promise<T> {
-    const previous = process.env.SIDECAR_DNS_ALIAS;
-    if (alias === undefined) delete process.env.SIDECAR_DNS_ALIAS;
-    else process.env.SIDECAR_DNS_ALIAS = alias;
-    try {
-      return await fn();
-    } finally {
-      if (previous === undefined) delete process.env.SIDECAR_DNS_ALIAS;
-      else process.env.SIDECAR_DNS_ALIAS = previous;
-    }
-  }
-
   it("accepts the per-run docker bridge alias it was launched with", async () => {
     // The Docker orchestrator mints a fresh alias per run and hands it to the
     // sidecar as SIDECAR_DNS_ALIAS; the agent's Host is `<alias>:8080`. Any
@@ -130,10 +111,35 @@ describe("ALL /mcp — Host header validation (DNS-rebinding defence)", () => {
   it("rejects any non-loopback host when no alias is set (fail-closed)", async () => {
     // Process orchestrator / Firecracker guest reach the sidecar over
     // loopback and publish no DNS alias, so an unset SIDECAR_DNS_ALIAS must
-    // narrow the allowlist to localhost/127.0.0.1 — including refusing the
-    // historical constant `sidecar`, which names no container any more.
-    const res = await withAlias(undefined, () => rawMcp(createApp(makeDeps()), "sidecar:8080"));
+    // narrow the allowlist to localhost/127.0.0.1 (plus the transitional
+    // `sidecar` shim, pinned separately below).
+    const res = await withAlias(undefined, () =>
+      rawMcp(createApp(makeDeps()), "attacker.example.com:8080"),
+    );
     expect(res.status).toBe(403);
+  });
+
+  it("SHIM (delete with LEGACY_SIDECAR_HOSTNAME): still accepts the literal `sidecar`", async () => {
+    // NOT the contract — a transitional compatibility shim for an OLD
+    // platform driving a NEW sidecar image, where the sidecar is joined to
+    // the run bridge under the constant alias `sidecar` and gets no
+    // SIDECAR_DNS_ALIAS. Without it every /mcp call 403s and the run dies
+    // with a 30 s "MCP connect deadline exceeded". Under the current
+    // platform nothing on the bridge answers to that name, so this accepts
+    // requests that cannot arrive. Delete this test together with
+    // LEGACY_SIDECAR_HOSTNAME in `mcp.ts` (see its doc comment for the
+    // release), NOT by loosening it.
+    const unsetAlias = await withAlias(undefined, () =>
+      rawMcp(createApp(makeDeps()), "sidecar:8080"),
+    );
+    expect(unsetAlias.status).toBe(200);
+
+    // Accepted even when a per-run alias IS set: an old platform can also be
+    // driving a sidecar whose env carries a stale value.
+    const withOtherAlias = await withAlias("s5f3a1c9e7b2d4068159e2a7c3b0d6f84", () =>
+      rawMcp(createApp(makeDeps()), "sidecar:8080"),
+    );
+    expect(withOtherAlias.status).toBe(200);
   });
 
   it("accepts localhost with a dynamic port (process orchestrator)", async () => {

@@ -82,9 +82,19 @@ COPY runtime-pi/*.ts              runtime-pi/
 # `--minify-whitespace` only. `bun build` already drops every comment by
 # default, but it still emits a `// packages/core/src/…` banner above each
 # inlined module — a readable map of the internal source tree. Whitespace
-# minification removes those banners. Identifier mangling (full `--minify`)
-# is deliberately NOT enabled: it is a separate change with its own risk
-# (stack traces, any name-dependent runtime lookup).
+# minification removes those banners.
+#
+# Note what this already costs, so nobody re-derives it under pressure: the
+# whole 1.28 MB bundle collapses to ~126 lines, so line/column fidelity in
+# stack traces is ALREADY gone, and no sourcemap is emitted to recover it —
+# emitting one would re-embed the very sources this stage exists to keep out
+# of the image. Function names are what survives, and they are what makes a
+# trace readable. That is the accepted trade: names yes, positions no.
+#
+# Identifier mangling (full `--minify`) is deliberately NOT enabled, because
+# it spends the one thing still left — it renames those functions, and it
+# breaks any name-dependent runtime lookup (`fn.name`, class-name dispatch).
+# It is a separate change with its own risk, not a free extension of this one.
 RUN bun build runtime-pi/entrypoint.ts \
         --target=bun \
         --minify-whitespace \
