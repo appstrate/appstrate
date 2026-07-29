@@ -15,6 +15,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **`POST /api/packages/import-bundle` skipped agent integration validation
+  entirely** — it accepts `.afps-bundle`, `.afps` and `.zip` and cuts versions
+  via `postInstallPackage`, but ran none of the checks `POST /api/packages/import`
+  runs, so the bytes one route refused imported cleanly through the other and
+  froze a broken selection into an immutable version. Both the declared-but-empty
+  gate and the pre-existing tools/scopes subset checks now run there as a
+  pure-read preflight before the first write: one invalid agent aborts the whole
+  bundle, and each field error names the offending `@scope/name@version`.
+
+- **The publish-time integration check read the integration author's draft
+  manifest, not the version the agent pinned** — an agent pinned to `^1.0.0`
+  whose v1 declares `default_tools` was refused at publish the moment that
+  integration's author dropped `default_tools` from their _draft_, even though
+  the run would have resolved v1 and worked. The check now judges the manifest
+  at the version the pin resolves to, via the run's own resolver. A pin that
+  resolves to nothing is left unjudged rather than rejected — that run already
+  fails upstream with `dependency_unresolved` (422), where the error names the
+  right field.
+
+- **An integration entry that was both empty and mis-scoped reported one error
+  at a time** — `{ tools: [], scopes: ["bogus"] }` returned `no_tools_selected`
+  alone, so the author fixed it, republished, and only then learned about
+  `scope_not_in_catalog`. Both are reported in one pass.
+
 - **A model provider credential could become impossible to delete** —
   `GET /api/models` dropped every model whose credential could no longer serve
   inference (a revoked OAuth refresh token, or a stored secret that no longer
@@ -249,17 +273,42 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   The alias is a contract between two separately-built images. Compose deploys
   get this for free: `docker-compose.yml` and every `examples/self-hosting`
   template pin each image to the same `${APPSTRATE_VERSION}`, and the CLI
-  installer writes an explicit `APPSTRATE_VERSION` into `.env`. A **local dev
-  loop** can drift, because `SIDECAR_IMAGE` defaults to the floating tag
-  `appstrate-sidecar:latest` and an image already present locally is never
-  re-pulled. The symptom of a mismatch, in either direction, is the agent
-  failing with `MCP connect deadline exceeded after 30000ms` 30 s into the run
-  with nothing logged platform-side; the fix is `bun run docker:build:sidecar`.
-  A stale _platform_ against a current sidecar image is additionally tolerated
-  for one release by a transitional shim that still accepts `Host: sidecar`
-  (`LEGACY_SIDECAR_HOSTNAME` in `runtime-pi/sidecar/mcp.ts`) — it grants no
-  reachability, since no container answers to that name under the current
-  platform. Detail: `docs/architecture/SIDECAR.md`.
+  installer writes an explicit `APPSTRATE_VERSION` into `.env`. **Any
+  non-compose deployment can drift** — bare `docker run`, systemd, Kubernetes, a
+  PaaS environment panel, or `bun run dev` — because `SIDECAR_IMAGE` then falls
+  back to the floating `appstrate-sidecar:latest`, and an image already present
+  locally is never re-pulled. The symptom of a mismatch, in either direction, is
+  the agent failing with `MCP connect deadline exceeded after 30000ms` 30 s into
+  the run with nothing logged platform-side; the fix is
+  `bun run docker:build:sidecar`, or pinning `SIDECAR_IMAGE` to the platform's
+  own version. A stale _platform_ against a current sidecar image is tolerated
+  for one release by a transitional shim keyed off a single shared constant
+  (`LEGACY_SIDECAR_HOSTNAME`, deleted in `v1.0.0-beta.48`): the Host guard still
+  accepts `Host: sidecar`, and the sidecar still resolves the legacy run plane
+  (`appstrate-exec-<runId>` under the alias `sidecar`) when the platform sends
+  no `SIDECAR_DNS_ALIAS`. The shim grants no reachability — no container answers
+  to that name under the current platform. Both halves are required: the Host
+  guard alone rescued only runs declaring zero integrations, because
+  `resolveRunPlane` still aborted every run with an integration, and every
+  connect run, before the agent started. Detail:
+  `docs/architecture/SIDECAR.md`.
+
+- **The agent runtime image ships only the bundled entrypoint, not the platform
+  sources** — the image copied its own build inputs into the runtime stage
+  (every `@appstrate/*` workspace `src/` tree, `runtime-pi/mcp/`, the
+  `runtime-pi/*.ts` bootstrap files), all of which `bun build` had already
+  inlined into `dist/entrypoint.js`, the ENTRYPOINT. They were dead weight that
+  happened to be readable, and a confused agent read them: it recovered the
+  sidecar endpoints, the credential-injection design and the sentence "the agent
+  connects unauthenticated" from the source comments, then acted on that. No
+  secret was exposed and the zero-knowledge boundary held. **This is not a
+  confidentiality boundary** — the public `SECURITY.md` documents the same
+  design in more detail and the bundle still carries the endpoint string
+  literals. What changes is what the sandbox can read _without egress_: the
+  agent container reaches nothing but the sidecar, so it cannot fetch the public
+  docs. `--minify-whitespace` additionally drops the per-module
+  `// packages/core/src/…` banners, a readable map of the internal source tree
+  that survived comment stripping.
 
 - **Full-codebase security review remediation (#855, #863)** — 9 P0 + 15 P1 +
   12 systemic findings closed (SSRF `guarded-fetch` + bounded unzip hardening
@@ -278,6 +327,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   docs.
 
 ### Changed
+
+- **A declared integration that exposes no callable tool now fails, instead of
+  degrading silently** — BREAKING for agents in that state. Declaring
+  `dependencies.integrations["@scope/x"]` while selecting no tool used to boot
+  the run with nothing callable from it, announced only by a `warn` in the
+  platform run log that never reached the model's context. Observed in
+  production: with no legitimate call path the agent improvised unauthenticated
+  HTTP from bash, hunted the filesystem for credentials and probed the sidecar's
+  ports for 40 turns before a human cancelled it. The state is now refused in
+  two places. At **publish and import** (`POST /api/packages/agents/{scope}/{name}/versions`,
+  `POST /api/packages/import`, `POST /api/packages/import-bundle`) it is a
+  `validation_failed` naming `integrations_configuration.<id>.tools` — the one
+  moment the artifact is still editable, since a published version is immutable.
+  At **run boot** it aborts the run as a backstop for drafts and pre-existing
+  packages. Draft writes are deliberately NOT gated: the editor passes through
+  the empty state between adding a dependency and ticking a tool.
+
+  Blast radius is one checkbox. An absent `tools` key still inherits the
+  integration's `default_tools` (59 of the 65 system integrations declare
+  `api_call`), so only an explicit `[]`, or an integration declaring no
+  `default_tools`, is affected. Note this also corrects a documented falsehood:
+  `tools` absent and `tools: []` were described as equivalent throughout the
+  docs, the `ManifestIntegrationEntry` TSDoc and the LLM-facing MCP tool
+  instructions. They never were — absent inherits, `[]` overrides.
 
 - **Single Pi execution engine (#875)** — agent runs AND oauth-subscription
   chat (Claude Pro/Max via `claude-code`, ChatGPT via `codex`) all execute on

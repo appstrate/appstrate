@@ -38,7 +38,7 @@ import type { OrchestratorRegistration } from "./platform-types.ts";
  * attributes, bundler support). `packages/core/test/core-version.test.ts`
  * asserts it equals the published `version` field, so it cannot drift.
  */
-export const CORE_VERSION = "6.1.0";
+export const CORE_VERSION = "6.2.0";
 
 /** Metadata describing a module. */
 export interface ModuleManifest {

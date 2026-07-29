@@ -1066,44 +1066,125 @@ describe("Packages API", () => {
   describe("agent install — integration scope validation", () => {
     const integrationId = "@pkgorg/gmail-mcp-test";
 
-    async function seedGmailIntegration() {
+    function gmailIntegrationManifest(
+      overrides: Record<string, unknown> = {},
+    ): Record<string, unknown> {
+      return {
+        type: "integration",
+        schema_version: "0.1",
+        name: integrationId,
+        version: "1.0.0",
+        display_name: "Gmail (test)",
+        source: { kind: "local", server: { name: "@pkgorg/gmail-server", version: "^1.0.0" } },
+        auths: {
+          primary: {
+            type: "oauth2",
+            authorization_endpoint: "https://idp/a",
+            token_endpoint: "https://idp/t",
+            authorized_uris: ["https://api/*"],
+            delivery: {
+              http: {
+                in: "header",
+                name: "Authorization",
+                prefix: "Bearer ",
+                value: "{$credential.access_token}",
+              },
+            },
+            scope_catalog: [
+              { value: "read", label: "Read" },
+              { value: "send", label: "Send" },
+            ],
+          },
+        },
+        tools_policy: {
+          list_messages: { required_scopes: { primary: ["read"] } },
+          send_message: { required_scopes: { primary: ["send"] } },
+        },
+        ...overrides,
+      };
+    }
+
+    /**
+     * Seed the test integration as a DRAFT **and** as published `1.0.0`.
+     *
+     * The published row is load-bearing, not decoration: the declared-but-empty
+     * gate resolves `dependencies.integrations[id]` through the run's own
+     * version resolver and judges the PINNED manifest, so an integration that
+     * exists only as a draft is never judged (a `^1.0.0` pin against a
+     * never-published package is `dependency_unresolved` at run kickoff, not a
+     * tool-selection problem). Seeding both mirrors the runtime shape.
+     */
+    async function seedGmailIntegration(opts: { draftManifest?: Record<string, unknown> } = {}) {
       await seedPackage({
         id: integrationId,
         orgId: ctx.orgId,
         type: "integration",
         source: "local",
-        draftManifest: {
-          type: "integration",
-          schema_version: "0.1",
-          name: integrationId,
-          version: "1.0.0",
-          display_name: "Gmail (test)",
-          source: { kind: "local", server: { name: "@pkgorg/gmail-server", version: "^1.0.0" } },
-          auths: {
-            primary: {
-              type: "oauth2",
-              authorization_endpoint: "https://idp/a",
-              token_endpoint: "https://idp/t",
-              authorized_uris: ["https://api/*"],
-              delivery: {
-                http: {
-                  in: "header",
-                  name: "Authorization",
-                  prefix: "Bearer ",
-                  value: "{$credential.access_token}",
-                },
+        draftManifest: opts.draftManifest ?? gmailIntegrationManifest(),
+      });
+      await seedPackageVersion({
+        packageId: integrationId,
+        version: "1.0.0",
+        manifest: gmailIntegrationManifest(),
+      });
+    }
+
+    // A serverless api_call integration that declares `default_tools` — the
+    // shape the ~60 system integrations use, where adding the dependency alone
+    // already yields a callable surface.
+    const defaultsIntegrationId = "@pkgorg/with-defaults";
+
+    function defaultsIntegrationManifest(
+      overrides: Record<string, unknown> = {},
+    ): Record<string, unknown> {
+      return {
+        type: "integration",
+        schema_version: "0.1",
+        name: defaultsIntegrationId,
+        version: "1.0.0",
+        display_name: "Defaults (test)",
+        source: { kind: "none" },
+        default_tools: ["api_call"],
+        auths: {
+          primary: {
+            type: "oauth2",
+            authorization_endpoint: "https://idp/a",
+            token_endpoint: "https://idp/t",
+            authorized_uris: ["https://api/*"],
+            delivery: {
+              http: {
+                in: "header",
+                name: "Authorization",
+                prefix: "Bearer ",
+                value: "{$credential.access_token}",
               },
-              scope_catalog: [
-                { value: "read", label: "Read" },
-                { value: "send", label: "Send" },
-              ],
             },
           },
-          tools_policy: {
-            list_messages: { required_scopes: { primary: ["read"] } },
-            send_message: { required_scopes: { primary: ["send"] } },
-          },
         },
+        _meta: { "dev.appstrate/api": { auths: { primary: {} } } },
+        ...overrides,
+      };
+    }
+
+    /**
+     * Seed the defaults integration with an INDEPENDENT draft and published
+     * manifest, so a test can make the two disagree.
+     */
+    async function seedDefaultsIntegration(opts: {
+      draftManifest?: Record<string, unknown>;
+      publishedManifest?: Record<string, unknown>;
+    }) {
+      await seedPackage({
+        id: defaultsIntegrationId,
+        orgId: ctx.orgId,
+        type: "integration",
+        source: "local",
+        draftManifest: opts.draftManifest ?? defaultsIntegrationManifest(),
+      });
+      await seedPackageVersion({
+        packageId: defaultsIntegrationId,
+        version: "1.0.0",
+        manifest: opts.publishedManifest ?? defaultsIntegrationManifest(),
       });
     }
 
@@ -1356,38 +1437,7 @@ describe("Packages API", () => {
       // `tools` absent is NOT `tools: []` — it inherits `default_tools`
       // (AFPS §4.4), which is what the ~60 api_call system integrations rely
       // on. Publishing must not break the "add it and go" flow for those.
-      await seedPackage({
-        id: "@pkgorg/with-defaults",
-        orgId: ctx.orgId,
-        type: "integration",
-        source: "local",
-        draftManifest: {
-          type: "integration",
-          schema_version: "0.1",
-          name: "@pkgorg/with-defaults",
-          version: "1.0.0",
-          display_name: "Defaults (test)",
-          source: { kind: "none" },
-          default_tools: ["api_call"],
-          auths: {
-            primary: {
-              type: "oauth2",
-              authorization_endpoint: "https://idp/a",
-              token_endpoint: "https://idp/t",
-              authorized_uris: ["https://api/*"],
-              delivery: {
-                http: {
-                  in: "header",
-                  name: "Authorization",
-                  prefix: "Bearer ",
-                  value: "{$credential.access_token}",
-                },
-              },
-            },
-          },
-          _meta: { "dev.appstrate/api": { auths: { primary: {} } } },
-        },
-      });
+      await seedDefaultsIntegration({});
       await seedPackage({
         id: "@pkgorg/publish-inherits-default",
         orgId: ctx.orgId,
@@ -1399,7 +1449,7 @@ describe("Packages API", () => {
           schema_version: "0.2",
           display_name: "Inherits default",
           description: "No explicit selection",
-          dependencies: { integrations: { "@pkgorg/with-defaults": "^1.0.0" } },
+          dependencies: { integrations: { [defaultsIntegrationId]: "^1.0.0" } },
         },
         draftContent: "Prompt.",
       });
@@ -1414,6 +1464,89 @@ describe("Packages API", () => {
       );
 
       expect(res.status).toBeLessThan(300);
+    });
+
+    it("publish judges the PINNED integration manifest, not the integration author's draft", async () => {
+      // The regression this guards: the gate used to read
+      // `packages.draft_manifest`, but a run resolves the pin and boots the
+      // PUBLISHED manifest. Here v1.0.0 declares `default_tools: ["api_call"]`
+      // — so the agent's absent selection inherits a callable tool and the run
+      // works — while the integration author's CURRENT draft has dropped
+      // `default_tools`. Judging the draft 400s a publish the runtime would run
+      // perfectly.
+      const draftWithoutDefaults = defaultsIntegrationManifest();
+      delete draftWithoutDefaults.default_tools;
+      await seedDefaultsIntegration({
+        draftManifest: draftWithoutDefaults,
+        publishedManifest: defaultsIntegrationManifest(),
+      });
+      await seedPackage({
+        id: "@pkgorg/publish-pinned-defaults",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        draftManifest: {
+          name: "@pkgorg/publish-pinned-defaults",
+          version: "1.0.0",
+          type: "agent",
+          schema_version: "0.2",
+          display_name: "Pinned defaults",
+          description: "No explicit selection",
+          dependencies: { integrations: { [defaultsIntegrationId]: "^1.0.0" } },
+        },
+        draftContent: "Prompt.",
+      });
+
+      const res = await app.request(
+        "/api/packages/agents/@pkgorg/publish-pinned-defaults/versions",
+        {
+          method: "POST",
+          headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+          body: JSON.stringify({}),
+        },
+      );
+
+      if (res.status >= 300) {
+        throw new Error(`expected publish to succeed, got ${res.status}: ${await res.text()}`);
+      }
+    });
+
+    it("publish reports the empty selection AND the bad scope in one pass", async () => {
+      // `{ tools: [], scopes: ["bogus"] }` reaches the configured-entry filter
+      // on `scopes.length > 0` alone, so both checks apply. Short-circuiting
+      // after `no_tools_selected` made the author fix `tools`, republish, and
+      // only then discover `scopes` — two round-trips for one broken entry.
+      await seedGmailIntegration();
+      await seedPackage({
+        id: "@pkgorg/publish-empty-and-bad-scope",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        draftManifest: {
+          name: "@pkgorg/publish-empty-and-bad-scope",
+          version: "1.0.0",
+          type: "agent",
+          schema_version: "0.2",
+          display_name: "Empty tools, bogus scope",
+          description: "Two problems, one entry",
+          dependencies: { integrations: { [integrationId]: "^1.0.0" } },
+          integrations_configuration: { [integrationId]: { tools: [], scopes: ["bogus"] } },
+        },
+        draftContent: "Prompt.",
+      });
+
+      const res = await app.request(
+        "/api/packages/agents/@pkgorg/publish-empty-and-bad-scope/versions",
+        {
+          method: "POST",
+          headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+          body: JSON.stringify({}),
+        },
+      );
+
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { errors?: { code: string; field: string }[] };
+      const codes = (body.errors ?? []).map((e) => e.code);
+      expect(codes).toContain("no_tools_selected");
+      expect(codes).toContain("scope_not_in_catalog");
     });
 
     it("ZIP import refuses an agent whose declared integration selects no tool", async () => {

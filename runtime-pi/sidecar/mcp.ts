@@ -67,6 +67,7 @@ import {
 } from "@appstrate/runner-pi/runtime-tools";
 import {
   ABSOLUTE_MAX_RESPONSE_SIZE,
+  LEGACY_SIDECAR_HOSTNAME,
   MAX_MCP_ENVELOPE_SIZE,
   MAX_REQUEST_BODY_SIZE,
   MAX_RESPONSE_SIZE,
@@ -139,43 +140,30 @@ const API_CALL_PREFLIGHT_META: Record<string, unknown> = {
 const MAX_MCP_REQUEST_BODY_SIZE = MAX_MCP_ENVELOPE_SIZE;
 
 /**
- * TRANSITIONAL COMPATIBILITY SHIM — remove one release after the release
- * that first ships `SIDECAR_DNS_ALIAS`. (Latest tag when this was written:
- * `v1.0.0-beta.46`; so introduced in `beta.47`, delete in `beta.48`.)
- *
- * Why it exists: the platform and the sidecar ship as two separate images,
- * so an operator can end up running an OLD platform against a NEW sidecar
- * image. The common case is a stale locally-built `appstrate-sidecar:latest`
- * — `ensureImage` returns early for an image that already exists locally, so
- * a floating tag is never re-pulled. The old platform joins the sidecar to
- * the run bridge under the constant alias `sidecar` and hands the agent
- * `http://sidecar:8080`, so every `/mcp` and `/runtime-events` request
- * arrives with `Host: sidecar` — which a new sidecar, seeing no
- * `SIDECAR_DNS_ALIAS`, would fail closed on. The symptom is a 30 s "MCP
- * connect deadline exceeded" with no platform-side evidence.
- *
- * Why accepting it re-opens nothing: this allowlist only ever judges
- * requests that have ALREADY resolved a name and connected — a Host header
- * is a label on an established connection, not a way to establish one. Under
- * the new platform nothing on the run bridge answers to `sidecar`: the
- * sidecar's only network alias is the per-run one
- * (`connectContainerToNetwork(…, [alias])` in `docker-orchestrator.ts`) and
- * its container name is `appstrate-sidecar-<runId>`, so Docker's embedded
- * DNS has no `sidecar` record to hand out. A request bearing this Host
- * therefore cannot arrive at all unless an old platform put that alias
- * there — which is exactly the case being tolerated.
- */
-const LEGACY_SIDECAR_HOSTNAME = "sidecar";
-
-/**
  * Hostnames the agent uses to reach the sidecar. The process orchestrator
  * (used by `appstrate run` and tests) and the Firecracker guest expose it
  * under `localhost`/`127.0.0.1` on a *dynamic* port. The Docker bridge
  * publishes it under a **per-run** DNS alias on port 8080, handed to the
  * sidecar as `SIDECAR_DNS_ALIAS` at launch — it replaced the historical
  * constant `sidecar`, which every run shared and which a prompt-injection
- * payload could therefore hard-code. That constant is still accepted, for
- * one release only — see {@link LEGACY_SIDECAR_HOSTNAME}.
+ * payload could therefore hard-code.
+ *
+ * TRANSITIONAL COMPATIBILITY SHIM (site 1 of 2) — delete in `v1.0.0-beta.48`
+ * together with {@link LEGACY_SIDECAR_HOSTNAME} and its sibling in
+ * `integration-runtime-adapter-docker.ts`. The constant's doc comment carries
+ * the lifecycle; what matters here is what accepting it means at THIS gate.
+ * An OLD platform hands the agent `http://sidecar:8080` and sets no
+ * `SIDECAR_DNS_ALIAS`, so every `/mcp` and `/runtime-events` request arrives
+ * with `Host: sidecar`, which this gate would otherwise fail closed on —
+ * surfacing as a 30 s "MCP connect deadline exceeded" with no platform-side
+ * evidence. Accepting it re-opens nothing: this allowlist only ever judges
+ * requests that have ALREADY resolved a name and connected — a Host header
+ * is a label on an established connection, not a way to establish one. Under
+ * the new platform nothing on the run bridge answers to `sidecar` (the sole
+ * network alias is the per-run one and the container is named
+ * `appstrate-sidecar-<runId>`), so Docker's embedded DNS has no `sidecar`
+ * record to hand out and such a request cannot arrive unless an old platform
+ * put that alias there — exactly the case being tolerated.
  *
  * The MCP SDK's built-in `allowedHosts` does an exact-match check
  * including port, which fails the dynamic-port case (Host header

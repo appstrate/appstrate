@@ -155,18 +155,25 @@ describe("bootIntegrations — zero callable tools is a boot failure", () => {
     }
   });
 
-  it("keeps the diagnostic breadcrumb alongside the failure", async () => {
+  it("reports the failure on exactly one breadcrumb, not two", async () => {
     const result = await boot(zeroToolSpec());
     try {
-      const messages = result.report.breadcrumbs.map((b) => b.message);
-      // The pre-existing warn crumb (self-diagnosing trail)…
-      expect(
-        messages.some((m) => m.includes("api_call exposed 0 tools") && m.includes(INTEGRATION_ID)),
-      ).toBe(true);
-      // …plus the error crumb the failure path emits.
-      const errorCrumbs = result.report.breadcrumbs.filter((b) => b.level === "error");
-      expect(errorCrumbs).toHaveLength(1);
-      expect(errorCrumbs[0]!.message).toContain(INTEGRATION_ID);
+      // One crumb, not two. The gate runs before the serverless "ready"
+      // breadcrumb, so the failure path's `error` crumb is the only one — and
+      // it carries the full actionable sentence, so nothing is lost by the
+      // `warn` crumb no longer firing. Two crumbs would print the same
+      // sentence twice in the run log.
+      const zeroToolCrumbs = result.report.breadcrumbs.filter(
+        (b) => b.message.includes("api_call exposed 0 tools") && b.message.includes(INTEGRATION_ID),
+      );
+      expect(zeroToolCrumbs).toHaveLength(1);
+      expect(zeroToolCrumbs[0]!.level).toBe("error");
+      expect(zeroToolCrumbs[0]!.message).toContain(
+        `integrations_configuration["${INTEGRATION_ID}"].tools`,
+      );
+      // The spawn mode survives on the failure crumb (the serverless "ready"
+      // crumb that used to carry it never runs on this path).
+      expect(zeroToolCrumbs[0]!.data).toMatchObject({ kind: "serverless" });
     } finally {
       await result.shutdown();
     }

@@ -6,13 +6,13 @@
  * boot-contract gate that turns the same condition into a run failure.
  *
  * A serverless integration whose config didn't list `"api_call"` exposes zero
- * tools and is non-functional. It must surface as a `warn` with an actionable
- * message rather than the success-toned `api_call ready` breadcrumb, which is
- * indistinguishable in tone from the healthy `(N tools)` case. The breadcrumb
- * is the diagnostic trail only — the run is failed by the assertion, which
- * throws into `bootIntegrations`' per-spec catch (`failed[]` → `report.ok:
- * false` → the agent container aborts). Boot-level coverage of that path lives
- * in `integrations-boot-zero-tools.test.ts`.
+ * tools and is non-functional. `bootIntegrations` runs the assertion BEFORE
+ * the breadcrumb, so that case never reaches this helper: it throws into the
+ * per-spec catch (`failed[]` → `report.ok: false` → the agent container
+ * aborts), which emits the single `error` breadcrumb carrying the actionable
+ * sentence. Boot-level coverage of that path lives in
+ * `integrations-boot-zero-tools.test.ts`; what is left here is the success
+ * wording and the gate's own contract.
  */
 
 import { describe, it, expect } from "bun:test";
@@ -40,31 +40,11 @@ function serverlessSpec(): IntegrationSpawnSpec {
 }
 
 describe("pushServerlessReadyBreadcrumb", () => {
-  it("warns when 0 tools were exposed", () => {
-    const breadcrumbs: IntegrationBootBreadcrumb[] = [];
-    pushServerlessReadyBreadcrumb(serverlessSpec(), 0, 12, breadcrumbs);
-
-    expect(breadcrumbs).toHaveLength(1);
-    expect(breadcrumbs[0]!.level).toBe("warn");
-    expect(breadcrumbs[0]!.message).toContain("api_call exposed 0 tools");
-    expect(breadcrumbs[0]!.message).toContain(
-      'integrations_configuration["@tractr/google-drive"].tools',
-    );
-    expect(breadcrumbs[0]!.data).toMatchObject({
-      integrationId: "@tractr/google-drive",
-      kind: "serverless",
-      durationMs: 12,
-      toolCount: 0,
-    });
-  });
-
-  it("never uses the success-toned 'ready' wording for 0 tools", () => {
-    const breadcrumbs: IntegrationBootBreadcrumb[] = [];
-    pushServerlessReadyBreadcrumb(serverlessSpec(), 0, 5, breadcrumbs);
-
-    expect(breadcrumbs[0]!.message).not.toContain("ready");
-  });
-
+  // No zero-tool case here by design: the gate runs first, so this helper is
+  // only ever reached with `toolCount > 0`. The zero path is a run FAILURE and
+  // is covered against `bootIntegrations` in
+  // `integrations-boot-zero-tools.test.ts` — asserting it here again would pin
+  // a branch the boot path can no longer take.
   it("emits an info 'ready' breadcrumb for a single tool (singular)", () => {
     const breadcrumbs: IntegrationBootBreadcrumb[] = [];
     pushServerlessReadyBreadcrumb(serverlessSpec(), 1, 8, breadcrumbs);

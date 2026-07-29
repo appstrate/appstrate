@@ -19,6 +19,7 @@ import { posix, join } from "node:path";
 import { SubprocessTransport } from "@appstrate/mcp-transport";
 
 import { logger } from "./logger.ts";
+import { LEGACY_SIDECAR_HOSTNAME } from "./helpers.ts";
 import type { IntegrationSpawnSpec } from "./integrations-boot.ts";
 import { createIntegrationDnsResponder } from "./integration-dns-responder.ts";
 import { createTransparentEgressListener } from "./integration-transparent-listener.ts";
@@ -450,7 +451,11 @@ async function setupTransparentEgress(runNetwork: string): Promise<TransparentEg
 export interface RunPlane {
   /** `appstrate-exec-<runId>` — created by the platform launcher. */
   readonly network: string;
-  /** The sidecar's per-run DNS alias on that network (`SIDECAR_DNS_ALIAS`). */
+  /**
+   * The DNS name the sidecar answers to on that network: the per-run
+   * `SIDECAR_DNS_ALIAS`, or `LEGACY_SIDECAR_HOSTNAME` on a pre-`beta.47`
+   * platform (see {@link resolveRunPlane}).
+   */
   readonly alias: string;
 }
 
@@ -458,33 +463,62 @@ export interface RunPlane {
  * Decide whether this sidecar is running under a platform launcher (→ a run
  * plane) or standalone (→ dev/test fallback: default bridge, loopback URLs).
  *
- * `RUN_ID` alone is the signal, because `RUN_ID` alone is what the launcher
- * guarantees. The fallback is security-relevant — a `delivery.env` runner
- * spawned there gets NO `--network`, so `HTTPS_PROXY=http://127.0.0.1:<port>`
- * points at the runner itself and it has full unfiltered egress while holding
- * real credentials in its env. That is tolerable only when no MITM/allowlist
- * plane was ever supposed to exist. It is NOT tolerable as the silent landing
- * spot for a half-configured launcher, so `RUN_ID` present with
- * `SIDECAR_DNS_ALIAS` missing throws instead: no supported topology produces
- * it, and the platform sets both unconditionally on the same env object
- * (`DockerOrchestrator.createSidecar`).
+ * `RUN_ID` alone is the signal, because `RUN_ID` alone is what every launcher
+ * guarantees — past and present. The fallback is security-relevant: a
+ * `delivery.env` runner spawned there gets NO `--network`, so
+ * `HTTPS_PROXY=http://127.0.0.1:<port>` points at the runner itself and it has
+ * full unfiltered egress while holding real credentials in its env. That is
+ * tolerable only when no MITM/allowlist plane was ever supposed to exist, so
+ * `null` stays reachable ONLY from an absent/empty `RUN_ID` — a launched run
+ * never lands there, whatever else is set.
+ *
+ * States, exhaustively:
+ *
+ * | `RUN_ID`  | `SIDECAR_DNS_ALIAS` | outcome                                  |
+ * | --------- | ------------------- | ---------------------------------------- |
+ * | unset/""  | anything            | `null` — no launcher, loopback is honest |
+ * | set       | set                 | current plane, per-run alias             |
+ * | set       | unset               | SHIM: legacy plane, alias `sidecar`      |
+ * | set       | ""                  | throws — unknowable, see below           |
+ *
+ * The `unset` row is not a degradation: it is the topology a pre-`beta.47`
+ * platform actually builds. That platform creates the same
+ * `appstrate-exec-<runId>` bridge and joins the sidecar to it under the
+ * constant alias — `connectContainerToNetwork(boundary.id, containerId,
+ * ["sidecar"])` — so {@link LEGACY_SIDECAR_HOSTNAME} is the sidecar's real
+ * name there, and returning it keeps runners on the MITM/allowlist plane.
+ *
+ * An `SIDECAR_DNS_ALIAS` that is present but EMPTY still throws, because no
+ * launcher produces it: the old platform never sets the var (absent, not
+ * empty) and the current one always sets it to a minted `s`+32-hex alias.
+ * Empty means something mangled the env between launcher and sidecar, and
+ * there is no evidence left to pick a plane from — guessing one would be
+ * inventing it. Failing loud there is the same call the throw was written
+ * for; only the "unset" state moved out from under it, because that state
+ * turned out to be knowable.
  *
  * Pure and env-injected (same shape as `selectIntegrationRuntimeAdapter`) so
- * all three branches are unit-testable without a Docker daemon.
+ * every branch is unit-testable without a Docker daemon.
  */
 export function resolveRunPlane(env: NodeJS.ProcessEnv): RunPlane | null {
   const runId = env.RUN_ID;
   if (runId === undefined || runId === "") return null;
+  const network = `appstrate-exec-${runId}`;
   const alias = env.SIDECAR_DNS_ALIAS;
-  if (alias === undefined || alias === "") {
+  // TRANSITIONAL COMPATIBILITY SHIM (site 2 of 2) — delete in `v1.0.0-beta.48`
+  // together with LEGACY_SIDECAR_HOSTNAME and its sibling in `mcp.ts`, at
+  // which point this branch goes back to throwing the error below.
+  if (alias === undefined) return { network, alias: LEGACY_SIDECAR_HOSTNAME };
+  if (alias === "") {
     throw new Error(
-      "RUN_ID is set but SIDECAR_DNS_ALIAS is not: the platform launcher started this sidecar " +
-        "but did not tell it its DNS alias on the run network. Refusing to fall back to the " +
-        "networkless dev path, which would give integration runners unfiltered egress with " +
-        "real credentials. Check DockerOrchestrator.createSidecar.",
+      "RUN_ID is set but SIDECAR_DNS_ALIAS is not usable — it is present but empty, which no " +
+        "launcher produces (the current platform mints one, an older one sets none at all). " +
+        "Refusing to guess a run plane, and refusing to fall back to the networkless dev path, " +
+        "which would give integration runners unfiltered egress with real credentials. " +
+        "Check DockerOrchestrator.createSidecar.",
     );
   }
-  return { network: `appstrate-exec-${runId}`, alias };
+  return { network, alias };
 }
 
 export function createDockerIntegrationRuntimeAdapter(): IntegrationRuntimeAdapter {

@@ -1101,12 +1101,27 @@ export function hiddenToolsForNativeUpstream(
  *    the one to fix: the dependency was declared but nothing was picked, or
  *    what was picked no longer exists upstream.
  */
+/**
+ * Whether the spec's entire surface is the in-process `api_call` server — no
+ * runner container, no remote MCP. The resolver signals this with
+ * `sourceKind: "none"`, and also leaves `manifest.server` undefined for it, so
+ * either is sufficient; both are checked because a hand-written spec in a test
+ * has historically set only one.
+ *
+ * Named because the branch drives three separate decisions (which boot path
+ * runs, how a zero-tool failure is phrased, and the `kind` a breadcrumb
+ * reports) and they must not drift apart.
+ */
+function isServerlessSpec(spec: IntegrationSpawnSpec): boolean {
+  return spec.sourceKind === "none" || !spec.manifest.server;
+}
+
 function zeroToolReason(spec: IntegrationSpawnSpec): string {
   const key = `integrations_configuration["${spec.integrationId}"].tools`;
   if (spec.toolAllowlist === undefined) {
     return `0 tools registered under tools: "*" — nothing callable. The agent selected every upstream tool, so ${key} is not the problem: integration ${spec.integrationId} advertised no tool, or its manifest's hidden_tools suppressed all of them.`;
   }
-  return spec.sourceKind === "none" || !spec.manifest.server
+  return isServerlessSpec(spec)
     ? `api_call exposed 0 tools — nothing callable. Check ${key} (a serverless integration must list "api_call").`
     : `0 tools registered — nothing callable. Check ${key} (it must list at least one tool this integration advertises).`;
 }
@@ -1135,16 +1150,16 @@ export function assertIntegrationExposesTools(spec: IntegrationSpawnSpec, toolCo
 }
 
 /**
- * Breadcrumb for the serverless (`sourceKind: "none"`) branch, where the
- * in-process `api_call` server is the integration's entire surface.
+ * Success breadcrumb for the serverless (`sourceKind: "none"`) branch, where
+ * the in-process `api_call` server is the integration's entire surface.
  *
- * When `toolCount === 0` the integration is non-functional: the config
- * (`integrations_configuration[id].tools`) didn't list `"api_call"`, so the
- * resolver filtered everything and nothing is callable. Emit a `warn` with an
- * actionable message instead of a success-toned "ready" breadcrumb — the
- * breadcrumb is the diagnostic trail; the run is failed separately by
- * {@link assertIntegrationExposesTools}. Keep the `ready (N tools)` wording
- * only for `N > 0`.
+ * Only ever called with `toolCount > 0`: {@link bootIntegrations} runs
+ * {@link assertIntegrationExposesTools} first, so a zero-tool serverless
+ * integration throws before reaching here and the failure path emits the one
+ * `error` breadcrumb carrying {@link zeroToolReason}. This helper used to
+ * carry its own zero branch, which printed the same failure twice — once as
+ * `warn` here, once as `error` from the catch. Move the gate and you must
+ * bring a zero case back, or the run log will read `ready (0 tools)`.
  */
 export function pushServerlessReadyBreadcrumb(
   spec: IntegrationSpawnSpec,
@@ -1152,19 +1167,6 @@ export function pushServerlessReadyBreadcrumb(
   durationMs: number,
   breadcrumbs: IntegrationBootBreadcrumb[],
 ): void {
-  if (toolCount === 0) {
-    breadcrumbs.push({
-      message: `${spec.integrationId}: ${zeroToolReason(spec)}`,
-      level: "warn",
-      data: {
-        integrationId: spec.integrationId,
-        kind: "serverless",
-        durationMs,
-        toolCount: 0,
-      },
-    });
-    return;
-  }
   breadcrumbs.push({
     message: `${spec.integrationId}: api_call ready (${durationMs}ms, ${toolCount} tool${toolCount === 1 ? "" : "s"})`,
     level: "info",
@@ -1462,16 +1464,19 @@ export async function bootIntegrations(
 
       // Serverless integration (api_call-only, no MCP server) — the in-process
       // api_call server is its entire surface (registered as the primary).
-      // Dispatch on `sourceKind === "none"`; the resolver also leaves
-      // `manifest.server` undefined for this branch.
-      if (spec.sourceKind === "none" || !spec.manifest.server) {
+      if (isServerlessSpec(spec)) {
         const apiCallToolCount = await attachApiCall();
         const ms = Math.round(performance.now() - specStart);
-        // Breadcrumb first (diagnostic trail), then the contract gate — a
-        // zero-tool integration throws into the catch below and lands on
-        // `failed[]` instead of on `spawned[]`.
-        pushServerlessReadyBreadcrumb(spec, apiCallToolCount, ms, breadcrumbs);
+        // Contract gate FIRST, breadcrumb second. A zero-tool integration
+        // throws into the catch below, which records `zeroToolReason(spec)` —
+        // the full actionable sentence — on `failed[]` AND as the `error`
+        // breadcrumb. Pushing the `warn` crumb before the throw printed that
+        // same sentence twice in one run log, once at `warn` and once at
+        // `error`, for a single failure. Nothing is lost by dropping the
+        // `warn`: the `error` crumb carries the identical diagnosis and the
+        // spec lands on `failed[]` either way.
         assertIntegrationExposesTools(spec, apiCallToolCount);
+        pushServerlessReadyBreadcrumb(spec, apiCallToolCount, ms, breadcrumbs);
         spawned.push({
           integrationId: spec.integrationId,
           namespace: spec.namespace,
@@ -1664,7 +1669,16 @@ export async function bootIntegrations(
       breadcrumbs.push({
         message: `${spec.integrationId}: failed after ${ms}ms — ${msg}${stderrSuffix}`,
         level: "error",
-        data: { integrationId: spec.integrationId, durationMs: ms, error: msg },
+        data: {
+          integrationId: spec.integrationId,
+          // Same `kind` the success crumbs carry, so a failure is filterable by
+          // spawn mode too. Load-bearing for the serverless zero-tool case:
+          // that path now fails before its own breadcrumb runs, and this is
+          // where the mode survives.
+          kind: isServerlessSpec(spec) ? "serverless" : "local",
+          durationMs: ms,
+          error: msg,
+        },
       });
     }
   }

@@ -61,8 +61,10 @@ describe("createRuntimeEventDrainer — cursor advance", () => {
     // DNS-rebinding guard. `RuntimeEventDrainerOptions` has no `headers`
     // field for exactly that reason — this pins that the drainer does not
     // grow one implicitly.
+    let calls = 0;
     let seenInit: RequestInit | undefined;
     const fn = (async (_url: string, init?: RequestInit) => {
+      calls += 1;
       seenInit = init;
       return new Response(JSON.stringify({ events: [], cursor: 0 }), { status: 200 });
     }) as unknown as typeof fetch;
@@ -71,6 +73,11 @@ describe("createRuntimeEventDrainer — cursor advance", () => {
       fetch: fn,
     });
     await d.drain();
+    // Pin that the fetch HAPPENED first: `seenInit?.headers` is also
+    // `undefined` when `doFetch` was never called, so on its own the
+    // assertion below passes vacuously against a drainer that stopped
+    // issuing requests at all.
+    expect(calls).toBe(1);
     expect(seenInit?.headers).toBeUndefined();
   });
 });

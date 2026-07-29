@@ -15,6 +15,36 @@ export type { HostResolver } from "./ssrf.ts";
 // Accepts both simple IDs (gmail) and scoped IDs (@appstrate/gmail)
 export const INTEGRATION_ID_RE = /^(@[a-z0-9][a-z0-9-]*\/)?[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
 
+/**
+ * TRANSITIONAL COMPATIBILITY SHIM — delete in `v1.0.0-beta.48`, one release
+ * after `beta.47` first ships `SIDECAR_DNS_ALIAS`.
+ *
+ * The cross-run constant the platform used to publish the sidecar under on
+ * the per-run bridge, before the alias was minted per run. It is a property
+ * of the OLD platform, which is why it is a constant and not an env read:
+ * `docker-orchestrator.ts` on the previous release calls
+ * `connectContainerToNetwork(boundary.id, containerId, ["sidecar"])` and hands
+ * the agent `http://sidecar:8080`, while setting no `SIDECAR_DNS_ALIAS` at all.
+ *
+ * The platform and the sidecar ship as two separately-built images, so an
+ * operator can run an OLD platform against a NEW sidecar image — the common
+ * case being a stale locally-built `appstrate-sidecar:latest`, which
+ * `ensureImage` never re-pulls once present. For one release the new sidecar
+ * therefore keeps working on that topology, which takes TWO co-dependent
+ * tolerances, both keyed off this constant so they cannot be deleted apart:
+ *
+ *   1. `isAllowedSidecarHostname` (`mcp.ts`) accepts `Host: sidecar` on
+ *      `/mcp` + `/runtime-events`, so the agent's requests are not 403'd.
+ *   2. `resolveRunPlane` (`integration-runtime-adapter-docker.ts`) returns
+ *      this alias as the sidecar's name on the run bridge, so integration
+ *      runners can still reach the MITM/allowlist plane.
+ *
+ * Deleting only (1) leaves every run that declares an integration broken
+ * while the shim claims to cover it; deleting only (2) breaks every run.
+ * Delete both, and this constant, in the same commit.
+ */
+export const LEGACY_SIDECAR_HOSTNAME = "sidecar";
+
 // Default cap on upstream response bytes the sidecar buffers before
 // returning them inline. Set generously enough that typical provider
 // responses (Drive metadata listings, Gmail thread snippets, paginated

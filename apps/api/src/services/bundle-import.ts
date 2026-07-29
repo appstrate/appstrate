@@ -43,7 +43,9 @@ import { parsePackageZip } from "@appstrate/core/zip";
 import { db } from "@appstrate/db/client";
 import { packages, packageVersions } from "@appstrate/db/schema";
 import { and, eq, notExists, sql } from "drizzle-orm";
-import { conflict, invalidRequest } from "../lib/errors.ts";
+import { conflict, invalidRequest, validationFailed } from "../lib/errors.ts";
+import type { ValidationFieldError } from "../lib/errors.ts";
+import { validateAgentIntegrationSelections } from "./integration-scope-validation.ts";
 import { isSystemPackage } from "./system-packages.ts";
 import { postInstallPackage } from "./post-install-package.ts";
 import { buildBundleFromUploadedAfps, type BundleAssemblyScope } from "./bundle-assembly.ts";
@@ -491,8 +493,64 @@ export async function importBundle(
 }
 
 /**
+ * Refuse a bundle carrying an agent whose declared integration selects no
+ * callable tool — the SAME gate `POST /api/packages/import` and the publish
+ * route apply (`requireCallableTools`). Without it `/import-bundle` was a
+ * verbatim bypass: the identical `.afps` bytes refused by `/import` imported
+ * cleanly here, and `postInstallPackage` froze the broken selection into an
+ * immutable version.
+ *
+ * ALL-OR-NOTHING, and preflight. One invalid agent aborts the WHOLE bundle:
+ * the root is what the caller asked to install, and "the bundle minus its root"
+ * (or minus a sub-agent a sibling depends on) is not a smaller success, it is a
+ * half-installed set with nothing attached to the part that went missing.
+ * Running it here — pure reads, before `detectBundleConflicts` and before the
+ * first write — means the refusal costs no rollback.
+ *
+ * Every package is offered to the validator; non-agents short-circuit inside it
+ * on the `type` check, so this needs no filter of its own beyond the system
+ * skip {@link importBundle} already applies.
+ *
+ * KNOWN RESIDUAL: an integration carried BY this bundle and not yet in the org
+ * registry is invisible to the validator (which reads the DB), so a
+ * self-contained foreign bundle is not judged on that integration. That is the
+ * validator's documented "integration not installed → skip silently" contract,
+ * identical on `POST /import`, not a hole this path opens. Such a run is still
+ * refused twice downstream — readiness (`integration_not_active` /
+ * `not_connected`) and the sidecar boot gate `assertIntegrationExposesTools`.
+ *
+ * Trade-off accepted: an already-present version is re-validated too, so
+ * re-importing a bundle that carries a pre-gate broken agent now fails instead
+ * of no-op'ing. That is the same rule `/import` has always applied to a
+ * re-import, and the artifact it refuses was never runnable.
+ */
+async function assertBundleAgentsExposeCallableTools(bundle: Bundle, orgId: string): Promise<void> {
+  const errors: ValidationFieldError[] = [];
+  for (const [identity, pkg] of bundle.packages) {
+    const parsed = parsePackageIdentity(identity);
+    // System packages are reused verbatim, never written — same skip as the
+    // import loop, so the gate cannot refuse a bundle over bytes it will not
+    // even touch.
+    if (parsed && isSystemPackage(parsed.packageId)) continue;
+    const packageErrors = await validateAgentIntegrationSelections({
+      manifest: pkg.manifest as unknown as Record<string, unknown>,
+      orgId,
+      requireCallableTools: true,
+    });
+    // `field` stays the agent-manifest key the author has to edit; a bundle
+    // carries MANY manifests, so the offending package's identity is prefixed
+    // onto the message — the same `${identity}: …` convention this file's
+    // install warnings use.
+    for (const e of packageErrors) {
+      errors.push({ ...e, message: `${identity}: ${e.message}` });
+    }
+  }
+  if (errors.length > 0) throw validationFailed(errors);
+}
+
+/**
  * End-to-end import entry point used by the `POST /api/packages/import-bundle`
- * route. Composes read → detect conflicts → import.
+ * route. Composes read → gate → detect conflicts → import.
  */
 export async function handleImportBundle(
   bytes: Uint8Array,
@@ -500,6 +558,7 @@ export async function handleImportBundle(
   userId: string,
 ): Promise<ImportBundleResult> {
   const bundle = await readOrBuildBundle(bytes, scope);
+  await assertBundleAgentsExposeCallableTools(bundle, scope.orgId);
   const conflicts = await detectBundleConflicts(bundle, scope);
   if (conflicts.length > 0) {
     const summary = conflicts

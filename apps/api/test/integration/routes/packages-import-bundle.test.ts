@@ -32,9 +32,12 @@ import { and, eq } from "drizzle-orm";
 import * as storage from "@appstrate/db/storage";
 import { computeIntegrity } from "@appstrate/core/integrity";
 import {
+  buildBundleFromCatalog,
+  extractRootFromAfps,
   readBundleFromBuffer,
   writeBundleToBuffer,
   type Bundle,
+  type PackageCatalog,
 } from "@appstrate/afps-runtime/bundle";
 
 const BUCKET = "agent-packages";
@@ -761,5 +764,156 @@ describe("POST /api/packages/import-bundle — import", () => {
     // Integrity must match — the bundle contract guarantees this
     // across instances when the package bytes are identical.
     expect(reimported.integrity).toBe(orig.integrity);
+  });
+
+  // ── Declared-but-empty integration gate ─────────────────────────────
+  //
+  // `/import-bundle` used to run NO integration-selection check at all, so an
+  // agent refused by `POST /api/packages/import` imported cleanly here and
+  // `postInstallPackage` froze the broken selection into an immutable version.
+  // The gate now runs as a pure-read preflight in `handleImportBundle`.
+
+  const gateIntegrationId = "@importorg/gate-integration";
+
+  function gateIntegrationManifest(): Record<string, unknown> {
+    return {
+      type: "integration",
+      schema_version: "0.1",
+      name: gateIntegrationId,
+      version: "1.0.0",
+      display_name: "Gate (test)",
+      source: { kind: "none" },
+      // No `default_tools`: an absent selection resolves to empty, exactly
+      // like the explicit `tools: []` the failing case uses.
+      auths: {
+        primary: {
+          type: "oauth2",
+          authorization_endpoint: "https://idp/a",
+          token_endpoint: "https://idp/t",
+          authorized_uris: ["https://api/*"],
+          delivery: {
+            http: {
+              in: "header",
+              name: "Authorization",
+              prefix: "Bearer ",
+              value: "{$credential.access_token}",
+            },
+          },
+        },
+      },
+      tools_policy: { list_messages: {} },
+      _meta: { "dev.appstrate/api": { auths: { primary: {} } } },
+    };
+  }
+
+  /**
+   * Seed the integration as a draft AND as published `1.0.0` — the gate judges
+   * the manifest the agent's `^1.0.0` pin resolves to, so a draft-only package
+   * is deliberately never judged.
+   */
+  async function seedGateIntegration(): Promise<void> {
+    await seedPackage({
+      id: gateIntegrationId,
+      orgId: ctx.orgId,
+      type: "integration",
+      source: "local",
+      draftManifest: gateIntegrationManifest(),
+    });
+    await seedPackageVersion({
+      packageId: gateIntegrationId,
+      version: "1.0.0",
+      manifest: gateIntegrationManifest(),
+    });
+  }
+
+  /**
+   * Wrap ONE agent `.afps` into a valid single-package `.afps-bundle`.
+   * `depTypes: []` suppresses the transitive walk, so the catalog is never
+   * consulted and the bundle carries exactly the agent under test — the gate,
+   * not dependency resolution, is what this exercises.
+   */
+  async function bundleOfOne(manifest: Record<string, unknown>): Promise<Uint8Array> {
+    const afps = buildAfps({ manifest, content: "Prompt.", type: "agent" });
+    const unusedCatalog: PackageCatalog = {
+      resolve: async () => {
+        throw new Error("catalog must not be consulted with depTypes: []");
+      },
+      fetch: async () => {
+        throw new Error("catalog must not be consulted with depTypes: []");
+      },
+    };
+    const bundle = await buildBundleFromCatalog(extractRootFromAfps(afps), unusedCatalog, {
+      depTypes: [],
+    });
+    return writeBundleToBuffer(bundle);
+  }
+
+  function gatedAgentManifest(
+    id: string,
+    config: Record<string, unknown> | undefined,
+  ): Record<string, unknown> {
+    return {
+      name: id,
+      version: "1.0.0",
+      type: "agent",
+      schema_version: "0.2",
+      display_name: "Gated",
+      description: "Declares an integration",
+      dependencies: { integrations: { [gateIntegrationId]: "^1.0.0" } },
+      ...(config ? { integrations_configuration: { [gateIntegrationId]: config } } : {}),
+    };
+  }
+
+  it("refuses a bundle whose agent declares an integration selecting no tool", async () => {
+    await seedGateIntegration();
+    const agentId = "@importorg/bundle-empty-tools";
+    const bytes = await bundleOfOne(gatedAgentManifest(agentId, { tools: [] }));
+
+    const form = new FormData();
+    form.append("file", new Blob([bytes]), "broken.afps-bundle");
+    const res = await app.request("/api/packages/import-bundle", {
+      method: "POST",
+      body: form,
+      headers: authHeaders(ctx),
+    });
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as {
+      errors?: { code: string; field: string; message: string }[];
+    };
+    expect(body.errors?.[0]?.code).toBe("no_tools_selected");
+    expect(body.errors?.[0]?.field).toBe(`integrations_configuration.${gateIntegrationId}.tools`);
+    // The bundle carries many manifests — the message must name WHICH package.
+    expect(body.errors?.[0]?.message).toStartWith(`${agentId}@1.0.0:`);
+
+    // All-or-nothing, and preflight: nothing was written.
+    const rows = await db
+      .select({ id: packages.id })
+      .from(packages)
+      .where(eq(packages.id, agentId));
+    expect(rows).toHaveLength(0);
+  });
+
+  it("imports the same bundle once a tool is selected", async () => {
+    // Negative control — the gate must refuse the empty selection, not every
+    // agent that declares an integration.
+    await seedGateIntegration();
+    const agentId = "@importorg/bundle-with-tool";
+    const bytes = await bundleOfOne(gatedAgentManifest(agentId, { tools: ["list_messages"] }));
+
+    const form = new FormData();
+    form.append("file", new Blob([bytes]), "ok.afps-bundle");
+    const res = await app.request("/api/packages/import-bundle", {
+      method: "POST",
+      body: form,
+      headers: authHeaders(ctx),
+    });
+
+    if (res.status !== 201) {
+      throw new Error(`unexpected ${res.status}: ${await res.text()}`);
+    }
+    const body = (await res.json()) as { imported: Array<{ identity: string; status: string }> };
+    expect(body.imported).toHaveLength(1);
+    expect(body.imported[0]!.status).toBe("inserted");
   });
 });
