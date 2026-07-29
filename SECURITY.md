@@ -327,6 +327,14 @@ USER pi
 USER bun
 ```
 
+### Image contents — bundle only, no platform sources
+
+The agent image ships a single pre-bundled `/runtime/dist/entrypoint.js`. The TypeScript sources it was built from (`runtime-pi/*.ts`, `runtime-pi/mcp/`, and the `@appstrate/*` workspace packages) exist only in the build stage and are not copied into the runtime stage, so no readable platform source is reachable from inside the sandbox.
+
+**This is not a confidentiality boundary, and nothing here depends on it being one.** This document is public and describes the sidecar design in more detail than those comments ever did, and the minified bundle still contains the endpoint string literals (`/integrations/boot-report`, `/mcp`, `SIDECAR_URL`). Anyone auditing Appstrate can read all of it.
+
+What it changes is what an agent can read _without leaving the sandbox_. The agent container has no egress except through the sidecar, so it cannot fetch this page. Previously a confused agent that read `/runtime` could reconstruct the credential-injection design from source comments and act on that reconstruction. Removing the prose rationale is defence in depth against agent confusion and low-effort prompt injection — it removes a convenient local hint, not a secret.
+
 ### Resource limits
 
 Docker resource constraints prevent resource exhaustion attacks:
