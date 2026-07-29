@@ -11,10 +11,10 @@
  * present-but-nonsensical pair.
  */
 
-import { describe, it, expect, beforeEach, beforeAll, afterAll } from "bun:test";
-import { eq } from "drizzle-orm";
+import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll } from "bun:test";
+import { and, eq, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { runs } from "@appstrate/db/schema";
+import { runLogs, runs } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
@@ -261,6 +261,16 @@ describe("run context budget — write path (prepareAndExecuteRun)", () => {
   });
 
   beforeEach(async () => {
+    // Drain FIRST, truncate SECOND. `truncateAll()` is a `DELETE FROM` sweep
+    // over every table; a background run still writing `runs`/`run_logs` holds
+    // FK row locks on `packages`/`organizations` that the sweep wants to
+    // delete, and Postgres breaks the resulting cycle with a 40P01 deadlock.
+    // Draining here as WELL as in `afterEach` is deliberate belt-and-braces:
+    // `afterEach` is the primary net (it runs even when the test body threw
+    // before its last line), but bun aborts a hook that exceeds the per-test
+    // timeout, and an aborted `afterEach` would otherwise hand a live run to
+    // this sweep. A no-op when the drain already happened.
+    await drainLaunchedRuns();
     await truncateAll();
     ctx = await createTestContext({ orgSlug: "ctxorg" });
     await seedAgent({
@@ -276,6 +286,15 @@ describe("run context budget — write path (prepareAndExecuteRun)", () => {
       draftContent: "Do the thing.",
     });
     await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, RUNNABLE);
+  });
+
+  // Primary drain. Unlike a trailing `await settle()` on the last line of each
+  // test, this runs whether the test passed, failed an assertion, or threw —
+  // so a single red test can no longer hand its still-writing background run
+  // to the next test's `truncateAll()` and cascade the whole file into
+  // deadlocks.
+  afterEach(async () => {
+    await drainLaunchedRuns();
   });
 
   /**
@@ -297,7 +316,7 @@ describe("run context budget — write path (prepareAndExecuteRun)", () => {
       label: `${label} credential`,
       providerId: "openai-compatible",
       apiKey: "sk-test-not-a-real-key",
-      baseUrl: "https://llm.example.com/v1",
+      baseUrlOverride: "https://llm.example.com/v1",
     });
     const modelDbId = await createOrgModel(
       ctx.orgId,
@@ -310,6 +329,15 @@ describe("run context budget — write path (prepareAndExecuteRun)", () => {
     await setDefaultModel(ctx.orgId, modelDbId);
   }
 
+  /**
+   * Run ids launched by the CURRENT test, awaiting drain.
+   *
+   * Scoped to the describe (not the test body) so `afterEach` can drain a run
+   * whose test threw before reaching its own last line — the exact case the
+   * old trailing `await settle()` silently skipped.
+   */
+  const launchedRunIds: string[] = [];
+
   async function trigger(): Promise<string> {
     const res = await app.request(`/api/agents/${RUNNABLE}/run?version=draft`, {
       method: "POST",
@@ -318,13 +346,81 @@ describe("run context budget — write path (prepareAndExecuteRun)", () => {
     });
     expect(res.status).toBe(201);
     const body = (await res.json()) as { id: string };
+    // Recorded BEFORE any caller assertion can throw. `prepareAndExecuteRun`
+    // calls `trackRun()` synchronously (the `runWithSpan` facade is a plain
+    // `fn()` passthrough with no provider installed), so the run is already in
+    // the in-flight map by the time this 201 is read.
+    launchedRunIds.push(body.id);
     return body.id;
   }
 
-  /** The fake workload exits 0 immediately; let the terminal settle. */
-  async function settle(): Promise<void> {
-    await waitForInFlight(10_000);
-    await Bun.sleep(300);
+  /**
+   * How many `run_logs` rows the platform writes DETACHED (`void appendRunLog`)
+   * on a launch: one in `run-pipeline.ts` ("run created - starting containers")
+   * and one in `run-launcher/execute-background.ts` ("containers starting").
+   * Both tag `data` with `{ platform: true }`; every other write on this path
+   * is awaited inside `executeAgentInBackground`, so these two are the only DB
+   * writes that can outlive the in-flight tracker.
+   *
+   * If the platform ever adds or drops a detached breadcrumb, the drain below
+   * fails loudly with the count it saw rather than going quiet — which is the
+   * point: a silent under-count is exactly what a `Bun.sleep(300)` used to
+   * paper over.
+   */
+  const DETACHED_PLATFORM_BREADCRUMBS = 2;
+
+  async function platformBreadcrumbCount(runId: string): Promise<number> {
+    const [row] = await db
+      .select({ n: sql<number>`count(*)::int` })
+      .from(runLogs)
+      .where(and(eq(runLogs.runId, runId), sql`${runLogs.data}->>'platform' = 'true'`));
+    return row?.n ?? 0;
+  }
+
+  /**
+   * Fully quiesce every run this test launched, so no background DB write can
+   * survive into the next test's `truncateAll()`.
+   *
+   * Two stages, because one is not enough:
+   *
+   *  1. `waitForInFlight` — `executeAgentInBackground` calls `untrackRun()` in
+   *     its `finally`, so this covers the whole AWAITED chain (status flips,
+   *     `synthesiseFinalize` -> `finalizeRun` -> terminal log + notification
+   *     fan-out). Necessary, but NOT sufficient.
+   *  2. The two DETACHED `void appendRunLog(...)` breadcrumbs, fired and
+   *     forgotten, which can still be in flight after the tracker reports
+   *     empty. This waits on the OBSERVABLE EFFECT — the rows being visible —
+   *     not on elapsed time, so it is deterministic. The old `Bun.sleep(300)`
+   *     was a bet that 300ms is always enough, and a loaded CI box is exactly
+   *     where that bet loses.
+   *
+   * The `Bun.sleep(5)` below is a poll interval inside a condition loop, not a
+   * fixed wait: it exits as soon as the predicate holds.
+   */
+  async function drainLaunchedRuns(): Promise<void> {
+    const runIds = launchedRunIds.splice(0);
+    if (runIds.length === 0) return;
+
+    if (!(await waitForInFlight(10_000))) {
+      throw new Error(`drain: run(s) still in flight after 10s: ${runIds.join(", ")}`);
+    }
+
+    const deadline = Date.now() + 10_000;
+    for (const runId of runIds) {
+      let seen = await platformBreadcrumbCount(runId);
+      while (seen < DETACHED_PLATFORM_BREADCRUMBS) {
+        if (Date.now() > deadline) {
+          throw new Error(
+            `drain: run ${runId} settled with ${seen}/${DETACHED_PLATFORM_BREADCRUMBS} ` +
+              "detached platform breadcrumbs after 10s — the set of detached " +
+              "run_logs writes in the run pipeline has changed; update " +
+              "DETACHED_PLATFORM_BREADCRUMBS.",
+          );
+        }
+        await Bun.sleep(5);
+        seen = await platformBreadcrumbCount(runId);
+      }
+    }
   }
 
   async function persistedBudget(runId: string) {
@@ -350,8 +446,6 @@ describe("run context budget — write path (prepareAndExecuteRun)", () => {
       contextWindow: 200_000,
       compactionThreshold: 136_000,
     });
-
-    await settle();
   });
 
   // THE regression this suite exists for. `buildRuntimePiEnv` omits
@@ -372,8 +466,6 @@ describe("run context budget — write path (prepareAndExecuteRun)", () => {
     // rather than drifting past a bare null check.
     expect(budget.contextWindow).not.toBe(200_000);
     expect(budget.contextWindow).not.toBe(128_000);
-
-    await settle();
   });
 
   // A window with no usable output cap still yields a budget — the derived 20 %
@@ -388,7 +480,5 @@ describe("run context budget — write path (prepareAndExecuteRun)", () => {
       contextWindow: 32_768,
       compactionThreshold: 32_768 - 16_384,
     });
-
-    await settle();
   });
 });
