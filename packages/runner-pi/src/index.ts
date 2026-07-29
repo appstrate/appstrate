@@ -4,6 +4,8 @@ export {
   PiRunner,
   installSessionBridge,
   derivePiCompactionSettings,
+  toPiCompaction,
+  type PiCompactionSettings,
   type PiRunnerOptions,
   type PiModelConfig,
   type BridgeableSession,

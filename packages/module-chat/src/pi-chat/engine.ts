@@ -27,6 +27,7 @@ import { createUIMessageStream, createUIMessageStreamResponse, type UIMessageChu
 import {
   loadPiCodingAgentSdk,
   derivePiCompactionSettings,
+  toPiCompaction,
   deriveProviderFromApi,
   type Api,
   type Model,
@@ -203,7 +204,7 @@ export function runPiSubscriptionChat(input: PiSubscriptionChatInput): Response 
           resourceLoader,
           sessionManager: SessionManager.inMemory(),
           settingsManager: SettingsManager.inMemory({
-            compaction: derivePiCompactionSettings(piModel),
+            compaction: toPiCompaction(derivePiCompactionSettings(piModel)),
             // ONE retry: chat is interactive — a user watches blank "thinking"
             // dots for the whole retry window. One retry absorbs transient
             // blips; anything sturdier (quota 429s, auth failures) fails the

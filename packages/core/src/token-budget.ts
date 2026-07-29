@@ -31,35 +31,6 @@
  */
 
 /**
- * Fallback context window when the resolved model omits it. Matches the
- * Claude family's standard 200 k window — the most common runtime target.
- *
- * **Scope — read before reusing it.** This is NOT a platform-wide default that
- * every surface applies to a null window. Exactly two consumers read it, and
- * both are places that must produce *some* window to proceed at all:
- *
- *   - `derivePiCompactionSettings` (packages/runner-pi/src/pi-runner.ts) —
- *     sizes compaction for an in-process Pi session.
- *   - `apps/cli/src/commands/run/model.ts` — the standalone CLI's model preset.
- *
- * Three surfaces deliberately do NOT:
- *
- *   - `runtime-pi/env.ts` declares its own `DEFAULT_CONTEXT_WINDOW` of 128 000
- *     for `MODEL_CONTEXT_WINDOW`, which `buildRuntimePiEnv` omits when the
- *     model's window is null. Containerised runs on an undeclared window
- *     therefore run against 128 k, not this constant.
- *   - `runtime-pi/sidecar/token-budget.ts` applies no default at all — an
- *     absent `contextWindowTokens` disables the spill guard rather than
- *     inventing a window to guard against.
- *   - `runs.context_window` (the dashboard gauge denominator) stores NULL for
- *     an undeclared window; see `apps/api/src/services/run-token-budget.ts`.
- *
- * So do not "unify" a null-window default across surfaces on the strength of
- * this constant existing — the divergences are load-bearing, not drift.
- */
-export const DEFAULT_CONTEXT_WINDOW = 200_000;
-
-/**
  * Floor on the derived response reserve when no usable `maxTokens` is
  * available. 16384 covers the common "no thinking" Claude / GPT response
  * shape; larger budgets (Sonnet thinking @ 64 k) flow through an explicit

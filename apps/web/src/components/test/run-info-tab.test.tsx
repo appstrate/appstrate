@@ -25,7 +25,16 @@ await i18n.changeLanguage("fr");
 
 const WINDOW = 200_000;
 
+/**
+ * A turn as the runner emits it: it states the window it ran against, which is
+ * now the table's only source for the denominator.
+ */
 function turn(index: number, contextTokens: number): RunTurnRow {
+  return { ...windowlessTurn(index, contextTokens), contextWindow: WINDOW };
+}
+
+/** A turn with the window key ABSENT — a run predating it, or an unsizable model. */
+function windowlessTurn(index: number, contextTokens: number): RunTurnRow {
   return {
     index,
     contextTokens,
@@ -39,6 +48,8 @@ function turn(index: number, contextTokens: number): RunTurnRow {
 
 /** Peak 100k = half the window, so window- and peak-relative bars differ. */
 const TURNS = [turn(0, 50_000), turn(1, 100_000)];
+/** The same series from a runner that stated no window. */
+const WINDOWLESS_TURNS = [windowlessTurn(0, 50_000), windowlessTurn(1, 100_000)];
 
 function makeRun(overrides: Partial<EnrichedRun> = {}): EnrichedRun {
   return {
@@ -51,8 +62,6 @@ function makeRun(overrides: Partial<EnrichedRun> = {}): EnrichedRun {
     version_ref: "1.0.0",
     package_ephemeral: false,
     runOrigin: "platform",
-    context_window: WINDOW,
-    compaction_threshold: 136_000,
     document_counts: { input: 0, output: 0 },
     ...overrides,
   } as unknown as EnrichedRun;
@@ -68,6 +77,13 @@ function render(node: ReactElement): string {
 
 describe("TurnsTable with a known context window", () => {
   const html = render(<RunInfoTab run={makeRun()} turns={TURNS} />);
+
+  it("reads the window off the turns — the run DTO carries none", () => {
+    // Same derivation as the header gauge (`readRunContext`), so the two
+    // surfaces cannot disagree about which turn's window applies.
+    expect(makeRun()).not.toHaveProperty("context_window");
+    expect(html).toContain(agentsFr["run.turnContextShare"]);
+  });
 
   it("renders the `%` column with each turn's share of the WINDOW", () => {
     expect(html).toContain(agentsFr["run.turnContextShare"]);
@@ -85,10 +101,28 @@ describe("TurnsTable with a known context window", () => {
     expect(html).not.toContain(agentsFr["run.turnsPeakRelativeHint"]);
     expect(html).toContain("bg-primary/15");
   });
+
+  it("normalizes on the LAST stated window after a mid-run model swap, as the header does", () => {
+    // Swap down 1M → 200k. Against the widest window seen, the two turns would
+    // read 90 % and 19 %; against the one in force they read 100 % (clamped)
+    // and 95 %. The table follows the header because both call `readRunContext`.
+    const swapped = render(
+      <RunInfoTab
+        run={makeRun()}
+        turns={[
+          { ...turn(0, 900_000), contextWindow: 1_000_000 },
+          { ...turn(1, 190_000), contextWindow: 200_000 },
+        ]}
+      />,
+    );
+    expect(swapped).toContain(formatWindowPercent(0.95, i18n.language));
+    expect(swapped).not.toContain(formatWindowPercent(0.19, i18n.language));
+    expect(swapped).toContain("width:95%");
+  });
 });
 
 describe("TurnsTable without a context window", () => {
-  const html = render(<RunInfoTab run={makeRun({ context_window: null })} turns={TURNS} />);
+  const html = render(<RunInfoTab run={makeRun()} turns={WINDOWLESS_TURNS} />);
 
   it("omits the `%` column rather than inventing a 200k denominator", () => {
     expect(html).not.toContain(agentsFr["run.turnContextShare"]);

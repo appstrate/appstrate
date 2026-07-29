@@ -6,12 +6,13 @@ import type { RunTurnRow } from "./log-utils";
 import { formatCompactTokens, formatWindowPercent, readRunContext } from "./run-context";
 
 interface ContextGaugeReadoutProps {
-  /** Per-turn breakdown projected from the run's logs (`buildTurnRows`). */
+  /**
+   * Per-turn breakdown projected from the run's logs (`buildTurnRows`) — the
+   * WHOLE input. Each turn carries its own window and compaction threshold, so
+   * the numerator and the denominator arrive together and cannot disagree; see
+   * `readRunContext` for which turn's window is used.
+   */
   turns: readonly RunTurnRow[] | undefined;
-  /** `runs.context_window` — the denominator. `null` renders nothing. */
-  contextWindow: number | null | undefined;
-  /** `runs.compaction_threshold` — the marker. `null` drops the marker only. */
-  compactionThreshold: number | null | undefined;
   /**
    * `runs.status`. Taken raw rather than as a pre-computed `isActive` boolean so
    * the active/terminal vocabulary has exactly one definition
@@ -62,18 +63,15 @@ interface ContextGaugeReadoutProps {
  * just given to. A zero-width track costs nothing to lay out and stays
  * announced; only the decoration inside it is clipped.
  *
- * Renders NOTHING (not a zeroed bar) when the run has no turns, no window, or
- * no turn with a usable reading — see `readRunContext` for all three cases and
- * why the header drops a numerator it cannot divide.
+ * Renders NOTHING (not a zeroed bar) when the run has no turns, no turn stating
+ * a window, or no turn with a usable reading — see `readRunContext` for all
+ * three cases and why the header drops a numerator it cannot divide. All three
+ * are now read from the same rows, so a run whose logs were pruned drops the
+ * gauge whole instead of keeping a denominator with nothing left to divide.
  */
-export function ContextGaugeReadout({
-  turns,
-  contextWindow,
-  compactionThreshold,
-  status,
-}: ContextGaugeReadoutProps) {
+export function ContextGaugeReadout({ turns, status }: ContextGaugeReadoutProps) {
   const { t, i18n } = useTranslation("agents");
-  const reading = readRunContext(turns, contextWindow, compactionThreshold);
+  const reading = readRunContext(turns);
   if (!reading) return null;
 
   const isActive = !!status && (ACTIVE_RUN_STATUSES as ReadonlySet<string>).has(status);

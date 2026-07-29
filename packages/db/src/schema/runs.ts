@@ -181,42 +181,6 @@ export const runs = pgTable(
     // the run carries a status — including every run finalized before this
     // column existed.
     costPricingStatus: text("cost_pricing_status").$type<PricingStatus>(),
-    // Denominator of the run's context gauge: the model context window this run
-    // was actually LAUNCHED with (`llmConfig.contextWindow`). Persisted because
-    // the numerator (`contextTokens` on each `appstrate.progress` breadcrumb) is
-    // meaningless without the window the run ran against, and the org's model
-    // config can change under a finished run.
-    //
-    // NULL = unknown, and it must stay readable as unknown. Three populations
-    // land here: rows predating this column; runs that resolve no platform model
-    // (remote-origin runs execute on the caller's host with the caller's own
-    // model); and — the deliberate one — runs whose resolved model declares NO
-    // context window. The platform does not guess one for that last case:
-    // `buildRuntimePiEnv` omits `MODEL_CONTEXT_WINDOW` when it is null and the
-    // container applies its own 128 000 default (runtime-pi/env.ts), which is
-    // NOT core's `DEFAULT_CONTEXT_WINDOW` (200 000), so any platform-side
-    // fallback would be a denominator no run ever used. See
-    // `apps/api/src/services/run-token-budget.ts` for why aligning the two
-    // constants was rejected instead.
-    //
-    // A zeroed gauge would read as "context empty", which is a lie — consumers
-    // render NO gauge on NULL.
-    contextWindow: integer("context_window"),
-    // Token count at which the runner's auto-compaction kicks in, computed at
-    // launch as `contextWindow - deriveResponseReserveTokens(contextWindow,
-    // maxTokens)` — the exact expression `derivePiCompactionSettings`
-    // (packages/runner-pi/src/pi-runner.ts) feeds the Pi SDK. Platform and
-    // runner therefore agree WHENEVER the model declares a window; when it does
-    // not, both columns are NULL (above) rather than a guessed pair.
-    //
-    // KNOWN CAVEAT — do not "fix" this by plumbing more state: the runner also
-    // honours `MODEL_COMPACTION_ENABLED=false` read from its OWN container env,
-    // which the platform neither forwards nor can observe. On a deployment that
-    // opts out of compaction, the persisted threshold is ADVISORY (no compaction
-    // will actually happen at it). Accepted trade-off: the gauge is a diagnostic
-    // aid, not an alert — auto-compaction, where enabled, already handles
-    // saturation.
-    compactionThreshold: integer("compaction_threshold"),
     runNumber: integer("run_number"),
     // Per-run integration connection overrides — the caller's explicit
     // choice at run kickoff (e.g. "for this run, use my Gmail-Boulot
@@ -415,26 +379,6 @@ export const runs = pgTable(
     check(
       "runs_cost_pricing_status_valid",
       sql`cost_pricing_status IN ('priced', 'partial', 'unpriced')`,
-    ),
-    // Context-gauge invariants. Both columns are nullable ("unknown"), and
-    // standard CHECK semantics let NULL through — exactly the intent for
-    // pre-feature rows and model-less (remote-origin) runs. What must never
-    // exist is a PRESENT-but-nonsensical value: a zero/negative window would
-    // divide the gauge by zero, and a threshold outside `(0, context_window)`
-    // would mark compaction at a point the run can never reach (or has always
-    // passed). The launcher's arithmetic already guarantees both — this is
-    // where the invariant belongs, one code path away from any future writer.
-    check("runs_context_window_positive", sql`context_window > 0`),
-    // Written as an explicit `IS NULL OR (…)` rather than the bare comparison:
-    // `compaction_threshold < context_window` evaluates to NULL — and therefore
-    // PASSES — when the window is NULL, which would legalise an orphan
-    // threshold (a number the gauge has nothing to divide by). The two columns
-    // are meaningless apart, so the pair is all-or-nothing in that direction.
-    // A window WITHOUT a threshold stays legal: a run can resolve a context
-    // window and still have no usable response cap to derive a threshold from.
-    check(
-      "runs_compaction_threshold_within_window",
-      sql`compaction_threshold IS NULL OR (context_window IS NOT NULL AND compaction_threshold > 0 AND compaction_threshold < context_window)`,
     ),
   ],
 );

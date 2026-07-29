@@ -150,6 +150,8 @@ describe("buildTurnRows — per-turn projection", () => {
         cacheReadTokens: 96000,
         cacheWriteTokens: 800,
         contextTokens: 96920,
+        contextWindow: 200000,
+        compactionThreshold: 136000,
       }),
     ]);
     expect(rows).toEqual([
@@ -161,8 +163,44 @@ describe("buildTurnRows — per-turn projection", () => {
         cacheReadTokens: 96000,
         cacheWriteTokens: 800,
         latencyMs: 4200,
+        contextWindow: 200000,
+        compactionThreshold: 136000,
       },
     ]);
+  });
+
+  it("keeps the window ABSENT rather than zeroed when the runner states none", () => {
+    // The denominator of the whole context reading. "Unknown" and "0" are
+    // different statements, and a defaulted 0 would be indistinguishable from a
+    // runner that genuinely reported one — so the key must simply not be there.
+    const rows = buildTurnRows([
+      turnLog({ event: "turn", index: 1, inputTokens: 10, outputTokens: 5 }),
+    ]);
+    expect(rows[0]!).not.toHaveProperty("contextWindow");
+    expect(rows[0]!).not.toHaveProperty("compactionThreshold");
+  });
+
+  it("carries a window with no threshold — auto-compaction off, reported truthfully", () => {
+    const rows = buildTurnRows([
+      turnLog({ event: "turn", index: 1, inputTokens: 10, contextWindow: 1_000_000 }),
+    ]);
+    expect(rows[0]!.contextWindow).toBe(1_000_000);
+    expect(rows[0]!).not.toHaveProperty("compactionThreshold");
+  });
+
+  it("drops a malformed window/threshold instead of coercing it", () => {
+    const rows = buildTurnRows([
+      turnLog({
+        event: "turn",
+        index: 1,
+        inputTokens: 10,
+        contextWindow: "200k",
+        compactionThreshold: Number.NaN,
+      }),
+    ]);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!).not.toHaveProperty("contextWindow");
+    expect(rows[0]!).not.toHaveProperty("compactionThreshold");
   });
 
   it("ignores rows carrying a different `data.event`", () => {

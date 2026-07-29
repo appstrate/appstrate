@@ -225,13 +225,6 @@
       "when": 1785190457502,
       "tag": "0031_jittery_satana",
       "breakpoints": true
-    },
-    {
-      "idx": 32,
-      "version": "7",
-      "when": 1785318885780,
-      "tag": "0032_concerned_jimmy_woo",
-      "breakpoints": true
     }
   ]
 }

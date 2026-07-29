@@ -24,7 +24,6 @@
 import type { Api, Model } from "../../lib/pi-sdk.ts";
 import { deriveProviderFromApi, PROVIDER_BY_API } from "@appstrate/runner-pi";
 import { ANTHROPIC_OAUTH_PLACEHOLDER_API_KEY } from "@appstrate/core/oauth-bearer-swap";
-import { DEFAULT_CONTEXT_WINDOW } from "@appstrate/core/token-budget";
 import { listModelPresets, PROXY_SUPPORTED_APIS, type ModelPreset } from "../../lib/models.ts";
 
 export type ModelSource = "env" | "preset";
@@ -123,7 +122,7 @@ export function resolveModel(flags: ModelFlags): ResolvedModel {
     reasoning: false,
     input: ["text"],
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-    contextWindow: DEFAULT_CONTEXT_WINDOW,
+    contextWindow: 200_000,
     maxTokens: 8192,
   };
 
@@ -199,7 +198,7 @@ export async function resolvePresetModel(inputs: PresetResolutionInputs): Promis
       cacheRead: preset.cost?.cacheRead ?? 0,
       cacheWrite: preset.cost?.cacheWrite ?? 0,
     },
-    contextWindow: preset.contextWindow ?? DEFAULT_CONTEXT_WINDOW,
+    contextWindow: preset.contextWindow ?? 200_000,
     maxTokens: preset.maxTokens ?? 8192,
     headers,
   };

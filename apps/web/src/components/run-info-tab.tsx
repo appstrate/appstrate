@@ -10,7 +10,7 @@ import { EmptyState } from "./page-states";
 import { RunTrigger } from "./run-trigger";
 import { RunCostReadout } from "./run-cost-readout";
 import { formatDateField } from "../lib/markdown";
-import { fractionOfWindow, formatWindowPercent } from "./run-context";
+import { fractionOfWindow, formatWindowPercent, readRunContext } from "./run-context";
 import type { RunTurnRow } from "./log-utils";
 import { ACTIVE_RUN_STATUSES, type EnrichedRun, type TokenUsage } from "@appstrate/shared-types";
 
@@ -49,11 +49,11 @@ function InfoCard({ label, value }: { label: string; value: React.ReactNode }) {
  * is the one thing the column exists to tell apart. This is the same reading
  * the header gauge shows, computed by the same helper so the two cannot drift.
  *
- * FALLBACK, deliberately explicit: when `contextWindow` is null there is no
+ * FALLBACK, deliberately explicit: when no turn states a window there is no
  * denominator, so the bar reverts to peak-relative AND the `%` column is not
- * rendered at all. No 200k default is invented here — the server already
- * applies that fallback at launch for every run that has a window, so a null
- * means genuinely unknown, and a fabricated percentage is worse than none.
+ * rendered at all. No 200k default is invented here — the runner already
+ * applies its own default when it has one, so an absent window means genuinely
+ * unknown, and a fabricated percentage is worse than none.
  *
  * That switch is ANNOUNCED, in words and in colour. Silently swapping the
  * denominator left a remote-origin run showing a full-width bar on its peak
@@ -61,15 +61,17 @@ function InfoCard({ label, value }: { label: string; value: React.ReactNode }) {
  * first, as "this turn filled the window", i.e. precisely the misreading #1046
  * exists to remove. The missing `%` column is not a cue: absence never is.
  */
-function TurnsTable({
-  turns,
-  contextWindow,
-}: {
-  turns: RunTurnRow[];
-  contextWindow: number | null;
-}) {
+function TurnsTable({ turns }: { turns: RunTurnRow[] }) {
   const { t, i18n } = useTranslation("agents");
   const peak = turns.reduce((max, turn) => Math.max(max, turn.contextTokens), 0);
+  // The window comes from the turns, through the very call the header gauge
+  // makes — not from a parallel scan of the same rows. One derivation is the
+  // only thing that keeps the two surfaces from disagreeing about which turn's
+  // window applies, which is the drift #1046 exists to remove. It follows that
+  // the table falls back whenever the gauge renders nothing, including on a run
+  // whose turns all measured zero: that fallback is announced below, so the
+  // reader is never left guessing which denominator they are looking at.
+  const contextWindow = readRunContext(turns)?.window ?? null;
   // The denominator the bar is drawn against — the window when known, the run's
   // own peak otherwise. `hasWindow` is what gates the `%` column: a share of a
   // peak is not a share of anything the reader can act on.
@@ -296,12 +298,9 @@ export function RunInfoTab({ run, turns }: RunInfoTabProps) {
       {turns && turns.length > 0 && (
         <SectionCard title={t("run.turnsTitle")}>
           <p className="text-muted-foreground text-xs">{t("run.turnsHint")}</p>
-          {/* `context_window` is read straight off the run rather than threaded
-              in as a new prop: `RunInfoTab` already receives the whole DTO, and
-              `TurnsTable` is its private child — adding a prop to the public
-              boundary to carry a field that boundary already crosses would be
-              duplication, not decoupling. */}
-          <TurnsTable turns={turns} contextWindow={run.context_window} />
+          {/* No window prop: the rows carry their own, so the table derives it
+              from the same `readRunContext` call the header gauge makes. */}
+          <TurnsTable turns={turns} />
         </SectionCard>
       )}
 

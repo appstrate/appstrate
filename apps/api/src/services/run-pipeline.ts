@@ -37,7 +37,6 @@ import type { LoadedPackage } from "../types/index.ts";
 import type { Actor } from "../lib/actor.ts";
 import type { FileReference } from "./run-launcher/types.ts";
 import { runPreflightGates } from "./run-preflight-gates.ts";
-import { deriveRunContextBudget } from "./run-token-budget.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { runWithSpan } from "@appstrate/core/telemetry";
 
@@ -535,14 +534,6 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
 
   // --- Step 5: Create run record (with sink state) ---
   const agentDenorm = extractRunAgentDenorm(agent);
-  // Context-gauge denominator, snapshotted from the SAME resolved model the
-  // container is launched with (`plan.llmConfig` → `buildRuntimePiEnv`), so the
-  // dashboard reads the window this run actually ran against even after the
-  // org's model config changes. NULL when the model declares no window: the
-  // container then falls back to its own default, which is NOT core's, so any
-  // value the platform invented here would be a denominator the run never used.
-  // See `run-token-budget.ts`.
-  const contextBudget = deriveRunContextBudget(plan.llmConfig);
   const createStart = Date.now();
   await runWithSpan("appstrate.run.create", { attributes: spanAttributes }, () =>
     createRun(
@@ -562,8 +553,6 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
         // the run row so the runner's ledger row (whose cost the container
         // computes) can be classified without trusting the container.
         modelCost,
-        contextWindow: contextBudget?.contextWindow,
-        compactionThreshold: contextBudget?.compactionThreshold,
         apiKeyId,
         agentScope: agentDenorm.scope,
         agentName: agentDenorm.name,

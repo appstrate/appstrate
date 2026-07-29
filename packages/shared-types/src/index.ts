@@ -112,21 +112,6 @@ export interface RunWireDto {
   proxy_label: string | null;
   model_label: string | null;
   model_source: string | null;
-  /**
-   * Context window (tokens) the run was launched with — the DENOMINATOR of the
-   * run header's context gauge. The numerator is `contextTokens` on each
-   * `appstrate.progress` run-log breadcrumb. `null` means unknown (a run
-   * created before this field existed, or a remote-origin run that resolved no
-   * platform model): render NO gauge, never a zeroed one.
-   */
-  context_window: number | null;
-  /**
-   * Token count at which the runner's auto-compaction kicks in, always within
-   * `(0, context_window)`. Advisory: a deployment that sets
-   * `MODEL_COMPACTION_ENABLED=false` in the runner's container env disables
-   * compaction without the platform being able to observe it.
-   */
-  compaction_threshold: number | null;
   runner_name: string | null;
   runner_kind: string | null;
   agent_scope: string | null;

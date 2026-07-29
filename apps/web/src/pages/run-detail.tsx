@@ -78,7 +78,10 @@ export function RunDetailPage() {
   // that one fires `runKeys.all` (`["run"]`), which does not prefix-match the
   // `["run-logs", …]` family. Without it, the frames that arrive between the
   // last render and the stream teardown below are lost — and with them the turn
-  // breadcrumbs the header gauge reads its peak off. Invalidating cannot loop:
+  // breadcrumbs the header gauge reads its peak off. That now costs the whole
+  // gauge, not just a stale peak: the breadcrumbs carry the context WINDOW too,
+  // so a run-logs cache missing its final frames can leave the header with no
+  // denominator at all. Invalidating cannot loop:
   // the effect depends on `status`/`runId`, never on the logs it refetches.
   useEffect(() => {
     const terminal = !!status && !(ACTIVE_RUN_STATUSES as ReadonlySet<string>).has(status);
@@ -340,17 +343,15 @@ export function RunDetailPage() {
           </div>
           {/* Context gauge — the state metric the cumulative token total never
               was (#1046): bounded by the run's window, non-monotone, and
-              readable as "how much headroom is left". Renders nothing at all
-              for a run with no turn breadcrumbs or no recorded window, leaving
-              the `$` alone rather than an empty bar claiming an empty context.
-              Its own live cadence is the turn boundary, NOT the 250 ms metric
-              tick the `$` beside it follows. */}
-          <ContextGaugeReadout
-            turns={turnRows}
-            contextWindow={run.context_window}
-            compactionThreshold={run.compaction_threshold}
-            status={run.status}
-          />
+              readable as "how much headroom is left". Numerator AND denominator
+              both ride `turnRows`: each turn breadcrumb states the window the
+              runner is running against, so nothing here needs threading from
+              the run DTO. Renders nothing at all for a run with no turn
+              breadcrumbs or none stating a window, leaving the `$` alone rather
+              than an empty bar claiming an empty context. Its own live cadence
+              is the turn boundary, NOT the 250 ms metric tick the `$` beside it
+              follows. */}
+          <ContextGaugeReadout turns={turnRows} status={run.status} />
           {!isRunning && !isInline && agent && (
             <Button variant="outline" size="sm" onClick={() => setInputOpen(true)}>
               <Play className="size-3.5" />

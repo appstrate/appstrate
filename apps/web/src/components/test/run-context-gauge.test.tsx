@@ -26,7 +26,29 @@ const THRESHOLD = 136_000;
 /** Derived from the locale bundle, never hardcoded — same rule as the `%`. */
 const THRESHOLD_LABEL = agentsFr["run.contextGaugeThreshold"].replace("{{tokens}}", "136k");
 
-function turn(index: number, contextTokens: number): RunTurnRow {
+/**
+ * A turn as the runner emits it: the window and the compaction threshold ride
+ * the same breadcrumb as the token counts, so the gauge's only input is `turns`.
+ */
+function turn(index: number, contextTokens: number, over: Partial<RunTurnRow> = {}): RunTurnRow {
+  return {
+    ...windowlessTurn(index, contextTokens),
+    contextWindow: WINDOW,
+    compactionThreshold: THRESHOLD,
+    ...over,
+  };
+}
+
+/**
+ * A turn stating a window but NO threshold — the key is ABSENT, which is how a
+ * runner with auto-compaction disabled reports it.
+ */
+function thresholdlessTurn(index: number, contextTokens: number): RunTurnRow {
+  return { ...windowlessTurn(index, contextTokens), contextWindow: WINDOW };
+}
+
+/** A turn from a runner that could not state its window — the key is ABSENT. */
+function windowlessTurn(index: number, contextTokens: number): RunTurnRow {
   return {
     index,
     contextTokens,
@@ -56,14 +78,7 @@ function classesOf(html: string, pattern: RegExp): string[] {
 }
 
 describe("ContextGaugeReadout — active run", () => {
-  const html = render(
-    <ContextGaugeReadout
-      turns={TURNS}
-      contextWindow={WINDOW}
-      compactionThreshold={THRESHOLD}
-      status="running"
-    />,
-  );
+  const html = render(<ContextGaugeReadout turns={TURNS} status="running" />);
 
   it("shows the CURRENT context (the last turn), not the peak", () => {
     expect(html).toContain("128k / 200k");
@@ -111,15 +126,10 @@ describe("ContextGaugeReadout — active run", () => {
 });
 
 describe("ContextGaugeReadout — count past a stale window", () => {
-  // The window is recorded at launch; a provider can later bill a prompt larger
-  // than it. `readRunContext` leaves that raw count unclamped on purpose.
+  // The window is what the runner stated for the turn; a provider can bill a
+  // prompt larger than it. `readRunContext` leaves that raw count unclamped.
   const html = render(
-    <ContextGaugeReadout
-      turns={[turn(0, 210_000)]}
-      contextWindow={WINDOW}
-      compactionThreshold={null}
-      status="running"
-    />,
+    <ContextGaugeReadout turns={[thresholdlessTurn(0, 210_000)]} status="running" />,
   );
 
   it("clamps `aria-valuenow` into the declared range", () => {
@@ -139,14 +149,7 @@ describe("ContextGaugeReadout — count past a stale window", () => {
 describe("ContextGaugeReadout — 375px header budget", () => {
   // The header row also carries a 5-tab list, the `$` pill and Re-run/Cancel.
   // The gauge must not be what pushes the page into a horizontal scroll.
-  const html = render(
-    <ContextGaugeReadout
-      turns={TURNS}
-      contextWindow={WINDOW}
-      compactionThreshold={THRESHOLD}
-      status="running"
-    />,
-  );
+  const html = render(<ContextGaugeReadout turns={TURNS} status="running" />);
 
   const BAR = /role="progressbar"[\s\S]*?class="([^"]*)"/;
 
@@ -185,14 +188,7 @@ describe("ContextGaugeReadout — 375px header budget", () => {
 });
 
 describe("ContextGaugeReadout — terminal run", () => {
-  const html = render(
-    <ContextGaugeReadout
-      turns={TURNS}
-      contextWindow={WINDOW}
-      compactionThreshold={THRESHOLD}
-      status="success"
-    />,
-  );
+  const html = render(<ContextGaugeReadout turns={TURNS} status="success" />);
 
   it("switches to the PEAK reading, labelled `pic ctx`", () => {
     expect(html).toContain(agentsFr["run.contextGaugePeakLabel"]);
@@ -207,18 +203,51 @@ describe("ContextGaugeReadout — terminal run", () => {
   });
 });
 
-describe("ContextGaugeReadout — threshold absent", () => {
-  it("omits the marker but keeps the gauge", () => {
+describe("ContextGaugeReadout — window and threshold ride the turns", () => {
+  it("takes its denominator from the turns, with no run-level field to override it", () => {
+    // 1M window: nothing outside `turns` could have supplied it.
     const html = render(
       <ContextGaugeReadout
-        turns={TURNS}
-        contextWindow={WINDOW}
-        compactionThreshold={null}
+        turns={[turn(0, 128_000, { contextWindow: 1_000_000, compactionThreshold: 800_000 })]}
+        status="running"
+      />,
+    );
+    expect(html).toContain("128k / 1.0M");
+    expect(html).toContain('aria-valuemax="1000000"');
+    expect(html).toContain("width:12.8%");
+    expect(html).toContain("left:80%");
+  });
+
+  it("omits the marker but keeps the gauge when the payload carries no threshold", () => {
+    // Auto-compaction disabled, now reportable: the key is absent, not zero.
+    const html = render(
+      <ContextGaugeReadout
+        turns={[thresholdlessTurn(0, 40_000), thresholdlessTurn(1, 128_000)]}
         status="running"
       />,
     );
     expect(html).toContain('role="progressbar"');
+    expect(html).toContain("128k / 200k");
     expect(html).not.toContain("left:");
+    expect(html).not.toContain(THRESHOLD_LABEL);
+  });
+
+  it("sizes the reading against the LAST stated window after a mid-run model swap", () => {
+    // Swap down 1M → 200k. Sizing `current` against the widest window seen
+    // would print 19 % for a context one turn from compaction.
+    const html = render(
+      <ContextGaugeReadout
+        turns={[
+          turn(0, 900_000, { contextWindow: 1_000_000, compactionThreshold: 800_000 }),
+          turn(1, 190_000),
+        ]}
+        status="running"
+      />,
+    );
+    expect(html).toContain("190k / 200k");
+    expect(html).toContain('aria-valuemax="200000"');
+    expect(html).toContain(formatWindowPercent(0.95, i18n.language));
+    expect(html).not.toContain(formatWindowPercent(0.19, i18n.language));
   });
 });
 
@@ -238,25 +267,17 @@ describe("ContextGaugeReadout — nothing to render", () => {
   }
 
   it("renders nothing for a run predating the turn breadcrumb", () => {
-    assertNoGauge(
-      render(
-        <ContextGaugeReadout
-          turns={[]}
-          contextWindow={WINDOW}
-          compactionThreshold={THRESHOLD}
-          status="success"
-        />,
-      ),
-    );
+    assertNoGauge(render(<ContextGaugeReadout turns={[]} status="success" />));
   });
 
-  it("renders nothing when the window is unknown, even with real turns", () => {
+  it("renders nothing when no turn states a window, even with real counts", () => {
+    // Runs predating the field, and runners that cannot size their model. There
+    // is no run-level fallback left: the turns are the ONLY source of the
+    // denominator, so a series that states none drops the gauge whole.
     assertNoGauge(
       render(
         <ContextGaugeReadout
-          turns={TURNS}
-          contextWindow={null}
-          compactionThreshold={null}
+          turns={[windowlessTurn(0, 40_000), windowlessTurn(1, 128_000)]}
           status="running"
         />,
       ),
@@ -268,14 +289,7 @@ describe("ContextGaugeReadout — nothing to render", () => {
     // prompt count settles real turns whose context reads zero. The old code
     // rendered `ctx 0 / 200k · 0 %` for them — the exact lie above.
     assertNoGauge(
-      render(
-        <ContextGaugeReadout
-          turns={[turn(0, 0), turn(1, 0)]}
-          contextWindow={WINDOW}
-          compactionThreshold={THRESHOLD}
-          status="success"
-        />,
-      ),
+      render(<ContextGaugeReadout turns={[turn(0, 0), turn(1, 0)]} status="success" />),
     );
   });
 });

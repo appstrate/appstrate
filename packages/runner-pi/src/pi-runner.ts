@@ -37,7 +37,7 @@ import {
 } from "./pi-sdk.ts";
 import { scheduleDeadlineNudges } from "./deadline-nudges.ts";
 import type { ModelApiShape } from "@appstrate/core/sidecar-types";
-import { deriveResponseReserveTokens, DEFAULT_CONTEXT_WINDOW } from "@appstrate/core/token-budget";
+import { deriveResponseReserveTokens } from "@appstrate/core/token-budget";
 import type { RunEvent, ExecutionContext } from "@appstrate/afps-runtime/types";
 import {
   buildError,
@@ -126,6 +126,11 @@ export interface PiRunnerOptions {
 }
 
 /**
+ * Fallback context window when the model omits it. Matches the Claude
+ * family's standard 200 k window — the most common runtime target.
+ */
+const DEFAULT_CONTEXT_WINDOW = 200_000;
+/**
  * Floor on `keepRecentTokens`. Below ~20k the agent loses meaningful
  * recent context (a few thousand tokens of recent tool calls + the last
  * user message) and starts replaying earlier turns. 20k is small enough
@@ -150,13 +155,32 @@ const KEEP_RECENT_FRACTION = 0.1;
  * `MODEL_COMPACTION_ENABLED=false` (mirrors the existing
  * `MODEL_RETRY_ENABLED` pattern) — useful when stacking external
  * compaction middleware. See appstrate#445.
+ *
+ * `contextWindow` is returned on BOTH shapes, and `compactionThreshold` only on
+ * the enabled one. The window is the fallback-resolved number this session will
+ * really run against, so it stays meaningful with compaction off — it is the
+ * denominator of the run's context gauge either way. The threshold is the SDK's
+ * own trigger expression (`shouldCompact`: `contextTokens > contextWindow -
+ * reserveTokens`) evaluated once here; with compaction off no such point exists,
+ * so the key is absent rather than reported as a line the run never crosses.
+ * Both are consumed by {@link installSessionBridge} for the per-turn breadcrumb;
+ * returning them keeps the fallback in ONE place, so the number emitted cannot
+ * drift from the number handed to the SDK.
  */
 export function derivePiCompactionSettings(
   model: { contextWindow?: number | null; maxTokens?: number | null },
   env: Record<string, string | undefined> = process.env,
-): { enabled: false } | { enabled: true; reserveTokens: number; keepRecentTokens: number } {
-  if (env["MODEL_COMPACTION_ENABLED"] === "false") return { enabled: false };
+):
+  | { enabled: false; contextWindow: number }
+  | {
+      enabled: true;
+      contextWindow: number;
+      compactionThreshold: number;
+      reserveTokens: number;
+      keepRecentTokens: number;
+    } {
   const contextWindow = model.contextWindow ?? DEFAULT_CONTEXT_WINDOW;
+  if (env["MODEL_COMPACTION_ENABLED"] === "false") return { enabled: false, contextWindow };
   // Shared clamp (see `@appstrate/core/token-budget`): honours a usable
   // `maxTokens`, but treats an impossible `maxTokens >= contextWindow`
   // (corrupt catalog/override data) as unset and derives a sane reserve —
@@ -167,7 +191,36 @@ export function derivePiCompactionSettings(
     MIN_KEEP_RECENT_TOKENS,
     Math.floor(contextWindow * KEEP_RECENT_FRACTION),
   );
-  return { enabled: true, reserveTokens, keepRecentTokens };
+  return {
+    enabled: true,
+    contextWindow,
+    compactionThreshold: contextWindow - reserveTokens,
+    reserveTokens,
+    keepRecentTokens,
+  };
+}
+
+/** What {@link derivePiCompactionSettings} returns: the SDK's knobs + ours. */
+export type PiCompactionSettings = ReturnType<typeof derivePiCompactionSettings>;
+
+/**
+ * Narrow the derived settings to the members the Pi SDK actually declares.
+ *
+ * `contextWindow` / `compactionThreshold` are OURS — they exist to label turn
+ * breadcrumbs, and the SDK neither declares nor reads them. Handing it the wide
+ * object happens to work today (`SettingsManager.inMemory` only clones and
+ * serialises, and `shouldCompact` reads `enabled`/`reserveTokens`), but that is
+ * a bet on a third party's tolerance for unknown keys, renewed on every upgrade.
+ * Narrowing here makes the boundary a line of code instead of a footnote.
+ */
+export function toPiCompaction(settings: PiCompactionSettings) {
+  return settings.enabled
+    ? {
+        enabled: true as const,
+        reserveTokens: settings.reserveTokens,
+        keepRecentTokens: settings.keepRecentTokens,
+      }
+    : { enabled: false as const };
 }
 
 // The `MODEL_API` → provider-key map lives in `provider-map.ts` (no Pi SDK
@@ -415,6 +468,11 @@ export class PiRunner implements Runner {
 
     const modelRegistry = ModelRegistry.create(authStorage);
 
+    // Derived ONCE: the same object sizes the SDK's compaction pass and labels
+    // every turn breadcrumb, so the window the gauge divides by is by
+    // construction the window this session ran against — fallback included.
+    const compaction = derivePiCompactionSettings(model, process.env);
+
     const resourceLoader = new DefaultResourceLoader({
       cwd,
       agentDir,
@@ -437,7 +495,7 @@ export class PiRunner implements Runner {
       resourceLoader,
       sessionManager: SessionManager.inMemory(),
       settingsManager: SettingsManager.inMemory({
-        compaction: derivePiCompactionSettings(model, process.env),
+        compaction: toPiCompaction(compaction),
         // Pi SDK's built-in retry (Retry-After honoring + jitter) covers
         // transient 429/5xx upstream — including OpenAI's mid-stream 5xx
         // `server_error`, which the Codex/Responses adapter surfaces as a
@@ -460,6 +518,8 @@ export class PiRunner implements Runner {
     const terminalTools = this.opts.terminalTools ?? [];
     const bridge = installSessionBridge(session, internalSink, context.runId, {
       terminalTools,
+      contextWindow: compaction.contextWindow,
+      ...(compaction.enabled ? { compactionThreshold: compaction.compactionThreshold } : {}),
       // Early-stop: abort the SDK loop as soon as a terminal tool has
       // executed successfully. `session.abort()` resolves once the agent
       // is idle; detached because the bridge callback is synchronous.
@@ -1004,6 +1064,16 @@ export interface SessionBridgeOptions {
    * error. The runner uses this to abort the SDK loop early.
    */
   onTerminalTool?: () => void;
+  /**
+   * Context window (tokens) the session actually runs against, and the token
+   * count at which the SDK auto-compacts — both straight off
+   * {@link derivePiCompactionSettings}, stamped on every turn breadcrumb so the
+   * gauge's denominator travels with its numerator. Omit either when it is not
+   * knowable: `contextWindow` for a caller that installs the bridge without an
+   * SDK session behind it, `compactionThreshold` whenever compaction is off.
+   */
+  contextWindow?: number;
+  compactionThreshold?: number;
 }
 
 export function installSessionBridge(
@@ -1148,6 +1218,12 @@ export function installSessionBridge(
                   outputTokens: outputDelta,
                   cacheReadTokens: u.cacheRead ?? 0,
                   cacheWriteTokens: u.cacheWrite ?? 0,
+                  ...(options.contextWindow !== undefined
+                    ? { contextWindow: options.contextWindow }
+                    : {}),
+                  ...(options.compactionThreshold !== undefined
+                    ? { compactionThreshold: options.compactionThreshold }
+                    : {}),
                 },
               ),
             );

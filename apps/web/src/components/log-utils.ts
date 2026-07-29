@@ -41,6 +41,24 @@ export interface RunTurnRow {
   cacheWriteTokens: number;
   /** Omitted when the runner could not observe the turn's start. */
   latencyMs?: number;
+  /**
+   * The window `contextTokens` is a share of, as stated by the runner for THIS
+   * turn — the denominator of the whole context reading.
+   *
+   * It rides the breadcrumb rather than the run row because the runner is the
+   * only authority on it: it applies the container-side default the platform
+   * cannot see, and it is where the number exists at emission time. Omitted
+   * when the runner cannot state it, and absent on every run predating the
+   * field — never zero, never a fabricated default.
+   */
+  contextWindow?: number;
+  /**
+   * Auto-compaction trigger point for this turn, when the runner has one.
+   *
+   * Genuinely optional: a runner with auto-compaction disabled now reports that
+   * truthfully by omitting the key, which is not the same statement as `0`.
+   */
+  compactionThreshold?: number;
 }
 
 /** `data.event` discriminator carried by per-turn breadcrumb rows. */
@@ -76,6 +94,13 @@ export function buildTurnRows(rawLogs: RawLog[]): RunTurnRow[] {
     const cacheReadTokens = readNumber(d["cacheReadTokens"], 0);
     const cacheWriteTokens = readNumber(d["cacheWriteTokens"], 0);
     const latencyMs = d["latencyMs"];
+    // Same rule as `latencyMs`, and deliberately NOT `readNumber`: these three
+    // have no honest fallback. A missing window is "unknown", which the reading
+    // must be able to tell apart from any number at all — so the key is left
+    // ABSENT rather than defaulted, and a malformed payload drops it the same
+    // way instead of throwing.
+    const contextWindow = d["contextWindow"];
+    const compactionThreshold = d["compactionThreshold"];
 
     rows.push({
       index: d["index"],
@@ -90,6 +115,12 @@ export function buildTurnRows(rawLogs: RawLog[]): RunTurnRow[] {
       cacheReadTokens,
       cacheWriteTokens,
       ...(typeof latencyMs === "number" && Number.isFinite(latencyMs) ? { latencyMs } : {}),
+      ...(typeof contextWindow === "number" && Number.isFinite(contextWindow)
+        ? { contextWindow }
+        : {}),
+      ...(typeof compactionThreshold === "number" && Number.isFinite(compactionThreshold)
+        ? { compactionThreshold }
+        : {}),
     });
   }
   return rows;

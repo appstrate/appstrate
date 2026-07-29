@@ -98,19 +98,6 @@ export interface RuntimeEnv {
 }
 
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 30_000;
-/**
- * Window assumed when the launcher sends no `MODEL_CONTEXT_WINDOW` (which
- * `buildRuntimePiEnv` omits whenever the resolved model declares none).
- *
- * DELIBERATELY NOT `DEFAULT_CONTEXT_WINDOW` from `@appstrate/core/token-budget`
- * (200 000) — do not "unify" them. This value is what the agent's prompts are
- * actually sized against inside the container; raising it to 200 000 would push
- * requests on every genuinely-128 k model past the provider's real limit into
- * upstream 400s. The platform accommodates the divergence rather than the other
- * way round: it persists NULL on `runs.context_window` for an undeclared window
- * instead of recording a denominator this container never used
- * (apps/api/src/services/run-token-budget.ts).
- */
 const DEFAULT_CONTEXT_WINDOW = 128_000;
 const DEFAULT_MAX_TOKENS = 16_384;
 const DEFAULT_MCP_CONNECT_DEADLINE_MS = 60_000;

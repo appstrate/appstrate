@@ -243,8 +243,6 @@ function runRowToWireDto(row: typeof runs.$inferSelect): RunWireDto {
     proxy_label: row.proxyLabel,
     model_label: row.modelLabel,
     model_source: row.modelSource,
-    context_window: row.contextWindow,
-    compaction_threshold: row.compactionThreshold,
     runner_name: row.runnerName,
     runner_kind: row.runnerKind,
     // Stored bare on historical rows; emitted with the `@` sigil so every
@@ -415,17 +413,6 @@ interface CreateRunParams {
    * container's word. Absent/null = the model resolved no pricing.
    */
   modelCost?: ModelCost | null;
-  /**
-   * Context window (tokens) the run is LAUNCHED with, and the token count at
-   * which the runner auto-compacts. Derived once by `deriveRunContextBudget`
-   * from the same resolved model the container receives, so the dashboard's
-   * context gauge has a denominator that survives later model-config changes.
-   * Omitted (→ NULL = "unknown", no gauge) on runs that resolve no platform
-   * model — remote-origin runs execute on the caller's host with the caller's
-   * own model.
-   */
-  contextWindow?: number;
-  compactionThreshold?: number;
   apiKeyId?: string;
   /** Snapshot of the agent's @scope (e.g. "@acme") at run creation. */
   agentScope?: string | null;
@@ -558,8 +545,6 @@ export async function createRun(scope: AppScope, params: CreateRunParams): Promi
       modelLabel: params.modelLabel,
       modelSource: params.modelSource,
       modelCost: params.modelCost ?? null,
-      contextWindow: params.contextWindow ?? null,
-      compactionThreshold: params.compactionThreshold ?? null,
       applicationId: scope.applicationId,
       apiKeyId: params.apiKeyId,
       runNumber,
