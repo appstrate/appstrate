@@ -24,7 +24,9 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
+import { createAuth, getAuth } from "@appstrate/db/auth";
 import {
+  account as accountTable,
   applicationPackages,
   applications,
   organizationMembers,
@@ -46,6 +48,8 @@ const AGENTS_DIR = resolve(
 );
 const EMAIL = process.env["SEED_EMAIL"] ?? "demo@appstrate.local";
 const ORG_SLUG = process.env["SEED_ORG_SLUG"] ?? "demo";
+/** Instance de démonstration jetable : le mot de passe est écrit dans la sortie du script. */
+const PASSWORD = process.env["SEED_PASSWORD"] ?? "demo12345678";
 
 // ─── 1. Schema ──────────────────────────────────────────────────────────────
 // Normally applied at boot. Doing it here is what lets this script run against a
@@ -63,8 +67,25 @@ if (!account) {
     .values({ id, name: "Demo", email: EMAIL, emailVerified: true, realm: "platform" })
     .returning();
   await db.insert(profiles).values({ id, displayName: "Demo", language: "fr" });
-  console.log(`account created: ${EMAIL}`);
-  console.log("  (no password — sign in through the onboarding flow, or set one from the UI)");
+
+  // AVEC un mot de passe. Sans lui, le script promet une instance prête en une commande
+  // et livre un compte auquel personne ne peut se connecter : ni l'écran ni le CLI. Le
+  // hachage vient de Better Auth lui-même, jamais réimplémenté ici — c'est le seul moyen
+  // que la connexion vérifie ce que le script a écrit.
+  //
+  // `createAuth()` d'abord : hors du serveur, personne ne l'a appelé, et `getAuth()` lève
+  // alors une exception qui laisse un utilisateur SANS ligne de credentials — un compte
+  // qu'aucun mot de passe n'ouvre et que la reprise du script ne recrée pas.
+  createAuth([]);
+  const { password: hasher } = await getAuth().$context;
+  await db.insert(accountTable).values({
+    id: crypto.randomUUID(),
+    accountId: id,
+    providerId: "credential",
+    userId: id,
+    password: await hasher.hash(PASSWORD),
+  });
+  console.log(`account created: ${EMAIL} / ${PASSWORD}`);
 }
 
 let [org] = await db.select().from(organizations).where(eq(organizations.slug, ORG_SLUG)).limit(1);
