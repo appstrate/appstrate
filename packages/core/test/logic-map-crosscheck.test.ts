@@ -177,6 +177,38 @@ describe("logic map cross-check", () => {
     expect(out.some((f) => f.code === "shape_suspect")).toBe(true);
   });
 
+  it("flags a gap or an edge that points at a step which does not exist", () => {
+    // Un identifiant fantôme ne casse rien au rendu : il ne dessine simplement rien, et le
+    // lecteur croit que le trou n'était rattaché à aucune étape.
+    const broken: LogicMapLike = {
+      shape: "sequence",
+      steps: [{ id: "s1", kind: "step", label: "x" }],
+      edges: [{ from: "s1", to: "s9" }],
+      gaps: [{ kind: "unhandled_case", message: "…", related_steps: ["s1", "s404"] }],
+    };
+    const codes = crossCheckLogicMap(broken, {}).filter((f) => f.code === "dangling_step_id");
+    expect(codes.map((f) => f.item_id).sort()).toEqual(["s404", "s9"]);
+    expect(codes.every((f) => f.level === "error")).toBe(true);
+  });
+
+  it("hints at a file declared read but never cited", () => {
+    // La signature d'une carte qui annonce avoir lu le prompt alors que la route le lui a
+    // rendu vide. Indice et non erreur : ouvrir un SKILL.md pour savoir quel fichier de
+    // références fait foi, sans le citer, est légitime — un cas dans le corpus.
+    const found = crossCheckLogicMap(load("compta-gmail-harvest"), {}).filter(
+      (f) => f.code === "declared_but_uncited",
+    );
+    expect(found.map((f) => f.item_id)).toEqual(["skills/@default/compta-references/SKILL.md"]);
+    expect(found[0]!.level).toBe("hint");
+  });
+
+  it("leaves the hand-written corpus free of dangling identifiers", () => {
+    for (const name of ["wiki-brain", "compta-inbox", "fleet-software-engineer"]) {
+      const found = crossCheckLogicMap(load(name), {}).filter((f) => f.code === "dangling_step_id");
+      expect(found).toEqual([]);
+    }
+  });
+
   it("measures how much a plain substring search would have found", () => {
     // Un prompt qui nomme ses outils : la lecture de sens n'apporte rien de plus.
     const named = grepEquivalence(

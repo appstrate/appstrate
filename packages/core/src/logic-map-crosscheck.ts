@@ -55,12 +55,19 @@ interface LogicMapStep {
   label: string;
   refs?: readonly string[];
   detail?: string | null;
+  /**
+   * Laxiste à dessein : l'appelant passe parfois une carte déjà projetée pour le rendu, qui
+   * ne garde de l'ancrage que la citation. Sans `file`, le contrôle de périmètre se tait.
+   */
+  evidence?: { file?: string; quote?: string } | null;
 }
 
 export interface LogicMapLike {
   shape: "sequence" | "policies";
   steps: readonly LogicMapStep[];
   edges: readonly { from: string; to: string }[];
+  gaps?: readonly { kind: string; message: string; related_steps?: readonly string[] }[];
+  source?: { files?: readonly string[] };
 }
 
 export interface CrossCheckOptions {
@@ -324,6 +331,59 @@ export function crossCheckLogicMap(
           `ne décrit ce qu'elle déclenche.`,
       });
     }
+  }
+
+  // --- Identifiants internes ------------------------------------------------
+  // Une arête ou un trou qui désigne une étape inexistante est invisible : le rendu ne
+  // dessine rien, et le lecteur croit que le trou n'était rattaché à rien. Le schéma ne
+  // peut pas l'attraper, les identifiants y sont de simples chaînes.
+  const stepIds = new Set(map.steps.map((s) => s.id));
+  const dangling = new Map<string, string[]>();
+  const noteDangling = (id: string, from: string) => {
+    if (stepIds.has(id)) return;
+    const holders = dangling.get(id);
+    if (holders) holders.push(from);
+    else dangling.set(id, [from]);
+  };
+  for (const edge of map.edges) {
+    noteDangling(edge.from, `arête ${edge.from}→${edge.to}`);
+    noteDangling(edge.to, `arête ${edge.from}→${edge.to}`);
+  }
+  for (const [i, gap] of (map.gaps ?? []).entries()) {
+    for (const id of gap.related_steps ?? []) noteDangling(id, `trou ${i + 1} (${gap.kind})`);
+  }
+  for (const [id, holders] of dangling) {
+    findings.push({
+      level: "error",
+      code: "dangling_step_id",
+      node_id: null,
+      item_id: id,
+      step_ids: [],
+      message:
+        `\`${id}\` est désigné par ${holders.length > 1 ? `${holders.length} renvois` : holders[0]} ` +
+        `mais n'est l'identifiant d'aucune étape de la carte.`,
+    });
+  }
+
+  // --- Périmètre de lecture annoncé ------------------------------------------
+  // Un fichier déclaré lu que pas une citation n'utilise. Souvent légitime (on ouvre un
+  // SKILL.md pour savoir QUEL fichier de références fait foi, sans le citer), donc un
+  // indice et non une erreur. Mais c'est aussi la signature d'une carte qui annonce avoir
+  // lu le prompt alors que la route le lui a rendu vide : mesuré sur deux runs, et rien
+  // ne le signalait.
+  const citedFiles = new Set(map.steps.map((s) => s.evidence?.file).filter(Boolean));
+  for (const file of map.source?.files ?? []) {
+    if (citedFiles.has(file)) continue;
+    findings.push({
+      level: "hint",
+      code: "declared_but_uncited",
+      node_id: null,
+      item_id: file,
+      step_ids: [],
+      message:
+        `\`${file}\` est déclaré lu mais aucune étape ne le cite : soit il a servi à en ` +
+        `trouver un autre, soit la carte annonce un périmètre qu'elle n'a pas.`,
+    });
   }
 
   // --- Cohérence de la forme déclarée ----------------------------------------

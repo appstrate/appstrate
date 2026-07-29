@@ -65,8 +65,20 @@ const misplaced: string[] = [];
 const missing: string[] = [];
 const unreadable: string[] = [];
 const outsideSource: string[] = [];
+const offLayout: string[] = [];
 
 const declared = new Set(map.source?.files ?? []);
+
+/**
+ * Disposition d'un skill dans un bundle AFPS. Un chemin de skill qui ne la respecte pas
+ * est un chemin de dézippage temporaire : il se vérifie dans la session de l'agent et
+ * nulle part ailleurs, donc la citation meurt avec le run. Mesuré : un run a cité
+ * `skills/@default/compta-references/archive/references/…` alors que l'archive publiée
+ * n'a jamais eu de dossier `archive/`. Ce contrôle-là passait au travers de tous les autres.
+ */
+const SKILL_SHAPE = /^(\.pi\/)?skills\/@[^/]+\/[^/]+\/(SKILL\.md|references\/|scripts\/|assets\/)/;
+/** Les deux racines vues en vrai : la disposition du bundle, et le point de montage du conteneur. */
+const SKILL_ROOT = /^(\.pi\/)?skills\//;
 
 for (const step of map.steps) {
   const ev = step.evidence;
@@ -75,6 +87,10 @@ for (const step of map.steps) {
   // Une citation qui pointe hors de `source.files` décrit un fichier que la carte ne
   // déclare pas avoir lu : le périmètre de lecture ment.
   if (declared.size > 0 && !declared.has(ev.file)) outsideSource.push(`${step.id} → ${ev.file}`);
+
+  if (SKILL_ROOT.test(ev.file) && !SKILL_SHAPE.test(ev.file)) {
+    offLayout.push(`${step.id} → ${ev.file}`);
+  }
 
   if (!existsSync(path)) {
     unreadable.push(`${step.id} → ${ev.file}`);
@@ -114,12 +130,20 @@ console.log(`  mal située    ${misplaced.length}`);
 console.log(`  introuvables  ${missing.length}`);
 if (unreadable.length) console.log(`  source absente ${unreadable.length}`);
 if (outsideSource.length) console.log(`  hors source.files ${outsideSource.length}`);
+if (offLayout.length) console.log(`  chemin hors bundle ${offLayout.length}`);
 
 for (const m of missing) console.log(`  INTROUVABLE  ${m}`);
 for (const m of misplaced) console.log(`  MAL SITUÉE   ${m}`);
 for (const m of unreadable) console.log(`  ILLISIBLE    ${m}`);
 for (const m of outsideSource) console.log(`  HORS PÉRIMÈTRE ${m}`);
+for (const m of offLayout) {
+  console.log(`  HORS BUNDLE  ${m}`);
+  console.log(
+    `               attendu : skills/@scope/nom/{SKILL.md|references/…|scripts/…}. ` +
+      `Dézippe le skill à sa place dans le bundle, ne cite jamais un dossier de travail.`,
+  );
+}
 
-// Une citation introuvable ou illisible invalide la carte ; des lignes fausses la
-// rendent trompeuse. Les deux bloquent la publication.
-process.exit(missing.length + unreadable.length + misplaced.length > 0 ? 1 : 0);
+// Une citation introuvable ou illisible invalide la carte ; des lignes fausses la rendent
+// trompeuse ; un chemin de dossier temporaire la rend invérifiable après le run. Tous bloquent.
+process.exit(missing.length + unreadable.length + misplaced.length + offLayout.length > 0 ? 1 : 0);
