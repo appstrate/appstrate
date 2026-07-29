@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [6.1.0] — 2026-07-29
+
+Additive release. It exists because `packages/core/src` had drifted from the
+published `6.0.0` by 191 lines while carrying the same version number — npm and
+the in-tree source were no longer the same code under the same label, which is
+invisible to anyone consuming core from the registry.
+
+### Added
+
+- **`findRetiredDependencyKeys()`**, plus the `RetiredDependencyKey` and
+  `RetiredDependencyKeyUse` types (`@appstrate/core/dependencies`). Lists the
+  AFPS 1.x `dependencies` keys that AFPS 2.0 retired, each paired with its
+  replacement: `tools` → `mcp_servers`, `providers` → `integrations`. Pure and
+  non-mutating — it reports what it found and decides nothing, so callers apply
+  the direction-dependent policy themselves (reject on author input, warn and
+  never rewrite on already-persisted manifests).
+- **`totalTokens()`** (`@appstrate/core/token-usage`). Sums a `TokenUsage`
+  across all four counters, cache creation and cache read included. Summing
+  only `input_tokens + output_tokens` under-reports every cached turn.
+- **`LlmUsageLedgerRow.pricingStatus`** (`@appstrate/core/module`), optional,
+  `"priced" | "partial" | "unpriced" | null`. Lets a reader distinguish a row
+  priced at zero from a row whose price could not be resolved — previously
+  indistinguishable, both surfacing as `0`.
+
+### Changed
+
+- **`validateManifest()` under `retiredRuntimeTools: "reject"` now also rejects
+  retired `dependencies` keys**, naming the replacement key in the error.
+  Author input carrying `dependencies.tools` or `dependencies.providers` was
+  silently accepted and then inert; it now fails at authoring time.
+
+  Note the asymmetry, which is deliberate: this is a policy on author input,
+  not a shape constraint. `dependencies` stays a loose object (AFPS §10
+  mandates extensibility for objects it does not explicitly close), so
+  **already-published manifests carrying a retired key keep validating and keep
+  running**. Only the `"reject"` policy path is affected — a caller that
+  previously passed such a manifest through `validateManifest` and got a pass
+  will now get a failure.
+
 ## [6.0.0] — 2026-07-26
 
 Major release grouping every contract change the repository accumulated after
