@@ -64,6 +64,28 @@ describe("logic-map schema", () => {
     expect(validate(map)).toBe(false);
   });
 
+  it("closes the grain of `runtime`, the one prefix nothing can verify", () => {
+    // Les autres préfixes sont vérifiés contre le manifeste ; `runtime` n'a aucun
+    // emplacement de déclaration, donc seul l'enum peut empêcher que le même pouvoir
+    // prenne le nom d'outil de chaque harnais (`bash` contre `shell`, `edit` contre
+    // `apply_patch`, trois `browser_*` pour une capacité).
+    const validate = makeValidator();
+    const map = JSON.parse(readFileSync(join(EXAMPLES_DIR, exampleFiles[0]!), "utf8"));
+
+    map.steps[0].refs = ["runtime:shell"];
+    expect(validate(map)).toBe(true);
+    map.steps[0].refs = ["runtime:bash"];
+    expect(validate(map)).toBe(false);
+    map.steps[0].refs = ["runtime:apply_patch"];
+    expect(validate(map)).toBe(false);
+    // Le grain `#` reste réservé aux préfixes qui ont un manifeste derrière eux.
+    map.steps[0].refs = ["runtime:shell#rm"];
+    expect(validate(map)).toBe(false);
+    // Et il ne bride pas les autres.
+    map.steps[0].refs = ["toolbox:@appstrate/gmail#api_call"];
+    expect(validate(map)).toBe(true);
+  });
+
   it("keeps `applies_to` exclusive to guards", () => {
     const validate = makeValidator();
     const map = JSON.parse(readFileSync(join(EXAMPLES_DIR, exampleFiles[0]!), "utf8"));
@@ -79,6 +101,21 @@ describe("logic-map schema", () => {
     const step = map.steps.find((s: { kind: string }) => s.kind !== "loop");
     expect(step).toBeDefined();
     step.until = "the query is completely resolved";
+    expect(validate(map)).toBe(false);
+  });
+
+  it("lets an edge declare a deliberate departure from the source", () => {
+    // Le pendant d'`aggregated` : une carte qui a corrigé un ordre fautif doit pouvoir le
+    // dire, sinon elle passe pour fidèle et le défaut de la source disparaît avec elle.
+    const validate = makeValidator();
+    const map = JSON.parse(
+      readFileSync(join(EXAMPLES_DIR, "analyste-donnees.logic-map.json"), "utf8"),
+    );
+    const repaired = map.edges.find((e: { departs_from_source?: string }) => e.departs_from_source);
+    expect(repaired).toBeDefined();
+    expect(validate(map)).toBe(true);
+
+    map.edges[0].departs_from_source = { why: "objet" };
     expect(validate(map)).toBe(false);
   });
 

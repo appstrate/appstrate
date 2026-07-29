@@ -222,7 +222,7 @@
       "label": "Tâche non triviale, à phases, ambiguë ou multi-demandes : établir un plan",
       "parent": null,
       "detail": "Sept déclencheurs énumérés (l. 64-70), dont « l'utilisateur a demandé plus d'une chose » et « tu génères des étapes supplémentaires en cours de route ».",
-      "refs": ["runtime:update_plan"],
+      "refs": ["runtime:plan"],
       "evidence": {
         "file": "corpus-web/codex-cli-base-instructions.md",
         "lines": [64, 64],
@@ -237,7 +237,7 @@
       "label": "Pas de plan pour une requête simple ou en une seule étape, ni d'étapes de remplissage",
       "parent": null,
       "detail": "Le prompt donne trois exemples de « low-quality plans » à ne pas produire (l. 101-119).",
-      "refs": ["runtime:update_plan"],
+      "refs": ["runtime:plan"],
       "evidence": {
         "file": "corpus-web/codex-cli-base-instructions.md",
         "lines": [56, 56],
@@ -267,7 +267,7 @@
       "label": "Ne pas répéter le contenu du plan après un appel `update_plan`",
       "parent": null,
       "detail": "Le harnais l'affiche déjà. Résumer le changement et signaler le contexte important.",
-      "refs": ["runtime:update_plan"],
+      "refs": ["runtime:plan"],
       "evidence": {
         "file": "corpus-web/codex-cli-base-instructions.md",
         "lines": [58, 58],
@@ -282,7 +282,7 @@
       "label": "Avant chaque commande : vérifier que l'étape précédente est finie et la marquer terminée",
       "parent": null,
       "detail": "Point de rebouclage du travail : c'est cette prescription, jointe à up2, qui fait de l'exécution une boucle.",
-      "refs": ["runtime:update_plan"],
+      "refs": ["runtime:plan"],
       "evidence": {
         "file": "corpus-web/codex-cli-base-instructions.md",
         "lines": [60, 60],
@@ -297,7 +297,7 @@
       "label": "Changement de plan en cours de tâche : rappeler `update_plan` avec une `explanation`",
       "parent": null,
       "detail": "",
-      "refs": ["runtime:update_plan"],
+      "refs": ["runtime:plan"],
       "evidence": {
         "file": "corpus-web/codex-cli-base-instructions.md",
         "lines": [60, 60],
@@ -312,7 +312,7 @@
       "label": "N'écrire que des plans de haute qualité",
       "parent": null,
       "detail": "Adossé à six exemples littéraux, trois bons et trois mauvais. Aucun critère explicite ne distingue les deux séries : le prompt enseigne par l'exemple.",
-      "refs": ["runtime:update_plan"],
+      "refs": ["runtime:plan"],
       "evidence": {
         "file": "corpus-web/codex-cli-base-instructions.md",
         "lines": [121, 121],
@@ -403,7 +403,7 @@
       "label": "Éditer les fichiers avec `apply_patch` — jamais `applypatch` ni `apply-patch`",
       "parent": null,
       "detail": "Le prompt donne la forme exacte de l'appel, y compris l'enveloppe `*** Begin Patch` / `*** End Patch`. Seul outil nommé du document avec `update_plan` et `rg`.",
-      "refs": ["runtime:apply_patch"],
+      "refs": ["runtime:edit_file"],
       "evidence": {
         "file": "corpus-web/codex-cli-base-instructions.md",
         "lines": [132, 132],
@@ -524,7 +524,7 @@
       "label": "Ne pas relire un fichier après `apply_patch` : l'appel échoue s'il n'a pas marché",
       "parent": null,
       "detail": "Vaut aussi pour la création et la suppression de dossiers. Règle d'économie de jetons adossée à une garantie du harnais.",
-      "refs": ["runtime:apply_patch"],
+      "refs": ["runtime:edit_file"],
       "evidence": {
         "file": "corpus-web/codex-cli-base-instructions.md",
         "lines": [143, 143],
@@ -1086,7 +1086,7 @@
       "label": "Créer le plan : appeler `update_plan` avec 1 à 7 étapes de 5 à 7 mots, chacune avec un statut",
       "parent": null,
       "detail": "Statuts admis : `pending`, `in_progress`, `completed`.",
-      "refs": ["runtime:update_plan"],
+      "refs": ["runtime:plan"],
       "evidence": {
         "file": "corpus-web/codex-cli-base-instructions.md",
         "lines": [271, 271],
@@ -1101,7 +1101,7 @@
       "label": "Marquer les étapes terminées `completed` et la suivante `in_progress`",
       "parent": null,
       "detail": "Plusieurs étapes peuvent être closes en un seul appel.",
-      "refs": ["runtime:update_plan"],
+      "refs": ["runtime:plan"],
       "evidence": {
         "file": "corpus-web/codex-cli-base-instructions.md",
         "lines": [273, 273],
@@ -1116,7 +1116,7 @@
       "label": "Exactement une étape `in_progress` à tout instant, jusqu'à la fin",
       "parent": null,
       "detail": "Invariant d'état vérifiable, le plus contrôlable du document.",
-      "refs": ["runtime:update_plan"],
+      "refs": ["runtime:plan"],
       "evidence": {
         "file": "corpus-web/codex-cli-base-instructions.md",
         "lines": [273, 273],
@@ -1131,7 +1131,7 @@
       "label": "Toutes les étapes finies : appeler `update_plan` pour tout marquer `completed`",
       "parent": null,
       "detail": "Condition d'arrêt du plan — distincte de la condition d'arrêt du tour (te1), et rien ne dit qu'elles coïncident.",
-      "refs": ["runtime:update_plan"],
+      "refs": ["runtime:plan"],
       "evidence": {
         "file": "corpus-web/codex-cli-base-instructions.md",
         "lines": [275, 275],

@@ -101,7 +101,7 @@
       "label": "Explorer avec des outils filtrants (find, grep, git) plutôt qu'en force",
       "parent": null,
       "detail": "",
-      "refs": ["runtime:bash"],
+      "refs": ["runtime:shell"],
       "evidence": {
         "file": "corpus-web/openhands-system-prompt.md",
         "lines": [19, 19],
@@ -147,7 +147,7 @@
       "label": "Remplacement global : envisager `sed` plutôt que d'ouvrir un éditeur plusieurs fois",
       "parent": null,
       "detail": "",
-      "refs": ["runtime:bash"],
+      "refs": ["runtime:shell"],
       "evidence": {
         "file": "corpus-web/openhands-system-prompt.md",
         "lines": [25, 25],
@@ -314,7 +314,7 @@
       "label": "Credentials git configurés : les utiliser et ajouter `Co-authored-by: openhands`",
       "parent": null,
       "detail": "À défaut, `openhands` / `openhands@all-hands.dev`.",
-      "refs": ["runtime:bash"],
+      "refs": ["runtime:shell"],
       "evidence": {
         "file": "corpus-web/openhands-system-prompt.md",
         "lines": [44, 44],
@@ -344,7 +344,7 @@
       "label": "Au moment de committer : `git status` d'abord, puis `git commit -a` si possible",
       "parent": null,
       "detail": "",
-      "refs": ["runtime:bash"],
+      "refs": ["runtime:shell"],
       "evidence": {
         "file": "corpus-web/openhands-system-prompt.md",
         "lines": [46, 46],
@@ -389,7 +389,7 @@
       "label": "`git --no-pager` sur les commandes à sortie paginée",
       "parent": null,
       "detail": "Contre-mesure au blocage sur une entrée interactive.",
-      "refs": ["runtime:bash"],
+      "refs": ["runtime:shell"],
       "evidence": {
         "file": "corpus-web/openhands-system-prompt.md",
         "lines": [49, 49],
@@ -920,7 +920,7 @@
       "label": "Essayer curl/wget/fetch d'abord ; le navigateur seulement si l'outil simple échoue",
       "parent": null,
       "detail": "Ou si la page requiert du JavaScript ou une interaction.",
-      "refs": ["runtime:bash"],
+      "refs": ["runtime:shell"],
       "evidence": {
         "file": "corpus-web/openhands-system-prompt.md",
         "lines": [155, 155],
@@ -935,7 +935,7 @@
       "label": "TOUJOURS `browser_get_state` avant CHAQUE `browser_click` ou `browser_type`",
       "parent": null,
       "detail": "Les indices changent après chaque action. Flot imposé : navigate → get_state → interact → get_state → get_content.",
-      "refs": ["runtime:browser_get_state", "runtime:browser_click", "runtime:browser_type"],
+      "refs": ["runtime:browser", "runtime:browser", "runtime:browser"],
       "evidence": {
         "file": "corpus-web/openhands-system-prompt.md",
         "lines": [156, 156],
@@ -1104,7 +1104,7 @@
       "label": "Pas de `pkill` sur un mot-clé générique",
       "parent": null,
       "detail": "`pkill -f server`, `pkill -f python` risquent de tuer d'autres processus importants.",
-      "refs": ["runtime:bash"],
+      "refs": ["runtime:shell"],
       "evidence": {
         "file": "corpus-web/openhands-system-prompt.md",
         "lines": [189, 189],
@@ -1119,7 +1119,7 @@
       "label": "Trouver le PID exact via `ps aux`, puis tuer ce PID",
       "parent": null,
       "detail": "Ou, mieux, lire un fichier de PID ou utiliser l'arrêt propre de l'application.",
-      "refs": ["runtime:bash"],
+      "refs": ["runtime:shell"],
       "evidence": {
         "file": "corpus-web/openhands-system-prompt.md",
         "lines": [191, 191],

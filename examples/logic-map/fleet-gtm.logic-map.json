@@ -119,7 +119,7 @@
       "parent": null,
       "detail": "Entrée : nom et prénom, société et/ou domaine, données CRM existantes. Un crédit Apollo par enrichissement. Aucun type du vocabulaire ne décrit une délégation à un sous-agent : `tool_call` est le moins mauvais. Les quatre refs sont les outils que le prompt attribue au SOUS-AGENT (l. 111), pas à l'agent principal : sans elles, quatre outils déclarés sur seize deviendraient « jamais référencés » à tort.",
       "refs": [
-        "runtime:task",
+        "runtime:spawn_subagent",
         "toolbox:apollo#apollo_search_contacts",
         "toolbox:apollo#apollo_search_people",
         "toolbox:apollo#apollo_enrich_people",
@@ -155,7 +155,7 @@
       "parent": null,
       "detail": "Entrée : `account_name`, `channel_id`, fenêtre de rétrospection optionnelle. Retourne un résumé des mises à jour, actions, blocages et prochaines étapes. Même limite de typage que `sa1`. Refs = outils attribués au sous-agent (l. 117).",
       "refs": [
-        "runtime:task",
+        "runtime:spawn_subagent",
         "toolbox:slack#slack_read_channel_history",
         "toolbox:slack#slack_read_thread_messages"
       ],
@@ -173,7 +173,7 @@
       "label": "Recherche parallèle : lancer plusieurs `task` ad hoc simultanément dès que possible",
       "parent": null,
       "detail": "Autorise des sous-agents non déclarés au manifeste, créés à la volée.",
-      "refs": ["runtime:task"],
+      "refs": ["runtime:spawn_subagent"],
       "evidence": {
         "file": "configs/agents/gtm/AGENT.md",
         "lines": [119, 119],
@@ -533,7 +533,7 @@
       "label": "Recherche sur un canal interne de compte (discussions, actions, débriefs) : déléguer à `internal-channel-researcher`",
       "parent": null,
       "detail": "Déclencheur explicite pour la délégation décrite en `sa3`.",
-      "refs": ["runtime:task"],
+      "refs": ["runtime:spawn_subagent"],
       "evidence": {
         "file": "configs/agents/gtm/AGENT.md",
         "lines": [179, 179],

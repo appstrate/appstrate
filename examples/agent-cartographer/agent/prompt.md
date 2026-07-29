@@ -139,6 +139,14 @@ laisse `over` à `null` et renseigne `until`.
 - **N'invente jamais une étape que le texte ne prescrit pas.** Ce qui manque
   manifestement va dans `gaps`, pas dans un nœud inventé.
 - Une politique = **un déclencheur**. Huit conditions d'entrée font huit nœuds.
+- **Si tu réordonnes, dis-le.** Quand la lettre de la source produirait un graphe incohérent
+  (une sortie émise avant le calcul de l'un de ses champs, une étape qui en présuppose une
+  suivante), rétablis l'ordre ET renseigne `departs_from_source` sur l'arête concernée, en
+  disant ce que le texte prescrit et pourquoi tu t'en écartes. Le défaut de la source va
+  aussi dans `gaps`. Une carte qui répare en silence passe pour fidèle et **fait disparaître
+  le défaut qu'elle vient de corriger**. Un texte dont l'ordre d'écriture diffère simplement
+  de l'ordre d'exécution n'est pas un écart : ne renseigne ce champ que pour une décision
+  délibérée.
 - Sur un très gros prompt, tu devras résumer. **Dis-le, ce n'est pas facultatif** :
   `aggregated: true` sur le nœud concerné, et `aggregates: <nombre de gestes repliés>` dès
   que tu peux les compter. La règle est mécanique : **un nœud qui recouvre plus d'un geste
@@ -177,9 +185,26 @@ Chaque étape peut porter des `refs` vers ce qu'elle mobilise, par fiabilité d�
 jamais. Si le prompt nomme une intégration que le manifeste ne déclare pas, écris ce que
 le prompt dit. C'est précisément ainsi que les incohérences remontent.
 
-Préfixes disponibles : `toolbox` · `skills` · `mcp_servers` · `system_tools` · `runtime`
-(bash, lecture de fichiers : capacités d'hôte, non déclarables) · `subagents` ·
-`context_files` · `config` · `agent_input` · `agent_output` · `model` · `schedules`.
+Préfixes disponibles : `toolbox` · `skills` · `mcp_servers` · `system_tools` · `runtime` ·
+`subagents` · `context_files` · `config` · `agent_input` · `agent_output` · `model` ·
+`schedules`.
+
+**`runtime` est le seul dont la valeur est FERMÉE**, et pour la raison inverse des autres :
+rien ne la déclare nulle part, donc rien ne peut la vérifier. Nomme la capacité, jamais
+l'outil qui l'expose dans le harnais que tu lis :
+
+```
+exécuter une commande (bash, sh, shell, run_command)    → runtime:shell
+lire un fichier                                          → runtime:read_file
+modifier un fichier existant (edit, apply_patch, patch)  → runtime:edit_file
+créer un fichier                                         → runtime:write_file
+tenir un plan de travail visible (update_plan, todo)     → runtime:plan
+s'adresser à l'utilisateur hors résultat final           → runtime:message_user
+lancer un sous-agent (task, delegate)                    → runtime:spawn_subagent
+piloter un navigateur (browser_click, browser_type, …)   → runtime:browser
+```
+
+Pas de grain `#` sur `runtime` : il n'y a pas de manifeste derrière pour le vérifier.
 
 ## 7. Déclarer ce que le prompt ne dit pas — vocabulaire FERMÉ
 

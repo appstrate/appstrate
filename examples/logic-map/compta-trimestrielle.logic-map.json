@@ -46,7 +46,7 @@
       "label": "Installer les dépendances : `pip install pdfplumber openpyxl` puis `bun install`",
       "parent": null,
       "detail": "Deux écosystèmes dans le même run : Python pour `chq-extractor` / `generate-xlsx` / `extract-pdf`, bun pour `mc-extractor.ts` (dépendance npm `pdf-parse`).",
-      "refs": ["runtime:bash", "skills:@default/compta-references"],
+      "refs": ["runtime:shell", "skills:@default/compta-references"],
       "evidence": {
         "file": "prompt.md",
         "lines": [43, 49],
@@ -92,7 +92,7 @@
       "label": "Aucun appel LLM externe : les scripts ne font que du déterministe",
       "parent": null,
       "detail": "Classification des marchands, détection de mappings et parsing des factures sont faits dans le run ; les scripts du skill s'invoquent par bash et ne contiennent aucune IA.",
-      "refs": ["skills:@default/compta-references", "runtime:bash"],
+      "refs": ["skills:@default/compta-references", "runtime:shell"],
       "evidence": {
         "file": "prompt.md",
         "lines": [25, 27],
@@ -527,7 +527,7 @@
       "label": "Préparer la structure locale du trimestre",
       "parent": null,
       "detail": "`mkdir -p` de `1. Banque/Relevés MC/extraction` et `1. Banque/Relevés CHQ/extraction` : c'est la structure que les scripts d'extraction attendent.",
-      "refs": ["runtime:bash"],
+      "refs": ["runtime:shell"],
       "evidence": {
         "file": "prompt.md",
         "lines": [179, 183],
@@ -591,7 +591,7 @@
       "label": "Filtrer (3 mois + `accepted`) et matérialiser le CSV brut BNC",
       "parent": null,
       "detail": "Postdatés et rejetés restent dans le store mais ne comptent jamais dans un trimestre. Le CSV est écrit dans `1. Banque/` sous un nom de 14 chiffres, seule forme que `generate-xlsx.py::load_paiements_csv` détecte.",
-      "refs": ["skills:@default/compta-references", "runtime:bash"],
+      "refs": ["skills:@default/compta-references", "runtime:shell"],
       "evidence": {
         "file": "skills/@default/compta-references/references/paiements-store.md",
         "lines": [105, 108],
@@ -606,7 +606,7 @@
       "label": "3.5bis — même matérialisation pour les virements Interac, fenêtre élargie",
       "parent": null,
       "detail": "Store `Virements-Interac-BNC_{AF}.json`, records sous la clé `transfers`, fenêtre = 3 mois du trimestre + le mois précédent, car un virement Interac est débité 0 à 3 jours après son initiation. CSV écrit sous `{14_chiffres}-interac.csv`.",
-      "refs": ["skills:@default/compta-references", "runtime:bash"],
+      "refs": ["skills:@default/compta-references", "runtime:shell"],
       "evidence": {
         "file": "skills/@default/compta-references/references/virements-interac-store.md",
         "lines": [70, 76],
@@ -622,7 +622,7 @@
       "label": "Extraire les transactions Mastercard : `bun run mc-extractor.ts`",
       "parent": null,
       "detail": "Script TypeScript du skill, invoqué par bash. Le script attend une arborescence `bank/` + `transactions/` : l'agent la fabrique avec des liens symboliques temporaires puis les supprime. Produit `all_cc_transactions.json` et `.csv`.",
-      "refs": ["skills:@default/compta-references", "runtime:bash"],
+      "refs": ["skills:@default/compta-references", "runtime:shell"],
       "evidence": {
         "file": "prompt.md",
         "lines": [246, 258],
@@ -652,7 +652,7 @@
       "label": "Gap-fill : `cc-csv-extractor.py --since --until`, puis fusion",
       "parent": null,
       "detail": "Bornes : lendemain de la dernière date couverte par les PDF → dernier jour du trimestre. Fusion dans `all_cc_transactions.json` avec dédup par `reference`, à défaut `dateTransaction` + `montantDebite`. Exclut les « En attente » et les montants nuls.",
-      "refs": ["skills:@default/compta-references", "runtime:bash"],
+      "refs": ["skills:@default/compta-references", "runtime:shell"],
       "evidence": {
         "file": "prompt.md",
         "lines": [267, 268],
@@ -682,7 +682,7 @@
       "label": "Extraire les transactions compte chèque : `chq-extractor.py`",
       "parent": null,
       "detail": "Script Python du skill, invoqué par bash, seulement si des PDFs CHQ ont été téléchargés. Filtre lui-même le compte 92325. Produit `all_chq_transactions.json`.",
-      "refs": ["skills:@default/compta-references", "runtime:bash"],
+      "refs": ["skills:@default/compta-references", "runtime:shell"],
       "evidence": {
         "file": "prompt.md",
         "lines": [274, 281],
@@ -788,7 +788,7 @@
       "label": "Extraire le texte (`extract-pdf.py --pages 1-3`)",
       "parent": "t32",
       "detail": "Même script de skill que `compta-inbox`, invoqué par bash.",
-      "refs": ["skills:@default/compta-references", "runtime:bash"],
+      "refs": ["skills:@default/compta-references", "runtime:shell"],
       "evidence": {
         "file": "prompt.md",
         "lines": [335, 338],
@@ -895,7 +895,7 @@
       "label": "Concilier par script : `match-factures.py` → `manifest.json`",
       "parent": null,
       "detail": "Script Python pur du skill, invoqué par bash. Barème CC : montant exact 50 pts + vendor 30/15 pts + même mois 20 pts ; CHQ : montant 50 + mois 20 + destinataire 30 ; score minimum 50. L'algorithme est explicitement hors du raisonnement de l'agent. Stats du résumé console capturées pour l'output.",
-      "refs": ["skills:@default/compta-references", "runtime:bash", "agent_output:factures_stats"],
+      "refs": ["skills:@default/compta-references", "runtime:shell", "agent_output:factures_stats"],
       "evidence": {
         "file": "skills/@default/compta-references/SKILL.md",
         "lines": [103, 107],
@@ -926,7 +926,7 @@
       "label": "Générer le xlsx : `generate-xlsx.py`",
       "parent": null,
       "detail": "Script Python du skill, invoqué par bash. Produit `{QTR} - Transactions.xlsx` à la racine du dossier trimestre local (4 onglets : Résumé, CC Dépenses, CC Crédits, CHQ). Vérifier l'existence du fichier et logger sa taille.",
-      "refs": ["skills:@default/compta-references", "runtime:bash", "system_tools:log"],
+      "refs": ["skills:@default/compta-references", "runtime:shell", "system_tools:log"],
       "evidence": {
         "file": "prompt.md",
         "lines": [502, 511],

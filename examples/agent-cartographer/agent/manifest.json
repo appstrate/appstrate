@@ -1,7 +1,7 @@
 {
   "$schema": "https://schemas.afps.dev/v0/agent.schema.json",
   "name": "@appstrate/agent-cartographer",
-  "version": "0.9.0",
+  "version": "1.0.0",
   "type": "agent",
   "schema_version": "0.2",
   "display_name": "Cartographe de logique",
@@ -173,9 +173,16 @@
       },
       "$defs": {
         "ref": {
-          "description": "Référence typée vers une capacité, du même vocabulaire que les nœuds de la carte de dépendances. Le producteur PROPOSE, le serveur VÉRIFIE contre le manifeste, sans modèle et sans correspondance textuelle. Grain fin possible avec `#` sur `toolbox`, `mcp_servers` et `skills` (`skills:@default/compta-references#scripts/match-factures.py`). La sévérité d'une référence non résolue dépend de l'existence d'un emplacement de déclaration : `toolbox`/`skills`/`mcp_servers`/`system_tools` en ont un, donc erreur ; `runtime` et `subagents` n'en ont pas, donc indice seulement.",
+          "description": "Référence typée vers une capacité, du même vocabulaire que les nœuds de la carte de dépendances. Le producteur PROPOSE, le serveur VÉRIFIE contre le manifeste, sans modèle et sans correspondance textuelle. Grain fin possible avec `#` sur `toolbox`, `mcp_servers` et `skills` (`skills:@default/compta-references#scripts/match-factures.py`). La sévérité d'une référence non résolue dépend de l'existence d'un emplacement de déclaration : `toolbox`/`skills`/`mcp_servers`/`system_tools` en ont un, donc erreur ; `runtime` et `subagents` n'en ont pas, donc indice seulement. `runtime` est le SEUL préfixe dont la valeur est fermée, et pour la raison inverse des autres : rien ne la déclare nulle part, donc rien ne peut la vérifier. Laissée libre, elle recopiait le nom d'outil propre à chaque harnais — le corpus portait `bash` (31) contre `shell` (7) pour le même pouvoir, `edit` contre `apply_patch`, trois entrées `browser_*` pour une capacité. Huit capacités d'hôte, nommées par ce qu'elles PEUVENT et non par l'outil qui les expose : `shell` (exécuter une commande), `read_file`, `edit_file` (modifier un fichier existant), `write_file` (en créer un), `plan` (tenir un plan de travail visible), `message_user`, `spawn_subagent`, `browser`. `write_file` ne figure dans aucune carte du corpus mais le runtime l'expose bel et bien — c'est un fait de plateforme, pas une spéculation.",
           "type": "string",
-          "pattern": "^(toolbox|skills|mcp_servers|system_tools|runtime|subagents|context_files|config|agent_input|agent_output|model|schedules):[^\\s]+$"
+          "anyOf": [
+            {
+              "pattern": "^(toolbox|skills|mcp_servers|system_tools|subagents|context_files|config|agent_input|agent_output|model|schedules):[^\\s]+$"
+            },
+            {
+              "pattern": "^runtime:(shell|read_file|edit_file|write_file|plan|message_user|spawn_subagent|browser)$"
+            }
+          ]
         },
         "evidence": {
           "description": "Ancrage obligatoire dans la source. C'est ce qui rend la carte auditable et ce qui permet de détecter mécaniquement une carte inventée : la citation doit se retrouver littéralement dans le fichier, aux lignes annoncées.",
@@ -355,6 +362,10 @@
               "minLength": 1
             },
             "condition": {
+              "type": ["string", "null"]
+            },
+            "departs_from_source": {
+              "description": "Raison pour laquelle cette arête NE SUIT PAS la lettre de la source. Même rôle que `aggregated` : une carte qui a corrigé en silence ment par omission, ici sur la fidélité plutôt que sur l'exhaustivité. Le cas fondateur est `analyste-donnees`, dont l'étape 3 numérotée émet le résultat final avant que l'étape 4 ne calcule l'un de ses champs — la carte a dû réordonner pour rester cohérente, et rien ne permettait de le dire. Sans ce champ, un lecteur ne peut pas distinguer une carte fidèle d'une carte réparée, et le défaut de la source disparaît au passage. À ne renseigner que pour un écart DÉLIBÉRÉ : un texte dont l'ordre d'écriture diffère de l'ordre d'exécution n'en est pas un.",
               "type": ["string", "null"]
             },
             "confidence": {

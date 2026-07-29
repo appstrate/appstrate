@@ -46,7 +46,7 @@
       "label": "Installer `pdfplumber` et `PyMuPDF` (une fois par run)",
       "parent": null,
       "detail": "Sortie du processus par bash : `pip install`. Prérequis des deux passes de lecture PDF (texte puis image).",
-      "refs": ["runtime:bash"],
+      "refs": ["runtime:shell"],
       "evidence": {
         "file": "prompt.md",
         "lines": [54, 56],
@@ -122,7 +122,7 @@
       "label": "Aucun appel LLM externe : la classification, c'est toi",
       "parent": null,
       "detail": "Les scripts du skill ne font que de l'extraction déterministe et s'invoquent par bash ; tout le raisonnement reste dans le run.",
-      "refs": ["skills:@default/compta-references", "runtime:bash"],
+      "refs": ["skills:@default/compta-references", "runtime:shell"],
       "evidence": {
         "file": "skills/@default/compta-references/SKILL.md",
         "lines": [36, 38],
@@ -339,7 +339,7 @@
       "label": "Préparer `/workspace/inbox` et télécharger le fichier en streaming",
       "parent": "s6",
       "detail": "`mkdir -p` en bash, puis `api_call` GET `?alt=media` avec `responseMode: { toFile }` pour éviter l'inflation base64 en mémoire.",
-      "refs": ["toolbox:@appstrate/google-drive#api_call", "runtime:bash"],
+      "refs": ["toolbox:@appstrate/google-drive#api_call", "runtime:shell"],
       "evidence": {
         "file": "prompt.md",
         "lines": [134, 144],
@@ -354,7 +354,7 @@
       "label": "Pass 1 — extraire le texte des 3 premières pages (`extract-pdf.py`)",
       "parent": "s6",
       "detail": "Script déterministe du skill invoqué par bash ; le texte sort sur stdout, préfixé `--- page N ---`.",
-      "refs": ["skills:@default/compta-references", "runtime:bash"],
+      "refs": ["skills:@default/compta-references", "runtime:shell"],
       "evidence": {
         "file": "prompt.md",
         "lines": [150, 152],
@@ -384,7 +384,7 @@
       "label": "Pass 2 — convertir en JPEG dpi=100 (PyMuPDF) puis lire l'image via `Read`",
       "parent": "s6",
       "detail": "Snippet Python inline en bash, page 1 seulement par défaut. JPEG dpi=100 (~0,2 Mo) et non PNG dpi=150 (~2,3 Mo) pour tenir sous la limite multimodale de ~10,5 Mo ; les scans sont traités un par un. Conversion impossible → `ambiguous`.",
-      "refs": ["runtime:bash", "runtime:read_file"],
+      "refs": ["runtime:shell", "runtime:read_file"],
       "evidence": {
         "file": "prompt.md",
         "lines": [160, 179],
@@ -534,7 +534,7 @@
       "label": "Parser le CSV en `cp1252` vers des enregistrements JSON",
       "parent": "s6",
       "detail": "Deux scripts Python inline strictement parallèles (agrégés ici) : `/tmp/paiements-records.json` et `/tmp/interac-records.json`. Colonnes positionnelles, statut normalisé, bénéficiaire séparé de sa référence entre crochets. Vérifier que le bénéficiaire n'est pas vide — sinon l'encodage a échoué.",
-      "refs": ["runtime:bash", "skills:@default/compta-references"],
+      "refs": ["runtime:shell", "skills:@default/compta-references"],
       "evidence": {
         "file": "prompt.md",
         "lines": [247, 280],
@@ -799,7 +799,7 @@
       "refs": [
         "toolbox:@appstrate/google-drive#api_call",
         "toolbox:@appstrate/google-drive#api_upload",
-        "runtime:bash"
+        "runtime:shell"
       ],
       "evidence": {
         "file": "prompt.md",
@@ -909,7 +909,7 @@
       "refs": [
         "toolbox:@appstrate/google-drive#api_call",
         "toolbox:@appstrate/google-drive#api_upload",
-        "runtime:bash",
+        "runtime:shell",
         "agent_output:factures_parsed_updated"
       ],
       "evidence": {
