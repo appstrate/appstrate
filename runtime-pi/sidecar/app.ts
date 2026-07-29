@@ -772,7 +772,7 @@ export function createApp(deps: AppDeps): Hono {
   // same blob store.
   // Runtime-event drain surface — the Pi runner pulls the
   // canonical events the sidecar journaled while executing runtime tools, and
-  // re-emits them on its single run-event sink. Same Host-header posture as
+  // re-emits them on its single run-event sink. Same `Host: sidecar` posture as
   // `/mcp` (the per-run Docker network is the boundary; no token). An empty
   // journal (no runtime tools selected) answers an empty batch.
   app.get("/runtime-events", (c) => {

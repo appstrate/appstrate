@@ -532,11 +532,10 @@ const sidecarUrl = env.sidecarUrl;
 // a retrying final drain. One instance so the cursor stays consistent across
 // intermediate + final drains. Undefined when no sidecar is attached (no
 // journal to drain — the in-process Pi extension path emits its own events).
-// No `Host` header — `fetch` derives it from the URL, which is the only place
-// that knows the sidecar's hostname on this topology.
 const runtimeDrainer: RuntimeEventDrainer | undefined = sidecarUrl
   ? createRuntimeEventDrainer({
       url: `${sidecarUrl.replace(/\/$/, "")}/runtime-events`,
+      headers: { Host: "sidecar" },
       logger: {
         warn: (msg, data) => logLine("warn", msg, data),
         error: (msg, data) => logLine("error", msg, data),

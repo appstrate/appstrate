@@ -119,7 +119,7 @@ User Browser (BrowserRouter SPA)  Platform (Bun + Hono :3000)
      |   Scheduler (BullMQ + Redis) --|-- distributed cron, exactly-once, same execute path
      |                                |
      |   Docker network: appstrate-exec-{runId} (isolated bridge)
-     |   ┌─ Sidecar Container (per-run DNS alias) ────────────┐
+     |   ┌─ Sidecar Container (alias "sidecar") ──────────────┐
      |   │  RUN_TOKEN, PLATFORM_API_URL via env               │
      |   │  /mcp (JSON-RPC stateless): run_history,           │
      |   │    recall_memory, {ns}__api_call (cred injection), │
@@ -131,7 +131,7 @@ User Browser (BrowserRouter SPA)  Platform (Bun + Hono :3000)
      |   └────────────────────────────────────────────────────┘
 ```
 
-Sidecar + agent setup run in parallel (`Promise.all`). Images pre-pulled at boot (`ensureImage`) to amortise cold pull. The sidecar's DNS alias on the run bridge is **minted per run** (`generateSidecarAlias()`), not the former constant `sidecar` — every agent-facing endpoint (`SIDECAR_URL`, `MODEL_BASE_URL`, `HTTP(S)_PROXY`, `NO_PROXY`) is derived from it, so anything talking to the sidecar must take its `Host` from the URL rather than hard-coding a name. Full sidecar protocol: `docs/architecture/SIDECAR.md`.
+Sidecar + agent setup run in parallel (`Promise.all`). Images pre-pulled at boot (`ensureImage`) to amortise cold pull. Full sidecar protocol: `docs/architecture/SIDECAR.md`.
 
 ## Key Conventions & Gotchas
 

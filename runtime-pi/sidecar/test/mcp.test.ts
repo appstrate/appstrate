@@ -16,7 +16,6 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { createApp, buildSidecarRuntimeDeps, type AppDeps } from "../app.ts";
 import { buildApiCallHost } from "./helpers/api-call-host.ts";
-import { withAlias } from "./helpers/sidecar-alias-env.ts";
 import { MAX_MCP_ENVELOPE_SIZE } from "../helpers.ts";
 
 function makeDeps(overrides?: Partial<AppDeps>): AppDeps {
@@ -58,7 +57,7 @@ async function rpc(
       // Hono's `app.request()` does not synthesise a Host header. Real
       // HTTP/1.1 clients (the agent container, mcp-inspector, the SDK
       // Client) always send one. We set it explicitly here so the
-      // sidecar's DNS-rebinding guard (`isAllowedSidecarHostname`) accepts
+      // sidecar's DNS-rebinding guard (`ALLOWED_HOSTNAMES`) accepts
       // the test request.
       Host: "localhost",
     },
@@ -92,30 +91,9 @@ describe("ALL /mcp — Host header validation (DNS-rebinding defence)", () => {
     });
   }
 
-  it("accepts the per-run docker bridge alias it was launched with", async () => {
-    // The Docker orchestrator mints a fresh alias per run and hands it to the
-    // sidecar as SIDECAR_DNS_ALIAS; the agent's Host is `<alias>:8080`. Any
-    // shape of alias must work — there is no constant to pin.
-    const alias = "s5f3a1c9e7b2d4068159e2a7c3b0d6f84";
-    const res = await withAlias(alias, () => rawMcp(createApp(makeDeps()), `${alias}:8080`));
+  it("accepts the docker bridge alias (sidecar:8080)", async () => {
+    const res = await rawMcp(createApp(makeDeps()), "sidecar:8080");
     expect(res.status).toBe(200);
-  });
-
-  it("rejects a different run's alias", async () => {
-    const res = await withAlias("s5f3a1c9e7b2d4068159e2a7c3b0d6f84", () =>
-      rawMcp(createApp(makeDeps()), "s00000000000000000000000000000000:8080"),
-    );
-    expect(res.status).toBe(403);
-  });
-
-  it("rejects any non-loopback host when no alias is set (fail-closed)", async () => {
-    // Process orchestrator / Firecracker guest reach the sidecar over
-    // loopback and publish no DNS alias, so an unset SIDECAR_DNS_ALIAS must
-    // narrow the allowlist to localhost/127.0.0.1.
-    const res = await withAlias(undefined, () =>
-      rawMcp(createApp(makeDeps()), "attacker.example.com:8080"),
-    );
-    expect(res.status).toBe(403);
   });
 
   it("accepts localhost with a dynamic port (process orchestrator)", async () => {

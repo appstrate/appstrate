@@ -33,16 +33,10 @@ export interface DrainLogger {
 const NOOP_LOGGER: DrainLogger = { warn: () => {}, error: () => {} };
 
 export interface RuntimeEventDrainerOptions {
-  /**
-   * Absolute URL of the sidecar `GET /runtime-events` endpoint.
-   *
-   * There is deliberately no `headers` option. The only header a caller ever
-   * set here was `Host`, and a literal is always wrong: the sidecar's hostname
-   * is per-run, so this URL is the only thing that knows it. Bun honours an
-   * explicit `Host` over the URL-derived one, which would 403 against the
-   * sidecar's DNS-rebinding guard on every drain.
-   */
+  /** Absolute URL of the sidecar `GET /runtime-events` endpoint. */
   url: string;
+  /** Headers sent with every drain request (e.g. `{ Host: "sidecar" }`). */
+  headers?: Record<string, string>;
   /** Injected logger; defaults to a no-op (the drainer is silent in tests). */
   logger?: DrainLogger;
   /** Injectable fetch for tests. Defaults to the global `fetch`. */
@@ -98,6 +92,7 @@ export function createRuntimeEventDrainer(
     try {
       const sep = options.url.includes("?") ? "&" : "?";
       const res = await doFetch(`${options.url}${sep}after=${cursor}`, {
+        headers: options.headers ?? {},
         signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       });
       if (!res.ok) {

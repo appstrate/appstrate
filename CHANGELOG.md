@@ -249,33 +249,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Security
 
-- **The sidecar's DNS alias is minted per run instead of the constant
-  `sidecar`** — on the Docker topology the sidecar was published on every run's
-  bridge network under the same well-known name, so a prompt-injection payload
-  could hard-code `http://sidecar:8080/mcp` and have it resolve in any run.
-  `generateSidecarAlias()` now mints an unguessable per-run label, and all four
-  agent-facing endpoints (`SIDECAR_URL`, `MODEL_BASE_URL`, `HTTP(S)_PROXY`,
-  `NO_PROXY`) plus the container's network alias and the sidecar's own
-  `SIDECAR_DNS_ALIAS` are derived from that one value. The network boundary is
-  unchanged — `/mcp` stays deliberately unauthenticated and the per-run Docker
-  network remains the boundary — and the agent still learns the name (`NO_PROXY`
-  carries it); what changes is that the name is no longer a cross-run constant.
-  **Anything talking to the sidecar must take its `Host` from the URL, never
-  hard-code one**; the `headers` option on `@appstrate/core`'s runtime-event
-  drainer is removed for that reason (no remaining caller, and its only use was
-  setting a literal `Host`).
-  **Note for operators — platform and sidecar image must be upgraded together.**
-  Compose and CLI deploys get this for free (both images pinned to the same
-  `${APPSTRATE_VERSION}`). **Any non-compose deployment can drift** — bare
-  `docker run`, systemd, Kubernetes, a PaaS environment panel, or `bun run dev`
-  — because `SIDECAR_IMAGE` then falls back to the floating
-  `appstrate-sidecar:latest`, and an image already present locally is never
-  re-pulled. The symptom of a mismatch, in either direction, is the agent
-  failing with `MCP connect deadline exceeded after 30000ms` 30 s into the run
-  with nothing logged platform-side; the fix is `bun run docker:build:sidecar`,
-  or pinning `SIDECAR_IMAGE` to the platform's own version. Detail:
-  `docs/architecture/SIDECAR.md`.
-
 - **The agent runtime image ships only the bundled entrypoint, not the platform
   sources** — the image copied its own build inputs into the runtime stage
   (every `@appstrate/*` workspace `src/` tree, `runtime-pi/mcp/`, the
