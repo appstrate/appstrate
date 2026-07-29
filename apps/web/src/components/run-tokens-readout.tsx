@@ -26,10 +26,18 @@ import { totalTokens, type TokenUsage } from "@appstrate/core/token-usage";
  * The count goes through `totalTokens` so it covers the same four buckets the
  * cost prices — `input_tokens` is net of cache, so an input+output sum would
  * omit the bulk of the consumption on any cached run and contradict the Info tab.
+ *
+ * ABSENT vs ZERO are not the same fact and are not rendered the same way.
+ * `runs.token_usage` is `null` on a run that failed before it ever reached the
+ * model, and `totalTokens({})` would turn that into a confident `0` with a
+ * four-zero tooltip — "consumed nothing" where the truth is "never measured".
+ * An em dash, matching the rule `RunCostReadout` and the per-turn latency column
+ * already follow. A measured zero still prints `0`, tooltip and all.
  */
 export function RunTokensReadout({ usage }: { usage: TokenUsage | null | undefined }) {
   const { t } = useTranslation("agents");
-  const total = totalTokens(usage ?? {});
+  if (usage == null) return <span className="tabular-nums">—</span>;
+  const total = totalTokens(usage);
 
   return (
     <TooltipProvider delayDuration={300}>
@@ -43,17 +51,17 @@ export function RunTokensReadout({ usage }: { usage: TokenUsage | null | undefin
         </TooltipTrigger>
         <TooltipContent side="bottom" className="max-w-xs">
           <span className="block text-xs">
-            {t("run.usageInputTokens")}: {(usage?.input_tokens ?? 0).toLocaleString()}
+            {t("run.usageInputTokens")}: {(usage.input_tokens ?? 0).toLocaleString()}
           </span>
           <span className="block text-xs">
-            {t("run.usageOutputTokens")}: {(usage?.output_tokens ?? 0).toLocaleString()}
+            {t("run.usageOutputTokens")}: {(usage.output_tokens ?? 0).toLocaleString()}
           </span>
           <span className="block text-xs">
-            {t("run.usageCacheRead")}: {(usage?.cache_read_input_tokens ?? 0).toLocaleString()}
+            {t("run.usageCacheRead")}: {(usage.cache_read_input_tokens ?? 0).toLocaleString()}
           </span>
           <span className="block text-xs">
             {t("run.usageCacheCreation")}:{" "}
-            {(usage?.cache_creation_input_tokens ?? 0).toLocaleString()}
+            {(usage.cache_creation_input_tokens ?? 0).toLocaleString()}
           </span>
           <span className="text-muted-foreground mt-1 block text-xs">
             {t("run.usageTokensCumulative")}

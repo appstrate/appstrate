@@ -168,6 +168,34 @@ describe("RunRowDetails (the panel body)", () => {
     expect(html).toContain('tabindex="0"');
   });
 
+  it("distinguishes a never-measured usage from a measured zero", () => {
+    // `runs.token_usage` is NULL on a run that failed before reaching the model.
+    // `totalTokens({})` turned that into a confident `0` under a four-zero
+    // tooltip — "consumed nothing" where the truth is "never measured".
+    const never = render(<RunRowDetails run={makeRun({ token_usage: null })} />);
+    expect(never).toContain(agentsFr["run.usageTokensTotal"]);
+    expect(never).toContain("—");
+    expect(never).not.toMatch(/>0</);
+    // No tooltip trigger either: there are no buckets to break down.
+    expect(never).not.toContain('tabindex="0"');
+
+    const measured = render(
+      <RunRowDetails
+        run={makeRun({
+          token_usage: {
+            input_tokens: 0,
+            output_tokens: 0,
+            cache_read_input_tokens: 0,
+            cache_creation_input_tokens: 0,
+          },
+        })}
+      />,
+    );
+    expect(measured).toMatch(/>0</);
+    expect(measured).not.toContain("—");
+    expect(measured).toContain('tabindex="0"');
+  });
+
   it("omits the rows whose data the run does not have", () => {
     const bare = render(
       <RunRowDetails

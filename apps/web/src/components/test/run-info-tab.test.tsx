@@ -80,6 +80,11 @@ describe("TurnsTable with a known context window", () => {
     expect(html).toContain("width:50%");
     expect(html).not.toContain("width:100%");
   });
+
+  it("shows no fallback notice, and tints the bars with the window accent", () => {
+    expect(html).not.toContain(agentsFr["run.turnsPeakRelativeHint"]);
+    expect(html).toContain("bg-primary/15");
+  });
 });
 
 describe("TurnsTable without a context window", () => {
@@ -97,5 +102,16 @@ describe("TurnsTable without a context window", () => {
 
   it("still lists the absolute token counts the header gauge had to drop", () => {
     expect(html).toContain((100_000).toLocaleString());
+  });
+
+  it("says so, instead of silently swapping the denominator under an unchanged header", () => {
+    // Without this, a remote-origin run shows a full-width bar on its peak turn
+    // under the same `Contexte (tokens)` header a windowed run uses — read as
+    // "this turn filled the window", the misreading #1046 removes. The absent
+    // `%` column is not a cue: absence never is.
+    expect(html).toContain(agentsFr["run.turnsPeakRelativeHint"]);
+    // …and in colour too, so the two denominators are not the same picture.
+    expect(html).not.toContain("bg-primary/15");
+    expect(html).toContain("bg-muted-foreground/15");
   });
 });

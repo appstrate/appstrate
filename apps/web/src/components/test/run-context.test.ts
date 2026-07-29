@@ -74,6 +74,38 @@ describe("readRunContext — nothing truthful to render", () => {
     expect(readRunContext([turn(0, 100)], -1, null)).toBeNull();
     expect(readRunContext([turn(0, 100)], Number.NaN, null)).toBeNull();
   });
+
+  it("returns null when no turn carries a usable reading", () => {
+    // A settled turn CAN report zero: the runner emits the breadcrumb as soon as
+    // the input OR the output delta is positive, and `contextTokens` is built
+    // from the input side only — so a provider reporting completion tokens but
+    // omitting the prompt count produces real turns whose context reads zero.
+    // Rendering them is the `0 / 200k`, empty-bar lie the module forbids.
+    expect(readRunContext([turn(0, 0)], WINDOW, null)).toBeNull();
+    expect(readRunContext([turn(0, 0), turn(1, 0)], WINDOW, null)).toBeNull();
+  });
+});
+
+describe("readRunContext — turns that measured nothing", () => {
+  it("excludes a zero-context turn from BOTH readings", () => {
+    const reading = readRunContext([turn(0, 190_000), turn(1, 0)], WINDOW, null);
+    expect(reading?.current).toBe(190_000);
+    expect(reading?.peak).toBe(190_000);
+    expect(reading?.currentFraction).toBeCloseTo(0.95, 10);
+  });
+
+  it("reads `current` off the last USABLE turn, not off the last turn", () => {
+    // The documented semantic refinement: slightly stale beats plainly false.
+    const reading = readRunContext([turn(0, 187_000), turn(1, 128_000), turn(2, 0)], WINDOW, null);
+    expect(reading?.current).toBe(128_000);
+    expect(reading?.peak).toBe(187_000);
+  });
+
+  it("treats a malformed count the same way as a zero", () => {
+    const reading = readRunContext([turn(0, 128_000), turn(1, Number.NaN)], WINDOW, null);
+    expect(reading?.current).toBe(128_000);
+    expect(reading?.peak).toBe(128_000);
+  });
 });
 
 describe("readRunContext — compaction threshold", () => {
@@ -129,6 +161,16 @@ describe("formatCompactTokens", () => {
   it("switches to `M` at a million — 1M windows are shipping models", () => {
     expect(formatCompactTokens(1_000_000)).toBe("1.0M");
     expect(formatCompactTokens(1_500_000)).toBe("1.5M");
+  });
+
+  it("promotes at the ROUNDING boundary, never emitting the `1000k` it rejects", () => {
+    // On a 1 048 576-token window a run at 999 600 used to render
+    // `1000k / 1.0M` — two magnitudes side by side, and the exact string the
+    // function's own docstring calls unreadable.
+    expect(formatCompactTokens(999_400)).toBe("999k");
+    expect(formatCompactTokens(999_500)).toBe("1.0M");
+    expect(formatCompactTokens(999_600)).toBe("1.0M");
+    expect(formatCompactTokens(1_048_576)).toBe("1.0M");
   });
 
   it("never renders a misleading figure for malformed input", () => {

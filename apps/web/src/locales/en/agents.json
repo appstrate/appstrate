@@ -165,6 +165,8 @@
   "run.contextGaugeAria": "Context used out of the model window",
   "run.contextGaugePeakAria": "Peak context reached out of the model window",
   "run.contextGaugeThreshold": "Auto-compaction kicks in at {{tokens}}",
+  "run.contextGaugeValueText": "{{used}} tokens out of {{window}}",
+  "run.turnsPeakRelativeHint": "Context window unknown for this run: bars are relative to the highest value reached, not to the model window.",
   "import.title": "Import package",
   "import.dropText": "Drop an AFPS, AFPS-bundle, or ZIP file here",
   "import.dropHint": "or click to browse",

@@ -33,7 +33,7 @@ import type { components } from "../api/client";
 import { formatDateField } from "../lib/markdown";
 import { JsonView } from "../components/json-view";
 import { useRunMemories, useRunPinned } from "../hooks/use-persistence";
-import { runKeys } from "../lib/query-keys";
+import { runKeys, invalidateRunLogs } from "../lib/query-keys";
 import { MemoryPanel } from "../components/persistence/memory-panel";
 import { Play } from "lucide-react";
 
@@ -67,16 +67,24 @@ export function RunDetailPage() {
 
   const markRead = useMarkReadByRun();
 
-  // Auto-mark notification as read when viewing a terminal run. Keyed on
-  // `status`: the SSE run patch carries `status` (see `runUpdateToRunPatch`),
-  // so a run that finalizes while the page is open marks read the moment
-  // status flips terminal. Idempotent server-side (no-op for a non-recipient /
-  // already-read), and `status` is stable once terminal so the effect does not
-  // re-fire on subsequent renders.
+  // Auto-mark notification as read when viewing a terminal run, and refetch the
+  // run's logs. Keyed on `status`: the SSE run patch carries `status` (see
+  // `runUpdateToRunPatch`), so a run that finalizes while the page is open acts
+  // the moment status flips terminal. Idempotent server-side (no-op for a
+  // non-recipient / already-read), and `status` is stable once terminal so the
+  // effect does not re-fire on subsequent renders.
+  //
+  // The log refetch is NOT covered by the global terminal-status invalidation:
+  // that one fires `runKeys.all` (`["run"]`), which does not prefix-match the
+  // `["run-logs", …]` family. Without it, the frames that arrive between the
+  // last render and the stream teardown below are lost — and with them the turn
+  // breadcrumbs the header gauge reads its peak off. Invalidating cannot loop:
+  // the effect depends on `status`/`runId`, never on the logs it refetches.
   useEffect(() => {
     const terminal = !!status && !(ACTIVE_RUN_STATUSES as ReadonlySet<string>).has(status);
     if (run && runId && terminal) {
       markRead.mutate({ params: { path: { runId } } });
+      void invalidateRunLogs(qc, orgId, applicationId, runId);
     }
   }, [status, runId]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -269,7 +277,13 @@ export function RunDetailPage() {
 
       <RunArtifactsBanner artifacts={run.artifacts} />
 
-      <div className="mb-4 flex items-center justify-between gap-4">
+      {/* `flex-wrap`, not a fixed row: at 375px the tab list alone eats most of
+          the width, and the actions group (cost pill, context gauge, Re-run /
+          Cancel) cannot fit beside it. Wrapping keeps every one of them visible
+          with zero interaction — the acceptance criterion #1046 sets — where a
+          non-wrapping row pushes the page body into a horizontal scroll. The
+          gauge shrinks itself on top of this (see `ContextGaugeReadout`). */}
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-4">
         <Tabs
           value={effectiveTab}
           onValueChange={(v) =>

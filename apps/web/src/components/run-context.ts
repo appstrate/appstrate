@@ -18,6 +18,10 @@
  *     the signal ("the run just bought itself headroom").
  *   - `peak` is the max across every turn — the post-mortem question, "did this
  *     run come close to compaction at any point".
+ *
+ * Both readings are taken over the turns carrying a POSITIVE context only — see
+ * {@link readRunContext} for the provider behaviour that makes a settled turn
+ * report zero, and for the semantic refinement that exclusion implies.
  */
 
 import type { RunTurnRow } from "./log-utils";
@@ -29,9 +33,13 @@ import type { RunTurnRow } from "./log-utils";
  * than a zeroed reading.
  */
 export interface RunContextReading {
-  /** Context size of the last settled turn — the "where is it now" figure. */
+  /**
+   * Context size of the last turn that reported a usable (positive) reading —
+   * the "where is it now" figure. Not simply "the last turn": see
+   * {@link readRunContext}.
+   */
   current: number;
-  /** Largest context size across all turns — the post-mortem figure. */
+  /** Largest context size across the turns with a usable reading. */
   peak: number;
   /** The denominator: the context window the run launched with. */
   window: number;
@@ -64,7 +72,7 @@ export function fractionOfWindow(tokens: number, window: number): number {
  * Derive the context reading for a run, or `null` when there is nothing
  * truthful to render.
  *
- * Two independent null cases, both deliberately collapsing to "no gauge":
+ * Three independent null cases, all deliberately collapsing to "no gauge":
  *
  *  1. **No turns.** Runs predating the per-turn breadcrumb emit none, so there
  *     is no numerator at all. A zeroed bar would read as "the context is
@@ -83,6 +91,22 @@ export function fractionOfWindow(tokens: number, window: number): number {
  *     Fabricating a 200k denominator client-side is the one option rejected
  *     outright: the server already applies that fallback at launch for every
  *     run that has a window, so a `null` here means genuinely unknown.
+ *
+ *  3. **No turn with a usable reading.** A turn can settle with
+ *     `contextTokens === 0`: the runner emits the breadcrumb as soon as EITHER
+ *     the input or the output delta is positive, and `contextTokens` is built
+ *     from the input side only (input + cache read + cache write). A provider
+ *     that reports completion tokens but omits the prompt count — openai-
+ *     compatible gateways do — therefore produces a real turn whose context
+ *     reads zero. That is a measurement gap, not an empty context, so those
+ *     turns are excluded from BOTH readings, and a run in which none survives
+ *     yields `null` for the same reason case 1 does.
+ *
+ * SEMANTIC REFINEMENT, not a guard: excluding them changes `current` from "the
+ * last turn" to "the last turn with a usable reading". On a run whose final
+ * turn reports no prompt count the gauge now shows the previous turn's context
+ * rather than `0 / 200k · 0 %` — slightly stale, but stale beats false, and the
+ * alternative renders an empty bar on a run holding ~190k.
  */
 export function readRunContext(
   turns: readonly RunTurnRow[] | undefined,
@@ -92,12 +116,19 @@ export function readRunContext(
   if (!turns || turns.length === 0) return null;
   if (contextWindow == null || !Number.isFinite(contextWindow) || contextWindow <= 0) return null;
 
-  // `turns` is ordered as the runner emitted it, so the last element is the
-  // most recent settled turn. Reading `at(-1)` rather than sorting by `index`
-  // keeps this total: a malformed index cannot silently reorder the series.
-  const current = turns[turns.length - 1]!.contextTokens;
+  // `turns` is ordered as the runner emitted it, so the last usable element is
+  // the most recent settled turn that measured anything. Walking the array
+  // rather than sorting by `index` keeps this total: a malformed index cannot
+  // silently reorder the series.
+  let current = 0;
   let peak = 0;
-  for (const turn of turns) peak = Math.max(peak, turn.contextTokens);
+  for (const turn of turns) {
+    const tokens = turn.contextTokens;
+    if (!Number.isFinite(tokens) || tokens <= 0) continue;
+    current = tokens;
+    peak = Math.max(peak, tokens);
+  }
+  if (peak <= 0) return null;
 
   // The threshold is advisory and only meaningful inside the window — a value
   // at or past the window marks nothing a full bar does not already say.
@@ -127,11 +158,17 @@ export function readRunContext(
  * not bytes, and `200000` must read `200k` and not `195K`. The `M` tier is not
  * speculative: 1M-token windows are shipping models, and `1000k / 1000k` would
  * be unreadable.
+ *
+ * The tier is chosen AFTER rounding, not before. Testing the raw count first
+ * lets `999_600` fall in the `k` tier and then round to the very `1000k` the
+ * paragraph above rejects — and on a 1 048 576-token window it would print it
+ * next to `1.0M`, two magnitudes side by side.
  */
 export function formatCompactTokens(tokens: number): string {
   if (!Number.isFinite(tokens) || tokens < 0) return "0";
   if (tokens < 1000) return String(Math.round(tokens));
-  if (tokens < 1_000_000) return `${Math.round(tokens / 1000)}k`;
+  const thousands = Math.round(tokens / 1000);
+  if (thousands < 1000) return `${thousands}k`;
   return `${(tokens / 1_000_000).toFixed(1)}M`;
 }
 

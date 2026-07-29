@@ -19,17 +19,47 @@
  * arrays these caches have always used (a pure refactor).
  */
 
+import type { QueryClient } from "@tanstack/react-query";
+
 type Id = string | null | undefined;
 
 /** Single run detail + its log list. Patched live by the run SSE stream. */
 export const runKeys = {
-  /** Prefix — every run-detail entry (terminal-status invalidation). */
+  /**
+   * Prefix — every run-detail entry (terminal-status invalidation).
+   *
+   * It does NOT reach {@link runKeys.logs}: React Query prefix-matches element
+   * by element, and `["run"]` is not a prefix of `["run-logs", …]`. The logs
+   * cache is a separate family that has to be invalidated by name — see
+   * {@link invalidateRunLogs}.
+   */
   all: ["run"] as const,
   detail: (orgId: Id, applicationId: Id, runId: Id) =>
     ["run", orgId, applicationId, runId] as const,
   logs: (orgId: Id, applicationId: Id, runId: Id) =>
     ["run-logs", orgId, applicationId, runId] as const,
 };
+
+/**
+ * Refetch one run's log list.
+ *
+ * Its own function, in the module that owns the key, because the miss it fixes
+ * is exactly the drift this file exists to make impossible: the global
+ * terminal-status invalidation (`invalidateRunAndNotificationQueries`, in
+ * `use-notifications.ts`) fires `runKeys.all`, which refetches the run row and
+ * silently leaves the logs cache alone.
+ *
+ * That matters beyond a short log list. The run-detail page appends live SSE
+ * frames into this same cache with `setQueryData`, and the per-turn context
+ * breadcrumbs the header gauge is computed from ride in it — so a breadcrumb
+ * emitted between the last render and the stream teardown is dropped for good,
+ * and a run that peaked at 187k renders its peak as whatever the last surviving
+ * turn said. Refetching on the terminal transition re-reads the authoritative
+ * server-side list and repairs both the gauge and the Info tab's turn table.
+ */
+export function invalidateRunLogs(qc: QueryClient, orgId: Id, applicationId: Id, runId: Id) {
+  return qc.invalidateQueries({ queryKey: runKeys.logs(orgId, applicationId, runId) });
+}
 
 /** Per-agent run list. Patched in place by the run SSE stream. */
 export const runsKeys = {
