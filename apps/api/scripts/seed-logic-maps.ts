@@ -37,6 +37,7 @@ import {
   user as userTable,
 } from "@appstrate/db/schema";
 import { computeIntegrity } from "@appstrate/core/integrity";
+import { buildMinimalZip, uploadPackageZip } from "../src/services/package-storage.ts";
 
 const MAPS_DIR = resolve(import.meta.dir, "../../../examples/logic-map");
 /** Where the agent definitions live. Outside the repo by default — they are Tractr's, not the platform's. */
@@ -146,20 +147,40 @@ for (const file of mapFiles) {
     .onConflictDoNothing();
 
   const version = manifest.version ?? "1.0.0";
-  const integrity = await computeIntegrity(new TextEncoder().encode(prompt));
+
+  // L'ARCHIVE, PAS SEULEMENT LA LIGNE. Une version sans artefact en stockage est une
+  // version dont personne ne peut relire le contenu : la route de version rend
+  // `content: null` et le téléchargement répond 404. Un agent qui lit la plateforme,
+  // le cartographe par exemple, ne voit alors que le manifeste et cartographie une
+  // coquille sans pouvoir s'en apercevoir. Mesuré : quatre runs sur quatre.
+  const zip = buildMinimalZip({ ...manifest, name: packageId }, prompt);
+  const integrity = await computeIntegrity(zip);
+
+  // Envoi INCONDITIONNEL : une base semée par une version antérieure du script porte des
+  // lignes sans archive, et c'est précisément le cas à réparer. Écraser par un contenu
+  // identique est sans effet, l'omettre laisserait le défaut en place.
+  await uploadPackageZip(packageId, version, zip);
+
   let [row] = await db
     .select()
     .from(packageVersions)
     .where(eq(packageVersions.packageId, packageId))
     .limit(1);
-  if (!row) {
+  if (row) {
+    // L'ancienne intégrité était calculée sur le prompt seul ; le téléchargement la
+    // confronte à celle de l'archive et refuserait de servir un fichier qui ne colle pas.
+    await db
+      .update(packageVersions)
+      .set({ integrity, artifactSize: zip.length })
+      .where(eq(packageVersions.id, row.id));
+  } else {
     [row] = await db
       .insert(packageVersions)
       .values({
         packageId,
         version,
         integrity,
-        artifactSize: prompt.length,
+        artifactSize: zip.length,
         manifest: { ...manifest, name: packageId },
         createdBy: account!.id,
       })
