@@ -39,7 +39,7 @@ import type { RunTurnRow } from "./log-utils";
  * {@link readRunContext} for why the absence of either yields `null` rather
  * than a zeroed reading.
  */
-export interface RunContextReading {
+interface RunContextReading {
   /**
    * Context size of the last turn that reported a usable (positive) reading —
    * the "where is it now" figure. Not simply "the last turn": see

@@ -13,97 +13,54 @@ import { formatCompactTokens, formatWindowPercent, readRunContext } from "./run-
 
 interface ContextGaugeReadoutProps {
   /**
-   * Per-turn breakdown projected from the run's logs (`buildTurnRows`) — the
-   * WHOLE input. Each turn carries its own window, so the numerator and the
-   * denominator arrive together and cannot disagree; see `readRunContext` for
-   * which turn's window is used.
+   * Per-turn breakdown from `buildTurnRows` — the WHOLE input. Each turn carries
+   * its own window, so numerator and denominator arrive together and cannot
+   * disagree; `readRunContext` decides which turn's window applies.
    */
   turns: readonly RunTurnRow[] | undefined;
   /**
-   * `runs.status`. Taken raw rather than as a pre-computed `isActive` boolean so
-   * the active/terminal vocabulary has exactly one definition
-   * (`ACTIVE_RUN_STATUSES`) and the caller cannot disagree with the gauge about
-   * which reading a run gets.
+   * `runs.status`, raw rather than a pre-computed `isActive`, so
+   * `ACTIVE_RUN_STATUSES` stays the single definition of the split.
    */
   status: string | null | undefined;
 }
 
 /**
- * The run's context occupancy, as a peer of the `$` readout in the run-detail
- * header — same chrome, same weight, not a hero element.
+ * The run's context occupancy, a peer of the `$` readout in the run-detail
+ * header (#1046).
  *
- * Two readings of the same series, because the useful question changes when the
- * run stops (#1046):
- *   - active   → `▓▓▓▓░░  128k / 200k · 64 %` — the CURRENT context, i.e. how
- *                much headroom is left before auto-compaction.
- *   - terminal → `▓▓▓▓▓░  187k / 200k`        — the PEAK, i.e. the post-mortem
- *                "did this run come close to compaction".
+ * Two readings, because the useful question changes when the run stops: active
+ * shows the CURRENT context (`128k / 200k · 64 %` — headroom left before
+ * auto-compaction), terminal shows the PEAK (`187k / 200k` — did this run come
+ * close). Terminal drops the percentage per the issue's sketch but keeps the
+ * bar: "how full did it get" reads at a glance where two numbers have to be
+ * divided.
  *
- * The bar is kept in the terminal form even though the issue's sketch shows
- * text only: "how close to full did it get" is the post-mortem reading, and a
- * fill answers it at a glance where two numbers have to be divided. The
- * percentage is dropped there, per that sketch — a peak share is a diagnostic,
- * and the two absolute figures beside it already carry it.
+ * The two diverge exactly when the runner compacted — a run that peaked at 187k
+ * and ended at 40k prints a high-water mark, not a stopping point — so which
+ * reading is on screen has to be stated. `aria-valuetext` names it in both
+ * states. Sighted users get a tooltip on the TERMINAL state only: that is the
+ * misreadable number, and the state that drops the percentage. The active
+ * reading is the unsurprising one, and an affordance that says nothing trains
+ * people to ignore the one that does.
  *
- * WHICH READING, AND HOW IT IS SIGNALLED — the two diverge exactly when the
- * runner compacted: a run that peaked at 187k and ended at 40k prints `187k`,
- * which is a high-water mark and not a stopping point. That distinction used to
- * ride a permanent `ctx` / `pic ctx` text prefix. It no longer does: a label on
- * every render is a heavy way to carry a fact that only surprises in one of the
- * two states, and the bar plus `128k / 200k` is otherwise self-describing.
- * It is carried instead by
- *   - `aria-valuetext`, which NAMES the reading on both states. It is the AT
- *     path and it costs no pixels, so there is no reason to make it selective.
- *   - a tooltip, on the TERMINAL state only.
+ * LIVE CADENCE — `contextTokens` exists only at turn boundaries, so the gauge is
+ * STILL for a whole turn, then jumps. Do not add polling, animation or
+ * interpolation: a smoothly creeping bar would be an invented number, and would
+ * hide the compaction drop that is the most informative thing here.
  *
- * Two judgement calls behind that tooltip, both deliberate:
+ * NARROW VIEWPORTS — the header must not scroll horizontally at 375px, where it
+ * also carries the tab list, the `$` pill and Re-run/Cancel. The gauge is
+ * `shrink-0` and drops the bar and the percentage; the counts stay at every
+ * width, because #1046 exists precisely because a header hid its primary figures
+ * behind a breakpoint. The track collapses to `w-0` and NOT to `hidden`:
+ * `display: none` would take the progressbar out of the accessibility tree, and
+ * with it the `aria-valuetext` carrying the UNABBREVIATED counts that the
+ * visible `128k / 200k` has compacted away.
  *
- *  1. It wraps the COUNTS, not the whole pill. The counts are the ambiguous
- *     part; the bar already carries its own accessible name and `aria-valuetext`
- *     and would become a focus stop nested inside an interactive trigger if the
- *     pill were the trigger. It is also the shape `RunTokensReadout` uses one
- *     element over — same dotted-underline trigger, same `tabIndex={0}`, so the
- *     two readouts in this header teach the reader one affordance, not two.
- *     `title=` is deliberately NOT used: it is invisible to touch and to screen
- *     readers, which is the whole failure this replaces.
- *
- *  2. The ACTIVE state gets no tooltip. Its reading is the unsurprising one —
- *     a running run has no "final" figure a live number could be mistaken for,
- *     the bar is visibly moving, and the percentage that only the active state
- *     renders already anchors the number as a share of the window RIGHT NOW.
- *     A tooltip there would restate the screen, and an affordance that says
- *     nothing trains people to ignore the one that does. The terminal state is
- *     precisely the one that drops the percentage, i.e. the one with the least
- *     on-screen context and the only misreadable number.
- *
- * LIVE CADENCE — `contextTokens` only exists at turn boundaries: the runner
- * emits one breadcrumb per settled assistant turn, and the per-run SSE stream
- * patches those rows into the same React Query cache `turns` is projected from.
- * So the gauge is intentionally STILL for the whole duration of a long turn,
- * then jumps. That is the truth of the measurement. Do not add polling,
- * animation or interpolation to make it look continuous — a smoothly creeping
- * bar would be an invented number, and it would also hide the compaction drop
- * that is the single most informative thing this gauge shows.
- *
- * NARROW VIEWPORTS — the header row must not scroll horizontally at 375px
- * (#1046), where it also carries the tab list, the `$` pill and Re-run/Cancel.
- * The gauge is `shrink-0` (a squeezed token count is worse than none) and drops
- * the two parts that carry nothing the rest does not: the bar, whose numbers sit
- * beside it, and the percentage, which is `used / window` restated. The counts
- * themselves are kept at every width — they ARE the reading, and #1046 exists
- * because a header hid its primary figures behind a breakpoint.
- *
- * The track collapses to `w-0`, NOT to `hidden`: `display: none` would take the
- * `progressbar` out of the accessibility tree, and with it the `aria-valuetext`
- * that is the only carrier of the UNABBREVIATED counts — the visible text is
- * compacted to `128k / 200k` at every width. A zero-width track costs nothing to
- * lay out and stays announced; only the fill inside it is clipped.
- *
- * Renders NOTHING (not a zeroed bar) when the run has no turns, no turn stating
- * a window, or no turn with a usable reading — see `readRunContext` for all
- * three cases and why the header drops a numerator it cannot divide. All three
- * are now read from the same rows, so a run whose logs were pruned drops the
- * gauge whole instead of keeping a denominator with nothing left to divide.
+ * Renders NOTHING (not a zeroed bar) when there are no turns, no turn stating a
+ * window, or no turn with a usable reading — see `readRunContext` for all three,
+ * and for why a numerator it cannot divide is dropped rather than shown.
  */
 export function ContextGaugeReadout({ turns, status }: ContextGaugeReadoutProps) {
   const { t, i18n } = useTranslation("agents");
@@ -114,18 +71,8 @@ export function ContextGaugeReadout({ turns, status }: ContextGaugeReadoutProps)
   const value = isActive ? reading.current : reading.peak;
   const fraction = isActive ? reading.currentFraction : reading.peakFraction;
 
-  // `aria-valuenow` MUST stay inside `[valuemin, valuemax]` — a screen reader
-  // announcing "210000 out of a maximum of 200000" is reporting a broken widget,
-  // not an overflowing context. The raw count is not lost: it is what
-  // `aria-valuetext` and the visible text carry, unclamped, exactly as
-  // `readRunContext` leaves it (a window recorded at launch can legitimately
-  // disagree with what the provider later billed).
-  //
-  // It also NAMES the reading (current vs peak), which the removed text prefix
-  // used to do for everyone: `aria-valuetext` REPLACES the raw number in every
-  // AT announcement, so naming it there costs nothing and keeps the distinction
-  // on the assistive path in both states — including the active one, which
-  // renders no tooltip.
+  // `aria-valuetext` REPLACES the raw number in every AT announcement, which is
+  // why it — and not `aria-valuenow` — is where the reading gets named.
   const ariaValueText = t(
     isActive ? "run.contextGaugeValueText" : "run.contextGaugePeakValueText",
     {
@@ -138,9 +85,11 @@ export function ContextGaugeReadout({ turns, status }: ContextGaugeReadoutProps)
 
   return (
     <div className="text-muted-foreground bg-muted/50 flex shrink-0 items-center gap-1.5 rounded-md px-2.5 py-1 text-xs tabular-nums">
-      {/* The bar carries no meaning the text does not: the counts (and, while
-          active, the percentage) sit beside it, and the ARIA values restate the
-          same numbers for a reader that skips the decoration. */}
+      {/* `aria-valuenow` is clamped into `[valuemin, valuemax]`: announcing
+          "210000 out of a maximum of 200000" reports a broken widget, not an
+          overflowing context. The raw count stays honest in `aria-valuetext`
+          and in the visible text — a window recorded at launch can legitimately
+          disagree with what the provider later billed. */}
       <span
         role="progressbar"
         aria-label={isActive ? t("run.contextGaugeAria") : t("run.contextGaugePeakAria")}
@@ -161,9 +110,11 @@ export function ContextGaugeReadout({ turns, status }: ContextGaugeReadoutProps)
       ) : (
         <TooltipProvider delayDuration={300}>
           <Tooltip>
-            {/* Focusable trigger: the counts are otherwise plain text, so
-                keyboard and touch users would have no way to reach the one
-                thing the removed label used to state. */}
+            {/* Focusable trigger, wrapping the COUNTS rather than the pill: the
+                counts are the ambiguous part, and making the pill the trigger
+                would nest the progressbar's own focus stop inside it. Same
+                dotted-underline shape as `RunTokensReadout`, so the two readouts
+                in this header teach one affordance rather than two. */}
             <TooltipTrigger asChild>
               <span
                 tabIndex={0}
@@ -186,13 +137,10 @@ export function ContextGaugeReadout({ turns, status }: ContextGaugeReadoutProps)
 }
 
 /**
- * What the terminal gauge's tooltip says: that the figure is a maximum, and why
- * it can sit far above where the run actually ended.
- *
- * Exported as a testing affordance, exactly as `RunRowDetails` is: Radix keeps
- * tooltip content unmounted until it is opened, and the web test runner has no
- * DOM to open it with — so this is the only way to assert the sighted-user
- * carrier of the current/peak distinction without adding a browser harness.
+ * What the terminal gauge's tooltip says. Exported as a testing affordance, as
+ * `RunRowDetails` is: Radix keeps tooltip content unmounted until it is opened
+ * and the web test runner has no DOM, so this is the only way to assert the
+ * sighted-user carrier of the current/peak distinction without a browser.
  */
 export function ContextGaugePeakHint() {
   const { t } = useTranslation("agents");

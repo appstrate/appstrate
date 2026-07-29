@@ -23,7 +23,7 @@ import { ACTIVE_RUN_STATUSES, type EnrichedRun } from "@appstrate/shared-types";
  * detail page" under a name that described only one of its consequences. Two
  * props for one distinction is exactly the duplication #1046 exists to remove.
  */
-export type RunRowVariant = "list" | "detail";
+type RunRowVariant = "list" | "detail";
 
 function DetailRow({ label, children }: { label: string; children: ReactNode }) {
   return (

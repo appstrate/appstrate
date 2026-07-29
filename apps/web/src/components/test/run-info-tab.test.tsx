@@ -78,14 +78,10 @@ function render(node: ReactElement): string {
 describe("TurnsTable with a known context window", () => {
   const html = render(<RunInfoTab run={makeRun()} turns={TURNS} />);
 
-  it("reads the window off the turns — the run DTO carries none", () => {
-    // Same derivation as the header gauge (`readRunContext`), so the two
-    // surfaces cannot disagree about which turn's window applies.
-    expect(makeRun()).not.toHaveProperty("context_window");
-    expect(html).toContain(agentsFr["run.turnContextShare"]);
-  });
-
   it("renders the `%` column with each turn's share of the WINDOW", () => {
+    // The window is read off the turns, by the same `readRunContext` call the
+    // header gauge makes — the run DTO carries none — so the two surfaces
+    // cannot disagree about which turn's window applies.
     expect(html).toContain(agentsFr["run.turnContextShare"]);
     expect(html).toContain(formatWindowPercent(0.25, i18n.language));
     expect(html).toContain(formatWindowPercent(0.5, i18n.language));

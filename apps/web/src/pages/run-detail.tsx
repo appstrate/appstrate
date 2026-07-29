@@ -74,15 +74,9 @@ export function RunDetailPage() {
   // non-recipient / already-read), and `status` is stable once terminal so the
   // effect does not re-fire on subsequent renders.
   //
-  // The log refetch is NOT covered by the global terminal-status invalidation:
-  // that one fires `runKeys.all` (`["run"]`), which does not prefix-match the
-  // `["run-logs", …]` family. Without it, the frames that arrive between the
-  // last render and the stream teardown below are lost — and with them the turn
-  // breadcrumbs the header gauge reads its peak off. That now costs the whole
-  // gauge, not just a stale peak: the breadcrumbs carry the context WINDOW too,
-  // so a run-logs cache missing its final frames can leave the header with no
-  // denominator at all. Invalidating cannot loop:
-  // the effect depends on `status`/`runId`, never on the logs it refetches.
+  // Why the log refetch is a separate call rather than a consequence of the
+  // global invalidation: see `invalidateRunLogs`. It cannot loop — the effect
+  // depends on `status`/`runId`, never on the logs it refetches.
   useEffect(() => {
     const terminal = !!status && !(ACTIVE_RUN_STATUSES as ReadonlySet<string>).has(status);
     if (run && runId && terminal) {
@@ -154,13 +148,11 @@ export function RunDetailPage() {
         // the matching fields (id/createdAt are ISO strings on both).
         //
         // `data` needs a localized narrow, but NOT because the frame is empty:
-        // `use-realtime.ts` opens this per-run stream with `verbose=true`, which
-        // is exactly the flag that makes `routes/realtime.ts` send `evt.data`
-        // instead of `stripPayload(evt)` — payloads arrive populated here. The
-        // cast bridges a generated-type mismatch instead: the spec declares
-        // `data` as a bare object, so `schema.d.ts` emits
-        // `Record<string, never> | null`, which the event's validated
-        // `Record<string, unknown> | string` is not assignable to.
+        // `use-realtime.ts` opens this stream with `verbose=true`, the flag that
+        // makes `routes/realtime.ts` send `evt.data` rather than
+        // `stripPayload(evt)`, so payloads arrive populated. The cast bridges a
+        // generated-type mismatch: the spec declares `data` as a bare object, so
+        // `schema.d.ts` emits `Record<string, never> | null`.
         const entry: RunLogEntry = {
           ...newLog,
           data: (newLog.data ?? null) as RunLogEntry["data"],
@@ -327,10 +319,10 @@ export function RunDetailPage() {
               While the run is active the pulse dot animates and `onMetric` SSE
               patches `run.cost` in place at the throttled 250 ms cadence; once
               finalized, the field holds the authoritative aggregate written by
-              `finalizeRun`. Structural, not conditional on data.
-              The token count that used to sit beside it moved into the run
-              row's details panel (#1046): it is a diagnostic, read once. The
-              `$` is a governance figure read at a glance, so it stays. */}
+              `finalizeRun`. Structural, not conditional on data. The token
+              count that used to sit beside it moved into the run row's details
+              panel (#1046): it is a diagnostic, read once, where the `$` is a
+              governance figure read at a glance. */}
           <div className="text-muted-foreground bg-muted/50 flex items-center gap-2 rounded-md px-2.5 py-1 text-xs tabular-nums">
             {isRunning && (
               <span className="bg-primary size-1.5 animate-pulse rounded-full" aria-hidden />
@@ -342,15 +334,9 @@ export function RunDetailPage() {
             />
           </div>
           {/* Context gauge — the state metric the cumulative token total never
-              was (#1046): bounded by the run's window, non-monotone, and
-              readable as "how much headroom is left". Numerator AND denominator
-              both ride `turnRows`: each turn breadcrumb states the window the
-              runner is running against, so nothing here needs threading from
-              the run DTO. Renders nothing at all for a run with no turn
-              breadcrumbs or none stating a window, leaving the `$` alone rather
-              than an empty bar claiming an empty context. Its own live cadence
-              is the turn boundary, NOT the 250 ms metric tick the `$` beside it
-              follows. */}
+              was (#1046). Numerator AND denominator both ride `turnRows`, so
+              nothing is threaded from the run DTO; see `ContextGaugeReadout`
+              for the readings, the live cadence and when it renders nothing. */}
           <ContextGaugeReadout turns={turnRows} status={run.status} />
           {!isRunning && !isInline && agent && (
             <Button variant="outline" size="sm" onClick={() => setInputOpen(true)}>

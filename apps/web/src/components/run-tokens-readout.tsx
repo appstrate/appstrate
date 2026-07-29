@@ -11,28 +11,23 @@ import { totalTokens, type TokenUsage } from "@appstrate/core/token-usage";
 
 /**
  * A run's token consumption: the total, with the four-bucket breakdown behind a
- * tooltip.
+ * tooltip. Lifted out of the run-detail header (#1046) so the run row's details
+ * panel can render it.
  *
- * Lifted out of the run-detail header (#1046) so the run row's details panel can
- * render it. A shared component rather than a render slot on `RunRow`: the panel
- * needs `runs.token_usage` and `RunRow` already receives the whole run DTO, so
- * threading markup down from the page would be plumbing that buys nothing — and
- * it is the same seam `RunCostReadout` already uses for the `$` beside it.
- *
- * Its own file despite the single caller: it is `RunCostReadout`'s twin (same
- * directory, same props-in/tooltip-out shape), and inlining ~35 lines of
- * four-bucket tooltip into `run-row.tsx` would bury the row's own structure.
+ * Its own file despite the single caller: it is `RunCostReadout`'s twin — same
+ * directory, same props-in/tooltip-out shape, same dotted-underline trigger —
+ * and inlining ~35 lines of four-bucket tooltip into `run-row.tsx` would bury
+ * the row's own structure.
  *
  * The count goes through `totalTokens` so it covers the same four buckets the
  * cost prices — `input_tokens` is net of cache, so an input+output sum would
  * omit the bulk of the consumption on any cached run and contradict the Info tab.
  *
- * ABSENT vs ZERO are not the same fact and are not rendered the same way.
- * `runs.token_usage` is `null` on a run that failed before it ever reached the
- * model, and `totalTokens({})` would turn that into a confident `0` with a
- * four-zero tooltip — "consumed nothing" where the truth is "never measured".
- * An em dash, matching the rule `RunCostReadout` and the per-turn latency column
- * already follow. A measured zero still prints `0`, tooltip and all.
+ * ABSENT vs ZERO are not the same fact. `runs.token_usage` is `null` on a run
+ * that failed before reaching the model, and `totalTokens({})` would turn that
+ * into a confident `0` under a four-zero tooltip — "consumed nothing" where the
+ * truth is "never measured". An em dash instead, matching `RunCostReadout` and
+ * the per-turn latency column. A measured zero still prints `0`, tooltip and all.
  */
 export function RunTokensReadout({ usage }: { usage: TokenUsage | null | undefined }) {
   const { t } = useTranslation("agents");

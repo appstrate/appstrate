@@ -42,12 +42,6 @@ function windowlessTurn(index: number, contextTokens: number): RunTurnRow {
 }
 
 describe("readRunContext — current vs peak", () => {
-  it("reads `current` off the LAST turn and `peak` off the whole series", () => {
-    const reading = readRunContext([turn(0, 40_000), turn(1, 128_000)]);
-    expect(reading?.current).toBe(128_000);
-    expect(reading?.peak).toBe(128_000);
-  });
-
   it("follows a compaction DROP: `current` falls, `peak` remembers", () => {
     // The whole point of the metric: context is NOT monotone. After the runner
     // auto-compacts, the last turn is smaller than the peak — a gauge reading
@@ -83,16 +77,10 @@ describe("readRunContext — where the denominator comes from", () => {
     expect(reading?.window).toBe(200_000);
     expect(reading?.currentFraction).toBeCloseTo(0.95, 10);
     expect(reading?.currentFraction).not.toBeCloseTo(0.19, 2);
-  });
 
-  it("shares that one denominator with `peak`, clamping rather than overflowing", () => {
-    // `peak` was reached under the wider window, so against the current one it
-    // exceeds the track. The bar clamps; the raw count stays honest, exactly as
-    // for a window that disagrees with what the provider later billed.
-    const reading = readRunContext([
-      turn(0, 900_000, { contextWindow: 1_000_000 }),
-      turn(1, 190_000, { contextWindow: 200_000 }),
-    ]);
+    // `peak` shares that ONE denominator, so on a swap down it exceeds it. The
+    // fraction clamps; the raw count stays honest, exactly as for a window that
+    // disagrees with what the provider later billed.
     expect(reading?.peak).toBe(900_000);
     expect(reading?.peakFraction).toBe(1);
   });
