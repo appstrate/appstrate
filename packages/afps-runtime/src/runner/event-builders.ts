@@ -118,10 +118,10 @@ export const TURN_PROGRESS_EVENT = "turn";
  * `outputTokens` — output is generated, not re-read, and folding it in would
  * hide the re-read cost this metric exists to expose.
  *
- * `contextWindow` / `compactionThreshold` are that numerator's SCALE, and they
- * ride here rather than on the run row for two reasons. The runner is the only
- * layer that knows them — it is the code that applies its own fallback when the
- * launcher declares no window, so a window guessed one layer up describes a run
+ * `contextWindow` is that numerator's SCALE, and it rides here rather than on
+ * the run row for two reasons. The runner is the only layer that knows it — it
+ * is the code that applies its own fallback when the launcher declares no
+ * window, so a window guessed one layer up describes a run
  * that never happened. And a denominator stored apart from its numerator is
  * unreadable exactly where it would matter: terminal inline runs have their
  * `run_logs` pruned while the `runs` row survives, leaving a window with no
@@ -154,13 +154,6 @@ export function buildTurnProgress(
      * by zero and a guess would misreport saturation.
      */
     contextWindow?: number;
-    /**
-     * Token count at which the runner auto-compacts. Omitted — not zeroed —
-     * when compaction is off for this run, which is a state only the runner can
-     * observe (`MODEL_COMPACTION_ENABLED=false` lives in its own environment).
-     * Absent therefore means "no compaction will happen", not "unknown".
-     */
-    compactionThreshold?: number;
   },
 ): RunEvent {
   const contextTokens = input.inputTokens + input.cacheReadTokens + input.cacheWriteTokens;
@@ -179,9 +172,6 @@ export function buildTurnProgress(
       cacheWriteTokens: input.cacheWriteTokens,
       contextTokens,
       ...(input.contextWindow !== undefined ? { contextWindow: input.contextWindow } : {}),
-      ...(input.compactionThreshold !== undefined
-        ? { compactionThreshold: input.compactionThreshold }
-        : {}),
     },
   };
 }

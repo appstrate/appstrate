@@ -151,7 +151,6 @@ describe("buildTurnRows — per-turn projection", () => {
         cacheWriteTokens: 800,
         contextTokens: 96920,
         contextWindow: 200000,
-        compactionThreshold: 136000,
       }),
     ]);
     expect(rows).toEqual([
@@ -164,7 +163,6 @@ describe("buildTurnRows — per-turn projection", () => {
         cacheWriteTokens: 800,
         latencyMs: 4200,
         contextWindow: 200000,
-        compactionThreshold: 136000,
       },
     ]);
   });
@@ -177,30 +175,21 @@ describe("buildTurnRows — per-turn projection", () => {
       turnLog({ event: "turn", index: 1, inputTokens: 10, outputTokens: 5 }),
     ]);
     expect(rows[0]!).not.toHaveProperty("contextWindow");
-    expect(rows[0]!).not.toHaveProperty("compactionThreshold");
   });
 
-  it("carries a window with no threshold — auto-compaction off, reported truthfully", () => {
+  it("carries the window the runner stated", () => {
     const rows = buildTurnRows([
       turnLog({ event: "turn", index: 1, inputTokens: 10, contextWindow: 1_000_000 }),
     ]);
     expect(rows[0]!.contextWindow).toBe(1_000_000);
-    expect(rows[0]!).not.toHaveProperty("compactionThreshold");
   });
 
-  it("drops a malformed window/threshold instead of coercing it", () => {
+  it("drops a malformed window instead of coercing it", () => {
     const rows = buildTurnRows([
-      turnLog({
-        event: "turn",
-        index: 1,
-        inputTokens: 10,
-        contextWindow: "200k",
-        compactionThreshold: Number.NaN,
-      }),
+      turnLog({ event: "turn", index: 1, inputTokens: 10, contextWindow: "200k" }),
     ]);
     expect(rows).toHaveLength(1);
     expect(rows[0]!).not.toHaveProperty("contextWindow");
-    expect(rows[0]!).not.toHaveProperty("compactionThreshold");
   });
 
   it("ignores rows carrying a different `data.event`", () => {

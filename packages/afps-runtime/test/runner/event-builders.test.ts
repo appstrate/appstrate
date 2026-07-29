@@ -92,7 +92,7 @@ describe("buildTurnProgress", () => {
     expect("latencyMs" in (ev.data as Record<string, unknown>)).toBe(false);
   });
 
-  it("carries contextWindow and compactionThreshold when the runner states both", () => {
+  it("carries contextWindow when the runner states one", () => {
     const ev = buildTurnProgress(BASE, {
       index: 3,
       inputTokens: 100,
@@ -100,7 +100,6 @@ describe("buildTurnProgress", () => {
       cacheReadTokens: 0,
       cacheWriteTokens: 0,
       contextWindow: 200_000,
-      compactionThreshold: 136_000,
     });
 
     expect(ev.data).toEqual({
@@ -112,26 +111,7 @@ describe("buildTurnProgress", () => {
       cacheWriteTokens: 0,
       contextTokens: 100,
       contextWindow: 200_000,
-      compactionThreshold: 136_000,
     });
-  });
-
-  it("omits compactionThreshold entirely — not zero, not null — when there is no threshold", () => {
-    // Compaction disabled for the run: the window is still the right
-    // denominator, but no point exists at which the run compacts. A 0 would
-    // render a marker at the left edge of the gauge, i.e. "always compacting".
-    const ev = buildTurnProgress(BASE, {
-      index: 4,
-      inputTokens: 1,
-      outputTokens: 1,
-      cacheReadTokens: 0,
-      cacheWriteTokens: 0,
-      contextWindow: 128_000,
-    });
-
-    const data = ev.data as Record<string, unknown>;
-    expect(data["contextWindow"]).toBe(128_000);
-    expect("compactionThreshold" in data).toBe(false);
   });
 
   it("omits contextWindow entirely when the runner cannot state one", () => {
@@ -145,7 +125,6 @@ describe("buildTurnProgress", () => {
 
     const data = ev.data as Record<string, unknown>;
     expect("contextWindow" in data).toBe(false);
-    expect("compactionThreshold" in data).toBe(false);
   });
 
   it("carries the discriminator and the envelope identity", () => {

@@ -52,13 +52,6 @@ export interface RunTurnRow {
    * field — never zero, never a fabricated default.
    */
   contextWindow?: number;
-  /**
-   * Auto-compaction trigger point for this turn, when the runner has one.
-   *
-   * Genuinely optional: a runner with auto-compaction disabled now reports that
-   * truthfully by omitting the key, which is not the same statement as `0`.
-   */
-  compactionThreshold?: number;
 }
 
 /** `data.event` discriminator carried by per-turn breadcrumb rows. */
@@ -94,13 +87,12 @@ export function buildTurnRows(rawLogs: RawLog[]): RunTurnRow[] {
     const cacheReadTokens = readNumber(d["cacheReadTokens"], 0);
     const cacheWriteTokens = readNumber(d["cacheWriteTokens"], 0);
     const latencyMs = d["latencyMs"];
-    // Same rule as `latencyMs`, and deliberately NOT `readNumber`: these three
-    // have no honest fallback. A missing window is "unknown", which the reading
-    // must be able to tell apart from any number at all — so the key is left
-    // ABSENT rather than defaulted, and a malformed payload drops it the same
-    // way instead of throwing.
+    // Same rule as `latencyMs`, and deliberately NOT `readNumber`: neither has
+    // an honest fallback. A missing window is "unknown", which the reading must
+    // be able to tell apart from any number at all — so the key is left ABSENT
+    // rather than defaulted, and a malformed payload drops it the same way
+    // instead of throwing.
     const contextWindow = d["contextWindow"];
-    const compactionThreshold = d["compactionThreshold"];
 
     rows.push({
       index: d["index"],
@@ -117,9 +109,6 @@ export function buildTurnRows(rawLogs: RawLog[]): RunTurnRow[] {
       ...(typeof latencyMs === "number" && Number.isFinite(latencyMs) ? { latencyMs } : {}),
       ...(typeof contextWindow === "number" && Number.isFinite(contextWindow)
         ? { contextWindow }
-        : {}),
-      ...(typeof compactionThreshold === "number" && Number.isFinite(compactionThreshold)
-        ? { compactionThreshold }
         : {}),
     });
   }

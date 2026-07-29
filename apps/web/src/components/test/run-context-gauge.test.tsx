@@ -22,29 +22,17 @@ await i18nReady;
 await i18n.changeLanguage("fr");
 
 const WINDOW = 200_000;
-const THRESHOLD = 136_000;
-/** Derived from the locale bundle, never hardcoded — same rule as the `%`. */
-const THRESHOLD_LABEL = agentsFr["run.contextGaugeThreshold"].replace("{{tokens}}", "136k");
 
 /**
- * A turn as the runner emits it: the window and the compaction threshold ride
- * the same breadcrumb as the token counts, so the gauge's only input is `turns`.
+ * A turn as the runner emits it: the window rides the same breadcrumb as the
+ * token counts, so the gauge's only input is `turns`.
  */
 function turn(index: number, contextTokens: number, over: Partial<RunTurnRow> = {}): RunTurnRow {
   return {
     ...windowlessTurn(index, contextTokens),
     contextWindow: WINDOW,
-    compactionThreshold: THRESHOLD,
     ...over,
   };
-}
-
-/**
- * A turn stating a window but NO threshold — the key is ABSENT, which is how a
- * runner with auto-compaction disabled reports it.
- */
-function thresholdlessTurn(index: number, contextTokens: number): RunTurnRow {
-  return { ...windowlessTurn(index, contextTokens), contextWindow: WINDOW };
 }
 
 /** A turn from a runner that could not state its window — the key is ABSENT. */
@@ -100,37 +88,20 @@ describe("ContextGaugeReadout — active run", () => {
     expect(html).toContain("width:64%");
   });
 
-  it("marks the compaction threshold on the track", () => {
-    expect(html).toContain("left:68%");
-  });
-
-  it("carries the threshold in the accessible value, not only in a mouse-only `title`", () => {
-    // `title` reaches a precise mouse and nothing else — no screen reader, no
-    // touch. The threshold is the stated point of the terminal reading, so it
-    // rides on `aria-valuetext`, which every AT surfaces with the progressbar.
-    expect(html).toContain(THRESHOLD_LABEL);
+  it("carries the UNABBREVIATED counts in the accessible value", () => {
+    // The visible text is compacted to `128k / 200k` at every width, so
+    // `aria-valuetext` — which every AT surfaces with the progressbar — is the
+    // only place the exact figures are stated.
     const valueText = /aria-valuetext="([^"]*)"/.exec(html)?.[1] ?? "";
-    expect(valueText).toContain(THRESHOLD_LABEL);
     expect(valueText).toContain((128_000).toLocaleString(i18n.language));
-  });
-
-  it("gives the threshold marker a hit area wider than one pixel", () => {
-    const marker = classesOf(html, /title="[^"]*"\s+class="([^"]*)"/);
-    expect(marker.length).toBeGreaterThan(0);
-    // A transparent 8px target centred on the threshold; the visible mark inside
-    // it stays thin so it still reads as a line and not as a second fill.
-    expect(marker).toContain("w-2");
-    expect(marker).toContain("-translate-x-1/2");
-    expect(marker).not.toContain("w-px");
+    expect(valueText).toContain(WINDOW.toLocaleString(i18n.language));
   });
 });
 
 describe("ContextGaugeReadout — count past a stale window", () => {
   // The window is what the runner stated for the turn; a provider can bill a
   // prompt larger than it. `readRunContext` leaves that raw count unclamped.
-  const html = render(
-    <ContextGaugeReadout turns={[thresholdlessTurn(0, 210_000)]} status="running" />,
-  );
+  const html = render(<ContextGaugeReadout turns={[turn(0, 210_000)]} status="running" />);
 
   it("clamps `aria-valuenow` into the declared range", () => {
     // `valuenow > valuemax` makes AT announce a broken widget, not a full one.
@@ -176,14 +147,15 @@ describe("ContextGaugeReadout — 375px header budget", () => {
 
   it("collapses the track's WIDTH rather than `display: none`-ing it away", () => {
     // `hidden` would take the progressbar out of the accessibility tree, and
-    // with it the `aria-valuetext` that is the only carrier of the compaction
-    // threshold for a screen-reader or touch user — dropping the threshold for
-    // precisely the people the marker fix exists for.
+    // with it the `aria-valuetext` that is the only carrier of the
+    // unabbreviated counts for a screen-reader or touch user.
     const bar = classesOf(html, BAR);
     expect(bar).not.toContain("hidden");
     expect(bar).toContain("block");
-    // …and the threshold is still announced at that width.
-    expect(/aria-valuetext="([^"]*)"/.exec(html)?.[1] ?? "").toContain(THRESHOLD_LABEL);
+    // …and the exact counts are still announced at that width.
+    expect(/aria-valuetext="([^"]*)"/.exec(html)?.[1] ?? "").toContain(
+      (128_000).toLocaleString(i18n.language),
+    );
   });
 });
 
@@ -203,33 +175,18 @@ describe("ContextGaugeReadout — terminal run", () => {
   });
 });
 
-describe("ContextGaugeReadout — window and threshold ride the turns", () => {
+describe("ContextGaugeReadout — the window rides the turns", () => {
   it("takes its denominator from the turns, with no run-level field to override it", () => {
     // 1M window: nothing outside `turns` could have supplied it.
     const html = render(
       <ContextGaugeReadout
-        turns={[turn(0, 128_000, { contextWindow: 1_000_000, compactionThreshold: 800_000 })]}
+        turns={[turn(0, 128_000, { contextWindow: 1_000_000 })]}
         status="running"
       />,
     );
     expect(html).toContain("128k / 1.0M");
     expect(html).toContain('aria-valuemax="1000000"');
     expect(html).toContain("width:12.8%");
-    expect(html).toContain("left:80%");
-  });
-
-  it("omits the marker but keeps the gauge when the payload carries no threshold", () => {
-    // Auto-compaction disabled, now reportable: the key is absent, not zero.
-    const html = render(
-      <ContextGaugeReadout
-        turns={[thresholdlessTurn(0, 40_000), thresholdlessTurn(1, 128_000)]}
-        status="running"
-      />,
-    );
-    expect(html).toContain('role="progressbar"');
-    expect(html).toContain("128k / 200k");
-    expect(html).not.toContain("left:");
-    expect(html).not.toContain(THRESHOLD_LABEL);
   });
 
   it("sizes the reading against the LAST stated window after a mid-run model swap", () => {
@@ -237,10 +194,7 @@ describe("ContextGaugeReadout — window and threshold ride the turns", () => {
     // would print 19 % for a context one turn from compaction.
     const html = render(
       <ContextGaugeReadout
-        turns={[
-          turn(0, 900_000, { contextWindow: 1_000_000, compactionThreshold: 800_000 }),
-          turn(1, 190_000),
-        ]}
+        turns={[turn(0, 900_000, { contextWindow: 1_000_000 }), turn(1, 190_000)]}
         status="running"
       />,
     );

@@ -100,11 +100,8 @@ describe("derivePiCompactionSettings — MODEL_COMPACTION_ENABLED opt-out", () =
       { MODEL_COMPACTION_ENABLED: "false" },
     );
     // The window survives the opt-out — it is what the session runs against
-    // either way, and it is the gauge's denominator. The THRESHOLD does not:
-    // with compaction off there is no point at which the run compacts, so the
-    // key is absent rather than reported as a line the run never crosses.
+    // either way, and it is the gauge's denominator.
     expect(result).toEqual({ enabled: false, contextWindow: 200_000 });
-    expect("compactionThreshold" in result).toBe(false);
   });
 
   it("ignores other values of MODEL_COMPACTION_ENABLED (only 'false' opts out)", () => {
@@ -136,7 +133,6 @@ describe("derivePiCompactionSettings — full result shape", () => {
     expect(result).toEqual({
       enabled: true,
       contextWindow: 200_000,
-      compactionThreshold: 136_000,
       reserveTokens: 64_000,
       keepRecentTokens: 20_000,
     });
@@ -166,26 +162,5 @@ describe("derivePiCompactionSettings — context budget reported to the breadcru
       { MODEL_COMPACTION_ENABLED: "false" },
     );
     expect(result).toEqual({ enabled: false, contextWindow: 200_000 });
-  });
-
-  it("compactionThreshold is exactly contextWindow - reserveTokens — the SDK's own trigger", () => {
-    // `shouldCompact` in the Pi SDK fires on
-    // `contextTokens > contextWindow - reserveTokens`. The threshold reported
-    // to the gauge must BE that expression, not a parallel approximation of it.
-    for (const model of [
-      { contextWindow: 200_000, maxTokens: 64_000 },
-      { contextWindow: 1_000_000, maxTokens: 32_000 },
-      { contextWindow: 100_000, maxTokens: null },
-      // Corrupt catalog row: maxTokens == contextWindow, clamped upstream.
-      { contextWindow: 256_000, maxTokens: 256_000 },
-      // No declared window → fallback drives BOTH numbers.
-      { maxTokens: 8_192 },
-    ]) {
-      const result = derivePiCompactionSettings(model, {});
-      if (result.enabled === false) throw new Error("compaction should be enabled");
-      expect(result.compactionThreshold).toBe(result.contextWindow - result.reserveTokens);
-      expect(result.compactionThreshold).toBeGreaterThan(0);
-      expect(result.compactionThreshold).toBeLessThan(result.contextWindow);
-    }
   });
 });

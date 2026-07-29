@@ -8,9 +8,9 @@ import { formatCompactTokens, formatWindowPercent, readRunContext } from "./run-
 interface ContextGaugeReadoutProps {
   /**
    * Per-turn breakdown projected from the run's logs (`buildTurnRows`) — the
-   * WHOLE input. Each turn carries its own window and compaction threshold, so
-   * the numerator and the denominator arrive together and cannot disagree; see
-   * `readRunContext` for which turn's window is used.
+   * WHOLE input. Each turn carries its own window, so the numerator and the
+   * denominator arrive together and cannot disagree; see `readRunContext` for
+   * which turn's window is used.
    */
   turns: readonly RunTurnRow[] | undefined;
   /**
@@ -34,10 +34,10 @@ interface ContextGaugeReadoutProps {
  *                post-mortem "did this run come close to compaction".
  *
  * The bar is kept in the terminal form even though the issue's sketch shows
- * text only: the threshold marker is the whole point of the post-mortem
- * reading, and a marker needs a track to sit on. The percentage is dropped
- * there, per that sketch — a peak share is a diagnostic, and the two absolute
- * figures beside it already carry it.
+ * text only: "how close to full did it get" is the post-mortem reading, and a
+ * fill answers it at a glance where two numbers have to be divided. The
+ * percentage is dropped there, per that sketch — a peak share is a diagnostic,
+ * and the two absolute figures beside it already carry it.
  *
  * LIVE CADENCE — `contextTokens` only exists at turn boundaries: the runner
  * emits one breadcrumb per settled assistant turn, and the per-run SSE stream
@@ -58,10 +58,9 @@ interface ContextGaugeReadoutProps {
  *
  * The track collapses to `w-0`, NOT to `hidden`: `display: none` would take the
  * `progressbar` out of the accessibility tree, and with it the `aria-valuetext`
- * that is the only carrier of the compaction threshold for a screen-reader or
- * touch user — i.e. it would drop the threshold for exactly the people it was
- * just given to. A zero-width track costs nothing to lay out and stays
- * announced; only the decoration inside it is clipped.
+ * that is the only carrier of the UNABBREVIATED counts — the visible text is
+ * compacted to `128k / 200k` at every width. A zero-width track costs nothing to
+ * lay out and stays announced; only the fill inside it is clipped.
  *
  * Renders NOTHING (not a zeroed bar) when the run has no turns, no turn stating
  * a window, or no turn with a usable reading — see `readRunContext` for all
@@ -77,10 +76,6 @@ export function ContextGaugeReadout({ turns, status }: ContextGaugeReadoutProps)
   const isActive = !!status && (ACTIVE_RUN_STATUSES as ReadonlySet<string>).has(status);
   const value = isActive ? reading.current : reading.peak;
   const fraction = isActive ? reading.currentFraction : reading.peakFraction;
-  const thresholdLabel =
-    reading.threshold == null
-      ? null
-      : t("run.contextGaugeThreshold", { tokens: formatCompactTokens(reading.threshold) });
 
   // `aria-valuenow` MUST stay inside `[valuemin, valuemax]` — a screen reader
   // announcing "210000 out of a maximum of 200000" is reporting a broken widget,
@@ -88,15 +83,10 @@ export function ContextGaugeReadout({ turns, status }: ContextGaugeReadoutProps)
   // `aria-valuetext` and the visible text carry, unclamped, exactly as
   // `readRunContext` leaves it (a window recorded at launch can legitimately
   // disagree with what the provider later billed).
-  const ariaValueText = [
-    t("run.contextGaugeValueText", {
-      used: value.toLocaleString(i18n.language),
-      window: reading.window.toLocaleString(i18n.language),
-    }),
-    thresholdLabel,
-  ]
-    .filter(Boolean)
-    .join(" · ");
+  const ariaValueText = t("run.contextGaugeValueText", {
+    used: value.toLocaleString(i18n.language),
+    window: reading.window.toLocaleString(i18n.language),
+  });
 
   return (
     <div className="text-muted-foreground bg-muted/50 flex shrink-0 items-center gap-1.5 rounded-md px-2.5 py-1 text-xs tabular-nums">
@@ -118,22 +108,6 @@ export function ContextGaugeReadout({ turns, status }: ContextGaugeReadoutProps)
           className="bg-primary absolute inset-y-0 left-0 rounded-full"
           style={{ width: `${fraction * 100}%` }}
         />
-        {reading.thresholdFraction != null && (
-          // A 1px hairline was reachable by nothing but a precise mouse. The
-          // visible mark stays thin (it must read as a line on the track, not as
-          // a second fill) but sits centred in a wider transparent target, and
-          // `title` is no longer the only carrier of what it means — the
-          // threshold is folded into `aria-valuetext` above, which is what a
-          // screen-reader and a touch user actually get.
-          <span
-            aria-hidden
-            title={thresholdLabel ?? undefined}
-            className="absolute inset-y-0 flex w-2 -translate-x-1/2 justify-center"
-            style={{ left: `${reading.thresholdFraction * 100}%` }}
-          >
-            <span className="bg-foreground/70 h-full w-0.5" />
-          </span>
-        )}
       </span>
       <span className="text-foreground font-medium">
         {formatCompactTokens(value)} / {formatCompactTokens(reading.window)}

@@ -181,49 +181,6 @@ describe("readRunContext — turns that measured nothing", () => {
   });
 });
 
-describe("readRunContext — compaction threshold", () => {
-  it("carries the marker as a share of the window when it is inside it", () => {
-    const reading = readRunContext([turn(0, 128_000, { compactionThreshold: 136_000 })]);
-    expect(reading?.threshold).toBe(136_000);
-    expect(reading?.thresholdFraction).toBeCloseTo(0.68, 10);
-  });
-
-  it("drops the marker — not the reading — when the runner states no threshold", () => {
-    // Not a gap: this is how a runner with auto-compaction disabled reports it.
-    const reading = readRunContext([turn(0, 128_000)]);
-    expect(reading).not.toBeNull();
-    expect(reading?.threshold).toBeNull();
-    expect(reading?.thresholdFraction).toBeNull();
-  });
-
-  it("drops a threshold at or past the window: it marks nothing a full bar does not", () => {
-    expect(readRunContext([turn(0, 1, { compactionThreshold: WINDOW })])?.threshold).toBeNull();
-    expect(readRunContext([turn(0, 1, { compactionThreshold: WINDOW + 1 })])?.threshold).toBeNull();
-    expect(readRunContext([turn(0, 1, { compactionThreshold: 0 })])?.threshold).toBeNull();
-  });
-
-  it("reads the threshold from the SAME turn as the window, never an earlier one", () => {
-    // Swapped to a model with auto-compaction off: keeping the previous
-    // model's 136k would draw the marker at 13.6 % of a 1M track it has no
-    // relationship with.
-    const reading = readRunContext([
-      turn(0, 50_000, { compactionThreshold: 136_000 }),
-      turn(1, 60_000, { contextWindow: 1_000_000 }),
-    ]);
-    expect(reading?.window).toBe(1_000_000);
-    expect(reading?.threshold).toBeNull();
-  });
-
-  it("follows the threshold forward when a later turn restates it", () => {
-    const reading = readRunContext([
-      turn(0, 50_000, { compactionThreshold: 100_000 }),
-      turn(1, 60_000, { compactionThreshold: 150_000 }),
-    ]);
-    expect(reading?.threshold).toBe(150_000);
-    expect(reading?.thresholdFraction).toBeCloseTo(0.75, 10);
-  });
-});
-
 describe("fractionOfWindow", () => {
   it("is a plain share of the denominator", () => {
     expect(fractionOfWindow(50, 200)).toBe(0.25);

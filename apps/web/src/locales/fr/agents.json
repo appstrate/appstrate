@@ -164,7 +164,6 @@
   "run.contextGaugePeakLabel": "pic ctx",
   "run.contextGaugeAria": "Contexte utilisé sur la fenêtre du modèle",
   "run.contextGaugePeakAria": "Contexte maximal atteint sur la fenêtre du modèle",
-  "run.contextGaugeThreshold": "Compaction automatique à partir de {{tokens}}",
   "run.contextGaugeValueText": "{{used}} tokens sur {{window}}",
   "run.turnsPeakRelativeHint": "Fenêtre de contexte inconnue pour cette exécution : les barres sont proportionnelles au maximum atteint, pas à la fenêtre du modèle.",
   "import.title": "Importer un package",

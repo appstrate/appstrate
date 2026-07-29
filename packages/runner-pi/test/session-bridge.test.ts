@@ -1201,34 +1201,18 @@ describe("installSessionBridge — per-turn context breadcrumb", () => {
   it("stamps the context budget on EVERY turn, so a pruned run's gauge still has a scale", () => {
     const sink = createInternalCapture();
     const session = createFakeSession();
-    installSessionBridge(session, sink, RUN_ID, {
-      contextWindow: 200_000,
-      compactionThreshold: 136_000,
-    });
+    installSessionBridge(session, sink, RUN_ID, { contextWindow: 200_000 });
 
     settleTurn(session, { input: 10, output: 5 });
     settleTurn(session, { input: 4, output: 7 });
 
     for (const turn of turns(sink)) {
       expect(turn.contextWindow).toBe(200_000);
-      expect(turn.compactionThreshold).toBe(136_000);
     }
     expect(turns(sink)).toHaveLength(2);
   });
 
-  it("omits compactionThreshold when the caller passes none (compaction disabled)", () => {
-    const sink = createInternalCapture();
-    const session = createFakeSession();
-    installSessionBridge(session, sink, RUN_ID, { contextWindow: 128_000 });
-
-    settleTurn(session, { input: 10, output: 5 });
-
-    const turn = turns(sink)[0] ?? {};
-    expect(turn.contextWindow).toBe(128_000);
-    expect("compactionThreshold" in turn).toBe(false);
-  });
-
-  it("omits both keys when the bridge was installed without a budget", () => {
+  it("omits the key when the bridge was installed without a budget", () => {
     const sink = createInternalCapture();
     const session = createFakeSession();
     installSessionBridge(session, sink, RUN_ID);
@@ -1237,7 +1221,6 @@ describe("installSessionBridge — per-turn context breadcrumb", () => {
 
     const turn = turns(sink)[0] ?? {};
     expect("contextWindow" in turn).toBe(false);
-    expect("compactionThreshold" in turn).toBe(false);
   });
 
   it("emits the window derivePiCompactionSettings actually used — the two cannot drift", () => {
@@ -1255,16 +1238,12 @@ describe("installSessionBridge — per-turn context breadcrumb", () => {
       const derived = derivePiCompactionSettings(model, {});
       const sink = createInternalCapture();
       const session = createFakeSession();
-      installSessionBridge(session, sink, RUN_ID, {
-        contextWindow: derived.contextWindow,
-        ...(derived.enabled ? { compactionThreshold: derived.compactionThreshold } : {}),
-      });
+      installSessionBridge(session, sink, RUN_ID, { contextWindow: derived.contextWindow });
 
       settleTurn(session, { input: 1, output: 1 });
 
       const turn = turns(sink)[0] ?? {};
       expect(turn.contextWindow).toBe(derived.contextWindow);
-      if (derived.enabled) expect(turn.compactionThreshold).toBe(derived.compactionThreshold);
     }
   });
 

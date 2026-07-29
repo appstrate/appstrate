@@ -23,12 +23,12 @@
  * {@link readRunContext} for the provider behaviour that makes a settled turn
  * report zero, and for the semantic refinement that exclusion implies.
  *
- * DENOMINATOR PROVENANCE — the window and the compaction threshold are read off
- * the turns too, not off the run row. The runner is the authority on both (it
- * applies the container-side default the platform cannot see), it states them
- * where it already states the numerator, and keeping the two on one payload
- * removes the failure this module used to have: a run whose logs were pruned
- * kept a denominator with no numerator left to divide.
+ * DENOMINATOR PROVENANCE — the window is read off the turns too, not off the run
+ * row. The runner is the authority on it (it applies the container-side default
+ * the platform cannot see), it states it where it already states the numerator,
+ * and keeping the two on one payload removes the failure this module used to
+ * have: a run whose logs were pruned kept a denominator with no numerator left
+ * to divide.
  */
 
 import type { RunTurnRow } from "./log-utils";
@@ -50,14 +50,10 @@ export interface RunContextReading {
   peak: number;
   /** The denominator: the window last stated by a turn — see {@link readRunContext}. */
   window: number;
-  /** Auto-compaction trigger point, or `null` when the runner did not state one. */
-  threshold: number | null;
   /** {@link current} as a 0..1 share of {@link window}. */
   currentFraction: number;
   /** {@link peak} as a 0..1 share of {@link window}. */
   peakFraction: number;
-  /** {@link threshold} as a 0..1 share of {@link window}, or `null`. */
-  thresholdFraction: number | null;
 }
 
 /**
@@ -115,12 +111,11 @@ export function fractionOfWindow(tokens: number, window: number): number {
  * rather than `0 / 200k · 0 %` — slightly stale, but stale beats false, and the
  * alternative renders an empty bar on a run holding ~190k.
  *
- * WHICH TURN'S WINDOW — the LAST turn that states a usable one, and its
- * threshold with it, as a pair.
+ * WHICH TURN'S WINDOW — the LAST turn that states a usable one.
  *
- * Every turn carries the pair, so on the ordinary run they all agree and the
- * choice is invisible. It becomes a decision on a run whose model was swapped
- * mid-flight, and "last" is the one that keeps the reading honest:
+ * Every turn carries it, so on the ordinary run they all agree and the choice is
+ * invisible. It becomes a decision on a run whose model was swapped mid-flight,
+ * and "last" is the one that keeps the reading honest:
  *
  *   - The headline reading is `current`, "how full is the context NOW", and it
  *     is taken from the end of the series. Dividing it by the FIRST window
@@ -139,12 +134,6 @@ export function fractionOfWindow(tokens: number, window: number): number {
  * treatment as a window that simply disagrees with what the provider billed.
  * The alternative — a second denominator for the peak — would put two different
  * windows in one gauge with one `aria-valuemax`, which is unreadable.
- *
- * The threshold is read from the SAME turn as the window, never scavenged from
- * an earlier one: a trigger point belongs to the model that declared it, and
- * pairing 136k with a 1M window would draw the marker at 13 % of a track it has
- * nothing to do with. A turn stating a window but no threshold therefore drops
- * the marker — which is precisely how the runner reports auto-compaction off.
  */
 export function readRunContext(turns: readonly RunTurnRow[] | undefined): RunContextReading | null {
   if (!turns || turns.length === 0) return null;
@@ -156,16 +145,12 @@ export function readRunContext(turns: readonly RunTurnRow[] | undefined): RunCon
   // Named `contextWindow`, not `window`: this file is bundled for the browser
   // and a local shadowing the global reads as a bug to the next person.
   let contextWindow: number | null = null;
-  let statedThreshold: number | undefined;
   let current = 0;
   let peak = 0;
   for (const turn of turns) {
     const stated = turn.contextWindow;
     if (typeof stated === "number" && Number.isFinite(stated) && stated > 0) {
       contextWindow = stated;
-      // Re-read as a pair — including when it is absent, so a later turn with
-      // auto-compaction off clears an earlier turn's marker.
-      statedThreshold = turn.compactionThreshold;
     }
     const tokens = turn.contextTokens;
     if (!Number.isFinite(tokens) || tokens <= 0) continue;
@@ -175,24 +160,12 @@ export function readRunContext(turns: readonly RunTurnRow[] | undefined): RunCon
   if (contextWindow == null) return null;
   if (peak <= 0) return null;
 
-  // The threshold is advisory and only meaningful inside the window — a value
-  // at or past the window marks nothing a full bar does not already say.
-  const threshold =
-    statedThreshold != null &&
-    Number.isFinite(statedThreshold) &&
-    statedThreshold > 0 &&
-    statedThreshold < contextWindow
-      ? statedThreshold
-      : null;
-
   return {
     current,
     peak,
     window: contextWindow,
-    threshold,
     currentFraction: fractionOfWindow(current, contextWindow),
     peakFraction: fractionOfWindow(peak, contextWindow),
-    thresholdFraction: threshold == null ? null : fractionOfWindow(threshold, contextWindow),
   };
 }
 

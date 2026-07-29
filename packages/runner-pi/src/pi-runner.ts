@@ -156,15 +156,11 @@ const KEEP_RECENT_FRACTION = 0.1;
  * `MODEL_RETRY_ENABLED` pattern) — useful when stacking external
  * compaction middleware. See appstrate#445.
  *
- * `contextWindow` is returned on BOTH shapes, and `compactionThreshold` only on
- * the enabled one. The window is the fallback-resolved number this session will
- * really run against, so it stays meaningful with compaction off — it is the
- * denominator of the run's context gauge either way. The threshold is the SDK's
- * own trigger expression (`shouldCompact`: `contextTokens > contextWindow -
- * reserveTokens`) evaluated once here; with compaction off no such point exists,
- * so the key is absent rather than reported as a line the run never crosses.
- * Both are consumed by {@link installSessionBridge} for the per-turn breadcrumb;
- * returning them keeps the fallback in ONE place, so the number emitted cannot
+ * `contextWindow` is returned on BOTH shapes. It is the fallback-resolved number
+ * this session will really run against, so it stays meaningful with compaction
+ * off — it is the denominator of the run's context gauge either way. It is
+ * consumed by {@link installSessionBridge} for the per-turn breadcrumb;
+ * returning it keeps the fallback in ONE place, so the number emitted cannot
  * drift from the number handed to the SDK.
  */
 export function derivePiCompactionSettings(
@@ -175,7 +171,6 @@ export function derivePiCompactionSettings(
   | {
       enabled: true;
       contextWindow: number;
-      compactionThreshold: number;
       reserveTokens: number;
       keepRecentTokens: number;
     } {
@@ -194,7 +189,6 @@ export function derivePiCompactionSettings(
   return {
     enabled: true,
     contextWindow,
-    compactionThreshold: contextWindow - reserveTokens,
     reserveTokens,
     keepRecentTokens,
   };
@@ -206,12 +200,13 @@ export type PiCompactionSettings = ReturnType<typeof derivePiCompactionSettings>
 /**
  * Narrow the derived settings to the members the Pi SDK actually declares.
  *
- * `contextWindow` / `compactionThreshold` are OURS — they exist to label turn
- * breadcrumbs, and the SDK neither declares nor reads them. Handing it the wide
- * object happens to work today (`SettingsManager.inMemory` only clones and
- * serialises, and `shouldCompact` reads `enabled`/`reserveTokens`), but that is
- * a bet on a third party's tolerance for unknown keys, renewed on every upgrade.
- * Narrowing here makes the boundary a line of code instead of a footnote.
+ * `contextWindow` is OURS — it exists to label turn breadcrumbs, and the SDK
+ * neither declares nor reads it (`CompactionSettings` is `enabled` /
+ * `reserveTokens` / `keepRecentTokens`). Handing it the wide object happens to
+ * work today (`SettingsManager.inMemory` only clones and serialises, and
+ * `shouldCompact` reads `enabled`/`reserveTokens`), but that is a bet on a third
+ * party's tolerance for unknown keys, renewed on every upgrade. Narrowing here
+ * makes the boundary a line of code instead of a footnote.
  */
 export function toPiCompaction(settings: PiCompactionSettings) {
   return settings.enabled
@@ -519,7 +514,6 @@ export class PiRunner implements Runner {
     const bridge = installSessionBridge(session, internalSink, context.runId, {
       terminalTools,
       contextWindow: compaction.contextWindow,
-      ...(compaction.enabled ? { compactionThreshold: compaction.compactionThreshold } : {}),
       // Early-stop: abort the SDK loop as soon as a terminal tool has
       // executed successfully. `session.abort()` resolves once the agent
       // is idle; detached because the bridge callback is synchronous.
@@ -1065,15 +1059,13 @@ export interface SessionBridgeOptions {
    */
   onTerminalTool?: () => void;
   /**
-   * Context window (tokens) the session actually runs against, and the token
-   * count at which the SDK auto-compacts — both straight off
+   * Context window (tokens) the session actually runs against, straight off
    * {@link derivePiCompactionSettings}, stamped on every turn breadcrumb so the
-   * gauge's denominator travels with its numerator. Omit either when it is not
-   * knowable: `contextWindow` for a caller that installs the bridge without an
-   * SDK session behind it, `compactionThreshold` whenever compaction is off.
+   * gauge's denominator travels with its numerator. Omit it when it is not
+   * knowable — a caller that installs the bridge without an SDK session behind
+   * it.
    */
   contextWindow?: number;
-  compactionThreshold?: number;
 }
 
 export function installSessionBridge(
@@ -1220,9 +1212,6 @@ export function installSessionBridge(
                   cacheWriteTokens: u.cacheWrite ?? 0,
                   ...(options.contextWindow !== undefined
                     ? { contextWindow: options.contextWindow }
-                    : {}),
-                  ...(options.compactionThreshold !== undefined
-                    ? { compactionThreshold: options.compactionThreshold }
                     : {}),
                 },
               ),
