@@ -8,8 +8,8 @@
  * only reachable state) and the non-major case that keeps the gate's teeth.
  */
 
-import { describe, it, expect } from "bun:test";
-import { assessDrift } from "../check-consumer-versions.ts";
+import { describe, it, expect, afterEach } from "bun:test";
+import { assessDrift, fetchPackageJson } from "../check-consumer-versions.ts";
 
 type V = [number, number, number];
 
@@ -73,5 +73,58 @@ describe("assessDrift — same major", () => {
     // silently turn it into a publish-blocking failure.
     expect(assessDrift([6, 2, 0], [6, 5, 0])).toEqual({ verdict: "ok", detail: "in sync" });
     expect(assessDrift([6, 2, 0], [6, 2, 7])).toEqual({ verdict: "ok", detail: "in sync" });
+  });
+});
+
+describe("fetchPackageJson", () => {
+  const realFetch = globalThis.fetch;
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+  });
+
+  function stubFetch(status: number, statusText: string, body?: unknown): void {
+    globalThis.fetch = (async () =>
+      new Response(body === undefined ? null : JSON.stringify(body), {
+        status,
+        statusText,
+      })) as typeof fetch;
+  }
+
+  it("THROWS on 404 instead of reporting an absent file", async () => {
+    // The regression this guards: 404 used to return null, which main() logged
+    // as "not present, skipping" and counted as neither warning nor failure. A
+    // CONSUMER_LOCKSTEP_TOKEN that could read neither private consumer then
+    // produced `Summary: 0 failure(s)` having verified nothing, and
+    // core@6.1.0 published unchecked. Every listed consumer is a live npm
+    // package and therefore HAS a package.json, so 404 is always a read
+    // failure — it must reach main()'s fail-closed catch.
+    stubFetch(404, "Not Found");
+    await expect(fetchPackageJson("appstrate/cloud", "package.json")).rejects.toThrow(/404/);
+  });
+
+  it("names the token and the likely causes in the 404 message", async () => {
+    // The message is the operator's only clue. Bare "404 Not Found" reads as
+    // "the file was deleted" and sends them to look in the wrong place.
+    stubFetch(404, "Not Found");
+    const err = await fetchPackageJson("appstrate/cloud", "package.json").catch(
+      (e: unknown) => e as Error,
+    );
+    expect(err.message).toContain("READ failure");
+    expect(err.message).toContain("contents:read");
+    expect(err.message).toContain("appstrate/cloud");
+  });
+
+  it("still throws on other non-2xx statuses", async () => {
+    stubFetch(403, "Forbidden");
+    await expect(fetchPackageJson("appstrate/cloud", "package.json")).rejects.toThrow(/403/);
+  });
+
+  it("returns the parsed package.json on success", async () => {
+    stubFetch(200, "OK", {
+      name: "@appstrate/cloud",
+      dependencies: { "@appstrate/core": "^6.1.0" },
+    });
+    const pkg = await fetchPackageJson("appstrate/cloud", "package.json");
+    expect(pkg.name).toBe("@appstrate/cloud");
   });
 });
