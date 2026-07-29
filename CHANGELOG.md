@@ -295,12 +295,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   packages. Draft writes are deliberately NOT gated: the editor passes through
   the empty state between adding a dependency and ticking a tool.
 
-  Blast radius is one checkbox: an absent `tools` key still inherits the
-  integration's `default_tools`, so only an explicit `[]`, or an integration
-  declaring no `default_tools`, is affected. This also corrects a documented
-  falsehood — `tools` absent and `tools: []` were described as equivalent in the
-  docs, the `ManifestIntegrationEntry` TSDoc and the LLM-facing MCP tool
-  instructions. They never were: absent inherits, `[]` overrides.
+  Blast radius: an absent `tools` key still inherits the integration's
+  `default_tools`, which 59 of the 65 system integrations declare — for those,
+  only an explicit `[]` is affected. The six that declare **no** `default_tools`
+  are the exception, and they are widely used, so an absent `tools` key is
+  enough to trip the gate there: `@appstrate/gmail-mcp`,
+  `@appstrate/github-mcp`, `@appstrate/notion-mcp`, `@appstrate/clickup-mcp`,
+  `@appstrate/canva-mcp`, `@appstrate/github-git`. Every one of them ships a
+  populated `tools_policy` (7–91 tools), so the gate is always satisfiable from
+  the editor — there is no manifest it can refuse without offering a fix. An
+  agent in this state was already non-functional against that integration; it
+  now fails loudly instead of silently.
+
+  The PR body carries the audit query that lists the affected published
+  versions; run it before deploying.
+
+  This also corrects a documented falsehood — `tools` absent and `tools: []`
+  were described as equivalent in the docs, the `ManifestIntegrationEntry`
+  TSDoc and the LLM-facing MCP tool instructions. They never were: absent
+  inherits, `[]` overrides.
 
 - **Single Pi execution engine (#875)** — agent runs AND oauth-subscription
   chat (Claude Pro/Max via `claude-code`, ChatGPT via `codex`) all execute on
