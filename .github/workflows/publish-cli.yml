@@ -143,7 +143,19 @@ jobs:
         # Publisher registered on npmjs.com for this package, pinned to THIS
         # workflow filename — renaming this file breaks publishing until the
         # npm-side configuration is updated to match.
-        run: npm publish --provenance
+        #
+        # `--tag latest` is required, not optional: npm >= 11 refuses to
+        # publish a prerelease version without an explicit `--tag`, where
+        # npm 10 silently assigned `latest`. That silent assignment is how
+        # `latest` came to point at 1.0.0-beta.14, and it is the behaviour
+        # consumers depend on — `npx appstrate` resolves the `latest`
+        # dist-tag, so publishing under `beta` instead would leave every
+        # npm-channel user pinned to beta.14 while the tarball for the new
+        # version sat unreachable. Every release on this line is a
+        # `1.0.0-beta.X`, so `latest` IS the release channel. Revisit only
+        # when a stable line ships alongside prereleases and the two need
+        # separate tags.
+        run: npm publish --provenance --tag latest
 
       - name: Post-publish smoke test (registry → bunx)
         # Belt-and-suspenders check: pull from the actual registry and
