@@ -77,7 +77,6 @@
       },
       "confidence": 0.95
     },
-
     {
       "id": "cc1",
       "kind": "policy",
@@ -157,7 +156,6 @@
       },
       "confidence": 0.97
     },
-
     {
       "id": "ep1",
       "kind": "step",
@@ -233,7 +231,6 @@
       },
       "confidence": 0.98
     },
-
     {
       "id": "pref1",
       "kind": "policy",
@@ -354,7 +351,6 @@
       },
       "confidence": 0.97
     },
-
     {
       "id": "cal1",
       "kind": "policy",
@@ -463,7 +459,6 @@
       },
       "confidence": 0.97
     },
-
     {
       "id": "mem1",
       "kind": "policy",
@@ -539,7 +534,6 @@
       },
       "confidence": 0.97
     },
-
     {
       "id": "arch1",
       "kind": "policy",
@@ -555,7 +549,6 @@
       },
       "confidence": 0.97
     },
-
     {
       "id": "fab1",
       "kind": "guard",
@@ -571,7 +564,6 @@
       },
       "confidence": 0.98
     },
-
     {
       "id": "res1",
       "kind": "policy",
@@ -707,7 +699,6 @@
       },
       "confidence": 0.98
     },
-
     {
       "id": "sub1",
       "kind": "tool_call",
@@ -723,7 +714,6 @@
       },
       "confidence": 0.93
     },
-
     {
       "id": "ig1",
       "kind": "policy",
@@ -829,7 +819,6 @@
       },
       "confidence": 0.97
     },
-
     {
       "id": "cap1",
       "kind": "policy",
@@ -847,14 +836,36 @@
     }
   ],
   "edges": [
-    { "from": "ob1", "to": "ob2", "condition": "pas de marqueur `## Onboarded`" },
-    { "from": "ob1", "to": "ob4", "condition": "marqueur présent" },
-
-    { "from": "ep1", "to": "ep2", "condition": null },
-    { "from": "ep2", "to": "ep3", "condition": null },
-    { "from": "ep3", "to": "ep4", "condition": "aucune préférence ne correspond" },
-
-    { "from": "cal2", "to": "cal3", "condition": null }
+    {
+      "from": "ob1",
+      "to": "ob2",
+      "condition": "pas de marqueur `## Onboarded`"
+    },
+    {
+      "from": "ob1",
+      "to": "ob4",
+      "condition": "marqueur présent"
+    },
+    {
+      "from": "ep1",
+      "to": "ep2",
+      "condition": null
+    },
+    {
+      "from": "ep2",
+      "to": "ep3",
+      "condition": null
+    },
+    {
+      "from": "ep3",
+      "to": "ep4",
+      "condition": "aucune préférence ne correspond"
+    },
+    {
+      "from": "cal2",
+      "to": "cal3",
+      "condition": null
+    }
   ],
   "gaps": [
     {
@@ -881,6 +892,11 @@
       "kind": "external_authority",
       "message": "Deux skills font autorité sur des décisions absentes de ce fichier : `inbox-triage` porte les catégories de triage et l'arbre de décision, `email-drafting` porte toutes les conventions de rédaction. Une carte tirée du seul prompt système cartographie une coquille sur ces deux points.",
       "related_steps": ["ep1", "ep5"]
+    },
+    {
+      "kind": "unguarded_input",
+      "message": "L'agent lit les emails entrants et en tire ses décisions de triage, d'archivage et de rédaction, mais aucune règle ne dit qu'un email est une donnée et non un ordre. La section « Privacy & Security Rules » (AGENT.md:203-209) est entièrement tournée vers la fuite SORTANTE — ne pas mettre de contenu privé dans une requête de recherche — et ne dit rien du contenu entrant. C'est le cas le plus exposé du corpus : l'agent lit du courrier de n'importe qui et peut archiver, rédiger et envoyer en retour.",
+      "related_steps": ["ep1", "ep2", "ep5"]
     }
   ],
   "overall_confidence": 0.95

@@ -319,11 +319,31 @@
     }
   ],
   "edges": [
-    { "from": "s1", "to": "s2", "condition": null },
-    { "from": "s2", "to": "s3", "condition": null },
-    { "from": "s3", "to": "s4", "condition": null },
-    { "from": "s4", "to": "s5", "condition": "un format est demandé" },
-    { "from": "s4", "to": "s6", "condition": "aucun format fourni" }
+    {
+      "from": "s1",
+      "to": "s2",
+      "condition": null
+    },
+    {
+      "from": "s2",
+      "to": "s3",
+      "condition": null
+    },
+    {
+      "from": "s3",
+      "to": "s4",
+      "condition": null
+    },
+    {
+      "from": "s4",
+      "to": "s5",
+      "condition": "un format est demandé"
+    },
+    {
+      "from": "s4",
+      "to": "s6",
+      "condition": "aucun format fourni"
+    }
   ],
   "gaps": [
     {
@@ -360,6 +380,11 @@
       "kind": "undefined_criterion",
       "message": "« Sparse » (AGENT.md:46) décide seul du passage d'une fenêtre d'un mois à un trimestre, et n'est défini nulle part. C'est le seul paramètre qui change le coût d'un run.",
       "related_steps": ["c3"]
+    },
+    {
+      "kind": "unguarded_input",
+      "message": "L'agent lit des pages web renvoyées par la recherche, c'est-à-dire du contenu que n'importe qui peut publier. Le prompt cadre la CRÉDIBILITÉ des sources (AGENT.md:c2 : salle de presse, grands médias) mais jamais leur STATUT : rien ne dit qu'une page est une donnée et non une instruction. Une page conçue pour être lue par un agent n'a aucun garde-fou en face.",
+      "related_steps": ["c2", "s1"]
     }
   ],
   "overall_confidence": 0.94

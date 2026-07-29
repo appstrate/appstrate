@@ -169,14 +169,46 @@
     }
   ],
   "edges": [
-    { "from": "s1", "to": "s2", "condition": null },
-    { "from": "s2", "to": "s3", "condition": null },
-    { "from": "s3", "to": "s4", "condition": null },
-    { "from": "s4", "to": "s5", "condition": null },
-    { "from": "s5", "to": "s6", "condition": "identifiant de liste ou d'espace manquant" },
-    { "from": "s5", "to": "s7", "condition": "sinon" },
-    { "from": "s6", "to": "s7", "condition": null },
-    { "from": "s7", "to": "s8", "condition": null }
+    {
+      "from": "s1",
+      "to": "s2",
+      "condition": null
+    },
+    {
+      "from": "s2",
+      "to": "s3",
+      "condition": null
+    },
+    {
+      "from": "s3",
+      "to": "s4",
+      "condition": null
+    },
+    {
+      "from": "s4",
+      "to": "s5",
+      "condition": null
+    },
+    {
+      "from": "s5",
+      "to": "s6",
+      "condition": "identifiant de liste ou d'espace manquant"
+    },
+    {
+      "from": "s5",
+      "to": "s7",
+      "condition": "sinon"
+    },
+    {
+      "from": "s6",
+      "to": "s7",
+      "condition": null
+    },
+    {
+      "from": "s7",
+      "to": "s8",
+      "condition": null
+    }
   ],
   "gaps": [
     {
@@ -190,8 +222,8 @@
       "related_steps": ["s4"]
     },
     {
-      "kind": "unbounded_work",
-      "message": "« Limite-toi à environ 15 tâches » plafonne sans définir le seuil exact ni imposer de signaler la troncature. Si Olivier a 40 tâches ouvertes, le `summary` annoncera « 15 tâches ouvertes » sans mentionner qu'il en manque 25. `compta-gmail-harvest` interdit explicitement ce comportement (« ne prétends pas avoir tout traité ») ; ici rien.",
+      "kind": "undefined_criterion",
+      "message": "« Limite-toi à environ 15 tâches » pose une borne sans la fixer : « environ » ne se décide pas deux fois pareil, et rien ne dit sur quel critère couper la liste quand elle dépasse.",
       "related_steps": ["s4", "s8"]
     },
     {
@@ -208,6 +240,11 @@
       "kind": "unhandled_case",
       "message": "La branche `clickup_get_workspace_hierarchy` (l. 9) n'a pas de suite écrite : le prompt dit quand l'appeler, jamais qu'il faut ensuite rejouer `clickup_filter_tasks` avec l'identifiant obtenu. L'arête `s6 → s7` de cette carte suit la lettre du texte ; l'intention est manifestement `s6 → s4`.",
       "related_steps": ["s5", "s6"]
+    },
+    {
+      "kind": "unhandled_case",
+      "message": "La troncature à « environ 15 tâches » n'a aucune règle de signalement. Si Olivier a 40 tâches ouvertes, le `summary` annoncera « 15 tâches ouvertes » sans mentionner qu'il en manque 25. `compta-gmail-harvest` interdit explicitement ce comportement (« ne prétends pas avoir tout traité ») ; ici rien.",
+      "related_steps": ["s8"]
     }
   ],
   "overall_confidence": 0.96

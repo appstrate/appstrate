@@ -530,6 +530,7 @@
         "contradiction": "Two incompatible passages",
         "unhandled_failure": "No path when it fails",
         "duplicated_rule": "The same rule written twice",
+        "unguarded_input": "Third-party content read with no rule",
         "unhandled_case": "Reachable situation left untreated",
         "undefined_criterion": "Criterion nobody would decide the same way twice",
         "unbounded_work": "Repetition with no bound or order",

@@ -54,7 +54,6 @@
       },
       "confidence": 0.98
     },
-
     {
       "id": "g1",
       "kind": "guard",
@@ -175,7 +174,6 @@
       },
       "confidence": 0.98
     },
-
     {
       "id": "s3",
       "kind": "tool_call",
@@ -210,7 +208,6 @@
       },
       "confidence": 0.99
     },
-
     {
       "id": "s5",
       "kind": "loop",
@@ -316,7 +313,6 @@
       },
       "confidence": 0.98
     },
-
     {
       "id": "s6",
       "kind": "loop",
@@ -542,7 +538,6 @@
       },
       "confidence": 0.94
     },
-
     {
       "id": "s7",
       "kind": "loop",
@@ -651,7 +646,6 @@
       },
       "confidence": 0.99
     },
-
     {
       "id": "s8",
       "kind": "tool_call",
@@ -697,7 +691,6 @@
       },
       "confidence": 0.97
     },
-
     {
       "id": "s9",
       "kind": "decision",
@@ -758,7 +751,6 @@
       },
       "confidence": 0.99
     },
-
     {
       "id": "s10",
       "kind": "loop",
@@ -868,7 +860,6 @@
       },
       "confidence": 0.98
     },
-
     {
       "id": "s12",
       "kind": "loop",
@@ -919,7 +910,6 @@
       },
       "confidence": 0.93
     },
-
     {
       "id": "s13",
       "kind": "step",
@@ -1016,7 +1006,6 @@
       },
       "confidence": 0.94
     },
-
     {
       "id": "s16",
       "kind": "loop",
@@ -1051,7 +1040,6 @@
       },
       "confidence": 0.96
     },
-
     {
       "id": "s17",
       "kind": "emit",
@@ -1119,72 +1107,311 @@
     }
   ],
   "edges": [
-    { "from": "s1", "to": "s2", "condition": null },
-    { "from": "s2", "to": "s3", "condition": null },
-    { "from": "s3", "to": "s4", "condition": null },
-    { "from": "s4", "to": "s17", "condition": "inbox vide" },
-    { "from": "s4", "to": "s5", "condition": "N > 0" },
-    { "from": "s5", "to": "s6", "condition": null },
-    { "from": "s6", "to": "s7", "condition": null },
-    { "from": "s7", "to": "s8", "condition": null },
-    { "from": "s8", "to": "s8.1", "condition": null },
-    { "from": "s8.1", "to": "s8.2", "condition": "doublon détecté" },
-    { "from": "s8.1", "to": "s9", "condition": "clé inédite" },
-    { "from": "s8.2", "to": "s9", "condition": null },
-    { "from": "s9", "to": "s9.1", "condition": "auto_create_quarter_structure = true" },
-    { "from": "s9", "to": "s6.12", "condition": "false → trimestre cible inexistant" },
-    { "from": "s9.1", "to": "s10", "condition": null },
-    { "from": "s10", "to": "s11", "condition": null },
-    { "from": "s11", "to": "s12", "condition": null },
-    { "from": "s12", "to": "s13", "condition": null },
-    { "from": "s13", "to": "s13.1", "condition": null },
-    { "from": "s13.1", "to": "s14", "condition": null },
-    { "from": "s14", "to": "s15", "condition": null },
-    { "from": "s15", "to": "s16", "condition": null },
-    { "from": "s16", "to": "s17", "condition": null },
-    { "from": "s17", "to": "s18", "condition": null },
-
-    { "from": "s5.1", "to": "s5.2", "condition": "oui" },
-    { "from": "s5.1", "to": "s5.3", "condition": "non" },
-    { "from": "s5.3", "to": "s5.4", "condition": "oui" },
-    { "from": "s5.3", "to": "s5.5", "condition": "non" },
-    { "from": "s5.4", "to": "s6.12", "condition": "numéro de compte hors 92325/24426/29223" },
-    { "from": "s5.5", "to": "s5.6", "condition": "oui" },
-    { "from": "s5.5", "to": "s6", "condition": "aucun motif : lecture de contenu" },
-    { "from": "s5.6", "to": "s6.13", "condition": null },
-
-    { "from": "s6.1", "to": "s6.2", "condition": "PDF" },
-    { "from": "s6.1", "to": "s6.13", "condition": "CSV" },
-    { "from": "s6.2", "to": "s6.3", "condition": null },
-    { "from": "s6.3", "to": "s6.5", "condition": "texte exploitable" },
-    { "from": "s6.3", "to": "s6.4", "condition": "moins de 50 caractères" },
-    { "from": "s6.4", "to": "s6.5", "condition": "image lue" },
-    { "from": "s6.4", "to": "s6.12", "condition": "conversion impossible" },
-    { "from": "s6.5", "to": "s6.7", "condition": "facture, avis gouv à payer ou TPS/TVQ combiné" },
-    { "from": "s6.5", "to": "s6.8", "condition": "Stripe ou reçu de dépôt" },
-    { "from": "s6.5", "to": "s6.6", "condition": "avis d'un seul organisme gouvernemental" },
-    { "from": "s6.6", "to": "s6.7", "condition": "dépense" },
-    { "from": "s6.6", "to": "s6.8", "condition": "revenu" },
-    { "from": "s6.6", "to": "s6.12", "condition": "deux signaux ou aucun" },
-    { "from": "s6.7", "to": "s6.9", "condition": null },
-    { "from": "s6.8", "to": "s6.9", "condition": null },
-    { "from": "s6.9", "to": "s6.10", "condition": "destination {QTR}-Factures/" },
-    { "from": "s6.9", "to": "s6.12", "condition": "vendor, date ou montant non extractible" },
-    { "from": "s6.10", "to": "s6.11", "condition": null },
-    { "from": "s6.11", "to": "s6.12", "condition": "autre personne morale évidente" },
-    { "from": "s6.13", "to": "s6.14", "condition": null },
-
-    { "from": "s7.1", "to": "s7.2", "condition": null },
-    { "from": "s7.2", "to": "s7.3", "condition": null },
-    { "from": "s7.3", "to": "s7.4", "condition": "nom cible déjà pris" },
-    { "from": "s7.3", "to": "s7.5", "condition": "libre, ou destination à créer" },
-
-    { "from": "s10.1", "to": "s10.2", "condition": "run réel" },
-    { "from": "s11.1", "to": "s11.2", "condition": null },
-    { "from": "s11.2", "to": "s11.3", "condition": "run réel" },
-
-    { "from": "s12.1", "to": "s12.2", "condition": null },
-    { "from": "s14.1", "to": "s14.2", "condition": null }
+    {
+      "from": "s1",
+      "to": "s2",
+      "condition": null
+    },
+    {
+      "from": "s2",
+      "to": "s3",
+      "condition": null
+    },
+    {
+      "from": "s3",
+      "to": "s4",
+      "condition": null
+    },
+    {
+      "from": "s4",
+      "to": "s17",
+      "condition": "inbox vide"
+    },
+    {
+      "from": "s4",
+      "to": "s5",
+      "condition": "N > 0"
+    },
+    {
+      "from": "s5",
+      "to": "s6",
+      "condition": null
+    },
+    {
+      "from": "s6",
+      "to": "s7",
+      "condition": null
+    },
+    {
+      "from": "s7",
+      "to": "s8",
+      "condition": null
+    },
+    {
+      "from": "s8",
+      "to": "s8.1",
+      "condition": null
+    },
+    {
+      "from": "s8.1",
+      "to": "s8.2",
+      "condition": "doublon détecté"
+    },
+    {
+      "from": "s8.1",
+      "to": "s9",
+      "condition": "clé inédite"
+    },
+    {
+      "from": "s8.2",
+      "to": "s9",
+      "condition": null
+    },
+    {
+      "from": "s9",
+      "to": "s9.1",
+      "condition": "auto_create_quarter_structure = true"
+    },
+    {
+      "from": "s9",
+      "to": "s6.12",
+      "condition": "false → trimestre cible inexistant"
+    },
+    {
+      "from": "s9.1",
+      "to": "s10",
+      "condition": null
+    },
+    {
+      "from": "s10",
+      "to": "s11",
+      "condition": null
+    },
+    {
+      "from": "s11",
+      "to": "s12",
+      "condition": null
+    },
+    {
+      "from": "s12",
+      "to": "s13",
+      "condition": null
+    },
+    {
+      "from": "s13",
+      "to": "s13.1",
+      "condition": null
+    },
+    {
+      "from": "s13.1",
+      "to": "s14",
+      "condition": null
+    },
+    {
+      "from": "s14",
+      "to": "s15",
+      "condition": null
+    },
+    {
+      "from": "s15",
+      "to": "s16",
+      "condition": null
+    },
+    {
+      "from": "s16",
+      "to": "s17",
+      "condition": null
+    },
+    {
+      "from": "s17",
+      "to": "s18",
+      "condition": null
+    },
+    {
+      "from": "s5.1",
+      "to": "s5.2",
+      "condition": "oui"
+    },
+    {
+      "from": "s5.1",
+      "to": "s5.3",
+      "condition": "non"
+    },
+    {
+      "from": "s5.3",
+      "to": "s5.4",
+      "condition": "oui"
+    },
+    {
+      "from": "s5.3",
+      "to": "s5.5",
+      "condition": "non"
+    },
+    {
+      "from": "s5.4",
+      "to": "s6.12",
+      "condition": "numéro de compte hors 92325/24426/29223"
+    },
+    {
+      "from": "s5.5",
+      "to": "s5.6",
+      "condition": "oui"
+    },
+    {
+      "from": "s5.5",
+      "to": "s6",
+      "condition": "aucun motif : lecture de contenu"
+    },
+    {
+      "from": "s5.6",
+      "to": "s6.13",
+      "condition": null
+    },
+    {
+      "from": "s6.1",
+      "to": "s6.2",
+      "condition": "PDF"
+    },
+    {
+      "from": "s6.1",
+      "to": "s6.13",
+      "condition": "CSV"
+    },
+    {
+      "from": "s6.2",
+      "to": "s6.3",
+      "condition": null
+    },
+    {
+      "from": "s6.3",
+      "to": "s6.5",
+      "condition": "texte exploitable"
+    },
+    {
+      "from": "s6.3",
+      "to": "s6.4",
+      "condition": "moins de 50 caractères"
+    },
+    {
+      "from": "s6.4",
+      "to": "s6.5",
+      "condition": "image lue"
+    },
+    {
+      "from": "s6.4",
+      "to": "s6.12",
+      "condition": "conversion impossible"
+    },
+    {
+      "from": "s6.5",
+      "to": "s6.7",
+      "condition": "facture, avis gouv à payer ou TPS/TVQ combiné"
+    },
+    {
+      "from": "s6.5",
+      "to": "s6.8",
+      "condition": "Stripe ou reçu de dépôt"
+    },
+    {
+      "from": "s6.5",
+      "to": "s6.6",
+      "condition": "avis d'un seul organisme gouvernemental"
+    },
+    {
+      "from": "s6.6",
+      "to": "s6.7",
+      "condition": "dépense"
+    },
+    {
+      "from": "s6.6",
+      "to": "s6.8",
+      "condition": "revenu"
+    },
+    {
+      "from": "s6.6",
+      "to": "s6.12",
+      "condition": "deux signaux ou aucun"
+    },
+    {
+      "from": "s6.7",
+      "to": "s6.9",
+      "condition": null
+    },
+    {
+      "from": "s6.8",
+      "to": "s6.9",
+      "condition": null
+    },
+    {
+      "from": "s6.9",
+      "to": "s6.10",
+      "condition": "destination {QTR}-Factures/"
+    },
+    {
+      "from": "s6.9",
+      "to": "s6.12",
+      "condition": "vendor, date ou montant non extractible"
+    },
+    {
+      "from": "s6.10",
+      "to": "s6.11",
+      "condition": null
+    },
+    {
+      "from": "s6.11",
+      "to": "s6.12",
+      "condition": "autre personne morale évidente"
+    },
+    {
+      "from": "s6.13",
+      "to": "s6.14",
+      "condition": null
+    },
+    {
+      "from": "s7.1",
+      "to": "s7.2",
+      "condition": null
+    },
+    {
+      "from": "s7.2",
+      "to": "s7.3",
+      "condition": null
+    },
+    {
+      "from": "s7.3",
+      "to": "s7.4",
+      "condition": "nom cible déjà pris"
+    },
+    {
+      "from": "s7.3",
+      "to": "s7.5",
+      "condition": "libre, ou destination à créer"
+    },
+    {
+      "from": "s10.1",
+      "to": "s10.2",
+      "condition": "run réel"
+    },
+    {
+      "from": "s11.1",
+      "to": "s11.2",
+      "condition": null
+    },
+    {
+      "from": "s11.2",
+      "to": "s11.3",
+      "condition": "run réel"
+    },
+    {
+      "from": "s12.1",
+      "to": "s12.2",
+      "condition": null
+    },
+    {
+      "from": "s14.1",
+      "to": "s14.2",
+      "condition": null
+    }
   ],
   "gaps": [
     {
@@ -1226,6 +1453,11 @@
       "kind": "capability_without_rule",
       "message": "La clé de configuration `org_name` (défaut `TRACTR`) est déclarée au manifeste ; ni le prompt ni les références ne disent quand l'utiliser. Aucune étape ne la référence.",
       "related_steps": []
+    },
+    {
+      "kind": "unguarded_input",
+      "message": "L'agent télécharge et lit des PDF déposés dans l'Inbox par des tiers (fournisseurs, banques), en extrait le texte puis, en dernier recours, les lit en image. Ces contenus décident du classement et de la destination des fichiers. Aucune règle des 753 lignes ne dit qu'un PDF est une donnée à interpréter et non une consigne à exécuter, alors que l'agent déplace, renomme et crée des fichiers dans un Drive de production.",
+      "related_steps": ["s6.1", "s6.2", "g5"]
     }
   ],
   "overall_confidence": 0.94

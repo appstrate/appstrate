@@ -141,7 +141,7 @@ describe("logic-map schema", () => {
       for (const gap of map.gaps ?? []) used.add(gap.kind);
     }
     expect([...families].filter((f) => !used.has(f))).toEqual([]);
-    expect(families.size).toBe(12);
+    expect(families.size).toBe(13);
   });
 
   it("requires `aggregated` when a node declares how many gestures it folds", () => {

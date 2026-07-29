@@ -54,7 +54,6 @@
       },
       "confidence": 0.98
     },
-
     {
       "id": "tg1",
       "kind": "guard",
@@ -175,7 +174,6 @@
       },
       "confidence": 0.97
     },
-
     {
       "id": "t3",
       "kind": "decision",
@@ -221,7 +219,6 @@
       },
       "confidence": 0.99
     },
-
     {
       "id": "t5",
       "kind": "decision",
@@ -267,7 +264,6 @@
       },
       "confidence": 0.98
     },
-
     {
       "id": "t8",
       "kind": "step",
@@ -361,7 +357,6 @@
       },
       "confidence": 0.98
     },
-
     {
       "id": "t13",
       "kind": "loop",
@@ -519,7 +514,6 @@
       },
       "confidence": 0.98
     },
-
     {
       "id": "t18",
       "kind": "tool_call",
@@ -614,7 +608,6 @@
       },
       "confidence": 0.95
     },
-
     {
       "id": "t24",
       "kind": "tool_call",
@@ -705,7 +698,6 @@
       },
       "confidence": 0.97
     },
-
     {
       "id": "t29",
       "kind": "tool_call",
@@ -826,7 +818,6 @@
       },
       "confidence": 0.96
     },
-
     {
       "id": "t34",
       "kind": "step",
@@ -872,7 +863,6 @@
       },
       "confidence": 0.99
     },
-
     {
       "id": "t36",
       "kind": "decision",
@@ -918,7 +908,6 @@
       },
       "confidence": 0.97
     },
-
     {
       "id": "t39",
       "kind": "tool_call",
@@ -998,7 +987,6 @@
       },
       "confidence": 0.98
     },
-
     {
       "id": "t43",
       "kind": "emit",
@@ -1067,67 +1055,281 @@
     }
   ],
   "edges": [
-    { "from": "t1", "to": "t2", "condition": null },
-    { "from": "t2", "to": "t3", "condition": null },
-    { "from": "t3", "to": "t5", "condition": "vide : pipeline complet" },
-    { "from": "t3", "to": "t4", "condition": "étape spécifiée" },
-    { "from": "t4", "to": "t5", "condition": null },
-    { "from": "t5", "to": "t7", "condition": "trimestre fourni" },
-    { "from": "t5", "to": "t6", "condition": "vide" },
-    { "from": "t6", "to": "t7", "condition": null },
-    { "from": "t7", "to": "t8", "condition": null },
-    { "from": "t8", "to": "t9", "condition": null },
-    { "from": "t9", "to": "t10", "condition": "aucun manquant bloquant" },
-    { "from": "t10", "to": "t11", "condition": null },
-    { "from": "t11", "to": "t12", "condition": "année fiscale ou trimestre absent" },
-    { "from": "t11", "to": "t13", "condition": "structure présente" },
-    { "from": "t12", "to": "t13", "condition": null },
-    { "from": "t13", "to": "t14", "condition": null },
-    { "from": "t14", "to": "t15", "condition": null },
-    { "from": "t15", "to": "t16", "condition": "nouveau nom déjà pris" },
-    { "from": "t15", "to": "t17", "condition": "libre" },
-    { "from": "t17", "to": "t18", "condition": null },
-    { "from": "t18", "to": "t19", "condition": null },
-    { "from": "t19", "to": "t20", "condition": null },
-    { "from": "t20", "to": "t21", "condition": null },
-    { "from": "t21", "to": "t22", "condition": "store présent" },
-    { "from": "t21", "to": "t23", "condition": "store absent : matérialisation sautée" },
-    { "from": "t22", "to": "t23", "condition": null },
-    { "from": "t23", "to": "t24", "condition": null },
-    { "from": "t24", "to": "t25", "condition": null },
+    {
+      "from": "t1",
+      "to": "t2",
+      "condition": null
+    },
+    {
+      "from": "t2",
+      "to": "t3",
+      "condition": null
+    },
+    {
+      "from": "t3",
+      "to": "t5",
+      "condition": "vide : pipeline complet"
+    },
+    {
+      "from": "t3",
+      "to": "t4",
+      "condition": "étape spécifiée"
+    },
+    {
+      "from": "t4",
+      "to": "t5",
+      "condition": null
+    },
+    {
+      "from": "t5",
+      "to": "t7",
+      "condition": "trimestre fourni"
+    },
+    {
+      "from": "t5",
+      "to": "t6",
+      "condition": "vide"
+    },
+    {
+      "from": "t6",
+      "to": "t7",
+      "condition": null
+    },
+    {
+      "from": "t7",
+      "to": "t8",
+      "condition": null
+    },
+    {
+      "from": "t8",
+      "to": "t9",
+      "condition": null
+    },
+    {
+      "from": "t9",
+      "to": "t10",
+      "condition": "aucun manquant bloquant"
+    },
+    {
+      "from": "t10",
+      "to": "t11",
+      "condition": null
+    },
+    {
+      "from": "t11",
+      "to": "t12",
+      "condition": "année fiscale ou trimestre absent"
+    },
+    {
+      "from": "t11",
+      "to": "t13",
+      "condition": "structure présente"
+    },
+    {
+      "from": "t12",
+      "to": "t13",
+      "condition": null
+    },
+    {
+      "from": "t13",
+      "to": "t14",
+      "condition": null
+    },
+    {
+      "from": "t14",
+      "to": "t15",
+      "condition": null
+    },
+    {
+      "from": "t15",
+      "to": "t16",
+      "condition": "nouveau nom déjà pris"
+    },
+    {
+      "from": "t15",
+      "to": "t17",
+      "condition": "libre"
+    },
+    {
+      "from": "t17",
+      "to": "t18",
+      "condition": null
+    },
+    {
+      "from": "t18",
+      "to": "t19",
+      "condition": null
+    },
+    {
+      "from": "t19",
+      "to": "t20",
+      "condition": null
+    },
+    {
+      "from": "t20",
+      "to": "t21",
+      "condition": null
+    },
+    {
+      "from": "t21",
+      "to": "t22",
+      "condition": "store présent"
+    },
+    {
+      "from": "t21",
+      "to": "t23",
+      "condition": "store absent : matérialisation sautée"
+    },
+    {
+      "from": "t22",
+      "to": "t23",
+      "condition": null
+    },
+    {
+      "from": "t23",
+      "to": "t24",
+      "condition": null
+    },
+    {
+      "from": "t24",
+      "to": "t25",
+      "condition": null
+    },
     {
       "from": "t25",
       "to": "t26",
       "condition": "couverture PDF incomplète et export CSV disponible"
     },
-    { "from": "t25", "to": "t27", "condition": "couverture complète" },
-    { "from": "t26", "to": "t27", "condition": null },
-    { "from": "t27", "to": "t28", "condition": null },
-    { "from": "t28", "to": "t29", "condition": null },
-    { "from": "t29", "to": "t30", "condition": "`factures-parsed.json` présent" },
-    { "from": "t29", "to": "t31", "condition": "absent : partir de {}" },
-    { "from": "t30", "to": "t31", "condition": null },
-    { "from": "t31", "to": "t32", "condition": null },
-    { "from": "t32", "to": "t33", "condition": null },
-    { "from": "t33", "to": "t34", "condition": null },
-    { "from": "t34", "to": "t35", "condition": null },
-    { "from": "t35", "to": "t36", "condition": null },
-    { "from": "t36", "to": "t37", "condition": "au moins une facture" },
-    { "from": "t36", "to": "t39", "condition": "0 facture : étape sautée" },
-    { "from": "t37", "to": "t38", "condition": null },
-    { "from": "t38", "to": "t39", "condition": null },
-    { "from": "t39", "to": "t40", "condition": null },
-    { "from": "t40", "to": "t41", "condition": null },
-    { "from": "t41", "to": "t42", "condition": null },
-    { "from": "t42", "to": "t43", "condition": null },
-    { "from": "t43", "to": "t44", "condition": null },
-
-    { "from": "t13.1", "to": "t13.2", "condition": "brut à renommer" },
-    { "from": "t13.1", "to": "t13.3", "condition": "déjà renommé ou autre" },
-    { "from": "t14.1", "to": "t14.2", "condition": "brut 92325" },
-
-    { "from": "t32.1", "to": "t32.2", "condition": null },
-    { "from": "t32.2", "to": "t32.3", "condition": null }
+    {
+      "from": "t25",
+      "to": "t27",
+      "condition": "couverture complète"
+    },
+    {
+      "from": "t26",
+      "to": "t27",
+      "condition": null
+    },
+    {
+      "from": "t27",
+      "to": "t28",
+      "condition": null
+    },
+    {
+      "from": "t28",
+      "to": "t29",
+      "condition": null
+    },
+    {
+      "from": "t29",
+      "to": "t30",
+      "condition": "`factures-parsed.json` présent"
+    },
+    {
+      "from": "t29",
+      "to": "t31",
+      "condition": "absent : partir de {}"
+    },
+    {
+      "from": "t30",
+      "to": "t31",
+      "condition": null
+    },
+    {
+      "from": "t31",
+      "to": "t32",
+      "condition": null
+    },
+    {
+      "from": "t32",
+      "to": "t33",
+      "condition": null
+    },
+    {
+      "from": "t33",
+      "to": "t34",
+      "condition": null
+    },
+    {
+      "from": "t34",
+      "to": "t35",
+      "condition": null
+    },
+    {
+      "from": "t35",
+      "to": "t36",
+      "condition": null
+    },
+    {
+      "from": "t36",
+      "to": "t37",
+      "condition": "au moins une facture"
+    },
+    {
+      "from": "t36",
+      "to": "t39",
+      "condition": "0 facture : étape sautée"
+    },
+    {
+      "from": "t37",
+      "to": "t38",
+      "condition": null
+    },
+    {
+      "from": "t38",
+      "to": "t39",
+      "condition": null
+    },
+    {
+      "from": "t39",
+      "to": "t40",
+      "condition": null
+    },
+    {
+      "from": "t40",
+      "to": "t41",
+      "condition": null
+    },
+    {
+      "from": "t41",
+      "to": "t42",
+      "condition": null
+    },
+    {
+      "from": "t42",
+      "to": "t43",
+      "condition": null
+    },
+    {
+      "from": "t43",
+      "to": "t44",
+      "condition": null
+    },
+    {
+      "from": "t13.1",
+      "to": "t13.2",
+      "condition": "brut à renommer"
+    },
+    {
+      "from": "t13.1",
+      "to": "t13.3",
+      "condition": "déjà renommé ou autre"
+    },
+    {
+      "from": "t14.1",
+      "to": "t14.2",
+      "condition": "brut 92325"
+    },
+    {
+      "from": "t32.1",
+      "to": "t32.2",
+      "condition": null
+    },
+    {
+      "from": "t32.2",
+      "to": "t32.3",
+      "condition": null
+    }
   ],
   "gaps": [
     {
@@ -1174,6 +1376,11 @@
       "kind": "capability_without_rule",
       "message": "La clé de configuration `org_name` (défaut `TRACTR`) est déclarée au manifeste ; aucune règle du prompt ni des références ne dit quand l'utiliser. Aucune étape ne la référence.",
       "related_steps": []
+    },
+    {
+      "kind": "unguarded_input",
+      "message": "Même exposition que `compta-inbox`, sur le même pipeline : les relevés et factures téléchargés sont du contenu tiers, lu puis interprété pour produire le fichier comptable du trimestre. Rien dans les 675 lignes ne fixe le statut de ce contenu. L'agent dispose par ailleurs de bash et de scripts, ce qui élargit d'autant la portée d'une consigne glissée dans un document.",
+      "related_steps": ["t20", "t21"]
     }
   ],
   "overall_confidence": 0.94

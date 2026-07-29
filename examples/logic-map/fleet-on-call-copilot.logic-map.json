@@ -1257,12 +1257,31 @@
     }
   ],
   "edges": [
-    { "from": "rf2", "to": "rf3", "condition": null },
-    { "from": "rf3", "to": "rf4", "condition": null },
-    { "from": "rf4", "to": "rf5", "condition": null },
-    { "from": "rf5", "to": "rf6", "condition": null },
-
-    { "from": "m1", "to": "m2", "condition": "étape 2 du skill `intake`" }
+    {
+      "from": "rf2",
+      "to": "rf3",
+      "condition": null
+    },
+    {
+      "from": "rf3",
+      "to": "rf4",
+      "condition": null
+    },
+    {
+      "from": "rf4",
+      "to": "rf5",
+      "condition": null
+    },
+    {
+      "from": "rf5",
+      "to": "rf6",
+      "condition": null
+    },
+    {
+      "from": "m1",
+      "to": "m2",
+      "condition": "étape 2 du skill `intake`"
+    }
   ],
   "gaps": [
     {
@@ -1314,6 +1333,11 @@
       "kind": "contradiction",
       "message": "`fleet-sweep` autorise à poster une ligne dans le canal de journal de triage (AGENT.md:188), alors que `<signal-sources>` interdit à tout brouillon de s'auto-publier sur un canal visible du client (AGENT.md:98) et que ce même ancrage est vide. Sans la liste des rôles de canaux, rien ne permet de savoir si le canal visé par le sweep est publiable.",
       "related_steps": ["sc1", "t1c"]
+    },
+    {
+      "kind": "unguarded_input",
+      "message": "Tout ce que l'agent lit vient de tiers : alertes, tickets, fils de discussion, pages de wiki opérationnel. Rien dans les 237 lignes ne dit que ce contenu est une preuve à évaluer plutôt qu'une consigne à suivre. Un ticket ou une alerte dont le texte imite une instruction d'astreinte n'a aucun garde-fou écrit, alors que l'agent en tire des propositions d'escalade.",
+      "related_steps": ["rf2", "rf3", "id3"]
     }
   ],
   "overall_confidence": 0.93

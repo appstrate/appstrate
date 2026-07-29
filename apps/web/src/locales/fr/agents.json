@@ -529,6 +529,7 @@
         "declaration_mismatch": "Déclaré des deux côtés, mais pas pareil",
         "contradiction": "Deux passages incompatibles",
         "duplicated_rule": "La même règle écrite deux fois",
+        "unguarded_input": "Contenu tiers lu sans règle de traitement",
         "unhandled_failure": "Aucun chemin en cas d'échec",
         "unhandled_case": "Situation atteignable non traitée",
         "undefined_criterion": "Critère qui ne se décide pas deux fois pareil",

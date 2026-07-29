@@ -37,7 +37,6 @@
       },
       "confidence": 0.99
     },
-
     {
       "id": "s2",
       "kind": "decision",
@@ -98,7 +97,6 @@
       },
       "confidence": 0.99
     },
-
     {
       "id": "s6",
       "kind": "tool_call",
@@ -129,7 +127,6 @@
       },
       "confidence": 0.96
     },
-
     {
       "id": "s8",
       "kind": "step",
@@ -190,7 +187,6 @@
       },
       "confidence": 0.97
     },
-
     {
       "id": "s12",
       "kind": "loop",
@@ -476,7 +472,6 @@
       },
       "confidence": 0.98
     },
-
     {
       "id": "s13",
       "kind": "step",
@@ -492,7 +487,6 @@
       },
       "confidence": 0.96
     },
-
     {
       "id": "s14",
       "kind": "emit",
@@ -508,7 +502,6 @@
       },
       "confidence": 0.92
     },
-
     {
       "id": "g1",
       "kind": "guard",
@@ -601,40 +594,166 @@
     }
   ],
   "edges": [
-    { "from": "s1", "to": "s2", "condition": null },
-    { "from": "s2", "to": "s3", "condition": "`since` et `until` fournis" },
-    { "from": "s2", "to": "s4", "condition": "sinon" },
-    { "from": "s3", "to": "s5", "condition": null },
-    { "from": "s4", "to": "s5", "condition": null },
-    { "from": "s5", "to": "s6", "condition": null },
-    { "from": "s6", "to": "s7", "condition": null },
-    { "from": "s7", "to": "s8", "condition": null },
-    { "from": "s8", "to": "s9", "condition": null },
-    { "from": "s9", "to": "s10", "condition": null },
-    { "from": "s10", "to": "s11", "condition": "`max_messages` > 0" },
-    { "from": "s10", "to": "s12", "condition": "pas de plafond" },
-    { "from": "s11", "to": "s12", "condition": null },
-    { "from": "s12", "to": "s13", "condition": null },
-    { "from": "s13", "to": "s14", "condition": null },
-
-    { "from": "s12.1", "to": "s12.2", "condition": null },
-    { "from": "s12.2", "to": "s12.3", "condition": "oui, couple Stripe" },
-    { "from": "s12.2", "to": "s12.4", "condition": "non" },
-    { "from": "s12.3", "to": "s12.7", "condition": null },
-    { "from": "s12.4", "to": "s12.5", "condition": "oui, bruit évident" },
-    { "from": "s12.4", "to": "s12.6", "condition": "non" },
-    { "from": "s12.6", "to": "s12.7", "condition": null },
-    { "from": "s12.7", "to": "s12.8", "condition": null },
-
-    { "from": "s12.7.1", "to": "s12.7.2", "condition": null },
-    { "from": "s12.7.2", "to": "s12.7.3", "condition": null },
-    { "from": "s12.7.3", "to": "s12.7.4", "condition": "md5 déjà connu" },
-    { "from": "s12.7.3", "to": "s12.7.5", "condition": "md5 inconnu" },
-    { "from": "s12.7.5", "to": "s12.7.6", "condition": "collision de nom" },
-    { "from": "s12.7.5", "to": "s12.7.7", "condition": "pas de collision" },
-    { "from": "s12.7.6", "to": "s12.7.7", "condition": null },
-    { "from": "s12.7.7", "to": "s12.7.8", "condition": null },
-    { "from": "s12.7.8", "to": "s12.7.9", "condition": null }
+    {
+      "from": "s1",
+      "to": "s2",
+      "condition": null
+    },
+    {
+      "from": "s2",
+      "to": "s3",
+      "condition": "`since` et `until` fournis"
+    },
+    {
+      "from": "s2",
+      "to": "s4",
+      "condition": "sinon"
+    },
+    {
+      "from": "s3",
+      "to": "s5",
+      "condition": null
+    },
+    {
+      "from": "s4",
+      "to": "s5",
+      "condition": null
+    },
+    {
+      "from": "s5",
+      "to": "s6",
+      "condition": null
+    },
+    {
+      "from": "s6",
+      "to": "s7",
+      "condition": null
+    },
+    {
+      "from": "s7",
+      "to": "s8",
+      "condition": null
+    },
+    {
+      "from": "s8",
+      "to": "s9",
+      "condition": null
+    },
+    {
+      "from": "s9",
+      "to": "s10",
+      "condition": null
+    },
+    {
+      "from": "s10",
+      "to": "s11",
+      "condition": "`max_messages` > 0"
+    },
+    {
+      "from": "s10",
+      "to": "s12",
+      "condition": "pas de plafond"
+    },
+    {
+      "from": "s11",
+      "to": "s12",
+      "condition": null
+    },
+    {
+      "from": "s12",
+      "to": "s13",
+      "condition": null
+    },
+    {
+      "from": "s13",
+      "to": "s14",
+      "condition": null
+    },
+    {
+      "from": "s12.1",
+      "to": "s12.2",
+      "condition": null
+    },
+    {
+      "from": "s12.2",
+      "to": "s12.3",
+      "condition": "oui, couple Stripe"
+    },
+    {
+      "from": "s12.2",
+      "to": "s12.4",
+      "condition": "non"
+    },
+    {
+      "from": "s12.3",
+      "to": "s12.7",
+      "condition": null
+    },
+    {
+      "from": "s12.4",
+      "to": "s12.5",
+      "condition": "oui, bruit évident"
+    },
+    {
+      "from": "s12.4",
+      "to": "s12.6",
+      "condition": "non"
+    },
+    {
+      "from": "s12.6",
+      "to": "s12.7",
+      "condition": null
+    },
+    {
+      "from": "s12.7",
+      "to": "s12.8",
+      "condition": null
+    },
+    {
+      "from": "s12.7.1",
+      "to": "s12.7.2",
+      "condition": null
+    },
+    {
+      "from": "s12.7.2",
+      "to": "s12.7.3",
+      "condition": null
+    },
+    {
+      "from": "s12.7.3",
+      "to": "s12.7.4",
+      "condition": "md5 déjà connu"
+    },
+    {
+      "from": "s12.7.3",
+      "to": "s12.7.5",
+      "condition": "md5 inconnu"
+    },
+    {
+      "from": "s12.7.5",
+      "to": "s12.7.6",
+      "condition": "collision de nom"
+    },
+    {
+      "from": "s12.7.5",
+      "to": "s12.7.7",
+      "condition": "pas de collision"
+    },
+    {
+      "from": "s12.7.6",
+      "to": "s12.7.7",
+      "condition": null
+    },
+    {
+      "from": "s12.7.7",
+      "to": "s12.7.8",
+      "condition": null
+    },
+    {
+      "from": "s12.7.8",
+      "to": "s12.7.9",
+      "condition": null
+    }
   ],
   "gaps": [
     {
@@ -643,8 +762,8 @@
       "related_steps": ["s12.8", "g7"]
     },
     {
-      "kind": "unbounded_work",
-      "message": "`max_messages` plafonne le nombre de messages sans définir l'ordre de troncature (plus récents ? plus anciens ? ordre de l'API ?). Deux runs plafonnés sur la même fenêtre peuvent traiter des ensembles différents, et rien ne garantit que la suite sera reprise au run suivant.",
+      "kind": "undefined_criterion",
+      "message": "`max_messages` plafonne le nombre de messages mais ne définit pas l'ordre de troncature (plus récents ? plus anciens ? ordre de l'API ?). Deux runs plafonnés sur la même fenêtre peuvent traiter des ensembles différents, et rien ne garantit que la suite sera reprise au run suivant. La borne existe, c'est le critère qui la rend applicable qui manque.",
       "related_steps": ["s10", "s11"]
     },
     {

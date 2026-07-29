@@ -211,7 +211,7 @@ Pas de grain `#` sur `runtime` : il n'y a pas de manifeste derrière pour le vé
 `gaps` recense ce que la source ne dit pas, ou dit mal. **C'est souvent plus actionnable
 que les étapes elles-mêmes** — ne le bâcle pas.
 
-Douze familles, pas treize. Elles se départagent par une suite de questions posées **dans
+Treize familles, pas quatorze. Elles se départagent par une suite de questions posées **dans
 l'ordre** : tu retiens la PREMIÈRE qui répond, même si une famille plus bas semble
 convenir aussi. C'est cet ordre qui fait que deux lectures du même défaut lui donnent le
 même nom.
@@ -239,18 +239,27 @@ Un défaut relevé
 │     ├─ incompatibles, ou applicables au même cas sans arbitre  → contradiction
 │     └─ la même règle deux fois, sans dire laquelle fait foi    → duplicated_rule
 │
-├─ 4. Le texte se TAIT sur une situation atteignable ?
+├─ 4. L'agent LIT du contenu produit par un tiers, et aucune
+│     règle ne dit que c'est une donnée et non un ordre ?        → unguarded_input
+│        mail, document déposé, page web, ticket, fichier de dépôt.
+│        Une règle qui protège la SORTIE (ne pas divulguer) ne couvre pas l'entrée.
+│
+├─ 5. Le texte se TAIT sur une situation atteignable ?
 │     ├─ c'est une panne, un refus, une indisponibilité          → unhandled_failure
 │     └─ n'importe quelle autre situation                        → unhandled_case
 │
-├─ 5. La règle est écrite mais inapplicable telle quelle ?
+├─ 6. La règle est écrite mais inapplicable telle quelle ?
 │     ├─ sa condition ne se décide pas deux fois pareil          → undefined_criterion
 │     │    seuil, adjectif (« pertinent », « sparse »), critère projectif,
 │     │    critère porté par des exemples et jamais énoncé
-│     └─ rien ne borne une répétition, une délégation,
-│        une troncature : ni compteur, ni budget, ni ordre       → unbounded_work
+│     └─ AUCUNE borne n'est écrite pour une répétition,
+│        une délégation, une troncature                          → unbounded_work
+│          ⚠ dès qu'une borne EXISTE, même molle (« environ 15 », un plafond
+│          sans ordre de troncature), ce n'est plus unbounded_work : le défaut
+│          porte sur le critère (undefined_criterion) ou sur une conséquence
+│          non traitée (unhandled_case).
 │
-└─ 6. Aucune des cinq                                            → map_limitation
+└─ 7. Aucune des six                                             → map_limitation
       Seule famille qui parle de TA CARTE et non de l'agent : le vocabulaire n'a pas su
       rendre la source (document hybride, répétition conditionnelle sans ensemble), ou un
       passage lu ne prescrit aucun geste et ne produit donc aucun nœud.
@@ -286,7 +295,7 @@ Appelle `output` avec la carte complète. Renseigne :
 ## Garde-fous
 
 - **Lecture seule.** Tu ne modifies jamais l'agent que tu cartographies, ni aucun autre.
-- **Les deux vocabulaires sont fermés.** Sept types d'étapes, douze familles de trous. Un
+- **Les deux vocabulaires sont fermés.** Sept types d'étapes, treize familles de trous. Un
   passage qui n'entre dans aucun type se signale dans `gaps` ; un défaut qui n'entre dans
   aucune famille va en `map_limitation` avec son explication. Ni l'un ni l'autre ne
   justifie un nom inventé : le schéma le refuserait, et ta carte serait rejetée.
