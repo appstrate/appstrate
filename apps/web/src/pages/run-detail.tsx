@@ -24,6 +24,7 @@ import { RunDocumentsTab } from "../components/run-documents-tab";
 import { invalidateOrgStorage } from "../hooks/use-documents";
 import { RunRow } from "../components/run-row";
 import { RunCostReadout } from "../components/run-cost-readout";
+import { ContextGaugeReadout } from "../components/run-context-gauge";
 import { RunDegradedBanner } from "../components/run-degraded-banner";
 import { RunArtifactsBanner } from "../components/run-artifacts-banner";
 import { useMarkReadByRun } from "../hooks/use-notifications";
@@ -323,6 +324,19 @@ export function RunDetailPage() {
               className="text-foreground font-medium"
             />
           </div>
+          {/* Context gauge — the state metric the cumulative token total never
+              was (#1046): bounded by the run's window, non-monotone, and
+              readable as "how much headroom is left". Renders nothing at all
+              for a run with no turn breadcrumbs or no recorded window, leaving
+              the `$` alone rather than an empty bar claiming an empty context.
+              Its own live cadence is the turn boundary, NOT the 250 ms metric
+              tick the `$` beside it follows. */}
+          <ContextGaugeReadout
+            turns={turnRows}
+            contextWindow={run.context_window}
+            compactionThreshold={run.compaction_threshold}
+            status={run.status}
+          />
           {!isRunning && !isInline && agent && (
             <Button variant="outline" size="sm" onClick={() => setInputOpen(true)}>
               <Play className="size-3.5" />

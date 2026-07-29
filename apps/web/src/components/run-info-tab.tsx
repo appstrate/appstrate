@@ -10,6 +10,7 @@ import { EmptyState } from "./page-states";
 import { RunTrigger } from "./run-trigger";
 import { RunCostReadout } from "./run-cost-readout";
 import { formatDateField } from "../lib/markdown";
+import { fractionOfWindow, formatWindowPercent } from "./run-context";
 import type { RunTurnRow } from "./log-utils";
 import { ACTIVE_RUN_STATUSES, type EnrichedRun, type TokenUsage } from "@appstrate/shared-types";
 
@@ -40,11 +41,34 @@ function InfoCard({ label, value }: { label: string; value: React.ReactNode }) {
  *
  * A table, not a chart: the shape is small, the numbers are the point, and no
  * charting dependency is worth it. The proportional bar behind the context
- * column is pure CSS, scaled to the run's own peak.
+ * column is pure CSS.
+ *
+ * The bar is normalized on the run's context WINDOW, not on the run's own peak
+ * (#1046). Peak-relative made every run look equally full — the widest bar was
+ * always 100 % whether the run had used 5 % or 95 % of what it was given, which
+ * is the one thing the column exists to tell apart. This is the same reading
+ * the header gauge shows, computed by the same helper so the two cannot drift.
+ *
+ * FALLBACK, deliberately explicit: when `contextWindow` is null there is no
+ * denominator, so the bar reverts to peak-relative AND the `%` column is not
+ * rendered at all. No 200k default is invented here — the server already
+ * applies that fallback at launch for every run that has a window, so a null
+ * means genuinely unknown, and a fabricated percentage is worse than none.
  */
-function TurnsTable({ turns }: { turns: RunTurnRow[] }) {
-  const { t } = useTranslation("agents");
-  const maxContext = turns.reduce((max, turn) => Math.max(max, turn.contextTokens), 0);
+function TurnsTable({
+  turns,
+  contextWindow,
+}: {
+  turns: RunTurnRow[];
+  contextWindow: number | null;
+}) {
+  const { t, i18n } = useTranslation("agents");
+  const peak = turns.reduce((max, turn) => Math.max(max, turn.contextTokens), 0);
+  // The denominator the bar is drawn against — the window when known, the run's
+  // own peak otherwise. `hasWindow` is what gates the `%` column: a share of a
+  // peak is not a share of anything the reader can act on.
+  const hasWindow = contextWindow != null && contextWindow > 0;
+  const denominator = hasWindow ? contextWindow : peak;
 
   return (
     <div className="overflow-x-auto">
@@ -57,6 +81,11 @@ function TurnsTable({ turns }: { turns: RunTurnRow[] }) {
             <th scope="col" className="py-1.5 pr-3 text-right font-medium">
               {t("run.turnContextTokens")}
             </th>
+            {hasWindow && (
+              <th scope="col" className="py-1.5 pr-3 text-right font-medium">
+                {t("run.turnContextShare")}
+              </th>
+            )}
             <th scope="col" className="py-1.5 pr-3 text-right font-medium">
               {t("run.turnOutputTokens")}
             </th>
@@ -66,31 +95,37 @@ function TurnsTable({ turns }: { turns: RunTurnRow[] }) {
           </tr>
         </thead>
         <tbody>
-          {turns.map((turn) => (
-            <tr key={turn.index} className="border-border/40 border-b last:border-b-0">
-              <th scope="row" className="py-1 pr-3 text-left font-normal tabular-nums">
-                {turn.index}
-              </th>
-              <td className="relative py-1 pr-3 text-right tabular-nums">
-                <span
-                  aria-hidden
-                  className="bg-primary/15 absolute inset-y-0.5 right-0 rounded-sm"
-                  style={{
-                    width: maxContext > 0 ? `${(turn.contextTokens / maxContext) * 100}%` : "0%",
-                  }}
-                />
-                <span className="relative">{turn.contextTokens.toLocaleString()}</span>
-              </td>
-              <td className="py-1 pr-3 text-right tabular-nums">
-                {turn.outputTokens.toLocaleString()}
-              </td>
-              <td className="text-muted-foreground py-1 text-right tabular-nums">
-                {/* Omitted by the runner when it could not observe the turn's
-                    start — an em dash is honest, a 0 would read as instant. */}
-                {turn.latencyMs !== undefined ? formatDuration(turn.latencyMs) : "—"}
-              </td>
-            </tr>
-          ))}
+          {turns.map((turn) => {
+            const fraction = fractionOfWindow(turn.contextTokens, denominator);
+            return (
+              <tr key={turn.index} className="border-border/40 border-b last:border-b-0">
+                <th scope="row" className="py-1 pr-3 text-left font-normal tabular-nums">
+                  {turn.index}
+                </th>
+                <td className="relative py-1 pr-3 text-right tabular-nums">
+                  <span
+                    aria-hidden
+                    className="bg-primary/15 absolute inset-y-0.5 right-0 rounded-sm"
+                    style={{ width: `${fraction * 100}%` }}
+                  />
+                  <span className="relative">{turn.contextTokens.toLocaleString()}</span>
+                </td>
+                {hasWindow && (
+                  <td className="text-muted-foreground py-1 pr-3 text-right tabular-nums">
+                    {formatWindowPercent(fraction, i18n.language)}
+                  </td>
+                )}
+                <td className="py-1 pr-3 text-right tabular-nums">
+                  {turn.outputTokens.toLocaleString()}
+                </td>
+                <td className="text-muted-foreground py-1 text-right tabular-nums">
+                  {/* Omitted by the runner when it could not observe the turn's
+                      start — an em dash is honest, a 0 would read as instant. */}
+                  {turn.latencyMs !== undefined ? formatDuration(turn.latencyMs) : "—"}
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>
@@ -243,7 +278,12 @@ export function RunInfoTab({ run, turns }: RunInfoTabProps) {
       {turns && turns.length > 0 && (
         <SectionCard title={t("run.turnsTitle")}>
           <p className="text-muted-foreground text-xs">{t("run.turnsHint")}</p>
-          <TurnsTable turns={turns} />
+          {/* `context_window` is read straight off the run rather than threaded
+              in as a new prop: `RunInfoTab` already receives the whole DTO, and
+              `TurnsTable` is its private child — adding a prop to the public
+              boundary to carry a field that boundary already crosses would be
+              duplication, not decoupling. */}
+          <TurnsTable turns={turns} contextWindow={run.context_window} />
         </SectionCard>
       )}
 

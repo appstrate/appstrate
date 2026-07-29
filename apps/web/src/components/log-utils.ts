@@ -12,10 +12,13 @@ export interface LogEntry {
    * call's start and end (`data.durationMs`). Omitted otherwise — the runner
    * deliberately emits nothing rather than a misleading zero.
    *
-   * NOTE: live SSE `run_log` frames have their `data` stripped server-side
-   * (`stripPayload` in `apps/api/src/routes/realtime.ts`), so this — like the
-   * existing `detail` — only materializes once the rows come back from the
-   * REST logs query. That is expected, not a bug to work around here.
+   * NOTE: whether this survives a live SSE frame depends on the stream, not on
+   * the field. `stripPayload` (`apps/api/src/routes/realtime.ts`) drops
+   * `run_log.data` only for NON-verbose subscribers — the org-wide
+   * `use-global-run-sync` stream, which deliberately omits `verbose` because it
+   * discards log payloads anyway. The per-run stream that feeds this projection
+   * opens with `verbose=true` (`use-realtime.ts`), so its frames arrive with
+   * `data` intact and this materializes live, not only on the REST logs query.
    */
   durationMs?: number;
   createdAt?: Date | string | null;
