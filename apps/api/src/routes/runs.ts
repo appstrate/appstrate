@@ -75,6 +75,20 @@ const inlineRunBodySchema = z.object({
    * names the offending URI rather than a Zod path.
    */
   context_documents: z.array(z.unknown()).optional(),
+  /**
+   * Per-integration connection picks for this run (resolver mechanism #2).
+   * Declared here so the parse keeps the field for the preflight's readiness
+   * gate, which runs BEFORE `parseRequestInput` and would otherwise never see
+   * it.
+   *
+   * `.min(1)` is owned here rather than delegated to `parseRequestInput`: an
+   * empty-string id is falsy at the resolver's `resolveOne`, so readiness would
+   * answer 412 before the parser's field-precise 400 could fire — and
+   * `POST /runs/inline/validate` never calls the parser at all, so the guard
+   * would have no owner there and the validator would disagree with the launch
+   * on the same body.
+   */
+  connection_overrides: z.record(z.string(), z.string().min(1)).optional(),
 });
 
 /**
