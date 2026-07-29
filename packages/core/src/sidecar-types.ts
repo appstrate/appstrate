@@ -648,7 +648,11 @@ export interface IntegrationBootReport {
     toolCount: number;
     vendored?: boolean;
   }>;
-  /** Per-integration failure — the error that prevented spawn/connect/register. */
+  /**
+   * Per-integration failure — the error that prevented spawn/connect/register,
+   * OR the boot-contract violation of registering zero callable tools (a
+   * declared integration that exposes nothing did not launch as declared).
+   */
   failed: Array<{ integrationId: string; error: string }>;
   /** Ordered per-phase breadcrumbs for the run-log boot trail. */
   breadcrumbs: IntegrationBootBreadcrumb[];

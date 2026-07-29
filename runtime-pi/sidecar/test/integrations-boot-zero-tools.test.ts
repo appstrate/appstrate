@@ -1,0 +1,172 @@
+// SPDX-License-Identifier: Apache-2.0
+
+/**
+ * Boot-contract coverage: a DECLARED integration that ends boot with zero
+ * callable tools must fail the run, not warn.
+ *
+ * Reproduces the production shape that motivated the gate: an agent declared
+ * `dependencies.integrations["@scope/x"]` but shipped no
+ * `integrations_configuration["@scope/x"]` entry, so the spawn resolver emitted
+ * a serverless spec with no `apiCalls`. The integration "booted" with an empty
+ * surface, the sidecar warned into the run log only (never into the model's
+ * context), and the agent improvised unauthenticated HTTP for 40 turns.
+ *
+ * These tests assert the report the agent container actually reads
+ * (`GET /integrations/boot-report`): `ok: false` + a `failed[]` entry is what
+ * `entrypoint.ts` turns into a `die()`.
+ */
+
+import { describe, expect, it } from "bun:test";
+import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
+import type { ApiCallToolDeps } from "../mcp.ts";
+import { TokenBudget } from "../token-budget.ts";
+import { bootIntegrations } from "../integrations-boot.ts";
+
+const INTEGRATION_ID = "@quiz-room/google-business-profile";
+
+const unreachableFetch = (async () => {
+  throw new Error("api_call handler must not execute in a boot-contract test");
+}) as unknown as typeof fetch;
+
+const apiCallDeps: ApiCallToolDeps = {
+  proxyDeps: {
+    config: { runToken: "run-token", platformApiUrl: "http://platform.local" },
+    cookieJar: new Map(),
+    fetchFn: unreachableFetch,
+    reportedAuthFailures: new Set(),
+  },
+  tokenBudget: new TokenBudget(),
+};
+
+/** Platform stub serving the one auth the healthy spec injects. */
+const platformFetch = (async (input: string | URL | Request) => {
+  const url = typeof input === "string" ? input : input.toString();
+  if (url.includes(`/internal/integration-credentials/${INTEGRATION_ID}`)) {
+    return new Response(
+      JSON.stringify({
+        auths: [
+          {
+            auth_key: "primary",
+            auth_type: "api_key",
+            fields: { token: "primary-token" },
+            authorized_uris: ["https://mybusiness.googleapis.com/**"],
+          },
+        ],
+        delivery_plans: {
+          primary: {
+            header_name: "Authorization",
+            header_prefix: "Bearer ",
+            value: "primary-token",
+            allow_server_override: false,
+          },
+        },
+        expires_at_epoch_ms: { primary: null },
+      }),
+      { status: 200 },
+    );
+  }
+  return new Response(JSON.stringify({ detail: `unexpected platform call: ${url}` }), {
+    status: 404,
+  });
+}) as unknown as typeof fetch;
+
+/** Declared serverless integration whose config selected no tool at all. */
+function zeroToolSpec(): IntegrationSpawnSpec {
+  return {
+    integrationId: INTEGRATION_ID,
+    namespace: "gbp",
+    sourceKind: "none",
+    manifest: { name: INTEGRATION_ID, version: "1.0.0" },
+    spawnEnv: {},
+    toolAllowlist: [],
+  } as IntegrationSpawnSpec;
+}
+
+/** Same integration, with `api_call` actually selected. */
+function healthySpec(): IntegrationSpawnSpec {
+  return {
+    integrationId: INTEGRATION_ID,
+    namespace: "gbp",
+    sourceKind: "none",
+    manifest: { name: INTEGRATION_ID, version: "1.0.0" },
+    apiCalls: [
+      {
+        authKey: "primary",
+        toolName: "api_call",
+        authorizedUris: ["https://mybusiness.googleapis.com/**"],
+      },
+    ],
+    spawnEnv: {},
+    toolAllowlist: ["api_call"],
+  } as IntegrationSpawnSpec;
+}
+
+async function boot(spec: IntegrationSpawnSpec) {
+  const previousAdapter = process.env.INTEGRATION_RUNTIME_ADAPTER;
+  process.env.INTEGRATION_RUNTIME_ADAPTER = "process";
+  try {
+    return await bootIntegrations(
+      [spec],
+      {
+        platformApiUrl: "http://platform.local",
+        runToken: "run-token",
+        fetchFn: platformFetch,
+      },
+      apiCallDeps,
+    );
+  } finally {
+    if (previousAdapter === undefined) delete process.env.INTEGRATION_RUNTIME_ADAPTER;
+    else process.env.INTEGRATION_RUNTIME_ADAPTER = previousAdapter;
+  }
+}
+
+describe("bootIntegrations — zero callable tools is a boot failure", () => {
+  it("fails the boot report when a declared serverless integration exposes nothing", async () => {
+    const result = await boot(zeroToolSpec());
+    try {
+      expect(result.report.ok).toBe(false);
+      expect(result.report.declared).toBe(1);
+      expect(result.spawned).toEqual([]);
+      expect(result.failed).toHaveLength(1);
+      expect(result.failed[0]!.integrationId).toBe(INTEGRATION_ID);
+      // Actionable: names what is missing AND the manifest key to fix.
+      expect(result.failed[0]!.error).toContain("nothing callable");
+      expect(result.failed[0]!.error).toContain(
+        `integrations_configuration["${INTEGRATION_ID}"].tools`,
+      );
+      expect(result.tools).toEqual([]);
+    } finally {
+      await result.shutdown();
+    }
+  });
+
+  it("keeps the diagnostic breadcrumb alongside the failure", async () => {
+    const result = await boot(zeroToolSpec());
+    try {
+      const messages = result.report.breadcrumbs.map((b) => b.message);
+      // The pre-existing warn crumb (self-diagnosing trail)…
+      expect(
+        messages.some((m) => m.includes("api_call exposed 0 tools") && m.includes(INTEGRATION_ID)),
+      ).toBe(true);
+      // …plus the error crumb the failure path emits.
+      const errorCrumbs = result.report.breadcrumbs.filter((b) => b.level === "error");
+      expect(errorCrumbs).toHaveLength(1);
+      expect(errorCrumbs[0]!.message).toContain(INTEGRATION_ID);
+    } finally {
+      await result.shutdown();
+    }
+  });
+
+  it("still reports ok for a healthy integration (no regression)", async () => {
+    const result = await boot(healthySpec());
+    try {
+      expect(result.report.ok).toBe(true);
+      expect(result.failed).toEqual([]);
+      expect(result.spawned).toHaveLength(1);
+      expect(result.spawned[0]!.toolCount).toBe(1);
+      expect(result.tools.map((t) => t.descriptor.name)).toEqual(["gbp__api_call"]);
+    } finally {
+      await result.shutdown();
+    }
+  });
+});

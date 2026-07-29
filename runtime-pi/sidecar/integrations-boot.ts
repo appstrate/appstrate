@@ -1078,16 +1078,56 @@ export function hiddenToolsForNativeUpstream(
 }
 
 /**
+ * Actionable reason string for a declared integration that ended registration
+ * with zero callable tools. Shared by the diagnostic breadcrumb and the boot
+ * failure below so both name the same manifest key to fix.
+ *
+ * Every reachable cause is a manifest/config one, so the message points at the
+ * agent-side selection key: an agent that declared the dependency but selected
+ * no tool (`integrations_configuration[id].tools` absent or `[]`), or an
+ * integration manifest whose `hidden_tools` suppressed everything selected.
+ */
+function zeroToolReason(spec: IntegrationSpawnSpec): string {
+  const key = `integrations_configuration["${spec.integrationId}"].tools`;
+  return spec.sourceKind === "none" || !spec.manifest.server
+    ? `api_call exposed 0 tools — nothing callable. Check ${key} (a serverless integration must list "api_call").`
+    : `0 tools registered — nothing callable. Check ${key} (it must list at least one tool this integration advertises).`;
+}
+
+/**
+ * Boot contract: a declared integration that exposes no callable tool did not
+ * launch as declared, so it fails the run.
+ *
+ * The contract behind `INTEGRATIONS_TO_SPAWN_JSON` is "declared ⇒ callable" —
+ * the agent's prompt was written against that surface. An integration that
+ * boots but registers nothing is indistinguishable, from the model's side,
+ * from an integration that was never declared: the boot report is the only
+ * channel the agent reads, and a `warn` breadcrumb goes to the platform run
+ * log, never into the model's context. Observed failure mode: the agent has no
+ * legitimate call path left, improvises unauthenticated HTTP from bash, and
+ * burns the whole budget before a human cancels it.
+ *
+ * Throwing routes the spec through the per-spec catch in
+ * {@link bootIntegrations}, which records it in `failed[]` — the SAME abort
+ * path a spawn/connect failure takes (`entrypoint.ts` reads `report.ok` from
+ * `GET /integrations/boot-report` and dies). No second failure mechanism.
+ */
+export function assertIntegrationExposesTools(spec: IntegrationSpawnSpec, toolCount: number): void {
+  if (toolCount > 0) return;
+  throw new Error(zeroToolReason(spec));
+}
+
+/**
  * Breadcrumb for the serverless (`sourceKind: "none"`) branch, where the
  * in-process `api_call` server is the integration's entire surface.
  *
- * When `toolCount === 0` the integration is effectively non-functional: the
- * config (`integrations_configuration[id].tools`) didn't list `"api_call"`, so
- * the resolver filtered everything and nothing is callable. The agent silently
- * falls back to read/bash and the run looks healthy until it fails its job.
- * Emit a `warn` with an actionable message instead of a success-toned "ready"
- * breadcrumb, so the misconfiguration is self-diagnosing. Keep the
- * `ready (N tools)` wording only for `N > 0`.
+ * When `toolCount === 0` the integration is non-functional: the config
+ * (`integrations_configuration[id].tools`) didn't list `"api_call"`, so the
+ * resolver filtered everything and nothing is callable. Emit a `warn` with an
+ * actionable message instead of a success-toned "ready" breadcrumb — the
+ * breadcrumb is the diagnostic trail; the run is failed separately by
+ * {@link assertIntegrationExposesTools}. Keep the `ready (N tools)` wording
+ * only for `N > 0`.
  */
 export function pushServerlessReadyBreadcrumb(
   spec: IntegrationSpawnSpec,
@@ -1097,7 +1137,7 @@ export function pushServerlessReadyBreadcrumb(
 ): void {
   if (toolCount === 0) {
     breadcrumbs.push({
-      message: `${spec.integrationId}: api_call exposed 0 tools — nothing callable. Check integrations_configuration["${spec.integrationId}"].tools (a serverless integration must list "api_call").`,
+      message: `${spec.integrationId}: ${zeroToolReason(spec)}`,
       level: "warn",
       data: {
         integrationId: spec.integrationId,
@@ -1409,14 +1449,18 @@ export async function bootIntegrations(
       // `manifest.server` undefined for this branch.
       if (spec.sourceKind === "none" || !spec.manifest.server) {
         const apiCallToolCount = await attachApiCall();
+        const ms = Math.round(performance.now() - specStart);
+        // Breadcrumb first (diagnostic trail), then the contract gate — a
+        // zero-tool integration throws into the catch below and lands on
+        // `failed[]` instead of on `spawned[]`.
+        pushServerlessReadyBreadcrumb(spec, apiCallToolCount, ms, breadcrumbs);
+        assertIntegrationExposesTools(spec, apiCallToolCount);
         spawned.push({
           integrationId: spec.integrationId,
           namespace: spec.namespace,
           toolCount: apiCallToolCount,
           // serverless integration — no `source.server`, so `vendored` is N/A.
         });
-        const ms = Math.round(performance.now() - specStart);
-        pushServerlessReadyBreadcrumb(spec, apiCallToolCount, ms, breadcrumbs);
         continue;
       }
       const server = spec.manifest.server;
@@ -1460,6 +1504,7 @@ export async function bootIntegrations(
         pushUnavailableToolBreadcrumb(spec, added, breadcrumbs);
         // Attach the in-process api_call tool alongside the remote MCP's tools.
         const apiCallAdded = await attachApiCall(allocatedNs);
+        assertIntegrationExposesTools(spec, added + apiCallAdded);
         spawned.push({
           integrationId: spec.integrationId,
           namespace: spec.namespace,
@@ -1550,6 +1595,7 @@ export async function bootIntegrations(
       // native tools, under the same (allocated) namespace.
       const apiCallAdded = await attachApiCall(allocatedNs);
 
+      assertIntegrationExposesTools(spec, added + apiCallAdded);
       spawned.push({
         integrationId: spec.integrationId,
         namespace: spec.namespace,
