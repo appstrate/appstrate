@@ -8,12 +8,37 @@
  * only reachable state) and the non-major case that keeps the gate's teeth.
  */
 
-import { describe, it, expect, afterEach } from "bun:test";
-import { assessDrift, fetchPackageJson } from "../check-consumer-versions.ts";
+import { describe, it, expect, afterEach, spyOn } from "bun:test";
+import {
+  assessDeclaredRange,
+  assessDrift,
+  fetchPackageJson,
+  resolvePolicy,
+} from "../check-consumer-versions.ts";
 
 type V = [number, number, number];
 
 const verdict = (local: V, consumer: V) => assessDrift(local, consumer).verdict;
+
+describe("resolvePolicy", () => {
+  it("keeps only the exact lowercase policies", () => {
+    expect(resolvePolicy("fail")).toBe("fail");
+    expect(resolvePolicy("warn")).toBe("warn");
+    expect(resolvePolicy("off")).toBe("off");
+  });
+
+  it("fails closed on wrong case and typos", () => {
+    const warn = spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      for (const raw of ["FAIL", "WARN", "OFF", "typo"]) {
+        expect(resolvePolicy(raw)).toBe("fail");
+      }
+      expect(warn).toHaveBeenCalledTimes(4);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+});
 
 describe("assessDrift — major mismatch", () => {
   it("warns when a MAJOR release finds a consumer exactly one major behind (#1028)", () => {
@@ -73,6 +98,31 @@ describe("assessDrift — same major", () => {
     // silently turn it into a publish-blocking failure.
     expect(assessDrift([6, 2, 0], [6, 5, 0])).toEqual({ verdict: "ok", detail: "in sync" });
     expect(assessDrift([6, 2, 0], [6, 2, 7])).toEqual({ verdict: "ok", detail: "in sync" });
+  });
+});
+
+describe("assessDeclaredRange", () => {
+  it("preserves assessDrift for a valid range", () => {
+    expect(assessDeclaredRange([6, 3, 0], "^6.1.0", "fail")).toEqual(
+      assessDrift([6, 3, 0], [6, 1, 0]),
+    );
+    expect(assessDeclaredRange([6, 3, 0], "^6.2.0", "warn")).toEqual(
+      assessDrift([6, 3, 0], [6, 2, 0]),
+    );
+  });
+
+  it("fails an unparsable range under the fail policy", () => {
+    expect(assessDeclaredRange([6, 3, 0], "workspace:*", "fail")).toEqual({
+      verdict: "fail",
+      detail: 'unparsable range "workspace:*", cannot verify drift',
+    });
+  });
+
+  it("warns on an unparsable range under the warn policy", () => {
+    expect(assessDeclaredRange([6, 3, 0], "workspace:*", "warn")).toEqual({
+      verdict: "warn",
+      detail: 'unparsable range "workspace:*", cannot verify drift',
+    });
   });
 });
 

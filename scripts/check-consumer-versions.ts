@@ -68,7 +68,7 @@ const VALID_POLICIES: readonly DriftPolicy[] = ["warn", "fail", "off"];
  * must NOT silently disable blocking — fall back to `fail` with a warning so a
  * misconfigured env can never fail open.
  */
-function resolvePolicy(raw: string | undefined): DriftPolicy {
+export function resolvePolicy(raw: string | undefined): DriftPolicy {
   if (raw === undefined) return "fail";
   if ((VALID_POLICIES as readonly string[]).includes(raw)) return raw as DriftPolicy;
   console.warn(
@@ -147,6 +147,26 @@ export function assessDrift(
     return { verdict: "ok", detail: "patch-behind, OK" };
   }
   return { verdict: "ok", detail: "in sync" };
+}
+
+/**
+ * Assess a consumer's declared range. A range that cannot be parsed is also a
+ * consumer that cannot be verified, so it follows the active enforcement
+ * policy instead of disappearing from the summary.
+ */
+export function assessDeclaredRange(
+  local: [number, number, number],
+  range: string,
+  policy: Exclude<DriftPolicy, "off">,
+): DriftAssessment {
+  const consumer = parseSemver(range);
+  if (!consumer) {
+    return {
+      verdict: policy === "fail" ? "fail" : "warn",
+      detail: `unparsable range "${range}", cannot verify drift`,
+    };
+  }
+  return assessDrift(local, consumer);
 }
 
 /**
@@ -256,13 +276,7 @@ async function main(): Promise<void> {
         continue;
       }
 
-      const consumerVersion = parseSemver(range);
-      if (!consumerVersion) {
-        console.warn(`  ? ${consumer.repo}/${path} — unparsable range "${range}"`);
-        continue;
-      }
-
-      const { verdict, detail } = assessDrift(localVersion, consumerVersion);
+      const { verdict, detail } = assessDeclaredRange(localVersion, range, POLICY);
       const line = `${consumer.repo}/${path} pins ${range} — ${detail}`;
       if (verdict === "fail") {
         console.error(`  ✗ ${line}`);
@@ -286,8 +300,7 @@ async function main(): Promise<void> {
   }
 }
 
-// Guarded so the test file can import `assessDrift` without the module
-// hitting the GitHub API on import.
+// Guarded so tests can import this script without hitting the GitHub API.
 if (import.meta.main) {
   main().catch((err) => {
     console.error(err instanceof Error ? err.stack : String(err));
