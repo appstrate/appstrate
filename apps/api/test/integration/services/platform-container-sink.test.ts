@@ -48,6 +48,7 @@ import { mintSinkCredentials } from "../../../src/lib/mint-sink-credentials.ts";
 import type { AppstrateRunPlan } from "../../../src/services/run-launcher/types.ts";
 import type { ExecutionContext } from "@appstrate/afps-runtime/types";
 import type { LoadedPackage } from "../../../src/types/index.ts";
+import { defaultTestAgentResources } from "../../helpers/run-resources.ts";
 
 // ---------------------------------------------------------------------------
 // Fake orchestrator
@@ -201,6 +202,7 @@ function buildRunPlan(): AppstrateRunPlan {
       aliasId: "claude-3-5-sonnet-latest",
     },
     timeout: 60,
+    resources: defaultTestAgentResources(),
   };
 }
 

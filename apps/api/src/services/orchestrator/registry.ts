@@ -15,7 +15,11 @@
  * runs inside the API process.
  */
 
-import type { RunOrchestrator, OrchestratorRegistration } from "@appstrate/core/platform-types";
+import type {
+  OrchestratorAgentResourceCapabilities,
+  RunOrchestrator,
+  OrchestratorRegistration,
+} from "@appstrate/core/platform-types";
 import type { ExecutionMode } from "../../infra/mode.ts";
 import { DockerOrchestrator } from "./docker-orchestrator.ts";
 import { ProcessOrchestrator } from "./process-orchestrator.ts";
@@ -28,6 +32,41 @@ interface OwnedRegistration extends OrchestratorRegistration {
 }
 
 const ORCHESTRATORS = new Map<string, OwnedRegistration>();
+const MAX_AGENT_CPU = Math.floor(Number.MAX_SAFE_INTEGER / 1_000_000_000);
+
+function validateAgentResources(id: string, owner: string, capabilities: unknown): void {
+  if (capabilities === undefined) return;
+  const prefix = `Invalid agentResources for orchestrator ${JSON.stringify(id)} from ${JSON.stringify(owner)}`;
+  if (typeof capabilities !== "object" || capabilities === null) {
+    throw new Error(`${prefix}: expected an object.`);
+  }
+
+  const { semantics, maxAgentCpu, writableRootTmpfsPercent } = capabilities as Record<
+    string,
+    unknown
+  >;
+  if (semantics !== "limits" && semantics !== "sizing") {
+    throw new Error(`${prefix}: semantics must be "limits" or "sizing".`);
+  }
+  if (
+    maxAgentCpu !== undefined &&
+    (!Number.isSafeInteger(maxAgentCpu) ||
+      (maxAgentCpu as number) <= 0 ||
+      (maxAgentCpu as number) > MAX_AGENT_CPU)
+  ) {
+    throw new Error(
+      `${prefix}: maxAgentCpu must be a positive safe integer whose nanoCPU conversion is safe.`,
+    );
+  }
+  if (
+    writableRootTmpfsPercent !== undefined &&
+    (!Number.isSafeInteger(writableRootTmpfsPercent) ||
+      (writableRootTmpfsPercent as number) < 1 ||
+      (writableRootTmpfsPercent as number) > 100)
+  ) {
+    throw new Error(`${prefix}: writableRootTmpfsPercent must be a safe integer from 1 to 100.`);
+  }
+}
 
 /**
  * Register an execution backend under a `RUN_ADAPTER` id. Called by core
@@ -49,6 +88,7 @@ export function registerOrchestrator(
         `contribution would silently shadow the first at RUN_ADAPTER resolution time.`,
     );
   }
+  validateAgentResources(id, owner, registration.agentResources);
   ORCHESTRATORS.set(id, { ...registration, owner });
 }
 
@@ -58,6 +98,7 @@ function registerCoreOrchestrators(): void {
     {
       isolatesWorkloads: true,
       supportsSidecarOnly: true,
+      agentResources: { semantics: "limits" },
       create: () => new DockerOrchestrator(),
     },
     "core",
@@ -103,6 +144,17 @@ export function orchestratorIsolatesWorkloads(id: ExecutionMode): boolean {
  */
 export function orchestratorSupportsSidecarOnly(id: ExecutionMode): boolean {
   return ORCHESTRATORS.get(id)?.supportsSidecarOnly ?? false;
+}
+
+/**
+ * Resource semantics declared by the backend registered under `id`.
+ * Fail-closed: process, unknown, and undeclared future backends return
+ * `undefined`.
+ */
+export function orchestratorAgentResources(
+  id: ExecutionMode,
+): OrchestratorAgentResourceCapabilities | undefined {
+  return ORCHESTRATORS.get(id)?.agentResources;
 }
 
 /** Ids of the backends that provide per-run isolation (sorted). */

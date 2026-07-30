@@ -18,6 +18,7 @@ supply chain).
 
 ## Guides
 
+- [**guides/configuring-agent-resources.md**](./guides/configuring-agent-resources.md) — configure operator ceilings and author portable per-run memory/CPU hints.
 - [**guides/writing-an-integration-with-connect.md**](./guides/writing-an-integration-with-connect.md) — build an AFPS integration that authenticates through Connect.
 - [**guides/connecting-mcp-clients.md**](./guides/connecting-mcp-clients.md) — point an external MCP client (Claude Code, Cursor, …) at an Appstrate instance.
 

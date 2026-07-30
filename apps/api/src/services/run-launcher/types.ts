@@ -7,6 +7,7 @@ import type { ResourceEntry as ToolMeta } from "@appstrate/shared-types";
 import type { JSONSchemaObject } from "@appstrate/core/form";
 import type { Bundle } from "@appstrate/afps-runtime/bundle";
 import type { ResolvedModel } from "../org-models.ts";
+import type { ResolvedAgentResources } from "../run-limits.ts";
 
 export type { ToolMeta, TokenUsage, ResolvedModel };
 export { modelCostSchema, tokenUsageSchema };
@@ -80,6 +81,8 @@ export interface AppstrateRunPlan {
   proxyUrl?: string | null;
   /** Seconds cap on the container lifetime. */
   timeout: number;
+  /** Canonical requested/effective allocation resolved before launch. */
+  resources: ResolvedAgentResources;
 
   // --- Files ---
   /**

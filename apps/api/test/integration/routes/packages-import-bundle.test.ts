@@ -21,7 +21,12 @@ import { seedPackage, seedPackageVersion } from "../../helpers/seed.ts";
 import { getTestApp } from "../../helpers/app.ts";
 import { assertDbMissing } from "../../helpers/assertions.ts";
 import { installPackage } from "../../../src/services/application-packages.ts";
-import { getPlatformRunLimits } from "../../../src/services/run-limits.ts";
+import {
+  _setRunLimitsForTesting,
+  getInlineRunLimits,
+  getPlatformRunLimits,
+} from "../../../src/services/run-limits.ts";
+import { _resetCacheForTesting } from "@appstrate/env";
 import {
   applicationPackages,
   auditEvents,
@@ -32,6 +37,7 @@ import {
 import { and, eq } from "drizzle-orm";
 import * as storage from "@appstrate/db/storage";
 import { computeIntegrity } from "@appstrate/core/integrity";
+import { AGENT_RESOURCES_META_KEY } from "@appstrate/core/validation";
 import {
   buildBundleFromCatalog,
   extractRootFromAfps,
@@ -389,6 +395,77 @@ describe("POST /api/packages/import-bundle — import", () => {
     expect(body.warnings).toContain(
       `${agentId}@1.0.0: timeout: declared ${declared}s exceeds this deployment's ceiling — runs will be capped at ${ceiling}s.`,
     );
+  });
+
+  it("re-evaluates capped agent resource warnings exactly once when reusing a bundle", async () => {
+    const previousAdapter = process.env.RUN_ADAPTER;
+    const previousPlatformLimits = getPlatformRunLimits();
+    const previousInlineLimits = getInlineRunLimits();
+    const agentId = "@importorg/reused-resources" as const;
+    const manifest = {
+      name: agentId,
+      version: "1.0.0",
+      type: "agent",
+      schema_version: "0.1",
+      display_name: "Reused Resources",
+      author: "tester",
+      _meta: {
+        [AGENT_RESOURCES_META_KEY]: { memory_mb: 4096 },
+      },
+    };
+    const afps = buildAfps({
+      manifest,
+      content: "Resource-aware prompt.",
+      type: "agent",
+    });
+
+    const importAgent = async () => {
+      const form = new FormData();
+      form.append("file", new Blob([afps]), "reused-resources.afps");
+      const response = await app.request("/api/packages/import-bundle", {
+        method: "POST",
+        body: form,
+        headers: authHeaders(ctx),
+      });
+      if (response.status !== 201) {
+        throw new Error(`unexpected ${response.status}: ${await response.text()}`);
+      }
+      return (await response.json()) as {
+        imported: Array<{ identity: string; status: string }>;
+        warnings: string[];
+      };
+    };
+
+    process.env.RUN_ADAPTER = "docker";
+    _resetCacheForTesting();
+    try {
+      _setRunLimitsForTesting(
+        { ...previousPlatformLimits, agent_memory_ceiling_mb: 2048 },
+        previousInlineLimits,
+      );
+      const first = await importAgent();
+      expect(first.imported[0]!.status).toBe("inserted");
+      expect(first.warnings).toEqual([
+        `${agentId}@1.0.0: _meta["${AGENT_RESOURCES_META_KEY}"].memory_mb: declared 4096 MiB exceeds this deployment's effective ceiling — runs will use 2048 MiB.`,
+      ]);
+
+      // The same artifact now takes the reuse path. A changed deployment cap
+      // must be reflected from current policy, without duplicating the warning.
+      _setRunLimitsForTesting(
+        { ...previousPlatformLimits, agent_memory_ceiling_mb: 1024 },
+        previousInlineLimits,
+      );
+      const second = await importAgent();
+      expect(second.imported[0]!.status).toBe("reused");
+      expect(second.warnings).toEqual([
+        `${agentId}@1.0.0: _meta["${AGENT_RESOURCES_META_KEY}"].memory_mb: declared 4096 MiB exceeds this deployment's effective ceiling — runs will use 1024 MiB.`,
+      ]);
+    } finally {
+      if (previousAdapter === undefined) delete process.env.RUN_ADAPTER;
+      else process.env.RUN_ADAPTER = previousAdapter;
+      _resetCacheForTesting();
+      _setRunLimitsForTesting(previousPlatformLimits, previousInlineLimits);
+    }
   });
 
   // ── retired `runtime_tools` policy: import-bundle is the READ direction ──

@@ -72,6 +72,21 @@ export interface PlatformPromptOptions {
    * the bullet then renders nothing rather than stating a wrong limit.
    */
   workspaceTmpfsSizeMb?: number;
+  /**
+   * Percentage cap of the RAM-backed writable root, including the workspace.
+   * Used by microVM backends where all writable paths share one guest-RAM
+   * budget. `workspaceTmpfsSizeMb` takes precedence when both are provided.
+   */
+  workspaceTmpfsSizePercent?: number;
+  /**
+   * Effective agent allocation and the backend semantics that make it
+   * actionable. Omit when the backend does not enforce or size from it.
+   */
+  agentResources?: {
+    readonly memoryMb: number;
+    readonly cpu: number;
+    readonly semantics: "limits" | "sizing";
+  };
 
   /**
    * Bundled skills catalogue. Skills are workspace file references, not
@@ -181,16 +196,39 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
         : "") +
       "You may use the filesystem for temporary processing during this run only.",
   );
-  // Disk bullet (#1019). The workspace bullet above invites filesystem use;
-  // without the cap next to it, any agent running a real dependency install
-  // dies with ENOSPC mid-run and takes every planned verification step down
-  // with it. Rendered only when the caller knows the workspace is tmpfs-backed
-  // (see `workspaceTmpfsSizeMb`) — keep bulky scratch work outside that cap.
+  // Disk bullet (#1019, #1044). The workspace bullet above invites filesystem
+  // use; without the cap next to it, a dependency install can die with ENOSPC
+  // mid-run. MB takes precedence if a caller accidentally supplies both
+  // backend representations, keeping the output deterministic.
   if (opts.workspaceTmpfsSizeMb) {
     sections.push(
       `- **Disk**: the workspace is a RAM-backed tmpfs capped at ${opts.workspaceTmpfsSizeMb} MB. ` +
         "Keep dependency installs, clones and other bulky scratch work under `/tmp`, " +
         "outside this workspace cap. Write user deliverables under `./outputs/`.",
+    );
+  } else if (opts.workspaceTmpfsSizePercent) {
+    sections.push(
+      `- **Disk**: the writable root, including the workspace, is a RAM-backed tmpfs capped at ${opts.workspaceTmpfsSizePercent}% of guest RAM. ` +
+        "All writes consume guest RAM shared with the agent, system, and sidecar. " +
+        "Keep installations, clones, and verification artifacts lean; " +
+        "write user deliverables under `./outputs/`.",
+    );
+  }
+  if (opts.agentResources?.semantics === "limits") {
+    sections.push(
+      `- **Compute**: hard container limits: ${opts.agentResources.memoryMb} MiB RAM and ` +
+        `${opts.agentResources.cpu} vCPU quota. ` +
+        (opts.workspaceTmpfsSizeMb
+          ? "The RAM-backed workspace counts toward this container RAM limit. "
+          : "") +
+        "Exceeding the memory limit can kill a process " +
+        "(often exit 137); fit installations and verification work within this budget.",
+    );
+  } else if (opts.agentResources?.semantics === "sizing") {
+    sections.push(
+      `- **Compute**: agent sizing budget: ${opts.agentResources.memoryMb} MiB RAM and ` +
+        `${opts.agentResources.cpu} vCPU. The microVM adds or shares capacity for the system ` +
+        "and sidecar, so the total visible capacity may be higher; keep agent work within this budget.",
     );
   }
   sections.push("");
