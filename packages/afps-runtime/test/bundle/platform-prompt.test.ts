@@ -120,6 +120,35 @@ describe("renderPlatformPrompt", () => {
     expect(out).not.toContain("512 MB");
   });
 
+  it("surfaces the Firecracker writable-root tmpfs budget without a false /tmp escape", () => {
+    const out = renderPlatformPrompt({
+      template: "T",
+      context: ctx(),
+      workspaceTmpfsSizePercent: 50,
+    });
+    const diskLine = out.split("\n").find((line) => line.startsWith("- **Disk**"));
+    expect(diskLine).toBe(
+      "- **Disk**: the writable root, including the workspace, is a RAM-backed tmpfs capped at 50% of guest RAM. " +
+        "All writes consume guest RAM shared with the agent, system, and sidecar. " +
+        "Keep installations, clones, and verification artifacts lean; " +
+        "write user deliverables under `./outputs/`.",
+    );
+    expect(diskLine).not.toContain("/tmp");
+  });
+
+  it("prefers the MB workspace cap when both tmpfs representations are supplied", () => {
+    const out = renderPlatformPrompt({
+      template: "T",
+      context: ctx(),
+      workspaceTmpfsSizeMb: 512,
+      workspaceTmpfsSizePercent: 50,
+    });
+    const diskLines = out.split("\n").filter((line) => line.startsWith("- **Disk**"));
+    expect(diskLines).toHaveLength(1);
+    expect(diskLines[0]).toContain("capped at 512 MB");
+    expect(diskLines[0]).not.toContain("guest RAM");
+  });
+
   it("omits the disk line when the workspace is not tmpfs-backed (#1019)", () => {
     // Absent option (unknown backing) and an explicit 0 (disk-backed volume)
     // must both stay silent — a wrong cap is worse than no cap.
@@ -128,6 +157,7 @@ describe("renderPlatformPrompt", () => {
       template: "T",
       context: ctx(),
       workspaceTmpfsSizeMb: 0,
+      workspaceTmpfsSizePercent: 0,
     });
     expect(withoutCap).not.toContain("**Disk**");
     expect(withZeroCap).toBe(withoutCap);
@@ -164,7 +194,7 @@ describe("renderPlatformPrompt", () => {
     const out = renderPlatformPrompt({
       template: "T",
       context: ctx(),
-      workspaceTmpfsSizeMb: 512,
+      workspaceTmpfsSizePercent: 50,
       agentResources: { memoryMb: 4096, cpu: 7, semantics: "sizing" },
     });
     const computeLine = out.split("\n").find((line) => line.startsWith("- **Compute**"));

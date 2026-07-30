@@ -79,7 +79,9 @@ hint or ceiling.
   agent-only cgroup. The microVM adds or shares capacity for system and sidecar
   overhead, so total visible capacity may be higher. The portable Firecracker
   agent CPU maximum is 7 vCPU because the VM is capped at 8 and a sidecar may
-  require one.
+  require one. The writable root, including `/workspace`, is a tmpfs capped at
+  50% of guest RAM; all writes consume the same guest RAM shared with the
+  agent, system, and sidecar.
 - **Process:** the backend ignores `WorkloadSpec.resources`; resource hints do
   not change host-process limits, and the prompt and import warning remain
   silent.
