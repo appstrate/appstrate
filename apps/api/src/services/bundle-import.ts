@@ -224,8 +224,7 @@ export interface ImportedPackageResult {
   version_id: number | null;
   /**
    * Package type, present on `inserted` entries only (the reuse paths
-   * never parse the ZIP, so the type is not known there without an
-   * extra read). Consumed by the route's audit events.
+   * do not need it). Consumed by the route's audit events.
    */
   type?: string;
 }
@@ -273,6 +272,41 @@ export async function importBundle(
       continue;
     }
 
+    let reconstructed: Uint8Array | undefined;
+    let parsedZip: ReturnType<typeof parsePackageZip> | undefined;
+    const getReconstructedPackage = (): Uint8Array => {
+      reconstructed ??= reconstructPackageZip(pkg);
+      return reconstructed;
+    };
+    const parseIncomingPackage = (): ReturnType<typeof parsePackageZip> => {
+      try {
+        // READ direction. A bundle is assembled by the platform from its OWN
+        // published versions (`GET /api/agents/:scope/:name/bundle`), and a
+        // published artifact is immutable by construction. A `runtime_tools`
+        // id retired after publication therefore cannot be repaired at the
+        // source — rejecting here would abort the ENTIRE bundle (every
+        // co-packaged skill and integration with it) on a legacy agent, with no
+        // recourse for the operator. Drop the retired ids and surface them as
+        // install warnings below.
+        return parsePackageZip(getReconstructedPackage(), { retiredRuntimeTools: "drop" });
+      } catch (err) {
+        throw invalidRequest(`Invalid package '${identity}' in bundle: ${getErrorMessage(err)}`);
+      }
+    };
+
+    // BundlePackage only guarantees a JSON-object manifest, not Appstrate's
+    // per-type contract. Agent warnings can throw on malformed resource data,
+    // so agent-shaped packages cross the authoritative parser before either
+    // insertion or reuse. Other package types retain the reuse fast path.
+    if (pkg.manifest.type === "agent") {
+      parsedZip = parseIncomingPackage();
+      // Deployment policy can change after a version was first imported.
+      // Re-evaluate warnings on every import, including equivalent reuse.
+      for (const w of collectAgentInstallWarnings(parsedZip.manifest)) {
+        warnings.push(`${identity}: ${w}`);
+      }
+    }
+
     // Reuse path — version already present. The preflight
     // (`detectBundleConflicts`) verified content equivalence (RECORD
     // integrity match). Skip the upload to avoid clobbering the storage ZIP
@@ -299,26 +333,9 @@ export async function importBundle(
       continue;
     }
 
-    const reconstructed = reconstructPackageZip(pkg);
-
-    // Parse the reconstructed ZIP through the shared platform primitive
-    // so we get the same manifest/content/files/type shape used by
-    // /packages/import — keeps the skill content extraction, file tree
-    // separation, and per-type validation in one place.
-    let parsedZip: ReturnType<typeof parsePackageZip>;
-    try {
-      // READ direction. A bundle is assembled by the platform from its OWN
-      // published versions (`GET /api/agents/:scope/:name/bundle`), and a
-      // published artifact is immutable by construction. A `runtime_tools` id
-      // retired after publication therefore cannot be repaired at the source —
-      // rejecting here would abort the ENTIRE bundle (every co-packaged skill
-      // and integration with it) on a legacy agent, with no recourse for the
-      // operator. Drop the retired ids and surface them as install warnings
-      // below.
-      parsedZip = parsePackageZip(reconstructed, { retiredRuntimeTools: "drop" });
-    } catch (err) {
-      throw invalidRequest(`Invalid package '${identity}' in bundle: ${getErrorMessage(err)}`);
-    }
+    // Insertions of every type need the fully parsed content. Agent packages
+    // reuse the parse above; other types are parsed only after the reuse check.
+    parsedZip ??= parseIncomingPackage();
 
     // A drop keeps the import alive but is a silent capability loss — lift it
     // into the same non-blocking warning channel the AFPS §7.7 / §10.1
@@ -352,12 +369,6 @@ export async function importBundle(
     // warning is how the operator learns the dependencies declared under it
     // were never honoured and that a republish removes the key.
     for (const w of collectRetiredDependencyKeyWarnings(parsedZip.manifest)) {
-      warnings.push(`${identity}: ${w}`);
-    }
-
-    // Same channel for deployment-specific agent limits — the run narrows them
-    // either way, so the author is told here rather than discovering it later.
-    for (const w of collectAgentInstallWarnings(parsedZip.manifest)) {
       warnings.push(`${identity}: ${w}`);
     }
 
@@ -428,7 +439,7 @@ export async function importBundle(
         userId,
         content: parsedZip.content,
         files: parsedZip.files,
-        zipBuffer: Buffer.from(reconstructed),
+        zipBuffer: Buffer.from(getReconstructedPackage()),
         version,
       });
     } catch (err) {
