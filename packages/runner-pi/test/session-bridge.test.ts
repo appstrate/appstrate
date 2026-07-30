@@ -11,7 +11,12 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { installSessionBridge, truncateToolResult, type InternalSink } from "../src/pi-runner.ts";
+import {
+  derivePiCompactionSettings,
+  installSessionBridge,
+  truncateToolResult,
+  type InternalSink,
+} from "../src/pi-runner.ts";
 import { createFakeSession, createInternalCapture } from "./helpers.ts";
 import type { RunEvent } from "@appstrate/afps-runtime/types";
 
@@ -1191,5 +1196,65 @@ describe("installSessionBridge — per-turn context breadcrumb", () => {
     settleTurn(session, { input: 3, output: 2 });
 
     expect(turns(sink).map((t) => t.index)).toEqual([2]);
+  });
+
+  it("stamps the context budget on EVERY turn, so a pruned run's gauge still has a scale", () => {
+    const sink = createInternalCapture();
+    const session = createFakeSession();
+    installSessionBridge(session, sink, RUN_ID, { contextWindow: 200_000 });
+
+    settleTurn(session, { input: 10, output: 5 });
+    settleTurn(session, { input: 4, output: 7 });
+
+    for (const turn of turns(sink)) {
+      expect(turn.contextWindow).toBe(200_000);
+    }
+    expect(turns(sink)).toHaveLength(2);
+  });
+
+  it("omits the key when the bridge was installed without a budget", () => {
+    const sink = createInternalCapture();
+    const session = createFakeSession();
+    installSessionBridge(session, sink, RUN_ID);
+
+    settleTurn(session, { input: 10, output: 5 });
+
+    const turn = turns(sink)[0] ?? {};
+    expect("contextWindow" in turn).toBe(false);
+  });
+
+  it("emits the window derivePiCompactionSettings actually used — the two cannot drift", () => {
+    // Guards the bug this design replaced: a denominator computed by a layer
+    // that does not apply the fallback reported 200 000 for a run the runner
+    // was really sizing at its own default. Feeding the breadcrumb from the
+    // SAME call that sizes the SDK makes that class of drift unrepresentable.
+    for (const model of [
+      { contextWindow: 128_000, maxTokens: 16_384 },
+      { contextWindow: 1_000_000, maxTokens: 32_000 },
+      // Declares no window: only the runner knows what it fell back to.
+      { maxTokens: 16_384 },
+      { contextWindow: null, maxTokens: null },
+    ]) {
+      const derived = derivePiCompactionSettings(model, {});
+      const sink = createInternalCapture();
+      const session = createFakeSession();
+      installSessionBridge(session, sink, RUN_ID, { contextWindow: derived.contextWindow });
+
+      settleTurn(session, { input: 1, output: 1 });
+
+      const turn = turns(sink)[0] ?? {};
+      expect(turn.contextWindow).toBe(derived.contextWindow);
+    }
+  });
+
+  it("a model declaring no window emits the runner's real default, not a caller's guess", () => {
+    const derived = derivePiCompactionSettings({ maxTokens: 16_384 }, {});
+    const sink = createInternalCapture();
+    const session = createFakeSession();
+    installSessionBridge(session, sink, RUN_ID, { contextWindow: derived.contextWindow });
+
+    settleTurn(session, { input: 1, output: 1 });
+
+    expect(turns(sink)[0]?.contextWindow).toBe(200_000);
   });
 });

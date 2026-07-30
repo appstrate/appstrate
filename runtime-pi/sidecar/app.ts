@@ -296,6 +296,7 @@ async function passUpstream(
 async function logOauthLlmResponse(
   credentialId: string,
   targetUrl: string,
+  method: string,
   upstream: Response,
 ): Promise<Response> {
   if (upstream.status >= 200 && upstream.status < 300) return upstream;
@@ -316,6 +317,7 @@ async function logOauthLlmResponse(
   logger.warn("oauth llm: upstream response non-2xx", {
     credentialId,
     targetUrl,
+    method,
     status: upstream.status,
     contentType: upstream.headers.get("content-type"),
     responseHeaders,
@@ -727,7 +729,7 @@ export function createApp(deps: AppDeps): Hono {
       return llmFetchErrorResponse(c, targetUrl, err);
     }
 
-    upstream = await logOauthLlmResponse(llmConfig.credentialId, targetUrl, upstream);
+    upstream = await logOauthLlmResponse(llmConfig.credentialId, targetUrl, method, upstream);
 
     // 401 retry: invalidate + force-refresh the token, replay once.
     if (upstream.status === 401) {
@@ -735,7 +737,7 @@ export function createApp(deps: AppDeps): Hono {
       try {
         const refreshed = await tokenCache.forceRefresh(llmConfig.credentialId);
         upstream = await doFetch(buildHeaders(refreshed.accessToken));
-        upstream = await logOauthLlmResponse(llmConfig.credentialId, targetUrl, upstream);
+        upstream = await logOauthLlmResponse(llmConfig.credentialId, targetUrl, method, upstream);
       } catch (err) {
         if (err instanceof NeedsReconnectionError) {
           return c.json(

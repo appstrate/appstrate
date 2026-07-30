@@ -64,6 +64,14 @@ export interface PlatformPromptOptions {
   platformName?: string;
   /** Run timeout in seconds — surfaced in the `## System` section. */
   timeoutSeconds?: number;
+  /**
+   * Size cap (MB) of the RAM-backed workspace, when the runner backs it
+   * with a tmpfs. Surfaced as the `- **Disk**` bullet so the agent keeps
+   * bulky scratch work (dependency installs, clones) off the capped
+   * mount. Omit (or pass 0) on backends whose workspace is disk-backed —
+   * the bullet then renders nothing rather than stating a wrong limit.
+   */
+  workspaceTmpfsSizeMb?: number;
 
   /**
    * Bundled skills catalogue. Skills are workspace file references, not
@@ -171,8 +179,21 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
       (hasUploads
         ? "Input documents are available under `./documents/` (relative to cwd) and listed in the `## Documents` section below. "
         : "") +
-      "You may use the filesystem for temporary processing during this run only.\n",
+      "You may use the filesystem for temporary processing during this run only.",
   );
+  // Disk bullet (#1019). The workspace bullet above invites filesystem use;
+  // without the cap next to it, any agent running a real dependency install
+  // dies with ENOSPC mid-run and takes every planned verification step down
+  // with it. Rendered only when the caller knows the workspace is tmpfs-backed
+  // (see `workspaceTmpfsSizeMb`) — keep bulky scratch work outside that cap.
+  if (opts.workspaceTmpfsSizeMb) {
+    sections.push(
+      `- **Disk**: the workspace is a RAM-backed tmpfs capped at ${opts.workspaceTmpfsSizeMb} MB. ` +
+        "Keep dependency installs, clones and other bulky scratch work under `/tmp`, " +
+        "outside this workspace cap. Write user deliverables under `./outputs/`.",
+    );
+  }
+  sections.push("");
 
   // --- Communication contract ---
   // The platform parses ONLY the typed events your tools emit. Plain

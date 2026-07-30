@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { parseExpression } from "cron-parser";
+import { CronExpressionParser } from "cron-parser";
 
 /** Validate a cron expression. Returns true if valid. */
 export function isValidCron(cronExpression: string): boolean {
   try {
-    parseExpression(cronExpression);
+    CronExpressionParser.parse(cronExpression);
     return true;
   } catch {
     return false;
@@ -20,7 +20,7 @@ export function isValidCron(cronExpression: string): boolean {
  */
 export function computeNextRun(cronExpression: string, timezone: string, from?: Date): Date | null {
   try {
-    const interval = parseExpression(cronExpression, {
+    const interval = CronExpressionParser.parse(cronExpression, {
       tz: timezone,
       ...(from ? { currentDate: from } : {}),
     });

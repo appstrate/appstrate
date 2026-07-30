@@ -847,6 +847,20 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
           description: "Per-run config override (either kind).",
           additionalProperties: true,
         },
+        connection_overrides: {
+          type: "object",
+          additionalProperties: { type: "string" },
+          description:
+            'Which connection to use per integration (either kind): `{ "@scope/integration": ' +
+            '"<connection_id>" }`, exactly one connection id per integration. This is the retry ' +
+            "path for a `412 must_choose_connection` launch error — that error lists the " +
+            "ambiguous integration and its `candidate_connection_ids`; pick one id from that " +
+            "list and retry the SAME call with it here. Each key is the integration id itself " +
+            "(`@scope/integration`) — NOT the `integrations.<id>` field path the error reports " +
+            "it under, which matches no integration and is ignored. TOP-LEVEL argument, " +
+            "alongside `manifest`/`config` — pass the object itself; JSON-encoding it is " +
+            "refused before the launch.",
+        },
         context_documents: {
           type: "array",
           items: { type: "string" },

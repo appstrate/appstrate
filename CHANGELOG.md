@@ -15,6 +15,36 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **`POST /api/packages/import-bundle` skipped agent integration validation
+  entirely** — bytes `POST /api/packages/import` refused imported cleanly
+  through it and froze a broken selection into an immutable version. The same
+  checks now run there as a pure-read preflight before the first write: one
+  invalid agent aborts the whole bundle, and each field error names the
+  offending `@scope/name@version`.
+
+- **The publish-time integration check read the integration author's draft
+  manifest, not the version the agent pinned** — an agent pinned to `^1.0.0`
+  was refused at publish the moment that integration's author dropped
+  `default_tools` from their _draft_, even though the run would have resolved v1
+  and worked. The check now judges the manifest at the version the pin resolves
+  to. A pin that resolves to nothing is left unjudged rather than rejected — that
+  run already fails upstream with `dependency_unresolved` (422).
+
+- **The publish-time check read a local integration's mcp-server catalog from
+  that package's draft** — a `source.kind: "local"` integration takes its tool
+  catalog from a separate `mcp-server` package, and the spawn resolver reads it
+  at the version `source.server.version` resolves to. The validator called
+  `fetchMcpServerManifest`, which reads `packages.draft_manifest`. Both
+  directions were wrong: a tool the mcp-server author had only in their draft
+  passed publish and then registered nothing at boot, and a tool present only in
+  the published version was refused. Freeze points now call
+  `resolveMcpServerForSpawn` — the resolver the spawn path itself uses.
+
+- **An integration entry that was both empty and mis-scoped reported one error
+  at a time** — `{ tools: [], scopes: ["bogus"] }` returned `no_tools_selected`
+  alone, hiding `scope_not_in_catalog` until the next republish. Both are
+  reported in one pass.
+
 - **A model provider credential could become impossible to delete** —
   `GET /api/models` dropped every model whose credential could no longer serve
   inference (a revoked OAuth refresh token, or a stored secret that no longer
@@ -229,6 +259,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Security
 
+- **The agent runtime image ships only the bundled entrypoint, not the platform
+  sources** — the image copied its own build inputs into the runtime stage
+  (every `@appstrate/*` workspace `src/` tree, `runtime-pi/mcp/`, the
+  `runtime-pi/*.ts` bootstrap files), all of which `bun build` had already
+  inlined into `dist/entrypoint.js`, the ENTRYPOINT. They were dead weight that
+  happened to be readable, and a confused agent read them and acted on what it
+  found. No secret was exposed and the zero-knowledge boundary held. **This is
+  not a confidentiality boundary** — the public `SECURITY.md` documents the same
+  design in more detail. What changes is what the sandbox can read _without
+  egress_. The bundle is deliberately NOT minified: `--minify-whitespace`
+  was tried and reverted, because collapsing 1023 lines to 2 destroys the line
+  and column of every production stack trace, and all it bought was hiding the
+  per-module `// packages/core/src/…` banners. Concealment is not what this
+  change is for.
+
 - **Full-codebase security review remediation (#855, #863)** — 9 P0 + 15 P1 +
   12 systemic findings closed (SSRF `guarded-fetch` + bounded unzip hardening
   in `@appstrate/afps-shared`, among others), followed by a DRY/KISS/YAGNI
@@ -246,6 +291,84 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   docs.
 
 ### Changed
+
+- **A declared integration that exposes no callable tool now fails, instead of
+  degrading silently** — BREAKING for agents in that state. Declaring
+  `dependencies.integrations["@scope/x"]` while selecting no tool used to boot
+  the run with nothing callable from it, announced only by a `warn` in the
+  platform run log that never reached the model's context — leaving the agent to
+  improvise unauthenticated HTTP from bash. The state is now refused in two
+  places, with two different shapes.
+
+  **Publishing and importing** — `POST /api/packages/agents/{scope}/{name}/versions`,
+  `POST /api/packages/import`, `POST /api/packages/import-bundle` — answer
+  `400 validation_failed` naming `integrations_configuration.<id>.tools`. That
+  is the one moment the artifact is still editable, since a published version
+  is immutable.
+
+  **Creating** — `POST /api/packages/agents` — still answers `201`. The empty
+  state is legal as a draft and the editor's flow passes through it; what
+  changed is that the route no longer takes its usual initial version snapshot
+  from a manifest publishing would refuse (a skip that `createVersionSafe` has
+  always performed for a missing or invalid `version`). The draft is created,
+  the author ticks a tool, and the first version is cut on publish.
+
+  **At run boot** it aborts the run as a backstop. Draft `PUT`s are not gated
+  at all.
+
+  A **self-contained** bundle is judged too. Its integrations are not in the
+  registry yet, so a DB-only validator hit "not installed → skip silently" and
+  waved the agent into an immutable version; the catalog is now
+  `incoming ∪ already-installed`, and the agent's `dependencies.integrations`
+  spec is resolved against the catalog that will exist after import — including
+  forward-only version creation, yanks, dist-tags and `latest` movement. Keying
+  by package id alone, or preferring any carried match over a newer installed
+  one, would judge a manifest the runtime will never use. The same lookup covers
+  the mcp-servers a local integration references; system packages remain
+  canonical even when a bundle carries a same-named manifest.
+
+  The gate also tests CALLABILITY, not selection length. `default_tools: ["x"]`
+  where `x` sits in `hidden_tools`, or is absent from the resolved mcp-server, is
+  a non-empty selection that registers nothing; the effective selection is
+  intersected with the same `resolveIntegrationToolCatalog` result the subset
+  check uses. When the surface is genuinely unknown at publish time — a remote
+  integration that enumerates nothing — the intersection is skipped rather than
+  guessed.
+
+  The runtime backstop stays necessary regardless: versions published before
+  this gate existed are still runnable, and a draft can be run straight from
+  the editor without ever being published.
+
+  Blast radius: an absent `tools` key still inherits the integration's
+  `default_tools`, which 59 of the 65 system integrations declare — for those,
+  only an explicit `[]` is affected. The six that declare **no** `default_tools`
+  are the exception, and they are widely used, so an absent `tools` key is
+  enough to trip the gate there: `@appstrate/gmail-mcp`,
+  `@appstrate/github-mcp`, `@appstrate/notion-mcp`, `@appstrate/clickup-mcp`,
+  `@appstrate/canva-mcp`, `@appstrate/github-git`. Every one of them ships a
+  populated `tools_policy` (7–91 tools), so the gate is always satisfiable from
+  the editor — there is no manifest it can refuse without offering a fix. An
+  agent in this state was already non-functional against that integration; it
+  now fails loudly instead of silently.
+
+  **Before deploying**, run `bun scripts/audit-empty-integration-selections.ts`.
+  It lists every affected artifact and distinguishes active targets from
+  explicitly selectable drafts/history. The exit code is 1 only when a normal
+  application default or an enabled schedule targets the broken artifact;
+  selector-only findings remain warnings, so an in-progress draft or immutable
+  historical version cannot permanently jam the rollout gate. It calls the
+  runtime's own resolvers rather than approximating them in SQL — a SQL version
+  shipped first and was wrong three ways: it read the integration's draft
+  `default_tools` instead of resolving the agent's pin, it ignored mutable drafts
+  even though an installed package makes every artifact selector-runnable (and
+  the editor explicitly runs the draft), and it ignored `dependency_overrides`.
+  The audit now calls the same callability validator as publish/import, including
+  the resolved nested mcp-server catalog and `hidden_tools`.
+
+  This also corrects a documented falsehood — `tools` absent and `tools: []`
+  were described as equivalent in the docs, the `ManifestIntegrationEntry`
+  TSDoc and the LLM-facing MCP tool instructions. They never were: absent
+  inherits, `[]` overrides.
 
 - **Single Pi execution engine (#875)** — agent runs AND oauth-subscription
   chat (Claude Pro/Max via `claude-code`, ChatGPT via `codex`) all execute on

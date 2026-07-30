@@ -41,6 +41,7 @@ import { buildShadowLoadedPackage, generateShadowPackageId } from "./inline-run.
 import { getInlineRunLimits } from "./run-limits.ts";
 import { validateAgentReadiness, collectAgentReadinessErrors } from "./agent-readiness.ts";
 import type { InlineRunBody } from "@appstrate/core/platform-types";
+import type { ConnectionOverrides } from "@appstrate/core/integration";
 
 export type { InlineRunBody };
 
@@ -51,6 +52,16 @@ export interface InlineRunPreflightResult {
   effectiveInput: Record<string, unknown> | null;
   modelIdOverride: string | null;
   proxyIdOverride: string | null;
+  /**
+   * Caller's per-integration connection picks (resolver mechanism #2), read off
+   * the body ONCE below and carried here. Nothing else on the inline path feeds
+   * them to the readiness gate, so without this a `must_choose_connection` 412
+   * is inescapable here; and every consumer — both readiness branches and
+   * `prepareAndExecuteRun` — must gate on this one value, since a second
+   * independent read is how two passes come to disagree about which connection
+   * the run uses.
+   */
+  connectionOverrides: ConnectionOverrides | null;
 }
 
 type Mode = "fail-fast" | "accumulate";
@@ -108,6 +119,7 @@ export async function runInlinePreflight(params: {
 
   const modelIdOverride = body.modelId ?? null;
   const proxyIdOverride = body.proxyId ?? null;
+  const runOverrides = body.connection_overrides ?? null;
 
   // ----- 2. input against manifest schema (AJV) -----
   // config + prompt validation are delegated entirely to agent readiness
@@ -158,6 +170,7 @@ export async function runInlinePreflight(params: {
         config: effectiveConfig,
         applicationId,
         actor,
+        ...(runOverrides ? { runOverrides } : {}),
       });
     } else {
       push(
@@ -167,6 +180,7 @@ export async function runInlinePreflight(params: {
           config: effectiveConfig,
           applicationId,
           actor,
+          ...(runOverrides ? { runOverrides } : {}),
         }),
       );
     }
@@ -198,6 +212,7 @@ export async function runInlinePreflight(params: {
     effectiveInput,
     modelIdOverride,
     proxyIdOverride,
+    connectionOverrides: runOverrides,
   };
 }
 

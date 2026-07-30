@@ -335,6 +335,16 @@ describe("resolveIntegrationToolCatalog", () => {
     expect(out.map((e) => e.name)).toEqual(["policy_only"]);
     expect(out[0]!.policy?.required_scopes).toEqual({ primary: ["read"] });
   });
+
+  it("an explicitly empty mcp-server catalog is authoritative, not a fallback signal", () => {
+    const out = resolveIntegrationToolCatalog({
+      integration: localSourceManifest({
+        tools: { policy_only: { required_scopes: { primary: ["read"] } } },
+      }),
+      mcpServerTools: [],
+    });
+    expect(out).toEqual([]);
+  });
 });
 
 describe("getConnectToolNames", () => {

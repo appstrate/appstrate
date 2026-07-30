@@ -20,6 +20,7 @@
 import { and, desc, eq, isNull, or } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { getErrorMessage } from "@appstrate/core/errors";
+import { asRecord } from "@appstrate/core/safe-json";
 import { resolveVersionString } from "@appstrate/core/semver";
 import { logger } from "../../lib/logger.ts";
 import { packages, packageVersions, packageDistTags } from "@appstrate/db/schema";
@@ -175,12 +176,28 @@ export class DbPackageCatalog implements PackageCatalog {
       }
       return bundlePackage;
     } catch (err) {
-      if (err instanceof BundleError) throw err;
-      throw new BundleError(
-        "ARCHIVE_INVALID",
-        `DbPackageCatalog: failed to extract ${identity}: ${getErrorMessage(err)}`,
-        { identity },
-      );
+      // `extractRootFromAfps` is handed bytes, not a catalog entry, so its
+      // message names no package — a manifest-less artifact reports only
+      // ".afps archive missing manifest.json at root". Callers surface that
+      // text as an error `detail`, so this is the last boundary that can say
+      // WHICH dependency is broken. Attach the identity here.
+      //
+      // The original `code` is carried through rather than flattened to
+      // `ARCHIVE_INVALID` so the typed diagnostic detail still distinguishes a
+      // missing manifest from a limits or archive-structure failure.
+      const code = err instanceof BundleError ? err.code : "ARCHIVE_INVALID";
+      const reason = getErrorMessage(err);
+      // The HTTP response is a 4xx (the org republishes to fix it), but a
+      // corrupt artifact at rest still warrants an operator trail.
+      logger.warn("DbPackageCatalog: stored artifact could not be extracted", {
+        identity,
+        code,
+        reason,
+      });
+      throw new BundleError(code, `stored artifact for ${identity} is unreadable: ${reason}`, {
+        ...asRecord(err instanceof BundleError ? err.details : undefined),
+        identity,
+      });
     }
   }
 }

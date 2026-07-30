@@ -12,10 +12,13 @@ export interface LogEntry {
    * call's start and end (`data.durationMs`). Omitted otherwise — the runner
    * deliberately emits nothing rather than a misleading zero.
    *
-   * NOTE: live SSE `run_log` frames have their `data` stripped server-side
-   * (`stripPayload` in `apps/api/src/routes/realtime.ts`), so this — like the
-   * existing `detail` — only materializes once the rows come back from the
-   * REST logs query. That is expected, not a bug to work around here.
+   * NOTE: whether this survives a live SSE frame depends on the stream, not on
+   * the field. `stripPayload` (`apps/api/src/routes/realtime.ts`) drops
+   * `run_log.data` only for NON-verbose subscribers — the org-wide
+   * `use-global-run-sync` stream, which deliberately omits `verbose` because it
+   * discards log payloads anyway. The per-run stream that feeds this projection
+   * opens with `verbose=true` (`use-realtime.ts`), so its frames arrive with
+   * `data` intact and this materializes live, not only on the REST logs query.
    */
   durationMs?: number;
   createdAt?: Date | string | null;
@@ -38,6 +41,17 @@ export interface RunTurnRow {
   cacheWriteTokens: number;
   /** Omitted when the runner could not observe the turn's start. */
   latencyMs?: number;
+  /**
+   * The window `contextTokens` is a share of, as stated by the runner for THIS
+   * turn — the denominator of the whole context reading.
+   *
+   * It rides the breadcrumb rather than the run row because the runner is the
+   * only authority on it: it applies the container-side default the platform
+   * cannot see, and it is where the number exists at emission time. Omitted
+   * when the runner cannot state it, and absent on every run predating the
+   * field — never zero, never a fabricated default.
+   */
+  contextWindow?: number;
 }
 
 /** `data.event` discriminator carried by per-turn breadcrumb rows. */
@@ -73,6 +87,12 @@ export function buildTurnRows(rawLogs: RawLog[]): RunTurnRow[] {
     const cacheReadTokens = readNumber(d["cacheReadTokens"], 0);
     const cacheWriteTokens = readNumber(d["cacheWriteTokens"], 0);
     const latencyMs = d["latencyMs"];
+    // Same rule as `latencyMs`, and deliberately NOT `readNumber`: neither has
+    // an honest fallback. A missing window is "unknown", which the reading must
+    // be able to tell apart from any number at all — so the key is left ABSENT
+    // rather than defaulted, and a malformed payload drops it the same way
+    // instead of throwing.
+    const contextWindow = d["contextWindow"];
 
     rows.push({
       index: d["index"],
@@ -87,6 +107,9 @@ export function buildTurnRows(rawLogs: RawLog[]): RunTurnRow[] {
       cacheReadTokens,
       cacheWriteTokens,
       ...(typeof latencyMs === "number" && Number.isFinite(latencyMs) ? { latencyMs } : {}),
+      ...(typeof contextWindow === "number" && Number.isFinite(contextWindow)
+        ? { contextWindow }
+        : {}),
     });
   }
   return rows;

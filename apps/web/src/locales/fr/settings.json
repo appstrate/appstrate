@@ -825,7 +825,7 @@
   "agentEditor.integrations.wildcard.description": "Expose à l'agent tous les outils annoncés par le serveur MCP distant, y compris ceux non listés dans le manifest. Disponible uniquement quand l'intégration l'autorise.",
   "agentEditor.integrations.wildcard.scopesNotice": "Les scopes OAuth utilisés seront les scopes par défaut déclarés sur la méthode d'authentification sélectionnée — la sélection outil par outil et l'inférence de scopes sont désactivées.",
   "agentEditor.integrations.tools.title": "Outils autorisés",
-  "agentEditor.integrations.tools.noneNotice": "Aucun outil sélectionné — l'intégration est déclarée mais n'expose rien à l'agent. Cochez les outils nécessaires ou utilisez « Tout sélectionner ».",
+  "agentEditor.integrations.tools.noneNotice": "Aucun outil sélectionné — en l'état, l'intégration n'expose rien à l'agent : la publication sera refusée et l'exécution échouera au démarrage. Cochez au moins un outil (ou « Tout sélectionner »), ou retirez l'intégration des dépendances.",
   "agentEditor.integrations.tools.explicitNotice": "Seuls les outils cochés seront exposés à l'agent à l'exécution. Les scopes OAuth requis sont inférés automatiquement.",
   "agentEditor.integrations.tools.requires": "Requiert :",
   "agentEditor.integrations.tools.selectAll": "Tout sélectionner",

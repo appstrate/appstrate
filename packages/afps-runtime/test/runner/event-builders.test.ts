@@ -92,6 +92,41 @@ describe("buildTurnProgress", () => {
     expect("latencyMs" in (ev.data as Record<string, unknown>)).toBe(false);
   });
 
+  it("carries contextWindow when the runner states one", () => {
+    const ev = buildTurnProgress(BASE, {
+      index: 3,
+      inputTokens: 100,
+      outputTokens: 10,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      contextWindow: 200_000,
+    });
+
+    expect(ev.data).toEqual({
+      event: TURN_PROGRESS_EVENT,
+      index: 3,
+      inputTokens: 100,
+      outputTokens: 10,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      contextTokens: 100,
+      contextWindow: 200_000,
+    });
+  });
+
+  it("omits contextWindow entirely when the runner cannot state one", () => {
+    const ev = buildTurnProgress(BASE, {
+      index: 5,
+      inputTokens: 1,
+      outputTokens: 1,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+    });
+
+    const data = ev.data as Record<string, unknown>;
+    expect("contextWindow" in data).toBe(false);
+  });
+
   it("carries the discriminator and the envelope identity", () => {
     const ev = buildTurnProgress(BASE, {
       index: 2,

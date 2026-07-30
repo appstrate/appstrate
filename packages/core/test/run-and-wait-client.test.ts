@@ -449,6 +449,165 @@ describe("launchRunAndWait launch body", () => {
     expect(captured()).toBeUndefined();
   });
 
+  // `connection_overrides` is the documented retry for a 412
+  // `must_choose_connection`. Dropped anywhere along the way, every retry hits
+  // the same 412 with nothing saying why, and the model has no way out.
+  it("kind:inline forwards connection_overrides", async () => {
+    const { fetchImpl, captured } = captureLaunch();
+
+    await launchRunAndWait(
+      {
+        kind: "inline",
+        manifest: { name: "tmp" },
+        prompt: "do it",
+        connection_overrides: { "@appstrate/gmail": "conn_abc" },
+      },
+      { origin: "https://test.local", headers: {}, fetch: fetchImpl },
+    );
+
+    expect(captured()).toMatchObject({
+      url: "https://test.local/api/runs/inline",
+      method: "POST",
+      body: { connection_overrides: { "@appstrate/gmail": "conn_abc" } },
+    });
+  });
+
+  it("kind:agent forwards connection_overrides", async () => {
+    const { fetchImpl, captured } = captureLaunch();
+
+    await launchRunAndWait(
+      {
+        kind: "agent",
+        scope: "@acme",
+        name: "writer",
+        connection_overrides: { "@appstrate/gmail": "conn_abc" },
+      },
+      { origin: "https://test.local", headers: {}, fetch: fetchImpl },
+    );
+
+    expect(captured()).toMatchObject({
+      url: "https://test.local/api/agents/@acme/writer/run",
+      method: "POST",
+      body: { connection_overrides: { "@appstrate/gmail": "conn_abc" } },
+    });
+  });
+
+  // Absent and present-but-empty are different requests: an omitted argument
+  // leaves the launch body untouched, while `{}` is a well-shaped map and
+  // travels like any other rather than being folded back into "no argument".
+  it("omits connection_overrides when absent and forwards an empty map when present", async () => {
+    const absent = captureLaunch();
+    await launchRunAndWait(
+      { kind: "inline", manifest: { name: "tmp" }, prompt: "do it" },
+      { origin: "https://test.local", headers: {}, fetch: absent.fetchImpl },
+    );
+    expect(Object.keys(absent.captured()?.body as Record<string, unknown>)).not.toContain(
+      "connection_overrides",
+    );
+
+    const empty = captureLaunch();
+    const result = await launchRunAndWait(
+      { kind: "inline", manifest: { name: "tmp" }, prompt: "do it", connection_overrides: {} },
+      { origin: "https://test.local", headers: {}, fetch: empty.fetchImpl },
+    );
+    expect(result.ok).toBe(true);
+    expect(empty.captured()?.body).toMatchObject({ connection_overrides: {} });
+  });
+
+  it("rejects a JSON-encoded connection_overrides string before dispatch", async () => {
+    const { fetchImpl, captured } = captureLaunch();
+
+    const result = await launchRunAndWait(
+      {
+        kind: "inline",
+        manifest: { name: "tmp" },
+        prompt: "do it",
+        connection_overrides: JSON.stringify({ "@appstrate/gmail": "conn_abc" }),
+      },
+      { origin: "https://test.local", headers: {}, fetch: fetchImpl },
+    );
+
+    expect(result.ok).toBe(false);
+    expect(
+      String((result as { step: { payload: { error?: string } } }).step.payload.error),
+    ).toMatch(/must be a JSON object/);
+    expect(captured()).toBeUndefined();
+  });
+
+  // Presence is what is refused, not one enumerated mistake: every non-object
+  // shape reaches the same dead end as the JSON-encoded string above.
+  it.each([
+    ["an array", [{ "@appstrate/gmail": "conn_abc" }]],
+    ["a number", 42],
+    ["a boolean", true],
+    ["explicit null", null],
+  ])("rejects connection_overrides given as %s before dispatch", async (_label, value) => {
+    const { fetchImpl, captured } = captureLaunch();
+
+    const result = await launchRunAndWait(
+      {
+        kind: "inline",
+        manifest: { name: "tmp" },
+        prompt: "do it",
+        connection_overrides: value,
+      },
+      { origin: "https://test.local", headers: {}, fetch: fetchImpl },
+    );
+
+    expect(result.ok).toBe(false);
+    expect(
+      String((result as { step: { payload: { error?: string } } }).step.payload.error),
+    ).toMatch(/must be a JSON object/);
+    expect(captured()).toBeUndefined();
+  });
+
+  // The name inside `config` belongs to the AGENT, not to us: an agent whose own
+  // config schema declares a `connection_overrides` property must stay launchable
+  // and get that property through untouched, whatever the top-level argument says.
+  it("forwards the top-level connection_overrides and leaves config's own property alone", async () => {
+    const { fetchImpl, captured } = captureLaunch();
+
+    const result = await launchRunAndWait(
+      {
+        kind: "inline",
+        manifest: { name: "tmp" },
+        prompt: "do it",
+        connection_overrides: { "@appstrate/gmail": "conn_top" },
+        config: { connection_overrides: { "@appstrate/gmail": "conn_nested" } },
+      },
+      { origin: "https://test.local", headers: {}, fetch: fetchImpl },
+    );
+
+    expect(result.ok).toBe(true);
+    expect(captured()?.body).toMatchObject({
+      connection_overrides: { "@appstrate/gmail": "conn_top" },
+      config: { connection_overrides: { "@appstrate/gmail": "conn_nested" } },
+    });
+  });
+
+  it("launches an agent whose config declares its own connection_overrides property", async () => {
+    const { fetchImpl, captured } = captureLaunch();
+
+    const result = await launchRunAndWait(
+      {
+        kind: "agent",
+        scope: "@acme",
+        name: "writer",
+        config: { connection_overrides: { "@appstrate/gmail": "conn_abc" } },
+      },
+      { origin: "https://test.local", headers: {}, fetch: fetchImpl },
+    );
+
+    expect(result.ok).toBe(true);
+    // Verbatim, and nothing synthesised at top level from it.
+    expect(captured()?.body).toMatchObject({
+      config: { connection_overrides: { "@appstrate/gmail": "conn_abc" } },
+    });
+    expect(Object.keys(captured()?.body as Record<string, unknown>)).not.toContain(
+      "connection_overrides",
+    );
+  });
+
   it("exposes the launch HTTP status on success", async () => {
     const fetchImpl = fakeFetch(async () => jsonResponse({ id: "run_1", status: "pending" }, 201));
 

@@ -6,13 +6,6 @@ import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@appstrate/ui/components/button";
 import { Tabs, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@appstrate/ui/components/tooltip";
-import { totalTokens, type TokenUsage } from "@appstrate/core/token-usage";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
 import { usePackageDetail } from "../hooks/use-packages";
 import { useRun, useRunLogs } from "../hooks/use-runs";
@@ -31,6 +24,7 @@ import { RunDocumentsTab } from "../components/run-documents-tab";
 import { invalidateOrgStorage } from "../hooks/use-documents";
 import { RunRow } from "../components/run-row";
 import { RunCostReadout } from "../components/run-cost-readout";
+import { ContextGaugeReadout } from "../components/run-context-gauge";
 import { RunDegradedBanner } from "../components/run-degraded-banner";
 import { RunArtifactsBanner } from "../components/run-artifacts-banner";
 import { useMarkReadByRun } from "../hooks/use-notifications";
@@ -39,7 +33,7 @@ import type { components } from "../api/client";
 import { formatDateField } from "../lib/markdown";
 import { JsonView } from "../components/json-view";
 import { useRunMemories, useRunPinned } from "../hooks/use-persistence";
-import { runKeys } from "../lib/query-keys";
+import { runKeys, invalidateRunLogs } from "../lib/query-keys";
 import { MemoryPanel } from "../components/persistence/memory-panel";
 import { Play } from "lucide-react";
 
@@ -73,16 +67,21 @@ export function RunDetailPage() {
 
   const markRead = useMarkReadByRun();
 
-  // Auto-mark notification as read when viewing a terminal run. Keyed on
-  // `status`: the SSE run patch carries `status` (see `runUpdateToRunPatch`),
-  // so a run that finalizes while the page is open marks read the moment
-  // status flips terminal. Idempotent server-side (no-op for a non-recipient /
-  // already-read), and `status` is stable once terminal so the effect does not
-  // re-fire on subsequent renders.
+  // Auto-mark notification as read when viewing a terminal run, and refetch the
+  // run's logs. Keyed on `status`: the SSE run patch carries `status` (see
+  // `runUpdateToRunPatch`), so a run that finalizes while the page is open acts
+  // the moment status flips terminal. Idempotent server-side (no-op for a
+  // non-recipient / already-read), and `status` is stable once terminal so the
+  // effect does not re-fire on subsequent renders.
+  //
+  // Why the log refetch is a separate call rather than a consequence of the
+  // global invalidation: see `invalidateRunLogs`. It cannot loop — the effect
+  // depends on `status`/`runId`, never on the logs it refetches.
   useEffect(() => {
     const terminal = !!status && !(ACTIVE_RUN_STATUSES as ReadonlySet<string>).has(status);
     if (run && runId && terminal) {
       markRead.mutate({ params: { path: { runId } } });
+      void invalidateRunLogs(qc, orgId, applicationId, runId);
     }
   }, [status, runId]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -146,9 +145,14 @@ export function RunDetailPage() {
         // `newLog` is runtime-validated by `runLogEventSchema`. Type the patch
         // against the wire `RunLog` (spec) so this writer and `useRunLogs` agree
         // on the element type of the shared `runKeys.logs` cache. Spread carries
-        // the matching fields (id/createdAt are ISO strings on both); only the
-        // spec's lossy `data` (`object`) needs a localized narrow — the SSE frame
-        // strips `data` server-side (`stripPayload`), so it is null in practice.
+        // the matching fields (id/createdAt are ISO strings on both).
+        //
+        // `data` needs a localized narrow, but NOT because the frame is empty:
+        // `use-realtime.ts` opens this stream with `verbose=true`, the flag that
+        // makes `routes/realtime.ts` send `evt.data` rather than
+        // `stripPayload(evt)`, so payloads arrive populated. The cast bridges a
+        // generated-type mismatch: the spec declares `data` as a bare object, so
+        // `schema.d.ts` emits `Record<string, never> | null`.
         const entry: RunLogEntry = {
           ...newLog,
           data: (newLog.data ?? null) as RunLogEntry["data"],
@@ -232,10 +236,10 @@ export function RunDetailPage() {
 
   return (
     <div className="p-6">
-      <PageHeader title={runCrumbLabel} emoji="▶️" breadcrumbs={breadcrumbs} />
+      <PageHeader title={runCrumbLabel} breadcrumbs={breadcrumbs} />
 
       <div className="border-border mb-4 rounded-md border">
-        <RunRow run={enrichedRun} disableLink />
+        <RunRow run={enrichedRun} variant="detail" />
       </div>
 
       {agent && (
@@ -268,7 +272,13 @@ export function RunDetailPage() {
 
       <RunArtifactsBanner artifacts={run.artifacts} />
 
-      <div className="mb-4 flex items-center justify-between gap-4">
+      {/* `flex-wrap`, not a fixed row: at 375px the tab list alone eats most of
+          the width, and the actions group (cost pill, context gauge, Re-run /
+          Cancel) cannot fit beside it. Wrapping keeps every one of them visible
+          with zero interaction — the acceptance criterion #1046 sets — where a
+          non-wrapping row pushes the page body into a horizontal scroll. The
+          gauge shrinks itself on top of this (see `ContextGaugeReadout`). */}
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-4">
         <Tabs
           value={effectiveTab}
           onValueChange={(v) =>
@@ -305,67 +315,29 @@ export function RunDetailPage() {
           </TabsList>
         </Tabs>
         <div className="flex items-center gap-2">
-          {/* Token + cost readout — shown at all times (pending, running,
-              terminal). While the run is active the pulse dot animates and
-              `onMetric` SSE patches `run.token_usage` + `run.cost` in place
-              at the throttled 250 ms cadence; once finalized, the same
-              fields hold the authoritative aggregate written by
-              `finalizeRun`. Defaults to zeros for runs that never produced
-              tokens (the readout is structural, not conditional on data).
-              The count goes through `totalTokens` so it covers the same four
-              buckets the `$` beside it prices — `input_tokens` is net of
-              cache, so an input+output sum would omit the bulk of the
-              consumption on any cached run and contradict the Info tab. */}
-          {(() => {
-            const liveUsage = run.token_usage as TokenUsage | null;
-            const total = totalTokens(liveUsage ?? {});
-            return (
-              <div className="text-muted-foreground bg-muted/50 flex items-center gap-2 rounded-md px-2.5 py-1 text-xs tabular-nums">
-                {isRunning && (
-                  <span className="bg-primary size-1.5 animate-pulse rounded-full" aria-hidden />
-                )}
-                <TooltipProvider delayDuration={300}>
-                  <Tooltip>
-                    {/* Focusable trigger: the readout is otherwise plain text,
-                        so keyboard users would have no way to reach the
-                        breakdown. */}
-                    <TooltipTrigger asChild>
-                      <span tabIndex={0} className="cursor-default underline decoration-dotted">
-                        {total.toLocaleString()} tokens
-                      </span>
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom" className="max-w-xs">
-                      <span className="block text-xs">
-                        {t("run.usageInputTokens")}:{" "}
-                        {(liveUsage?.input_tokens ?? 0).toLocaleString()}
-                      </span>
-                      <span className="block text-xs">
-                        {t("run.usageOutputTokens")}:{" "}
-                        {(liveUsage?.output_tokens ?? 0).toLocaleString()}
-                      </span>
-                      <span className="block text-xs">
-                        {t("run.usageCacheRead")}:{" "}
-                        {(liveUsage?.cache_read_input_tokens ?? 0).toLocaleString()}
-                      </span>
-                      <span className="block text-xs">
-                        {t("run.usageCacheCreation")}:{" "}
-                        {(liveUsage?.cache_creation_input_tokens ?? 0).toLocaleString()}
-                      </span>
-                      <span className="text-muted-foreground mt-1 block text-xs">
-                        {t("run.usageTokensCumulative")}
-                      </span>
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-                <span aria-hidden>·</span>
-                <RunCostReadout
-                  cost={run.cost}
-                  pricingStatus={run.cost_pricing_status}
-                  className="text-foreground font-medium"
-                />
-              </div>
-            );
-          })()}
+          {/* Cost readout — shown at all times (pending, running, terminal).
+              While the run is active the pulse dot animates and `onMetric` SSE
+              patches `run.cost` in place at the throttled 250 ms cadence; once
+              finalized, the field holds the authoritative aggregate written by
+              `finalizeRun`. Structural, not conditional on data. The token
+              count that used to sit beside it moved into the run row's details
+              panel (#1046): it is a diagnostic, read once, where the `$` is a
+              governance figure read at a glance. */}
+          <div className="text-muted-foreground bg-muted/50 flex items-center gap-2 rounded-md px-2.5 py-1 text-xs tabular-nums">
+            {isRunning && (
+              <span className="bg-primary size-1.5 animate-pulse rounded-full" aria-hidden />
+            )}
+            <RunCostReadout
+              cost={run.cost}
+              pricingStatus={run.cost_pricing_status}
+              className="text-foreground font-medium"
+            />
+          </div>
+          {/* Context gauge — the state metric the cumulative token total never
+              was (#1046). Numerator AND denominator both ride `turnRows`, so
+              nothing is threaded from the run DTO; see `ContextGaugeReadout`
+              for the readings, the live cadence and when it renders nothing. */}
+          <ContextGaugeReadout turns={turnRows} status={run.status} />
           {!isRunning && !isInline && agent && (
             <Button variant="outline" size="sm" onClick={() => setInputOpen(true)}>
               <Play className="size-3.5" />

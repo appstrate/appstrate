@@ -68,19 +68,27 @@ RUN --mount=type=cache,target=/root/.bun/install/cache,sharing=locked \
 # `--external` import resolves at runtime via the same path the
 # unbundled entrypoint used.
 #
-# Workspace sources for `@appstrate/*` packages are bundled inline,
-# which is why those symlinks become optional below (we keep them for
-# safety since other scripts under /runtime/mcp/ still import via the
-# symlinked paths).
+# Workspace sources for `@appstrate/*` packages are bundled INLINE into
+# the output file. They exist only in this build stage — the runtime
+# stage ships the bundle, never these sources.
 COPY packages/afps-runtime/src    packages/afps-runtime/src
 COPY packages/afps-shared/src     packages/afps-shared/src
-COPY packages/connect/src         packages/connect/src
 COPY packages/core/src            packages/core/src
 COPY packages/mcp-transport/src   packages/mcp-transport/src
 COPY packages/runner-pi/src       packages/runner-pi/src
 COPY runtime-pi/mcp/              runtime-pi/mcp/
 COPY runtime-pi/*.ts              runtime-pi/
 
+# NO minification. `--minify-whitespace` was tried here and reverted: it
+# collapses the whole bundle onto a couple of lines (measured: 1023 lines ->
+# 2 on a representative build), which destroys the line/column positions in
+# every production stack trace. It bought only the removal of the
+# `// packages/core/src/…` banner `bun build` emits above each inlined module.
+# Trading readable stack traces for the concealment of path strings is a bad
+# deal, and concealment was never the point of this stage — see the runtime
+# COPY below and SECURITY.md: the bundle is readable platform code either way.
+# `--minify` (identifier mangling) is worse still: it renames functions and
+# breaks name-dependent runtime lookups (`fn.name`, class-name dispatch).
 RUN bun build runtime-pi/entrypoint.ts \
         --target=bun \
         --external='@mariozechner/pi-ai' \
@@ -179,46 +187,27 @@ COPY --from=deps --chown=pi:pi /build/packages/mcp-transport/node_modules ./pack
 COPY --from=deps --chown=pi:pi /build/packages/runner-pi/node_modules     ./packages/runner-pi/node_modules
 COPY --from=deps --chown=pi:pi /build/runtime-pi/node_modules             ./runtime-pi/node_modules
 
-# Workspace sources — `@appstrate/afps-runtime`, `@appstrate/mcp-transport`,
-# `@appstrate/runner-pi`, and `@appstrate/core` are source-only (Bun loads
-# .ts directly, no build step). The `packages/core/src` COPY below is load
-# bearing: `entrypoint.ts`, `env.ts`, `provision.ts`, `publish.ts`, the
-# `mcp/` tool surface + upload adapters, and `sidecar/` all import core
-# subpaths at runtime — `sidecar-types`, `errors`, `runtime-tool-defs`,
-# `runtime-event-drain`, `ssrf`, `naming`, `integration`, `platform-types`,
-# `zip`, `token-budget`, `model-swap`, `oauth-bearer-swap`.
-COPY --chown=pi:pi packages/afps-runtime/src            ./packages/afps-runtime/src
-COPY --chown=pi:pi packages/afps-runtime/package.json   ./packages/afps-runtime/
-COPY --chown=pi:pi packages/mcp-transport/src           ./packages/mcp-transport/src
-COPY --chown=pi:pi packages/mcp-transport/package.json  ./packages/mcp-transport/
-COPY --chown=pi:pi packages/runner-pi/src               ./packages/runner-pi/src
-COPY --chown=pi:pi packages/runner-pi/package.json      ./packages/runner-pi/
-COPY --chown=pi:pi packages/core/src                    ./packages/core/src
-COPY --chown=pi:pi packages/core/package.json           ./packages/core/
-COPY --chown=pi:pi packages/afps-shared/src             ./packages/afps-shared/src
-COPY --chown=pi:pi packages/afps-shared/package.json    ./packages/afps-shared/
-
-# Restore the `@appstrate/*` workspace symlinks materialised by
-# `bun install` (docker COPY dereferences them into real directories).
-RUN mkdir -p node_modules/@appstrate \
- && rm -rf  node_modules/@appstrate/afps-runtime node_modules/@appstrate/afps-shared node_modules/@appstrate/mcp-transport node_modules/@appstrate/runner-pi node_modules/@appstrate/core \
- && ln -s   /runtime/packages/afps-runtime  node_modules/@appstrate/afps-runtime \
- && ln -s   /runtime/packages/afps-shared   node_modules/@appstrate/afps-shared \
- && ln -s   /runtime/packages/mcp-transport node_modules/@appstrate/mcp-transport \
- && ln -s   /runtime/packages/runner-pi     node_modules/@appstrate/runner-pi \
- && ln -s   /runtime/packages/core          node_modules/@appstrate/core \
- && chown -h pi:pi \
-        node_modules/@appstrate \
-        node_modules/@appstrate/afps-runtime \
-        node_modules/@appstrate/afps-shared \
-        node_modules/@appstrate/mcp-transport \
-        node_modules/@appstrate/runner-pi \
-        node_modules/@appstrate/core
+# No `@appstrate/*` workspace sources are copied here, and no `@appstrate`
+# symlinks are restored: `bun build` inlined every workspace module into
+# /runtime/dist/entrypoint.js in the deps stage, so nothing in the running
+# container resolves `@appstrate/*` at all. The per-package
+# `node_modules/@appstrate/*` symlinks that came across with the COPYs
+# above therefore dangle, harmlessly — BuildKit preserves symlinks rather
+# than dereferencing them, so their targets are simply absent from the
+# image.
+#
+# Consequence for whoever comes next: adding a *runtime* import of a
+# workspace package — a dynamic import, a subprocess running a `.ts` file,
+# anything outside the static graph `bun build` can see — will fail with
+# ERR_MODULE_NOT_FOUND in the image while working fine locally. Making it
+# work means bringing back both the `packages/<pkg>/{src,package.json}`
+# COPY and the symlink, which puts the raw platform SOURCE TREE back
+# inside the sandbox (see the comment on the entrypoint COPY below).
 
 # Pi SDK pair (@mariozechner/pi-ai, @mariozechner/pi-coding-agent) lands
-# in runtime-pi/node_modules per bun's hoisting decisions. MCP utility
-# scripts under /runtime/mcp/ resolve from /runtime/node_modules, so
-# symlink the SDK pair to make import resolution work.
+# in runtime-pi/node_modules per bun's hoisting decisions. The bundle at
+# /runtime/dist/ keeps the pair `--external`, and its resolution walks up
+# to /runtime/node_modules, so symlink the pair there.
 RUN mkdir -p node_modules/@mariozechner \
  && ln -s /runtime/runtime-pi/node_modules/@mariozechner/pi-ai           node_modules/@mariozechner/pi-ai \
  && ln -s /runtime/runtime-pi/node_modules/@mariozechner/pi-coding-agent node_modules/@mariozechner/pi-coding-agent \
@@ -227,20 +216,30 @@ RUN mkdir -p node_modules/@mariozechner \
         node_modules/@mariozechner/pi-ai \
         node_modules/@mariozechner/pi-coding-agent
 
-# Bootstrap sources. Glob is single-level (no recursion into `sidecar/`
-# or `test/`), so adding a new `.ts` file at `runtime-pi/*.ts` is picked
-# up automatically — no Dockerfile edit required.
+# The pre-bundled entrypoint, and nothing else. The `.ts` sources it was
+# built from (`runtime-pi/*.ts`, `runtime-pi/mcp/`) are deliberately NOT
+# copied: `bun build` inlines them, so they are dead weight at runtime.
 #
-# Both the original `.ts` sources and the pre-bundled `dist/entrypoint.js`
-# are copied — the bundle is the production entrypoint, while the `.ts`
-# sources remain on disk so the MCP glob imports (`./mcp/*.ts`) still
-# resolve when the bundle delegates to them at runtime.
-COPY --chown=pi:pi runtime-pi/mcp/        ./mcp/
-COPY --chown=pi:pi runtime-pi/*.ts        ./
+# Why bother removing dead weight: the agent container has no egress
+# except through the sidecar, so what it can read is what it knows. A
+# confused agent that reads `/runtime` used to recover the platform's
+# architecture from the source comments — the sidecar endpoints, the
+# credential-injection design, the sentence "the agent connects
+# unauthenticated". No secrets were exposed, and this is NOT a
+# confidentiality boundary — do not let anyone promote it into one.
+# What ships is still readable platform code: `bun build` drops comments
+# but keeps identifiers, string literals, and a `// packages/core/src/…`
+# banner above every inlined module, so the bundle names the source tree
+# it came from. The repo's public SECURITY.md documents the design in
+# more detail than any of it. What actually changes is that the PROSE
+# rationale — the comments explaining why the design is what it is — is
+# no longer sitting in the sandbox, and the sandbox has no egress to go
+# read it. Defence in depth against agent confusion and low-effort
+# injection; nothing more, and nothing should be built on top of it.
 COPY --from=deps --chown=pi:pi /build/runtime-pi/dist/entrypoint.js ./dist/entrypoint.js
 
 # Pre-warmed Bun transpiler cache (issue #835). Bun re-parses every JS file
-# >50 KB on each process start — for the 1.6 MB bundled entrypoint plus the
+# >50 KB on each process start — for the ~1.6 MB bundled entrypoint plus the
 # external Pi SDK dist files that is a large share of the per-run cold start,
 # and on the firecracker adapter (VM-per-run, empty guest page cache) it is
 # paid on EVERY run. Baking the cache into the image turns that parse into a
@@ -259,10 +258,10 @@ RUN mkdir -p /runtime/.transpiler-cache \
  && [ -n "$(ls -A /runtime/.transpiler-cache)" ] \
  && chown -R pi:pi /runtime/.transpiler-cache
 
-# Agent workspace. Bundled package entrypoints keep only the Pi SDK
-# pair external, resolved from `/runtime/packages/runner-pi/node_modules`
-# by `prepareBundleForPi`, so nothing under `/workspace` needs to
-# resolve against npm packages.
+# Agent workspace. Nothing under `/workspace` resolves against npm
+# packages: `/runtime/node_modules` is not on the resolution path from
+# `/workspace`, and `prepareBundleForPi` (packages/runner-pi) only stages
+# skills — it does no module resolution and links no dependencies.
 RUN mkdir -p /workspace && chown pi:pi /workspace
 
 USER pi:pi

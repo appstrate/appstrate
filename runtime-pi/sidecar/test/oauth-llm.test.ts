@@ -13,8 +13,9 @@
  * and the upstream provider via one `fetchFn` dispatcher.
  */
 
-import { describe, it, expect, mock } from "bun:test";
+import { describe, it, expect, mock, spyOn } from "bun:test";
 import { createApp, type AppDeps } from "../app.ts";
+import { logger } from "../logger.ts";
 import { OAuthTokenCache } from "../oauth-token-cache.ts";
 import type { OAuthTokenResponse } from "@appstrate/core/sidecar-types";
 import type { LlmProxyOauthConfig } from "../helpers.ts";
@@ -183,6 +184,59 @@ describe("/llm/* oauth — no forging", () => {
       body,
     });
     expect(calls[1]!.body).toBe(body);
+  });
+
+  it("logs the forwarded method and status on a redacted upstream 405", async () => {
+    const headerSecret = "header-secret-954";
+    const bodySecret = "body-secret-954";
+    const { fetchFn, calls } = setupFetchMock((url) => {
+      if (url.startsWith(PLATFORM_API)) {
+        return new Response(JSON.stringify(buildOAuthTokenResponse()), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return new Response(`upstream echoed Bearer ${bodySecret}`, {
+        status: 405,
+        headers: {
+          "Content-Type": "application/json",
+          "WWW-Authenticate": `Bearer ${headerSecret}`,
+        },
+      });
+    });
+    const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
+
+    try {
+      const deps = makeDeps(fetchFn);
+      deps.config.llm = OAUTH_CFG;
+      const app = createApp(deps);
+
+      const res = await app.request("/llm/codex/responses", { method: "GET" });
+
+      expect(res.status).toBe(405);
+      const upstreamCalls = calls.filter((call) =>
+        call.url.startsWith("https://api.anthropic.com"),
+      );
+      expect(upstreamCalls).toHaveLength(1);
+      expect(upstreamCalls[0]!.method).toBe("GET");
+
+      const non2xxWarnings = warnSpy.mock.calls.filter(
+        ([message]) => message === "oauth llm: upstream response non-2xx",
+      );
+      expect(non2xxWarnings).toHaveLength(1);
+      const payload = non2xxWarnings[0]![1] as Record<string, unknown>;
+      expect(payload).toMatchObject({
+        credentialId: "conn-oauth",
+        targetUrl: "https://api.anthropic.com/codex/responses",
+        method: "GET",
+        status: 405,
+      });
+      const serializedPayload = JSON.stringify(payload);
+      expect(serializedPayload).not.toContain(headerSecret);
+      expect(serializedPayload).not.toContain(bodySecret);
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 
   it("retries once on 401 with a force-refreshed token", async () => {

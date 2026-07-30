@@ -8,12 +8,37 @@
  * only reachable state) and the non-major case that keeps the gate's teeth.
  */
 
-import { describe, it, expect, afterEach } from "bun:test";
-import { assessDrift, fetchPackageJson } from "../check-consumer-versions.ts";
+import { describe, it, expect, afterEach, spyOn } from "bun:test";
+import {
+  assessDeclaredRange,
+  assessDrift,
+  fetchPackageJson,
+  resolvePolicy,
+} from "../check-consumer-versions.ts";
 
 type V = [number, number, number];
 
 const verdict = (local: V, consumer: V) => assessDrift(local, consumer).verdict;
+
+describe("resolvePolicy", () => {
+  it("keeps only the exact lowercase policies", () => {
+    expect(resolvePolicy("fail")).toBe("fail");
+    expect(resolvePolicy("warn")).toBe("warn");
+    expect(resolvePolicy("off")).toBe("off");
+  });
+
+  it("fails closed on wrong case and typos", () => {
+    const warn = spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      for (const raw of ["FAIL", "WARN", "OFF", "typo"]) {
+        expect(resolvePolicy(raw)).toBe("fail");
+      }
+      expect(warn).toHaveBeenCalledTimes(4);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+});
 
 describe("assessDrift — major mismatch", () => {
   it("warns when a MAJOR release finds a consumer exactly one major behind (#1028)", () => {
@@ -76,12 +101,45 @@ describe("assessDrift — same major", () => {
   });
 });
 
-describe("fetchPackageJson", () => {
-  const realFetch = globalThis.fetch;
-  afterEach(() => {
-    globalThis.fetch = realFetch;
+describe("assessDeclaredRange", () => {
+  it("preserves assessDrift for a valid range", () => {
+    expect(assessDeclaredRange([6, 3, 0], "^6.1.0", "fail")).toEqual(
+      assessDrift([6, 3, 0], [6, 1, 0]),
+    );
+    expect(assessDeclaredRange([6, 3, 0], "^6.2.0", "warn")).toEqual(
+      assessDrift([6, 3, 0], [6, 2, 0]),
+    );
   });
 
+  it("fails an unparsable range under the fail policy", () => {
+    expect(assessDeclaredRange([6, 3, 0], "workspace:*", "fail")).toEqual({
+      verdict: "fail",
+      detail: 'unparsable range "workspace:*", cannot verify drift',
+    });
+  });
+
+  it("warns on an unparsable range under the warn policy", () => {
+    expect(assessDeclaredRange([6, 3, 0], "workspace:*", "warn")).toEqual({
+      verdict: "warn",
+      detail: 'unparsable range "workspace:*", cannot verify drift',
+    });
+  });
+});
+
+describe("fetchPackageJson", () => {
+  const realFetch = globalThis.fetch;
+  const initialToken = process.env.GITHUB_TOKEN;
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+    if (initialToken === undefined) {
+      delete process.env.GITHUB_TOKEN;
+    } else {
+      process.env.GITHUB_TOKEN = initialToken;
+    }
+  });
+
+  // Bun's `fetch` type includes `preconnect`, so keep the test double
+  // structurally compatible instead of hiding the missing member with a cast.
   function stubFetch(status: number, statusText: string, body?: unknown): void {
     globalThis.fetch = Object.assign(
       async () =>
@@ -108,13 +166,26 @@ describe("fetchPackageJson", () => {
   it("names the token and the likely causes in the 404 message", async () => {
     // The message is the operator's only clue. Bare "404 Not Found" reads as
     // "the file was deleted" and sends them to look in the wrong place.
+    process.env.GITHUB_TOKEN = "test-token";
     stubFetch(404, "Not Found");
     const err = await fetchPackageJson("appstrate/cloud", "package.json").catch(
       (e: unknown) => e as Error,
     );
     expect(err.message).toContain("READ failure");
-    expect(err.message).toContain("contents:read");
+    expect(err.message).toContain("CONSUMER_LOCKSTEP_TOKEN");
+    expect(err.message).toContain("missing scope");
+    expect(err.message).toContain("SSO not authorized");
     expect(err.message).toContain("appstrate/cloud");
+  });
+
+  it("names the publish-core secret when GITHUB_TOKEN is absent", async () => {
+    delete process.env.GITHUB_TOKEN;
+    stubFetch(404, "Not Found");
+    const err = await fetchPackageJson("appstrate/cloud", "package.json").catch(
+      (e: unknown) => e as Error,
+    );
+    expect(err.message).toContain("GITHUB_TOKEN is not configured");
+    expect(err.message).toContain("CONSUMER_LOCKSTEP_TOKEN");
   });
 
   it("still throws on other non-2xx statuses", async () => {

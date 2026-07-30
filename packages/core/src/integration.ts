@@ -619,7 +619,7 @@ export function resolveIntegrationToolCatalog(
 
   // Step 1 — the integration's own MCP catalog
   let base: IntegrationToolCatalogEntry[];
-  if (mcpServerTools && mcpServerTools.length > 0) {
+  if (mcpServerTools !== undefined) {
     base = mcpServerTools.map((t) => ({ name: t.name, description: t.description }));
   } else {
     base = getDeclaredToolNames(integration).map((name) => ({ name }));

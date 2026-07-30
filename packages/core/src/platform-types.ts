@@ -281,6 +281,18 @@ export interface InlineRunBody {
   config?: Record<string, unknown>;
   modelId?: string | null;
   proxyId?: string | null;
+  /**
+   * Per-integration connection picks for THIS run (flat map:
+   * `{ "@scope/integration": "<connection_id>" }`, resolver mechanism #2).
+   * Read by the preflight so a caller that disambiguates a
+   * `must_choose_connection` 412 by re-posting its pick gets past the readiness
+   * gate — the same recovery loop the cataloged run route supports.
+   *
+   * Optional but NOT nullable: both run routes reject an explicit `null` on the
+   * wire, so a published type promising `| null` would describe a body the
+   * server refuses. Omit the field to mean "no picks".
+   */
+  connection_overrides?: Record<string, string>;
 }
 
 // ---------------------------------------------------------------------------
