@@ -18,10 +18,17 @@ import { resolveProxy } from "./org-proxies.ts";
 import { resolveModel } from "./org-models.ts";
 import { extractManifestSchemas } from "../lib/manifest-utils.ts";
 import { resolveIntegrationSpawns } from "./integration-spawn-resolver.ts";
-import { DEFAULT_RUN_TIMEOUT_SECONDS } from "./run-limits.ts";
+import {
+  DEFAULT_RUN_TIMEOUT_SECONDS,
+  getPlatformRunLimits,
+  resolveAgentResources,
+} from "./run-limits.ts";
 import type { IntegrationManifestCache } from "./integration-service.ts";
 import type { ResolvedConnectionMap } from "@appstrate/core/integration";
 import type { ModelCost } from "@appstrate/core/module";
+import { getAgentResourceHints } from "@appstrate/core/validation";
+import { getExecutionMode } from "../infra/mode.ts";
+import { orchestratorAgentResources } from "./orchestrator/registry.ts";
 
 export class ModelNotConfiguredError extends Error {
   constructor() {
@@ -249,6 +256,12 @@ export async function buildRunContext(params: {
   const runtimeTools = Array.isArray(manifestRuntimeTools)
     ? manifestRuntimeTools.filter((t): t is string => typeof t === "string")
     : undefined;
+  const resourceHints = getAgentResourceHints(agent.manifest);
+  const resources = resolveAgentResources(
+    resourceHints,
+    getPlatformRunLimits(),
+    orchestratorAgentResources(getExecutionMode()),
+  );
 
   const plan: AppstrateRunPlan = {
     bundle,
@@ -261,6 +274,7 @@ export async function buildRunContext(params: {
     // The manifest reaching here is already ceiling-clamped by
     // `runPreflightGates`; only the no-declaration default is left to apply.
     timeout: (agent.manifest.timeout as number | undefined) ?? DEFAULT_RUN_TIMEOUT_SECONDS,
+    resources,
     files,
     ...(integrationSpawns.length > 0 ? { integrations: integrationSpawns } : {}),
   };

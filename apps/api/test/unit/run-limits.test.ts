@@ -6,8 +6,12 @@ import {
   _setRunLimitsForTesting,
   getPlatformRunLimits,
   getInlineRunLimits,
+  resolveAgentResources,
   resolveRunTimeout,
+  DEFAULT_AGENT_CPU,
+  DEFAULT_AGENT_MEMORY_MB,
   DEFAULT_RUN_TIMEOUT_SECONDS,
+  type AgentResourcePolicy,
 } from "../../src/services/run-limits.ts";
 
 describe("run-limits registry", () => {
@@ -40,6 +44,8 @@ describe("run-limits registry", () => {
     expect(platform.timeout_ceiling_seconds).toBe(1800);
     expect(platform.per_org_global_rate_per_min).toBe(200);
     expect(platform.max_concurrent_per_org).toBe(50);
+    expect(platform.agent_memory_ceiling_mb).toBe(DEFAULT_AGENT_MEMORY_MB);
+    expect(platform.agent_cpu_ceiling).toBe(DEFAULT_AGENT_CPU);
 
     expect(inline.rate_per_min).toBe(60);
     expect(inline.manifest_bytes).toBe(65536);
@@ -59,7 +65,21 @@ describe("run-limits registry", () => {
   it("rejects zero / negative caps (must be positive integers)", () => {
     expect(() => _setRunLimitsForTesting({ timeout_ceiling_seconds: 0 }, {})).toThrow();
     expect(() => _setRunLimitsForTesting({ max_concurrent_per_org: -1 }, {})).toThrow();
+    expect(() => _setRunLimitsForTesting({ agent_memory_ceiling_mb: 0 }, {})).toThrow();
+    expect(() => _setRunLimitsForTesting({ agent_cpu_ceiling: -1 }, {})).toThrow();
     expect(() => _setRunLimitsForTesting({}, { rate_per_min: 0 })).toThrow();
+  });
+
+  it("rejects fractional or non-convertible resource ceilings", () => {
+    const maxMemoryMb = Math.floor(Number.MAX_SAFE_INTEGER / (1024 * 1024));
+    const maxCpu = Math.floor(Number.MAX_SAFE_INTEGER / 1_000_000_000);
+
+    expect(() => _setRunLimitsForTesting({ agent_memory_ceiling_mb: 1.5 }, {})).toThrow();
+    expect(() => _setRunLimitsForTesting({ agent_cpu_ceiling: 1.5 }, {})).toThrow();
+    expect(() =>
+      _setRunLimitsForTesting({ agent_memory_ceiling_mb: maxMemoryMb + 1 }, {}),
+    ).toThrow();
+    expect(() => _setRunLimitsForTesting({ agent_cpu_ceiling: maxCpu + 1 }, {})).toThrow();
   });
 });
 
@@ -126,5 +146,96 @@ describe("resolveRunTimeout", () => {
   it("throws before init() rather than defaulting to an unbounded timeout", () => {
     _resetRunLimitsForTesting();
     expect(() => resolveRunTimeout(60)).toThrow(/not initialized/i);
+  });
+});
+
+describe("resolveAgentResources", () => {
+  const defaultPolicy: AgentResourcePolicy = {
+    agent_memory_ceiling_mb: DEFAULT_AGENT_MEMORY_MB,
+    agent_cpu_ceiling: DEFAULT_AGENT_CPU,
+  };
+  const generousPolicy: AgentResourcePolicy = {
+    agent_memory_ceiling_mb: 8192,
+    agent_cpu_ceiling: 16,
+  };
+
+  it("keeps the existing 1536 MiB / 2 CPU allocation by default", () => {
+    expect(resolveAgentResources(undefined, defaultPolicy)).toEqual({
+      requested: { memoryMb: 1536, cpu: 2 },
+      effective: { memoryMb: 1536, cpu: 2 },
+      memoryCapped: false,
+      cpuCapped: false,
+      workload: {
+        memoryBytes: 1536 * 1024 * 1024,
+        nanoCpus: 2_000_000_000,
+      },
+    });
+  });
+
+  it("fills only the missing dimension when hints are partial", () => {
+    expect(resolveAgentResources({ memoryMb: 4096 }, generousPolicy).requested).toEqual({
+      memoryMb: 4096,
+      cpu: DEFAULT_AGENT_CPU,
+    });
+    expect(resolveAgentResources({ cpu: 6 }, generousPolicy).requested).toEqual({
+      memoryMb: DEFAULT_AGENT_MEMORY_MB,
+      cpu: 6,
+    });
+  });
+
+  it("preserves complete hints below the operator ceilings", () => {
+    const resolved = resolveAgentResources({ memoryMb: 4096, cpu: 6 }, generousPolicy);
+    expect(resolved.effective).toEqual({ memoryMb: 4096, cpu: 6 });
+    expect(resolved.memoryCapped).toBe(false);
+    expect(resolved.cpuCapped).toBe(false);
+    expect(resolved.workload).toEqual({
+      memoryBytes: 4_294_967_296,
+      nanoCpus: 6_000_000_000,
+    });
+  });
+
+  it("clamps both dimensions to the operator ceilings", () => {
+    const resolved = resolveAgentResources(
+      { memoryMb: 4096, cpu: 8 },
+      { agent_memory_ceiling_mb: 2048, agent_cpu_ceiling: 4 },
+    );
+    expect(resolved.requested).toEqual({ memoryMb: 4096, cpu: 8 });
+    expect(resolved.effective).toEqual({ memoryMb: 2048, cpu: 4 });
+    expect(resolved.memoryCapped).toBe(true);
+    expect(resolved.cpuCapped).toBe(true);
+    expect(resolved.workload).toEqual({
+      memoryBytes: 2_147_483_648,
+      nanoCpus: 4_000_000_000,
+    });
+  });
+
+  it("also clamps CPU to a backend-specific maximum", () => {
+    const resolved = resolveAgentResources({ memoryMb: 4096, cpu: 8 }, generousPolicy, {
+      semantics: "sizing",
+      maxAgentCpu: 7,
+    });
+    expect(resolved.requested).toEqual({ memoryMb: 4096, cpu: 8 });
+    expect(resolved.effective.memoryMb).toBe(4096);
+    expect(resolved.effective.cpu).toBe(7);
+    expect(resolved.cpuCapped).toBe(true);
+    expect(resolved.workload.nanoCpus).toBe(7_000_000_000);
+  });
+
+  it("lets ceilings below the defaults reduce undeclared allocations explicitly", () => {
+    const resolved = resolveAgentResources(undefined, {
+      agent_memory_ceiling_mb: 512,
+      agent_cpu_ceiling: 1,
+    });
+    expect(resolved.requested).toEqual({
+      memoryMb: DEFAULT_AGENT_MEMORY_MB,
+      cpu: DEFAULT_AGENT_CPU,
+    });
+    expect(resolved.effective).toEqual({ memoryMb: 512, cpu: 1 });
+    expect(resolved.memoryCapped).toBe(true);
+    expect(resolved.cpuCapped).toBe(true);
+    expect(resolved.workload).toEqual({
+      memoryBytes: 536_870_912,
+      nanoCpus: 1_000_000_000,
+    });
   });
 });

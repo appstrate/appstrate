@@ -6,6 +6,7 @@ import type { RunOrchestrator } from "@appstrate/core/platform-types";
 
 export {
   orchestratorIsolatesWorkloads,
+  orchestratorAgentResources,
   orchestratorSupportsSidecarOnly,
   isolatingOrchestratorIds,
 } from "./registry.ts";

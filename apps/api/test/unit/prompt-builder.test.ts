@@ -10,6 +10,7 @@ import type {
 import type { ExecutionContext } from "@appstrate/afps-runtime/types";
 import type { Bundle, BundlePackage, PackageIdentity } from "@appstrate/afps-runtime/bundle";
 import { _resetCacheForTesting } from "@appstrate/env";
+import { defaultTestAgentResources } from "../helpers/run-resources.ts";
 
 interface TestSchemas {
   input?: import("@appstrate/core/form").JSONSchemaObject;
@@ -149,6 +150,7 @@ function splitLegacy(ctx: PromptContext): {
     ...(ctx.runToken !== undefined ? { runToken: ctx.runToken } : {}),
     proxyUrl: ctx.proxyUrl,
     timeout: ctx.timeout ?? 0,
+    resources: defaultTestAgentResources(),
     files: ctx.files,
   };
   return { context, plan };

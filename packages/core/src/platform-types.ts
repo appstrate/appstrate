@@ -240,6 +240,18 @@ export interface RunOrchestrator {
 }
 
 /**
+ * How an orchestrator applies the agent allocation carried by
+ * {@link WorkloadSpec.resources}. Absent capabilities mean the backend does
+ * not apply the allocation.
+ */
+export interface OrchestratorAgentResourceCapabilities {
+  /** Hard per-workload limits, or capacity used to size a wider boundary. */
+  readonly semantics: "limits" | "sizing";
+  /** Optional agent CPU ceiling imposed by the backend's own sizing model. */
+  readonly maxAgentCpu?: number;
+}
+
+/**
  * Registration entry for an execution backend, keyed by `RUN_ADAPTER` value
  * in the orchestrator registry. Core registers its own backends (docker,
  * process); modules contribute additional ones via
@@ -265,6 +277,8 @@ export interface OrchestratorRegistration {
    * instead.
    */
   readonly supportsSidecarOnly: boolean;
+  /** Resource semantics declared explicitly; absence fails closed. */
+  readonly agentResources?: OrchestratorAgentResourceCapabilities;
   /** Build a fresh orchestrator instance. Called once per process (singleton held by the registry consumer). */
   readonly create: () => RunOrchestrator;
 }

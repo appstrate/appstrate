@@ -14,6 +14,11 @@
 
 import { z } from "zod";
 import { getEnv } from "@appstrate/env";
+import type { AgentResourceHints } from "@appstrate/core/validation";
+import type {
+  OrchestratorAgentResourceCapabilities,
+  WorkloadResources,
+} from "@appstrate/core/platform-types";
 import { logger } from "../lib/logger.ts";
 import { formatZodIssues } from "../lib/zod-format.ts";
 
@@ -21,11 +26,31 @@ import { formatZodIssues } from "../lib/zod-format.ts";
 // Schemas — reject unknown keys so typos surface at boot.
 // ---------------------------------------------------------------------------
 
+const BYTES_PER_MEBIBYTE = 1024 * 1024;
+const NANO_CPUS_PER_CPU = 1_000_000_000;
+const MAX_AGENT_MEMORY_CEILING_MB = Math.floor(Number.MAX_SAFE_INTEGER / BYTES_PER_MEBIBYTE);
+const MAX_AGENT_CPU_CEILING = Math.floor(Number.MAX_SAFE_INTEGER / NANO_CPUS_PER_CPU);
+
+export const DEFAULT_AGENT_MEMORY_MB = 1536;
+export const DEFAULT_AGENT_CPU = 2;
+
 const platformRunLimitsSchema = z
   .object({
     timeout_ceiling_seconds: z.number().int().positive().default(1800),
     per_org_global_rate_per_min: z.number().int().positive().default(200),
     max_concurrent_per_org: z.number().int().positive().default(50),
+    agent_memory_ceiling_mb: z
+      .number()
+      .int()
+      .positive()
+      .max(MAX_AGENT_MEMORY_CEILING_MB)
+      .default(DEFAULT_AGENT_MEMORY_MB),
+    agent_cpu_ceiling: z
+      .number()
+      .int()
+      .positive()
+      .max(MAX_AGENT_CPU_CEILING)
+      .default(DEFAULT_AGENT_CPU),
   })
   .strict();
 
@@ -138,6 +163,64 @@ export function resolveRunTimeout(declaredTimeout: unknown): ResolvedRunTimeout 
     declaredSeconds,
     effectiveSeconds: Math.min(declaredSeconds, ceiling),
     capped: declaredSeconds > ceiling,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Agent resource resolution
+// ---------------------------------------------------------------------------
+
+export interface AgentResourceAllocation {
+  readonly memoryMb: number;
+  readonly cpu: number;
+}
+
+export interface ResolvedAgentResources {
+  readonly requested: AgentResourceAllocation;
+  readonly effective: AgentResourceAllocation;
+  readonly memoryCapped: boolean;
+  readonly cpuCapped: boolean;
+  readonly workload: WorkloadResources;
+}
+
+export type AgentResourcePolicy = Pick<
+  PlatformRunLimits,
+  "agent_memory_ceiling_mb" | "agent_cpu_ceiling"
+>;
+
+/**
+ * Resolve agent-authored hints against operator and backend ceilings.
+ *
+ * The returned `workload` is the only byte/nanoCPU conversion and is carried
+ * unchanged on the run plan to the orchestrator.
+ */
+export function resolveAgentResources(
+  hints: AgentResourceHints | undefined,
+  policy: AgentResourcePolicy,
+  backendCapabilities?: OrchestratorAgentResourceCapabilities,
+): ResolvedAgentResources {
+  const requested: AgentResourceAllocation = {
+    memoryMb: hints?.memoryMb ?? DEFAULT_AGENT_MEMORY_MB,
+    cpu: hints?.cpu ?? DEFAULT_AGENT_CPU,
+  };
+  const effective: AgentResourceAllocation = {
+    memoryMb: Math.min(requested.memoryMb, policy.agent_memory_ceiling_mb),
+    cpu: Math.min(
+      requested.cpu,
+      policy.agent_cpu_ceiling,
+      backendCapabilities?.maxAgentCpu ?? Number.POSITIVE_INFINITY,
+    ),
+  };
+
+  return {
+    requested,
+    effective,
+    memoryCapped: effective.memoryMb < requested.memoryMb,
+    cpuCapped: effective.cpu < requested.cpu,
+    workload: {
+      memoryBytes: effective.memoryMb * BYTES_PER_MEBIBYTE,
+      nanoCpus: effective.cpu * NANO_CPUS_PER_CPU,
+    },
   };
 }
 

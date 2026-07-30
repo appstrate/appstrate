@@ -27,11 +27,13 @@ import { runPlatformContainer } from "../../../src/services/run-launcher/pi.ts";
 import { mintSinkCredentials } from "../../../src/lib/mint-sink-credentials.ts";
 import type { AppstrateRunPlan } from "../../../src/services/run-launcher/types.ts";
 import type { ExecutionContext } from "@appstrate/afps-runtime/types";
+import { defaultTestAgentResources } from "../../helpers/run-resources.ts";
 
 interface CallCounts {
   createSidecarCalls: number;
   createWorkloadCalls: number;
   capturedAgentEnv: Record<string, string> | null;
+  capturedAgentSpec: WorkloadSpec | null;
   capturedSidecarSpec: SidecarLaunchSpec | null;
 }
 
@@ -43,6 +45,7 @@ function createCountingFake(): {
     createSidecarCalls: 0,
     createWorkloadCalls: 0,
     capturedAgentEnv: null,
+    capturedAgentSpec: null,
     capturedSidecarSpec: null,
   };
 
@@ -79,6 +82,7 @@ function createCountingFake(): {
     async createWorkload(spec: WorkloadSpec): Promise<WorkloadHandle> {
       counts.createWorkloadCalls++;
       counts.capturedAgentEnv = { ...spec.env };
+      counts.capturedAgentSpec = spec;
       return { id: `agent_${spec.runId}`, runId: spec.runId, role: spec.role };
     },
     async startWorkload() {},
@@ -132,6 +136,7 @@ function buildRunPlan(overrides: Partial<AppstrateRunPlan> = {}): AppstrateRunPl
       aliasId: "claude-3-5-sonnet-latest",
     },
     timeout: 60,
+    resources: defaultTestAgentResources(),
     ...overrides,
   };
 }
@@ -147,11 +152,19 @@ describe("run-launcher — sidecar skip decision", () => {
 
   it("skips createSidecar when no integrations AND llm uses a static API key", async () => {
     const { orchestrator, counts } = createCountingFake();
+    const resources: AppstrateRunPlan["resources"] = {
+      requested: { memoryMb: 768, cpu: 1 },
+      effective: { memoryMb: 768, cpu: 1 },
+      memoryCapped: false,
+      cpuCapped: false,
+      workload: { memoryBytes: 805_306_368, nanoCpus: 1_000_000_000 },
+    };
+    const plan = buildRunPlan({ resources });
 
     await runPlatformContainer({
       runId: "run_no_sidecar",
       context: buildContext("run_no_sidecar"),
-      plan: buildRunPlan(), // no integrations + apiKey set, no credentialId
+      plan, // no integrations + apiKey set, no credentialId
       sinkCredentials: mintSinkCredentials({
         runId: "run_no_sidecar",
         appUrl: "http://platform:3000",
@@ -162,6 +175,7 @@ describe("run-launcher — sidecar skip decision", () => {
 
     expect(counts.createSidecarCalls).toBe(0);
     expect(counts.createWorkloadCalls).toBe(1);
+    expect(counts.capturedAgentSpec?.resources).toBe(resources.workload);
 
     // The agent env must not advertise a sidecar URL nor a forward proxy
     // — both would point at a non-existent service. MODEL_BASE_URL, however,

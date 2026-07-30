@@ -94,6 +94,10 @@ const firecrackerModule: AppstrateModule = {
         // The VM boots exactly once, driven by the agent workload — a
         // sidecar-only launch (connect-runs) would silently never start.
         supportsSidecarOnly: false,
+        // Workload resources size the whole VM rather than an agent-only
+        // cgroup. vmSizing caps the guest at 8 vCPU and may reserve one for
+        // the sidecar, leaving at most 7 for the agent request.
+        agentResources: { semantics: "sizing", maxAgentCpu: 7 },
         // Wire the phase-4 observability hooks: boot-phase liveness (the
         // watchdog-safe synthetic heartbeat) and abnormal-exit console
         // surfacing. Both are inert unless provided — this is the only
