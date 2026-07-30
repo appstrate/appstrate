@@ -37,7 +37,6 @@ import { writeSync } from "node:fs";
 import * as path from "node:path";
 import type { ExtensionFactory, Api, Model } from "./pi-sdk.ts";
 import {
-  PiRunner,
   prepareBundleForPi,
   buildRuntimeToolExtensions,
   buildPublishDocumentExtension,
@@ -46,6 +45,7 @@ import {
   emitBootProgress,
   startSinkHeartbeat,
   loadPiCodingAgentSdk,
+  type PiRunner,
 } from "@appstrate/runner-pi";
 import { getErrorMessage } from "@appstrate/core/errors";
 import type { IntegrationBootReport } from "@appstrate/core/sidecar-types";
@@ -65,6 +65,7 @@ import type { ExecutionContext, RunEvent } from "@appstrate/afps-runtime/types";
 import { emptyRunResult } from "@appstrate/afps-runtime/runner";
 import { createMcpHttpClient, type AppstrateMcpClient } from "@appstrate/mcp-transport";
 import { parseRuntimeEnv, RuntimeEnvError, scrubSinkEnv } from "./env.ts";
+import { createRuntimePiRunner } from "./pi-runner.ts";
 import { buildMcpDirectFactories } from "./mcp/direct.ts";
 import {
   createRuntimeEventDrainer,
@@ -829,7 +830,8 @@ function buildPiRunner(): PiRunner {
   // communication contract discards anyway. Gated on the manifest selection
   // so a bundle-defined tool that happens to be named `output` (no
   // `runtime_tools` opt-in) keeps the SDK's natural stop.
-  return new PiRunner({
+  return createRuntimePiRunner({
+    sidecarUrl,
     model,
     apiKey: env.modelApiKey,
     systemPrompt,

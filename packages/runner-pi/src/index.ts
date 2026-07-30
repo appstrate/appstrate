@@ -16,7 +16,7 @@ export { deriveProviderFromApi, PROVIDER_BY_API } from "./provider-map.ts";
 // entrypoint can overlap its ~200ms eval with network-bound provisioning
 // instead of paying it on the pre-session boot path. `Type` (pi-ai, cheap) is a
 // static value export for building tool parameter schemas; the SDK type surface
-// (Model/Api/ExtensionFactory/ExtensionAPI/AuthStorage) rides through here so
+// (Model/Api/Transport/ExtensionFactory/ExtensionAPI/AuthStorage) rides through here so
 // consumers (e.g. the chat module's Pi engine) never import the vendor SDK
 // directly — the single-import-surface guard is the barrel.
 export { Type, loadPiCodingAgentSdk, type PiCodingAgentSdk } from "./pi-sdk.ts";
@@ -24,6 +24,7 @@ export type {
   Api,
   KnownApi,
   Model,
+  Transport,
   AuthStorage,
   ExtensionAPI,
   ExtensionFactory,

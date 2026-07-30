@@ -34,6 +34,7 @@ import {
   type Api,
   type KnownApi,
   type Model,
+  type Transport,
 } from "./pi-sdk.ts";
 import { scheduleDeadlineNudges } from "./deadline-nudges.ts";
 import type { ModelApiShape } from "@appstrate/core/sidecar-types";
@@ -112,6 +113,11 @@ export interface PiRunnerOptions {
   authStoragePath?: string;
   /** Pi SDK thinking level. Defaults to `"medium"`. */
   thinkingLevel?: "low" | "medium" | "high";
+  /**
+   * Preferred transport for providers that support multiple transports.
+   * Providers that do not support this option ignore it. Defaults to `"auto"`.
+   */
+  transport?: Transport;
   /**
    * Tool names whose first successful execution ends the run. When one of
    * these tools completes without error the runner aborts the Pi session
@@ -467,6 +473,7 @@ export class PiRunner implements Runner {
       sessionManager: SessionManager.inMemory(),
       settingsManager: SettingsManager.inMemory({
         compaction: budget.compaction,
+        transport: this.opts.transport ?? "auto",
         // Pi SDK's built-in retry (Retry-After honoring + jitter) covers
         // transient 429/5xx upstream — including OpenAI's mid-stream 5xx
         // `server_error`, which the Codex/Responses adapter surfaces as a
