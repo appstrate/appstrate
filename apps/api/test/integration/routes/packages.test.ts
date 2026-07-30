@@ -1561,6 +1561,53 @@ describe("Packages API", () => {
       expect((body.errors ?? []).map((e) => e.code)).toContain("no_tools_selected");
     });
 
+    it("publish refuses wildcard when a known catalog is entirely hidden", async () => {
+      const serverId = "@pkgorg/gmail-server";
+      const server = {
+        ...mcpServerManifest({ name: serverId, version: "1.0.0" }),
+        tools: [{ name: "list_messages" }],
+      };
+      await seedPackage({
+        id: serverId,
+        orgId: ctx.orgId,
+        type: "mcp-server",
+        source: "local",
+        draftManifest: server,
+      });
+      await seedPackageVersion({ packageId: serverId, version: "1.0.0", manifest: server });
+
+      const manifest = gmailIntegrationManifest({
+        source: { kind: "local", server: { name: serverId, version: "1.0.0" } },
+        allow_undeclared_tools: true,
+        hidden_tools: ["list_messages"],
+        tools_policy: { list_messages: { required_scopes: { primary: ["read"] } } },
+      });
+      const primary = (manifest.auths as Record<string, Record<string, unknown>>).primary!;
+      primary.default_scopes = ["read"];
+      await seedPackage({
+        id: integrationId,
+        orgId: ctx.orgId,
+        type: "integration",
+        source: "local",
+        draftManifest: manifest,
+      });
+      await seedPackageVersion({ packageId: integrationId, version: "1.0.0", manifest });
+      await seedDraftDeclaring("@pkgorg/publish-wildcard-all-hidden", { tools: "*" });
+
+      const res = await app.request(
+        "/api/packages/agents/@pkgorg/publish-wildcard-all-hidden/versions",
+        {
+          method: "POST",
+          headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+          body: JSON.stringify({}),
+        },
+      );
+
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { errors?: { code: string }[] };
+      expect((body.errors ?? []).map((e) => e.code)).toContain("no_tools_selected");
+    });
+
     it("publish refuses a draft whose declared integration selects no tool", async () => {
       await seedGmailIntegration();
       await seedDraftDeclaring("@pkgorg/publish-empty-tools", { tools: [] });

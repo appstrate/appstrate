@@ -510,10 +510,10 @@ export async function importBundle(
  * A SELF-CONTAINED bundle is judged too. Its integrations are not in the
  * registry yet, so a DB-only validator hit "integration not installed → skip
  * silently" and waved the agent straight into an immutable version. The catalog
- * handed to the validator is therefore `incoming ∪ already-installed`: every
- * manifest the bundle carries, keyed by package id, with the DB as the
- * fallback for whatever the bundle does not bring. Same map covers the
- * mcp-servers a local integration references.
+ * handed to the validator is therefore the post-import
+ * `incoming ∪ already-installed` catalog: every manifest the bundle carries,
+ * keyed by package id, is resolved together with existing versions and
+ * dist-tags. Same map covers the mcp-servers a local integration references.
  */
 async function assertBundleAgentsExposeCallableTools(bundle: Bundle, orgId: string): Promise<void> {
   // Built once for the whole bundle: an agent may reference an integration that
@@ -526,7 +526,10 @@ async function assertBundleAgentsExposeCallableTools(bundle: Bundle, orgId: stri
   const carried = new Map<string, CarriedVersion[]>();
   for (const [identity, pkg] of bundle.packages) {
     const parsed = parsePackageIdentity(identity);
-    if (!parsed) continue;
+    // System packages are authoritative platform inputs. The importer ignores
+    // carried copies below, so letting one participate in validation would
+    // judge a manifest the runtime will never install.
+    if (!parsed || isSystemPackage(parsed.packageId)) continue;
     const versions = carried.get(parsed.packageId) ?? [];
     versions.push({
       version: parsed.version,

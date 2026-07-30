@@ -20,11 +20,19 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage, seedPackageVersion, seedSchedule } from "../../helpers/seed.ts";
-import { applicationPackages, packageDistTags } from "@appstrate/db/schema";
+import { mcpServerManifest } from "../../helpers/integration-manifests.ts";
+import {
+  applicationPackages,
+  packageDistTags,
+  packageVersions,
+  packages,
+} from "@appstrate/db/schema";
+import { and, eq } from "drizzle-orm";
 import {
   auditEmptyIntegrationSelections,
   isReachable,
 } from "../../../src/services/audit-empty-integration-selections.ts";
+import { validateAgentIntegrationSelections } from "../../../src/services/integration-scope-validation.ts";
 
 const INTEGRATION_ID = "@audorg/no-defaults";
 
@@ -142,25 +150,83 @@ describe("auditEmptyIntegrationSelections", () => {
     expect(reachable[0]?.installedIn).toEqual([ctx.defaultAppId]);
   });
 
-  it("an install PINNED to the healthy version is not blocking", async () => {
+  it("an install PINNED to a healthy version can still run the broken draft", async () => {
     const { goodVersionId } = await seedSplitAgent();
     await db
       .insert(applicationPackages)
       .values({ applicationId: ctx.defaultAppId, packageId: AGENT_ID, versionId: goodVersionId });
 
-    expect((await auditEmptyIntegrationSelections()).filter(isReachable)).toHaveLength(0);
+    const reachable = (await auditEmptyIntegrationSelections()).filter(isReachable);
+    expect(reachable).toHaveLength(1);
+    expect(reachable[0]?.artifact).toBe("draft");
+    expect(reachable[0]?.installedIn).toEqual([ctx.defaultAppId]);
+  });
+
+  it("flags a non-empty inherited selection when hidden_tools removes every tool", async () => {
+    const serverId = "@audorg/hidden-server";
+    const serverManifest = {
+      ...mcpServerManifest({ name: serverId, version: "1.0.0" }),
+      tools: [{ name: "list_messages" }],
+    };
+    await seedPackage({
+      id: serverId,
+      orgId: ctx.orgId,
+      type: "mcp-server",
+      source: "local",
+      draftManifest: serverManifest,
+    });
+    await seedPackageVersion({
+      packageId: serverId,
+      version: "1.0.0",
+      manifest: serverManifest,
+    });
+    const baseIntegration = integrationManifest("1.0.0");
+    delete baseIntegration._meta;
+    const hidden = {
+      ...baseIntegration,
+      source: { kind: "local", server: { name: serverId, version: "^1.0.0" } },
+      default_tools: ["list_messages"],
+      hidden_tools: ["list_messages"],
+    };
+    await db.update(packages).set({ draftManifest: hidden }).where(eq(packages.id, INTEGRATION_ID));
+    await db
+      .update(packageVersions)
+      .set({ manifest: hidden })
+      .where(
+        and(eq(packageVersions.packageId, INTEGRATION_ID), eq(packageVersions.version, "1.0.0")),
+      );
+    await seedSplitAgent();
+    await db
+      .insert(applicationPackages)
+      .values({ applicationId: ctx.defaultAppId, packageId: AGENT_ID, versionId: null });
+
+    const validationErrors = await validateAgentIntegrationSelections({
+      manifest: agentManifest(AGENT_ID, "1.1.0"),
+      orgId: ctx.orgId,
+      requireCallableTools: true,
+    });
+    expect(validationErrors.map((e) => e.code)).toContain("no_tools_selected");
+
+    const reachable = (await auditEmptyIntegrationSelections()).filter(isReachable);
+    expect(reachable.map((f) => f.artifact).sort()).toEqual(["1.0.0", "draft"]);
+    expect(reachable.every((f) => f.integrationId === INTEGRATION_ID)).toBe(true);
   });
 
   describe("schedule version_override resolution", () => {
-    async function scheduleWith(versionOverride: string | null): Promise<void> {
-      await seedSchedule({
+    async function scheduleWith(
+      versionOverride: string | null,
+      dependencyOverrides?: Record<string, string>,
+    ): Promise<string> {
+      const schedule = await seedSchedule({
         packageId: AGENT_ID,
         orgId: ctx.orgId,
         applicationId: ctx.defaultAppId,
         userId: ctx.user.id,
         enabled: true,
         ...(versionOverride === null ? {} : { versionOverride }),
+        ...(dependencyOverrides ? { dependencyOverrides } : {}),
       });
+      return schedule.id;
     }
 
     // Absent and "published" both mean the LATEST PUBLISHED version, never the
@@ -248,6 +314,35 @@ describe("auditEmptyIntegrationSelections", () => {
       // neither, and neither finding collects the other's schedule.
       expect(byArtifact.get("draft")?.schedules).toHaveLength(1);
       expect(byArtifact.get("2.0.0")?.schedules).toHaveLength(1);
+    });
+
+    it("judges every schedule with its OWN dependency overrides", async () => {
+      const goodPublishedIntegration = {
+        ...integrationManifest("1.0.0"),
+        default_tools: ["list_messages"],
+      };
+      await db
+        .update(packageVersions)
+        .set({ manifest: goodPublishedIntegration })
+        .where(
+          and(eq(packageVersions.packageId, INTEGRATION_ID), eq(packageVersions.version, "1.0.0")),
+        );
+      await seedPackage({
+        id: AGENT_ID,
+        orgId: ctx.orgId,
+        type: "agent",
+        source: "local",
+        createdBy: ctx.user.id,
+        draftManifest: agentManifest(AGENT_ID, "1.1.0"),
+      });
+
+      const brokenScheduleId = await scheduleWith("draft", { [INTEGRATION_ID]: "draft" });
+      await scheduleWith("draft"); // default `^1` resolves the healthy published integration
+
+      const reachable = (await auditEmptyIntegrationSelections()).filter(isReachable);
+      expect(reachable).toHaveLength(1);
+      expect(reachable[0]?.artifact).toBe("draft");
+      expect(reachable[0]?.schedules.map((s) => s.id)).toEqual([brokenScheduleId]);
     });
   });
 });

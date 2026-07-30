@@ -927,6 +927,76 @@ describe("POST /api/packages/import-bundle — import", () => {
     expect(res.status).toBe(201);
   });
 
+  it("resolves a range against the POST-IMPORT union, not carried versions first", async () => {
+    await seedGateIntegration(); // DB 1.0.0, callable
+    await seedPackageVersion({
+      packageId: gateIntegrationId,
+      version: "1.1.0",
+      manifest: {
+        ...gateIntegrationManifest(),
+        version: "1.1.0",
+        tools_policy: { other_tool: {} },
+      },
+    });
+
+    const agentId = "@importorg/bundle-union-range";
+    const bytes = await selfContainedBundle(
+      gatedAgentManifest(agentId, { tools: ["list_messages"] }),
+      gateIntegrationManifest(), // carried 1.0.0 is callable, but DB 1.1.0 wins `^1`
+    );
+
+    const form = new FormData();
+    form.append("file", new Blob([bytes]), "union-range.afps-bundle");
+    const res = await app.request("/api/packages/import-bundle", {
+      method: "POST",
+      body: form,
+      headers: authHeaders(ctx),
+    });
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { errors?: { code: string }[] };
+    expect((body.errors ?? []).map((e) => e.code)).toContain("no_tools_selected");
+    await assertDbMissing(packages, eq(packages.id, agentId));
+  });
+
+  it("models the `latest` tag after the carried version is imported", async () => {
+    await seedGateIntegration();
+    const [publishedV1] = await db
+      .select({ id: packageVersions.id })
+      .from(packageVersions)
+      .where(
+        and(eq(packageVersions.packageId, gateIntegrationId), eq(packageVersions.version, "1.0.0")),
+      )
+      .limit(1);
+    await db
+      .insert(packageDistTags)
+      .values({ packageId: gateIntegrationId, tag: "latest", versionId: publishedV1!.id });
+
+    const agentId = "@importorg/bundle-future-latest";
+    const agent = gatedAgentManifest(agentId, { tools: ["list_messages"] });
+    (agent.dependencies as { integrations: Record<string, string> }).integrations[
+      gateIntegrationId
+    ] = "latest";
+    const bytes = await selfContainedBundle(agent, {
+      ...gateIntegrationManifest(),
+      version: "2.0.0",
+      tools_policy: { other_tool: {} },
+    });
+
+    const form = new FormData();
+    form.append("file", new Blob([bytes]), "future-latest.afps-bundle");
+    const res = await app.request("/api/packages/import-bundle", {
+      method: "POST",
+      body: form,
+      headers: authHeaders(ctx),
+    });
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { errors?: { code: string }[] };
+    expect((body.errors ?? []).map((e) => e.code)).toContain("no_tools_selected");
+    await assertDbMissing(packages, eq(packages.id, agentId));
+  });
+
   it("refuses a SELF-CONTAINED bundle whose carried integration exposes no tool", async () => {
     // The integration is deliberately NOT seeded — it travels in the bundle.
     const agentId = "@importorg/bundle-self-contained";

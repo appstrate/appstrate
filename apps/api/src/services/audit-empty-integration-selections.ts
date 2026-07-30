@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Pre-deploy audit for the declared-but-empty integration gate.
+ * Pre-deploy audit for the zero-callable integration gate.
  *
  * Finds every agent artifact whose declared integration would expose no
  * callable tool — the state `assertIntegrationExposesTools` turns into a failed
@@ -13,28 +13,24 @@
  *  - It read the integration's `draft_manifest` for `default_tools`, while a run
  *    reads the manifest at the version the agent's pin resolves to. Semver
  *    ranges and dist-tags are not resolvable in SQL.
- *  - It looked only at `package_versions`, so an installed DRAFT (`version_id
- *    IS NULL` — what the editor's Run button executes) was invisible. Live
- *    installs were missed that way.
+ *  - It looked only at `package_versions`, so mutable drafts were invisible
+ *    even though an installed package makes them selector-runnable and the
+ *    editor's Run button explicitly executes the draft.
  *  - It ignored `dependency_overrides`, which can point one dependency at
  *    `draft` per schedule, changing which manifest is judged.
  *
- * This calls the resolvers the runtime calls, so "empty" means here exactly what
- * it will mean at boot. Read-only.
+ * This calls the same callability validator as every freeze point, which in
+ * turn calls the runtime's version and tool-catalog resolvers. Read-only.
  *
  * CLI wrapper: `scripts/audit-empty-integration-selections.ts`.
  */
 
-import { resolveEffectiveToolSelection } from "@appstrate/core/integration";
-import { isToolsWildcard, parseManifestIntegrations } from "@appstrate/core/dependencies";
+import { parseManifestIntegrations } from "@appstrate/core/dependencies";
 import { db } from "@appstrate/db/client";
 import { applicationPackages, packageVersions, packages, schedules } from "@appstrate/db/schema";
 import { eq, and } from "drizzle-orm";
 
-import {
-  resolveRunIntegrationVersions,
-  type IntegrationManifestCache,
-} from "./integration-service.ts";
+import { validateAgentIntegrationSelections } from "./integration-scope-validation.ts";
 import { getLatestVersionInfo, getVersionDetail } from "./package-versions.ts";
 
 export interface Finding {
@@ -43,17 +39,19 @@ export interface Finding {
   artifact: string;
   integrationId: string;
   reason: string;
-  /** Applications where this exact artifact is installed and therefore runnable. */
+  /** Applications where this package is installed, making this artifact selector-runnable. */
   installedIn: string[];
   /** Enabled schedules pointed at it, with their next fire time. */
   schedules: Array<{ id: string; nextRunAt: string | null }>;
 }
 
 /**
- * Which integrations of `agentManifest` resolve to an empty effective
- * selection. Mirrors `selectsNoCallableTool` in
- * `apps/api/src/services/integration-scope-validation.ts` — kept as a call into
- * the same two core helpers rather than a reimplementation.
+ * Which integrations of `agentManifest` resolve to zero callable tools.
+ *
+ * This deliberately calls the freeze-point validator rather than reimplementing
+ * its predicate. Selection length is insufficient: `default_tools: ["x"]`
+ * where `x` is hidden or absent from the resolved mcp-server is non-empty but
+ * still aborts at boot.
  */
 async function emptySelections(
   agentManifest: Record<string, unknown>,
@@ -63,36 +61,26 @@ async function emptySelections(
   const declared = parseManifestIntegrations(agentManifest);
   if (declared.length === 0) return [];
 
-  const cache: IntegrationManifestCache = new Map();
-  await resolveRunIntegrationVersions({
-    agentManifest,
+  const errors = await validateAgentIntegrationSelections({
+    manifest: agentManifest,
     orgId,
+    requireCallableTools: true,
     ...(dependencyOverrides ? { dependencyOverrides } : {}),
-    manifestCache: cache,
   });
-
-  const out: Array<{ integrationId: string; reason: string }> = [];
-  for (const entry of declared) {
-    const pending = cache.get(entry.id);
-    if (!pending) {
-      // Unresolvable pin — a different, louder failure (`dependency_unresolved`,
-      // 422) already owns this case. Not this gate's finding.
-      continue;
-    }
-    const res = await pending;
-    if (!res.ok) continue;
-    const effective = resolveEffectiveToolSelection(entry.tools, res.manifest);
-    if (isToolsWildcard(effective)) continue;
-    if (effective !== undefined && effective.length > 0) continue;
-    out.push({
+  const noToolsFields = new Set(
+    errors.filter((e) => e.code === "no_tools_selected").map((e) => e.field),
+  );
+  return declared
+    .filter((entry) => noToolsFields.has(`integrations_configuration.${entry.id}.tools`))
+    .map((entry) => ({
       integrationId: entry.id,
       reason:
         entry.tools === undefined
-          ? "no selection, and the resolved integration declares no default_tools"
-          : "explicit empty tool selection",
-    });
-  }
-  return out;
+          ? "inherited selection exposes no callable tool"
+          : Array.isArray(entry.tools) && entry.tools.length === 0
+            ? "explicit empty tool selection"
+            : "selected tools are unavailable or hidden",
+    }));
 }
 
 /**
@@ -122,11 +110,11 @@ async function scheduleArtifactLabel(
   const sel = versionOverride?.trim() || undefined;
   if (sel === "draft") return "draft";
   if (sel === undefined || sel === "published") {
-    const latest = await getLatestVersionInfo(packageId).catch(() => null);
+    const latest = await getLatestVersionInfo(packageId);
     return latest?.version ?? null;
   }
   // Exact version, dist-tag, or semver range — one resolver, same as the run.
-  const detail = await getVersionDetail(packageId, sel).catch(() => null);
+  const detail = await getVersionDetail(packageId, sel);
   return detail?.version ?? null;
 }
 
@@ -155,7 +143,6 @@ export async function auditEmptyIntegrationSelections(): Promise<Finding[]> {
 
     const versions = await db
       .select({
-        id: packageVersions.id,
         version: packageVersions.version,
         manifest: packageVersions.manifest,
       })
@@ -167,17 +154,14 @@ export async function auditEmptyIntegrationSelections(): Promise<Finding[]> {
     const manifestByLabel = new Map<string, Record<string, unknown>>();
     const draftManifest = asManifest(agent.draftManifest);
     if (draftManifest) manifestByLabel.set("draft", draftManifest);
-    const versionIdByLabel = new Map<string, number>();
     for (const v of versions) {
       const m = asManifest(v.manifest);
       if (m) manifestByLabel.set(v.version, m);
-      versionIdByLabel.set(v.version, v.id);
     }
 
     const installs = await db
       .select({
         applicationId: applicationPackages.applicationId,
-        versionId: applicationPackages.versionId,
       })
       .from(applicationPackages)
       .where(eq(applicationPackages.packageId, agent.id));
@@ -201,10 +185,13 @@ export async function auditEmptyIntegrationSelections(): Promise<Finding[]> {
     }
     const consumers: Consumer[] = [];
     for (const i of installs) {
-      // A pinned install names its version; an unpinned one (`version_id IS
-      // NULL`) runs the DRAFT — that is the editor's Run button.
-      const label = i.versionId === null ? "draft" : labelForVersionId(versions, i.versionId);
-      if (label) consumers.push({ label, overrides: null, application: i.applicationId });
+      // Installation grants access to the PACKAGE, not one immutable artifact:
+      // `/run?version=` accepts draft, exact, tag and range, and the editor's
+      // Run button explicitly selects the draft. A version_id is a default pin,
+      // not a permission boundary, so every artifact is reachable.
+      for (const label of manifestByLabel.keys()) {
+        consumers.push({ label, overrides: null, application: i.applicationId });
+      }
     }
     for (const sc of agentSchedules) {
       const label = await scheduleArtifactLabel(agent.id, sc.versionOverride);
@@ -260,13 +247,6 @@ export async function auditEmptyIntegrationSelections(): Promise<Finding[]> {
 function asManifest(value: unknown): Record<string, unknown> | null {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
   return value as Record<string, unknown>;
-}
-
-function labelForVersionId(
-  versions: ReadonlyArray<{ id: number; version: string }>,
-  versionId: number,
-): string | null {
-  return versions.find((v) => v.id === versionId)?.version ?? null;
 }
 
 /** A finding nothing can reach is informational; a reachable one blocks. */

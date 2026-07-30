@@ -320,10 +320,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   registry yet, so a DB-only validator hit "not installed → skip silently" and
   waved the agent into an immutable version; the catalog is now
   `incoming ∪ already-installed`, and the agent's `dependencies.integrations`
-  range is resolved against the versions the bundle actually carries — keying by
-  package id alone would judge an agent pinning `^1` against a carried `2.0.0`
-  it will never run. The same lookup covers the mcp-servers a local integration
-  references.
+  spec is resolved against the catalog that will exist after import — including
+  forward-only version creation, yanks, dist-tags and `latest` movement. Keying
+  by package id alone, or preferring any carried match over a newer installed
+  one, would judge a manifest the runtime will never use. The same lookup covers
+  the mcp-servers a local integration references; system packages remain
+  canonical even when a bundle carries a same-named manifest.
 
   The gate also tests CALLABILITY, not selection length. `default_tools: ["x"]`
   where `x` sits in `hidden_tools`, or is absent from the resolved mcp-server, is
@@ -354,9 +356,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   when at least one is installed or scheduled so it can gate a rollout. It calls
   the runtime's own resolvers rather than approximating them in SQL — a SQL
   version shipped first and was wrong three ways: it read the integration's
-  draft `default_tools` instead of resolving the agent's pin, it ignored
-  installed DRAFTS (`version_id IS NULL`, what the editor's Run button
-  executes), and it ignored `dependency_overrides`.
+  draft `default_tools` instead of resolving the agent's pin, it ignored mutable
+  drafts even though an installed package makes every artifact selector-runnable
+  (and the editor explicitly runs the draft), and it ignored
+  `dependency_overrides`. The audit now calls the same callability validator as
+  publish/import, including the resolved nested mcp-server catalog and
+  `hidden_tools`.
 
   This also corrects a documented falsehood — `tools` absent and `tools: []`
   were described as equivalent in the docs, the `ManifestIntegrationEntry`

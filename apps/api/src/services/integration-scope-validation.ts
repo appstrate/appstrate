@@ -35,8 +35,9 @@
  */
 
 import { isToolsWildcard, parseManifestIntegrations } from "@appstrate/core/dependencies";
-import { matchVersion } from "@appstrate/core/semver";
+import { resolveVersionFromCatalog } from "@appstrate/core/semver";
 import type { ManifestIntegrationEntry } from "@appstrate/core/dependencies";
+import { planCreateVersionOutcome } from "@appstrate/core/version-policy";
 import {
   canonicalizeApiToolName,
   resolveEffectiveToolSelection,
@@ -46,6 +47,9 @@ import {
 import type { IntegrationManifest } from "@appstrate/core/integration";
 import type { McpServerManifest } from "@appstrate/core/mcp-server";
 import type { ValidationFieldError } from "@appstrate/core/api-errors";
+import { db } from "@appstrate/db/client";
+import { packageDistTags, packageVersions, packages } from "@appstrate/db/schema";
+import { and, eq, isNull, or } from "drizzle-orm";
 
 import {
   getIntegration,
@@ -63,24 +67,92 @@ export interface CarriedVersion {
 }
 
 /**
- * Pick the carried version that satisfies `range`, or `null` when the bundle
- * carries this package but no version of it matches — a MISS, which falls
- * through to the DB rather than being treated as an absence of the package.
+ * Resolve the package manifest from the catalog that will exist AFTER a
+ * successful bundle import.
  *
- * An exact-version range is handled by `matchVersion` too (semver treats
- * `"1.2.3"` as the range `=1.2.3`), so there is no separate exact path to keep
- * in sync.
+ * This cannot be "carried first, DB on miss": ranges resolve over the UNION,
+ * and importing a new stable version may move the `latest` dist-tag. Existing
+ * versions remain canonical (the importer reuses them without overwriting
+ * bytes); new carried versions are planned in bundle order through the same
+ * forward-only policy the importer calls.
  */
-function pickCarried(
-  carried: ReadonlyArray<CarriedVersion> | undefined,
-  range: string,
-): CarriedVersion | null {
-  if (!carried || carried.length === 0) return null;
-  const winner = matchVersion(
-    carried.map((c) => c.version),
-    range,
-  );
-  return winner ? (carried.find((c) => c.version === winner) ?? null) : null;
+async function resolvePostImportManifest(
+  packageId: string,
+  versionSpec: string,
+  orgId: string,
+  carried: ReadonlyArray<CarriedVersion>,
+): Promise<Record<string, unknown> | null> {
+  const existing = await db
+    .select({
+      id: packageVersions.id,
+      version: packageVersions.version,
+      yanked: packageVersions.yanked,
+      manifest: packageVersions.manifest,
+    })
+    .from(packageVersions)
+    .innerJoin(packages, eq(packages.id, packageVersions.packageId))
+    .where(
+      and(
+        eq(packageVersions.packageId, packageId),
+        or(eq(packages.orgId, orgId), isNull(packages.orgId)),
+      ),
+    );
+  const dbTags = await db
+    .select({ tag: packageDistTags.tag, versionId: packageDistTags.versionId })
+    .from(packageDistTags)
+    .where(eq(packageDistTags.packageId, packageId));
+
+  const catalog = existing.map((v) => ({ id: v.id, version: v.version, yanked: v.yanked }));
+  const manifestById = new Map<number, Record<string, unknown>>();
+  const existingByVersion = new Map(existing.map((v) => [v.version, v]));
+  for (const v of existing) {
+    const manifest = asManifest(v.manifest);
+    if (manifest) manifestById.set(v.id, manifest);
+  }
+
+  const tags = dbTags.filter((t) => manifestById.has(t.versionId));
+  let currentLatestVersion =
+    catalog.find((v) => v.id === tags.find((t) => t.tag === "latest")?.versionId)?.version ?? null;
+  const plannedVersions = existing.map((v) => v.version);
+  let syntheticId = -1;
+
+  for (const candidate of carried) {
+    // An existing version is immutable and reused verbatim. A divergent
+    // carried copy is rejected by conflict detection later; it never replaces
+    // the DB manifest in a successful import.
+    if (existingByVersion.has(candidate.version)) continue;
+
+    const outcome = planCreateVersionOutcome(
+      candidate.version,
+      plannedVersions,
+      currentLatestVersion,
+    );
+    if (outcome.action !== "insert") {
+      // The real import will reject at this point, before any agent can run.
+      // Stop simulating rather than invent a catalog from versions that would
+      // never be reached.
+      break;
+    }
+
+    const id = syntheticId--;
+    catalog.push({ id, version: candidate.version, yanked: false });
+    manifestById.set(id, candidate.manifest);
+    plannedVersions.push(candidate.version);
+    if (outcome.shouldUpdateLatest) {
+      const currentLatest = tags.find((t) => t.tag === "latest");
+      if (currentLatest) currentLatest.versionId = id;
+      else tags.push({ tag: "latest", versionId: id });
+      currentLatestVersion = candidate.version;
+    }
+  }
+
+  const resolvedId = resolveVersionFromCatalog(versionSpec, catalog, tags);
+  return resolvedId === null ? null : (manifestById.get(resolvedId) ?? null);
+}
+
+function asManifest(value: unknown): Record<string, unknown> | null {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
 }
 
 export interface ValidateAgentIntegrationSelectionsInput {
@@ -99,6 +171,8 @@ export interface ValidateAgentIntegrationSelectionsInput {
    * — publishing a version, and ZIP/GitHub/`.afps-bundle` import.
    */
   requireCallableTools?: boolean;
+  /** Per-run integration pins, used by the pre-deploy schedule audit. */
+  dependencyOverrides?: Record<string, string>;
   /**
    * Manifests travelling WITH the agent — the packages of an incoming
    * `.afps-bundle`, keyed by package id, each carrying EVERY version the bundle
@@ -109,15 +183,15 @@ export interface ValidateAgentIntegrationSelectionsInput {
    * integration is not in the registry yet, the DB lookup misses, and
    * "not installed → skip silently" waved the agent through into an immutable
    * version. The catalog a bundle must be judged against is
-   * `incoming ∪ already-installed`, not the DB alone.
+   * `incoming ∪ already-installed`, not the DB alone. Resolution models the
+   * post-import catalog, including yanks, dist-tags and `latest` movement.
    *
    * KEYED BY ID BUT VERSIONED. A bundle can legitimately carry several versions
-   * of one package, and the agent's `dependencies.integrations.<id>` range picks
+   * of one package, and the agent's `dependencies.integrations.<id>` spec picks
    * one. Flattening to a single manifest per id — which the first version of
    * this did — lets an agent pinning `^1` be judged against a carried `2.0.0`
    * and then run the `1.2.0` the DB resolves: a false verdict in both
-   * directions. The pin is resolved against these versions with
-   * {@link matchVersion}, and only a MISS falls through to the DB.
+   * directions. Carried and existing versions are resolved as one catalog.
    */
   extraManifests?: ReadonlyMap<string, ReadonlyArray<CarriedVersion>>;
 }
@@ -143,7 +217,7 @@ function selectsNoCallableTool(
   surfaceIsKnown: boolean,
 ): boolean {
   const effective = resolveEffectiveToolSelection(entry.tools, integrationManifest);
-  if (isToolsWildcard(effective)) return false;
+  if (isToolsWildcard(effective)) return surfaceIsKnown && catalog.length === 0;
   if (effective === undefined || effective.length === 0) return true;
   // Intersect only when the catalog is KNOWABLE here. A remote integration that
   // enumerates nothing in its manifest discovers its tools at connect time, so
@@ -184,11 +258,17 @@ function selectsNoCallableTool(
 async function resolvePinnedIntegrationManifests(
   manifest: Record<string, unknown>,
   orgId: string,
+  dependencyOverrides?: Record<string, string>,
 ): Promise<Map<string, IntegrationManifest>> {
   const cache: IntegrationManifestCache = new Map();
   // Return value ignored: every id that DID resolve is seeded into the cache
   // either way.
-  await resolveRunIntegrationVersions({ agentManifest: manifest, orgId, manifestCache: cache });
+  await resolveRunIntegrationVersions({
+    agentManifest: manifest,
+    orgId,
+    ...(dependencyOverrides ? { dependencyOverrides } : {}),
+    manifestCache: cache,
+  });
   const resolved = new Map<string, IntegrationManifest>();
   for (const [id, pending] of cache) {
     const res = await pending;
@@ -211,7 +291,13 @@ async function resolvePinnedIntegrationManifests(
 export async function validateAgentIntegrationSelections(
   input: ValidateAgentIntegrationSelectionsInput,
 ): Promise<ValidationFieldError[]> {
-  const { manifest, orgId, requireCallableTools = false, extraManifests } = input;
+  const {
+    manifest,
+    orgId,
+    requireCallableTools = false,
+    dependencyOverrides,
+    extraManifests,
+  } = input;
   if (manifest.type !== "agent") return [];
 
   const integrations = parseManifestIntegrations(manifest);
@@ -237,7 +323,7 @@ export async function validateAgentIntegrationSelections(
   const configuredIds = new Set(configuredEntries.map((e) => e.id));
 
   const pinnedManifests = requireCallableTools
-    ? await resolvePinnedIntegrationManifests(manifest, orgId)
+    ? await resolvePinnedIntegrationManifests(manifest, orgId, dependencyOverrides)
     : undefined;
 
   // Sequential DB lookups keep the implementation simple and the
@@ -245,11 +331,16 @@ export async function validateAgentIntegrationSelections(
   // for stable ordering of errors in the response.
   const errors: ValidationFieldError[] = [];
   for (const entry of inspected) {
-    // Resolve the agent's OWN pin against the versions the bundle carries.
-    const carriedEntry = pickCarried(extraManifests?.get(entry.id), entry.version);
-    const carried = carriedEntry?.manifest;
-    const integration = carried
-      ? { manifest: carried as unknown as IntegrationManifest }
+    // Resolve the agent's OWN pin against the catalog that will exist after a
+    // successful import. System ids are never present in `extraManifests`:
+    // their carried bytes are ignored by the importer, so the DB copy remains
+    // canonical here too.
+    const carriedVersions = extraManifests?.get(entry.id);
+    const postImportManifest = carriedVersions
+      ? await resolvePostImportManifest(entry.id, entry.version, orgId, carriedVersions)
+      : null;
+    const integration = postImportManifest
+      ? { manifest: postImportManifest as unknown as IntegrationManifest }
       : await getIntegration(orgId, entry.id);
     if (!integration) {
       // Integration not visible / not installed — defer to run-time
@@ -268,8 +359,8 @@ export async function validateAgentIntegrationSelections(
     // published cleanly and then registered nothing at boot — the exact abort
     // this validator exists to prevent — and the mirror case refused a publish
     // that would have run fine.
-    const pinnedManifest = carried
-      ? (carried as unknown as IntegrationManifest)
+    const pinnedManifest = postImportManifest
+      ? (postImportManifest as unknown as IntegrationManifest)
       : pinnedManifests?.get(entry.id);
     const judgedManifest = pinnedManifest ?? integration.manifest;
 
@@ -278,6 +369,7 @@ export async function validateAgentIntegrationSelections(
     // needs it too, because "non-empty selection" and "callable selection" are
     // different properties and only the second one is the boot contract.
     let mcpServerTools: ReadonlyArray<{ name: string; description?: string }> | undefined;
+    let mcpServerCatalogKnown = false;
     const localRef = getLocalServerRef(judgedManifest);
     if (localRef) {
       // Same rule as the integration manifest above, one level deeper: at a
@@ -287,13 +379,19 @@ export async function validateAgentIntegrationSelections(
       // reads `packages.draft_manifest`, which the runtime never does, so a tool
       // present only in the mcp-server author's draft used to pass publish and
       // then register nothing at boot.
-      // Same rule one level deeper: `source.server.version` is the range here.
-      const carriedServer = pickCarried(
-        extraManifests?.get(localRef.name),
-        localRef.version,
-      )?.manifest;
-      const mcpServer = carriedServer
-        ? (carriedServer as unknown as McpServerManifest)
+      // Same post-import union one level deeper: `source.server.version` is
+      // resolved against the carried + existing mcp-server versions.
+      const carriedServerVersions = extraManifests?.get(localRef.name);
+      const postImportServer = carriedServerVersions
+        ? await resolvePostImportManifest(
+            localRef.name,
+            localRef.version,
+            orgId,
+            carriedServerVersions,
+          )
+        : null;
+      const mcpServer = postImportServer
+        ? (postImportServer as unknown as McpServerManifest)
         : requireCallableTools
           ? await resolveMcpServerForSpawn(localRef.name, orgId, localRef.version).then((r) =>
               r.ok ? r.manifest : null,
@@ -302,6 +400,7 @@ export async function validateAgentIntegrationSelections(
       if (mcpServer) {
         const t = (mcpServer as { tools?: Array<{ name?: unknown; description?: unknown }> }).tools;
         if (Array.isArray(t)) {
+          mcpServerCatalogKnown = true;
           mcpServerTools = t
             .filter((e): e is { name: string; description?: string } => typeof e?.name === "string")
             .map((e) => ({
@@ -323,7 +422,7 @@ export async function validateAgentIntegrationSelections(
     // or when the referenced mcp-server resolved and enumerated tools. Absent
     // both, the surface is discovered at runtime and must not be second-guessed.
     const surfaceIsKnown =
-      (mcpServerTools?.length ?? 0) > 0 ||
+      mcpServerCatalogKnown ||
       Object.keys((judgedManifest as { tools_policy?: Record<string, unknown> }).tools_policy ?? {})
         .length > 0;
 
