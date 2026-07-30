@@ -1545,9 +1545,29 @@ export function createPackagesRouter() {
 
   // --- Shared import logic (used by /import and /import-github) ---
 
+  /** A parsed package plus the exact bytes that must be published for it. */
+  interface ParsedImport {
+    parsed: ReturnType<typeof parsePackageZip>;
+    /**
+     * Bytes to store as the version's content — NOT necessarily the upload.
+     * INVARIANT: this buffer and `parsed.files` declare the same
+     * `manifest.json`. Readers of a published artifact take the manifest from
+     * the archive (`extractRootFromAfps`), so a disagreement publishes a
+     * version that cannot be assembled.
+     */
+    artifact: Buffer;
+  }
+
   /**
    * Shared ZIP parse for `POST /import` (operator uploads a file) and
    * `POST /import-github` (fetch a repo directory).
+   *
+   * Returns the artifact with the parse because only this function knows
+   * whether they are the same bytes: an ordinary AFPS parse publishes the
+   * upload verbatim (re-zipping would drop whatever the parser doesn't model —
+   * a detached signature above all — and invalidate any signature over the
+   * original bytes), while the skill-only fallback must rebuild the archive
+   * because it synthesizes the `manifest.json` the upload lacks.
    *
    * WRITE direction — retired/unknown `runtime_tools` ids REJECT. Both routes
    * are author input, not content the platform already holds:
@@ -1572,17 +1592,22 @@ export function createPackagesRouter() {
    * Passed explicitly rather than left to the default so the choice reads as
    * deliberate at the call site.
    */
-  async function parseZipWithSkillFallback(
-    zipBytes: Uint8Array,
-    orgSlug: string,
-  ): Promise<ReturnType<typeof parsePackageZip>> {
+  async function parseZipWithSkillFallback(upload: Buffer, orgSlug: string): Promise<ParsedImport> {
+    const zipBytes = new Uint8Array(upload);
     try {
-      return parsePackageZip(zipBytes, { retiredRuntimeTools: "reject" });
+      const parsed = parsePackageZip(zipBytes, { retiredRuntimeTools: "reject" });
+      return { parsed, artifact: upload };
     } catch (err) {
       if (err instanceof PackageZipError && err.code === "MISSING_MANIFEST") {
         const result = await tryParseSkillOnlyZip(zipBytes, orgSlug);
         if (result.ok) {
-          return result.parsed;
+          // `result.parsed.files` is the upload's entries (wrapper prefix
+          // stripped) plus the synthesized `manifest.json`. `zipArtifact` is
+          // deterministic, so identical content still yields identical bytes.
+          return {
+            parsed: result.parsed,
+            artifact: Buffer.from(zipArtifact(result.parsed.files)),
+          };
         }
         if (result.reason === "unchanged") {
           throw conflict("skill_unchanged", "This skill already exists with the same content");
@@ -1606,10 +1631,16 @@ export function createPackagesRouter() {
     }
   }
 
+  /**
+   * Persist a parsed import. `artifact` is the {@link ParsedImport} buffer, not
+   * the raw upload: it is both what gets stored and what every integrity
+   * comparison below is made against, so the two cannot disagree about which
+   * bytes this version is.
+   */
   async function handleImport(
     c: Context<AppEnv>,
     parsed: ReturnType<typeof parsePackageZip>,
-    buffer: Buffer,
+    artifact: Buffer,
     force: boolean,
     source: "zip" | "github",
   ) {
@@ -1682,7 +1713,7 @@ export function createPackagesRouter() {
       if (!force && importedVersion) {
         const existingVer = await getVersionForDownload(packageId, importedVersion);
         if (existingVer) {
-          const importedIntegrity = computeIntegrity(new Uint8Array(buffer));
+          const importedIntegrity = computeIntegrity(new Uint8Array(artifact));
           if (existingVer.integrity !== importedIntegrity) {
             throw conflict(
               "integrity_mismatch",
@@ -1727,7 +1758,7 @@ export function createPackagesRouter() {
         userId: user.id,
         content,
         files,
-        zipBuffer: buffer,
+        zipBuffer: artifact,
       });
     } catch (err) {
       const message = getErrorMessage(err);
@@ -1765,12 +1796,12 @@ export function createPackagesRouter() {
     if (existing && force && importedVersionForReplace) {
       const existingVer = await getVersionForDownload(packageId, importedVersionForReplace);
       if (existingVer) {
-        const importedIntegrity = computeIntegrity(new Uint8Array(buffer));
+        const importedIntegrity = computeIntegrity(new Uint8Array(artifact));
         if (existingVer.integrity !== importedIntegrity) {
           await replaceVersionContent({
             packageId,
             version: importedVersionForReplace,
-            zipBuffer: buffer,
+            zipBuffer: artifact,
             manifest: manifest as Record<string, unknown>,
           });
         }
@@ -1893,12 +1924,11 @@ export function createPackagesRouter() {
       throw invalidRequest("Only .afps and .zip files are accepted");
     }
 
-    const buffer = Buffer.from(await file.arrayBuffer());
-    const zipBytes = new Uint8Array(buffer);
+    const upload = Buffer.from(await file.arrayBuffer());
 
-    const parsed = await parseZipWithSkillFallback(zipBytes, c.get("orgSlug"));
+    const { parsed, artifact } = await parseZipWithSkillFallback(upload, c.get("orgSlug"));
 
-    return handleImport(c, parsed, buffer, c.req.query("force") === "true", "zip");
+    return handleImport(c, parsed, artifact, c.req.query("force") === "true", "zip");
   });
 
   // POST /api/packages/import-github — import a package from a GitHub URL
@@ -1920,11 +1950,12 @@ export function createPackagesRouter() {
       throw err;
     }
 
-    const buffer = Buffer.from(zipBytes);
+    const { parsed, artifact } = await parseZipWithSkillFallback(
+      Buffer.from(zipBytes),
+      c.get("orgSlug"),
+    );
 
-    const parsed = await parseZipWithSkillFallback(zipBytes, c.get("orgSlug"));
-
-    return handleImport(c, parsed, buffer, false, "github");
+    return handleImport(c, parsed, artifact, false, "github");
   });
 
   // GET /api/packages/:scope/:name/:version/download — download a versioned package ZIP
