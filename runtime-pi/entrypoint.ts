@@ -837,6 +837,9 @@ function buildPiRunner(): PiRunner {
     agentDir: "/tmp/pi-agent",
     extensionFactories,
     authStoragePath: "/tmp/pi-auth/auth.json",
+    // The sidecar's /llm route is HTTP/SSE-only: Pi's "auto" would first
+    // probe it with a WebSocket GET (405). No-sidecar runs keep the auto default.
+    ...(sidecarUrl ? { transport: "sse" as const } : {}),
     ...(declaredRuntimeTools.includes("output") ? { terminalTools: ["output"] } : {}),
   });
 }
