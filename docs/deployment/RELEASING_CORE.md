@@ -67,22 +67,22 @@ unbumped consumer does not stay quiet, it blocks the next publish.
 block the publish under the default `fail` policy; `warn` reports them without
 blocking, `off` skips the check entirely.
 
-| Consumer state                              | Verdict                                 |
-| ------------------------------------------- | --------------------------------------- |
-| Major mismatch                              | fail                                    |
-| Exactly one major behind, **at an `X.0.0`** | warn (see step 2)                       |
-| ≥ 2 minors behind                           | fail                                    |
-| 1 minor behind                              | warn                                    |
-| In sync, or patch-behind                    | ok                                      |
-| Ahead within the same major                 | ok — logged as `in sync`                |
-| Fetch error (403, rate limit, outage)       | fail — "could not verify" is a failure  |
-| 404 on the path                             | logged, counted as nothing              |
-| No `@appstrate/core` in the merged deps     | logged, counted as nothing              |
-| Unparsable range                            | logged, counted as nothing — not a warn |
+| Consumer state                                  | Verdict                                 |
+| ----------------------------------------------- | --------------------------------------- |
+| Major mismatch                                  | fail                                    |
+| Exactly one major behind, **at an `X.0.0`**     | warn (see step 2)                       |
+| ≥ 2 minors behind                               | fail                                    |
+| 1 minor behind                                  | warn                                    |
+| In sync, or patch-behind                        | ok                                      |
+| Ahead within the same major                     | ok — logged as `in sync`                |
+| Fetch error (including 404, rate limit, outage) | fail under `fail`; warning under `warn` |
+| No `@appstrate/core` in the merged deps         | informational log; not counted          |
+| Unparsable range                                | fail under `fail`; warning under `warn` |
 
-A clean run prints `Summary: 0 failure(s), 0 warning(s)` — not proof every
-consumer was assessed: the last three rows produce it too, and an unparsable
-range leaves a listed consumer unassessed. Read the per-consumer lines above it.
+A clean run prints `Summary: 0 failure(s), 0 warning(s)`. It no longer hides a
+failed fetch or an unparsable range: both are counted. It can still include an
+informational "does not depend on `@appstrate/core`" line, so read the
+per-consumer output too.
 
 **It is a drift alarm, not a compatibility guard.** Publishing a new major
 breaks no consumer at install time — a `^2` range keeps resolving 2.x. What the
@@ -100,24 +100,19 @@ _cancelled_ job forces a bump. Never re-point the tag at a new commit.
 
 Both consumers are private, so the repository secret
 **`CONSUMER_LOCKSTEP_TOKEN`** must hold a PAT or GitHub App token with
-`contents:read` on both. Without it the gate passes having verified **nothing**
-— the comment above the gate step in `publish-core.yml` explains the mechanism.
-The secret was added on 2026-07-28; treat any green run from before that date as
-unverified.
-
-The assert step guarding it only tests that the secret is a non-empty string. It
-never calls the API, so a token that still exists but has lost `contents:read`
-on a consumer passes the assert and leaves the gate silently inert (#1041).
+`contents:read` on both. There is no separate preflight and no fallback token:
+the script checks capability with the real contents requests. An absent token or
+a token that cannot read a consumer makes that fetch fail. The strict `fail`
+policy blocks the publish, explicit `warn` reports the failed reads and
+continues, and `off` skips the check before any request.
 
 ## Bypassing — deliberate and auditable
 
 Set the repository **variable** `CONSUMER_DRIFT_POLICY` to `warn` or `off`, and
-**delete it again once the publish is through**. It relaxes both the assert step
-and the gate.
+**delete it again once the publish is through**. `warn` reports without
+blocking; `off` skips the gate entirely.
 
-Unset, the policy is `fail` — and so is any unrecognized value, **in the
-script**: `resolvePolicy` coerces a typo, or wrong case like `FAIL`, back to
-`fail` with a warning. The workflow's assert step does not share that logic — it
-compares the raw string against `"fail"` literally and case-sensitively, so
-`CONSUMER_DRIFT_POLICY=FAIL` takes its warn branch and exits 0 while the script
-still treats the same value as `fail` (#1041).
+The script is the single policy resolver. Only the exact lowercase values
+`warn` and `off` bypass blocking. An absent or unrecognized value — including
+wrong case such as `FAIL`, `WARN` or `OFF` — resolves to `fail`; unrecognized
+values also emit a warning.

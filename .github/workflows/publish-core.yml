@@ -104,77 +104,17 @@ jobs:
             exit 1
           fi
 
-      # ── Precondition for the lockstep gate below ────────────────────────────
       # Release procedure (ordering, bypass, token): docs/deployment/RELEASING_CORE.md
       #
-      # `check-consumer-versions.ts` reads two consumer repos through the
-      # GitHub contents API. BOTH ARE PRIVATE (cloud, connect-helper).
-      # `secrets.GITHUB_TOKEN` is scoped to
-      # THIS repo only, so for a private consumer the API answers 404 — and the
-      # script treats 404 as "not present, skipping" (a legitimate outcome for a
-      # repo that genuinely has no package.json at that path, so the script
-      # cannot tell the two apart).
-      #
-      # Net effect without a cross-repo token: the gate prints
-      # "0 failure(s), 0 warning(s)" and passes having verified NOTHING. That is
-      # worse than having no gate at all — a fail-closed check that had never
-      # once closed. Make the missing precondition loud instead.
-      #
-      # This step checks PRESENCE, which is not the same as CAPABILITY — and
-      # the difference bit on the core@6.1.0 release. The secret was present
-      # (added 2026-07-28) so this step passed, but the token could not read
-      # either private consumer; both 404'd, and the script logged them as
-      # "not present, skipping" and printed `0 failure(s)`. Presence was
-      # verified, capability never was.
-      #
-      # Capability is now enforced where it can actually be observed, in
-      # `check-consumer-versions.ts`: a 404 on a listed consumer throws instead
-      # of returning null, so it lands in the fail-closed catch. This step is
-      # still worth keeping — it names the missing precondition before the
-      # script runs, which is a clearer error than a fetch failure — but the
-      # gate no longer DEPENDS on it being right.
-      #
-      # Bypassing stays possible, but it must be a deliberate act (set the repo
-      # variable CONSUMER_DRIFT_POLICY to `warn` or `off`), never the accident
-      # of an absent secret.
-      - name: Assert the lockstep gate can actually run
-        working-directory: .
-        env:
-          LOCKSTEP_TOKEN: ${{ secrets.CONSUMER_LOCKSTEP_TOKEN }}
-          CONSUMER_DRIFT_POLICY: ${{ vars.CONSUMER_DRIFT_POLICY || 'fail' }}
-        run: |
-          if [ -n "$LOCKSTEP_TOKEN" ]; then
-            echo "CONSUMER_LOCKSTEP_TOKEN is set — the lockstep gate can read the private consumer repos."
-            exit 0
-          fi
-          MSG="CONSUMER_LOCKSTEP_TOKEN is not set. Every consumer repo (appstrate/cloud, appstrate/connect-helper) is private, so the fallback GITHUB_TOKEN gets a 404 on both of them and no consumer version can be read."
-          if [ "$CONSUMER_DRIFT_POLICY" = "fail" ]; then
-            echo "::error title=Consumer lockstep gate cannot run::${MSG} Fix: add a repository secret CONSUMER_LOCKSTEP_TOKEN (PAT or GitHub App token with contents:read on those repos). To publish anyway, set the repository variable CONSUMER_DRIFT_POLICY to 'warn' or 'off' — a deliberate, auditable bypass."
-            {
-              echo "### ❌ Consumer lockstep gate: NOT EXECUTED"
-              echo ""
-              echo "${MSG}"
-            } >> "$GITHUB_STEP_SUMMARY"
-            exit 1
-          fi
-          echo "::warning title=Consumer lockstep gate NOT executed::${MSG} CONSUMER_DRIFT_POLICY=${CONSUMER_DRIFT_POLICY} — publishing without verifying consumer versions."
-          {
-            echo "### ⚠️ Consumer lockstep gate: NOT EXECUTED"
-            echo ""
-            echo "${MSG}"
-            echo ""
-            echo "Bypassed on purpose via \`CONSUMER_DRIFT_POLICY=${CONSUMER_DRIFT_POLICY}\`."
-          } >> "$GITHUB_STEP_SUMMARY"
-
+      # Both consumers are private, so there is deliberately no GITHUB_TOKEN
+      # fallback. The script handles every non-2xx according to policy. Only
+      # exact `warn` and `off` values bypass; unknown values fail closed.
       - name: Check consumer-repo lockstep
         working-directory: .
         env:
-          # No `|| secrets.GITHUB_TOKEN` fallback: it cannot read the private
-          # consumer repos, and silently degrading to it is exactly what made
-          # this gate inert. The step above guarantees this is non-empty unless
-          # CONSUMER_DRIFT_POLICY was deliberately relaxed.
           GITHUB_TOKEN: ${{ secrets.CONSUMER_LOCKSTEP_TOKEN }}
-          # `fail` blocks publish if any consumer is >= 2 minors behind.
+          # `fail` blocks on any blocking drift verdict, an unreadable consumer,
+          # or an unparsable range. One-major-behind at X.0.0 remains a warning.
           # Set to `warn` for an emergency hotfix that intentionally outpaces
           # consumers, or `off` to bypass entirely.
           CONSUMER_DRIFT_POLICY: ${{ vars.CONSUMER_DRIFT_POLICY || 'fail' }}
