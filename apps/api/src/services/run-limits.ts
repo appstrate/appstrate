@@ -180,6 +180,7 @@ export interface ResolvedAgentResources {
   readonly effective: AgentResourceAllocation;
   readonly memoryCapped: boolean;
   readonly cpuCapped: boolean;
+  readonly semantics?: OrchestratorAgentResourceCapabilities["semantics"];
   readonly workload: WorkloadResources;
 }
 
@@ -217,6 +218,7 @@ export function resolveAgentResources(
     effective,
     memoryCapped: effective.memoryMb < requested.memoryMb,
     cpuCapped: effective.cpu < requested.cpu,
+    ...(backendCapabilities ? { semantics: backendCapabilities.semantics } : {}),
     workload: {
       memoryBytes: effective.memoryMb * BYTES_PER_MEBIBYTE,
       nanoCpus: effective.cpu * NANO_CPUS_PER_CPU,

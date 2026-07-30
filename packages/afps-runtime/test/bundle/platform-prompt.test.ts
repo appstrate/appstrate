@@ -133,6 +133,57 @@ describe("renderPlatformPrompt", () => {
     expect(withZeroCap).toBe(withoutCap);
   });
 
+  it("renders hard container limits without claiming visible cores are reduced", () => {
+    const out = renderPlatformPrompt({
+      template: "T",
+      context: ctx(),
+      workspaceTmpfsSizeMb: 512,
+      agentResources: { memoryMb: 2048, cpu: 3, semantics: "limits" },
+    });
+    const computeLine = out.split("\n").find((line) => line.startsWith("- **Compute**"));
+    expect(computeLine).toBe(
+      "- **Compute**: hard container limits: 2048 MiB RAM and 3 vCPU quota. " +
+        "The RAM-backed workspace counts toward this container RAM limit. " +
+        "Exceeding the memory limit can kill a process (often exit 137); " +
+        "fit installations and verification work within this budget.",
+    );
+    expect(computeLine).not.toContain("visible cores");
+  });
+
+  it("does not attribute workspace RAM when no tmpfs cap is present", () => {
+    const out = renderPlatformPrompt({
+      template: "T",
+      context: ctx(),
+      agentResources: { memoryMb: 2048, cpu: 3, semantics: "limits" },
+    });
+    expect(out).toContain("hard container limits: 2048 MiB RAM and 3 vCPU quota");
+    expect(out).not.toContain("workspace counts toward this container RAM limit");
+  });
+
+  it("renders a distinct microVM agent sizing budget", () => {
+    const out = renderPlatformPrompt({
+      template: "T",
+      context: ctx(),
+      workspaceTmpfsSizeMb: 512,
+      agentResources: { memoryMb: 4096, cpu: 7, semantics: "sizing" },
+    });
+    const computeLine = out.split("\n").find((line) => line.startsWith("- **Compute**"));
+    expect(computeLine).toBe(
+      "- **Compute**: agent sizing budget: 4096 MiB RAM and 7 vCPU. " +
+        "The microVM adds or shares capacity for the system and sidecar, so the total visible " +
+        "capacity may be higher; keep agent work within this budget.",
+    );
+    expect(computeLine).not.toContain("hard");
+    expect(computeLine).not.toContain("workspace counts toward");
+  });
+
+  it("omits compute resources when backend semantics are absent", () => {
+    const out = renderPlatformPrompt({ template: "T", context: ctx() });
+    expect(out).not.toContain("**Compute**");
+    expect(out).not.toContain("sizing budget");
+    expect(out).not.toContain("hard container limits");
+  });
+
   it("lists skills (tools come from MCP tools/list, never the prompt)", () => {
     const out = renderPlatformPrompt({
       template: "T",

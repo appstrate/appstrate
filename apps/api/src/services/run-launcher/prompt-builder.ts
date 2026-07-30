@@ -12,6 +12,8 @@
  *   - `uploads`: DB-stored files with platform-sanitised paths
  *   - `workspaceTmpfsSizeMb`: the operator's workspace cap, when the
  *     backend actually mounts one (see `promptWorkspaceTmpfsSizeMb`)
+ *   - `agentResources`: the effective allocation and semantics already
+ *     resolved onto the run plan
  *
  * Every other field flows straight from the bundle — the same code
  * path used by the `appstrate run` CLI. Outbound API access is surfaced
@@ -84,6 +86,14 @@ export async function buildPlatformSystemPrompt(
     // The runtime knows the workspace is capped; without this the agent
     // does not, and a dependency install dies with ENOSPC mid-run (#1019).
     workspaceTmpfsSizeMb: promptWorkspaceTmpfsSizeMb(),
+    ...(plan.resources.semantics
+      ? {
+          agentResources: {
+            ...plan.resources.effective,
+            semantics: plan.resources.semantics,
+          },
+        }
+      : {}),
     // Deliverables convention (Phase 2): files the agent writes under
     // `./outputs/` are swept and published as durable run documents at
     // finalize. Rendered as a platform-managed section BEFORE the raw prompt

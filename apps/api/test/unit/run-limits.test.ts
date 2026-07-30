@@ -218,6 +218,7 @@ describe("resolveAgentResources", () => {
     expect(resolved.effective.memoryMb).toBe(4096);
     expect(resolved.effective.cpu).toBe(7);
     expect(resolved.cpuCapped).toBe(true);
+    expect(resolved.semantics).toBe("sizing");
     expect(resolved.workload.nanoCpus).toBe(7_000_000_000);
   });
 

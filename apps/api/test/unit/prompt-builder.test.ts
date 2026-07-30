@@ -115,6 +115,7 @@ interface PromptContext {
   availableMcpServers?: ToolMeta[];
   packageDocs?: Array<{ id: string; content: string }>;
   runtimeTools?: string[];
+  resources?: AppstrateRunPlan["resources"];
 }
 
 function splitLegacy(ctx: PromptContext): {
@@ -150,7 +151,7 @@ function splitLegacy(ctx: PromptContext): {
     ...(ctx.runToken !== undefined ? { runToken: ctx.runToken } : {}),
     proxyUrl: ctx.proxyUrl,
     timeout: ctx.timeout ?? 0,
-    resources: defaultTestAgentResources(),
+    resources: ctx.resources ?? defaultTestAgentResources(),
     files: ctx.files,
   };
   return { context, plan };
@@ -274,6 +275,68 @@ describe("buildEnrichedPrompt — workspace disk cap", () => {
     expect(await promptWithEnv("docker", "0")).not.toContain("**Disk**");
     expect(await promptWithEnv("process")).not.toContain("**Disk**");
     expect(await promptWithEnv("firecracker")).not.toContain("**Disk**");
+  });
+});
+
+// ─── Effective agent resources ─────────────────────────────
+
+describe("buildEnrichedPrompt — effective agent resources", () => {
+  it("interpolates effective hard limits, never requested or default values", async () => {
+    const prompt = await buildEnrichedPrompt(
+      baseContext({
+        resources: {
+          requested: { memoryMb: 8192, cpu: 8 },
+          effective: { memoryMb: 2048, cpu: 3 },
+          memoryCapped: true,
+          cpuCapped: true,
+          semantics: "limits",
+          workload: { memoryBytes: 2_147_483_648, nanoCpus: 3_000_000_000 },
+        },
+      }),
+    );
+
+    expect(prompt).toContain("hard container limits: 2048 MiB RAM and 3 vCPU quota");
+    expect(prompt).not.toContain("8192 MiB");
+    expect(prompt).not.toContain("8 vCPU");
+    expect(prompt).not.toContain("1536 MiB");
+  });
+
+  it("interpolates the effective Firecracker sizing budget", async () => {
+    const prompt = await buildEnrichedPrompt(
+      baseContext({
+        resources: {
+          requested: { memoryMb: 8192, cpu: 8 },
+          effective: { memoryMb: 4096, cpu: 7 },
+          memoryCapped: true,
+          cpuCapped: true,
+          semantics: "sizing",
+          workload: { memoryBytes: 4_294_967_296, nanoCpus: 7_000_000_000 },
+        },
+      }),
+    );
+
+    expect(prompt).toContain("agent sizing budget: 4096 MiB RAM and 7 vCPU");
+    expect(prompt).not.toContain("hard container limits");
+    expect(prompt).not.toContain("8192 MiB");
+    expect(prompt).not.toContain("8 vCPU");
+  });
+
+  it("stays silent when the resolved plan has no resource semantics", async () => {
+    const prompt = await buildEnrichedPrompt(
+      baseContext({
+        resources: {
+          requested: { memoryMb: 3072, cpu: 5 },
+          effective: { memoryMb: 3072, cpu: 5 },
+          memoryCapped: false,
+          cpuCapped: false,
+          workload: { memoryBytes: 3_221_225_472, nanoCpus: 5_000_000_000 },
+        },
+      }),
+    );
+
+    expect(prompt).not.toContain("**Compute**");
+    expect(prompt).not.toContain("3072 MiB");
+    expect(prompt).not.toContain("5 vCPU");
   });
 });
 
