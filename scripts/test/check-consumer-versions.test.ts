@@ -83,11 +83,14 @@ describe("fetchPackageJson", () => {
   });
 
   function stubFetch(status: number, statusText: string, body?: unknown): void {
-    globalThis.fetch = (async () =>
-      new Response(body === undefined ? null : JSON.stringify(body), {
-        status,
-        statusText,
-      })) as typeof fetch;
+    globalThis.fetch = Object.assign(
+      async () =>
+        new Response(body === undefined ? null : JSON.stringify(body), {
+          status,
+          statusText,
+        }),
+      { preconnect: () => undefined },
+    );
   }
 
   it("THROWS on 404 instead of reporting an absent file", async () => {
