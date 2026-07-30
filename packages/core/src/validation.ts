@@ -202,6 +202,61 @@ export type Manifest = z.infer<typeof manifestSchema>;
 // Agent manifest schema — extends AFPS with core enhancements
 // ─────────────────────────────────────────────
 
+/** Appstrate vendor-extension key for optional agent resource hints. */
+export const AGENT_RESOURCES_META_KEY = "dev.appstrate/resources";
+
+/**
+ * Agent-authored resource hints read from `_meta["dev.appstrate/resources"]`.
+ *
+ * These values are requests, not entitlements. The platform resolves them
+ * against deployment policy before launching a run.
+ */
+export interface AgentResourceHints {
+  readonly memoryMb?: number;
+  readonly cpu?: number;
+}
+
+const agentResourceHintsMetaSchema = z
+  .strictObject({
+    memory_mb: z
+      .number({ error: "memory_mb must be a number" })
+      .int({ error: "memory_mb must be a positive safe integer" })
+      .positive({ error: "memory_mb must be a positive safe integer" })
+      .optional(),
+    cpu: z
+      .number({ error: "cpu must be a number" })
+      .int({ error: "cpu must be a positive safe integer" })
+      .positive({ error: "cpu must be a positive safe integer" })
+      .optional(),
+  })
+  .refine((hints) => hints.memory_mb !== undefined || hints.cpu !== undefined, {
+    error: "At least one of memory_mb or cpu must be declared",
+  });
+
+function refineAgentResourceHints(metaValue: unknown, ctx: z.RefinementCtx): void {
+  const result = agentResourceHintsMetaSchema.safeParse(metaValue);
+  if (result.success) return;
+
+  const basePath = ["_meta", AGENT_RESOURCES_META_KEY];
+  for (const issue of result.error.issues) {
+    if (issue.code === "unrecognized_keys") {
+      for (const key of issue.keys) {
+        ctx.addIssue({
+          code: "custom",
+          path: [...basePath, key],
+          message: `Unknown agent resource hint "${key}"`,
+        });
+      }
+      continue;
+    }
+    ctx.addIssue({
+      code: "custom",
+      path: [...basePath, ...issue.path],
+      message: issue.message,
+    });
+  }
+}
+
 /**
  * Zod schema for agent manifests — extends AFPS with relaxed optional metadata for local drafts
  * AND the Phase 1.0 `dependencies.integrations` map (proposal §4.2.3).
@@ -255,6 +310,13 @@ export const agentManifestSchema = agentManifestObjectSchema.superRefine((m, ctx
   // shared `refineIntegrationsConfiguration` to avoid drift).
   refineIntegrationsConfiguration(m, ctx);
 
+  const resourceHints = (m as { _meta?: Record<string, unknown> })._meta?.[
+    AGENT_RESOURCES_META_KEY
+  ];
+  if (resourceHints !== undefined) {
+    refineAgentResourceHints(resourceHints, ctx);
+  }
+
   const outputSchema = (m as { output?: { schema?: unknown } }).output?.schema;
   const hasOutputSchema =
     outputSchema != null &&
@@ -277,6 +339,26 @@ export const agentManifestSchema = agentManifestObjectSchema.superRefine((m, ctx
 
 /** Inferred type from the agent manifest schema. */
 export type AgentManifest = z.infer<typeof agentManifestSchema>;
+
+/**
+ * Read the validated Appstrate resource-hint extension from an agent manifest.
+ *
+ * Returns `undefined` when the extension is absent. Malformed values throw:
+ * callers should pass a manifest accepted by {@link agentManifestSchema}, so a
+ * throw signals that validation was bypassed or stored data is corrupt.
+ */
+export function getAgentResourceHints(
+  manifest: { readonly _meta?: Readonly<Record<string, unknown>> } | null | undefined,
+): AgentResourceHints | undefined {
+  const raw = manifest?._meta?.[AGENT_RESOURCES_META_KEY];
+  if (raw === undefined) return undefined;
+
+  const parsed = agentResourceHintsMetaSchema.parse(raw);
+  return {
+    ...(parsed.memory_mb !== undefined ? { memoryMb: parsed.memory_mb } : {}),
+    ...(parsed.cpu !== undefined ? { cpu: parsed.cpu } : {}),
+  };
+}
 
 // ─────────────────────────────────────────────
 // Skill manifest schema — extends AFPS with core enhancements
