@@ -275,14 +275,22 @@ describe("buildEnrichedPrompt — workspace disk cap", () => {
 
   it("stays silent when the docker workspace cap does not apply", async () => {
     // WORKSPACE_TMPFS_SIZE_MB=0 disables the tmpfs even under docker, while
-    // process and unknown backends have no core-owned tmpfs contract.
+    // process and undeclared backends have no core-owned tmpfs contract. A
+    // module id alone is never enough: the plan must carry the capability.
     expect(await promptWithEnv("docker", "0")).not.toContain("**Disk**");
     expect(await promptWithEnv("process")).not.toContain("**Disk**");
     expect(await promptWithEnv("module-backend")).not.toContain("**Disk**");
+    expect(await promptWithEnv("firecracker")).not.toContain("**Disk**");
   });
 
-  it("states the Firecracker writable-root budget without suggesting /tmp as an escape", async () => {
-    const prompt = await promptWithEnv("firecracker");
+  it("states a backend-declared writable-root budget without suggesting /tmp as an escape", async () => {
+    const prompt = await promptWithEnv("module-backend", undefined, {
+      resources: {
+        ...defaultTestAgentResources(),
+        semantics: "sizing",
+        writableRootTmpfsPercent: 50,
+      },
+    });
     const diskLine = prompt.split("\n").find((line) => line.startsWith("- **Disk**"));
     expect(diskLine).toBe(
       "- **Disk**: the writable root, including the workspace, is a RAM-backed tmpfs capped at 50% of guest RAM. " +
@@ -317,14 +325,15 @@ describe("buildEnrichedPrompt — effective agent resources", () => {
     expect(prompt).not.toContain("1536 MiB");
   });
 
-  it("interpolates the effective Firecracker sizing budget", async () => {
-    const prompt = await promptWithEnv("firecracker", undefined, {
+  it("interpolates the effective microVM sizing budget", async () => {
+    const prompt = await promptWithEnv("module-backend", undefined, {
       resources: {
         requested: { memoryMb: 8192, cpu: 8 },
         effective: { memoryMb: 4096, cpu: 7 },
         memoryCapped: true,
         cpuCapped: true,
         semantics: "sizing",
+        writableRootTmpfsPercent: 50,
         workload: { memoryBytes: 4_294_967_296, nanoCpus: 7_000_000_000 },
       },
     });

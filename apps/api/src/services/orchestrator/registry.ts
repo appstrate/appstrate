@@ -41,7 +41,10 @@ function validateAgentResources(id: string, owner: string, capabilities: unknown
     throw new Error(`${prefix}: expected an object.`);
   }
 
-  const { semantics, maxAgentCpu } = capabilities as Record<string, unknown>;
+  const { semantics, maxAgentCpu, writableRootTmpfsPercent } = capabilities as Record<
+    string,
+    unknown
+  >;
   if (semantics !== "limits" && semantics !== "sizing") {
     throw new Error(`${prefix}: semantics must be "limits" or "sizing".`);
   }
@@ -54,6 +57,14 @@ function validateAgentResources(id: string, owner: string, capabilities: unknown
     throw new Error(
       `${prefix}: maxAgentCpu must be a positive safe integer whose nanoCPU conversion is safe.`,
     );
+  }
+  if (
+    writableRootTmpfsPercent !== undefined &&
+    (!Number.isSafeInteger(writableRootTmpfsPercent) ||
+      (writableRootTmpfsPercent as number) < 1 ||
+      (writableRootTmpfsPercent as number) > 100)
+  ) {
+    throw new Error(`${prefix}: writableRootTmpfsPercent must be a safe integer from 1 to 100.`);
   }
 }
 

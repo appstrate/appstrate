@@ -249,6 +249,12 @@ export interface OrchestratorAgentResourceCapabilities {
   readonly semantics: "limits" | "sizing";
   /** Optional agent CPU ceiling imposed by the backend's own sizing model. */
   readonly maxAgentCpu?: number;
+  /**
+   * Optional percentage of guest RAM used to cap a RAM-backed writable root
+   * that includes the agent workspace. Lets a backend surface its filesystem
+   * budget without core knowing the backend id or implementation.
+   */
+  readonly writableRootTmpfsPercent?: number;
 }
 
 /**

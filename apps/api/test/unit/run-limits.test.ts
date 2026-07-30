@@ -213,12 +213,14 @@ describe("resolveAgentResources", () => {
     const resolved = resolveAgentResources({ memoryMb: 4096, cpu: 8 }, generousPolicy, {
       semantics: "sizing",
       maxAgentCpu: 7,
+      writableRootTmpfsPercent: 50,
     });
     expect(resolved.requested).toEqual({ memoryMb: 4096, cpu: 8 });
     expect(resolved.effective.memoryMb).toBe(4096);
     expect(resolved.effective.cpu).toBe(7);
     expect(resolved.cpuCapped).toBe(true);
     expect(resolved.semantics).toBe("sizing");
+    expect(resolved.writableRootTmpfsPercent).toBe(50);
     expect(resolved.workload.nanoCpus).toBe(7_000_000_000);
   });
 

@@ -187,6 +187,7 @@ export interface ResolvedAgentResources {
   readonly memoryCapped: boolean;
   readonly cpuCapped: boolean;
   readonly semantics?: OrchestratorAgentResourceCapabilities["semantics"];
+  readonly writableRootTmpfsPercent?: number;
   readonly workload: WorkloadResources;
 }
 
@@ -225,6 +226,9 @@ export function resolveAgentResources(
     memoryCapped: effective.memoryMb < requested.memoryMb,
     cpuCapped: effective.cpu < requested.cpu,
     ...(backendCapabilities ? { semantics: backendCapabilities.semantics } : {}),
+    ...(backendCapabilities?.writableRootTmpfsPercent !== undefined
+      ? { writableRootTmpfsPercent: backendCapabilities.writableRootTmpfsPercent }
+      : {}),
     workload: {
       memoryBytes: effective.memoryMb * BYTES_PER_MEBIBYTE,
       nanoCpus: effective.cpu * NANO_CPUS_PER_CPU,

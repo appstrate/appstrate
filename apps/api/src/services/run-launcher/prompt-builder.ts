@@ -12,7 +12,7 @@
  *   - `uploads`: DB-stored files with platform-sanitised paths
  *   - `workspaceTmpfsSizeMb`: the operator's workspace cap, when the
  *     backend actually mounts one (see `promptWorkspaceTmpfsSizeMb`)
- *   - `workspaceTmpfsSizePercent`: the Firecracker writable-root cap
+ *   - `workspaceTmpfsSizePercent`: a backend-declared writable-root cap
  *   - `agentResources`: the effective allocation and semantics already
  *     resolved onto the run plan
  *
@@ -37,8 +37,6 @@ import { getEnv } from "@appstrate/env";
 import { getExecutionMode, type ExecutionMode } from "../../infra/mode.ts";
 import { fetchIntegrationPromptDocs } from "../integration-service.ts";
 
-const FIRECRACKER_WRITABLE_ROOT_TMPFS_PERCENT = 50;
-
 /**
  * Workspace tmpfs cap (MB) to state in the prompt, or 0 to stay silent.
  *
@@ -51,14 +49,6 @@ const FIRECRACKER_WRITABLE_ROOT_TMPFS_PERCENT = 50;
  */
 function promptWorkspaceTmpfsSizeMb(executionMode: ExecutionMode): number {
   return executionMode === "docker" ? getEnv().WORKSPACE_TMPFS_SIZE_MB : 0;
-}
-
-/**
- * Firecracker mounts the guest's writable root, including `/workspace`, on a
- * tmpfs capped at 50% of guest RAM in `modules/firecracker/guest/init.sh`.
- */
-function promptWorkspaceTmpfsSizePercent(executionMode: ExecutionMode): number {
-  return executionMode === "firecracker" ? FIRECRACKER_WRITABLE_ROOT_TMPFS_PERCENT : 0;
 }
 
 export async function buildPlatformSystemPrompt(
@@ -98,7 +88,7 @@ export async function buildPlatformSystemPrompt(
     // The runtime knows the workspace is capped; without this the agent
     // does not, and a dependency install dies with ENOSPC mid-run (#1019).
     workspaceTmpfsSizeMb: promptWorkspaceTmpfsSizeMb(executionMode),
-    workspaceTmpfsSizePercent: promptWorkspaceTmpfsSizePercent(executionMode),
+    workspaceTmpfsSizePercent: plan.resources.writableRootTmpfsPercent,
     ...(plan.resources.semantics
       ? {
           agentResources: {

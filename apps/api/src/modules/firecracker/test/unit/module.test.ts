@@ -22,7 +22,11 @@ describe("firecracker module orchestrator contribution", () => {
     const registration = firecrackerModule.orchestrators?.()?.firecracker;
     expect(registration?.isolatesWorkloads).toBe(true);
     expect(registration?.supportsSidecarOnly).toBe(false);
-    expect(registration?.agentResources).toEqual({ semantics: "sizing", maxAgentCpu: 7 });
+    expect(registration?.agentResources).toEqual({
+      semantics: "sizing",
+      maxAgentCpu: 7,
+      writableRootTmpfsPercent: 50,
+    });
   });
 
   it("keeps the declared agent CPU maximum below the VM cap when a sidecar is present", () => {
@@ -34,5 +38,19 @@ describe("firecracker module orchestrator contribution", () => {
     expect(
       vmSizing({ memoryBytes: 1, nanoCpus: maxAgentCpu * 1_000_000_000 }, true).vcpuCount,
     ).toBe(8);
+  });
+
+  it("keeps the declared writable-root tmpfs budget in sync with guest init", async () => {
+    const guestInit = await Bun.file(new URL("../../guest/init.sh", import.meta.url)).text();
+    const mountPercent = guestInit.match(
+      /mount -t tmpfs -o [^\n]*size=(\d+)% tmpfs \/overlay/,
+    )?.[1];
+    if (mountPercent === undefined) {
+      throw new Error("guest init no longer declares the /overlay tmpfs percentage");
+    }
+
+    expect(
+      firecrackerModule.orchestrators?.()?.firecracker?.agentResources?.writableRootTmpfsPercent,
+    ).toBe(Number(mountPercent));
   });
 });

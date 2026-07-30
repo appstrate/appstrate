@@ -64,7 +64,11 @@ describe("orchestrator registration", () => {
       {
         isolatesWorkloads: true,
         supportsSidecarOnly: false,
-        agentResources: { semantics: "sizing", maxAgentCpu: 5 },
+        agentResources: {
+          semantics: "sizing",
+          maxAgentCpu: 5,
+          writableRootTmpfsPercent: 25,
+        },
         create: () => fakeOrchestrator,
       },
       "test",
@@ -74,6 +78,7 @@ describe("orchestrator registration", () => {
     expect(orchestratorAgentResources("fake-isolated")).toEqual({
       semantics: "sizing",
       maxAgentCpu: 5,
+      writableRootTmpfsPercent: 25,
     });
     expect(isolatingOrchestratorIds()).toEqual(["docker", "fake-isolated"]);
     expect(selectOrchestrator("fake-isolated")).toBe(fakeOrchestrator);
@@ -111,6 +116,26 @@ describe("orchestrator registration", () => {
           "broken-module",
         ),
       ).toThrow(/maxAgentCpu must be a positive safe integer/);
+    });
+  }
+
+  for (const invalidWritableRootTmpfsPercent of [0, 101, 1.5, Number.NaN]) {
+    it(`rejects writableRootTmpfsPercent=${String(invalidWritableRootTmpfsPercent)}`, () => {
+      expect(() =>
+        registerOrchestrator(
+          "invalid-resources",
+          {
+            isolatesWorkloads: true,
+            supportsSidecarOnly: false,
+            agentResources: {
+              semantics: "sizing",
+              writableRootTmpfsPercent: invalidWritableRootTmpfsPercent,
+            },
+            create: () => fakeOrchestrator,
+          },
+          "broken-module",
+        ),
+      ).toThrow(/writableRootTmpfsPercent must be a safe integer from 1 to 100/);
     });
   }
 

@@ -96,8 +96,14 @@ const firecrackerModule: AppstrateModule = {
         supportsSidecarOnly: false,
         // Workload resources size the whole VM rather than an agent-only
         // cgroup. vmSizing caps the guest at 8 vCPU and may reserve one for
-        // the sidecar, leaving at most 7 for the agent request.
-        agentResources: { semantics: "sizing", maxAgentCpu: 7 },
+        // the sidecar, leaving at most 7 for the agent request. Guest init
+        // mounts the writable root (including /workspace) on a tmpfs capped
+        // at 50% of guest RAM.
+        agentResources: {
+          semantics: "sizing",
+          maxAgentCpu: 7,
+          writableRootTmpfsPercent: 50,
+        },
         // Wire the phase-4 observability hooks: boot-phase liveness (the
         // watchdog-safe synthetic heartbeat) and abnormal-exit console
         // surfacing. Both are inert unless provided — this is the only
