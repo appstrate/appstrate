@@ -55,6 +55,25 @@ describe("toBundleApiError", () => {
       expect(mapped!.message).toContain("dependency_overrides");
     });
 
+    // `fetch()` raises the same code for an already-RESOLVED package whose
+    // bytes turned out to be unusable, carrying `details.identity` instead of
+    // `details.missing`. Before #1018 that shape hit the empty-`missing`
+    // fallback: "a declared dependency" with no name, and advice to fix a pin
+    // that had in fact resolved perfectly.
+    it("names the package and drops the pin advice when only `details.identity` is set", () => {
+      const mapped = toBundleApiError(
+        new BundleError("DEPENDENCY_UNRESOLVED", "no ZIP in storage", {
+          identity: "@acme/skill-x@1.0.0",
+        }),
+      );
+
+      expect(mapped!.status).toBe(422);
+      expect(mapped!.code).toBe("dependency_unresolved");
+      expect(mapped!.message).toContain("@acme/skill-x@1.0.0");
+      expect(mapped!.message).toContain("dependency_overrides");
+      expect(mapped!.message).not.toContain("fix the pin");
+    });
+
     it("degrades to a generic phrase when `details.missing` is absent or empty", () => {
       for (const details of [undefined, {}, { missing: [] }]) {
         const mapped = toBundleApiError(new BundleError("DEPENDENCY_UNRESOLVED", "x", details));
