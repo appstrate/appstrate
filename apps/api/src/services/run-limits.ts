@@ -133,6 +133,8 @@ export interface ResolvedRunTimeout {
   capped: boolean;
 }
 
+export type RunTimeoutPolicy = Pick<PlatformRunLimits, "timeout_ceiling_seconds">;
+
 /**
  * Resolve a manifest's declared `timeout` against the platform ceiling.
  *
@@ -152,11 +154,15 @@ export interface ResolvedRunTimeout {
  * would make the manifest's meaning depend on its JSON type.
  *
  * Throws when run limits are not initialized (see {@link getPlatformRunLimits}) —
- * a missing `initRunLimits()` is a boot-ordering bug, not a condition to paper
- * over with an unbounded default.
+ * unless the caller supplies an already-resolved policy. A missing
+ * `initRunLimits()` is a boot-ordering bug, not a condition to paper over with
+ * an unbounded default.
  */
-export function resolveRunTimeout(declaredTimeout: unknown): ResolvedRunTimeout {
-  const ceiling = getPlatformRunLimits().timeout_ceiling_seconds;
+export function resolveRunTimeout(
+  declaredTimeout: unknown,
+  policy: RunTimeoutPolicy = getPlatformRunLimits(),
+): ResolvedRunTimeout {
+  const ceiling = policy.timeout_ceiling_seconds;
   const declaredSeconds =
     typeof declaredTimeout === "number" ? declaredTimeout : DEFAULT_RUN_TIMEOUT_SECONDS;
   return {

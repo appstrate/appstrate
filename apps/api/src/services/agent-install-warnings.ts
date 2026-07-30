@@ -1,38 +1,91 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { resolveRunTimeout } from "./run-limits.ts";
+import { AGENT_RESOURCES_META_KEY, getAgentResourceHints } from "@appstrate/core/validation";
+import type { OrchestratorAgentResourceCapabilities } from "@appstrate/core/platform-types";
+import { getExecutionMode } from "../infra/mode.ts";
+import { orchestratorAgentResources } from "./orchestrator/registry.ts";
+import {
+  getPlatformRunLimits,
+  resolveAgentResources,
+  resolveRunTimeout,
+  type AgentResourcePolicy,
+  type RunTimeoutPolicy,
+} from "./run-limits.ts";
 
 /**
  * Install-time warnings for `agent` manifests that declare something the
  * platform will silently narrow at run time.
  *
  * Sibling of `integration-install-warnings.ts` (same non-blocking `warnings`
- * channel on the import 201) but kept separate for two reasons: the rules here
- * are agent-only — a skill / mcp-server / integration has no run timeout — and,
- * unlike those collectors, this one is NOT pure: it reads the platform run
- * limits registry, so it inherits the "not initialized ⇒ throw" contract of
- * `getPlatformRunLimits()`.
+ * channel on the import 201). The public collector reads deployment policy;
+ * the resource rule remains pure so operator and backend ceilings can be
+ * tested without mutating process-wide state.
  *
- * Today: the `timeout` ceiling. `runPreflightGates` clamps a declared timeout
- * to `PLATFORM_RUN_LIMITS.timeout_ceiling_seconds` before the run starts, which
- * is correct but invisible — an author who declares 10800 gets 1800 with no
- * signal short of watching a run die at the wrong moment. Warning at import
- * time is the earliest point the platform actually holds the manifest.
- *
- * Deliberately a warning, never a rejection: the ceiling is deployment-specific
- * (self-hosters raise it), so a manifest declaring above THIS deployment's
- * ceiling is portable and valid — rejecting it would make a package
- * un-importable on the smaller of two instances that both run it fine.
+ * Deliberately warnings, never rejections: deployment-specific ceilings do not
+ * make an otherwise portable package invalid.
  */
-export function collectAgentTimeoutWarnings(manifest: unknown): string[] {
-  if (typeof manifest !== "object" || manifest === null) return [];
+function asAgentManifest(manifest: unknown): Record<string, unknown> | undefined {
+  if (typeof manifest !== "object" || manifest === null) return undefined;
   const m = manifest as Record<string, unknown>;
-  if (m.type !== "agent") return [];
+  return m.type === "agent" ? m : undefined;
+}
 
-  const { declaredSeconds, effectiveSeconds, capped } = resolveRunTimeout(m.timeout);
+function collectTimeoutWarnings(
+  manifest: Record<string, unknown>,
+  policy: RunTimeoutPolicy,
+): string[] {
+  const { declaredSeconds, effectiveSeconds, capped } = resolveRunTimeout(manifest.timeout, policy);
   if (!capped) return [];
 
   return [
     `timeout: declared ${declaredSeconds}s exceeds this deployment's ceiling — runs will be capped at ${effectiveSeconds}s.`,
+  ];
+}
+
+/** Pure resource-warning rule for an already-validated manifest. */
+export function collectAgentResourceWarnings(
+  manifest: unknown,
+  policy: AgentResourcePolicy,
+  backendCapabilities: OrchestratorAgentResourceCapabilities | undefined,
+): string[] {
+  const agent = asAgentManifest(manifest);
+  if (!agent) return [];
+
+  // Throws on malformed stored data: import validation must run before this
+  // collector, and bypassing that boundary is corruption, not a warning.
+  const hints = getAgentResourceHints(
+    agent as { readonly _meta?: Readonly<Record<string, unknown>> },
+  );
+  if (!hints || !backendCapabilities) return [];
+
+  const resolved = resolveAgentResources(hints, policy, backendCapabilities);
+  const path = `_meta[${JSON.stringify(AGENT_RESOURCES_META_KEY)}]`;
+  const warnings: string[] = [];
+
+  if (hints.memoryMb !== undefined && resolved.memoryCapped) {
+    warnings.push(
+      `${path}.memory_mb: declared ${hints.memoryMb} MiB exceeds this deployment's effective ceiling — runs will use ${resolved.effective.memoryMb} MiB.`,
+    );
+  }
+  if (hints.cpu !== undefined && resolved.cpuCapped) {
+    warnings.push(
+      `${path}.cpu: declared ${hints.cpu} vCPU exceeds this deployment's effective ceiling — runs will use ${resolved.effective.cpu} vCPU.`,
+    );
+  }
+
+  return warnings;
+}
+
+export function collectAgentInstallWarnings(manifest: unknown): string[] {
+  const agent = asAgentManifest(manifest);
+  if (!agent) return [];
+
+  const policy = getPlatformRunLimits();
+  const executionMode = getExecutionMode();
+  const backendCapabilities = orchestratorAgentResources(executionMode);
+
+  return [
+    ...collectTimeoutWarnings(agent, policy),
+    ...collectAgentResourceWarnings(agent, policy, backendCapabilities),
   ];
 }
