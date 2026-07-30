@@ -339,8 +339,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   agent in this state was already non-functional against that integration; it
   now fails loudly instead of silently.
 
-  The PR body carries the audit query that lists the affected published
-  versions; run it before deploying.
+  **Before deploying**, run `bun scripts/audit-empty-integration-selections.ts`.
+  It lists every affected artifact and whether anything reaches it, exiting 1
+  when at least one is installed or scheduled so it can gate a rollout. It calls
+  the runtime's own resolvers rather than approximating them in SQL — a SQL
+  version shipped first and was wrong three ways: it read the integration's
+  draft `default_tools` instead of resolving the agent's pin, it ignored
+  installed DRAFTS (`version_id IS NULL`, what the editor's Run button
+  executes), and it ignored `dependency_overrides`.
 
   This also corrects a documented falsehood — `tools` absent and `tools: []`
   were described as equivalent in the docs, the `ManifestIntegrationEntry`
