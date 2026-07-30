@@ -45,6 +45,18 @@ elle doit précéder la cinquième, qui perdrait sinon son intérêt.
 
 ### 1. `applies_to` sur `guard` — bloquant
 
+> **Fait le 29 juillet, et la dette avec.** Le champ avait été ajouté au schéma puis
+> **aucune des 326 gardes du corpus ne le portait**, alors que le cartographe, lui, l'émet :
+> le discriminant réclamé ici n'était éprouvé sur aucune donnée réelle. Trois gardes le
+> portent désormais, celles dont la source borne explicitement la portée (le `dry_run` de
+> `compta-gmail-harvest` sur trois nœuds nommés, les deux gardes d'écriture de
+> `wiki-brain` sur les sept étapes que le prompt marque « écriture »), et le croisement en
+> tire un inventaire `guard_scope_ratio`.
+>
+> Les deux autres cas listés ci-dessous ne sont **pas exprimables**, et c'est un résultat :
+> chez OpenHands la portée est une PHASE, déjà portée par `parent` ; chez
+> `x-content-manager` les nœuds visés n'existent pas, ce qui est déjà relevé comme trou.
+
 Un garde-fou s'applique à une classe d'actions ; le format ne peut pas dire laquelle. Quatre
 manifestations indépendantes du même trou :
 

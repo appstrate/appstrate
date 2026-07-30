@@ -55,6 +55,8 @@ interface LogicMapStep {
   label: string;
   refs?: readonly string[];
   detail?: string | null;
+  /** Portée d'un `guard`. Absente ou vide, elle vaut « partout », donc rien. */
+  applies_to?: readonly string[];
   /**
    * Laxiste à dessein : l'appelant passe parfois une carte déjà projetée pour le rendu, qui
    * ne garde de l'ancrage que la citation. Sans `file`, le contrôle de périmètre se tait.
@@ -331,6 +333,28 @@ export function crossCheckLogicMap(
           `ne décrit ce qu'elle déclenche.`,
       });
     }
+  }
+
+  // --- Portée des garde-fous -------------------------------------------------
+  // Le discriminant contrainte / posture, et il est calculable : un principe directeur est
+  // exactement un garde-fou dont la portée vaut « partout », c'est-à-dire rien. Le constat
+  // est un INVENTAIRE, jamais un défaut : une constitution n'a que des principes, et c'est
+  // une mesure du document. Il devient utile en comparaison, entre versions d'un agent ou
+  // entre deux agents du même domaine.
+  const guards = map.steps.filter((s) => s.kind === "guard");
+  const scoped = guards.filter((s) => (s.applies_to?.length ?? 0) > 0);
+  if (guards.length > 0) {
+    findings.push({
+      level: "inventory",
+      code: "guard_scope_ratio",
+      node_id: null,
+      item_id: null,
+      step_ids: scoped.map((s) => s.id),
+      message:
+        `${scoped.length} garde-fou(s) sur ${guards.length} bornent explicitement leur portée ; ` +
+        `${guards.length - scoped.length} valent partout, donc énoncent un principe plutôt ` +
+        `qu'une contrainte vérifiable.`,
+    });
   }
 
   // --- Identifiants internes ------------------------------------------------

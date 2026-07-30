@@ -30,7 +30,8 @@
         "lines": [14, 14],
         "quote": "Tu n'écris **jamais** ailleurs, et tu n'as aucun autre pouvoir que lire les sources et écrire dans ce dossier."
       },
-      "confidence": 0.99
+      "confidence": 0.99,
+      "applies_to": ["s0.5", "s2.3", "s2.4", "s2.7", "s6.1", "s7.1", "s7.2"]
     },
     {
       "id": "c2",
@@ -90,7 +91,8 @@
         "lines": [42, 42],
         "quote": "En `dry_run` (input), les étapes marquées « écriture » sont simulées : tu produis le plan exact de ce que tu aurais écrit, sans aucun appel d'écriture (ni verrou, ni brut, ni wiki, ni purge)."
       },
-      "confidence": 0.97
+      "confidence": 0.97,
+      "applies_to": ["s0.5", "s2.3", "s2.4", "s2.7", "s6.1", "s7.1", "s7.2"]
     },
     {
       "id": "s0.1",
@@ -1206,48 +1208,181 @@
     }
   ],
   "edges": [
-    { "from": "s0.1", "to": "s0.2", "condition": null },
-    { "from": "s0.2", "to": "s0.3", "condition": "verrou actif (< 2 h)" },
-    { "from": "s0.2", "to": "s0.4", "condition": "verrou périmé (> 2 h)" },
-    { "from": "s0.2", "to": "s0.5", "condition": "pas de verrou" },
-    { "from": "s0.4", "to": "s0.5", "condition": null },
-    { "from": "s0.5", "to": "s1.1", "condition": null },
-
-    { "from": "s1.1", "to": "s1.2", "condition": null },
-    { "from": "s1.2", "to": "fr1", "condition": "premier run" },
-    { "from": "s1.2", "to": "s1.3", "condition": "run de mise à jour" },
-    { "from": "s1.3", "to": "s1.4", "condition": null },
-    { "from": "s1.4", "to": "s1.5", "condition": null },
-    { "from": "s1.5", "to": "s2.0", "condition": null },
-
-    { "from": "s2.2", "to": "s2.3", "condition": "source = gmail" },
-    { "from": "s2.3", "to": "s2.4", "condition": null },
-    { "from": "s2.5", "to": "s2.7", "condition": "source = drive" },
-    { "from": "s2.0", "to": "s3.1", "condition": null },
-
-    { "from": "s3.1", "to": "s3.2", "condition": null },
-    { "from": "s3.2", "to": "s3.3", "condition": null },
-    { "from": "s3.3", "to": "s7.1", "condition": "delta vide → no-op" },
-    { "from": "s3.3", "to": "s4.1", "condition": "delta non vide" },
-
-    { "from": "s4.1", "to": "ds3", "condition": null },
-    { "from": "ds3", "to": "s4.2", "condition": null },
-    { "from": "s4.2", "to": "s4.4", "condition": null },
-    { "from": "s4.4", "to": "s4.5", "condition": null },
-    { "from": "s4.5", "to": "s5.0", "condition": null },
-
-    { "from": "s5.0", "to": "s5.1", "condition": "le wiki a changé" },
-    { "from": "s5.0", "to": "s6.1", "condition": "aucun changement" },
-    { "from": "s5.1", "to": "s5.2", "condition": null },
-    { "from": "s5.2", "to": "s6.1", "condition": null },
-
-    { "from": "s6.1", "to": "s7.1", "condition": null },
-    { "from": "s7.1", "to": "s7.2", "condition": null },
-    { "from": "s7.2", "to": "s7.3", "condition": null },
-
-    { "from": "fr1", "to": "fr4", "condition": null },
-    { "from": "fr4", "to": "s2.0", "condition": null },
-    { "from": "fr2", "to": "fr3", "condition": "domaine réel hors budget" }
+    {
+      "from": "s0.1",
+      "to": "s0.2",
+      "condition": null
+    },
+    {
+      "from": "s0.2",
+      "to": "s0.3",
+      "condition": "verrou actif (< 2 h)"
+    },
+    {
+      "from": "s0.2",
+      "to": "s0.4",
+      "condition": "verrou périmé (> 2 h)"
+    },
+    {
+      "from": "s0.2",
+      "to": "s0.5",
+      "condition": "pas de verrou"
+    },
+    {
+      "from": "s0.4",
+      "to": "s0.5",
+      "condition": null
+    },
+    {
+      "from": "s0.5",
+      "to": "s1.1",
+      "condition": null
+    },
+    {
+      "from": "s1.1",
+      "to": "s1.2",
+      "condition": null
+    },
+    {
+      "from": "s1.2",
+      "to": "fr1",
+      "condition": "premier run"
+    },
+    {
+      "from": "s1.2",
+      "to": "s1.3",
+      "condition": "run de mise à jour"
+    },
+    {
+      "from": "s1.3",
+      "to": "s1.4",
+      "condition": null
+    },
+    {
+      "from": "s1.4",
+      "to": "s1.5",
+      "condition": null
+    },
+    {
+      "from": "s1.5",
+      "to": "s2.0",
+      "condition": null
+    },
+    {
+      "from": "s2.2",
+      "to": "s2.3",
+      "condition": "source = gmail"
+    },
+    {
+      "from": "s2.3",
+      "to": "s2.4",
+      "condition": null
+    },
+    {
+      "from": "s2.5",
+      "to": "s2.7",
+      "condition": "source = drive"
+    },
+    {
+      "from": "s2.0",
+      "to": "s3.1",
+      "condition": null
+    },
+    {
+      "from": "s3.1",
+      "to": "s3.2",
+      "condition": null
+    },
+    {
+      "from": "s3.2",
+      "to": "s3.3",
+      "condition": null
+    },
+    {
+      "from": "s3.3",
+      "to": "s7.1",
+      "condition": "delta vide → no-op"
+    },
+    {
+      "from": "s3.3",
+      "to": "s4.1",
+      "condition": "delta non vide"
+    },
+    {
+      "from": "s4.1",
+      "to": "ds3",
+      "condition": null
+    },
+    {
+      "from": "ds3",
+      "to": "s4.2",
+      "condition": null
+    },
+    {
+      "from": "s4.2",
+      "to": "s4.4",
+      "condition": null
+    },
+    {
+      "from": "s4.4",
+      "to": "s4.5",
+      "condition": null
+    },
+    {
+      "from": "s4.5",
+      "to": "s5.0",
+      "condition": null
+    },
+    {
+      "from": "s5.0",
+      "to": "s5.1",
+      "condition": "le wiki a changé"
+    },
+    {
+      "from": "s5.0",
+      "to": "s6.1",
+      "condition": "aucun changement"
+    },
+    {
+      "from": "s5.1",
+      "to": "s5.2",
+      "condition": null
+    },
+    {
+      "from": "s5.2",
+      "to": "s6.1",
+      "condition": null
+    },
+    {
+      "from": "s6.1",
+      "to": "s7.1",
+      "condition": null
+    },
+    {
+      "from": "s7.1",
+      "to": "s7.2",
+      "condition": null
+    },
+    {
+      "from": "s7.2",
+      "to": "s7.3",
+      "condition": null
+    },
+    {
+      "from": "fr1",
+      "to": "fr4",
+      "condition": null
+    },
+    {
+      "from": "fr4",
+      "to": "s2.0",
+      "condition": null
+    },
+    {
+      "from": "fr2",
+      "to": "fr3",
+      "condition": "domaine réel hors budget"
+    }
   ],
   "gaps": [
     {

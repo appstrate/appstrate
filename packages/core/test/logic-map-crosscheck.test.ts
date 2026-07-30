@@ -177,6 +177,25 @@ describe("logic map cross-check", () => {
     expect(out.some((f) => f.code === "shape_suspect")).toBe(true);
   });
 
+  it("counts how many guards actually bound their scope", () => {
+    // Le discriminant contrainte / posture. `compta-gmail-harvest` borne son garde-fou
+    // `dry_run` sur les trois nœuds que le texte nomme ; les autres valent partout.
+    const found = crossCheckLogicMap(map, HARVEST_DECLARED).find(
+      (f) => f.code === "guard_scope_ratio",
+    );
+    expect(found).toBeDefined();
+    expect(found!.level).toBe("inventory");
+    expect(found!.step_ids).toContain("g3");
+  });
+
+  it("stays silent about guard scope when a map has no guard at all", () => {
+    const out = crossCheckLogicMap(
+      { shape: "sequence", steps: [{ id: "s1", kind: "step", label: "x" }], edges: [] },
+      {},
+    );
+    expect(out.some((f) => f.code === "guard_scope_ratio")).toBe(false);
+  });
+
   it("flags a gap or an edge that points at a step which does not exist", () => {
     // Un identifiant fantôme ne casse rien au rendu : il ne dessine simplement rien, et le
     // lecteur croit que le trou n'était rattaché à aucune étape.
