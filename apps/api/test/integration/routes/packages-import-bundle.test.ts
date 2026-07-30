@@ -19,6 +19,7 @@ import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage, seedPackageVersion } from "../../helpers/seed.ts";
 import { getTestApp } from "../../helpers/app.ts";
+import { assertDbMissing } from "../../helpers/assertions.ts";
 import { installPackage } from "../../../src/services/application-packages.ts";
 import { getPlatformRunLimits } from "../../../src/services/run-limits.ts";
 import {
@@ -32,9 +33,12 @@ import { and, eq } from "drizzle-orm";
 import * as storage from "@appstrate/db/storage";
 import { computeIntegrity } from "@appstrate/core/integrity";
 import {
+  buildBundleFromCatalog,
+  extractRootFromAfps,
   readBundleFromBuffer,
   writeBundleToBuffer,
   type Bundle,
+  type PackageCatalog,
 } from "@appstrate/afps-runtime/bundle";
 
 const BUCKET = "agent-packages";
@@ -761,5 +765,311 @@ describe("POST /api/packages/import-bundle — import", () => {
     // Integrity must match — the bundle contract guarantees this
     // across instances when the package bytes are identical.
     expect(reimported.integrity).toBe(orig.integrity);
+  });
+
+  // ── Declared-but-empty integration gate ─────────────────────────────
+  //
+  // `/import-bundle` used to run NO integration-selection check at all, so an
+  // agent refused by `POST /api/packages/import` imported cleanly here and
+  // `postInstallPackage` froze the broken selection into an immutable version.
+  // The gate now runs as a pure-read preflight in `handleImportBundle`.
+
+  const gateIntegrationId = "@importorg/gate-integration";
+
+  function gateIntegrationManifest(): Record<string, unknown> {
+    return {
+      type: "integration",
+      schema_version: "0.1",
+      name: gateIntegrationId,
+      version: "1.0.0",
+      display_name: "Gate (test)",
+      source: { kind: "none" },
+      // No `default_tools`: an absent selection resolves to empty, exactly
+      // like the explicit `tools: []` the failing case uses.
+      auths: {
+        primary: {
+          type: "oauth2",
+          authorization_endpoint: "https://idp/a",
+          token_endpoint: "https://idp/t",
+          authorized_uris: ["https://api/*"],
+          delivery: {
+            http: {
+              in: "header",
+              name: "Authorization",
+              prefix: "Bearer ",
+              value: "{$credential.access_token}",
+            },
+          },
+        },
+      },
+      tools_policy: { list_messages: {} },
+      _meta: { "dev.appstrate/api": { auths: { primary: {} } } },
+    };
+  }
+
+  /**
+   * Seed the integration as a draft AND as published `1.0.0` — the gate judges
+   * the manifest the agent's `^1.0.0` pin resolves to, so a draft-only package
+   * is deliberately never judged.
+   */
+  async function seedGateIntegration(): Promise<void> {
+    await seedPackage({
+      id: gateIntegrationId,
+      orgId: ctx.orgId,
+      type: "integration",
+      source: "local",
+      draftManifest: gateIntegrationManifest(),
+    });
+    await seedPackageVersion({
+      packageId: gateIntegrationId,
+      version: "1.0.0",
+      manifest: gateIntegrationManifest(),
+    });
+  }
+
+  /**
+   * Wrap ONE agent `.afps` into a valid single-package `.afps-bundle`.
+   * `depTypes: []` suppresses the transitive walk, so the catalog is never
+   * consulted and the bundle carries exactly the agent under test — the gate,
+   * not dependency resolution, is what this exercises.
+   */
+  async function bundleOfOne(manifest: Record<string, unknown>): Promise<Uint8Array> {
+    const afps = buildAfps({ manifest, content: "Prompt.", type: "agent" });
+    const unusedCatalog: PackageCatalog = {
+      resolve: async () => {
+        throw new Error("catalog must not be consulted with depTypes: []");
+      },
+      fetch: async () => {
+        throw new Error("catalog must not be consulted with depTypes: []");
+      },
+    };
+    const bundle = await buildBundleFromCatalog(extractRootFromAfps(afps), unusedCatalog, {
+      depTypes: [],
+    });
+    return writeBundleToBuffer(bundle);
+  }
+
+  function gatedAgentManifest(
+    id: string,
+    config: Record<string, unknown> | undefined,
+  ): Record<string, unknown> {
+    return {
+      name: id,
+      version: "1.0.0",
+      type: "agent",
+      schema_version: "0.2",
+      display_name: "Gated",
+      description: "Declares an integration",
+      dependencies: { integrations: { [gateIntegrationId]: "^1.0.0" } },
+      ...(config ? { integrations_configuration: { [gateIntegrationId]: config } } : {}),
+    };
+  }
+
+  /**
+   * Wrap the agent AND the integration it declares into one SELF-CONTAINED
+   * bundle, with the integration absent from the DB. This is the shape that
+   * used to bypass the gate: the validator read only the registry, missed the
+   * integration, and "not installed → skip silently" waved the agent through
+   * into an immutable version.
+   */
+  async function selfContainedBundle(
+    agentManifest: Record<string, unknown>,
+    integrationManifest: Record<string, unknown>,
+  ): Promise<Uint8Array> {
+    const afps = buildAfps({ manifest: agentManifest, content: "Prompt.", type: "agent" });
+    const version = integrationManifest.version as string;
+    const identity = `${gateIntegrationId}@${version}` as const;
+    const files = new Map([["manifest.json", enc(JSON.stringify(integrationManifest, null, 2))]]);
+    const catalog: PackageCatalog = {
+      resolve: async (name) => (name === gateIntegrationId ? { identity } : null),
+      fetch: async () => ({
+        identity,
+        manifest: integrationManifest as never,
+        files,
+        integrity: "sha256-recomputed-by-the-builder",
+      }),
+    };
+    const bundle = await buildBundleFromCatalog(extractRootFromAfps(afps), catalog, {
+      depTypes: ["integrations"],
+    });
+    return writeBundleToBuffer(bundle);
+  }
+
+  it("resolves the agent's pin against the bundle's carried VERSION, not just its id", async () => {
+    // The bundle carries 2.0.0 with no callable selection; the agent pins ^1 and
+    // the DB holds a perfectly good 1.0.0. Judging by package id alone (the
+    // first implementation) matched the carried 2.0.0 and refused an import the
+    // runtime would have run from 1.0.0.
+    await seedGateIntegration(); // publishes 1.0.0 in the DB
+    const agentId = "@importorg/bundle-pin-mismatch";
+    // 2.0.0 dropped the tool the agent selects, so judging against it yields a
+    // 400 — which is exactly how this test tells the two behaviours apart.
+    const carriedV2 = {
+      ...gateIntegrationManifest(),
+      version: "2.0.0",
+      tools_policy: { other_tool: {} },
+    };
+    const bytes = await selfContainedBundle(
+      // `^1.0.0` cannot be satisfied by the carried 2.0.0.
+      gatedAgentManifest(agentId, { tools: ["list_messages"] }),
+      carriedV2,
+    );
+
+    const form = new FormData();
+    form.append("file", new Blob([bytes]), "pin-mismatch.afps-bundle");
+    const res = await app.request("/api/packages/import-bundle", {
+      method: "POST",
+      body: form,
+      headers: authHeaders(ctx),
+    });
+
+    // Judged against the DB's 1.0.0, where `list_messages` is callable.
+    expect(res.status).toBe(201);
+  });
+
+  it("resolves a range against the POST-IMPORT union, not carried versions first", async () => {
+    await seedGateIntegration(); // DB 1.0.0, callable
+    await seedPackageVersion({
+      packageId: gateIntegrationId,
+      version: "1.1.0",
+      manifest: {
+        ...gateIntegrationManifest(),
+        version: "1.1.0",
+        tools_policy: { other_tool: {} },
+      },
+    });
+
+    const agentId = "@importorg/bundle-union-range";
+    const bytes = await selfContainedBundle(
+      gatedAgentManifest(agentId, { tools: ["list_messages"] }),
+      gateIntegrationManifest(), // carried 1.0.0 is callable, but DB 1.1.0 wins `^1`
+    );
+
+    const form = new FormData();
+    form.append("file", new Blob([bytes]), "union-range.afps-bundle");
+    const res = await app.request("/api/packages/import-bundle", {
+      method: "POST",
+      body: form,
+      headers: authHeaders(ctx),
+    });
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { errors?: { code: string }[] };
+    expect((body.errors ?? []).map((e) => e.code)).toContain("no_tools_selected");
+    await assertDbMissing(packages, eq(packages.id, agentId));
+  });
+
+  it("models the `latest` tag after the carried version is imported", async () => {
+    await seedGateIntegration();
+    const [publishedV1] = await db
+      .select({ id: packageVersions.id })
+      .from(packageVersions)
+      .where(
+        and(eq(packageVersions.packageId, gateIntegrationId), eq(packageVersions.version, "1.0.0")),
+      )
+      .limit(1);
+    await db
+      .insert(packageDistTags)
+      .values({ packageId: gateIntegrationId, tag: "latest", versionId: publishedV1!.id });
+
+    const agentId = "@importorg/bundle-future-latest";
+    const agent = gatedAgentManifest(agentId, { tools: ["list_messages"] });
+    (agent.dependencies as { integrations: Record<string, string> }).integrations[
+      gateIntegrationId
+    ] = "latest";
+    const bytes = await selfContainedBundle(agent, {
+      ...gateIntegrationManifest(),
+      version: "2.0.0",
+      tools_policy: { other_tool: {} },
+    });
+
+    const form = new FormData();
+    form.append("file", new Blob([bytes]), "future-latest.afps-bundle");
+    const res = await app.request("/api/packages/import-bundle", {
+      method: "POST",
+      body: form,
+      headers: authHeaders(ctx),
+    });
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { errors?: { code: string }[] };
+    expect((body.errors ?? []).map((e) => e.code)).toContain("no_tools_selected");
+    await assertDbMissing(packages, eq(packages.id, agentId));
+  });
+
+  it("refuses a SELF-CONTAINED bundle whose carried integration exposes no tool", async () => {
+    // The integration is deliberately NOT seeded — it travels in the bundle.
+    const agentId = "@importorg/bundle-self-contained";
+    const bytes = await selfContainedBundle(
+      gatedAgentManifest(agentId, { tools: [] }),
+      gateIntegrationManifest(),
+    );
+
+    const form = new FormData();
+    form.append("file", new Blob([bytes]), "self-contained.afps-bundle");
+    const res = await app.request("/api/packages/import-bundle", {
+      method: "POST",
+      body: form,
+      headers: authHeaders(ctx),
+    });
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { errors?: { code: string; message: string }[] };
+    expect((body.errors ?? []).map((e) => e.code)).toContain("no_tools_selected");
+    // Nothing was written: the gate is a preflight, before the first insert.
+    await assertDbMissing(packages, eq(packages.id, agentId));
+  });
+
+  it("refuses a bundle whose agent declares an integration selecting no tool", async () => {
+    await seedGateIntegration();
+    const agentId = "@importorg/bundle-empty-tools";
+    const bytes = await bundleOfOne(gatedAgentManifest(agentId, { tools: [] }));
+
+    const form = new FormData();
+    form.append("file", new Blob([bytes]), "broken.afps-bundle");
+    const res = await app.request("/api/packages/import-bundle", {
+      method: "POST",
+      body: form,
+      headers: authHeaders(ctx),
+    });
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as {
+      errors?: { code: string; field: string; message: string }[];
+    };
+    expect(body.errors?.[0]?.code).toBe("no_tools_selected");
+    expect(body.errors?.[0]?.field).toBe(`integrations_configuration.${gateIntegrationId}.tools`);
+    // The bundle carries many manifests — the message must name WHICH package.
+    expect(body.errors?.[0]?.message).toStartWith(`${agentId}@1.0.0:`);
+
+    // All-or-nothing, and preflight: nothing was written.
+    const rows = await db
+      .select({ id: packages.id })
+      .from(packages)
+      .where(eq(packages.id, agentId));
+    expect(rows).toHaveLength(0);
+  });
+
+  it("imports the same bundle once a tool is selected", async () => {
+    // Negative control — the gate must refuse the empty selection, not every
+    // agent that declares an integration.
+    await seedGateIntegration();
+    const agentId = "@importorg/bundle-with-tool";
+    const bytes = await bundleOfOne(gatedAgentManifest(agentId, { tools: ["list_messages"] }));
+
+    const form = new FormData();
+    form.append("file", new Blob([bytes]), "ok.afps-bundle");
+    const res = await app.request("/api/packages/import-bundle", {
+      method: "POST",
+      body: form,
+      headers: authHeaders(ctx),
+    });
+
+    if (res.status !== 201) {
+      throw new Error(`unexpected ${res.status}: ${await res.text()}`);
+    }
+    const body = (await res.json()) as { imported: Array<{ identity: string; status: string }> };
+    expect(body.imported).toHaveLength(1);
+    expect(body.imported[0]!.status).toBe("inserted");
   });
 });

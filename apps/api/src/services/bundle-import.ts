@@ -43,7 +43,12 @@ import { parsePackageZip } from "@appstrate/core/zip";
 import { db } from "@appstrate/db/client";
 import { packages, packageVersions } from "@appstrate/db/schema";
 import { and, eq, notExists, sql } from "drizzle-orm";
-import { conflict, invalidRequest } from "../lib/errors.ts";
+import { conflict, invalidRequest, validationFailed } from "../lib/errors.ts";
+import type { ValidationFieldError } from "../lib/errors.ts";
+import {
+  validateAgentIntegrationSelections,
+  type CarriedVersion,
+} from "./integration-scope-validation.ts";
 import { isSystemPackage } from "./system-packages.ts";
 import { postInstallPackage } from "./post-install-package.ts";
 import { buildBundleFromUploadedAfps, type BundleAssemblyScope } from "./bundle-assembly.ts";
@@ -491,8 +496,72 @@ export async function importBundle(
 }
 
 /**
+ * Refuse a bundle carrying an agent whose declared integration selects no
+ * callable tool — the SAME gate `/import` and the publish route apply
+ * (`requireCallableTools`). Without it `/import-bundle` was a verbatim bypass,
+ * and `postInstallPackage` froze the broken selection into an immutable
+ * version.
+ *
+ * ALL-OR-NOTHING, and preflight. One invalid agent aborts the WHOLE bundle —
+ * "the bundle minus its root" is not a smaller success, it is a half-installed
+ * set. Running it here (pure reads, before `detectBundleConflicts` and before
+ * the first write) means the refusal costs no rollback.
+ *
+ * A SELF-CONTAINED bundle is judged too. Its integrations are not in the
+ * registry yet, so a DB-only validator hit "integration not installed → skip
+ * silently" and waved the agent straight into an immutable version. The catalog
+ * handed to the validator is therefore the post-import
+ * `incoming ∪ already-installed` catalog: every manifest the bundle carries,
+ * keyed by package id, is resolved together with existing versions and
+ * dist-tags. Same map covers the mcp-servers a local integration references.
+ */
+async function assertBundleAgentsExposeCallableTools(bundle: Bundle, orgId: string): Promise<void> {
+  // Built once for the whole bundle: an agent may reference an integration that
+  // appears anywhere in the package set, not only before it in iteration order.
+  //
+  // Grouped by package id but keeping EVERY version, because a bundle may carry
+  // several versions of one package and the agent's range picks one. Flattening
+  // to one manifest per id let an agent pinning `^1` be judged against a carried
+  // `2.0.0` — a verdict about a version the run would never resolve.
+  const carried = new Map<string, CarriedVersion[]>();
+  for (const [identity, pkg] of bundle.packages) {
+    const parsed = parsePackageIdentity(identity);
+    // System packages are authoritative platform inputs. The importer ignores
+    // carried copies below, so letting one participate in validation would
+    // judge a manifest the runtime will never install.
+    if (!parsed || isSystemPackage(parsed.packageId)) continue;
+    const versions = carried.get(parsed.packageId) ?? [];
+    versions.push({
+      version: parsed.version,
+      manifest: pkg.manifest as unknown as Record<string, unknown>,
+    });
+    carried.set(parsed.packageId, versions);
+  }
+
+  const errors: ValidationFieldError[] = [];
+  for (const [identity, pkg] of bundle.packages) {
+    const parsed = parsePackageIdentity(identity);
+    // System packages are reused verbatim, never written — same skip as the
+    // import loop.
+    if (parsed && isSystemPackage(parsed.packageId)) continue;
+    const packageErrors = await validateAgentIntegrationSelections({
+      manifest: pkg.manifest as unknown as Record<string, unknown>,
+      orgId,
+      requireCallableTools: true,
+      extraManifests: carried,
+    });
+    // `field` stays the agent-manifest key; a bundle carries MANY manifests,
+    // so the offending identity is prefixed onto the message instead.
+    for (const e of packageErrors) {
+      errors.push({ ...e, message: `${identity}: ${e.message}` });
+    }
+  }
+  if (errors.length > 0) throw validationFailed(errors);
+}
+
+/**
  * End-to-end import entry point used by the `POST /api/packages/import-bundle`
- * route. Composes read → detect conflicts → import.
+ * route. Composes read → gate → detect conflicts → import.
  */
 export async function handleImportBundle(
   bytes: Uint8Array,
@@ -500,6 +569,7 @@ export async function handleImportBundle(
   userId: string,
 ): Promise<ImportBundleResult> {
   const bundle = await readOrBuildBundle(bytes, scope);
+  await assertBundleAgentsExposeCallableTools(bundle, scope.orgId);
   const conflicts = await detectBundleConflicts(bundle, scope);
   if (conflicts.length > 0) {
     const summary = conflicts

@@ -96,12 +96,22 @@ function manifestErrorsToFieldErrors(errors: string[]): ValidationFieldError[] {
  * non-agent types, integrations with no configuration entry, and
  * integrations not visible to the org (the latter handled by run-time dep
  * validation).
+ *
+ * `requireCallableTools` adds the declared-but-empty gate on top. It belongs
+ * to the paths that FREEZE an artifact (publish, import), never to a draft
+ * write: the editor's own add-integration → tick-a-tool flow autosaves
+ * through the empty state.
  */
 async function assertAgentIntegrationScopesValid(
   manifest: Record<string, unknown>,
   orgId: string,
+  requireCallableTools = false,
 ): Promise<void> {
-  const scopeErrors = await validateAgentIntegrationSelections({ manifest, orgId });
+  const scopeErrors = await validateAgentIntegrationSelections({
+    manifest,
+    orgId,
+    requireCallableTools,
+  });
   if (scopeErrors.length > 0) {
     throw validationFailed(scopeErrors);
   }
@@ -127,12 +137,18 @@ async function assertAgentIntegrationScopesValid(
  *   artifacts are tolerated on read (#983), and gating here would make a
  *   legacy drifted draft permanently un-publishable. Retired ids drop so such
  *   a draft stays editable and publishable.
+ *
+ * `direction` is orthogonal to `opts.requireCallableTools`: it says where the
+ * bytes came from, not whether they are being frozen. Publishing a draft is
+ * `"stored"` yet must run the declared-but-empty gate; a PUT carrying a
+ * manifest is `"author"` yet must not.
  */
 async function validateManifestForRoute(
   manifest: unknown,
   expectedType: PackageType,
   orgId: string,
   direction: "author" | "stored",
+  opts: { requireCallableTools?: boolean } = {},
 ): Promise<Record<string, unknown> & { name: string }> {
   const result = validateManifest(
     manifest,
@@ -158,7 +174,7 @@ async function validateManifestForRoute(
     ]);
   }
 
-  await assertAgentIntegrationScopesValid(validated, orgId);
+  await assertAgentIntegrationScopesValid(validated, orgId, opts.requireCallableTools);
   return validated;
 }
 
@@ -345,7 +361,19 @@ async function parsePackageUpload(
 }
 
 /** Create a version snapshot from files + manifest (non-fatal on error).
- *  All package types are zipped as-is. */
+ *  All package types are zipped as-is.
+ *
+ *  SNAPSHOT ONLY WHAT WOULD SURVIVE A PUBLISH. Both create routes call this
+ *  right after `createOrgItem`, and a version is immutable — so without the
+ *  `requireCallableTools` gate here, `POST /api/packages/agents` froze exactly
+ *  the artifact the publish route refuses. The create routes themselves must
+ *  stay ungated (they validate `direction: "author"`, and the editor's flow
+ *  legitimately passes through the empty state), which is why the gate belongs
+ *  on the snapshot rather than on the request.
+ *
+ *  Skipping is an already-supported outcome, not a new one: the missing/invalid
+ *  `version` branch below has always returned without a snapshot. The draft is
+ *  created either way and the author fixes it, then publishes. */
 async function createVersionSafe(params: {
   packageId: string;
   orgId: string;
@@ -357,6 +385,18 @@ async function createVersionSafe(params: {
   if (!version || !isValidVersion(version)) {
     logger.warn("Skipping version creation: missing or invalid version in manifest", {
       packageId: params.packageId,
+    });
+    return;
+  }
+  const gateErrors = await validateAgentIntegrationSelections({
+    manifest: params.manifest,
+    orgId: params.orgId,
+    requireCallableTools: true,
+  });
+  if (gateErrors.length > 0) {
+    logger.warn("Skipping version creation: manifest would be refused at publish", {
+      packageId: params.packageId,
+      codes: gateErrors.map((e) => e.code),
     });
     return;
   }
@@ -1179,7 +1219,13 @@ function makeCreateVersionHandler(rcfg: PackageRouteConfig) {
     // integration-scope subset gate the create/update paths apply comes along
     // with it — a draft must not be frozen into an immutable version with an
     // `integrations_configuration` selection outside the integration catalog.
-    await validateManifestForRoute(item.manifest, rcfg.cfg.type, orgId, "stored");
+    //
+    // `requireCallableTools` is ON here and NOT on the draft writes: this is
+    // where the artifact stops being editable, and freezing an empty tool
+    // selection produces a version that can only fail at boot.
+    await validateManifestForRoute(item.manifest, rcfg.cfg.type, orgId, "stored", {
+      requireCallableTools: true,
+    });
 
     // Parse optional version override from request body. The body itself is
     // optional (OpenAPI `requestBody.required: false` — the SPA omits it
@@ -1584,7 +1630,11 @@ export function createPackagesRouter() {
     // Phase 1 — for agent imports, cross-check integrations_configuration
     // selections against the referenced integration catalogs. `parsePackageZip`
     // already ran `validateManifest`; this is the niveau 2 follow-up.
-    await assertAgentIntegrationScopesValid(manifest as Record<string, unknown>, orgId);
+    //
+    // An import is a FINAL artifact, not an editing step — `postInstallPackage`
+    // below cuts a version from it — so the declared-but-empty gate applies
+    // here too.
+    await assertAgentIntegrationScopesValid(manifest as Record<string, unknown>, orgId, true);
 
     // Check for existing user package
     const existing = await getPackageById(packageId);

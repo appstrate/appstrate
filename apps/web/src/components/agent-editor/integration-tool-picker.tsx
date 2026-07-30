@@ -7,12 +7,18 @@
  * (Phase 3) and optionally pins extra OAuth scopes beyond those
  * inferred from the tool selection.
  *
- * Least-privilege contract: the runtime treats `tools: undefined` and
- * `tools: []` identically (0 tools exposed). The picker surfaces
- * "Select all" / "Select none" buttons so the author can flip the
- * common cases in one click; per-tool checkboxes handle the fine
- * grain. The first toggle promotes `undefined → []` so subsequent
- * renders see the explicit form.
+ * Least-privilege contract: `tools: undefined` and `tools: []` are NOT
+ * the same selection — `undefined` inherits the integration's declared
+ * `default_tools` (§4.4), `[]` overrides it with nothing. The picker
+ * surfaces "Select all" / "Select none" buttons so the author can flip
+ * the common cases in one click; per-tool checkboxes handle the fine
+ * grain. The first toggle promotes the inherited default to an explicit
+ * array so subsequent renders see the written form.
+ *
+ * "Select none" stays — clearing the grid before re-picking is a normal
+ * editing move and the draft saves fine — but it cannot be the state you
+ * SHIP: publish/import refuse it with `no_tools_selected` and a run aborts
+ * at sidecar boot. `tools.noneNotice` says so in the panel.
  *
  * The picker writes back through `onChange` (handed in by
  * `ResourceSection`); the resulting `ResourceEntry` is split into the
@@ -158,8 +164,7 @@ export function IntegrationToolPicker({ packageId, entry, onChange }: Integratio
   }
   const hasScopeCatalog = scopeCatalog.size > 0;
 
-  // Least-privilege: an explicit `entry.tools === []` still means "0 tools
-  // picked, integration inert at runtime". `undefined` is reflected through
+  // The effective selection, canonicalised. `undefined` is reflected through
   // `effectiveTools` above so an inherited `default_tools` shows as checked
   // without being written back; the first toggle promotes that to an explicit
   // array. The wildcard form `"*"` short-circuits the picker (see
@@ -172,7 +177,14 @@ export function IntegrationToolPicker({ packageId, entry, onChange }: Integratio
   const selectedScopes = new Set(entry.scopes ?? []);
   const allSelected =
     declaredToolNames.length > 0 && declaredToolNames.every((name) => selectedTools.has(name));
+  // Disabled-state for the "Select none" button, which clears the NATIVE slice
+  // only (`replaceNativeToolSelection` preserves visible synthetic api_call
+  // selections).
   const noneSelected = declaredToolNames.every((name) => !selectedTools.has(name));
+  // Nothing callable AT ALL — mirrors `selectsNoCallableTool` on the API side:
+  // the whole effective selection, api_call rows included, not just the native
+  // slice.
+  const selectsNothing = !wildcardSelected && arrayTools.length === 0;
 
   // Inferred OAuth scopes — exactly what Phase 2 `computeRequiredScopes`
   // will union into the OAuth kickoff. Contributes the union of
@@ -341,6 +353,16 @@ export function IntegrationToolPicker({ packageId, entry, onChange }: Integratio
       className="bg-muted/30 mt-2 space-y-3 rounded-md border p-3"
       onClick={(e) => e.stopPropagation()}
     >
+      {/* Sits above the pickers because it applies to the whole integration,
+          not to the native slice alone. */}
+      {selectsNothing && (
+        <p
+          className="text-[11px] text-amber-600 dark:text-amber-500"
+          data-testid={`integ-no-tools-${packageId}`}
+        >
+          {t("agentEditor.integrations.tools.noneNotice")}
+        </p>
+      )}
       {hasMultipleAuths && (
         <div>
           <label className="flex flex-col gap-1">
@@ -462,9 +484,7 @@ export function IntegrationToolPicker({ packageId, entry, onChange }: Integratio
             </div>
           </div>
           <p className="text-muted-foreground mb-2 text-[11px]">
-            {noneSelected
-              ? t("agentEditor.integrations.tools.noneNotice")
-              : t("agentEditor.integrations.tools.explicitNotice")}
+            {t("agentEditor.integrations.tools.explicitNotice")}
           </p>
           <div className="grid gap-1.5">
             {nativeCatalog.map((entry) => {

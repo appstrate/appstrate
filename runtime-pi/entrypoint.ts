@@ -635,8 +635,9 @@ if (sidecarUrl) {
   // container. Fetch its authoritative boot report (uses the captured
   // `sidecarUrl` const — the env var is deleted just below), relay every
   // per-phase breadcrumb into the run log, and ABORT the run if any declared
-  // integration failed to start — the platform contract, every tier. A run
-  // that can't even confirm integration health aborts too.
+  // integration failed to start OR came up with nothing callable — the
+  // platform contract, every tier. A run that can't even confirm integration
+  // health aborts too.
   const bootResult = await fetchIntegrationBootReport(sidecarUrl);
   if ("error" in bootResult) {
     await die(`Could not verify integration boot status: ${bootResult.error}`);
