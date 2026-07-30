@@ -30,6 +30,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   to. A pin that resolves to nothing is left unjudged rather than rejected — that
   run already fails upstream with `dependency_unresolved` (422).
 
+- **The publish-time check read a local integration's mcp-server catalog from
+  that package's draft** — a `source.kind: "local"` integration takes its tool
+  catalog from a separate `mcp-server` package, and the spawn resolver reads it
+  at the version `source.server.version` resolves to. The validator called
+  `fetchMcpServerManifest`, which reads `packages.draft_manifest`. Both
+  directions were wrong: a tool the mcp-server author had only in their draft
+  passed publish and then registered nothing at boot, and a tool present only in
+  the published version was refused. Freeze points now call
+  `resolveMcpServerForSpawn` — the resolver the spawn path itself uses.
+
 - **An integration entry that was both empty and mis-scoped reported one error
   at a time** — `{ tools: [], scopes: ["bogus"] }` returned `no_tools_selected`
   alone, hiding `scope_not_in_catalog` until the next republish. Both are
@@ -258,9 +268,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   found. No secret was exposed and the zero-knowledge boundary held. **This is
   not a confidentiality boundary** — the public `SECURITY.md` documents the same
   design in more detail. What changes is what the sandbox can read _without
-  egress_. `--minify-whitespace` additionally drops the per-module
-  `// packages/core/src/…` banners, a readable map of the internal source tree
-  that survived comment stripping.
+  egress_. The bundle is deliberately NOT minified: `--minify-whitespace`
+  was tried and reverted, because collapsing 1023 lines to 2 destroys the line
+  and column of every production stack trace, and all it bought was hiding the
+  per-module `// packages/core/src/…` banners. Concealment is not what this
+  change is for.
 
 - **Full-codebase security review remediation (#855, #863)** — 9 P0 + 15 P1 +
   12 systemic findings closed (SSRF `guarded-fetch` + bounded unzip hardening
@@ -286,23 +298,34 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   the run with nothing callable from it, announced only by a `warn` in the
   platform run log that never reached the model's context — leaving the agent to
   improvise unauthenticated HTTP from bash. The state is now refused in two
-  places. **Wherever a version gets frozen**
-  (`POST /api/packages/agents/{scope}/{name}/versions`,
-  `POST /api/packages/import`, `POST /api/packages/import-bundle`, and the
-  initial snapshot the create routes take) it is a `validation_failed` naming
-  `integrations_configuration.<id>.tools` — the one moment the artifact is
-  still editable, since a published version is immutable. At **run boot** it
-  aborts the run as a backstop. Draft writes are deliberately NOT gated: the
-  editor passes through the empty state between adding a dependency and
-  ticking a tool, and the create routes still accept that manifest — they
-  just no longer freeze a version from it.
+  places, with two different shapes.
 
-  The backstop is not redundant. An integration carried by an `.afps-bundle`
-  and not yet installed is invisible to a validator that reads the DB, so its
-  agent is not judged on that entry; and versions published before this gate
-  existed are still runnable. Read the publish-side rule as "every path that
-  freezes a version, for every integration the org already knows", not "every
-  import".
+  **Publishing and importing** — `POST /api/packages/agents/{scope}/{name}/versions`,
+  `POST /api/packages/import`, `POST /api/packages/import-bundle` — answer
+  `400 validation_failed` naming `integrations_configuration.<id>.tools`. That
+  is the one moment the artifact is still editable, since a published version
+  is immutable.
+
+  **Creating** — `POST /api/packages/agents` — still answers `201`. The empty
+  state is legal as a draft and the editor's flow passes through it; what
+  changed is that the route no longer takes its usual initial version snapshot
+  from a manifest publishing would refuse (a skip that `createVersionSafe` has
+  always performed for a missing or invalid `version`). The draft is created,
+  the author ticks a tool, and the first version is cut on publish.
+
+  **At run boot** it aborts the run as a backstop. Draft `PUT`s are not gated
+  at all.
+
+  A **self-contained** bundle is judged too. Its integrations are not in the
+  registry yet, so a DB-only validator hit "not installed → skip silently" and
+  waved the agent into an immutable version; the catalog is now
+  `incoming ∪ already-installed` — every manifest the bundle carries, keyed by
+  package id, with the DB as the fallback. The same map covers the mcp-servers
+  a local integration references.
+
+  The runtime backstop stays necessary regardless: versions published before
+  this gate existed are still runnable, and a draft can be run straight from
+  the editor without ever being published.
 
   Blast radius: an absent `tools` key still inherits the integration's
   `default_tools`, which 59 of the 65 system integrations declare — for those,

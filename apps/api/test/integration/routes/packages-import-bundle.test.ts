@@ -19,6 +19,7 @@ import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage, seedPackageVersion } from "../../helpers/seed.ts";
 import { getTestApp } from "../../helpers/app.ts";
+import { assertDbMissing } from "../../helpers/assertions.ts";
 import { installPackage } from "../../../src/services/application-packages.ts";
 import { getPlatformRunLimits } from "../../../src/services/run-limits.ts";
 import {
@@ -863,6 +864,59 @@ describe("POST /api/packages/import-bundle — import", () => {
       ...(config ? { integrations_configuration: { [gateIntegrationId]: config } } : {}),
     };
   }
+
+  /**
+   * Wrap the agent AND the integration it declares into one SELF-CONTAINED
+   * bundle, with the integration absent from the DB. This is the shape that
+   * used to bypass the gate: the validator read only the registry, missed the
+   * integration, and "not installed → skip silently" waved the agent through
+   * into an immutable version.
+   */
+  async function selfContainedBundle(
+    agentManifest: Record<string, unknown>,
+    integrationManifest: Record<string, unknown>,
+  ): Promise<Uint8Array> {
+    const afps = buildAfps({ manifest: agentManifest, content: "Prompt.", type: "agent" });
+    const version = integrationManifest.version as string;
+    const identity = `${gateIntegrationId}@${version}` as const;
+    const files = new Map([["manifest.json", enc(JSON.stringify(integrationManifest, null, 2))]]);
+    const catalog: PackageCatalog = {
+      resolve: async (name) => (name === gateIntegrationId ? { identity } : null),
+      fetch: async () => ({
+        identity,
+        manifest: integrationManifest as never,
+        files,
+        integrity: "sha256-recomputed-by-the-builder",
+      }),
+    };
+    const bundle = await buildBundleFromCatalog(extractRootFromAfps(afps), catalog, {
+      depTypes: ["integrations"],
+    });
+    return writeBundleToBuffer(bundle);
+  }
+
+  it("refuses a SELF-CONTAINED bundle whose carried integration exposes no tool", async () => {
+    // The integration is deliberately NOT seeded — it travels in the bundle.
+    const agentId = "@importorg/bundle-self-contained";
+    const bytes = await selfContainedBundle(
+      gatedAgentManifest(agentId, { tools: [] }),
+      gateIntegrationManifest(),
+    );
+
+    const form = new FormData();
+    form.append("file", new Blob([bytes]), "self-contained.afps-bundle");
+    const res = await app.request("/api/packages/import-bundle", {
+      method: "POST",
+      body: form,
+      headers: authHeaders(ctx),
+    });
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { errors?: { code: string; message: string }[] };
+    expect((body.errors ?? []).map((e) => e.code)).toContain("no_tools_selected");
+    // Nothing was written: the gate is a preflight, before the first insert.
+    await assertDbMissing(packages, eq(packages.id, agentId));
+  });
 
   it("refuses a bundle whose agent declares an integration selecting no tool", async () => {
     await seedGateIntegration();

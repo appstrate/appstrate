@@ -41,11 +41,13 @@ import {
   validateAgentIntegrationScopes,
 } from "@appstrate/core/integration";
 import type { IntegrationManifest } from "@appstrate/core/integration";
+import type { McpServerManifest } from "@appstrate/core/mcp-server";
 import type { ValidationFieldError } from "@appstrate/core/api-errors";
 
 import {
   getIntegration,
   fetchMcpServerManifest,
+  resolveMcpServerForSpawn,
   resolveRunIntegrationVersions,
   type IntegrationManifestCache,
 } from "./integration-service.ts";
@@ -67,6 +69,21 @@ export interface ValidateAgentIntegrationSelectionsInput {
    * — publishing a version, and ZIP/GitHub/`.afps-bundle` import.
    */
   requireCallableTools?: boolean;
+  /**
+   * Manifests travelling WITH the agent, keyed by package id — the packages of
+   * an incoming `.afps-bundle`. Consulted before the DB, for integrations AND
+   * for the mcp-servers a local integration references.
+   *
+   * Without it a self-contained bundle bypassed the gate entirely: its
+   * integration is not in the registry yet, the DB lookup misses, and
+   * "not installed → skip silently" waved the agent through into an immutable
+   * version. The catalog a bundle must be judged against is
+   * `incoming ∪ already-installed`, not the DB alone.
+   *
+   * A bundle-carried manifest is used verbatim: it IS the artifact being
+   * frozen, so there is no published version to resolve it to.
+   */
+  extraManifests?: ReadonlyMap<string, Record<string, unknown>>;
 }
 
 /**
@@ -136,7 +153,7 @@ async function resolvePinnedIntegrationManifests(
 export async function validateAgentIntegrationSelections(
   input: ValidateAgentIntegrationSelectionsInput,
 ): Promise<ValidationFieldError[]> {
-  const { manifest, orgId, requireCallableTools = false } = input;
+  const { manifest, orgId, requireCallableTools = false, extraManifests } = input;
   if (manifest.type !== "agent") return [];
 
   const integrations = parseManifestIntegrations(manifest);
@@ -170,7 +187,10 @@ export async function validateAgentIntegrationSelections(
   // for stable ordering of errors in the response.
   const errors: ValidationFieldError[] = [];
   for (const entry of inspected) {
-    const integration = await getIntegration(orgId, entry.id);
+    const carried = extraManifests?.get(entry.id);
+    const integration = carried
+      ? { manifest: carried as unknown as IntegrationManifest }
+      : await getIntegration(orgId, entry.id);
     if (!integration) {
       // Integration not visible / not installed — defer to run-time
       // dependency validation rather than emit a misleading error
@@ -188,7 +208,9 @@ export async function validateAgentIntegrationSelections(
     // published cleanly and then registered nothing at boot — the exact abort
     // this validator exists to prevent — and the mirror case refused a publish
     // that would have run fine.
-    const pinnedManifest = pinnedManifests?.get(entry.id);
+    const pinnedManifest = carried
+      ? (carried as unknown as IntegrationManifest)
+      : pinnedManifests?.get(entry.id);
     const judgedManifest = pinnedManifest ?? integration.manifest;
     if (pinnedManifest && selectsNoCallableTool(entry, pinnedManifest)) {
       errors.push({
@@ -207,7 +229,21 @@ export async function validateAgentIntegrationSelections(
     let mcpServerTools: ReadonlyArray<{ name: string; description?: string }> | undefined;
     const localRef = getLocalServerRef(judgedManifest);
     if (localRef) {
-      const mcpServer = await fetchMcpServerManifest(localRef.name);
+      // Same rule as the integration manifest above, one level deeper: at a
+      // freeze point read the mcp-server AT the version `source.server.version`
+      // resolves to — `resolveMcpServerForSpawn`, the resolver the spawn path
+      // itself calls (`integration-spawn-resolver.ts`). `fetchMcpServerManifest`
+      // reads `packages.draft_manifest`, which the runtime never does, so a tool
+      // present only in the mcp-server author's draft used to pass publish and
+      // then register nothing at boot.
+      const carriedServer = extraManifests?.get(localRef.name);
+      const mcpServer = carriedServer
+        ? (carriedServer as unknown as McpServerManifest)
+        : requireCallableTools
+          ? await resolveMcpServerForSpawn(localRef.name, orgId, localRef.version).then((r) =>
+              r.ok ? r.manifest : null,
+            )
+          : await fetchMcpServerManifest(localRef.name);
       if (mcpServer) {
         const t = (mcpServer as { tools?: Array<{ name?: unknown; description?: unknown }> }).tools;
         if (Array.isArray(t)) {

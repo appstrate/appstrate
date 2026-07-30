@@ -18,6 +18,7 @@ import {
 } from "../../../src/services/integration-client-registry.ts";
 import { installPackage } from "../../../src/services/application-packages.ts";
 import { assertDbMissing, assertDbHas } from "../../helpers/assertions.ts";
+import { mcpServerManifest } from "../../helpers/integration-manifests.ts";
 import {
   buildMinimalZip,
   uploadPackageZip,
@@ -1457,6 +1458,74 @@ describe("Packages API", () => {
       const body = (await res.json()) as { errors?: { code: string; field: string }[] };
       const codes = (body.errors ?? []).map((e) => e.code);
       expect(codes).toContain("unknown_tool");
+    });
+
+    it("publish judges a local integration's mcp-server catalog on its RESOLVED version, not its draft", async () => {
+      // One level deeper than the test above. A `source.kind: "local"`
+      // integration takes its tool catalog from a separate mcp-server package,
+      // and the spawn resolver reads that package at the version
+      // `source.server.version` resolves to. The validator read
+      // `packages.draft_manifest` instead, which the runtime never does.
+      //
+      // Asserted in the ACCEPT direction on purpose: a tool present in the
+      // PUBLISHED mcp-server but absent from its author's draft must publish
+      // cleanly, because the run will find it. A refusal here can only come
+      // from reading the draft — whereas a rejection test would also pass for
+      // the unrelated reason that an unreadable draft falls back to the
+      // integration's own `tools_policy`.
+      const serverId = "@pkgorg/gmail-server";
+      // Built through the shared helper: a hand-written manifest failed
+      // `mcpServerManifestSchema` (it wants manifest_version 0.3 and
+      // `server.mcp_config`), the resolver returned null, and the catalog fell
+      // back to the integration's own `tools_policy` — a green-looking test
+      // that exercised neither read path.
+      const serverManifest = (tools: string[], version: string) => ({
+        ...mcpServerManifest({ name: serverId, version }),
+        tools: tools.map((name) => ({ name })),
+      });
+      await seedPackage({
+        id: serverId,
+        orgId: ctx.orgId,
+        type: "mcp-server",
+        source: "local",
+        // The DRAFT has dropped `archive_thread`…
+        draftManifest: serverManifest(["list_messages"], "1.1.0"),
+      });
+      // …the PUBLISHED 1.0.0 the integration pins still advertises it.
+      await seedPackageVersion({
+        packageId: serverId,
+        version: "1.0.0",
+        manifest: serverManifest(["list_messages", "archive_thread"], "1.0.0"),
+      });
+      const localIntegrationManifest = gmailIntegrationManifest({
+        source: { kind: "local", server: { name: serverId, version: "1.0.0" } },
+      });
+      await seedPackage({
+        id: integrationId,
+        orgId: ctx.orgId,
+        type: "integration",
+        source: "local",
+        draftManifest: localIntegrationManifest,
+      });
+      await seedPackageVersion({
+        packageId: integrationId,
+        version: "1.0.0",
+        manifest: localIntegrationManifest,
+      });
+      await seedDraftDeclaring("@pkgorg/publish-server-published-tool", {
+        tools: ["archive_thread"],
+      });
+
+      const res = await app.request(
+        "/api/packages/agents/@pkgorg/publish-server-published-tool/versions",
+        {
+          method: "POST",
+          headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+          body: JSON.stringify({}),
+        },
+      );
+
+      expect(res.status).toBe(201);
     });
 
     it("publish refuses a draft whose declared integration selects no tool", async () => {

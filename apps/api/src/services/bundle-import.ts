@@ -504,13 +504,23 @@ export async function importBundle(
  * set. Running it here (pure reads, before `detectBundleConflicts` and before
  * the first write) means the refusal costs no rollback.
  *
- * KNOWN RESIDUAL: an integration carried BY this bundle and not yet in the org
- * registry is invisible to the validator (which reads the DB), so a
- * self-contained foreign bundle is not judged on it — the validator's documented
- * "integration not installed → skip silently" contract, identical on
- * `POST /import`. Such a run is still refused downstream at boot.
+ * A SELF-CONTAINED bundle is judged too. Its integrations are not in the
+ * registry yet, so a DB-only validator hit "integration not installed → skip
+ * silently" and waved the agent straight into an immutable version. The catalog
+ * handed to the validator is therefore `incoming ∪ already-installed`: every
+ * manifest the bundle carries, keyed by package id, with the DB as the
+ * fallback for whatever the bundle does not bring. Same map covers the
+ * mcp-servers a local integration references.
  */
 async function assertBundleAgentsExposeCallableTools(bundle: Bundle, orgId: string): Promise<void> {
+  // Built once for the whole bundle: an agent may reference an integration that
+  // appears anywhere in the package set, not only before it in iteration order.
+  const carried = new Map<string, Record<string, unknown>>();
+  for (const [identity, pkg] of bundle.packages) {
+    const parsed = parsePackageIdentity(identity);
+    if (parsed) carried.set(parsed.packageId, pkg.manifest as unknown as Record<string, unknown>);
+  }
+
   const errors: ValidationFieldError[] = [];
   for (const [identity, pkg] of bundle.packages) {
     const parsed = parsePackageIdentity(identity);
@@ -521,6 +531,7 @@ async function assertBundleAgentsExposeCallableTools(bundle: Bundle, orgId: stri
       manifest: pkg.manifest as unknown as Record<string, unknown>,
       orgId,
       requireCallableTools: true,
+      extraManifests: carried,
     });
     // `field` stays the agent-manifest key; a bundle carries MANY manifests,
     // so the offending identity is prefixed onto the message instead.
