@@ -319,9 +319,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   A **self-contained** bundle is judged too. Its integrations are not in the
   registry yet, so a DB-only validator hit "not installed → skip silently" and
   waved the agent into an immutable version; the catalog is now
-  `incoming ∪ already-installed` — every manifest the bundle carries, keyed by
-  package id, with the DB as the fallback. The same map covers the mcp-servers
-  a local integration references.
+  `incoming ∪ already-installed`, and the agent's `dependencies.integrations`
+  range is resolved against the versions the bundle actually carries — keying by
+  package id alone would judge an agent pinning `^1` against a carried `2.0.0`
+  it will never run. The same lookup covers the mcp-servers a local integration
+  references.
+
+  The gate also tests CALLABILITY, not selection length. `default_tools: ["x"]`
+  where `x` sits in `hidden_tools`, or is absent from the resolved mcp-server, is
+  a non-empty selection that registers nothing; the effective selection is
+  intersected with the same `resolveIntegrationToolCatalog` result the subset
+  check uses. When the surface is genuinely unknown at publish time — a remote
+  integration that enumerates nothing — the intersection is skipped rather than
+  guessed.
 
   The runtime backstop stays necessary regardless: versions published before
   this gate existed are still runnable, and a draft can be run straight from

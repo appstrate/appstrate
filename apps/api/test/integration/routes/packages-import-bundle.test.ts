@@ -895,6 +895,38 @@ describe("POST /api/packages/import-bundle — import", () => {
     return writeBundleToBuffer(bundle);
   }
 
+  it("resolves the agent's pin against the bundle's carried VERSION, not just its id", async () => {
+    // The bundle carries 2.0.0 with no callable selection; the agent pins ^1 and
+    // the DB holds a perfectly good 1.0.0. Judging by package id alone (the
+    // first implementation) matched the carried 2.0.0 and refused an import the
+    // runtime would have run from 1.0.0.
+    await seedGateIntegration(); // publishes 1.0.0 in the DB
+    const agentId = "@importorg/bundle-pin-mismatch";
+    // 2.0.0 dropped the tool the agent selects, so judging against it yields a
+    // 400 — which is exactly how this test tells the two behaviours apart.
+    const carriedV2 = {
+      ...gateIntegrationManifest(),
+      version: "2.0.0",
+      tools_policy: { other_tool: {} },
+    };
+    const bytes = await selfContainedBundle(
+      // `^1.0.0` cannot be satisfied by the carried 2.0.0.
+      gatedAgentManifest(agentId, { tools: ["list_messages"] }),
+      carriedV2,
+    );
+
+    const form = new FormData();
+    form.append("file", new Blob([bytes]), "pin-mismatch.afps-bundle");
+    const res = await app.request("/api/packages/import-bundle", {
+      method: "POST",
+      body: form,
+      headers: authHeaders(ctx),
+    });
+
+    // Judged against the DB's 1.0.0, where `list_messages` is callable.
+    expect(res.status).toBe(201);
+  });
+
   it("refuses a SELF-CONTAINED bundle whose carried integration exposes no tool", async () => {
     // The integration is deliberately NOT seeded — it travels in the bundle.
     const agentId = "@importorg/bundle-self-contained";

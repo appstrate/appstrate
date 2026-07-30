@@ -1528,6 +1528,39 @@ describe("Packages API", () => {
       expect(res.status).toBe(201);
     });
 
+    it("publish refuses a NON-EMPTY selection whose every tool is hidden", async () => {
+      // "Non-empty" and "callable" are different properties, and only the second
+      // is the boot contract. `default_tools: ["list_messages"]` with
+      // `hidden_tools: ["list_messages"]` is a selection of length 1 that
+      // registers nothing — a length check waves it through and the run aborts.
+      const manifest = gmailIntegrationManifest({
+        default_tools: ["list_messages"],
+        hidden_tools: ["list_messages"],
+        tools_policy: { list_messages: { required_scopes: { primary: ["read"] } } },
+      });
+      await seedPackage({
+        id: integrationId,
+        orgId: ctx.orgId,
+        type: "integration",
+        source: "local",
+        draftManifest: manifest,
+      });
+      await seedPackageVersion({ packageId: integrationId, version: "1.0.0", manifest });
+      // No explicit selection — the agent inherits `default_tools`, so this is
+      // the path the subset check never sees.
+      await seedDraftDeclaring("@pkgorg/publish-all-hidden", undefined);
+
+      const res = await app.request("/api/packages/agents/@pkgorg/publish-all-hidden/versions", {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { errors?: { code: string }[] };
+      expect((body.errors ?? []).map((e) => e.code)).toContain("no_tools_selected");
+    });
+
     it("publish refuses a draft whose declared integration selects no tool", async () => {
       await seedGmailIntegration();
       await seedDraftDeclaring("@pkgorg/publish-empty-tools", { tools: [] });

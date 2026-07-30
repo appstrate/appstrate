@@ -45,7 +45,10 @@ import { packages, packageVersions } from "@appstrate/db/schema";
 import { and, eq, notExists, sql } from "drizzle-orm";
 import { conflict, invalidRequest, validationFailed } from "../lib/errors.ts";
 import type { ValidationFieldError } from "../lib/errors.ts";
-import { validateAgentIntegrationSelections } from "./integration-scope-validation.ts";
+import {
+  validateAgentIntegrationSelections,
+  type CarriedVersion,
+} from "./integration-scope-validation.ts";
 import { isSystemPackage } from "./system-packages.ts";
 import { postInstallPackage } from "./post-install-package.ts";
 import { buildBundleFromUploadedAfps, type BundleAssemblyScope } from "./bundle-assembly.ts";
@@ -515,10 +518,21 @@ export async function importBundle(
 async function assertBundleAgentsExposeCallableTools(bundle: Bundle, orgId: string): Promise<void> {
   // Built once for the whole bundle: an agent may reference an integration that
   // appears anywhere in the package set, not only before it in iteration order.
-  const carried = new Map<string, Record<string, unknown>>();
+  //
+  // Grouped by package id but keeping EVERY version, because a bundle may carry
+  // several versions of one package and the agent's range picks one. Flattening
+  // to one manifest per id let an agent pinning `^1` be judged against a carried
+  // `2.0.0` — a verdict about a version the run would never resolve.
+  const carried = new Map<string, CarriedVersion[]>();
   for (const [identity, pkg] of bundle.packages) {
     const parsed = parsePackageIdentity(identity);
-    if (parsed) carried.set(parsed.packageId, pkg.manifest as unknown as Record<string, unknown>);
+    if (!parsed) continue;
+    const versions = carried.get(parsed.packageId) ?? [];
+    versions.push({
+      version: parsed.version,
+      manifest: pkg.manifest as unknown as Record<string, unknown>,
+    });
+    carried.set(parsed.packageId, versions);
   }
 
   const errors: ValidationFieldError[] = [];

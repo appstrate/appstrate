@@ -35,9 +35,12 @@
  */
 
 import { isToolsWildcard, parseManifestIntegrations } from "@appstrate/core/dependencies";
+import { matchVersion } from "@appstrate/core/semver";
 import type { ManifestIntegrationEntry } from "@appstrate/core/dependencies";
 import {
+  canonicalizeApiToolName,
   resolveEffectiveToolSelection,
+  resolveIntegrationToolCatalog,
   validateAgentIntegrationScopes,
 } from "@appstrate/core/integration";
 import type { IntegrationManifest } from "@appstrate/core/integration";
@@ -52,6 +55,33 @@ import {
   type IntegrationManifestCache,
 } from "./integration-service.ts";
 import { getLocalServerRef } from "./integration-manifest-helpers.ts";
+
+/** One version of one package carried inside an incoming bundle. */
+export interface CarriedVersion {
+  version: string;
+  manifest: Record<string, unknown>;
+}
+
+/**
+ * Pick the carried version that satisfies `range`, or `null` when the bundle
+ * carries this package but no version of it matches — a MISS, which falls
+ * through to the DB rather than being treated as an absence of the package.
+ *
+ * An exact-version range is handled by `matchVersion` too (semver treats
+ * `"1.2.3"` as the range `=1.2.3`), so there is no separate exact path to keep
+ * in sync.
+ */
+function pickCarried(
+  carried: ReadonlyArray<CarriedVersion> | undefined,
+  range: string,
+): CarriedVersion | null {
+  if (!carried || carried.length === 0) return null;
+  const winner = matchVersion(
+    carried.map((c) => c.version),
+    range,
+  );
+  return winner ? (carried.find((c) => c.version === winner) ?? null) : null;
+}
 
 export interface ValidateAgentIntegrationSelectionsInput {
   /** Raw agent manifest (already shape-validated by `validateManifest`). */
@@ -70,9 +100,10 @@ export interface ValidateAgentIntegrationSelectionsInput {
    */
   requireCallableTools?: boolean;
   /**
-   * Manifests travelling WITH the agent, keyed by package id — the packages of
-   * an incoming `.afps-bundle`. Consulted before the DB, for integrations AND
-   * for the mcp-servers a local integration references.
+   * Manifests travelling WITH the agent — the packages of an incoming
+   * `.afps-bundle`, keyed by package id, each carrying EVERY version the bundle
+   * holds for that id. Consulted before the DB, for integrations AND for the
+   * mcp-servers a local integration references.
    *
    * Without it a self-contained bundle bypassed the gate entirely: its
    * integration is not in the registry yet, the DB lookup misses, and
@@ -80,25 +111,52 @@ export interface ValidateAgentIntegrationSelectionsInput {
    * version. The catalog a bundle must be judged against is
    * `incoming ∪ already-installed`, not the DB alone.
    *
-   * A bundle-carried manifest is used verbatim: it IS the artifact being
-   * frozen, so there is no published version to resolve it to.
+   * KEYED BY ID BUT VERSIONED. A bundle can legitimately carry several versions
+   * of one package, and the agent's `dependencies.integrations.<id>` range picks
+   * one. Flattening to a single manifest per id — which the first version of
+   * this did — lets an agent pinning `^1` be judged against a carried `2.0.0`
+   * and then run the `1.2.0` the DB resolves: a false verdict in both
+   * directions. The pin is resolved against these versions with
+   * {@link matchVersion}, and only a MISS falls through to the DB.
    */
-  extraManifests?: ReadonlyMap<string, Record<string, unknown>>;
+  extraManifests?: ReadonlyMap<string, ReadonlyArray<CarriedVersion>>;
 }
 
 /**
- * True when the agent would end up with no callable tool from this
- * integration. Reads through {@link resolveEffectiveToolSelection}, the SAME
- * resolver that builds `toolAllowlist`, so "empty" means here exactly what it
- * will mean at boot.
+ * True when the agent would end up with no callable tool from this integration.
+ *
+ * A NON-EMPTY selection is not the same thing as a callable one, which is why
+ * this intersects the effective selection with the resolved catalog instead of
+ * measuring its length. `default_tools: ["foo"]` where `foo` is listed in
+ * `hidden_tools`, or absent from the resolved mcp-server, is a non-empty
+ * selection that registers nothing — the boot gate's exact failure condition.
+ *
+ * `catalog` MUST be the same `resolveIntegrationToolCatalog` result the subset
+ * check below uses (it already subtracts `hidden_tools` and adds the synthetic
+ * `api_call`/`api_upload` entries). One computation, two checks: a catalog that
+ * disagreed between them would let one of the two lie.
  */
 function selectsNoCallableTool(
   entry: ManifestIntegrationEntry,
   integrationManifest: IntegrationManifest,
+  catalog: ReadonlyArray<{ name: string }>,
+  surfaceIsKnown: boolean,
 ): boolean {
   const effective = resolveEffectiveToolSelection(entry.tools, integrationManifest);
   if (isToolsWildcard(effective)) return false;
-  return effective === undefined || effective.length === 0;
+  if (effective === undefined || effective.length === 0) return true;
+  // Intersect only when the catalog is KNOWABLE here. A remote integration that
+  // enumerates nothing in its manifest discovers its tools at connect time, so
+  // an empty catalog means "unknown", not "none" — intersecting would refuse a
+  // perfectly good publish. Same reason `validateAgentIntegrationScopes` skips
+  // its own subset check on an empty catalog (Phase 0 semantics).
+  //
+  // A DECLARED surface that `hidden_tools` empties is the opposite case and must
+  // refuse: the integration told us its tools and then hid all of them, so the
+  // selection provably registers nothing.
+  if (!surfaceIsKnown) return false;
+  const callable = new Set(catalog.map((e) => e.name));
+  return !effective.some((t) => callable.has(canonicalizeApiToolName(integrationManifest, t)));
 }
 
 /**
@@ -187,7 +245,9 @@ export async function validateAgentIntegrationSelections(
   // for stable ordering of errors in the response.
   const errors: ValidationFieldError[] = [];
   for (const entry of inspected) {
-    const carried = extraManifests?.get(entry.id);
+    // Resolve the agent's OWN pin against the versions the bundle carries.
+    const carriedEntry = pickCarried(extraManifests?.get(entry.id), entry.version);
+    const carried = carriedEntry?.manifest;
     const integration = carried
       ? { manifest: carried as unknown as IntegrationManifest }
       : await getIntegration(orgId, entry.id);
@@ -212,20 +272,11 @@ export async function validateAgentIntegrationSelections(
       ? (carried as unknown as IntegrationManifest)
       : pinnedManifests?.get(entry.id);
     const judgedManifest = pinnedManifest ?? integration.manifest;
-    if (pinnedManifest && selectsNoCallableTool(entry, pinnedManifest)) {
-      errors.push({
-        field: `integrations_configuration.${entry.id}.tools`,
-        code: "no_tools_selected",
-        title: "Integration exposes no tool",
-        message: `Integration ${entry.id} is declared but selects no tool, so it would expose nothing callable and the run would abort at boot. Select at least one tool in integrations_configuration.${entry.id}.tools, or remove ${entry.id} from dependencies.integrations.`,
-      });
-      // Deliberately NO `continue`: `{ tools: [], scopes: ["bogus"] }` still
-      // has a checkable scope, and both errors must land in one pass.
-    }
-    if (!configuredIds.has(entry.id)) continue;
+
     // For local-source integrations the catalog comes from the referenced
-    // mcp-server's MCPB tools. Fetch it best-effort — the validator falls
-    // back to `integration.tools_policy` keys when undefined (mirrors the picker).
+    // mcp-server's MCPB tools. Fetched BEFORE both checks: the emptiness gate
+    // needs it too, because "non-empty selection" and "callable selection" are
+    // different properties and only the second one is the boot contract.
     let mcpServerTools: ReadonlyArray<{ name: string; description?: string }> | undefined;
     const localRef = getLocalServerRef(judgedManifest);
     if (localRef) {
@@ -236,7 +287,11 @@ export async function validateAgentIntegrationSelections(
       // reads `packages.draft_manifest`, which the runtime never does, so a tool
       // present only in the mcp-server author's draft used to pass publish and
       // then register nothing at boot.
-      const carriedServer = extraManifests?.get(localRef.name);
+      // Same rule one level deeper: `source.server.version` is the range here.
+      const carriedServer = pickCarried(
+        extraManifests?.get(localRef.name),
+        localRef.version,
+      )?.manifest;
       const mcpServer = carriedServer
         ? (carriedServer as unknown as McpServerManifest)
         : requireCallableTools
@@ -256,6 +311,34 @@ export async function validateAgentIntegrationSelections(
         }
       }
     }
+    // ONE catalog, both checks. `resolveIntegrationToolCatalog` already
+    // subtracts `hidden_tools` and appends the synthetic api_call/api_upload
+    // entries, so this is the set the sidecar will actually register.
+    const catalog = resolveIntegrationToolCatalog({
+      integration: judgedManifest,
+      ...(mcpServerTools ? { mcpServerTools } : {}),
+    });
+
+    // The integration told us its tool surface when it declares `tools_policy`,
+    // or when the referenced mcp-server resolved and enumerated tools. Absent
+    // both, the surface is discovered at runtime and must not be second-guessed.
+    const surfaceIsKnown =
+      (mcpServerTools?.length ?? 0) > 0 ||
+      Object.keys((judgedManifest as { tools_policy?: Record<string, unknown> }).tools_policy ?? {})
+        .length > 0;
+
+    if (pinnedManifest && selectsNoCallableTool(entry, pinnedManifest, catalog, surfaceIsKnown)) {
+      errors.push({
+        field: `integrations_configuration.${entry.id}.tools`,
+        code: "no_tools_selected",
+        title: "Integration exposes no callable tool",
+        message: `Integration ${entry.id} is declared but nothing it selects is callable, so the run would abort at boot. Select at least one tool this integration actually exposes in integrations_configuration.${entry.id}.tools, or remove ${entry.id} from dependencies.integrations.`,
+      });
+      // Deliberately NO `continue`: `{ tools: [], scopes: ["bogus"] }` still
+      // has a checkable scope, and both errors must land in one pass.
+    }
+    if (!configuredIds.has(entry.id)) continue;
+
     const issues = validateAgentIntegrationScopes(
       { id: entry.id, tools: entry.tools, scopes: entry.scopes },
       judgedManifest,
