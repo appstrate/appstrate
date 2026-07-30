@@ -138,21 +138,17 @@ describe("fetchPackageJson", () => {
     }
   });
 
-  // The double assertion is deliberate: the stub implements `fetch`'s call
-  // signature and nothing else, while `typeof fetch` also carries runtime-only
-  // members (`preconnect`, …) these tests never touch. Widening through
-  // `unknown` keeps the stub from breaking every time the ambient type grows
-  // another member.
+  // Bun's `fetch` type includes `preconnect`, so keep the test double
+  // structurally compatible instead of hiding the missing member with a cast.
   function stubFetch(status: number, statusText: string, body?: unknown): void {
-    // Double cast: `typeof fetch` carries React's `preconnect` augmentation in
-    // this tsconfig, which a bare arrow function cannot satisfy — and the stub
-    // has no business implementing it. The call signature is the only part
-    // under test.
-    globalThis.fetch = (async () =>
-      new Response(body === undefined ? null : JSON.stringify(body), {
-        status,
-        statusText,
-      })) as unknown as typeof fetch;
+    globalThis.fetch = Object.assign(
+      async () =>
+        new Response(body === undefined ? null : JSON.stringify(body), {
+          status,
+          statusText,
+        }),
+      { preconnect: () => undefined },
+    );
   }
 
   it("THROWS on 404 instead of reporting an absent file", async () => {

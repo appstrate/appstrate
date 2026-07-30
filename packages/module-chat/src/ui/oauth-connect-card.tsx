@@ -30,7 +30,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useThreadRuntime } from "@assistant-ui/react";
+import { useAui } from "@assistant-ui/react";
 import { AlertTriangleIcon, CheckIcon, Loader2Icon } from "lucide-react";
 import { encodePackageIdPath } from "@appstrate/core/naming";
 import { Button } from "./button.tsx";
@@ -108,7 +108,7 @@ export function OAuthConnectCard({
   /** Set when the initiate call itself failed (no auth url will ever arrive). */
   errorText?: string;
 }) {
-  const thread = useThreadRuntime();
+  const aui = useAui();
   const getHeaders = useChatHeaders();
   const [phase, setPhase] = useState<Phase>("idle");
   const [errMsg, setErrMsg] = useState<string | null>(null);
@@ -173,7 +173,7 @@ export function OAuthConnectCard({
         return;
       }
       setPhase("done");
-      thread.append({
+      aui.thread().append({
         content: [
           {
             type: "text",
@@ -188,7 +188,7 @@ export function OAuthConnectCard({
         ],
       });
     },
-    [thread, label, meta, packageId],
+    [aui, label, meta, packageId],
   );
 
   // Listen from mount until the connection lands — NOT only after the user
