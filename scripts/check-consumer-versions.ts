@@ -202,12 +202,16 @@ export async function fetchPackageJson(
     // it does not leak the repo's existence. Name that here: the message is
     // the operator's only clue, and "404 Not Found" alone reads as "the file
     // was deleted" — sending them to look in the wrong place.
+    const authHint = token
+      ? ` Check that CONSUMER_LOCKSTEP_TOKEN still has contents:read on ${repo}` +
+        ` (expired PAT, missing scope, repository not selected, or SSO not authorized).`
+      : ` GITHUB_TOKEN is not configured. Configure it with a token that has contents:read on ${repo};` +
+        ` the publish-core workflow sources GITHUB_TOKEN from the repository secret CONSUMER_LOCKSTEP_TOKEN.`;
     const hint =
       res.status === 404
         ? ` — a listed consumer always has this file, so this is a READ failure, not an absent file.` +
-          ` Check that ${token ? "CONSUMER_LOCKSTEP_TOKEN" : "GITHUB_TOKEN"} still has contents:read on ${repo}` +
-          ` (expired PAT, missing scope, or SSO not authorized). If the repo genuinely stopped consuming` +
-          ` @appstrate/core, remove it from CONSUMERS instead.`
+          authHint +
+          ` If the repo genuinely stopped consuming @appstrate/core, remove it from CONSUMERS instead.`
         : "";
     throw new Error(`GET ${url} → ${res.status} ${res.statusText}${hint}`);
   }

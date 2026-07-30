@@ -128,8 +128,14 @@ describe("assessDeclaredRange", () => {
 
 describe("fetchPackageJson", () => {
   const realFetch = globalThis.fetch;
+  const initialToken = process.env.GITHUB_TOKEN;
   afterEach(() => {
     globalThis.fetch = realFetch;
+    if (initialToken === undefined) {
+      delete process.env.GITHUB_TOKEN;
+    } else {
+      process.env.GITHUB_TOKEN = initialToken;
+    }
   });
 
   // The double assertion is deliberate: the stub implements `fetch`'s call
@@ -164,13 +170,26 @@ describe("fetchPackageJson", () => {
   it("names the token and the likely causes in the 404 message", async () => {
     // The message is the operator's only clue. Bare "404 Not Found" reads as
     // "the file was deleted" and sends them to look in the wrong place.
+    process.env.GITHUB_TOKEN = "test-token";
     stubFetch(404, "Not Found");
     const err = await fetchPackageJson("appstrate/cloud", "package.json").catch(
       (e: unknown) => e as Error,
     );
     expect(err.message).toContain("READ failure");
-    expect(err.message).toContain("contents:read");
+    expect(err.message).toContain("CONSUMER_LOCKSTEP_TOKEN");
+    expect(err.message).toContain("missing scope");
+    expect(err.message).toContain("SSO not authorized");
     expect(err.message).toContain("appstrate/cloud");
+  });
+
+  it("names the publish-core secret when GITHUB_TOKEN is absent", async () => {
+    delete process.env.GITHUB_TOKEN;
+    stubFetch(404, "Not Found");
+    const err = await fetchPackageJson("appstrate/cloud", "package.json").catch(
+      (e: unknown) => e as Error,
+    );
+    expect(err.message).toContain("GITHUB_TOKEN is not configured");
+    expect(err.message).toContain("CONSUMER_LOCKSTEP_TOKEN");
   });
 
   it("still throws on other non-2xx statuses", async () => {
