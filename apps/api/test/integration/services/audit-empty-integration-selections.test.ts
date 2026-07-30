@@ -5,9 +5,10 @@
  * (`services/audit-empty-integration-selections.ts`).
  *
  * This is a DEPLOY GATE: its exit code decides whether a rollout proceeds, so
- * mis-attributing a finding is as harmful as missing one. The first version got
- * schedule selectors backwards — it read an absent `version_override` as "draft"
- * when the runtime reads it as "latest published" — and pooled every schedule's
+ * it blocks only active defaults and enabled schedules. Explicitly selectable
+ * drafts/history remain warnings. The first version got schedule selectors
+ * backwards — it read an absent `version_override` as "draft" when the runtime
+ * reads it as "latest published" — and pooled every schedule's
  * `dependency_overrides` before assigning results, so one schedule's finding
  * landed on all of them.
  *
@@ -30,6 +31,7 @@ import {
 import { and, eq } from "drizzle-orm";
 import {
   auditEmptyIntegrationSelections,
+  isBlocking,
   isReachable,
 } from "../../../src/services/audit-empty-integration-selections.ts";
 import { validateAgentIntegrationSelections } from "../../../src/services/integration-scope-validation.ts";
@@ -135,9 +137,10 @@ describe("auditEmptyIntegrationSelections", () => {
     const findings = await auditEmptyIntegrationSelections();
     // Nothing installed, no schedule — reported, but not blocking.
     expect(findings.filter(isReachable)).toHaveLength(0);
+    expect(findings.filter(isBlocking)).toHaveLength(0);
   });
 
-  it("an UNPINNED install reaches the draft and is therefore blocking", async () => {
+  it("an installed draft is reported but does not block when only explicitly selectable", async () => {
     await seedSplitAgent();
     await db
       .insert(applicationPackages)
@@ -148,9 +151,11 @@ describe("auditEmptyIntegrationSelections", () => {
     expect(reachable).toHaveLength(1);
     expect(reachable[0]?.artifact).toBe("draft");
     expect(reachable[0]?.installedIn).toEqual([ctx.defaultAppId]);
+    expect(reachable[0]?.activeIn).toEqual([]);
+    expect(findings.filter(isBlocking)).toHaveLength(0);
   });
 
-  it("an install PINNED to a healthy version can still run the broken draft", async () => {
+  it("a healthy install pin leaves its explicitly selectable broken draft as a warning", async () => {
     const { goodVersionId } = await seedSplitAgent();
     await db
       .insert(applicationPackages)
@@ -160,6 +165,77 @@ describe("auditEmptyIntegrationSelections", () => {
     expect(reachable).toHaveLength(1);
     expect(reachable[0]?.artifact).toBe("draft");
     expect(reachable[0]?.installedIn).toEqual([ctx.defaultAppId]);
+    expect(reachable[0]?.activeIn).toEqual([]);
+    expect(reachable.filter(isBlocking)).toHaveLength(0);
+  });
+
+  it("blocks when the default published version is broken", async () => {
+    const { goodVersionId } = await seedSplitAgent();
+    const broken = await seedPackageVersion({
+      packageId: AGENT_ID,
+      version: "2.0.0",
+      manifest: agentManifest(AGENT_ID, "2.0.0"),
+    });
+    await db
+      .insert(packageDistTags)
+      .values({ packageId: AGENT_ID, tag: "latest", versionId: broken.id });
+    await db.insert(applicationPackages).values({
+      applicationId: ctx.defaultAppId,
+      packageId: AGENT_ID,
+      versionId: goodVersionId,
+    });
+
+    const findings = await auditEmptyIntegrationSelections();
+    const latest = findings.find((f) => f.artifact === "2.0.0");
+    expect(latest?.installedIn).toEqual([ctx.defaultAppId]);
+    expect(latest?.activeIn).toEqual([ctx.defaultAppId]);
+    expect(latest && isBlocking(latest)).toBe(true);
+  });
+
+  it("reports a broken historical version without blocking when no default targets it", async () => {
+    const { goodVersionId } = await seedSplitAgent();
+    const historical = await seedPackageVersion({
+      packageId: AGENT_ID,
+      version: "2.0.0",
+      manifest: agentManifest(AGENT_ID, "2.0.0"),
+    });
+    await db
+      .insert(packageDistTags)
+      .values({ packageId: AGENT_ID, tag: "latest", versionId: goodVersionId });
+    await db.insert(applicationPackages).values({
+      applicationId: ctx.defaultAppId,
+      packageId: AGENT_ID,
+      versionId: goodVersionId,
+    });
+
+    const findings = await auditEmptyIntegrationSelections();
+    const old = findings.find((f) => f.artifact === historical.version);
+    expect(old?.installedIn).toEqual([ctx.defaultAppId]);
+    expect(old?.activeIn).toEqual([]);
+    expect(old && isBlocking(old)).toBe(false);
+  });
+
+  it("blocks when an application version pin targets an otherwise historical version", async () => {
+    const { goodVersionId } = await seedSplitAgent();
+    const pinnedBroken = await seedPackageVersion({
+      packageId: AGENT_ID,
+      version: "2.0.0",
+      manifest: agentManifest(AGENT_ID, "2.0.0"),
+    });
+    await db
+      .insert(packageDistTags)
+      .values({ packageId: AGENT_ID, tag: "latest", versionId: goodVersionId });
+    await db.insert(applicationPackages).values({
+      applicationId: ctx.defaultAppId,
+      packageId: AGENT_ID,
+      versionId: pinnedBroken.id,
+    });
+
+    const pinned = (await auditEmptyIntegrationSelections()).find(
+      (f) => f.artifact === pinnedBroken.version,
+    );
+    expect(pinned?.activeIn).toEqual([ctx.defaultAppId]);
+    expect(pinned && isBlocking(pinned)).toBe(true);
   });
 
   it("flags a non-empty inherited selection when hidden_tools removes every tool", async () => {
@@ -248,10 +324,10 @@ describe("auditEmptyIntegrationSelections", () => {
     it("treats an explicit draft override as the draft", async () => {
       await seedSplitAgent();
       await scheduleWith("draft");
-      const reachable = (await auditEmptyIntegrationSelections()).filter(isReachable);
-      expect(reachable).toHaveLength(1);
-      expect(reachable[0]?.artifact).toBe("draft");
-      expect(reachable[0]?.schedules).toHaveLength(1);
+      const blocking = (await auditEmptyIntegrationSelections()).filter(isBlocking);
+      expect(blocking).toHaveLength(1);
+      expect(blocking[0]?.artifact).toBe("draft");
+      expect(blocking[0]?.schedules).toHaveLength(1);
     });
 
     it("resolves an exact version override", async () => {
@@ -263,8 +339,8 @@ describe("auditEmptyIntegrationSelections", () => {
         manifest: agentManifest(AGENT_ID, "2.0.0"),
       });
       await scheduleWith("2.0.0");
-      const reachable = (await auditEmptyIntegrationSelections()).filter(isReachable);
-      expect(reachable.map((f) => f.artifact)).toEqual(["2.0.0"]);
+      const blocking = (await auditEmptyIntegrationSelections()).filter(isBlocking);
+      expect(blocking.map((f) => f.artifact)).toEqual(["2.0.0"]);
     });
 
     it("resolves a semver RANGE override", async () => {
@@ -275,8 +351,8 @@ describe("auditEmptyIntegrationSelections", () => {
         manifest: agentManifest(AGENT_ID, "2.0.0"),
       });
       await scheduleWith("^2");
-      const reachable = (await auditEmptyIntegrationSelections()).filter(isReachable);
-      expect(reachable.map((f) => f.artifact)).toEqual(["2.0.0"]);
+      const blocking = (await auditEmptyIntegrationSelections()).filter(isBlocking);
+      expect(blocking.map((f) => f.artifact)).toEqual(["2.0.0"]);
     });
 
     it("resolves a DIST-TAG override", async () => {
@@ -290,8 +366,8 @@ describe("auditEmptyIntegrationSelections", () => {
         .insert(packageDistTags)
         .values({ packageId: AGENT_ID, tag: "next", versionId: broken.id });
       await scheduleWith("next");
-      const reachable = (await auditEmptyIntegrationSelections()).filter(isReachable);
-      expect(reachable.map((f) => f.artifact)).toEqual(["2.0.0"]);
+      const blocking = (await auditEmptyIntegrationSelections()).filter(isBlocking);
+      expect(blocking.map((f) => f.artifact)).toEqual(["2.0.0"]);
     });
 
     it("attributes each schedule to its OWN artifact, never pooling them", async () => {
@@ -308,7 +384,7 @@ describe("auditEmptyIntegrationSelections", () => {
       await scheduleWith("2.0.0"); // broken
 
       const findings = await auditEmptyIntegrationSelections();
-      const byArtifact = new Map(findings.filter(isReachable).map((f) => [f.artifact, f]));
+      const byArtifact = new Map(findings.filter(isBlocking).map((f) => [f.artifact, f]));
       expect([...byArtifact.keys()].sort()).toEqual(["2.0.0", "draft"]);
       // Exactly one schedule each — the healthy 1.0.0 schedule contributes to
       // neither, and neither finding collects the other's schedule.
@@ -339,10 +415,10 @@ describe("auditEmptyIntegrationSelections", () => {
       const brokenScheduleId = await scheduleWith("draft", { [INTEGRATION_ID]: "draft" });
       await scheduleWith("draft"); // default `^1` resolves the healthy published integration
 
-      const reachable = (await auditEmptyIntegrationSelections()).filter(isReachable);
-      expect(reachable).toHaveLength(1);
-      expect(reachable[0]?.artifact).toBe("draft");
-      expect(reachable[0]?.schedules.map((s) => s.id)).toEqual([brokenScheduleId]);
+      const blocking = (await auditEmptyIntegrationSelections()).filter(isBlocking);
+      expect(blocking).toHaveLength(1);
+      expect(blocking[0]?.artifact).toBe("draft");
+      expect(blocking[0]?.schedules.map((s) => s.id)).toEqual([brokenScheduleId]);
     });
   });
 });

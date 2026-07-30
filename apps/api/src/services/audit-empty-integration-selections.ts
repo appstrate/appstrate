@@ -5,7 +5,8 @@
  *
  * Finds every agent artifact whose declared integration would expose no
  * callable tool — the state `assertIntegrationExposesTools` turns into a failed
- * run — and reports, per row, whether anything can actually reach it.
+ * run — and reports, per row, whether it is merely explicitly selectable or
+ * actively targeted by an application default / enabled schedule.
  *
  * WHY NOT A SQL QUERY. A SQL approximation shipped first and was wrong in three
  * ways a query cannot fix without reimplementing the platform:
@@ -39,8 +40,13 @@ export interface Finding {
   artifact: string;
   integrationId: string;
   reason: string;
-  /** Applications where this package is installed, making this artifact selector-runnable. */
+  /** Applications where this package is installed, making this artifact explicitly selectable. */
   installedIn: string[];
+  /**
+   * Applications where a normal run/export path selects this artifact without
+   * an explicit version selector. These findings block rollout.
+   */
+  activeIn: string[];
   /** Enabled schedules pointed at it, with their next fire time. */
   schedules: Array<{ id: string; nextRunAt: string | null }>;
 }
@@ -143,6 +149,7 @@ export async function auditEmptyIntegrationSelections(): Promise<Finding[]> {
 
     const versions = await db
       .select({
+        id: packageVersions.id,
         version: packageVersions.version,
         manifest: packageVersions.manifest,
       })
@@ -152,16 +159,20 @@ export async function auditEmptyIntegrationSelections(): Promise<Finding[]> {
     // Every artifact a run can reach: the mutable draft (editor Run button,
     // `version=draft`) plus each published version (pin, dist-tag, or range).
     const manifestByLabel = new Map<string, Record<string, unknown>>();
+    const labelByVersionId = new Map<number, string>();
     const draftManifest = asManifest(agent.draftManifest);
     if (draftManifest) manifestByLabel.set("draft", draftManifest);
     for (const v of versions) {
       const m = asManifest(v.manifest);
       if (m) manifestByLabel.set(v.version, m);
+      labelByVersionId.set(v.id, v.version);
     }
+    const latest = await getLatestVersionInfo(agent.id);
 
     const installs = await db
       .select({
         applicationId: applicationPackages.applicationId,
+        versionId: applicationPackages.versionId,
       })
       .from(applicationPackages)
       .where(eq(applicationPackages.packageId, agent.id));
@@ -181,6 +192,7 @@ export async function auditEmptyIntegrationSelections(): Promise<Finding[]> {
       label: string;
       overrides: Record<string, string> | null;
       application?: string;
+      activeApplication?: string;
       schedule?: { id: string; nextRunAt: string | null };
     }
     const consumers: Consumer[] = [];
@@ -188,9 +200,23 @@ export async function auditEmptyIntegrationSelections(): Promise<Finding[]> {
       // Installation grants access to the PACKAGE, not one immutable artifact:
       // `/run?version=` accepts draft, exact, tag and range, and the editor's
       // Run button explicitly selects the draft. A version_id is a default pin,
-      // not a permission boundary, so every artifact is reachable.
+      // not a permission boundary, so every artifact remains visible in the
+      // audit. Only the latest published version (normal run default) and the
+      // installed version pin (bundle/export default) block rollout; drafts and
+      // historical versions that need an explicit selector are warnings.
+      const activeLabels = new Set<string>();
+      if (latest?.version) activeLabels.add(latest.version);
+      if (i.versionId !== null) {
+        const installedLabel = labelByVersionId.get(i.versionId);
+        if (installedLabel) activeLabels.add(installedLabel);
+      }
       for (const label of manifestByLabel.keys()) {
-        consumers.push({ label, overrides: null, application: i.applicationId });
+        consumers.push({
+          label,
+          overrides: null,
+          application: i.applicationId,
+          ...(activeLabels.has(label) ? { activeApplication: i.applicationId } : {}),
+        });
       }
     }
     for (const sc of agentSchedules) {
@@ -220,10 +246,13 @@ export async function auditEmptyIntegrationSelections(): Promise<Finding[]> {
         integrationId: e.integrationId,
         reason: e.reason,
         installedIn: [],
+        activeIn: [],
         schedules: [],
       };
       if (c?.application && !f.installedIn.includes(c.application))
         f.installedIn.push(c.application);
+      if (c?.activeApplication && !f.activeIn.includes(c.activeApplication))
+        f.activeIn.push(c.activeApplication);
       if (c?.schedule && !f.schedules.some((s) => s.id === c.schedule!.id))
         f.schedules.push(c.schedule);
       rows.set(key, f);
@@ -249,7 +278,16 @@ function asManifest(value: unknown): Record<string, unknown> | null {
   return value as Record<string, unknown>;
 }
 
-/** A finding nothing can reach is informational; a reachable one blocks. */
+/** Explicitly selectable or scheduled; useful for inventory and warnings. */
 export function isReachable(f: Finding): boolean {
   return f.installedIn.length > 0 || f.schedules.length > 0;
+}
+
+/**
+ * Blocking means execution is an active default, not merely possible through
+ * an explicit selector. Enabled schedules always block, including schedules
+ * that intentionally target the draft.
+ */
+export function isBlocking(f: Finding): boolean {
+  return f.activeIn.length > 0 || f.schedules.length > 0;
 }

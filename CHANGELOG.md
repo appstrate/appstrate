@@ -352,16 +352,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   now fails loudly instead of silently.
 
   **Before deploying**, run `bun scripts/audit-empty-integration-selections.ts`.
-  It lists every affected artifact and whether anything reaches it, exiting 1
-  when at least one is installed or scheduled so it can gate a rollout. It calls
-  the runtime's own resolvers rather than approximating them in SQL — a SQL
-  version shipped first and was wrong three ways: it read the integration's
-  draft `default_tools` instead of resolving the agent's pin, it ignored mutable
-  drafts even though an installed package makes every artifact selector-runnable
-  (and the editor explicitly runs the draft), and it ignored
-  `dependency_overrides`. The audit now calls the same callability validator as
-  publish/import, including the resolved nested mcp-server catalog and
-  `hidden_tools`.
+  It lists every affected artifact and distinguishes active targets from
+  explicitly selectable drafts/history. The exit code is 1 only when a normal
+  application default or an enabled schedule targets the broken artifact;
+  selector-only findings remain warnings, so an in-progress draft or immutable
+  historical version cannot permanently jam the rollout gate. It calls the
+  runtime's own resolvers rather than approximating them in SQL — a SQL version
+  shipped first and was wrong three ways: it read the integration's draft
+  `default_tools` instead of resolving the agent's pin, it ignored mutable drafts
+  even though an installed package makes every artifact selector-runnable (and
+  the editor explicitly runs the draft), and it ignored `dependency_overrides`.
+  The audit now calls the same callability validator as publish/import, including
+  the resolved nested mcp-server catalog and `hidden_tools`.
 
   This also corrects a documented falsehood — `tools` absent and `tools: []`
   were described as equivalent in the docs, the `ManifestIntegrationEntry`
