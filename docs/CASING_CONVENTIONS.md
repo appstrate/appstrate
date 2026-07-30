@@ -382,6 +382,8 @@ This is the single canonical contract for frontend, SDK, github-action, and MCP 
 
 **Agent extras**: `integrations_configuration`, `input`, `output`, `config`, `timeout`, `runtime_tools` (Appstrate extension), top-level `integrations.{id}.{tools, scopes}` (niveau-2 selection)
 
+**Agent resource extension**: `_meta["dev.appstrate/resources"].{memory_mb, cpu}`
+
 **Wrapper (input/output/config)**: `schema`, `file_constraints`, `ui_hints`, `property_order`
 
 - `file_constraints.{key}`: `accept`, `max_size`
