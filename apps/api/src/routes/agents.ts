@@ -42,6 +42,7 @@ import {
   resolveExportVersion,
 } from "../services/bundle-assembly.ts";
 import { writeBundleToBuffer } from "@appstrate/afps-runtime/bundle";
+import { toBundleApiError } from "../services/run-launcher/bundle-error-mapping.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 import { SCOPED_PACKAGE_ROUTE } from "./scoped-package-route.ts";
@@ -507,19 +508,37 @@ export function createAgentsRouter() {
       // the manifest itself (and without trusting a tag that may have moved
       // between bundle download and run creation).
       let versionLabel: string;
-      let bundle;
-      if (useDraft) {
-        bundle = await buildBundleFromAgentDraft(agent, scope, { builder: "appstrate-platform" });
-        versionLabel = "draft";
-      } else {
-        versionLabel = await resolveExportVersion(agent.id, scope, versionSpec);
-        bundle = await buildBundleForAgentExport(agent.id, scope, {
-          versionSpec: versionLabel,
-          metadata: { builder: "appstrate-platform" },
-        });
+      let bytes: Uint8Array;
+      try {
+        let bundle;
+        if (useDraft) {
+          bundle = await buildBundleFromAgentDraft(agent, scope, { builder: "appstrate-platform" });
+          versionLabel = "draft";
+        } else {
+          versionLabel = await resolveExportVersion(agent.id, scope, versionSpec);
+          bundle = await buildBundleForAgentExport(agent.id, scope, {
+            versionSpec: versionLabel,
+            metadata: { builder: "appstrate-platform" },
+          });
+        }
+        // Serialization stays inside the try: `writeBundleToBuffer` re-validates
+        // the assembled map and raises the same `BundleError` family, so leaving
+        // it outside would keep that throw on the untyped path.
+        bytes = writeBundleToBuffer(bundle);
+      } catch (err) {
+        // Export reads the same stored artifacts a run does and reaches
+        // dependencies through the same catalog, so it raises the same
+        // bundle-layer errors. Map them onto the RFC 9457 contract the run path
+        // already uses; without this they reach the global handler as an opaque
+        // `500 internal_error`.
+        //
+        // Anything the mapper does not own returns null and rethrows untouched,
+        // keeping its own status — the 404s from `resolveExportVersion`, the 400
+        // from an invalid draft manifest.
+        const mapped = toBundleApiError(err);
+        if (mapped) throw mapped;
+        throw err;
       }
-
-      const bytes = writeBundleToBuffer(bundle);
       const parsed = parseScopedName(agent.id);
       const safeName = parsed ? `${parsed.scope}-${parsed.name}` : "bundle";
 

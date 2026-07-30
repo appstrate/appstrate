@@ -40,11 +40,29 @@ interface UnresolvedDependency {
   versionSpec: string;
 }
 
-/** Render `details.missing` from a `DEPENDENCY_UNRESOLVED` error as a quoted list. */
+/**
+ * Turn a `DEPENDENCY_UNRESOLVED` error into a sentence naming what failed and
+ * what to do about it.
+ *
+ * The code is raised from two places whose remedies differ:
+ *
+ *   - the closure walk (`buildBundleFromCatalog`) collects every pin that
+ *     resolved to NO version into `details.missing` — publish the dependency or
+ *     change the pin.
+ *   - a catalog's `fetch()` fails on ONE already-resolved dependency whose bytes
+ *     are unusable (absent from storage, or out of the org's scope) and carries
+ *     `details.identity` — the pin resolved, so "fix the pin" would misdirect.
+ */
 function formatUnresolved(details: unknown): string {
-  const missing = (details as { missing?: UnresolvedDependency[] } | undefined)?.missing;
-  if (!missing || missing.length === 0) return "a declared dependency";
-  return missing.map((m) => `'${m.name}@${m.versionSpec}'`).join(", ");
+  const ctx = details as { missing?: UnresolvedDependency[]; identity?: string } | undefined;
+  if (ctx?.missing && ctx.missing.length > 0) {
+    const names = ctx.missing.map((m) => `'${m.name}@${m.versionSpec}'`).join(", ");
+    return `Could not resolve ${names} against published versions — publish the dependency, fix the pin, or pass \`dependency_overrides\` to run a working copy.`;
+  }
+  if (typeof ctx?.identity === "string") {
+    return `Dependency '${ctx.identity}' resolved to a published version whose artifact could not be loaded — republish that version, or pass \`dependency_overrides\` to run a working copy.`;
+  }
+  return "Could not resolve a declared dependency against published versions — publish the dependency, fix the pin, or pass `dependency_overrides` to run a working copy.";
 }
 
 /**
@@ -75,7 +93,7 @@ export function toBundleApiError(err: unknown): ApiError | null {
         status: 422,
         code: "dependency_unresolved",
         title: "Dependency Unresolved",
-        detail: `Could not resolve ${formatUnresolved(err.details)} against published versions — publish the dependency, fix the pin, or pass \`dependency_overrides\` to run a working copy.`,
+        detail: formatUnresolved(err.details),
       });
 
     case "INTEGRITY_MISMATCH":

@@ -10,6 +10,8 @@
  *   - No credentials leak (response bytes contain no connection secrets)
  *   - 404 on non-existent version
  *   - RBAC: 404 when agent is not accessible to the app
+ *   - Bundle-layer failures over stored dependency artifacts surface as coded
+ *     RFC 9457 422s naming the dependency, not as an opaque 500
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -25,8 +27,8 @@ import { and, eq } from "drizzle-orm";
 import * as storage from "@appstrate/db/storage";
 import { computeIntegrity } from "@appstrate/core/integrity";
 import { readBundleFromBuffer } from "@appstrate/afps-runtime/bundle";
+import { AGENT_PACKAGES_BUCKET, versionZipKey } from "../../../src/services/package-storage.ts";
 
-const BUCKET = "agent-packages";
 const app = getTestApp();
 
 function enc(s: string): Uint8Array {
@@ -57,11 +59,30 @@ async function seedVersionedPackage(opts: {
   manifest: Record<string, unknown>;
   content?: string;
   setLatest?: boolean;
+  /**
+   * Publish these bytes instead of a well-formed AFPS. The recorded integrity
+   * still matches them, so the SRI gate passes and any failure is attributable
+   * to the archive's contents rather than to corruption.
+   */
+  artifact?: Uint8Array;
+  /**
+   * Create the version row with NO object behind it. `truncateAll()` resets the
+   * database but not object storage, so absence has to be asserted by deleting
+   * the key: a leftover object from an earlier test would otherwise be found
+   * with a hash that no longer matches this row, turning the intended
+   * `dependency_unresolved` into an `INTEGRITY_MISMATCH`.
+   */
+  absentArtifact?: boolean;
 }): Promise<{ versionId: number; version: string }> {
   await seedPackage({ id: opts.id, type: opts.type, orgId: opts.orgId });
-  const afps = buildAfps(opts.manifest, opts.content ?? "content");
+  const afps = opts.artifact ?? buildAfps(opts.manifest, opts.content ?? "content");
   const integrity = computeIntegrity(afps);
-  await storage.uploadFile(BUCKET, `${opts.id}/${opts.version}.afps`, Buffer.from(afps));
+  const key = versionZipKey(opts.id, opts.version);
+  if (opts.absentArtifact) {
+    await storage.deleteFile(AGENT_PACKAGES_BUCKET, key);
+  } else {
+    await storage.uploadFile(AGENT_PACKAGES_BUCKET, key, Buffer.from(afps));
+  }
   const pv = await seedPackageVersion({
     packageId: opts.id,
     version: opts.version,
@@ -318,6 +339,153 @@ describe("GET /api/agents/:scope/:name/bundle — export", () => {
     expect(res.status).toBe(404);
     const body = (await res.json()) as { detail: string };
     expect(body.detail).toContain("publish a version first");
+  });
+
+  // ── Bundle-layer failures over stored dependency artifacts ──
+  //
+  // These assemble from real stored state, so they prove the route reaches
+  // `toBundleApiError` at all — without it each one is an opaque 500 carrying
+  // neither a code nor the name of the package to fix.
+
+  /** Root agent depending on `@exportorg/dep-skill@^1.0.0`, installed + exportable. */
+  async function seedRootWithDependency(ctx: TestContext): Promise<void> {
+    const rootPkgId = "@exportorg/dep-root" as const;
+    await seedVersionedPackage({
+      id: rootPkgId,
+      type: "agent",
+      version: "1.0.0",
+      orgId: ctx.orgId,
+      manifest: {
+        name: rootPkgId,
+        version: "1.0.0",
+        type: "agent",
+        schema_version: "0.1",
+        display_name: "DepRoot",
+        author: "tester",
+        dependencies: { skills: { "@exportorg/dep-skill": "^1.0.0" } },
+      },
+      setLatest: true,
+    });
+    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, rootPkgId);
+  }
+
+  async function exportDepRoot(ctx: TestContext) {
+    return app.request(`/api/agents/@exportorg/dep-root/bundle`, { headers: authHeaders(ctx) });
+  }
+
+  it("maps a dependency archive with no manifest.json to 422 bundle_invalid naming it", async () => {
+    await seedRootWithDependency(ctx);
+    // The artifact the pre-fix skill-only import published: SKILL.md and
+    // nothing else, integrity recorded over those same bytes.
+    await seedVersionedPackage({
+      id: "@exportorg/dep-skill",
+      type: "skill",
+      version: "1.0.0",
+      orgId: ctx.orgId,
+      manifest: {
+        name: "@exportorg/dep-skill",
+        version: "1.0.0",
+        type: "skill",
+        schema_version: "0.1",
+      },
+      artifact: zipSync({ "SKILL.md": enc("---\nname: dep-skill\n---\n\nBody.") }),
+      setLatest: true,
+    });
+
+    const res = await exportDepRoot(ctx);
+
+    expect(res.status).toBe(422);
+    expect(res.headers.get("Content-Type")).toContain("application/problem+json");
+    const body = (await res.json()) as { code: string; detail: string };
+    expect(body.code).toBe("bundle_invalid");
+    expect(body.detail).toContain("@exportorg/dep-skill@1.0.0");
+    expect(body.detail).toContain("BUNDLE_JSON_INVALID");
+  });
+
+  it("maps a dependency whose manifest identity disagrees with the published row to 422 bundle_invalid", async () => {
+    await seedRootWithDependency(ctx);
+    // Published as 1.0.0, but the stored archive's manifest says 1.0.1 — the
+    // shape a republish-under-the-wrong-version leaves behind. Integrity is
+    // recorded over these same bytes, so the SRI and signature gates both pass
+    // and the only fault is the identity disagreement itself.
+    //
+    // `buildBundleFromCatalog` is what detects the mismatch, comparing each
+    // fetched dependency against the identity it resolved. What this PR adds is
+    // the export route's error boundary: that BundleError now surfaces as the
+    // RFC 9457 422 asserted below instead of an untyped 500.
+    await seedVersionedPackage({
+      id: "@exportorg/dep-skill",
+      type: "skill",
+      version: "1.0.0",
+      orgId: ctx.orgId,
+      manifest: {
+        name: "@exportorg/dep-skill",
+        version: "1.0.0",
+        type: "skill",
+        schema_version: "0.1",
+      },
+      artifact: buildAfps(
+        {
+          name: "@exportorg/dep-skill",
+          version: "1.0.1",
+          type: "skill",
+          schema_version: "0.1",
+          display_name: "Dep",
+          author: "tester",
+        },
+        "Body.",
+      ),
+      setLatest: true,
+    });
+
+    const res = await exportDepRoot(ctx);
+
+    expect(res.status).toBe(422);
+    expect(res.headers.get("Content-Type")).toContain("application/problem+json");
+    const body = (await res.json()) as { code: string; detail: string };
+    expect(body.code).toBe("bundle_invalid");
+    // Detail names both the resolved identity and the one the stored manifest
+    // claims, so an operator reads a manifest disagreement, not corrupt bytes.
+    expect(body.detail).toContain("@exportorg/dep-skill@1.0.0");
+    expect(body.detail).toContain("@exportorg/dep-skill@1.0.1");
+    expect(body.detail).toContain("BUNDLE_JSON_INVALID");
+  });
+
+  it("maps a dependency version whose object is absent to 422 dependency_unresolved", async () => {
+    await seedRootWithDependency(ctx);
+    // Object storage outlives truncateAll(); seed stale bytes so absentArtifact
+    // must remove them. Without the delete these bytes are found with a hash
+    // that no longer matches the row below, and the export fails as a
+    // 500 INTEGRITY_MISMATCH instead of the 422 under test.
+    await storage.uploadFile(
+      AGENT_PACKAGES_BUCKET,
+      versionZipKey("@exportorg/dep-skill", "1.0.0"),
+      Buffer.from(zipSync({ "SKILL.md": enc("---\nname: dep-skill\n---\n\nBody.") })),
+    );
+    await seedVersionedPackage({
+      id: "@exportorg/dep-skill",
+      type: "skill",
+      version: "1.0.0",
+      orgId: ctx.orgId,
+      manifest: {
+        name: "@exportorg/dep-skill",
+        version: "1.0.0",
+        type: "skill",
+        schema_version: "0.1",
+      },
+      absentArtifact: true,
+      setLatest: true,
+    });
+
+    const res = await exportDepRoot(ctx);
+
+    expect(res.status).toBe(422);
+    const body = (await res.json()) as { code: string; detail: string };
+    expect(body.code).toBe("dependency_unresolved");
+    expect(body.detail).toContain("@exportorg/dep-skill@1.0.0");
+    // The pin resolved — pointing the operator at the version range would send
+    // them to fix something that is already correct.
+    expect(body.detail).not.toContain("fix the pin");
   });
 
   it("returns 404 when the agent is not accessible to the app", async () => {
