@@ -5,6 +5,7 @@ import { formatDuration } from "@appstrate/core/format";
 import {
   buildLogEntries,
   buildTurnRows,
+  singleLineMessage,
   type ExecutionEntry,
   type RawLog,
   type ToolExecutionEntry,
@@ -25,6 +26,18 @@ function toolEntry(entries: ExecutionEntry[], index = 0): ToolExecutionEntry {
 function turnLog(data: Record<string, unknown>): RawLog {
   return { type: "progress", level: "debug", event: "progress", message: "Turn 1 — …", data };
 }
+
+describe("singleLineMessage", () => {
+  it("joins every persisted line while preserving a compact preview", () => {
+    expect(singleLineMessage("First line\n  Second line\r\n\r\nThird line")).toBe(
+      "First line Second line Third line",
+    );
+  });
+
+  it("leaves a single-line message unchanged", () => {
+    expect(singleLineMessage("Already compact")).toBe("Already compact");
+  });
+});
 
 describe("buildLogEntries — output extraction", () => {
   it("merges output events into the structured output bag", () => {

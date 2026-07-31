@@ -25,6 +25,7 @@ import { formatDuration } from "@appstrate/core/format";
 import {
   formatTimestamp,
   levelColors,
+  singleLineMessage,
   type ExecutionEntry,
   type ToolExecutionStatus,
 } from "./log-utils";
@@ -224,6 +225,8 @@ export function LogViewer({ entries }: LogViewerProps) {
             const entry = entries[virtualRow.index]!;
             const expanded = expandAll || expandedId === entry.id;
             const canExpand = hasExpandableContent(entry);
+            const displayedMessage =
+              entry.kind === "tool" || expanded ? undefined : singleLineMessage(entry.message);
             const messageClassName = cn(
               "min-w-0 flex-1",
               expanded ? "break-words whitespace-pre-wrap" : "truncate whitespace-nowrap",
@@ -280,19 +283,21 @@ export function LogViewer({ entries }: LogViewerProps) {
                     <>
                       <MessageSquareText className="mr-1.5 size-3.5 shrink-0 text-violet-400" />
                       <span className={cn("text-foreground/80 font-sans", messageClassName)}>
-                        {entry.message}
+                        {displayedMessage ?? entry.message}
                       </span>
                     </>
                   ) : entry.kind === "log" ? (
                     <>
                       <MessageSquareText className="mr-1.5 size-3.5 shrink-0" />
                       <LevelBadge level={entry.level} />
-                      <span className={cn("font-sans", messageClassName)}>{entry.message}</span>
+                      <span className={cn("font-sans", messageClassName)}>
+                        {displayedMessage ?? entry.message}
+                      </span>
                     </>
                   ) : (
                     <>
                       <LevelBadge level={entry.level} />
-                      <span className={messageClassName}>{entry.message}</span>
+                      <span className={messageClassName}>{displayedMessage ?? entry.message}</span>
                     </>
                   )}
                 </div>
