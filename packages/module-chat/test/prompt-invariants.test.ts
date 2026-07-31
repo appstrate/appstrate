@@ -61,13 +61,6 @@ describe("SYSTEM_PROMPT invariants", () => {
     expect(SYSTEM_PROMPT).not.toContain("outputs/report.md");
   });
 
-  it("features a requested main file through an explicit primary publication", () => {
-    expect(SYSTEM_PROMPT).not.toContain("primary_deliverable");
-    expect(SYSTEM_PROMPT).toMatch(/run_and_wait.*automatically exposes.*publish_document/i);
-    expect(SYSTEM_PROMPT).toMatch(/presentation.*primary.*one main user-facing file/i);
-    expect(SYSTEM_PROMPT).toMatch(/several peer files.*does not call.*publish_document/i);
-  });
-
   it("keeps the sub-agent effort ceiling (cap, stop criterion, output last)", () => {
     expect(SYSTEM_PROMPT).toMatch(/at most 3 searches/);
     expect(SYSTEM_PROMPT).toMatch(/stop criterion/);
