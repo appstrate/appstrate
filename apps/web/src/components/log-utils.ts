@@ -1,12 +1,35 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Log types and pure utility functions shared between log-viewer components and pages.
+// Execution-trace types and pure projection functions shared between the run
+// page and its viewer. Persisted `run_logs` stay append-only; this module owns
+// the richer, correlated shape the UI renders.
 
-export interface LogEntry {
-  message: string;
-  type: string;
+interface ExecutionEntryBase {
+  /** Stable across live start -> result updates and historical replay. */
+  id: string;
+  kind: "agent" | "tool" | "log" | "runtime";
   level?: string;
+  createdAt?: Date | string | null;
+}
+
+export interface AgentExecutionEntry extends ExecutionEntryBase {
+  kind: "agent";
+  message: string;
+  level: "debug";
+}
+
+export type ToolExecutionStatus = "running" | "success" | "failed" | "interrupted" | "unknown";
+
+export interface ToolExecutionEntry extends ExecutionEntryBase {
+  kind: "tool";
+  tool: string;
+  toolCallId?: string;
+  status: ToolExecutionStatus;
+  args?: unknown;
+  result?: unknown;
   detail?: string;
+  /** True when a result arrived without a matching start row. */
+  orphaned?: boolean;
   /**
    * Wall time of a tool call, in milliseconds, when the runner could pair the
    * call's start and end (`data.durationMs`). Omitted otherwise — the runner
@@ -21,8 +44,22 @@ export interface LogEntry {
    * `data` intact and this materializes live, not only on the REST logs query.
    */
   durationMs?: number;
-  createdAt?: Date | string | null;
+  completedAt?: Date | string | null;
 }
+
+export interface ExplicitLogExecutionEntry extends ExecutionEntryBase {
+  kind: "log";
+  message: string;
+}
+
+export interface RuntimeExecutionEntry extends ExecutionEntryBase {
+  kind: "runtime";
+  message: string;
+  sourceType: string;
+}
+
+export type ExecutionEntry =
+  AgentExecutionEntry | ToolExecutionEntry | ExplicitLogExecutionEntry | RuntimeExecutionEntry;
 
 /**
  * One settled assistant turn, projected from a `data.event === "turn"` run-log
@@ -116,6 +153,7 @@ export function buildTurnRows(rawLogs: RawLog[]): RunTurnRow[] {
 }
 
 export interface RawLog {
+  id?: number;
   type: string;
   level: string;
   event?: string | null;
@@ -124,9 +162,14 @@ export interface RawLog {
   createdAt?: Date | string | null;
 }
 
-function formatToolArgs(args: Record<string, unknown>): string {
+function formatToolArgs(args: unknown): string {
+  if (!args || typeof args !== "object" || Array.isArray(args)) {
+    const str = typeof args === "string" ? args : JSON.stringify(args);
+    return (str ?? "").slice(0, 200);
+  }
+
   const parts: string[] = [];
-  for (const [key, value] of Object.entries(args)) {
+  for (const [key, value] of Object.entries(args as Record<string, unknown>)) {
     if (value === undefined || value === null) continue;
     const str = typeof value === "string" ? value : JSON.stringify(value);
     parts.push(`${key}: ${str}`);
@@ -135,62 +178,227 @@ function formatToolArgs(args: Record<string, unknown>): string {
   return joined.length > 200 ? joined.slice(0, 200) + "..." : joined;
 }
 
+const ASSISTANT_MESSAGE_EVENT = "assistant_message";
+
+function owns(value: Record<string, unknown>, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(value, key);
+}
+
+function stringValue(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function toolName(data: Record<string, unknown>, message: string): string {
+  const explicit = stringValue(data["tool"]);
+  if (explicit) return explicit;
+  const separator = message.indexOf(":");
+  return separator >= 0 ? message.slice(separator + 1).trim() || "unknown" : "unknown";
+}
+
 /**
- * Transform raw run logs into LogEntry[], merging consecutive text-only
- * progress entries and extracting the structured output.
+ * Tool starts and results deliberately share the generic `appstrate.progress`
+ * envelope. Their payload is the stable discriminator: results always carry
+ * `isError`, even when the underlying tool returned `undefined`; starts carry
+ * `args` when the SDK supplied them and use the `Tool:` message otherwise.
  */
-export function buildLogEntries(rawLogs: RawLog[]): {
-  entries: LogEntry[];
+function toolRowPhase(
+  data: Record<string, unknown>,
+  message: string,
+): "start" | "result" | undefined {
+  const looksToolish =
+    stringValue(data["tool"]) !== undefined ||
+    stringValue(data["toolCallId"]) !== undefined ||
+    message.startsWith("Tool:") ||
+    message.startsWith("Tool result") ||
+    message.startsWith("Tool error");
+  if (!looksToolish) return undefined;
+  if (typeof data["isError"] === "boolean" || owns(data, "result")) return "result";
+  if (owns(data, "args") || message.startsWith("Tool:")) return "start";
+  return undefined;
+}
+
+function rawEntryId(log: RawLog, index: number, suffix = ""): string {
+  return `log:${log.id ?? index}${suffix}`;
+}
+
+function isAgentText(log: RawLog): boolean {
+  if (log.type !== "progress") return false;
+  if (log.data?.["event"] === ASSISTANT_MESSAGE_EVENT) return true;
+  // Compatibility with runs emitted before `assistant_message` was stamped.
+  return !log.data && log.level === "debug";
+}
+
+export interface BuildLogEntriesOptions {
+  /** Marks correlated starts with no result as interrupted instead of spinning forever. */
+  isRunTerminal?: boolean;
+}
+
+/**
+ * Project raw run logs into a compact execution trace and structured output.
+ *
+ * Tool starts/results remain separate in persistence but collapse here by
+ * exact `toolCallId`. Tool-name matching is intentionally forbidden: parallel
+ * calls of the same tool may settle out of order. Legacy rows without an id
+ * remain separate and explicitly `unknown` once a run is terminal.
+ */
+export function buildLogEntries(
+  rawLogs: RawLog[],
+  options: BuildLogEntriesOptions = {},
+): {
+  entries: ExecutionEntry[];
   output: Record<string, unknown> | null;
 } {
-  const entries: LogEntry[] = [];
+  const entries: ExecutionEntry[] = [];
+  const toolEntryByCallId = new Map<string, number>();
   let output: Record<string, unknown> | null = null;
-  let lastWasPlainText = false;
+  let canCoalesceAgent = false;
 
-  for (const log of rawLogs) {
+  for (const [rawIndex, log] of rawLogs.entries()) {
     if (log.event === "output" && log.data) {
       if (!output) output = {};
       Object.assign(output, log.data);
-      lastWasPlainText = false;
+      canCoalesceAgent = false;
     } else if (log.event === "report" && log.type === "result") {
       // Dead channel: the `report` runtime tool was replaced by durable
       // `outputs/` documents. Rows written before the removal stay in the DB
       // but are skipped here — falling through to the generic branch would
       // render them as a truncated, contextless log line.
-      lastWasPlainText = false;
+      canCoalesceAgent = false;
     } else if (log.event === "run_completed") {
-      lastWasPlainText = false;
+      canCoalesceAgent = false;
     } else if (isTurnRow(log)) {
       // Per-turn breadcrumbs are a structured series, not narration: a heavy
       // run emits ~108 of them and they would drown the agent's own log lines.
       // They are rendered as a table in the run Info tab (`buildTurnRows`).
       // Same precedent as the dead `report` channel above.
-      lastWasPlainText = false;
+      canCoalesceAgent = false;
     } else {
       const logData = log.data ?? {};
       const message = (logData.message as string) || log.message || "";
-      if (message) {
-        const args = logData.args as Record<string, unknown> | undefined;
-        const detail = args ? formatToolArgs(args) : undefined;
-        const durationMs = logData["durationMs"];
-        const isPlainText = log.type === "progress" && !log.data;
+      if (!message) continue;
 
-        if (isPlainText && lastWasPlainText && entries.length > 0) {
-          entries[entries.length - 1]!.message += "\n" + message;
+      // Explicit semantic channels win over message-shape fallbacks. In
+      // particular, agent prose or a log-tool message is allowed to begin
+      // with "Tool:" without becoming a synthetic tool invocation.
+      if (log.event === "log") {
+        canCoalesceAgent = false;
+        entries.push({
+          id: rawEntryId(log, rawIndex, ":explicit-log"),
+          kind: "log",
+          message,
+          level: log.level || "info",
+          createdAt: log.createdAt,
+        });
+        continue;
+      }
+
+      if (isAgentText(log)) {
+        const previous = entries[entries.length - 1];
+        if (canCoalesceAgent && previous?.kind === "agent") {
+          previous.message += "\n" + message;
         } else {
           entries.push({
+            id: rawEntryId(log, rawIndex, ":agent"),
+            kind: "agent",
             message,
-            type: log.type || "progress",
-            level: log.level || "debug",
-            detail,
-            ...(typeof durationMs === "number" && Number.isFinite(durationMs)
-              ? { durationMs }
-              : {}),
+            level: "debug",
             createdAt: log.createdAt,
           });
         }
-        lastWasPlainText = isPlainText;
+        canCoalesceAgent = true;
+        continue;
       }
+
+      const phase = toolRowPhase(logData, message);
+      if (phase) {
+        canCoalesceAgent = false;
+        const callId = stringValue(logData["toolCallId"]);
+        const name = toolName(logData, message);
+        const durationMs = logData["durationMs"];
+
+        if (phase === "start") {
+          const existingIndex = callId ? toolEntryByCallId.get(callId) : undefined;
+          if (existingIndex !== undefined) {
+            // Defensive out-of-order path: a result row was projected first.
+            // Merge the late start into it without guessing by tool name.
+            const existing = entries[existingIndex];
+            if (existing?.kind === "tool") {
+              const args = logData["args"];
+              entries[existingIndex] = {
+                ...existing,
+                tool: name === "unknown" ? existing.tool : name,
+                ...(owns(logData, "args") ? { args, detail: formatToolArgs(args) } : {}),
+                orphaned: false,
+              };
+            }
+            continue;
+          }
+
+          const args = logData["args"];
+          const entry: ToolExecutionEntry = {
+            id: callId ? `tool:${callId}` : rawEntryId(log, rawIndex, ":tool-start"),
+            kind: "tool",
+            tool: name,
+            ...(callId ? { toolCallId: callId } : {}),
+            status: options.isRunTerminal ? (callId ? "interrupted" : "unknown") : "running",
+            ...(owns(logData, "args") ? { args, detail: formatToolArgs(args) } : {}),
+            ...(typeof durationMs === "number" && Number.isFinite(durationMs)
+              ? { durationMs }
+              : {}),
+            level: log.level || "debug",
+            createdAt: log.createdAt,
+          };
+          if (callId) toolEntryByCallId.set(callId, entries.length);
+          entries.push(entry);
+          continue;
+        }
+
+        const status: ToolExecutionStatus = logData["isError"] === true ? "failed" : "success";
+        const existingIndex = callId ? toolEntryByCallId.get(callId) : undefined;
+        if (existingIndex !== undefined) {
+          const existing = entries[existingIndex];
+          if (existing?.kind === "tool") {
+            entries[existingIndex] = {
+              ...existing,
+              tool: existing.tool === "unknown" ? name : existing.tool,
+              status,
+              result: logData["result"],
+              ...(typeof durationMs === "number" && Number.isFinite(durationMs)
+                ? { durationMs }
+                : {}),
+              completedAt: log.createdAt,
+            };
+          }
+          continue;
+        }
+
+        const resultEntry: ToolExecutionEntry = {
+          id: callId ? `tool:${callId}` : rawEntryId(log, rawIndex, ":tool-result"),
+          kind: "tool",
+          tool: name,
+          ...(callId ? { toolCallId: callId } : {}),
+          status,
+          result: logData["result"],
+          orphaned: true,
+          ...(typeof durationMs === "number" && Number.isFinite(durationMs) ? { durationMs } : {}),
+          level: log.level || "debug",
+          createdAt: log.createdAt,
+          completedAt: log.createdAt,
+        };
+        if (callId) toolEntryByCallId.set(callId, entries.length);
+        entries.push(resultEntry);
+        continue;
+      }
+
+      canCoalesceAgent = false;
+      entries.push({
+        id: rawEntryId(log, rawIndex, ":runtime"),
+        kind: "runtime",
+        message,
+        sourceType: log.type || "progress",
+        level: log.level || "debug",
+        createdAt: log.createdAt,
+      });
     }
   }
 
@@ -212,11 +420,6 @@ export function formatTimestamp(d: Date | string | null | undefined, lang: strin
     return "\u2014";
   }
 }
-
-/** Text color by semantic type (nature of the log). */
-export const typeColors: Record<string, string> = {
-  system: "text-primary",
-};
 
 /** Text color by severity level (overrides type color when set). */
 export const levelColors: Record<string, string> = {

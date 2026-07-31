@@ -6,17 +6,29 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   Copy,
   Check,
+  CheckCircle2,
   Clock,
   ArrowDown,
   WrapText,
   Info,
   AlertTriangle,
   XCircle,
+  Bot,
+  Wrench,
+  Loader2,
+  CircleSlash2,
+  CircleHelp,
+  MessageSquareText,
 } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { cn } from "@appstrate/ui/cn";
 import { formatDuration } from "@appstrate/core/format";
-import { formatTimestamp, typeColors, levelColors, type LogEntry } from "./log-utils";
+import {
+  formatTimestamp,
+  levelColors,
+  type ExecutionEntry,
+  type ToolExecutionStatus,
+} from "./log-utils";
 
 const levelConfig: Record<string, { icon: typeof Info; className: string; label: string }> = {
   info: { icon: Info, className: "text-blue-400 bg-blue-400/10", label: "INFO" },
@@ -42,8 +54,54 @@ function LevelBadge({ level }: { level?: string }) {
   );
 }
 
+const toolStatusClasses: Record<ToolExecutionStatus, string> = {
+  running: "text-blue-400",
+  success: "text-success",
+  failed: "text-destructive",
+  interrupted: "text-amber-400",
+  unknown: "text-muted-foreground",
+};
+
+function ToolStatusIcon({ status }: { status: ToolExecutionStatus }) {
+  const { t } = useTranslation("agents");
+  const className = cn("size-3.5 shrink-0", toolStatusClasses[status]);
+  const label = {
+    running: t("log.toolStatus.running"),
+    success: t("log.toolStatus.success"),
+    failed: t("log.toolStatus.failed"),
+    interrupted: t("log.toolStatus.interrupted"),
+    unknown: t("log.toolStatus.unknown"),
+  }[status];
+  switch (status) {
+    case "running":
+      return <Loader2 className={cn(className, "animate-spin")} aria-label={label} />;
+    case "success":
+      return <CheckCircle2 className={className} aria-label={label} />;
+    case "failed":
+      return <XCircle className={className} aria-label={label} />;
+    case "interrupted":
+      return <CircleSlash2 className={className} aria-label={label} />;
+    case "unknown":
+      return <CircleHelp className={className} aria-label={label} />;
+  }
+}
+
+function formatStructuredValue(value: unknown): string {
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value, null, 2) ?? String(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function hasExpandableContent(entry: ExecutionEntry): boolean {
+  if (entry.kind === "tool") return entry.args !== undefined || entry.result !== undefined;
+  return entry.message.includes("\n");
+}
+
 interface LogViewerProps {
-  entries: LogEntry[];
+  entries: ExecutionEntry[];
 }
 
 export function LogViewer({ entries }: LogViewerProps) {
@@ -54,7 +112,7 @@ export function LogViewer({ entries }: LogViewerProps) {
   const [autoScroll, setAutoScroll] = useState(true);
   const [copied, setCopied] = useState(false);
   const [expandAll, setExpandAll] = useState(false);
-  const [expandedIndex, setExpandedIndex] = useState<number | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   // eslint-disable-next-line react-hooks/incompatible-library
   const virtualizer = useVirtualizer({
@@ -64,12 +122,12 @@ export function LogViewer({ entries }: LogViewerProps) {
     overscan: 10,
   });
 
-  // Auto-scroll when new entries arrive
+  // Auto-scroll when entries are added OR a running tool row settles in place.
   useEffect(() => {
     if (autoScroll && entries.length > 0) {
       virtualizer.scrollToIndex(entries.length - 1, { align: "end" });
     }
-  }, [entries.length, autoScroll]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [entries, autoScroll]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Disable auto-scroll when user scrolls up
   useEffect(() => {
@@ -87,9 +145,21 @@ export function LogViewer({ entries }: LogViewerProps) {
     const text = entries
       .map((e) => {
         const ts = showTimestamps ? `[${formatTimestamp(e.createdAt, i18n.language)}] ` : "";
-        const detail = e.detail ? ` ${e.detail}` : "";
-        const duration = e.durationMs !== undefined ? ` ${formatDuration(e.durationMs)}` : "";
-        return `${ts}${e.message}${detail}${duration}`;
+        if (e.kind === "tool") {
+          const detail = e.detail ? ` ${e.detail}` : "";
+          const duration = e.durationMs !== undefined ? ` ${formatDuration(e.durationMs)}` : "";
+          const args =
+            e.args !== undefined
+              ? `\n  ${t("log.arguments")}: ${formatStructuredValue(e.args)}`
+              : "";
+          const result =
+            e.result !== undefined
+              ? `\n  ${t("log.result")}: ${formatStructuredValue(e.result)}`
+              : "";
+          return `${ts}[tool:${e.status}] ${e.tool}${detail}${duration}${args}${result}`;
+        }
+        const prefix = e.kind === "agent" ? `[${t("log.agent")}] ` : "";
+        return `${ts}${prefix}${e.message}`;
       })
       .join("\n");
     navigator.clipboard.writeText(text);
@@ -155,10 +225,12 @@ export function LogViewer({ entries }: LogViewerProps) {
           {virtualizer.getVirtualItems().map((virtualRow) => {
             const entry = entries[virtualRow.index]!;
             const hasLevel = entry.level && entry.level !== "debug";
-            const expanded = expandAll || expandedIndex === virtualRow.index || !!hasLevel;
+            const failedTool = entry.kind === "tool" && entry.status === "failed";
+            const expanded = expandAll || expandedId === entry.id || !!hasLevel || failedTool;
+            const canExpand = hasExpandableContent(entry);
             return (
               <div
-                key={virtualRow.index}
+                key={entry.id}
                 data-index={virtualRow.index}
                 ref={virtualizer.measureElement}
                 style={{
@@ -168,40 +240,90 @@ export function LogViewer({ entries }: LogViewerProps) {
                   width: "100%",
                   transform: `translateY(${virtualRow.start}px)`,
                 }}
-                onClick={() =>
-                  setExpandedIndex((prev) => (prev === virtualRow.index ? null : virtualRow.index))
-                }
+                onClick={() => {
+                  if (canExpand) setExpandedId((prev) => (prev === entry.id ? null : entry.id));
+                }}
               >
                 <div
                   className={cn(
-                    "text-muted-foreground hover:bg-muted/50 cursor-pointer truncate px-3 py-0.5 font-mono text-sm leading-7 select-none",
-                    (entry.level && levelColors[entry.level]) || typeColors[entry.type],
-                    entry.type === "progress" &&
+                    "text-muted-foreground hover:bg-muted/50 flex min-h-7 items-center truncate px-3 py-0.5 font-mono text-sm leading-7 select-none",
+                    entry.level && levelColors[entry.level],
+                    canExpand && "cursor-pointer",
+                    entry.kind === "runtime" &&
                       (!entry.level || entry.level === "debug") &&
                       "before:bg-primary before:mr-1.5 before:inline-block before:h-1.5 before:w-1.5 before:rounded-full before:opacity-60 before:content-['']",
                     expanded && "bg-muted/30 break-words whitespace-normal",
                   )}
                 >
                   {showTimestamps && (
-                    <span className="text-muted-foreground/60 mr-2 font-mono text-xs">
+                    <span className="text-muted-foreground/60 mr-2 shrink-0 font-mono text-xs">
                       {formatTimestamp(entry.createdAt, i18n.language)}
                     </span>
                   )}
-                  <LevelBadge level={entry.level} />
-                  {entry.message}
-                  {entry.detail && (
-                    <span className="text-muted-foreground ml-2 text-xs">{entry.detail}</span>
-                  )}
-                  {/* Tool wall time. Subordinate to the message, like `detail`.
-                      Only present on rows fetched via the REST logs query — the
-                      live SSE frame strips `data` server-side (`stripPayload`),
-                      so a running run shows it once the rows are refetched. */}
-                  {entry.durationMs !== undefined && (
-                    <span className="text-muted-foreground/70 ml-2 text-xs tabular-nums">
-                      {formatDuration(entry.durationMs)}
-                    </span>
+                  {entry.kind === "tool" ? (
+                    <>
+                      <ToolStatusIcon status={entry.status} />
+                      <Wrench className="text-muted-foreground/60 ml-1.5 size-3.5 shrink-0" />
+                      <span className="text-foreground ml-1.5 font-medium">{entry.tool}</span>
+                      {entry.detail && (
+                        <span className="text-muted-foreground ml-2 truncate text-xs">
+                          {entry.detail}
+                        </span>
+                      )}
+                      {entry.durationMs !== undefined && (
+                        <span className="text-muted-foreground/70 ml-2 shrink-0 text-xs tabular-nums">
+                          {formatDuration(entry.durationMs)}
+                        </span>
+                      )}
+                    </>
+                  ) : entry.kind === "agent" ? (
+                    <>
+                      <Bot className="mr-1.5 size-3.5 shrink-0 text-violet-400" />
+                      <span className="mr-2 shrink-0 text-[10px] font-semibold tracking-wide text-violet-400 uppercase">
+                        {t("log.agent")}
+                      </span>
+                      <span className="text-foreground/80 min-w-0 font-sans">{entry.message}</span>
+                    </>
+                  ) : entry.kind === "log" ? (
+                    <>
+                      <MessageSquareText className="mr-1.5 size-3.5 shrink-0" />
+                      <LevelBadge level={entry.level} />
+                      <span className="min-w-0 font-sans">{entry.message}</span>
+                    </>
+                  ) : (
+                    <>
+                      <LevelBadge level={entry.level} />
+                      <span className="min-w-0">{entry.message}</span>
+                    </>
                   )}
                 </div>
+                {expanded && entry.kind === "tool" && canExpand && (
+                  <div
+                    className="border-border bg-muted/20 border-t px-8 py-2 text-xs"
+                    onClick={(event) => event.stopPropagation()}
+                  >
+                    {entry.args !== undefined && (
+                      <div className="mb-2 last:mb-0">
+                        <div className="text-muted-foreground mb-1 font-medium">
+                          {t("log.arguments")}
+                        </div>
+                        <pre className="text-foreground/80 overflow-x-auto whitespace-pre-wrap select-text">
+                          {formatStructuredValue(entry.args)}
+                        </pre>
+                      </div>
+                    )}
+                    {entry.result !== undefined && (
+                      <div>
+                        <div className="text-muted-foreground mb-1 font-medium">
+                          {t("log.result")}
+                        </div>
+                        <pre className="text-foreground/80 overflow-x-auto whitespace-pre-wrap select-text">
+                          {formatStructuredValue(entry.result)}
+                        </pre>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             );
           })}

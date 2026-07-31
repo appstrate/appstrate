@@ -2,7 +2,24 @@
 
 import { describe, it, expect } from "bun:test";
 import { formatDuration } from "@appstrate/core/format";
-import { buildLogEntries, buildTurnRows, type RawLog } from "../log-utils";
+import {
+  buildLogEntries,
+  buildTurnRows,
+  type ExecutionEntry,
+  type RawLog,
+  type ToolExecutionEntry,
+} from "../log-utils";
+
+function entryLabel(entry: ExecutionEntry): string {
+  return entry.kind === "tool" ? `Tool: ${entry.tool}` : entry.message;
+}
+
+function toolEntry(entries: ExecutionEntry[], index = 0): ToolExecutionEntry {
+  const entry = entries[index];
+  expect(entry?.kind).toBe("tool");
+  if (!entry || entry.kind !== "tool") throw new Error(`entry ${index} is not a tool`);
+  return entry;
+}
 
 /** Minimal well-formed per-turn breadcrumb, as the runner emits it. */
 function turnLog(data: Record<string, unknown>): RawLog {
@@ -60,7 +77,7 @@ describe("buildLogEntries — historical report rows", () => {
     const { entries } = buildLogEntries(logs);
     // The report row also breaks the plain-text coalescing run, so `before`
     // and `after` stay two distinct entries rather than being merged.
-    expect(entries.map((e) => e.message)).toEqual(["before", "after"]);
+    expect(entries.map(entryLabel)).toEqual(["before", "after"]);
   });
 });
 
@@ -75,7 +92,8 @@ describe("buildLogEntries — progress entry coalescing", () => {
     ];
     const { entries } = buildLogEntries(logs);
     expect(entries).toHaveLength(1);
-    expect(entries[0]!.message).toBe("line one\nline two\nline three");
+    expect(entries[0]!.kind).toBe("agent");
+    expect(entryLabel(entries[0]!)).toBe("line one\nline two\nline three");
   });
 
   it("keeps data-bearing progress events as distinct entries (boot breadcrumbs)", () => {
@@ -88,7 +106,8 @@ describe("buildLogEntries — progress entry coalescing", () => {
     ];
     const { entries } = buildLogEntries(logs);
     expect(entries).toHaveLength(2);
-    expect(entries.map((e) => e.message)).toEqual(["connecting to sidecar", "MCP connected"]);
+    expect(entries.map(entryLabel)).toEqual(["connecting to sidecar", "MCP connected"]);
+    expect(entries.every((entry) => entry.kind === "runtime")).toBe(true);
   });
 });
 
@@ -103,7 +122,7 @@ describe("buildLogEntries — tool durations", () => {
       },
     ];
     const { entries } = buildLogEntries(logs);
-    expect(entries[0]!.durationMs).toBe(1450);
+    expect(toolEntry(entries).durationMs).toBe(1450);
   });
 
   it("omits the duration when the runner could not pair the call", () => {
@@ -118,7 +137,7 @@ describe("buildLogEntries — tool durations", () => {
       },
     ];
     const { entries } = buildLogEntries(logs);
-    expect(entries[0]!.durationMs).toBeUndefined();
+    expect(toolEntry(entries).durationMs).toBeUndefined();
   });
 
   it("ignores a non-numeric duration", () => {
@@ -126,7 +145,7 @@ describe("buildLogEntries — tool durations", () => {
       { type: "progress", level: "debug", message: "Tool: read", data: { durationMs: "fast" } },
     ];
     const { entries } = buildLogEntries(logs);
-    expect(entries[0]!.durationMs).toBeUndefined();
+    expect(toolEntry(entries).durationMs).toBeUndefined();
   });
 
   it("formats durations sub-second in ms and above in one-decimal seconds", () => {
@@ -135,6 +154,238 @@ describe("buildLogEntries — tool durations", () => {
     // contract the log line depends on.
     expect(formatDuration(842)).toBe("842ms");
     expect(formatDuration(1500)).toBe("1.5s");
+  });
+});
+
+describe("buildLogEntries — correlated tool lifecycle", () => {
+  it("projects a start + result as one tool entry that settles in place", () => {
+    const logs: RawLog[] = [
+      {
+        id: 10,
+        type: "progress",
+        level: "debug",
+        message: "Tool: read",
+        data: { tool: "read", args: { path: "a.md" }, toolCallId: "call-1" },
+      },
+      {
+        id: 11,
+        type: "progress",
+        level: "debug",
+        message: "Tool result: read",
+        data: {
+          tool: "read",
+          result: "contents",
+          isError: false,
+          toolCallId: "call-1",
+          durationMs: 42,
+        },
+      },
+    ];
+
+    const { entries } = buildLogEntries(logs);
+    expect(entries).toHaveLength(1);
+    expect(toolEntry(entries)).toMatchObject({
+      id: "tool:call-1",
+      tool: "read",
+      toolCallId: "call-1",
+      status: "success",
+      args: { path: "a.md" },
+      result: "contents",
+      durationMs: 42,
+    });
+    expect(toolEntry(entries)).not.toHaveProperty("orphaned");
+  });
+
+  it("keeps parallel calls distinct when their results settle out of order", () => {
+    const logs: RawLog[] = [
+      {
+        type: "progress",
+        level: "debug",
+        message: "Tool: bash",
+        data: { tool: "bash", args: { cmd: "slow" }, toolCallId: "slow" },
+      },
+      {
+        type: "progress",
+        level: "debug",
+        message: "Tool: bash",
+        data: { tool: "bash", args: { cmd: "fast" }, toolCallId: "fast" },
+      },
+      {
+        type: "progress",
+        level: "debug",
+        message: "Tool result: bash",
+        data: { tool: "bash", result: "fast done", isError: false, toolCallId: "fast" },
+      },
+      {
+        type: "progress",
+        level: "debug",
+        message: "Tool error: bash",
+        data: { tool: "bash", result: "slow failed", isError: true, toolCallId: "slow" },
+      },
+    ];
+
+    const { entries } = buildLogEntries(logs);
+    expect(entries).toHaveLength(2);
+    expect(toolEntry(entries, 0)).toMatchObject({
+      toolCallId: "slow",
+      status: "failed",
+      result: "slow failed",
+    });
+    expect(toolEntry(entries, 1)).toMatchObject({
+      toolCallId: "fast",
+      status: "success",
+      result: "fast done",
+    });
+  });
+
+  it("shows a loader live and marks an unmatched correlated start interrupted at terminal", () => {
+    const logs: RawLog[] = [
+      {
+        type: "progress",
+        level: "debug",
+        message: "Tool: bash",
+        data: { tool: "bash", args: {}, toolCallId: "call-1" },
+      },
+    ];
+
+    expect(toolEntry(buildLogEntries(logs).entries).status).toBe("running");
+    expect(toolEntry(buildLogEntries(logs, { isRunTerminal: true }).entries).status).toBe(
+      "interrupted",
+    );
+  });
+
+  it("does not guess a correlation for legacy rows without toolCallId", () => {
+    const logs: RawLog[] = [
+      {
+        type: "progress",
+        level: "debug",
+        message: "Tool: bash",
+        data: { tool: "bash", args: { cmd: "one" } },
+      },
+      {
+        type: "progress",
+        level: "debug",
+        message: "Tool result: bash",
+        data: { tool: "bash", result: "done", isError: false },
+      },
+    ];
+
+    const { entries } = buildLogEntries(logs, { isRunTerminal: true });
+    expect(entries).toHaveLength(2);
+    expect(toolEntry(entries, 0).status).toBe("unknown");
+    expect(toolEntry(entries, 1)).toMatchObject({ status: "success", orphaned: true });
+  });
+
+  it("recognises a result through isError even when the result value is undefined", () => {
+    const { entries } = buildLogEntries([
+      {
+        type: "progress",
+        level: "debug",
+        message: "Tool result: noop",
+        data: { tool: "noop", isError: false, toolCallId: "noop-1" },
+      },
+    ]);
+
+    expect(toolEntry(entries)).toMatchObject({ status: "success", orphaned: true });
+  });
+
+  it("merges a late start into a result received first", () => {
+    const { entries } = buildLogEntries([
+      {
+        type: "progress",
+        level: "debug",
+        message: "Tool result: read",
+        data: { tool: "read", result: "contents", isError: false, toolCallId: "call-1" },
+      },
+      {
+        type: "progress",
+        level: "debug",
+        message: "Tool: read",
+        data: { tool: "read", args: { path: "a.md" }, toolCallId: "call-1" },
+      },
+    ]);
+
+    expect(entries).toHaveLength(1);
+    expect(toolEntry(entries)).toMatchObject({
+      status: "success",
+      args: { path: "a.md" },
+      result: "contents",
+      orphaned: false,
+    });
+  });
+});
+
+describe("buildLogEntries — semantic kinds", () => {
+  it("classifies tagged assistant text as a debug agent trace", () => {
+    const { entries } = buildLogEntries([
+      {
+        type: "progress",
+        level: "debug",
+        message: "I will inspect the repository",
+        data: { event: "assistant_message" },
+      },
+    ]);
+
+    expect(entries).toEqual([
+      expect.objectContaining({
+        kind: "agent",
+        level: "debug",
+        message: "I will inspect the repository",
+      }),
+    ]);
+  });
+
+  it("keeps the explicit log tool output distinct from agent text", () => {
+    const { entries } = buildLogEntries([
+      {
+        type: "progress",
+        level: "info",
+        event: "log",
+        message: "User-visible progress",
+      },
+    ]);
+
+    expect(entries).toEqual([
+      expect.objectContaining({ kind: "log", level: "info", message: "User-visible progress" }),
+    ]);
+  });
+
+  it("keeps an explicit debug log distinct from legacy data-less agent text", () => {
+    const { entries } = buildLogEntries([
+      {
+        type: "progress",
+        level: "debug",
+        event: "log",
+        message: "Diagnostic emitted through the log tool",
+      },
+    ]);
+
+    expect(entries).toEqual([
+      expect.objectContaining({
+        kind: "log",
+        level: "debug",
+        message: "Diagnostic emitted through the log tool",
+      }),
+    ]);
+  });
+
+  it("lets semantic agent/log messages begin with the legacy Tool: prefix", () => {
+    const { entries } = buildLogEntries([
+      {
+        type: "progress",
+        level: "debug",
+        message: "Tool: this is agent narration",
+        data: { event: "assistant_message" },
+      },
+      {
+        type: "progress",
+        level: "info",
+        event: "log",
+        message: "Tool: this is an explicit log",
+      },
+    ]);
+
+    expect(entries.map((entry) => entry.kind)).toEqual(["agent", "log"]);
   });
 });
 
@@ -245,7 +496,7 @@ describe("buildLogEntries — turn breadcrumbs excluded from the stream", () => 
       { type: "progress", level: "debug", message: "after" },
     ];
     const { entries } = buildLogEntries(logs);
-    expect(entries.map((e) => e.message)).toEqual(["before", "after"]);
+    expect(entries.map(entryLabel)).toEqual(["before", "after"]);
   });
 
   it("leaves every other row class untouched", () => {
@@ -263,9 +514,9 @@ describe("buildLogEntries — turn breadcrumbs excluded from the stream", () => 
     ];
     const { entries, output } = buildLogEntries(logs);
     expect(output).toEqual({ foo: 1 });
-    expect(entries.map((e) => e.message)).toEqual(["MCP connected", "Tool: read", "heads up"]);
-    expect(entries[1]!.detail).toBe("path: a.md");
-    expect(entries[1]!.durationMs).toBe(120);
+    expect(entries.map(entryLabel)).toEqual(["MCP connected", "Tool: read", "heads up"]);
+    expect(toolEntry(entries, 1).detail).toBe("path: a.md");
+    expect(toolEntry(entries, 1).durationMs).toBe(120);
     expect(entries[2]!.level).toBe("warn");
   });
 });

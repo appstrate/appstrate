@@ -63,6 +63,7 @@ export function RunDetailPage() {
   // `run?.status` is sufficient — no local mirror needed.
   const status = run?.status;
   const isRunning = !!status && (ACTIVE_RUN_STATUSES as ReadonlySet<string>).has(status);
+  const isTerminal = !!status && !isRunning;
 
   const { data: logs } = useRunLogs(runId);
 
@@ -95,11 +96,11 @@ export function RunDetailPage() {
     if (!logs) {
       return { historicalLogs: [], structuredOutput: null, turnRows: [] };
     }
-    const { entries, output } = buildLogEntries(logs);
+    const { entries, output } = buildLogEntries(logs, { isRunTerminal: isTerminal });
     // Turn breadcrumbs are filtered OUT of the log stream by `buildLogEntries`
     // and projected here into the Info tab's per-turn table instead.
     return { historicalLogs: entries, structuredOutput: output, turnRows: buildTurnRows(logs) };
-  }, [logs]);
+  }, [logs, isTerminal]);
 
   // `EnrichedRun.result` mirrors the jsonb column as `unknown`; the generated
   // OpenAPI schema is the authority on its shape, so narrow to that rather
