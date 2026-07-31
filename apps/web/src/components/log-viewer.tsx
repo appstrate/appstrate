@@ -158,8 +158,7 @@ export function LogViewer({ entries }: LogViewerProps) {
               : "";
           return `${ts}[tool:${e.status}] ${e.tool}${detail}${duration}${args}${result}`;
         }
-        const prefix = e.kind === "agent" ? `[${t("log.agent")}] ` : "";
-        return `${ts}${prefix}${e.message}`;
+        return `${ts}${e.message}`;
       })
       .join("\n");
     navigator.clipboard.writeText(text);
@@ -224,9 +223,7 @@ export function LogViewer({ entries }: LogViewerProps) {
         >
           {virtualizer.getVirtualItems().map((virtualRow) => {
             const entry = entries[virtualRow.index]!;
-            const hasLevel = entry.level && entry.level !== "debug";
-            const failedTool = entry.kind === "tool" && entry.status === "failed";
-            const expanded = expandAll || expandedId === entry.id || !!hasLevel || failedTool;
+            const expanded = expandAll || expandedId === entry.id;
             const canExpand = hasExpandableContent(entry);
             return (
               <div
@@ -279,9 +276,6 @@ export function LogViewer({ entries }: LogViewerProps) {
                   ) : entry.kind === "agent" ? (
                     <>
                       <Bot className="mr-1.5 size-3.5 shrink-0 text-violet-400" />
-                      <span className="mr-2 shrink-0 text-[10px] font-semibold tracking-wide text-violet-400 uppercase">
-                        {t("log.agent")}
-                      </span>
                       <span className="text-foreground/80 min-w-0 font-sans">{entry.message}</span>
                     </>
                   ) : entry.kind === "log" ? (

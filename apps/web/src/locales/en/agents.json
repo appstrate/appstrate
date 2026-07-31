@@ -287,7 +287,6 @@
   "log.toggleTimestamps": "Timestamps",
   "log.expandAll": "Expand all logs",
   "log.autoScroll": "Auto-scroll",
-  "log.agent": "Agent",
   "log.arguments": "Arguments",
   "log.result": "Result",
   "log.toolStatus.running": "Tool running",
