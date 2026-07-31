@@ -521,6 +521,7 @@
   "onboarding.planProDescription": "For intensive usage",
   "onboarding.planFreePrice": "Free",
   "onboarding.planCredits": "{{count}} credits / month",
+  "onboarding.planStorage": "{{size}} storage",
   "onboarding.summaryPlan": "Plan",
   "onboarding.modelTitle": "Configure an AI model",
   "onboarding.modelSubtitle": "Add an LLM model to run your agents. You can add more later.",

@@ -68,6 +68,13 @@ export interface BillingPlanDetail {
   name: string;
   price: number;
   credit_quota: number;
+  /**
+   * Durable-document storage the plan grants, in bytes. Optional: a cloud
+   * module older than the release that added it omits the field, and a plan
+   * card must still render — the storage line is dropped rather than showing
+   * "0 B" for a plan that actually grants capacity.
+   */
+  document_storage_bytes?: number;
 }
 
 export interface BillingInfo {
