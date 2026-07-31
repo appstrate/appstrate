@@ -402,7 +402,11 @@ export const runsPaths = {
                 manifest: {
                   type: "object",
                   description:
-                    "Full AFPS manifest (agent type). All referenced skills/integrations must already exist in the org or system catalog — registry-only dependencies.",
+                    "Full AFPS manifest (agent type). Give each inline run a concise, " +
+                    "task-specific `display_name` in the user's language and a matching " +
+                    "descriptive `@inline/<kebab-case-slug>` name — never an id or a generic " +
+                    "label such as `one-shot`. All referenced skills/integrations must already " +
+                    "exist in the org or system catalog — registry-only dependencies.",
                 },
                 prompt: {
                   type: "string",
@@ -446,8 +450,8 @@ export const runsPaths = {
             example: {
               manifest: {
                 $schema: "https://schemas.afps.dev/v0/agent.schema.json",
-                name: "@inline/one-shot",
-                display_name: "One-shot summary",
+                name: "@inline/summarize-attached-document",
+                display_name: "Summarize attached document",
                 version: "0.0.0",
                 type: "agent",
                 schema_version: "0.1",
@@ -510,7 +514,7 @@ export const runsPaths = {
                 runner_name: null,
                 runner_kind: null,
                 agent_scope: "@inline",
-                agent_name: "one-shot",
+                agent_name: "Summarize attached document",
                 runOrigin: "platform",
                 contextSnapshot: null,
                 modelCredentialId: "mpc_8h2k4m6n",
@@ -525,8 +529,8 @@ export const runsPaths = {
                 document_counts: { input: 0, output: 0 },
                 inline_manifest: {
                   $schema: "https://schemas.afps.dev/v0/agent.schema.json",
-                  name: "@inline/one-shot",
-                  display_name: "One-shot summary",
+                  name: "@inline/summarize-attached-document",
+                  display_name: "Summarize attached document",
                   version: "0.0.0",
                   type: "agent",
                   schema_version: "0.1",
@@ -630,7 +634,13 @@ export const runsPaths = {
               type: "object",
               required: ["manifest", "prompt"],
               properties: {
-                manifest: { type: "object" },
+                manifest: {
+                  type: "object",
+                  description:
+                    "Full AFPS manifest, with the same task-specific `display_name` and " +
+                    "descriptive `@inline/<kebab-case-slug>` naming guidance as " +
+                    "`POST /api/runs/inline`.",
+                },
                 prompt: { type: "string" },
                 input: { type: "object" },
                 config: { type: "object" },

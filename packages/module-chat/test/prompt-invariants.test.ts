@@ -32,6 +32,14 @@ describe("SYSTEM_PROMPT invariants", () => {
     expect(SYSTEM_PROMPT).toContain("never fabricate it");
   });
 
+  it("gives every inline run a task-specific human identity", () => {
+    expect(SYSTEM_PROMPT).toContain("Give EVERY inline run a task-specific identity");
+    expect(SYSTEM_PROMPT).toContain("manifest.display_name");
+    expect(SYSTEM_PROMPT).toContain("describes the exact action or outcome of THIS run");
+    expect(SYSTEM_PROMPT).toContain('"display_name": "Analyse des 3 derniers e-mails"');
+    expect(SYSTEM_PROMPT).not.toContain('"name": "@inline/one-shot"');
+  });
+
   it("keeps the fan-in-by-reference rule (context_documents, never a copy)", () => {
     expect(SYSTEM_PROMPT).toContain("context_documents");
     expect(SYSTEM_PROMPT).toMatch(/NEVER paste a previous run's content/);
@@ -42,6 +50,15 @@ describe("SYSTEM_PROMPT invariants", () => {
   it("keeps the fan-out deliverable contract (file in outputs/ AND a short output)", () => {
     expect(SYSTEM_PROMPT).toContain("outputs/<topic>.md");
     expect(SYSTEM_PROMPT).toMatch(/short summary naming that file/);
+  });
+
+  it("requires descriptive filenames that survive outside the run context", () => {
+    expect(SYSTEM_PROMPT).toContain(
+      "remain understandable after it is downloaded outside this run",
+    );
+    expect(SYSTEM_PROMPT).toContain("analyse-concurrents-restaurants-lyon.md");
+    expect(SYSTEM_PROMPT).toMatch(/NEVER use context-free names/);
+    expect(SYSTEM_PROMPT).not.toContain("outputs/report.md");
   });
 
   it("keeps the sub-agent effort ceiling (cap, stop criterion, output last)", () => {

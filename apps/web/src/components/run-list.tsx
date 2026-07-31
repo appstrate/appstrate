@@ -9,6 +9,7 @@ import { useAgents } from "../hooks/use-packages";
 import { RunRow } from "./run-row";
 import { EmptyState } from "./page-states";
 import type { EnrichedRun } from "@appstrate/shared-types";
+import { inlineRunDisplayName } from "../lib/run-title";
 
 interface RunListProps {
   packageId?: string;
@@ -88,7 +89,7 @@ export function RunList({
     // raw shadow packageId (`@inline/r-…`) is never meaningful to users, and
     // the ephemeral row isn't in `agents` so the map lookup would miss anyway.
     if (run.package_ephemeral === true) {
-      return run.agent_name || t("runs.inlineBadge");
+      return inlineRunDisplayName(run.agent_name, t("runs.inlineBadge"));
     }
     // Source agent deleted (FK SET NULL): fall back to the denormalized
     // `agent_name` snapshot stamped at INSERT time, then to a generic label.

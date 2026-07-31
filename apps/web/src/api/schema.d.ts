@@ -5433,7 +5433,7 @@ export interface components {
                 output?: unknown;
                 /**
                  * @deprecated
-                 * @description HISTORICAL ONLY. Markdown left by the removed `report` runtime tool. The platform no longer writes this field — it is served verbatim on runs finalized before the removal. Agent reports are markdown documents now (`outputs/report.md`).
+                 * @description HISTORICAL ONLY. Markdown left by the removed `report` runtime tool. The platform no longer writes this field — it is served verbatim on runs finalized before the removal. Agent reports are descriptively named markdown documents now (`outputs/<task-specific-name>.md`).
                  */
                 text?: string;
                 /**
@@ -18190,8 +18190,8 @@ export interface operations {
                  * @example {
                  *       "manifest": {
                  *         "$schema": "https://schemas.afps.dev/v0/agent.schema.json",
-                 *         "name": "@inline/one-shot",
-                 *         "display_name": "One-shot summary",
+                 *         "name": "@inline/summarize-attached-document",
+                 *         "display_name": "Summarize attached document",
                  *         "version": "0.0.0",
                  *         "type": "agent",
                  *         "schema_version": "0.1",
@@ -18204,7 +18204,7 @@ export interface operations {
                  *     }
                  */
                 "application/json": {
-                    /** @description Full AFPS manifest (agent type). All referenced skills/integrations must already exist in the org or system catalog — registry-only dependencies. */
+                    /** @description Full AFPS manifest (agent type). Give each inline run a concise, task-specific `display_name` in the user's language and a matching descriptive `@inline/<kebab-case-slug>` name — never an id or a generic label such as `one-shot`. All referenced skills/integrations must already exist in the org or system catalog — registry-only dependencies. */
                     manifest: Record<string, never>;
                     /** @description Contents of prompt.md — the agent's system prompt. */
                     prompt: string;
@@ -18271,7 +18271,7 @@ export interface operations {
                      *       "runner_name": null,
                      *       "runner_kind": null,
                      *       "agent_scope": "@inline",
-                     *       "agent_name": "one-shot",
+                     *       "agent_name": "Summarize attached document",
                      *       "runOrigin": "platform",
                      *       "contextSnapshot": null,
                      *       "modelCredentialId": "mpc_8h2k4m6n",
@@ -18289,8 +18289,8 @@ export interface operations {
                      *       },
                      *       "inline_manifest": {
                      *         "$schema": "https://schemas.afps.dev/v0/agent.schema.json",
-                     *         "name": "@inline/one-shot",
-                     *         "display_name": "One-shot summary",
+                     *         "name": "@inline/summarize-attached-document",
+                     *         "display_name": "Summarize attached document",
                      *         "version": "0.0.0",
                      *         "type": "agent",
                      *         "schema_version": "0.1",
@@ -18383,6 +18383,7 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
+                    /** @description Full AFPS manifest, with the same task-specific `display_name` and descriptive `@inline/<kebab-case-slug>` naming guidance as `POST /api/runs/inline`. */
                     manifest: Record<string, never>;
                     prompt: string;
                     input?: Record<string, never>;

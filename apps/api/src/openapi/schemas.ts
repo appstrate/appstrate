@@ -629,7 +629,7 @@ export const schemas = {
             type: "string",
             deprecated: true,
             description:
-              "HISTORICAL ONLY. Markdown left by the removed `report` runtime tool. The platform no longer writes this field — it is served verbatim on runs finalized before the removal. Agent reports are markdown documents now (`outputs/report.md`).",
+              "HISTORICAL ONLY. Markdown left by the removed `report` runtime tool. The platform no longer writes this field — it is served verbatim on runs finalized before the removal. Agent reports are descriptively named markdown documents now (`outputs/<task-specific-name>.md`).",
           },
           text_truncated: {
             type: "boolean",

@@ -598,6 +598,10 @@ describe("renderPlatformPrompt", () => {
       expect(withIt).toContain("## Deliverables");
       expect(withIt).toContain("`./outputs/`");
       expect(withIt).toContain("published automatically as a downloadable");
+      expect(withIt).toContain("remain understandable outside this run");
+      expect(withIt).toContain("`./outputs/analyse-concurrents-restaurants-lyon.md`");
+      expect(withIt).toContain("Never use context-free names");
+      expect(withIt).not.toContain("`./outputs/report.md`");
 
       const without = renderPlatformPrompt({ template: "T", context: ctx() });
       expect(without).not.toContain("## Deliverables");
