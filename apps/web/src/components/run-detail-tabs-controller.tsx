@@ -5,7 +5,7 @@ import { useTabWithHash } from "../hooks/use-tab-with-hash";
 import {
   RUN_DETAIL_TABS,
   effectiveRunDetailTab,
-  preserveInitialRunDetailTab,
+  initialRunDetailTab,
   type RunDetailTab,
   type RunTabAvailability,
 } from "../lib/run-detail-tabs";
@@ -25,9 +25,7 @@ export function RunDetailTabsController({
     setActiveTab: (tab: RunDetailTab) => void;
   }) => ReactNode;
 }) {
-  const [defaultTab] = useState(
-    () => preserveInitialRunDetailTab(null, true, availability) ?? "logs",
-  );
+  const [defaultTab] = useState(() => initialRunDetailTab(availability));
   const [requestedTab, setActiveTab] = useTabWithHash(RUN_DETAIL_TABS, defaultTab);
   const activeTab = effectiveRunDetailTab(requestedTab, availability);
 

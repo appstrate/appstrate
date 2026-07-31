@@ -28,20 +28,6 @@ export function initialRunDetailTab({
 }
 
 /**
- * Capture the first default selected from a resolved run and preserve it across
- * subsequent realtime updates. In particular, a late primary document must make
- * its tab available without moving a user who is already reading another tab.
- */
-export function preserveInitialRunDetailTab(
-  current: RunDetailTab | null,
-  runResolved: boolean,
-  availability: RunTabAvailability,
-): RunDetailTab | null {
-  if (current || !runResolved) return current;
-  return initialRunDetailTab(availability);
-}
-
-/**
  * Keep explicit deep links in the URL but avoid rendering a blank pane while
  * their optional content is unavailable. If realtime data later makes that
  * content available, the bookmarked choice becomes visible automatically.

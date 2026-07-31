@@ -181,9 +181,9 @@ Error bodies are the standard RFC 9457 `application/problem+json` from the globa
 
 The platform MCP server (`apps/api/src/modules/mcp/`) surfaces documents to external clients (claude.ai, …) and to the in-process chat, all through the same forwarded-auth in-process dispatch as the other tools:
 
-- **`run_and_wait`** result carries one **`resource_link`** content block per document the run published (`{type:"resource_link", uri, name, mimeType, size, description}`, spec 2025-06-18), alongside the text payload (which also echoes `documents`, parity with the chat path). Reuses `fetchRunDocuments`; the primary document is first and its link carries MCP annotations `audience: ["user"]`, `priority: 1`.
+- **`run_and_wait`** result carries one **`resource_link`** content block per document the run published (`{type:"resource_link", uri, name, mimeType, size, description}`, spec 2025-06-18), alongside the text payload (which also echoes `documents`, parity with the chat path). Reuses `fetchRunDocuments`.
 - **`resources/read`** on a `document://` URI: a textual document (`text/*`, JSON, XML, `+json`/`+xml`) ≤ 1 MiB that the caller may download is inlined as `text`; everything else (non-textual, oversized, not downloadable) returns metadata only. A foreign/unknown id is an MCP error. Documents are **not** listed under `resources/list` (per spec — links need not be enumerated).
-- **`list_documents`** tool: the caller-visible documents (reuses `listDocumentsForActor`), filterable by `run_id` / `chat_session_id` / `purpose`, returning compact `{documents:[{id, uri, name, mime, size, presentation, run_id, package_id, created_at}], has_more}`. Exposed to chat too (both engines discover it dynamically), so the assistant can retrieve and re-inject a `document://` URI.
+- **`list_documents`** tool: the caller-visible documents (reuses `listDocumentsForActor`), filterable by `run_id` / `chat_session_id` / `purpose`, returning compact `{documents:[{id, uri, name, mime, size, run_id, package_id, created_at}], has_more}`. Exposed to chat too (both engines discover it dynamically), so the assistant can retrieve and re-inject a `document://` URI.
 
 ## Hardening
 

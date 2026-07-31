@@ -353,13 +353,13 @@ export function buildRuntimeToolDefs(opts: BuildRuntimeToolDefsOptions): Runtime
 
 /**
  * Durable document metadata returned by a successful upload. Extends the
- * {@link RunAndWaitDocument} projection
- * (`{ id, uri, name, mime, size, presentation }` — the shape the run_and_wait
- * tool result embeds) with the integrity `sha256` the upload path also carries,
- * so the two shapes cannot drift.
+ * {@link RunAndWaitDocument} projection (`{ id, uri, name, mime, size }` — the
+ * shape the run_and_wait tool result embeds) with upload integrity and the
+ * optional presentation selected by `publish_document`.
  */
 export interface PublishedDocument extends RunAndWaitDocument {
   sha256: string;
+  presentation?: "primary" | null;
 }
 
 /** The canonical `document.published` run event for a stored document. */
@@ -395,16 +395,6 @@ export function documentPublishedEvent(doc: PublishedDocument): DocumentPublishe
     // normalizing absence to the same explicit null the platform returns.
     presentation: doc.presentation === "primary" ? "primary" : null,
   };
-}
-
-/** The structured request accepted by the run-scoped runtime uploader. */
-export interface PublishDocumentRequest {
-  /** Workspace-relative path to the file to publish. */
-  path: string;
-  /** Optional display-name override. */
-  name?: string;
-  /** Optional presentation role for the stored run document. */
-  presentation?: "primary";
 }
 
 /**

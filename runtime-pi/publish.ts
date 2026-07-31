@@ -27,11 +27,7 @@ import { resolveWorkspaceFile } from "@appstrate/afps-runtime/resolvers";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { documentPublishedEvent } from "@appstrate/core/runtime-tool-defs";
 import { encodeFilenameHeader, sanitizeFilename } from "@appstrate/core/naming";
-import type {
-  DocumentUploader,
-  PublishedDocument,
-  PublishDocumentRequest,
-} from "@appstrate/core/runtime-tool-defs";
+import type { DocumentUploader, PublishedDocument } from "@appstrate/core/runtime-tool-defs";
 import type { RunArtifactsSummary } from "@appstrate/afps-runtime/runner";
 
 /**
@@ -180,15 +176,7 @@ export interface RunDocumentUploaderDeps {
 }
 
 /**
- * The runtime's uploader supports the structured internal request while also
- * satisfying core's legacy positional uploader contract. The latter keeps
- * third-party `buildPublishDocumentDef` integrations source-compatible.
- */
-export type RunDocumentUploader = DocumentUploader &
-  ((request: PublishDocumentRequest) => Promise<PublishedDocument>);
-
-/**
- * Build the `uploadRunDocument({ path, name?, presentation? })` function the `publish_document`
+ * Build the `uploadRunDocument(path, name?, presentation?)` function the `publish_document`
  * tool and the outputs sweep both call. It streams the file straight to
  * `POST /api/runs/:id/documents` (never buffering it), records the returned
  * `${sha256}:${name}` identity in {@link RunDocumentUploaderDeps.publishedKeys},
@@ -200,23 +188,12 @@ export type RunDocumentUploader = DocumentUploader &
  * missing file or a path resolving outside the workspace — so the tool surfaces
  * it as a tool error and the sweep records the failure category.
  */
-export function createRunDocumentUploader(deps: RunDocumentUploaderDeps): RunDocumentUploader {
+export function createRunDocumentUploader(deps: RunDocumentUploaderDeps): DocumentUploader {
   const fetchFn = deps.fetchFn ?? fetch;
   const sleep = deps.sleepFn ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   const url = deps.sinkUrl.replace(/\/events$/, "/documents");
 
-  const upload = async (
-    requestOrPath: PublishDocumentRequest | string,
-    legacyName?: string,
-    legacyPresentation?: "primary",
-  ): Promise<PublishedDocument> => {
-    const {
-      path: relPath,
-      name,
-      presentation,
-    } = typeof requestOrPath === "string"
-      ? { path: requestOrPath, name: legacyName, presentation: legacyPresentation }
-      : requestOrPath;
+  return async (relPath, name, presentation) => {
     // `publish_document` promises a workspace-relative path. Keep that
     // contract narrower than api_call/api_upload: absolute `/tmp` paths are
     // not publishable, and symlinks may not escape the workspace.
@@ -334,7 +311,6 @@ export function createRunDocumentUploader(deps: RunDocumentUploaderDeps): RunDoc
       `upload of '${relPath}' failed after ${MAX_UPLOAD_ATTEMPTS} attempts — ${lastError}`,
     );
   };
-  return upload as RunDocumentUploader;
 }
 
 /** Compute a file's sha256 by streaming it (bounded memory). */
@@ -347,7 +323,7 @@ async function fileSha256(abs: string): Promise<string> {
 
 export interface SweepOutputsDeps {
   /** The uploader from {@link createRunDocumentUploader}. */
-  uploader: RunDocumentUploader;
+  uploader: DocumentUploader;
   /** Absolute workspace root — the sweep scans `<workspace>/outputs/`. */
   workspace: string;
   /** Shared dedup set (same instance handed to the uploader). */
@@ -501,10 +477,7 @@ export async function sweepOutputs(deps: SweepOutputsDeps): Promise<SweepResult>
       // The implicit outputs sweep never changes the primary selection.
       // Only an explicit `publish_document({ presentation: "primary" })` call
       // may carry that intent to the platform.
-      doc = await deps.uploader({
-        path: path.join("outputs", rel),
-        name: documentName,
-      });
+      doc = await deps.uploader(path.join("outputs", rel), documentName);
     } catch (err) {
       deps.publishedKeys.delete(key);
       // Best-effort: a single file's failure must not abort the sweep or the

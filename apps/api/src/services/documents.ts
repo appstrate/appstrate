@@ -805,24 +805,9 @@ async function commitDocumentRow(params: {
         );
         if (existing) {
           if (params.presentation === "primary" && existing.presentation !== "primary") {
-            await tx
-              .update(documents)
-              .set({ presentation: null })
-              .where(
-                and(
-                  eq(documents.runId, params.runId),
-                  eq(documents.orgId, scope.orgId),
-                  eq(documents.applicationId, scope.applicationId),
-                  eq(documents.presentation, "primary"),
-                ),
-              );
-            const [promoted] = await tx
-              .update(documents)
-              .set({ presentation: "primary" })
-              .where(eq(documents.id, existing.id))
-              .returning(documentSelect);
+            const promoted = await promoteRunDocument(tx, scope, params.runId, existing.id);
             return {
-              row: promoted as DocumentRow,
+              row: promoted,
               deduped: true,
               presentationChanged: true,
             };
@@ -864,17 +849,7 @@ async function commitDocumentRow(params: {
         // Switching the featured output is part of the publication transaction:
         // any later insert failure rolls this update back and preserves the
         // previous primary. The org lock above serializes competing switches.
-        await tx
-          .update(documents)
-          .set({ presentation: null })
-          .where(
-            and(
-              eq(documents.runId, params.runId!),
-              eq(documents.orgId, scope.orgId),
-              eq(documents.applicationId, scope.applicationId),
-              eq(documents.presentation, "primary"),
-            ),
-          );
+        await clearRunPrimary(tx, scope, params.runId!);
       }
       const inserted = await tx
         .insert(documents)
@@ -1038,6 +1013,43 @@ async function findDedupDocument(
   return (existing as DocumentRow) ?? null;
 }
 
+/** Clear the featured output for one run inside the caller's transaction. */
+async function clearRunPrimary(executor: DbOrTx, scope: AppScope, runId: string): Promise<void> {
+  await executor
+    .update(documents)
+    .set({ presentation: null })
+    .where(
+      and(
+        eq(documents.runId, runId),
+        eq(documents.orgId, scope.orgId),
+        eq(documents.applicationId, scope.applicationId),
+        eq(documents.presentation, "primary"),
+      ),
+    );
+}
+
+/**
+ * Make an existing run output primary. The clear + promote pair stays behind
+ * this transaction-local seam so every dedup path applies the same invariant.
+ */
+async function promoteRunDocument(
+  executor: DbOrTx,
+  scope: AppScope,
+  runId: string,
+  documentId: string,
+): Promise<DocumentRow> {
+  await clearRunPrimary(executor, scope, runId);
+  const [promoted] = await executor
+    .update(documents)
+    .set({ presentation: "primary" })
+    .where(eq(documents.id, documentId))
+    .returning(documentSelect);
+  if (!promoted) {
+    throw new Error(`Document ${documentId} vanished while selecting the run primary`);
+  }
+  return promoted as DocumentRow;
+}
+
 /**
  * Promote an already-committed dedup winner without creating a second object.
  * Uses the same org-first lock as fresh document commits so promotion races and
@@ -1077,23 +1089,8 @@ async function promoteExistingDocument(
       return { row: candidate as DocumentRow, changed: false };
     }
 
-    await tx
-      .update(documents)
-      .set({ presentation: null })
-      .where(
-        and(
-          eq(documents.runId, runId),
-          eq(documents.orgId, scope.orgId),
-          eq(documents.applicationId, scope.applicationId),
-          eq(documents.presentation, "primary"),
-        ),
-      );
-    const [promoted] = await tx
-      .update(documents)
-      .set({ presentation: "primary" })
-      .where(eq(documents.id, documentId))
-      .returning(documentSelect);
-    return promoted ? { row: promoted as DocumentRow, changed: true } : null;
+    const promoted = await promoteRunDocument(tx, scope, runId, documentId);
+    return { row: promoted, changed: true };
   });
 }
 

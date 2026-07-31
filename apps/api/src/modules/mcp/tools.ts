@@ -228,10 +228,6 @@ function documentResourceLink(doc: RunAndWaitDocument): {
   mimeType: string;
   size: number;
   description: string;
-  annotations?: {
-    audience: ["user"];
-    priority: number;
-  };
 } {
   return {
     type: "resource_link",
@@ -240,9 +236,6 @@ function documentResourceLink(doc: RunAndWaitDocument): {
     mimeType: doc.mime,
     size: doc.size,
     description: `Document published by this run — read it with resources/read or pass its URI to a follow-up run_and_wait input file field.`,
-    ...(doc.presentation === "primary"
-      ? { annotations: { audience: ["user"] as ["user"], priority: 1 } }
-      : {}),
   };
 }
 
@@ -1047,7 +1040,6 @@ function projectDocumentRow(raw: unknown): Record<string, unknown> | null {
     name,
     mime: asString(r?.mime) ?? "application/octet-stream",
     size: typeof r?.size === "number" ? r.size : 0,
-    presentation: r?.presentation === "primary" ? "primary" : null,
     // Casing mirrors DocumentDto (CASING_CONVENTIONS.md 4b): `packageId`/`createdAt`
     // camelCase carve-outs; `run_id` a snake_case domain field.
     run_id: asString(r?.run_id) ?? null,
