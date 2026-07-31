@@ -237,6 +237,7 @@ describe("run_and_wait", () => {
           name: "report.html",
           mime: "text/html",
           size: 120,
+          run_id: "run_7",
         },
       ],
     });

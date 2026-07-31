@@ -124,7 +124,10 @@ describe("run_and_wait terminal step", () => {
         });
       if (url.endsWith("/run")) return json({ id: "run_1", status: "pending" });
       if (url.includes("/api/documents")) {
-        return json({ object: "list", data: documents, hasMore: false });
+        // The list route reports each row's own container; `fetchRunDocuments`
+        // keeps only the ones this run produced.
+        const data = documents.map((doc) => ({ ...doc, run_id: "run_1" }));
+        return json({ object: "list", data, hasMore: false });
       }
       return json({ id: "run_1", packageId: "@acme/writer", status: "success", result: bigResult });
     }) as unknown as typeof fetch;
