@@ -88,31 +88,26 @@ describe("buildLogEntries — historical report rows", () => {
       { type: "progress", level: "debug", message: "after" },
     ];
     const { entries } = buildLogEntries(logs);
-    // The report row also breaks the plain-text coalescing run, so `before`
-    // and `after` stay two distinct entries rather than being merged.
     expect(entries.map(entryLabel)).toEqual(["before", "after"]);
   });
 });
 
-describe("buildLogEntries — progress entry coalescing", () => {
-  it("coalesces consecutive data-less progress lines into one entry (agent stdout)", () => {
-    // Freeform stdout lines arrive as data-less progress events; folding them
-    // into one block keeps the viewer readable instead of N micro-rows.
+describe("buildLogEntries — progress entry projection", () => {
+  it("keeps consecutive agent logs as separate viewer rows", () => {
     const logs: RawLog[] = [
       { type: "progress", level: "debug", message: "line one" },
       { type: "progress", level: "debug", message: "line two" },
       { type: "progress", level: "debug", message: "line three" },
     ];
     const { entries } = buildLogEntries(logs);
-    expect(entries).toHaveLength(1);
-    expect(entries[0]!.kind).toBe("agent");
-    expect(entryLabel(entries[0]!)).toBe("line one\nline two\nline three");
+    expect(entries).toHaveLength(3);
+    expect(entries.every((entry) => entry.kind === "agent")).toBe(true);
+    expect(entries.map(entryLabel)).toEqual(["line one", "line two", "line three"]);
   });
 
   it("keeps data-bearing progress events as distinct entries (boot breadcrumbs)", () => {
     // The runtime-pi boot breadcrumbs carry `data` (at least `{ boot: true }`)
-    // precisely so each phase marker stays its own log line rather than being
-    // folded into the previous one.
+    // precisely so the projection can distinguish them from agent narration.
     const logs: RawLog[] = [
       { type: "progress", level: "info", message: "connecting to sidecar", data: { boot: true } },
       { type: "progress", level: "info", message: "MCP connected", data: { boot: true } },

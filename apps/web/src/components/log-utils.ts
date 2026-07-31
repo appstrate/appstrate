@@ -251,27 +251,23 @@ export function buildLogEntries(
   const entries: ExecutionEntry[] = [];
   const toolEntryByCallId = new Map<string, number>();
   let output: Record<string, unknown> | null = null;
-  let canCoalesceAgent = false;
 
   for (const [rawIndex, log] of rawLogs.entries()) {
     if (log.event === "output" && log.data) {
       if (!output) output = {};
       Object.assign(output, log.data);
-      canCoalesceAgent = false;
     } else if (log.event === "report" && log.type === "result") {
       // Dead channel: the `report` runtime tool was replaced by durable
       // `outputs/` documents. Rows written before the removal stay in the DB
       // but are skipped here — falling through to the generic branch would
       // render them as a truncated, contextless log line.
-      canCoalesceAgent = false;
     } else if (log.event === "run_completed") {
-      canCoalesceAgent = false;
+      continue;
     } else if (isTurnRow(log)) {
       // Per-turn breadcrumbs are a structured series, not narration: a heavy
       // run emits ~108 of them and they would drown the agent's own log lines.
       // They are rendered as a table in the run Info tab (`buildTurnRows`).
       // Same precedent as the dead `report` channel above.
-      canCoalesceAgent = false;
     } else {
       const logData = log.data ?? {};
       const message = (logData.message as string) || log.message || "";
@@ -281,7 +277,6 @@ export function buildLogEntries(
       // particular, agent prose or a log-tool message is allowed to begin
       // with "Tool:" without becoming a synthetic tool invocation.
       if (log.event === "log") {
-        canCoalesceAgent = false;
         entries.push({
           id: rawEntryId(log, rawIndex, ":explicit-log"),
           kind: "log",
@@ -293,25 +288,18 @@ export function buildLogEntries(
       }
 
       if (isAgentText(log)) {
-        const previous = entries[entries.length - 1];
-        if (canCoalesceAgent && previous?.kind === "agent") {
-          previous.message += "\n" + message;
-        } else {
-          entries.push({
-            id: rawEntryId(log, rawIndex, ":agent"),
-            kind: "agent",
-            message,
-            level: "debug",
-            createdAt: log.createdAt,
-          });
-        }
-        canCoalesceAgent = true;
+        entries.push({
+          id: rawEntryId(log, rawIndex, ":agent"),
+          kind: "agent",
+          message,
+          level: "debug",
+          createdAt: log.createdAt,
+        });
         continue;
       }
 
       const phase = toolRowPhase(logData, message);
       if (phase) {
-        canCoalesceAgent = false;
         const callId = stringValue(logData["toolCallId"]);
         const name = toolName(logData, message);
         const durationMs = logData["durationMs"];
@@ -390,7 +378,6 @@ export function buildLogEntries(
         continue;
       }
 
-      canCoalesceAgent = false;
       entries.push({
         id: rawEntryId(log, rawIndex, ":runtime"),
         kind: "runtime",
