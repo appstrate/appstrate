@@ -9,6 +9,7 @@ import {
   extractRunId,
   extractRunPackageId,
   extractRunStatus,
+  isPrimaryAutoPresentationEligible,
   isRunLaunchOp,
   isTerminalStatus,
   mergeLogs,
@@ -18,6 +19,7 @@ import {
   parseRunLogFrame,
   parseRunResource,
   parseRunUpdateFrame,
+  primaryDocumentFromLogs,
   publishedDocumentsFromLogs,
   resolveAttachmentContent,
   safeJsonParse,
@@ -37,6 +39,10 @@ describe("run-events helpers", () => {
     expect(isTerminalStatus("failed")).toBe(true);
     expect(isTerminalStatus("running")).toBe(false);
     expect(isTerminalStatus(undefined)).toBe(false);
+    expect(isPrimaryAutoPresentationEligible("pending", "pending")).toBe(true);
+    expect(isPrimaryAutoPresentationEligible("running", "running")).toBe(true);
+    expect(isPrimaryAutoPresentationEligible("success", "success")).toBe(false);
+    expect(isPrimaryAutoPresentationEligible("running", "success")).toBe(false);
 
     // Keys, not sentences — the host translator renders them (no literal text
     // ships from this module).
@@ -105,12 +111,14 @@ describe("run-events helpers", () => {
       startedAt: "2026-06-30T00:00:00Z",
       completedAt: null,
       duration: null,
+      primary_document_id: "doc_primary",
       agentScope: "@inline",
       cost: 0,
     });
     expect(run?.status).toBe("running");
     expect(run?.packageId).toBe("@inline/run");
     expect(run?.startedAt).toBe("2026-06-30T00:00:00Z");
+    expect(run?.primary_document_id).toBe("doc_primary");
     // Malformed body (no status) → undefined, so the seed is skipped.
     expect(parseRunResource({ id: "run_1" })).toBeUndefined();
     expect(parseRunResource(null)).toBeUndefined();
@@ -182,22 +190,56 @@ describe("run-events helpers", () => {
           name: "out.csv",
           mime: "text/csv",
           size: 40,
+          presentation: "primary",
         },
       },
       { id: 3, event: "progress" },
     ];
     expect(publishedDocumentsFromLogs(logs)).toEqual([
-      { id: "doc_9", uri: "document://doc_9", name: "out.csv", mime: "text/csv", size: 40 },
+      {
+        id: "doc_9",
+        uri: "document://doc_9",
+        name: "out.csv",
+        mime: "text/csv",
+        size: 40,
+        presentation: "primary",
+      },
     ]);
+    expect(primaryDocumentFromLogs(logs)?.id).toBe("doc_9");
   });
 
-  it("merges document lists deduping by id (persisted wins over live)", () => {
-    const persisted = [{ id: "doc_1", uri: "document://doc_1", name: "report.html" }];
+  it("merges document lists deduping by id while newer promotion metadata wins", () => {
+    const persisted = [
+      { id: "doc_1", uri: "document://doc_1", name: "report.html", presentation: null as null },
+    ];
     const live = [
-      { id: "doc_1", uri: "document://doc_1", name: "report.html" },
+      {
+        id: "doc_1",
+        uri: "document://doc_1",
+        name: "report.html",
+        presentation: "primary" as const,
+      },
       { id: "doc_2", uri: "document://doc_2", name: "data.json" },
     ];
-    expect(mergeRunDocuments(persisted, live).map((d) => d.id)).toEqual(["doc_1", "doc_2"]);
+    const merged = mergeRunDocuments(persisted, live);
+    expect(merged.map((d) => d.id)).toEqual(["doc_1", "doc_2"]);
+    expect(merged[0]?.presentation).toBe("primary");
+  });
+
+  it("uses the last primary log when a run replaces its featured output", () => {
+    const logs: RunLogLine[] = [
+      {
+        id: 1,
+        event: "document",
+        data: { document_id: "doc_a", name: "a.md", presentation: "primary" },
+      },
+      {
+        id: 2,
+        event: "document",
+        data: { document_id: "doc_b", name: "b.md", presentation: "primary" },
+      },
+    ];
+    expect(primaryDocumentFromLogs(logs)?.id).toBe("doc_b");
   });
 
   it("resolves a sent attachment's content to a downloadable document or inert", () => {
