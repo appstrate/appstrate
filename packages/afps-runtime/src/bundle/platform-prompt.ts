@@ -457,8 +457,13 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
       "Write any file you produce for the user (generated documents, exports, data files) " +
         "under `./outputs/` — everything there is published automatically as a downloadable " +
         "document when the run ends. Hidden files (dotfiles, and anything under a hidden " +
-        "directory) are ignored by this automatic publish. If the user expects a written " +
-        "report or summary, write it as markdown to `./outputs/report.md`.\n",
+        "directory) are ignored by this automatic publish. Give every deliverable a concise, " +
+        "descriptive, task-specific kebab-case filename in the user's language, including enough " +
+        "subject or scope to remain understandable outside this run (for example, " +
+        "`./outputs/analyse-concurrents-restaurants-lyon.md`). Never use context-free names such " +
+        "as `report.md`, `summary.md`, `output.md`, `result.md`, or `document.md`. If the user " +
+        "expects a written report or summary without specifying a format, use markdown with such " +
+        "a descriptive filename.\n",
     );
   }
 

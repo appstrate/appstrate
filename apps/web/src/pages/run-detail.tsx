@@ -34,6 +34,7 @@ import { formatDateField } from "../lib/markdown";
 import { JsonView } from "../components/json-view";
 import { useRunMemories, useRunPinned } from "../hooks/use-persistence";
 import { runKeys, invalidateRunLogs } from "../lib/query-keys";
+import { inlineRunDisplayName, runPageTitle } from "../lib/run-title";
 import { MemoryPanel } from "../components/persistence/memory-panel";
 import { Play } from "lucide-react";
 
@@ -210,20 +211,27 @@ export function RunDetailPage() {
   const enrichedRun = run;
   const date = run.started_at ? formatDateField(run.started_at) : "";
   const isInline = enrichedRun.package_ephemeral === true;
+  const hasInlineName = !!enrichedRun.agent_name?.trim();
+  const inlineName = inlineRunDisplayName(enrichedRun.agent_name, t("runs.inlineBadge"));
 
   // For inline runs the agent crumb *is* the last crumb (the run itself),
   // so omit href — PageHeader renders it as the current-page indicator.
   const agentCrumb = isInline
     ? {
-        label: enrichedRun.agent_name
-          ? `${enrichedRun.agent_name} (${t("runs.inlineBadge").toLowerCase()})`
-          : t("runs.inlineBadge"),
+        label: hasInlineName
+          ? `${inlineName} (${t("runs.inlineBadge").toLowerCase()})`
+          : inlineName,
       }
     : { label: agent?.display_name || packageId || "", href: `/agents/${packageId}` };
 
   const runCrumbLabel = runNumber
     ? t("run.breadcrumb", { number: runNumber })
     : date || runId?.slice(0, 8) || "";
+  const title = runPageTitle({
+    isInline,
+    inlineName,
+    numberedTitle: runCrumbLabel,
+  });
 
   // Inline agents are 1:1 with their single run — the agent crumb already
   // identifies the run, so a trailing "Run #N" crumb is redundant.
@@ -236,7 +244,7 @@ export function RunDetailPage() {
 
   return (
     <div className="p-6">
-      <PageHeader title={runCrumbLabel} breadcrumbs={breadcrumbs} />
+      <PageHeader title={title} breadcrumbs={breadcrumbs} />
 
       <div className="border-border mb-4 rounded-md border">
         <RunRow run={enrichedRun} variant="detail" />

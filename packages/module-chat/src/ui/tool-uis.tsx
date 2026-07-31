@@ -255,7 +255,6 @@ function buildRunLaunch(props: AnyToolProps, runId: string | undefined): React.R
     <span className="flex items-center gap-2">
       <PlayIcon className="size-4 shrink-0" />
       {agentLabel ?? "Run"}
-      {runId ? <code className="text-muted-foreground text-xs">{runId}</code> : null}
     </span>
   );
   const details = (
