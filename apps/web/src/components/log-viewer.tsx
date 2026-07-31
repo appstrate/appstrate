@@ -24,6 +24,7 @@ import { cn } from "@appstrate/ui/cn";
 import { formatDuration } from "@appstrate/core/format";
 import {
   formatTimestamp,
+  getExecutionEntryDisclosure,
   levelColors,
   type ExecutionEntry,
   type ToolExecutionStatus,
@@ -92,10 +93,6 @@ function formatStructuredValue(value: unknown): string {
   } catch {
     return String(value);
   }
-}
-
-function hasExpandableContent(entry: ExecutionEntry): boolean {
-  return entry.kind === "tool" && (entry.args !== undefined || entry.result !== undefined);
 }
 
 interface LogViewerProps {
@@ -221,8 +218,15 @@ export function LogViewer({ entries }: LogViewerProps) {
         >
           {virtualizer.getVirtualItems().map((virtualRow) => {
             const entry = entries[virtualRow.index]!;
-            const expanded = expandAll || expandedId === entry.id;
-            const canExpand = hasExpandableContent(entry);
+            const disclosure = getExecutionEntryDisclosure(entry);
+            const expanded = disclosure.expandable && (expandAll || expandedId === entry.id);
+            const visibleMessage =
+              entry.kind === "tool" ? null : expanded ? entry.message : disclosure.collapsedMessage;
+            const wrapMessage = entry.kind !== "tool" && (expanded || !disclosure.expandable);
+            const messageClassName = cn(
+              "min-w-0 flex-1",
+              wrapMessage ? "break-words whitespace-pre-wrap" : "truncate whitespace-nowrap",
+            );
             return (
               <div
                 key={entry.id}
@@ -236,15 +240,19 @@ export function LogViewer({ entries }: LogViewerProps) {
                   transform: `translateY(${virtualRow.start}px)`,
                 }}
                 onClick={() => {
-                  if (canExpand) setExpandedId((prev) => (prev === entry.id ? null : entry.id));
+                  if (disclosure.expandable) {
+                    setExpandedId((prev) => (prev === entry.id ? null : entry.id));
+                  }
                 }}
               >
                 <div
                   className={cn(
                     "text-muted-foreground hover:bg-muted/50 flex min-h-7 items-center px-3 py-0.5 font-mono text-sm leading-7 select-none",
                     entry.level && levelColors[entry.level],
-                    canExpand && "cursor-pointer",
-                    entry.kind === "tool" ? "truncate" : "break-words whitespace-normal",
+                    disclosure.expandable && "cursor-pointer",
+                    entry.kind === "tool" || !wrapMessage
+                      ? "truncate"
+                      : "break-words whitespace-normal",
                     entry.kind === "runtime" &&
                       (!entry.level || entry.level === "debug") &&
                       "before:bg-primary before:mr-1.5 before:inline-block before:h-1.5 before:w-1.5 before:rounded-full before:opacity-60 before:content-['']",
@@ -275,26 +283,24 @@ export function LogViewer({ entries }: LogViewerProps) {
                   ) : entry.kind === "agent" ? (
                     <>
                       <MessageSquareText className="mr-1.5 size-3.5 shrink-0 text-violet-400" />
-                      <span className="text-foreground/80 min-w-0 flex-1 font-sans whitespace-pre-wrap">
-                        {entry.message}
+                      <span className={cn("text-foreground/80 font-sans", messageClassName)}>
+                        {visibleMessage}
                       </span>
                     </>
                   ) : entry.kind === "log" ? (
                     <>
                       <MessageSquareText className="mr-1.5 size-3.5 shrink-0" />
                       <LevelBadge level={entry.level} />
-                      <span className="min-w-0 flex-1 font-sans whitespace-pre-wrap">
-                        {entry.message}
-                      </span>
+                      <span className={cn("font-sans", messageClassName)}>{visibleMessage}</span>
                     </>
                   ) : (
                     <>
                       <LevelBadge level={entry.level} />
-                      <span className="min-w-0 flex-1 whitespace-pre-wrap">{entry.message}</span>
+                      <span className={messageClassName}>{visibleMessage}</span>
                     </>
                   )}
                 </div>
-                {expanded && entry.kind === "tool" && canExpand && (
+                {expanded && entry.kind === "tool" && (
                   <div
                     className="border-border bg-muted/20 border-t px-8 py-2 text-xs"
                     onClick={(event) => event.stopPropagation()}

@@ -5,6 +5,7 @@ import { formatDuration } from "@appstrate/core/format";
 import {
   buildLogEntries,
   buildTurnRows,
+  getExecutionEntryDisclosure,
   type ExecutionEntry,
   type RawLog,
   type ToolExecutionEntry,
@@ -25,6 +26,55 @@ function toolEntry(entries: ExecutionEntry[], index = 0): ToolExecutionEntry {
 function turnLog(data: Record<string, unknown>): RawLog {
   return { type: "progress", level: "debug", event: "progress", message: "Turn 1 — …", data };
 }
+
+describe("getExecutionEntryDisclosure", () => {
+  it("collapses text entries to their first logical line", () => {
+    const entry: ExecutionEntry = {
+      id: "agent:1",
+      kind: "agent",
+      level: "debug",
+      message: "First line\r\nSecond line\nThird line",
+    };
+
+    expect(getExecutionEntryDisclosure(entry)).toEqual({
+      expandable: true,
+      collapsedMessage: "First line",
+    });
+  });
+
+  it("leaves complete single-line text without a redundant disclosure", () => {
+    const entry: ExecutionEntry = {
+      id: "log:1",
+      kind: "log",
+      level: "info",
+      message: "Already complete",
+    };
+
+    expect(getExecutionEntryDisclosure(entry)).toEqual({
+      expandable: false,
+      collapsedMessage: "Already complete",
+    });
+  });
+
+  it("uses structured tool details as the same disclosure signal", () => {
+    const withDetails: ExecutionEntry = {
+      id: "tool:1",
+      kind: "tool",
+      tool: "bash",
+      status: "success",
+      args: { cmd: "pwd" },
+    };
+    const withoutDetails: ExecutionEntry = {
+      id: "tool:2",
+      kind: "tool",
+      tool: "noop",
+      status: "unknown",
+    };
+
+    expect(getExecutionEntryDisclosure(withDetails)).toEqual({ expandable: true });
+    expect(getExecutionEntryDisclosure(withoutDetails)).toEqual({ expandable: false });
+  });
+});
 
 describe("buildLogEntries — output extraction", () => {
   it("merges output events into the structured output bag", () => {
