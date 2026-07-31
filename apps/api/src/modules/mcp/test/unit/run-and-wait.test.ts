@@ -82,12 +82,13 @@ describe("run_and_wait", () => {
     expect(tool.descriptor.inputSchema.required).toEqual(["kind"]);
   });
 
-  it("describes how an inline run explicitly publishes its primary deliverable", () => {
+  it("describes inline capability enrichment without duplicating primary-selection policy", () => {
     const { tool } = makeRunAndWait({});
 
     expect(tool.descriptor.description).toContain("publish_document");
-    expect(tool.descriptor.description).toContain('presentation: "primary"');
     expect(tool.descriptor.description).toMatch(/automatically exposes/i);
+    expect(tool.descriptor.description).not.toMatch(/one main user-facing file/i);
+    expect(tool.descriptor.description).not.toMatch(/several peer files/i);
     expect(tool.descriptor.inputSchema.properties).not.toHaveProperty("primary_deliverable");
   });
 
@@ -120,7 +121,7 @@ describe("run_and_wait", () => {
     expect(calls.find((c) => c.method === "GET")?.search).toBe("?wait=55");
   });
 
-  it("launches an inline run with conditional primary-publication support", async () => {
+  it("launches an inline run with publish_document without rewriting its prompt", async () => {
     const { tool, calls } = makeRunAndWait({
       launch: () => jsonResponse({ id: "run_inline", status: "pending" }),
       getRun: [jsonResponse({ id: "run_inline", status: "success" })],
@@ -137,7 +138,7 @@ describe("run_and_wait", () => {
 
     expect(calls.find((c) => c.method === "POST")?.body).toEqual({
       manifest: { name: "tmp", runtime_tools: ["publish_document"] },
-      prompt: expect.stringContaining('presentation: "primary"'),
+      prompt: "do it",
     });
     expect(calls.some((c) => c.method === "GET")).toBe(true);
   });
