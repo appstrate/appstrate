@@ -234,6 +234,7 @@ describe("run_and_wait client", () => {
               mime: "text/html",
               size: 2048,
               purpose: "agent_output",
+              run_id: "run_1",
             },
           ],
           hasMore: false,
@@ -294,6 +295,63 @@ describe("run_and_wait client", () => {
       steps.push(step.payload);
     }
     expect(steps[1]).not.toHaveProperty("documents");
+  });
+
+  it("fetchRunDocuments keeps only documents this run produced", async () => {
+    // The documents container of a run also holds the documents mounted as its
+    // INPUT — a chained `document://` from an earlier run carries
+    // `purpose: 'agent_output'` too, so only its `run_id` distinguishes it.
+    const fetchImpl = fakeFetch(async () =>
+      jsonResponse({
+        object: "list",
+        data: [
+          {
+            id: "doc_in",
+            uri: "document://doc_in",
+            name: "input.pdf",
+            mime: "application/pdf",
+            size: 10,
+            purpose: "agent_output",
+            run_id: "run_0",
+          },
+          {
+            id: "doc_out",
+            uri: "document://doc_out",
+            name: "report.html",
+            mime: "text/html",
+            size: 20,
+            purpose: "agent_output",
+            run_id: "run_1",
+          },
+          {
+            id: "doc_detached",
+            uri: "document://doc_detached",
+            name: "orphan.txt",
+            mime: "text/plain",
+            size: 30,
+            purpose: "agent_output",
+            run_id: null,
+          },
+        ],
+        hasMore: false,
+      }),
+    );
+
+    await expect(
+      fetchRunDocuments("run_1", {
+        origin: "https://test.local",
+        headers: {},
+        fetch: fetchImpl,
+      }),
+    ).resolves.toEqual([
+      {
+        id: "doc_out",
+        uri: "document://doc_out",
+        name: "report.html",
+        mime: "text/html",
+        size: 20,
+      },
+    ]);
   });
 
   it("fetchRunDocuments swallows a non-2xx response", async () => {

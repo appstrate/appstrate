@@ -564,6 +564,12 @@ export async function* runAndWaitSteps(
  * name, mime, size }` shape the tool result embeds. Best-effort: any failure
  * (network, non-2xx, malformed body) yields an empty list — a missing document
  * list must never turn a successful run into a tool error.
+ *
+ * `GET /api/documents?run_id=…` answers the run's whole document CONTAINER —
+ * the documents it produced PLUS the ones mounted as its input (a chained
+ * `document://` from an earlier run keeps `purpose: 'agent_output'`, so the
+ * purpose filter alone does not exclude it). This list is the run's OUTPUT, so
+ * rows are kept only when their own `run_id` is this run.
  */
 export async function fetchRunDocuments(
   runId: string,
@@ -581,6 +587,7 @@ export async function fetchRunDocuments(
     const out: RunAndWaitDocument[] = [];
     for (const raw of data) {
       const r = asRecord(raw);
+      if (asString(r?.run_id) !== runId) continue;
       const id = asString(r?.id);
       const uri = asString(r?.uri);
       const name = asString(r?.name);

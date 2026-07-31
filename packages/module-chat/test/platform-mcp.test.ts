@@ -85,6 +85,7 @@ describe("platform MCP run_and_wait wrapper", () => {
               name: "report.html",
               mime: "text/html",
               size: 12,
+              run_id: "run_1",
             },
           ],
           hasMore: false,

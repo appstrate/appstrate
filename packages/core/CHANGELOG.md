@@ -26,6 +26,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ignored, so the refusal — with a message naming the mistake — is the only
   signal the caller can act on.
 
+### Fixed
+
+- `@appstrate/core/run-and-wait-client` — `fetchRunDocuments` now returns only
+  the documents the run itself produced. `GET /api/documents?run_id=…` answers
+  the run's whole document CONTAINER, inputs included, and a `document://`
+  chained in from an earlier run keeps `purpose: 'agent_output'` — so the
+  purpose filter alone let a previous run's output be reported (and rendered in
+  the chat run card) as this run's deliverable. Rows are now kept only when
+  their own `run_id` matches.
+
 ## [6.1.0] — 2026-07-29
 
 Additive release. It exists because `packages/core/src` had drifted from the
