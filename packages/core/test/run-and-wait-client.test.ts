@@ -428,7 +428,7 @@ describe("launchRunAndWait launch body", () => {
     });
   });
 
-  it("kind:inline always equips explicit, conditional primary publication", async () => {
+  it("kind:inline equips publish_document without rewriting the agent prompt", async () => {
     const { fetchImpl, captured } = captureLaunch();
 
     const result = await launchRunAndWait(
@@ -444,14 +444,8 @@ describe("launchRunAndWait launch body", () => {
     expect(captured()?.body).toMatchObject({
       manifest: { runtime_tools: ["log", "output", "publish_document"] },
     });
-    expect((captured()?.body as { prompt?: string } | undefined)?.prompt).toContain(
-      'presentation: "primary"',
-    );
-    expect((captured()?.body as { prompt?: string } | undefined)?.prompt).toMatch(
-      /one main user-facing file/i,
-    );
-    expect((captured()?.body as { prompt?: string } | undefined)?.prompt).toMatch(
-      /several peer files/i,
+    expect((captured()?.body as { prompt?: string } | undefined)?.prompt).toBe(
+      "Write the requested report to outputs/report.html.",
     );
   });
 

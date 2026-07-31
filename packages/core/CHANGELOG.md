@@ -33,6 +33,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `publish_document` now carries the complete conditional primary-selection rule in its shared
+  tool descriptor, so named agents and inline runs receive identical guidance whenever the
+  capability is available. `run_and_wait` still equips inline manifests idempotently, but no
+  longer rewrites their prompts with a second copy of that policy.
+
 - `@appstrate/core/run-and-wait-client` — `fetchRunDocuments` now returns only
   the documents the run itself produced. `GET /api/documents?run_id=…` answers
   the run's whole document CONTAINER, inputs included, and a `document://`

@@ -428,9 +428,12 @@ export function buildPublishDocumentDef(uploader: DocumentUploader): RuntimeTool
         "another tool — or to see an upload failure in time to react. Files written under " +
         "`./outputs/` are published automatically at the end of the run, which is enough for a " +
         "plain end-of-run deliverable, but that happens after you are done: you never get their " +
-        "URIs. To feature one document as this run's primary deliverable, finish editing it first, " +
-        'then publish it with `presentation: "primary"`; the last successful primary publication ' +
-        "wins.",
+        "URIs. Primary selection is an explicit semantic choice: never infer primary status from " +
+        "file count, filename, MIME type, or placement under `./outputs/`. If this run produces one " +
+        "clearly main user-facing file, finish editing it first, then publish it with " +
+        '`presentation: "primary"`; do not edit that file after publishing it. If the run produces ' +
+        "no file, or several peer files with no obvious main deliverable, do not select a primary. " +
+        "The last successful primary publication wins.",
       inputSchema: {
         type: "object",
         additionalProperties: false,

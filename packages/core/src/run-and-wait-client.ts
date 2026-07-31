@@ -14,12 +14,6 @@ import { encodePackageIdPath } from "./naming.ts";
 export const RUN_AND_WAIT_MAX_MS = 30 * 60_000;
 export const RUN_AND_WAIT_BACKOFF_MS = 500;
 const RUN_GET_WAIT_MAX_SECONDS = 55;
-const PRIMARY_PUBLICATION_PROMPT =
-  "Primary document selection: if this run produces one main user-facing file, after that " +
-  "file's final edit call `publish_document` with its workspace-relative path and " +
-  '`presentation: "primary"`. Do not edit that file after publishing it. If the run produces ' +
-  "no file, or several peer files with no obvious main deliverable, do not call " +
-  "`publish_document`.";
 
 /**
  * Inline ceiling for a run's structured `result` inside a tool result (≈8k
@@ -447,9 +441,8 @@ export async function launchRunAndWait(
         ? runtimeTools
         : [...runtimeTools, "publish_document"],
     };
-    const launchPrompt = `${prompt}\n\n${PRIMARY_PUBLICATION_PROMPT}`;
     launchPath = "/api/runs/inline";
-    launchBody = { manifest: launchManifest, prompt: launchPrompt };
+    launchBody = { manifest: launchManifest, prompt };
     if (asRecord(args.input)) launchBody.input = args.input;
     if (asRecord(args.config)) launchBody.config = args.config;
     // Fan-in by reference: forwarded verbatim; the route resolves each URI

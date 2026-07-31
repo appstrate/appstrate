@@ -138,6 +138,10 @@ describe("buildPublishDocumentDef", () => {
     });
     expect(def.descriptor.description).toContain("finish editing it first");
     expect(def.descriptor.description).toContain("last successful primary publication");
+    expect(def.descriptor.description).toMatch(/one clearly main user-facing file/i);
+    expect(def.descriptor.description).toMatch(/no file/i);
+    expect(def.descriptor.description).toMatch(/several peer files/i);
+    expect(def.descriptor.description).toMatch(/never infer.*file count/i);
   });
 
   it("passes presentation through the backward-compatible uploader signature", async () => {
