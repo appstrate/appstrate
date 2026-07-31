@@ -247,7 +247,8 @@ export function LogViewer({ entries }: LogViewerProps) {
               >
                 <div
                   className={cn(
-                    "text-muted-foreground hover:bg-muted/50 flex min-h-7 items-center px-3 py-0.5 font-mono text-sm leading-7 select-none",
+                    "text-muted-foreground hover:bg-muted/50 flex min-h-7 px-3 py-0.5 font-mono text-sm leading-7 select-none",
+                    wrapMessage ? "items-start" : "items-center",
                     entry.level && levelColors[entry.level],
                     disclosure.expandable && "cursor-pointer",
                     entry.kind === "tool" || !wrapMessage
