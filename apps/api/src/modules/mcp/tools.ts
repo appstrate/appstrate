@@ -792,11 +792,11 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
       "goal is a downloadable file (report, CSV, image…), instruct the run's `prompt` to write it " +
       "into `outputs/` with a descriptive, task-specific filename that remains understandable " +
       "outside this run; never use context-free names such as `report.md`, `summary.md`, or " +
-      "`output.md`. When the user asks for one main file, or one file is clearly the run's main " +
-      "deliverable, also declare `publish_document` in `runtime_tools` and instruct the run to call " +
-      'it after the file\'s final edit with `presentation: "primary"`; when several peer files have ' +
-      "no obvious main deliverable, leave them all unfeatured. Content merely returned in the " +
-      "output payload never becomes a document. " +
+      "`output.md`. For inline runs, run_and_wait automatically exposes `publish_document` and " +
+      'instructs the run to call it after the final edit with `presentation: "primary"` when it ' +
+      "produces one main user-facing file, but not when it produces no file or several peer files " +
+      "with no obvious main one. Content merely returned in the output payload never becomes a " +
+      "document. " +
       "Chaining runs (kind:inline): feed earlier runs' deliverables to a later one by passing " +
       "their `document://` URIs in `context_documents` — never by copying their content into " +
       "`prompt`. " +
@@ -844,8 +844,7 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
             "Never use an id or a generic label such as `one-shot`, `inline-agent`, or `task`. " +
             'Include `"log"` in `runtime_tools` so the ' +
             "run can emit progress lines the chat shows live (the panel surfaces only `log`-tool " +
-            "output). Also include `publish_document` when the requested outcome has one primary " +
-            "file deliverable. Do NOT put the prompt inside the manifest — it goes in the separate " +
+            "output). Do NOT put the prompt inside the manifest — it goes in the separate " +
             "top-level `prompt` argument.",
           additionalProperties: true,
         },
@@ -856,9 +855,7 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
             "alongside `manifest` (never nested inside it). Tell the run to call the `log` tool " +
             "to report each meaningful step — those lines are what the chat shows live. When the " +
             "run produces files, require descriptive, task-specific names that remain clear " +
-            "outside this run; never generic names such as `report.md`, `summary.md`, or `output.md`. " +
-            "For one requested main file, tell the run to call `publish_document` after its final " +
-            'edit with `presentation: "primary"`.',
+            "outside this run; never generic names such as `report.md`, `summary.md`, or `output.md`.",
         },
         config: {
           type: "object",

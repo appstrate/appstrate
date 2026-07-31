@@ -84,15 +84,11 @@ describe("run_and_wait", () => {
 
   it("describes how an inline run explicitly publishes its primary deliverable", () => {
     const { tool } = makeRunAndWait({});
-    const properties = tool.descriptor.inputSchema.properties as Record<
-      string,
-      { description?: string }
-    >;
 
     expect(tool.descriptor.description).toContain("publish_document");
     expect(tool.descriptor.description).toContain('presentation: "primary"');
-    expect(properties.manifest?.description).toContain("publish_document");
-    expect(properties.prompt?.description).toContain('presentation: "primary"');
+    expect(tool.descriptor.description).toMatch(/automatically exposes/i);
+    expect(tool.descriptor.inputSchema.properties).not.toHaveProperty("primary_deliverable");
   });
 
   it("launches an agent run, then waits for the final result", async () => {
@@ -124,17 +120,24 @@ describe("run_and_wait", () => {
     expect(calls.find((c) => c.method === "GET")?.search).toBe("?wait=55");
   });
 
-  it("launches an inline run without injecting metadata", async () => {
+  it("launches an inline run with conditional primary-publication support", async () => {
     const { tool, calls } = makeRunAndWait({
       launch: () => jsonResponse({ id: "run_inline", status: "pending" }),
       getRun: [jsonResponse({ id: "run_inline", status: "success" })],
     });
 
-    await tool.handler({ kind: "inline", manifest: { name: "tmp" }, prompt: "do it" }, noExtra);
+    await tool.handler(
+      {
+        kind: "inline",
+        manifest: { name: "tmp" },
+        prompt: "do it",
+      },
+      noExtra,
+    );
 
     expect(calls.find((c) => c.method === "POST")?.body).toEqual({
-      manifest: { name: "tmp" },
-      prompt: "do it",
+      manifest: { name: "tmp", runtime_tools: ["publish_document"] },
+      prompt: expect.stringContaining('presentation: "primary"'),
     });
     expect(calls.some((c) => c.method === "GET")).toBe(true);
   });
@@ -156,8 +159,8 @@ describe("run_and_wait", () => {
     );
 
     expect(calls.find((c) => c.method === "POST")?.body).toEqual({
-      manifest: { name: "tmp" },
-      prompt: "do it",
+      manifest: { name: "tmp", runtime_tools: ["publish_document"] },
+      prompt: expect.stringContaining("do it"),
       input: { screenshot: "document://doc_abc12345" },
     });
   });
@@ -204,8 +207,8 @@ describe("run_and_wait", () => {
       const post = calls.find((c) => c.method === "POST");
       expect(post?.path).toBe("/api/runs/inline");
       expect(post?.body).toEqual({
-        manifest: { name: "tmp" },
-        prompt: "do it",
+        manifest: { name: "tmp", runtime_tools: ["publish_document"] },
+        prompt: expect.stringContaining("do it"),
         connection_overrides: { "@acme/gmail": "conn_abc" },
       });
     });

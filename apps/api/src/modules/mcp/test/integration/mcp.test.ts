@@ -389,6 +389,7 @@ describe("mcp tool round-trip", () => {
     expect(instructions).toContain("Integration preference");
     expect(instructions).toContain("publish_document");
     expect(instructions).toContain('presentation: "primary"');
+    expect(instructions).toMatch(/run_and_wait.*automatically exposes/i);
     // The generated operation index is appended under this exact heading; the
     // chat splits on the same literal to strip it for uncached/no-tool
     // providers (see applyOperationIndexPolicy in module-chat). Keep in sync.

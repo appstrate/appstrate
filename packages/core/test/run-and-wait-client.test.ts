@@ -362,12 +362,39 @@ describe("launchRunAndWait launch body", () => {
       url: "https://test.local/api/runs/inline",
       method: "POST",
       body: {
-        manifest: { name: "tmp" },
-        prompt: "do it",
+        manifest: { name: "tmp", runtime_tools: ["publish_document"] },
+        prompt: expect.stringContaining("do it"),
         input: { screenshot: "document://doc_abc12345" },
         config: { model: "x" },
       },
     });
+  });
+
+  it("kind:inline always equips explicit, conditional primary publication", async () => {
+    const { fetchImpl, captured } = captureLaunch();
+
+    const result = await launchRunAndWait(
+      {
+        kind: "inline",
+        manifest: { name: "tmp", runtime_tools: ["log", "output"] },
+        prompt: "Write the requested report to outputs/report.html.",
+      },
+      { origin: "https://test.local", headers: {}, fetch: fetchImpl },
+    );
+
+    expect(result.ok).toBe(true);
+    expect(captured()?.body).toMatchObject({
+      manifest: { runtime_tools: ["log", "output", "publish_document"] },
+    });
+    expect((captured()?.body as { prompt?: string } | undefined)?.prompt).toContain(
+      'presentation: "primary"',
+    );
+    expect((captured()?.body as { prompt?: string } | undefined)?.prompt).toMatch(
+      /one main user-facing file/i,
+    );
+    expect((captured()?.body as { prompt?: string } | undefined)?.prompt).toMatch(
+      /several peer files/i,
+    );
   });
 
   it("kind:inline omits input when none is provided", async () => {
@@ -378,7 +405,10 @@ describe("launchRunAndWait launch body", () => {
       { origin: "https://test.local", headers: {}, fetch: fetchImpl },
     );
 
-    expect(captured()?.body).toEqual({ manifest: { name: "tmp" }, prompt: "do it" });
+    expect(captured()?.body).toEqual({
+      manifest: { name: "tmp", runtime_tools: ["publish_document"] },
+      prompt: expect.stringContaining("do it"),
+    });
   });
 
   it("kind:agent forwards input in the launch body", async () => {
@@ -421,11 +451,19 @@ describe("launchRunAndWait launch body", () => {
     const { fetchImpl, captured } = captureLaunch();
 
     await launchRunAndWait(
-      { kind: "inline", manifest: { name: "tmp" }, prompt: "do it", context_documents: [] },
+      {
+        kind: "inline",
+        manifest: { name: "tmp" },
+        prompt: "do it",
+        context_documents: [],
+      },
       { origin: "https://test.local", headers: {}, fetch: fetchImpl },
     );
 
-    expect(captured()?.body).toEqual({ manifest: { name: "tmp" }, prompt: "do it" });
+    expect(captured()?.body).toEqual({
+      manifest: { name: "tmp", runtime_tools: ["publish_document"] },
+      prompt: expect.stringContaining("do it"),
+    });
   });
 
   it("kind:agent rejects context_documents before dispatch (never silently drops it)", async () => {
@@ -507,7 +545,12 @@ describe("launchRunAndWait launch body", () => {
 
     const empty = captureLaunch();
     const result = await launchRunAndWait(
-      { kind: "inline", manifest: { name: "tmp" }, prompt: "do it", connection_overrides: {} },
+      {
+        kind: "inline",
+        manifest: { name: "tmp" },
+        prompt: "do it",
+        connection_overrides: {},
+      },
       { origin: "https://test.local", headers: {}, fetch: empty.fetchImpl },
     );
     expect(result.ok).toBe(true);
