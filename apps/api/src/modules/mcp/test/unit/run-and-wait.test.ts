@@ -82,6 +82,19 @@ describe("run_and_wait", () => {
     expect(tool.descriptor.inputSchema.required).toEqual(["kind"]);
   });
 
+  it("describes how an inline run explicitly publishes its primary deliverable", () => {
+    const { tool } = makeRunAndWait({});
+    const properties = tool.descriptor.inputSchema.properties as Record<
+      string,
+      { description?: string }
+    >;
+
+    expect(tool.descriptor.description).toContain("publish_document");
+    expect(tool.descriptor.description).toContain('presentation: "primary"');
+    expect(properties.manifest?.description).toContain("publish_document");
+    expect(properties.prompt?.description).toContain('presentation: "primary"');
+  });
+
   it("launches an agent run, then waits for the final result", async () => {
     const { tool, calls } = makeRunAndWait({
       launch: () => jsonResponse({ id: "run_42", packageId: "@acme/writer", status: "pending" }),

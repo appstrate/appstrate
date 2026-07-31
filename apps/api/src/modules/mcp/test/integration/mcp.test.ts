@@ -387,6 +387,8 @@ describe("mcp tool round-trip", () => {
     // single source of truth here — both chat engines and external MCP clients
     // read it from these instructions, so the chat prompt no longer restates it.
     expect(instructions).toContain("Integration preference");
+    expect(instructions).toContain("publish_document");
+    expect(instructions).toContain('presentation: "primary"');
     // The generated operation index is appended under this exact heading; the
     // chat splits on the same literal to strip it for uncached/no-tool
     // providers (see applyOperationIndexPolicy in module-chat). Keep in sync.
