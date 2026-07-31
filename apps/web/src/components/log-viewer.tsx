@@ -13,7 +13,6 @@ import {
   Info,
   AlertTriangle,
   XCircle,
-  Bot,
   Wrench,
   Loader2,
   CircleSlash2,
@@ -275,7 +274,7 @@ export function LogViewer({ entries }: LogViewerProps) {
                     </>
                   ) : entry.kind === "agent" ? (
                     <>
-                      <Bot className="mr-1.5 size-3.5 shrink-0 text-violet-400" />
+                      <MessageSquareText className="mr-1.5 size-3.5 shrink-0 text-violet-400" />
                       <span className="text-foreground/80 min-w-0 font-sans">{entry.message}</span>
                     </>
                   ) : entry.kind === "log" ? (
