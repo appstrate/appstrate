@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
@@ -44,7 +44,7 @@ function LevelBadge({ level }: { level?: string }) {
   return (
     <span
       className={cn(
-        "mr-1.5 inline-flex shrink-0 items-center gap-0.5 rounded px-1 py-px text-[10px] leading-none font-semibold",
+        "inline-flex shrink-0 items-center gap-0.5 rounded px-1 py-px text-[10px] leading-none font-semibold",
         config.className,
       )}
     >
@@ -52,6 +52,30 @@ function LevelBadge({ level }: { level?: string }) {
       {config.label}
     </span>
   );
+}
+
+function ExecutionEntryLeading({ entry }: { entry: ExecutionEntry }) {
+  let content: ReactNode = null;
+
+  if (entry.kind === "agent") {
+    content = <MessageSquareText className="size-3.5 text-violet-400" />;
+  } else if (entry.kind === "log") {
+    content = (
+      <>
+        <MessageSquareText className="size-3.5" />
+        <LevelBadge level={entry.level} />
+      </>
+    );
+  } else if (entry.kind === "runtime") {
+    if (!entry.level || entry.level === "debug") {
+      content = <span className="bg-primary size-1.5 rounded-full opacity-60" />;
+    } else if (levelConfig[entry.level]) {
+      content = <LevelBadge level={entry.level} />;
+    }
+  }
+
+  if (!content) return null;
+  return <span className="mr-1.5 flex h-7 shrink-0 items-center gap-1.5">{content}</span>;
 }
 
 const toolStatusClasses: Record<ToolExecutionStatus, string> = {
@@ -254,14 +278,11 @@ export function LogViewer({ entries }: LogViewerProps) {
                     entry.kind === "tool" || !wrapMessage
                       ? "truncate"
                       : "break-words whitespace-normal",
-                    entry.kind === "runtime" &&
-                      (!entry.level || entry.level === "debug") &&
-                      "before:bg-primary before:mr-1.5 before:inline-block before:h-1.5 before:w-1.5 before:rounded-full before:opacity-60 before:content-['']",
                     expanded && "bg-muted/30 break-words whitespace-normal",
                   )}
                 >
                   {showTimestamps && (
-                    <span className="text-muted-foreground/60 mr-2 shrink-0 font-mono text-xs">
+                    <span className="text-muted-foreground/60 mr-2 flex h-7 shrink-0 items-center font-mono text-xs">
                       {formatTimestamp(entry.createdAt, i18n.language)}
                     </span>
                   )}
@@ -281,23 +302,18 @@ export function LogViewer({ entries }: LogViewerProps) {
                         </span>
                       )}
                     </>
-                  ) : entry.kind === "agent" ? (
-                    <>
-                      <MessageSquareText className="mr-1.5 size-3.5 shrink-0 text-violet-400" />
-                      <span className={cn("text-foreground/80 font-sans", messageClassName)}>
-                        {visibleMessage}
-                      </span>
-                    </>
-                  ) : entry.kind === "log" ? (
-                    <>
-                      <MessageSquareText className="mr-1.5 size-3.5 shrink-0" />
-                      <LevelBadge level={entry.level} />
-                      <span className={cn("font-sans", messageClassName)}>{visibleMessage}</span>
-                    </>
                   ) : (
                     <>
-                      <LevelBadge level={entry.level} />
-                      <span className={messageClassName}>{visibleMessage}</span>
+                      <ExecutionEntryLeading entry={entry} />
+                      <span
+                        className={cn(
+                          messageClassName,
+                          entry.kind === "agent" && "text-foreground/80 font-sans",
+                          entry.kind === "log" && "font-sans",
+                        )}
+                      >
+                        {visibleMessage}
+                      </span>
                     </>
                   )}
                 </div>
