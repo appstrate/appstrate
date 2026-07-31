@@ -42,17 +42,19 @@ describe("getExecutionEntryDisclosure", () => {
     });
   });
 
-  it("leaves complete single-line text without a redundant disclosure", () => {
+  it("makes a visually overflowing single-line agent log collapsible", () => {
+    const message =
+      "A long agent log can overflow the available row width without containing a logical line break";
     const entry: ExecutionEntry = {
-      id: "log:1",
-      kind: "log",
-      level: "info",
-      message: "Already complete",
+      id: "agent:2",
+      kind: "agent",
+      level: "debug",
+      message,
     };
 
     expect(getExecutionEntryDisclosure(entry)).toEqual({
-      expandable: false,
-      collapsedMessage: "Already complete",
+      expandable: true,
+      collapsedMessage: message,
     });
   });
 

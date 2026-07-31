@@ -222,7 +222,7 @@ export function LogViewer({ entries }: LogViewerProps) {
             const expanded = disclosure.expandable && (expandAll || expandedId === entry.id);
             const visibleMessage =
               entry.kind === "tool" ? null : expanded ? entry.message : disclosure.collapsedMessage;
-            const wrapMessage = entry.kind !== "tool" && (expanded || !disclosure.expandable);
+            const wrapMessage = entry.kind !== "tool" && expanded;
             const messageClassName = cn(
               "min-w-0 flex-1",
               wrapMessage ? "break-words whitespace-pre-wrap" : "truncate whitespace-nowrap",

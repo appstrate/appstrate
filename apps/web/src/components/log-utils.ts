@@ -63,14 +63,14 @@ export type ExecutionEntry =
 
 export interface ExecutionEntryDisclosure {
   expandable: boolean;
-  /** First logical line for collapsed text entries; absent for tools. */
+  /** First logical line, or the full text when it contains no line break. */
   collapsedMessage?: string;
 }
 
 /**
  * Describe the shared collapsed/expanded behaviour of an execution entry.
- * Text entries reveal additional logical lines; tools reveal structured
- * arguments/results. The viewer owns only the interaction state.
+ * Text entries expand from one rendered line to their full content; tools
+ * reveal structured arguments/results. The viewer owns only interaction state.
  */
 export function getExecutionEntryDisclosure(entry: ExecutionEntry): ExecutionEntryDisclosure {
   if (entry.kind === "tool") {
@@ -78,12 +78,9 @@ export function getExecutionEntryDisclosure(entry: ExecutionEntry): ExecutionEnt
   }
 
   const firstLineBreak = entry.message.search(/[\r\n]/);
-  if (firstLineBreak < 0) {
-    return { expandable: false, collapsedMessage: entry.message };
-  }
   return {
     expandable: true,
-    collapsedMessage: entry.message.slice(0, firstLineBreak),
+    collapsedMessage: firstLineBreak < 0 ? entry.message : entry.message.slice(0, firstLineBreak),
   };
 }
 
