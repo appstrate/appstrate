@@ -25,7 +25,6 @@ import { formatDuration } from "@appstrate/core/format";
 import {
   formatTimestamp,
   levelColors,
-  singleLineMessage,
   type ExecutionEntry,
   type ToolExecutionStatus,
 } from "./log-utils";
@@ -96,8 +95,7 @@ function formatStructuredValue(value: unknown): string {
 }
 
 function hasExpandableContent(entry: ExecutionEntry): boolean {
-  if (entry.kind === "tool") return entry.args !== undefined || entry.result !== undefined;
-  return entry.message.includes("\n");
+  return entry.kind === "tool" && (entry.args !== undefined || entry.result !== undefined);
 }
 
 interface LogViewerProps {
@@ -225,12 +223,6 @@ export function LogViewer({ entries }: LogViewerProps) {
             const entry = entries[virtualRow.index]!;
             const expanded = expandAll || expandedId === entry.id;
             const canExpand = hasExpandableContent(entry);
-            const displayedMessage =
-              entry.kind === "tool" || expanded ? undefined : singleLineMessage(entry.message);
-            const messageClassName = cn(
-              "min-w-0 flex-1",
-              expanded ? "break-words whitespace-pre-wrap" : "truncate whitespace-nowrap",
-            );
             return (
               <div
                 key={entry.id}
@@ -249,9 +241,10 @@ export function LogViewer({ entries }: LogViewerProps) {
               >
                 <div
                   className={cn(
-                    "text-muted-foreground hover:bg-muted/50 flex min-h-7 items-center truncate px-3 py-0.5 font-mono text-sm leading-7 select-none",
+                    "text-muted-foreground hover:bg-muted/50 flex min-h-7 items-center px-3 py-0.5 font-mono text-sm leading-7 select-none",
                     entry.level && levelColors[entry.level],
                     canExpand && "cursor-pointer",
+                    entry.kind === "tool" ? "truncate" : "break-words whitespace-normal",
                     entry.kind === "runtime" &&
                       (!entry.level || entry.level === "debug") &&
                       "before:bg-primary before:mr-1.5 before:inline-block before:h-1.5 before:w-1.5 before:rounded-full before:opacity-60 before:content-['']",
@@ -282,22 +275,22 @@ export function LogViewer({ entries }: LogViewerProps) {
                   ) : entry.kind === "agent" ? (
                     <>
                       <MessageSquareText className="mr-1.5 size-3.5 shrink-0 text-violet-400" />
-                      <span className={cn("text-foreground/80 font-sans", messageClassName)}>
-                        {displayedMessage ?? entry.message}
+                      <span className="text-foreground/80 min-w-0 flex-1 font-sans whitespace-pre-wrap">
+                        {entry.message}
                       </span>
                     </>
                   ) : entry.kind === "log" ? (
                     <>
                       <MessageSquareText className="mr-1.5 size-3.5 shrink-0" />
                       <LevelBadge level={entry.level} />
-                      <span className={cn("font-sans", messageClassName)}>
-                        {displayedMessage ?? entry.message}
+                      <span className="min-w-0 flex-1 font-sans whitespace-pre-wrap">
+                        {entry.message}
                       </span>
                     </>
                   ) : (
                     <>
                       <LevelBadge level={entry.level} />
-                      <span className={messageClassName}>{displayedMessage ?? entry.message}</span>
+                      <span className="min-w-0 flex-1 whitespace-pre-wrap">{entry.message}</span>
                     </>
                   )}
                 </div>

@@ -413,8 +413,3 @@ export const levelColors: Record<string, string> = {
   warn: "text-amber-400",
   error: "text-destructive",
 };
-
-/** Join persisted line breaks for the compact, one-line trace preview. */
-export function singleLineMessage(message: string): string {
-  return message.replace(/\s*[\r\n]+\s*/g, " ");
-}
