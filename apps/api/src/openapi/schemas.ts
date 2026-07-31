@@ -596,6 +596,7 @@ export const schemas = {
       "package_ephemeral",
       "unread",
       "document_counts",
+      "primary_document_id",
     ],
     properties: {
       id: { type: "string" },
@@ -806,6 +807,12 @@ export const schemas = {
             description: "Documents produced by the run.",
           },
         },
+      },
+      primary_document_id: {
+        type: ["string", "null"],
+        description:
+          "Document id of the run's explicitly selected primary deliverable, or null. The " +
+          "referenced document remains part of the ordinary run document list.",
       },
       inline_manifest: {
         type: ["object", "null"],

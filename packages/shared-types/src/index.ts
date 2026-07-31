@@ -176,6 +176,11 @@ export type EnrichedRun = RunWireDto & {
    * input; `output` is the number of documents the run produced.
    */
   document_counts: { input: number; output: number };
+  /**
+   * The run's user-facing primary deliverable, selected explicitly by the
+   * publishing agent. Null when the run has no primary output.
+   */
+  primary_document_id: string | null;
   /** True if the run's source package is an inline/ephemeral shadow (POST /api/runs/inline). */
   package_ephemeral?: boolean;
   /** For inline runs only — snapshot of the manifest submitted at run time. Null after compaction. */

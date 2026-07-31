@@ -234,6 +234,16 @@ describe("run_and_wait client", () => {
               mime: "text/html",
               size: 2048,
               purpose: "agent_output",
+              presentation: "primary",
+            },
+            {
+              id: "doc_2",
+              uri: "document://doc_2",
+              name: "notes.txt",
+              mime: "text/plain",
+              size: 128,
+              purpose: "agent_output",
+              presentation: null,
             },
           ],
           hasMore: false,
@@ -269,6 +279,15 @@ describe("run_and_wait client", () => {
           name: "report.html",
           mime: "text/html",
           size: 2048,
+          presentation: "primary",
+        },
+        {
+          id: "doc_2",
+          uri: "document://doc_2",
+          name: "notes.txt",
+          mime: "text/plain",
+          size: 128,
+          presentation: null,
         },
       ],
     });
@@ -294,6 +313,54 @@ describe("run_and_wait client", () => {
       steps.push(step.payload);
     }
     expect(steps[1]).not.toHaveProperty("documents");
+  });
+
+  it("keeps an older primary beyond the first 100 documents in the bounded result", async () => {
+    const urls: string[] = [];
+    const firstPage = Array.from({ length: 100 }, (_, index) => ({
+      id: `doc_${index}`,
+      uri: `document://doc_${index}`,
+      name: `output-${index}.txt`,
+      mime: "text/plain",
+      size: index,
+      presentation: null,
+    }));
+    const fetchImpl = fakeFetch(async (input) => {
+      const url = String(input);
+      urls.push(url);
+      if (!url.includes("startingAfter=")) {
+        return jsonResponse({ object: "list", data: firstPage, hasMore: true });
+      }
+      return jsonResponse({
+        object: "list",
+        data: [
+          {
+            id: "doc_primary",
+            uri: "document://doc_primary",
+            name: "final-report.html",
+            mime: "text/html",
+            size: 4096,
+            presentation: "primary",
+          },
+        ],
+        hasMore: false,
+      });
+    });
+
+    const documents = await fetchRunDocuments("run_1", {
+      origin: "https://test.local",
+      headers: {},
+      fetch: fetchImpl,
+    });
+
+    expect(urls).toHaveLength(2);
+    expect(urls[1]).toContain("startingAfter=doc_99");
+    expect(documents).toHaveLength(100);
+    expect(documents[0]).toMatchObject({
+      id: "doc_primary",
+      presentation: "primary",
+    });
+    expect(documents.some((document) => document.id === "doc_99")).toBe(false);
   });
 
   it("fetchRunDocuments swallows a non-2xx response", async () => {

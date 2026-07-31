@@ -2,9 +2,12 @@
 
 import { describe, it, expect } from "bun:test";
 import {
+  buildPublishDocumentDef,
   buildRuntimeToolDefs,
+  documentPublishedEvent,
   reEmitRuntimeToolEvents,
   RUNTIME_TOOL_EVENTS_META_KEY,
+  type PublishedDocument,
   type RuntimeToolEvent,
 } from "../src/runtime-tool-defs.ts";
 
@@ -107,5 +110,82 @@ describe("reEmitRuntimeToolEvents", () => {
     reEmitRuntimeToolEvents(undefined, (e) => emitted.push(e));
     reEmitRuntimeToolEvents({ [RUNTIME_TOOL_EVENTS_META_KEY]: "nope" }, (e) => emitted.push(e));
     expect(emitted).toHaveLength(0);
+  });
+});
+
+describe("buildPublishDocumentDef", () => {
+  const primaryDocument: PublishedDocument = {
+    id: "doc_primary",
+    uri: "document://doc_primary",
+    name: "Final report.html",
+    mime: "text/html",
+    size: 42,
+    sha256: "abc123",
+    presentation: "primary",
+  };
+
+  it("declares the primary-only presentation schema", () => {
+    const def = buildPublishDocumentDef(async () => primaryDocument);
+    const properties = def.descriptor.inputSchema.properties as Record<
+      string,
+      Record<string, unknown>
+    >;
+
+    expect(properties.presentation).toEqual({
+      type: "string",
+      enum: ["primary"],
+      description: expect.stringContaining("last successful"),
+    });
+    expect(def.descriptor.description).toContain("finish editing it first");
+    expect(def.descriptor.description).toContain("last successful primary publication");
+  });
+
+  it("passes presentation through the backward-compatible uploader signature", async () => {
+    const requests: Array<[string, string | undefined, "primary" | undefined]> = [];
+    const def = buildPublishDocumentDef(async (path, name, presentation) => {
+      requests.push([path, name, presentation]);
+      return primaryDocument;
+    });
+
+    const result = await def.handler({
+      path: "outputs/final.html",
+      name: "Final report.html",
+      presentation: "primary",
+    });
+
+    expect(requests).toEqual([["outputs/final.html", "Final report.html", "primary"]]);
+    expect(eventsOf(result._meta)).toEqual([
+      {
+        ...documentPublishedEvent(primaryDocument),
+        timestamp: expect.any(Number),
+      },
+    ]);
+  });
+
+  it("keeps legacy two-argument uploaders valid and normalizes absent presentation", async () => {
+    const requests: Array<[string, string | undefined]> = [];
+    const ordinaryDocument: PublishedDocument = {
+      id: "doc_legacy",
+      uri: "document://doc_legacy",
+      name: "notes.md",
+      mime: "text/markdown",
+      size: 12,
+      sha256: "legacy-sha",
+    };
+    // This is the exact public uploader shape accepted before presentation was
+    // introduced. Fewer parameters remain assignable and work unchanged.
+    const def = buildPublishDocumentDef(async (path, name) => {
+      requests.push([path, name]);
+      return ordinaryDocument;
+    });
+
+    const result = await def.handler({
+      path: "outputs/notes.md",
+      name: "",
+      presentation: "primary",
+    });
+
+    expect(requests).toEqual([["outputs/notes.md", undefined]]);
+    expect(eventsOf(result._meta)[0]?.presentation).toBeNull();
   });
 });

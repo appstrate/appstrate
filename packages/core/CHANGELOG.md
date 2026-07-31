@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `publish_document.presentation: "primary"` — lets an agent explicitly select
+  the run's featured deliverable after writing its final bytes. The published
+  document/event and `RunAndWaitDocument` projections now carry
+  `presentation: "primary" | null`; run-and-wait clients put the primary
+  document first. The public uploader keeps its existing positional signature
+  (with an optional third argument), and the projection field is optional at
+  the TypeScript construction boundary, so existing 6.x consumers remain
+  source-compatible; current platform responses still always emit an explicit
+  value or `null`.
 - `@appstrate/core/platform-types` — `InlineRunBody.connection_overrides`, the
   flat `{ "@scope/integration": "<connection_id>" }` map (resolver mechanism #2).
   `POST /api/runs/inline` and `/inline/validate` read it, so an inline caller can

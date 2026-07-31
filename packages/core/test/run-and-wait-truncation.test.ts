@@ -39,6 +39,7 @@ const reportDocument: RunAndWaitDocument = {
   name: "report.html",
   mime: "text/html",
   size: 22_846,
+  presentation: "primary",
 };
 
 describe("truncateRunAndWaitPayload", () => {

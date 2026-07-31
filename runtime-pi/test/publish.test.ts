@@ -36,6 +36,7 @@ interface Received {
   /** The raw `X-Document-Name` wire value, before decoding. */
   rawHeader: string;
   contentType: string | null;
+  presentation: string | null;
   sha256: string;
   size: number;
 }
@@ -94,6 +95,7 @@ beforeAll(() => {
         name,
         rawHeader,
         contentType: req.headers.get("content-type"),
+        presentation: req.headers.get("x-document-presentation"),
         sha256,
         size: bytes.byteLength,
       });
@@ -113,6 +115,7 @@ beforeAll(() => {
         mime: req.headers.get("content-type") ?? "application/octet-stream",
         size: bytes.byteLength,
         sha256,
+        presentation: req.headers.get("x-document-presentation") === "primary" ? "primary" : null,
       });
     },
   });
@@ -157,12 +160,13 @@ describe("createRunDocumentUploader", () => {
     await writeFile(path.join(workspace, "report.html"), bytes);
     const keys = new Set<string>();
 
-    const doc = await makeUploader(keys)("report.html");
+    const doc = await makeUploader(keys)({ path: "report.html" });
 
     expect(doc.name).toBe("report.html");
     expect(doc.size).toBe(bytes.byteLength);
     expect(doc.sha256).toBe(sha256Hex(bytes));
     expect(doc.uri).toBe(`document://${doc.id}`);
+    expect(doc.presentation).toBeNull();
     expect(keys.has(key(doc.sha256, doc.name))).toBe(true);
     expect(config.received).toHaveLength(1);
     expect(config.received[0]!.name).toBe("report.html");
@@ -171,17 +175,33 @@ describe("createRunDocumentUploader", () => {
 
   it("honours a display-name override", async () => {
     await writeFile(path.join(workspace, "raw.bin"), new Uint8Array([1, 2, 3]));
-    const doc = await makeUploader(new Set())("raw.bin", "Nice Name.bin");
+    const doc = await makeUploader(new Set())({
+      path: "raw.bin",
+      name: "Nice Name.bin",
+    });
     expect(doc.name).toBe("Nice Name.bin");
     expect(config.received[0]!.name).toBe("Nice Name.bin");
   });
 
+  it("forwards the primary presentation intent and returns the stored role", async () => {
+    await writeFile(path.join(workspace, "final.html"), "<h1>Final</h1>");
+
+    const doc = await makeUploader(new Set())({
+      path: "final.html",
+      presentation: "primary",
+    });
+
+    expect(config.received).toHaveLength(1);
+    expect(config.received[0]!.presentation).toBe("primary");
+    expect(doc.presentation).toBe("primary");
+  });
+
   it("throws on a missing file", async () => {
-    await expect(makeUploader(new Set())("nope.txt")).rejects.toThrow(/ENOENT/);
+    await expect(makeUploader(new Set())({ path: "nope.txt" })).rejects.toThrow(/ENOENT/);
   });
 
   it("rejects a path escaping the allowed roots", async () => {
-    await expect(makeUploader(new Set())("../../../../../../etc/passwd")).rejects.toThrow(
+    await expect(makeUploader(new Set())({ path: "../../../../../../etc/passwd" })).rejects.toThrow(
       /outside the allowed roots/,
     );
   });
@@ -191,7 +211,9 @@ describe("createRunDocumentUploader", () => {
     const outsideFile = path.join(scratch, "secret.txt");
     await writeFile(outsideFile, "not a workspace artifact");
 
-    await expect(makeUploader(new Set())(outsideFile)).rejects.toThrow(/workspace-relative/);
+    await expect(makeUploader(new Set())({ path: outsideFile })).rejects.toThrow(
+      /workspace-relative/,
+    );
     expect(config.received).toHaveLength(0);
   });
 
@@ -201,7 +223,9 @@ describe("createRunDocumentUploader", () => {
     await writeFile(outsideFile, "not a workspace artifact");
     await symlink(outsideFile, path.join(workspace, "link.txt"));
 
-    await expect(makeUploader(new Set())("link.txt")).rejects.toThrow(/outside the allowed roots/);
+    await expect(makeUploader(new Set())({ path: "link.txt" })).rejects.toThrow(
+      /outside the allowed roots/,
+    );
     expect(config.received).toHaveLength(0);
   });
 
@@ -210,14 +234,14 @@ describe("createRunDocumentUploader", () => {
     // keeps the link as its final component and the lstat symlink gate fires.
     await symlink(path.join(workspace, "nope-target.txt"), path.join(workspace, "dangling.txt"));
 
-    await expect(makeUploader(new Set())("dangling.txt")).rejects.toThrow(/symlink/);
+    await expect(makeUploader(new Set())({ path: "dangling.txt" })).rejects.toThrow(/symlink/);
     expect(config.received).toHaveLength(0);
   });
 
   it("surfaces a non-2xx response as an error", async () => {
     config.status = 413;
     await writeFile(path.join(workspace, "big.txt"), new TextEncoder().encode("x"));
-    await expect(makeUploader(new Set())("big.txt")).rejects.toThrow(/413/);
+    await expect(makeUploader(new Set())({ path: "big.txt" })).rejects.toThrow(/413/);
   });
 
   it("retries a 5xx then succeeds", async () => {
@@ -227,7 +251,7 @@ describe("createRunDocumentUploader", () => {
     await writeFile(path.join(workspace, "r.txt"), bytes);
     const keys = new Set<string>();
 
-    const doc = await makeUploader(keys)("r.txt");
+    const doc = await makeUploader(keys)({ path: "r.txt" });
 
     expect(doc.sha256).toBe(sha256Hex(bytes));
     expect(config.received).toHaveLength(2); // one failed + one successful attempt
@@ -238,7 +262,7 @@ describe("createRunDocumentUploader", () => {
     config.statusQueue = [413, 201]; // second entry must never be reached
     await writeFile(path.join(workspace, "cap.txt"), new TextEncoder().encode("x"));
 
-    await expect(makeUploader(new Set())("cap.txt")).rejects.toThrow(/413/);
+    await expect(makeUploader(new Set())({ path: "cap.txt" })).rejects.toThrow(/413/);
     expect(config.received).toHaveLength(1); // stopped after the first attempt
   });
 
@@ -252,7 +276,7 @@ describe("createRunDocumentUploader", () => {
       sleepFn: async (ms) => {
         slept.push(ms);
       },
-    })("throttled.txt");
+    })({ path: "throttled.txt" });
 
     expect(doc.name).toBe("throttled.txt");
     expect(config.received).toHaveLength(2);
@@ -264,7 +288,9 @@ describe("createRunDocumentUploader", () => {
     config.status = 500; // every attempt fails
     await writeFile(path.join(workspace, "doomed.txt"), new TextEncoder().encode("z"));
 
-    await expect(makeUploader(new Set())("doomed.txt")).rejects.toThrow(/after 3 attempts/);
+    await expect(makeUploader(new Set())({ path: "doomed.txt" })).rejects.toThrow(
+      /after 3 attempts/,
+    );
     expect(config.received).toHaveLength(3);
   });
 
@@ -279,12 +305,12 @@ describe("createRunDocumentUploader", () => {
     ];
     for (const [status, code] of cases) {
       config = { status, statusQueue: [], received: [] };
-      const err = await makeUploader(new Set())("f.txt").catch((e) => e);
+      const err = await makeUploader(new Set())({ path: "f.txt" }).catch((e) => e);
       expect(err).toBeInstanceOf(UploadError);
       expect((err as UploadError).code).toBe(code);
     }
     config = { status: 500, statusQueue: [], received: [] };
-    const err = await makeUploader(new Set())("f.txt").catch((e) => e);
+    const err = await makeUploader(new Set())({ path: "f.txt" }).catch((e) => e);
     expect(err).toBeInstanceOf(UploadError);
     expect((err as UploadError).code).toBe("upload_failed");
   });
@@ -302,7 +328,7 @@ describe("createRunDocumentUploader", () => {
       await writeFile(path.join(workspace, name), new TextEncoder().encode(`bytes-of-${name}`));
       const keys = new Set<string>();
 
-      const doc = await makeUploader(keys)(name);
+      const doc = await makeUploader(keys)({ path: name });
 
       expect(doc.name).toBe(name);
       expect(config.received).toHaveLength(1);
@@ -317,7 +343,7 @@ describe("createRunDocumentUploader", () => {
 
   it("leaves a plain ASCII name unchanged on the wire", async () => {
     await writeFile(path.join(workspace, "report.html"), new TextEncoder().encode("<b>ok</b>"));
-    await makeUploader(new Set())("report.html");
+    await makeUploader(new Set())({ path: "report.html" });
     expect(config.received[0]!.rawHeader).toBe("report.html");
   });
 
@@ -326,7 +352,9 @@ describe("createRunDocumentUploader", () => {
     // fail opaquely, and burn 3 attempts plus backoff before reporting
     // `upload_failed`.
     await mkdir(path.join(workspace, "outputs"), { recursive: true });
-    await expect(makeUploader(new Set())("outputs")).rejects.toThrow(/not a regular file/);
+    await expect(makeUploader(new Set())({ path: "outputs" })).rejects.toThrow(
+      /not a regular file/,
+    );
     expect(config.received).toHaveLength(0);
   });
 });
@@ -417,6 +445,8 @@ describe("sweepOutputs", () => {
     expect(config.received).toHaveLength(2);
     expect(events).toHaveLength(2);
     expect(events.every((e) => e.type === "document.published")).toBe(true);
+    expect(events.every((e) => e.presentation === null)).toBe(true);
+    expect(config.received.every((r) => r.presentation === null)).toBe(true);
     expect(result.published).toHaveLength(2);
     expect(result.failed).toHaveLength(0);
     // Every emitted doc's `${sha}:${name}` key is now tracked.
@@ -770,7 +800,7 @@ describe("buildPublishDocumentDef (publish_document tool)", () => {
     await writeFile(path.join(workspace, "out.html"), new TextEncoder().encode("<h1>ok</h1>"));
     const def = buildPublishDocumentDef(makeUploader(new Set()));
 
-    const result = await def.handler({ path: "out.html" });
+    const result = await def.handler({ path: "out.html", presentation: "primary" });
 
     expect(result.isError).toBeUndefined();
     expect(result.content[0]!.text).toContain("Published");
@@ -778,6 +808,8 @@ describe("buildPublishDocumentDef (publish_document tool)", () => {
     expect(events).toHaveLength(1);
     expect(events[0]!.type).toBe("document.published");
     expect(events[0]!.document_id).toMatch(/^doc_/);
+    expect(events[0]!.presentation).toBe("primary");
+    expect(config.received[0]!.presentation).toBe("primary");
   });
 
   it("returns a tool error (not a throw) when the upload fails", async () => {
@@ -793,6 +825,14 @@ describe("buildPublishDocumentDef (publish_document tool)", () => {
     expect(result.isError).toBe(true);
   });
 
+  it("returns a tool error for an unsupported presentation role", async () => {
+    const def = buildPublishDocumentDef(makeUploader(new Set()));
+    const result = await def.handler({ path: "out.html", presentation: "thumbnail" });
+    expect(result.isError).toBe(true);
+    expect(result.content[0]!.text).toContain("must be `primary`");
+    expect(config.received).toHaveLength(0);
+  });
+
   it("leads its description with the publish-now + `document://` URI value", () => {
     // The `outputs/` sweep is unconditional and shares the same uploader, so
     // what the tool alone can do is publish DURING the run and hand back the
@@ -804,6 +844,8 @@ describe("buildPublishDocumentDef (publish_document tool)", () => {
     expect(description).toContain("document://");
     expect(description.indexOf("document://")).toBeLessThan(description.indexOf("./outputs/"));
     expect(description).not.toContain("use this tool only");
+    expect(description).toContain("finish editing it first");
+    expect(description).toContain("last successful primary publication");
   });
 
   it("still publishes an explicitly-chosen dotfile (hidden filter is sweep-only)", async () => {

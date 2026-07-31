@@ -631,6 +631,7 @@ describe("POST /api/runs/:runId/events — ingestion without Redis-specific coup
       mime: "text/html",
       size: 1234,
       sha256: "f".repeat(64),
+      presentation: "primary",
     };
     const envelope = buildEnvelope(runId, "document.published", payload, 1);
     const res = await postEvent(runId, envelope);
@@ -649,6 +650,7 @@ describe("POST /api/runs/:runId/events — ingestion without Redis-specific coup
       name: "report.html",
       mime: "text/html",
       size: 1234,
+      presentation: "primary",
     });
   });
 });

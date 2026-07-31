@@ -165,6 +165,7 @@ export const runsPaths = {
                 connections_used: null,
                 package_ephemeral: false,
                 document_counts: { input: 0, output: 0 },
+                primary_document_id: null,
               },
             },
           },
@@ -527,6 +528,7 @@ export const runsPaths = {
                 connections_used: null,
                 package_ephemeral: true,
                 document_counts: { input: 0, output: 0 },
+                primary_document_id: null,
                 inline_manifest: {
                   $schema: "https://schemas.afps.dev/v0/agent.schema.json",
                   name: "@inline/summarize-attached-document",
@@ -883,6 +885,7 @@ export const runsPaths = {
                 connections_used: null,
                 package_ephemeral: false,
                 document_counts: { input: 0, output: 0 },
+                primary_document_id: null,
               },
             },
           },
@@ -1051,6 +1054,7 @@ export const runsPaths = {
                 connections_used: null,
                 package_ephemeral: false,
                 document_counts: { input: 0, output: 0 },
+                primary_document_id: null,
               },
             },
           },
@@ -1604,7 +1608,7 @@ export const runsPaths = {
       tags: ["Runs"],
       summary: "Publish an agent-produced document (HMAC, streaming)",
       description:
-        "Posted by the agent runtime — via the `publish_document` runtime tool or the end-of-run `outputs/` sweep — to store a file the agent produced as a durable `agent_output` document attached to the run. The raw file bytes are the request body (streamed straight to storage, up to `DOCUMENT_MAX_FILE_BYTES`, 100 MiB by default); metadata is carried in the `X-Document-Name` and `Content-Type` headers. Same Standard Webhooks HMAC auth as the other run routes, verified over an EMPTY body (the bytes stream unbuffered; integrity is the returned sha256). Enforced synchronously: the per-file cap and per-run output budget cut the stream mid-flight (413, deleting any partial object); the org storage quota returns 403. Idempotent for sweep retries: an identical (run, sha256, name) upload returns the existing document with 200 instead of storing it twice. Requires the run to be `running` (409 `run_not_running` otherwise). Each `webhook-id` is single-use: because the signature covers an empty body, replaying a captured header set with different bytes is refused with 409 `message_replayed` (the runtime signs a fresh id per attempt, so retries are unaffected).",
+        "Posted by the agent runtime — via the `publish_document` runtime tool or the end-of-run `outputs/` sweep — to store a file the agent produced as a durable `agent_output` document attached to the run. The raw file bytes are the request body (streamed straight to storage, up to `DOCUMENT_MAX_FILE_BYTES`, 100 MiB by default); metadata is carried in the `X-Document-Name`, optional `X-Document-Presentation`, and `Content-Type` headers. `X-Document-Presentation: primary` atomically makes this the run's featured deliverable; the last successful primary publication wins, while an ordinary publication never changes the selection. Same Standard Webhooks HMAC auth as the other run routes, verified over an EMPTY body (the bytes stream unbuffered; integrity is the returned sha256). Enforced synchronously: the per-file cap and per-run output budget cut the stream mid-flight (413, deleting any partial object); the org storage quota returns 403. Idempotent for sweep retries: an identical (run, sha256, name) upload returns the existing document with 200 instead of storing it twice, and can still promote that existing document. Requires the run to be `running` (409 `run_not_running` otherwise). Each `webhook-id` is single-use: because the signature covers an empty body, replaying a captured header set with different bytes is refused with 409 `message_replayed` (the runtime signs a fresh id per attempt, so retries are unaffected).",
       parameters: [
         { name: "runId", in: "path", required: true, schema: { type: "string" } },
         {
@@ -1614,6 +1618,15 @@ export const runsPaths = {
           schema: { type: "string" },
           description:
             "Display name for the document, percent-encoded with `encodeURIComponent` (an HTTP header value cannot carry a raw non-ASCII filename). The server decodes it strictly and returns 400 on a malformed encoding, then sanitises the decoded name (path separators, control characters and `..` collapsed, 255 chars max).",
+        },
+        {
+          name: "X-Document-Presentation",
+          in: "header",
+          required: false,
+          schema: { type: "string", enum: ["primary"] },
+          description:
+            "Set to `primary` to feature this document on the run page. The last successful " +
+            "primary publication wins atomically. Omit for an ordinary output.",
         },
         {
           name: "Content-Type",
@@ -1642,7 +1655,7 @@ export const runsPaths = {
             "application/json": {
               schema: {
                 type: "object",
-                required: ["id", "uri", "name", "mime", "size", "sha256"],
+                required: ["id", "uri", "name", "mime", "size", "sha256", "presentation"],
                 properties: {
                   id: { type: "string" },
                   uri: { type: "string", description: "`document://<id>` durable URI." },
@@ -1650,6 +1663,7 @@ export const runsPaths = {
                   mime: { type: "string" },
                   size: { type: "integer" },
                   sha256: { type: "string" },
+                  presentation: { type: ["string", "null"], enum: ["primary", null] },
                 },
               },
             },
@@ -1662,7 +1676,7 @@ export const runsPaths = {
             "application/json": {
               schema: {
                 type: "object",
-                required: ["id", "uri", "name", "mime", "size", "sha256"],
+                required: ["id", "uri", "name", "mime", "size", "sha256", "presentation"],
                 properties: {
                   id: { type: "string" },
                   uri: { type: "string" },
@@ -1670,6 +1684,7 @@ export const runsPaths = {
                   mime: { type: "string" },
                   size: { type: "integer" },
                   sha256: { type: "string" },
+                  presentation: { type: ["string", "null"], enum: ["primary", null] },
                 },
               },
             },
@@ -1677,7 +1692,7 @@ export const runsPaths = {
         },
         "400": {
           description:
-            "X-Document-Name missing or not a valid percent-encoded filename / Content-Type header missing / empty body",
+            "X-Document-Name missing or not a valid percent-encoded filename / X-Document-Presentation has an unsupported value / Content-Type header missing / empty body",
         },
         "401": { description: "Signature verification failed" },
         "403": { description: "storage_limit_exceeded" },

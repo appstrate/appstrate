@@ -63,6 +63,12 @@ export interface RunAndWaitDocument {
   name: string;
   mime: string;
   size: number;
+  /**
+   * Explicit user-facing presentation role selected by the publishing agent.
+   * Optional for source compatibility with clients constructing the pre-6.2
+   * projection; current fetchers always return either `primary` or null.
+   */
+  presentation?: "primary" | null;
 }
 
 export interface RunAndWaitLaunch {
@@ -561,41 +567,75 @@ export async function* runAndWaitSteps(
 
 /**
  * List the agent-output documents a run published, projected to the `{ id, uri,
- * name, mime, size }` shape the tool result embeds. Best-effort: any failure
- * (network, non-2xx, malformed body) yields an empty list — a missing document
- * list must never turn a successful run into a tool error.
+ * name, mime, size, presentation }` shape the tool result embeds. The primary
+ * deliverable is returned first, even when it is older than the bounded first
+ * page. Best-effort: a first-page failure yields an empty list; a failure while
+ * scanning later pages for the primary preserves the first page already read.
+ * Missing document metadata must never turn a successful run into a tool error.
  */
 export async function fetchRunDocuments(
   runId: string,
   opts: RunAndWaitClientOptions,
 ): Promise<RunAndWaitDocument[]> {
+  const firstPage: RunAndWaitDocument[] = [];
+  const seenCursors = new Set<string>();
+  let startingAfter: string | undefined;
+
   try {
-    const url = apiUrl(
-      opts.origin,
-      `/api/documents?run_id=${encodeURIComponent(runId)}&purpose=agent_output&limit=100`,
-    );
-    const res = await opts.fetch(url, { method: "GET", headers: new Headers(opts.headers) });
-    if (!res.ok) return [];
-    const data = asRecord(await readJsonResponse(res))?.data;
-    if (!Array.isArray(data)) return [];
-    const out: RunAndWaitDocument[] = [];
-    for (const raw of data) {
-      const r = asRecord(raw);
-      const id = asString(r?.id);
-      const uri = asString(r?.uri);
-      const name = asString(r?.name);
-      if (!id || !uri || !name) continue;
-      out.push({
-        id,
-        uri,
-        name,
-        mime: asString(r?.mime) ?? "application/octet-stream",
-        size: typeof r?.size === "number" ? r.size : 0,
-      });
+    while (true) {
+      const cursorQuery =
+        startingAfter === undefined ? "" : `&startingAfter=${encodeURIComponent(startingAfter)}`;
+      const url = apiUrl(
+        opts.origin,
+        `/api/documents?run_id=${encodeURIComponent(runId)}&purpose=agent_output&limit=100${cursorQuery}`,
+      );
+      const res = await opts.fetch(url, { method: "GET", headers: new Headers(opts.headers) });
+      if (!res.ok) return firstPage;
+      const envelope = asRecord(await readJsonResponse(res));
+      const data = envelope?.data;
+      if (!Array.isArray(data)) return firstPage;
+
+      const page: RunAndWaitDocument[] = [];
+      for (const raw of data) {
+        const r = asRecord(raw);
+        const id = asString(r?.id);
+        const uri = asString(r?.uri);
+        const name = asString(r?.name);
+        if (!id || !uri || !name) continue;
+        page.push({
+          id,
+          uri,
+          name,
+          mime: asString(r?.mime) ?? "application/octet-stream",
+          size: typeof r?.size === "number" ? r.size : 0,
+          presentation: r?.presentation === "primary" ? "primary" : null,
+        });
+      }
+
+      if (startingAfter === undefined) firstPage.push(...page);
+      const primary = page.find((doc) => doc.presentation === "primary");
+      if (primary) {
+        const existingIndex = firstPage.findIndex((doc) => doc.id === primary.id);
+        if (existingIndex >= 0) firstPage.splice(existingIndex, 1);
+        firstPage.unshift(primary);
+        // Preserve the existing bounded result contract: scan later pages only
+        // to guarantee the featured document is represented, never to append
+        // an unbounded run history to the model payload.
+        if (firstPage.length > 100) firstPage.length = 100;
+        return firstPage;
+      }
+
+      if (envelope?.hasMore !== true) return firstPage;
+      const cursor = [...data]
+        .reverse()
+        .map((raw) => asString(asRecord(raw)?.id))
+        .find((id): id is string => id !== undefined);
+      if (!cursor || seenCursors.has(cursor)) return firstPage;
+      seenCursors.add(cursor);
+      startingAfter = cursor;
     }
-    return out;
   } catch {
-    return [];
+    return firstPage;
   }
 }
 

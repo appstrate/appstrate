@@ -107,6 +107,8 @@
   "run.artifacts.code.conflict": "Run was no longer active",
   "run.artifacts.code.upload_failed": "Upload failed after retries",
   "run.artifacts.code.unknown": "Not saved",
+  "run.tabDeliverable": "Deliverable",
+  "run.deliverableLabel": "Primary deliverable",
   "run.tabLogs": "Logs",
   "run.tabResultGroup": "Result",
   "run.tabMemory": "Memory",

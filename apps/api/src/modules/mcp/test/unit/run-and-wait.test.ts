@@ -232,11 +232,20 @@ describe("run_and_wait", () => {
       ],
       documents: [
         {
+          id: "doc_notes123",
+          uri: "document://doc_notes123",
+          name: "notes.txt",
+          mime: "text/plain",
+          size: 40,
+          presentation: null,
+        },
+        {
           id: "doc_abcd1234",
           uri: "document://doc_abcd1234",
           name: "report.html",
           mime: "text/html",
           size: 120,
+          presentation: "primary",
         },
       ],
     });
@@ -245,17 +254,22 @@ describe("run_and_wait", () => {
 
     // One resource_link per published document, alongside the text payload.
     const links = res.content.filter((c) => c.type === "resource_link");
-    expect(links).toHaveLength(1);
+    expect(links).toHaveLength(2);
     expect(links[0]).toMatchObject({
       type: "resource_link",
       uri: "document://doc_abcd1234",
       name: "report.html",
       mimeType: "text/html",
+      annotations: { audience: ["user"], priority: 1 },
     });
+    expect(links[1]).not.toHaveProperty("annotations");
     // The text payload also echoes the documents (parity with the chat path).
     const docs = (parseResult(res).documents as Array<Record<string, unknown>>) ?? [];
-    expect(docs).toHaveLength(1);
-    expect(docs[0]).toMatchObject({ uri: "document://doc_abcd1234" });
+    expect(docs).toHaveLength(2);
+    expect(docs[0]).toMatchObject({
+      uri: "document://doc_abcd1234",
+      presentation: "primary",
+    });
   });
 
   it("returns only a text block when the run published no documents", async () => {
