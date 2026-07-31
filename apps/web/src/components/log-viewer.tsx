@@ -224,6 +224,10 @@ export function LogViewer({ entries }: LogViewerProps) {
             const entry = entries[virtualRow.index]!;
             const expanded = expandAll || expandedId === entry.id;
             const canExpand = hasExpandableContent(entry);
+            const messageClassName = cn(
+              "min-w-0 flex-1",
+              expanded ? "break-words whitespace-pre-wrap" : "truncate whitespace-nowrap",
+            );
             return (
               <div
                 key={entry.id}
@@ -275,18 +279,20 @@ export function LogViewer({ entries }: LogViewerProps) {
                   ) : entry.kind === "agent" ? (
                     <>
                       <MessageSquareText className="mr-1.5 size-3.5 shrink-0 text-violet-400" />
-                      <span className="text-foreground/80 min-w-0 font-sans">{entry.message}</span>
+                      <span className={cn("text-foreground/80 font-sans", messageClassName)}>
+                        {entry.message}
+                      </span>
                     </>
                   ) : entry.kind === "log" ? (
                     <>
                       <MessageSquareText className="mr-1.5 size-3.5 shrink-0" />
                       <LevelBadge level={entry.level} />
-                      <span className="min-w-0 font-sans">{entry.message}</span>
+                      <span className={cn("font-sans", messageClassName)}>{entry.message}</span>
                     </>
                   ) : (
                     <>
                       <LevelBadge level={entry.level} />
-                      <span className="min-w-0">{entry.message}</span>
+                      <span className={messageClassName}>{entry.message}</span>
                     </>
                   )}
                 </div>
