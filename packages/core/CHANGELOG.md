@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `publish_document.presentation: "primary"` — lets an agent explicitly select
+  the run's featured deliverable after writing its final bytes. The published
+  document and `document.published` event carry the selected presentation. The
+  public uploader keeps its existing positional signature with an optional
+  third argument, so existing 6.x consumers remain source-compatible.
 - `@appstrate/core/platform-types` — `InlineRunBody.connection_overrides`, the
   flat `{ "@scope/integration": "<connection_id>" }` map (resolver mechanism #2).
   `POST /api/runs/inline` and `/inline/validate` read it, so an inline caller can

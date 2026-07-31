@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
 import { $api, client, type paths } from "../api/client";
+import { invalidateRunDetails } from "../lib/query-keys";
 import { useOrgScope } from "./use-org-scope";
 
 /** Wire shape of a single document (OpenAPI list-item schema). */
@@ -85,7 +86,10 @@ function invalidateDocuments(qc: ReturnType<typeof useQueryClient>) {
 export function useDeleteDocument() {
   const qc = useQueryClient();
   return $api.useMutation("delete", "/api/documents/{id}", {
-    onSuccess: () => invalidateDocuments(qc),
+    onSuccess: () => {
+      invalidateDocuments(qc);
+      void invalidateRunDetails(qc);
+    },
   });
 }
 

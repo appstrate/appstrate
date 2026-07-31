@@ -211,6 +211,7 @@ export async function persistRunEvent(
             mime: typeof event.mime === "string" ? event.mime : null,
             size: typeof event.size === "number" ? event.size : null,
             sha256: typeof event.sha256 === "string" ? event.sha256 : null,
+            presentation: event.presentation === "primary" ? "primary" : null,
           },
           "info",
           executor,

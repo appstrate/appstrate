@@ -12,6 +12,7 @@ const documentSchema = {
     "id",
     "uri",
     "purpose",
+    "presentation",
     "applicationId",
     "run_id",
     "chat_session_id",
@@ -34,6 +35,13 @@ const documentSchema = {
       description: "Stable `document://doc_…` reference — pass in a run's file input field.",
     },
     purpose: { type: "string", enum: ["user_upload", "agent_output"] },
+    presentation: {
+      type: ["string", "null"],
+      enum: ["primary", null],
+      description:
+        "User-facing presentation role selected by the producing agent. `primary` identifies " +
+        "the run's featured deliverable; null means the document remains a regular output.",
+    },
     applicationId: { type: "string" },
     run_id: { type: ["string", "null"], description: "Run container, or null." },
     chat_session_id: { type: ["string", "null"], description: "Chat-session container, or null." },

@@ -107,6 +107,8 @@
   "run.artifacts.code.conflict": "Le run n'était plus actif",
   "run.artifacts.code.upload_failed": "Échec de l'envoi après plusieurs tentatives",
   "run.artifacts.code.unknown": "Non enregistré",
+  "run.tabDeliverable": "Livrable",
+  "run.deliverableLabel": "Livrable principal",
   "run.tabLogs": "Logs",
   "run.tabResultGroup": "Résultat",
   "run.tabMemory": "Mémoire",

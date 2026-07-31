@@ -12,7 +12,7 @@
 
 import { describe, it, expect } from "bun:test";
 import { QueryClient } from "@tanstack/react-query";
-import { runKeys, invalidateRunLogs } from "../query-keys.ts";
+import { runKeys, invalidateRunDetails, invalidateRunLogs } from "../query-keys.ts";
 
 const ORG = "org_1";
 const APP = "app_1";
@@ -52,5 +52,19 @@ describe("run log cache invalidation", () => {
     qc.setQueryData(runKeys.logs(ORG, APP, "run_2"), []);
     await invalidateRunLogs(qc, ORG, APP, RUN);
     expect(isInvalidated(qc, runKeys.logs(ORG, APP, "run_2"))).toBe(false);
+  });
+});
+
+describe("run detail cache invalidation", () => {
+  it("marks a cached run stale when deleting one of its documents", async () => {
+    const qc = seededClient();
+    await invalidateRunDetails(qc);
+    expect(isInvalidated(qc, runKeys.detail(ORG, APP, RUN))).toBe(true);
+  });
+
+  it("does not invalidate the separate run-log family", async () => {
+    const qc = seededClient();
+    await invalidateRunDetails(qc);
+    expect(isInvalidated(qc, runKeys.logs(ORG, APP, RUN))).toBe(false);
   });
 });

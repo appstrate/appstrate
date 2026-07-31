@@ -59,6 +59,16 @@ export function invalidateRunLogs(qc: QueryClient, orgId: Id, applicationId: Id,
   return qc.invalidateQueries({ queryKey: runKeys.logs(orgId, applicationId, runId) });
 }
 
+/**
+ * Refetch every cached run detail after a mutation whose document container is
+ * not available at the hook call site. Deleting a featured output changes the
+ * derived `primary_document_id`; invalidating only document queries would leave
+ * the run page pointing at a row that no longer exists.
+ */
+export function invalidateRunDetails(qc: QueryClient) {
+  return qc.invalidateQueries({ queryKey: runKeys.all });
+}
+
 /** Per-agent run list. Patched in place by the run SSE stream. */
 export const runsKeys = {
   /** Prefix — every per-agent run list. */

@@ -454,6 +454,13 @@ export function createRunsEventsRouter() {
     const name = sanitizeFilename(decodedName);
     const mime = c.req.header("Content-Type");
     if (!mime) throw invalidRequest("Content-Type header is required", "Content-Type");
+    const rawPresentation = c.req.header("X-Document-Presentation");
+    if (rawPresentation !== undefined && rawPresentation !== "primary") {
+      throw invalidRequest(
+        "X-Document-Presentation must be 'primary' when provided",
+        "X-Document-Presentation",
+      );
+    }
 
     const body = c.req.raw.body;
     if (!body) throw invalidRequest("request body is required");
@@ -461,18 +468,19 @@ export function createRunsEventsRouter() {
     // Attribution is copied from the run row (never trusted from the agent):
     // the run's creator + end-user, and the run's producing package.
     const attribution = await getRunAttribution(run.orgId, run.id);
-    const { row, deduped } = await createDocumentFromStream(
+    const { row, deduped, presentationChanged } = await createDocumentFromStream(
       { orgId: run.orgId, applicationId: run.applicationId },
       run.id,
       { userId: attribution?.userId ?? null, endUserId: attribution?.endUserId ?? null },
       runRow.packageId,
-      { name, mime, body },
+      { name, mime, body, presentation: rawPresentation },
     );
 
-    // Audit only a genuinely NEW publish (201), never a dedup replay (200).
+    // Audit a genuinely new publish and a dedup replay that changed the
+    // featured document. A no-op replay remains silent.
     // No request context here (HMAC-run-authenticated, no user session), so
     // this is the direct-service `recordAudit`, attributed to the run's actor.
-    if (!deduped) {
+    if (!deduped || presentationChanged) {
       const actor = actorFromIds(attribution?.userId ?? null, attribution?.endUserId ?? null);
       await recordAudit({
         orgId: run.orgId,
@@ -482,7 +490,13 @@ export function createRunsEventsRouter() {
         action: "document.published",
         resourceType: "document",
         resourceId: row.id,
-        after: { name: row.name, size: row.size, mime: row.mime, runId: run.id },
+        after: {
+          name: row.name,
+          size: row.size,
+          mime: row.mime,
+          runId: run.id,
+          presentation: row.presentation,
+        },
       });
     }
 
@@ -494,6 +508,7 @@ export function createRunsEventsRouter() {
         mime: row.mime,
         size: row.size,
         sha256: row.sha256,
+        presentation: row.presentation,
       },
       deduped ? 200 : 201,
     );

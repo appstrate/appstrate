@@ -5,8 +5,7 @@ import { useParams, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@appstrate/ui/components/button";
-import { Tabs, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
-import { useTabWithHash } from "../hooks/use-tab-with-hash";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
 import { usePackageDetail } from "../hooks/use-packages";
 import { useRun, useRunLogs } from "../hooks/use-runs";
 import { useRunAgent, useCancelRun } from "../hooks/use-mutations";
@@ -21,6 +20,8 @@ import { PageHeader } from "../components/page-header";
 import { LoadingState, ErrorState } from "../components/page-states";
 import { RunInfoTab } from "../components/run-info-tab";
 import { RunDocumentsTab } from "../components/run-documents-tab";
+import { RunDeliverableTab } from "../components/run-deliverable-tab";
+import { RunDetailTabsController } from "../components/run-detail-tabs-controller";
 import { invalidateOrgStorage } from "../hooks/use-documents";
 import { RunRow } from "../components/run-row";
 import { RunCostReadout } from "../components/run-cost-readout";
@@ -37,6 +38,7 @@ import { runKeys, invalidateRunLogs } from "../lib/query-keys";
 import { inlineRunDisplayName, runPageTitle } from "../lib/run-title";
 import { MemoryPanel } from "../components/persistence/memory-panel";
 import { Play } from "lucide-react";
+import type { RunDetailTab } from "../lib/run-detail-tabs";
 
 /** Wire shape of a persisted log row (spec `RunLog`); `createdAt` is an ISO string. */
 type RunLogEntry = components["schemas"]["RunLog"];
@@ -108,6 +110,19 @@ export function RunDetailPage() {
     structuredOutput || (execResult?.output as Record<string, unknown> | undefined) || null;
   const hasOutput = !!finalOutput && Object.keys(finalOutput).length > 0;
   const allLogs = historicalLogs;
+  const primaryDocumentId = run?.primary_document_id ?? null;
+  const hasDeliverable = !!primaryDocumentId;
+  const handlePrimaryDocumentUnavailable = useCallback(
+    (documentId: string) => {
+      const key = runKeys.detail(orgId, applicationId, runId);
+      qc.setQueryData<EnrichedRun>(key, (previous) => {
+        if (!previous || previous.primary_document_id !== documentId) return previous;
+        return { ...previous, primary_document_id: null };
+      });
+      void qc.invalidateQueries({ queryKey: key });
+    },
+    [applicationId, orgId, qc, runId],
+  );
 
   // Run-level memory rows (only those touched during this run).
   const { data: runMemories } = useRunMemories(packageId, runId);
@@ -120,20 +135,6 @@ export function RunDetailPage() {
   // count them cost a request on every run page and silently saturated at the
   // page size; the list query now runs only when the tab is actually opened.
   const documentCount = (run?.document_counts.input ?? 0) + (run?.document_counts.output ?? 0);
-
-  // Default tab: "result" if the run emitted a structured output. Anything
-  // meant for a human is a document, surfaced by the Documents tab.
-  // useTabWithHash respects the URL hash if present.
-  const defaultTab = hasOutput ? "result" : "logs";
-  const [activeTab, setActiveTab] = useTabWithHash(
-    ["result", "logs", "memory", "documents", "info"] as const,
-    defaultTab,
-  );
-  // A bookmarked `#result` on a run with no output selects a tab
-  // whose trigger/content are gated off — render "logs" instead of a blank
-  // pane. Clamp at render only (the hash stays "result"), so if late SSE flips
-  // `hasOutput` true the Result tab reappears and the user's choice is honored.
-  const effectiveTab = activeTab === "result" && !hasOutput ? "logs" : activeTab;
 
   // Per-run SSE for log inserts + live metric updates. Status patches
   // come from `useGlobalRunSync` (mounted in MainLayout), which writes
@@ -280,50 +281,52 @@ export function RunDetailPage() {
 
       <RunArtifactsBanner artifacts={run.artifacts} />
 
-      {/* `flex-wrap`, not a fixed row: at 375px the tab list alone eats most of
-          the width, and the actions group (cost pill, context gauge, Re-run /
-          Cancel) cannot fit beside it. Wrapping keeps every one of them visible
-          with zero interaction — the acceptance criterion #1046 sets — where a
-          non-wrapping row pushes the page body into a horizontal scroll. The
-          gauge shrinks itself on top of this (see `ContextGaugeReadout`). */}
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-4">
-        <Tabs
-          value={effectiveTab}
-          onValueChange={(v) =>
-            setActiveTab(v as "logs" | "result" | "memory" | "documents" | "info")
-          }
-        >
-          <TabsList>
-            {hasOutput && <TabsTrigger value="result">{t("run.tabResultGroup")}</TabsTrigger>}
-            <TabsTrigger value="logs">
-              {t("run.tabLogs")}
-              {allLogs.length > 0 && (
-                <span className="bg-primary/15 text-primary ml-1.5 inline-flex items-center justify-center rounded-full px-1.5 py-0.5 text-[10px] leading-none font-medium">
-                  {allLogs.length}
-                </span>
-              )}
-            </TabsTrigger>
-            {hasRunMemory && (
-              <TabsTrigger value="memory">
-                {t("run.tabMemory")}
-                <span className="bg-primary/15 text-primary ml-1.5 inline-flex items-center justify-center rounded-full px-1.5 py-0.5 text-[10px] leading-none font-medium">
-                  {runMemoryCount}
-                </span>
-              </TabsTrigger>
-            )}
-            <TabsTrigger value="documents">
-              {t("run.tabDocuments")}
-              {documentCount > 0 && (
-                <span className="bg-primary/15 text-primary ml-1.5 inline-flex items-center justify-center rounded-full px-1.5 py-0.5 text-[10px] leading-none font-medium">
-                  {documentCount}
-                </span>
-              )}
-            </TabsTrigger>
-            <TabsTrigger value="info">{t("run.tabInfo")}</TabsTrigger>
-          </TabsList>
-        </Tabs>
-        <div className="flex items-center gap-2">
-          {/* Cost readout — shown at all times (pending, running, terminal).
+      <RunDetailTabsController
+        key={runId}
+        availability={{ hasDeliverable, hasResult: hasOutput, hasMemory: hasRunMemory }}
+      >
+        {({ activeTab, setActiveTab }) => (
+          <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as RunDetailTab)}>
+            {/* `flex-wrap`, not a fixed row: at 375px the tab list alone eats most of
+                the width, and the actions group (cost pill, context gauge, Re-run /
+                Cancel) cannot fit beside it. The tabs themselves scroll inside
+                their bounded region rather than widening the page. */}
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-4">
+              <div className="max-w-full min-w-0 overflow-x-auto pb-1">
+                <TabsList className="w-max">
+                  {hasDeliverable && (
+                    <TabsTrigger value="deliverable">{t("run.tabDeliverable")}</TabsTrigger>
+                  )}
+                  {hasOutput && <TabsTrigger value="result">{t("run.tabResultGroup")}</TabsTrigger>}
+                  <TabsTrigger value="logs">
+                    {t("run.tabLogs")}
+                    {allLogs.length > 0 && (
+                      <span className="bg-primary/15 text-primary ml-1.5 inline-flex items-center justify-center rounded-full px-1.5 py-0.5 text-[10px] leading-none font-medium">
+                        {allLogs.length}
+                      </span>
+                    )}
+                  </TabsTrigger>
+                  {hasRunMemory && (
+                    <TabsTrigger value="memory">
+                      {t("run.tabMemory")}
+                      <span className="bg-primary/15 text-primary ml-1.5 inline-flex items-center justify-center rounded-full px-1.5 py-0.5 text-[10px] leading-none font-medium">
+                        {runMemoryCount}
+                      </span>
+                    </TabsTrigger>
+                  )}
+                  <TabsTrigger value="documents">
+                    {t("run.tabDocuments")}
+                    {documentCount > 0 && (
+                      <span className="bg-primary/15 text-primary ml-1.5 inline-flex items-center justify-center rounded-full px-1.5 py-0.5 text-[10px] leading-none font-medium">
+                        {documentCount}
+                      </span>
+                    )}
+                  </TabsTrigger>
+                  <TabsTrigger value="info">{t("run.tabInfo")}</TabsTrigger>
+                </TabsList>
+              </div>
+              <div className="flex items-center gap-2">
+                {/* Cost readout — shown at all times (pending, running, terminal).
               While the run is active the pulse dot animates and `onMetric` SSE
               patches `run.cost` in place at the throttled 250 ms cadence; once
               finalized, the field holds the authoritative aggregate written by
@@ -331,51 +334,77 @@ export function RunDetailPage() {
               count that used to sit beside it moved into the run row's details
               panel (#1046): it is a diagnostic, read once, where the `$` is a
               governance figure read at a glance. */}
-          <div className="text-muted-foreground bg-muted/50 flex items-center gap-2 rounded-md px-2.5 py-1 text-xs tabular-nums">
-            {isRunning && (
-              <span className="bg-primary size-1.5 animate-pulse rounded-full" aria-hidden />
-            )}
-            <RunCostReadout
-              cost={run.cost}
-              pricingStatus={run.cost_pricing_status}
-              className="text-foreground font-medium"
-            />
-          </div>
-          {/* Context gauge — the state metric the cumulative token total never
+                <div className="text-muted-foreground bg-muted/50 flex items-center gap-2 rounded-md px-2.5 py-1 text-xs tabular-nums">
+                  {isRunning && (
+                    <span className="bg-primary size-1.5 animate-pulse rounded-full" aria-hidden />
+                  )}
+                  <RunCostReadout
+                    cost={run.cost}
+                    pricingStatus={run.cost_pricing_status}
+                    className="text-foreground font-medium"
+                  />
+                </div>
+                {/* Context gauge — the state metric the cumulative token total never
               was (#1046). Numerator AND denominator both ride `turnRows`, so
               nothing is threaded from the run DTO; see `ContextGaugeReadout`
               for the readings, the live cadence and when it renders nothing. */}
-          <ContextGaugeReadout turns={turnRows} status={run.status} />
-          {!isRunning && !isInline && agent && (
-            <Button variant="outline" size="sm" onClick={() => setInputOpen(true)}>
-              <Play className="size-3.5" />
-              {t("run.rerun")}
-            </Button>
-          )}
-          {/* Cancel hidden for remote-origin runs — the process runs on the
+                <ContextGaugeReadout turns={turnRows} status={run.status} />
+                {!isRunning && !isInline && agent && (
+                  <Button variant="outline" size="sm" onClick={() => setInputOpen(true)}>
+                    <Play className="size-3.5" />
+                    {t("run.rerun")}
+                  </Button>
+                )}
+                {/* Cancel hidden for remote-origin runs — the process runs on the
               caller's host and the platform cannot signal it. A soft-cancel
               (server flag + CLI poll) is tracked as a follow-up. */}
-          {isRunning && enrichedRun.runOrigin !== "remote" && (
-            <Button
-              variant="destructive"
-              onClick={() => cancelRun.mutate(runId!)}
-              disabled={cancelRun.isPending}
-            >
-              {cancelRun.isPending && <Spinner />} {t("btn.cancel")}
-            </Button>
-          )}
-        </div>
-      </div>
+                {isRunning && enrichedRun.runOrigin !== "remote" && (
+                  <Button
+                    variant="destructive"
+                    onClick={() => cancelRun.mutate(runId!)}
+                    disabled={cancelRun.isPending}
+                  >
+                    {cancelRun.isPending && <Spinner />} {t("btn.cancel")}
+                  </Button>
+                )}
+              </div>
+            </div>
 
-      {effectiveTab === "result" && hasOutput && <JsonView data={finalOutput} />}
+            {hasDeliverable && primaryDocumentId && (
+              <TabsContent value="deliverable" className="mt-0">
+                <RunDeliverableTab
+                  documentId={primaryDocumentId}
+                  onUnavailable={handlePrimaryDocumentUnavailable}
+                />
+              </TabsContent>
+            )}
 
-      {effectiveTab === "logs" && <LogViewer entries={allLogs} />}
+            {hasOutput && (
+              <TabsContent value="result" className="mt-0">
+                <JsonView data={finalOutput} />
+              </TabsContent>
+            )}
 
-      {effectiveTab === "memory" && <MemoryPanel packageId={packageId} runId={runId} />}
+            <TabsContent value="logs" className="mt-0">
+              <LogViewer entries={allLogs} />
+            </TabsContent>
 
-      {effectiveTab === "documents" && runId && <RunDocumentsTab runId={runId} />}
+            {hasRunMemory && (
+              <TabsContent value="memory" className="mt-0">
+                <MemoryPanel packageId={packageId} runId={runId} />
+              </TabsContent>
+            )}
 
-      {effectiveTab === "info" && <RunInfoTab run={enrichedRun} turns={turnRows} />}
+            <TabsContent value="documents" className="mt-0">
+              {runId && <RunDocumentsTab runId={runId} />}
+            </TabsContent>
+
+            <TabsContent value="info" className="mt-0">
+              <RunInfoTab run={enrichedRun} turns={turnRows} />
+            </TabsContent>
+          </Tabs>
+        )}
+      </RunDetailTabsController>
     </div>
   );
 }

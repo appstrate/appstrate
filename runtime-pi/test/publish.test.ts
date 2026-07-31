@@ -36,6 +36,7 @@ interface Received {
   /** The raw `X-Document-Name` wire value, before decoding. */
   rawHeader: string;
   contentType: string | null;
+  presentation: string | null;
   sha256: string;
   size: number;
 }
@@ -94,6 +95,7 @@ beforeAll(() => {
         name,
         rawHeader,
         contentType: req.headers.get("content-type"),
+        presentation: req.headers.get("x-document-presentation"),
         sha256,
         size: bytes.byteLength,
       });
@@ -113,6 +115,7 @@ beforeAll(() => {
         mime: req.headers.get("content-type") ?? "application/octet-stream",
         size: bytes.byteLength,
         sha256,
+        presentation: req.headers.get("x-document-presentation") === "primary" ? "primary" : null,
       });
     },
   });
@@ -163,6 +166,7 @@ describe("createRunDocumentUploader", () => {
     expect(doc.size).toBe(bytes.byteLength);
     expect(doc.sha256).toBe(sha256Hex(bytes));
     expect(doc.uri).toBe(`document://${doc.id}`);
+    expect(doc.presentation).toBeNull();
     expect(keys.has(key(doc.sha256, doc.name))).toBe(true);
     expect(config.received).toHaveLength(1);
     expect(config.received[0]!.name).toBe("report.html");
@@ -174,6 +178,16 @@ describe("createRunDocumentUploader", () => {
     const doc = await makeUploader(new Set())("raw.bin", "Nice Name.bin");
     expect(doc.name).toBe("Nice Name.bin");
     expect(config.received[0]!.name).toBe("Nice Name.bin");
+  });
+
+  it("forwards the primary presentation intent and returns the stored role", async () => {
+    await writeFile(path.join(workspace, "final.html"), "<h1>Final</h1>");
+
+    const doc = await makeUploader(new Set())("final.html", undefined, "primary");
+
+    expect(config.received).toHaveLength(1);
+    expect(config.received[0]!.presentation).toBe("primary");
+    expect(doc.presentation).toBe("primary");
   });
 
   it("throws on a missing file", async () => {
@@ -417,6 +431,8 @@ describe("sweepOutputs", () => {
     expect(config.received).toHaveLength(2);
     expect(events).toHaveLength(2);
     expect(events.every((e) => e.type === "document.published")).toBe(true);
+    expect(events.every((e) => e.presentation === null)).toBe(true);
+    expect(config.received.every((r) => r.presentation === null)).toBe(true);
     expect(result.published).toHaveLength(2);
     expect(result.failed).toHaveLength(0);
     // Every emitted doc's `${sha}:${name}` key is now tracked.
@@ -770,7 +786,7 @@ describe("buildPublishDocumentDef (publish_document tool)", () => {
     await writeFile(path.join(workspace, "out.html"), new TextEncoder().encode("<h1>ok</h1>"));
     const def = buildPublishDocumentDef(makeUploader(new Set()));
 
-    const result = await def.handler({ path: "out.html" });
+    const result = await def.handler({ path: "out.html", presentation: "primary" });
 
     expect(result.isError).toBeUndefined();
     expect(result.content[0]!.text).toContain("Published");
@@ -778,6 +794,8 @@ describe("buildPublishDocumentDef (publish_document tool)", () => {
     expect(events).toHaveLength(1);
     expect(events[0]!.type).toBe("document.published");
     expect(events[0]!.document_id).toMatch(/^doc_/);
+    expect(events[0]!.presentation).toBe("primary");
+    expect(config.received[0]!.presentation).toBe("primary");
   });
 
   it("returns a tool error (not a throw) when the upload fails", async () => {
@@ -793,6 +811,14 @@ describe("buildPublishDocumentDef (publish_document tool)", () => {
     expect(result.isError).toBe(true);
   });
 
+  it("returns a tool error for an unsupported presentation role", async () => {
+    const def = buildPublishDocumentDef(makeUploader(new Set()));
+    const result = await def.handler({ path: "out.html", presentation: "thumbnail" });
+    expect(result.isError).toBe(true);
+    expect(result.content[0]!.text).toContain("must be `primary`");
+    expect(config.received).toHaveLength(0);
+  });
+
   it("leads its description with the publish-now + `document://` URI value", () => {
     // The `outputs/` sweep is unconditional and shares the same uploader, so
     // what the tool alone can do is publish DURING the run and hand back the
@@ -804,6 +830,8 @@ describe("buildPublishDocumentDef (publish_document tool)", () => {
     expect(description).toContain("document://");
     expect(description.indexOf("document://")).toBeLessThan(description.indexOf("./outputs/"));
     expect(description).not.toContain("use this tool only");
+    expect(description).toContain("finish editing it first");
+    expect(description).toContain("last successful primary publication");
   });
 
   it("still publishes an explicitly-chosen dotfile (hidden filter is sweep-only)", async () => {

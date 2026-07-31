@@ -182,13 +182,18 @@ describe("listGlobalRuns", () => {
     expect(result.total).toBe(0);
   });
 
-  async function seedRunDocument(runId: string, purpose: "agent_output" | "user_upload") {
+  async function seedRunDocument(
+    runId: string,
+    purpose: "agent_output" | "user_upload",
+    presentation: "primary" | null = null,
+  ) {
     const docId = `doc_${crypto.randomUUID().replace(/-/g, "").slice(0, 20)}`;
     await db.insert(documents).values({
       id: docId,
       orgId: ctx.orgId,
       applicationId: ctx.defaultAppId,
       purpose,
+      presentation,
       runId,
       storageKey: `documents/${ctx.defaultAppId}/${docId}/out.txt`,
       name: "out.txt",
@@ -222,7 +227,7 @@ describe("listGlobalRuns", () => {
         bogus: "document://doc_x",
       },
     });
-    await seedOutputDocument(withDocs.id);
+    const primaryDocumentId = await seedRunDocument(withDocs.id, "agent_output", "primary");
     await seedOutputDocument(withDocs.id);
     await seedOutputDocument(withDocs.id);
 
@@ -233,7 +238,9 @@ describe("listGlobalRuns", () => {
     const byId = Object.fromEntries(result.data.map((r) => [r.id, r]));
 
     expect(byId[withDocs.id]?.document_counts).toEqual({ input: 2, output: 3 });
+    expect(byId[withDocs.id]?.primary_document_id).toBe(primaryDocumentId);
     expect(byId[empty.id]?.document_counts).toEqual({ input: 0, output: 0 });
+    expect(byId[empty.id]?.primary_document_id).toBeNull();
   });
 
   it("does not count a materialized INPUT upload as an output document", async () => {

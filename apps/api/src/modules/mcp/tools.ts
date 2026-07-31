@@ -792,7 +792,11 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
       "goal is a downloadable file (report, CSV, image…), instruct the run's `prompt` to write it " +
       "into `outputs/` with a descriptive, task-specific filename that remains understandable " +
       "outside this run; never use context-free names such as `report.md`, `summary.md`, or " +
-      "`output.md`. Content merely returned in the output payload never becomes a document. " +
+      "`output.md`. For inline runs, run_and_wait automatically exposes `publish_document` and " +
+      'instructs the run to call it after the final edit with `presentation: "primary"` when it ' +
+      "produces one main user-facing file, but not when it produces no file or several peer files " +
+      "with no obvious main one. Content merely returned in the output payload never becomes a " +
+      "document. " +
       "Chaining runs (kind:inline): feed earlier runs' deliverables to a later one by passing " +
       "their `document://` URIs in `context_documents` — never by copying their content into " +
       "`prompt`. " +
@@ -838,7 +842,7 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
             "a concise human title in the user's language describing this run's exact action or " +
             "outcome, and set `name` to a matching descriptive `@inline/<kebab-case-slug>`. " +
             "Never use an id or a generic label such as `one-shot`, `inline-agent`, or `task`. " +
-            'Include `"runtime_tools": ["log"]` so the ' +
+            'Include `"log"` in `runtime_tools` so the ' +
             "run can emit progress lines the chat shows live (the panel surfaces only `log`-tool " +
             "output). Do NOT put the prompt inside the manifest — it goes in the separate " +
             "top-level `prompt` argument.",
