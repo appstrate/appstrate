@@ -84,10 +84,10 @@ trous. Un trou hybride est un trou que personne ne pourra comparer d'un run à l
 | ------------------------- | -----: | -------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
 | `capability_without_rule` |     22 | Déclaré, mais aucune règle ne dit quand s'en servir : outil, skill, entrée, cron. Ou portée plus large que ce que les règles emploient.            | `unused_capability`, `declared_trigger_without_rule`, `no_routing_rule`, `over_broad_capability`, `missing_trigger` |
 | `contradiction`           |     22 | Deux passages incompatibles, ou applicables au même cas sans arbitre.                                                                              | `conflicting_policies`, `self_contradiction`, `unaddressed_conflict`                                                |
-| `unhandled_case`          |     22 | Le texte se tait sur une situation atteignable.                                                                                                    | `unspecified_case`, `unreachable_output_contract`, `unspecified_actor`                                              |
-| `rule_without_capability` |     14 | Le texte prescrit ou suppose une capacité, un état, une information que rien ne fournit ni ne déclare.                                             | `undeclared_capability`, `unenforceable_rule`, `unreachable_input`, `no_time_semantics`, `undefined_reference`      |
+| `unhandled_case`          |     21 | Le texte se tait sur une situation atteignable.                                                                                                    | `unspecified_case`, `unreachable_output_contract`, `unspecified_actor`                                              |
+| `rule_without_capability` |     16 | Le texte prescrit ou suppose une capacité, un état, une information que rien ne fournit ni ne déclare.                                             | `undeclared_capability`, `unenforceable_rule`, `unreachable_input`, `no_time_semantics`, `undefined_reference`      |
 | `undefined_criterion`     |     12 | Seuil, adjectif ou critère projectif qu'on ne décide pas deux fois pareil.                                                                         | `ambiguous_condition`, `undefined_threshold`, `unverifiable_criterion`, `ambiguous_boundary`, `teaching_by_example` |
-| `unhandled_failure`       |     11 | Panne, refus, indisponibilité : aucun chemin écrit.                                                                                                | `unspecified_error_path`, `no_failure_path`                                                                         |
+| `unhandled_failure`       |     10 | Panne, refus, indisponibilité : aucun chemin écrit.                                                                                                | `unspecified_error_path`, `no_failure_path`                                                                         |
 | `external_authority`      |      9 | Ce qui tranche vit hors du périmètre lu (skill non lu, sous-agent, `AGENTS.md`, source illisible). Ou un passage lu qui ne fait pas règle.         | `out_of_scope_source`, `self_declared_subordination`                                                                |
 | `unbounded_work`          |      4 | Répétition, délégation ou troncature dont **aucune** borne n'est écrite.                                                                           | `unbounded_work_loop`, `unbounded_delegation`, `unbounded_criterion`, `nondeterministic_truncation`                 |
 | `duplicated_rule`         |      5 | La même règle écrite deux fois, sans dire laquelle fait foi.                                                                                       | `duplicated_rule`                                                                                                   |
@@ -316,6 +316,45 @@ par pointage, jamais par intention.
 Ce critère est meilleur que celui que l'auteur avait fixé de son côté avant de lire les
 réponses (« l'agent sait-il quoi faire ? »), pour une raison simple : il se vérifie en
 cherchant un nom dans un texte, là où l'autre demandait d'interpréter une intention.
+
+### Second tour, et ce qu'il a attrapé
+
+La règle une fois écrite, il fallait la tester. **Trois annotateurs neufs** ont reçu les 140
+trous et les définitions augmentées de la frontière ; ceux du premier tour avaient participé
+à sa rédaction, les faire juger leur propre travail aurait gonflé le résultat.
+
+|                          | premier tour | second tour |
+| ------------------------ | ------------ | ----------- |
+| κ de Fleiss              | 0,91         | **0,90**    |
+| unanimité                | 88 %         | 86 %        |
+| accord avec la référence | 87 %         | **87 %**    |
+
+L'accord n'a pas bougé. Ce n'est pas un échec de la règle : elle a **déplacé** la friction
+plutôt que de la réduire. Les points de désaccord des annotateurs ne portent plus sur
+moyen contre conduite mais sur les questions 1 et 2 de l'arbre, et l'un d'eux est neuf et
+intéressant : `rule_without_capability` contre `map_limitation`, c'est-à-dire une capacité
+vraiment absente contre une capacité que le vocabulaire des `refs` ne sait pas nommer. Un
+défaut de l'agent contre un défaut du format.
+
+**Ce que le second tour a surtout attrapé, c'est une erreur de l'auteur.** Sur les neuf
+trous issus des six litiges, les **trois scissions ont été confirmées** (un annotateur a
+même retrouvé à l'aveugle que deux trous du corpus venaient du même défaut `add-memory` et
+les a séparés exactement comme la scission l'avait fait), mais les **trois reclassements ont
+été rejetés à l'unanimité**.
+
+En les relisant, les trois annotateurs avaient raison et l'auteur avait tort d'une façon
+précise : il avait suivi une majorité de deux voix sur trois du premier tour **tout en
+écrivant une règle qui disait l'inverse**. La règle stipule « ou dont le seul moyen de
+l'obtenir est interdit par le texte » ; or le trou du champ `list` dit mot pour mot que le
+prompt n'autorise aucun appel pour le résoudre. Porte fermée, donc
+`rule_without_capability`, c'est-à-dire ce que la référence disait avant d'être « corrigée ».
+
+Les trois reclassements sont annulés. L'accord passe alors de 85 % à **87 %**, et les
+corrections confirmées de 4 à **7 sur 9**.
+
+La leçon vaut plus que le chiffre : **une règle écrite et une référence modifiée doivent
+être vérifiées l'une contre l'autre**, sinon on publie une définition que ses propres
+données contredisent. C'est le protocole qui l'a détecté, pas la relecture.
 
 **La limite qui reste** : trois modèles ne sont pas trois humains. Ils partagent des biais
 que trois lecteurs différents n'auraient pas, et le κ est probablement optimiste pour cette

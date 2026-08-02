@@ -308,7 +308,7 @@
       "related_steps": []
     },
     {
-      "kind": "unhandled_case",
+      "kind": "rule_without_capability",
       "message": "La section `## Checkpoint` (l. 7) n'a pas d'emplacement documenté : ni le prompt ni le manifeste ne disent si elle est concaténée au `transcript`, au `contexte`, ou injectée hors des entrées déclarées. Un agent qui la cherche au mauvais endroit conclut « absente » et perd la continuité entre réunions, sans que rien ne le signale.",
       "related_steps": ["s1", "g1"]
     },

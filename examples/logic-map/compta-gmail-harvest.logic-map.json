@@ -758,7 +758,7 @@
   ],
   "gaps": [
     {
-      "kind": "unhandled_failure",
+      "kind": "unhandled_case",
       "message": "Le label est posé « une fois le message traité avec succès » (prompt.md:50), mais l'échec est déclaré non bloquant (prompt.md:53). Rien ne dit si un message dont un seul PDF sur trois a échoué à l'upload compte comme traité. Si le label est posé, le PDF manquant ne sera jamais rattrapé, le run suivant excluant le message.",
       "related_steps": ["s12.8", "g7"]
     },
