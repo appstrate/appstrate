@@ -538,7 +538,8 @@
         "uninstantiated_template": "Gabarit non rempli",
         "map_limitation": "Limite de la carte, pas de l'agent"
       }
-    }
+    },
+    "jumpTo": "Aller à une section"
   },
   "map": {
     "tabs": {

@@ -30,6 +30,7 @@ import { useTranslation } from "react-i18next";
 import { AlertTriangle, Info, ListChecks, Maximize2, Minimize2 } from "lucide-react";
 import { useAgentLogicMap } from "../../hooks/use-agent-logic-map";
 import { EmptyState, ErrorState, LoadingState } from "../page-states";
+import { LogicMapControls } from "./logic-map-controls";
 import { LogicMapGapsDialog, type LogicMapGap } from "./logic-map-gaps-dialog";
 import {
   DecisionNode,
@@ -75,6 +76,22 @@ function FitWhenMeasured({ signature }: { signature: string }) {
   return null;
 }
 
+/**
+ * Recadre sur une grappe. `fitView` accepte un sous-ensemble de nœuds, donc rien n'est
+ * calculé ici : on lui passe les identifiants et il fait le reste.
+ *
+ * Le hook vit dans un composant enfant parce que `useReactFlow` exige d'être sous le
+ * `ReactFlowProvider`, que la vue monte plus bas.
+ */
+function JumpHandle({ target }: { target: { ids: string[]; nonce: number } | null }) {
+  const { fitView } = useReactFlow();
+  useEffect(() => {
+    if (!target || target.ids.length === 0) return;
+    void fitView({ nodes: target.ids.map((id) => ({ id })), padding: 0.2, duration: 400 });
+  }, [target, fitView]);
+  return null;
+}
+
 export function AgentLogicMapView({
   packageId,
   version,
@@ -98,6 +115,43 @@ export function AgentLogicMapView({
     return new Map(entries);
   }, [data]);
   const labelForStep = useCallback((id: string) => stepLabels.get(id) ?? id, [stepLabels]);
+
+  // Filtrage par type et saut de section. Le `nonce` fait qu'un même groupe demandé deux
+  // fois de suite déclenche bien deux recadrages : sans lui, l'effet ne se rejouerait pas.
+  const [hiddenKinds, setHiddenKinds] = useState<ReadonlySet<string>>(() => new Set());
+  const [jump, setJump] = useState<{ ids: string[]; nonce: number } | null>(null);
+  const toggleKind = useCallback((kind: string) => {
+    setHiddenKinds((prev) => {
+      const next = new Set(prev);
+      if (next.has(kind)) next.delete(kind);
+      else next.add(kind);
+      return next;
+    });
+  }, []);
+
+  const rawSteps = useMemo(
+    () => (data?.map as { steps?: Record<string, unknown>[] } | null)?.steps ?? [],
+    [data],
+  );
+  const kindCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const s of rawSteps) {
+      const k = s["kind"] as string;
+      counts[k] = (counts[k] ?? 0) + 1;
+    }
+    return counts;
+  }, [rawSteps]);
+  const groupList = useMemo(
+    () => (data?.groups ?? []).map((g) => ({ name: g.name, count: g.count })),
+    [data],
+  );
+  const jumpToGroup = useCallback(
+    (name: string) => {
+      const ids = rawSteps.filter((s) => s["group"] === name).map((s) => s["id"] as string);
+      setJump({ ids, nonce: Date.now() });
+    },
+    [rawSteps],
+  );
 
   const { nodes, edges } = useMemo(() => {
     if (!data?.map) return { nodes: [] as Node[], edges: [] as Edge[] };
@@ -151,6 +205,9 @@ export function AgentLogicMapView({
               diagnostics: byStep.get(n.id) ?? [],
             },
             draggable: false,
+            // `hidden` plutôt qu un filtrage du tableau : React Flow garde le nœud, ses
+            // arêtes restent cohérentes, et le retour à l affichage ne recalcule rien.
+            hidden: hiddenKinds.has(steps.get(n.id)?.["kind"] as string),
           };
         }),
       ),
@@ -160,17 +217,19 @@ export function AgentLogicMapView({
         const label = e.departs_from_source
           ? `⚠ ${e.departs_from_source}`
           : (e.condition ?? undefined);
+        const cache = (id: string) => hiddenKinds.has(steps.get(id)?.["kind"] as string);
         return {
           id: `${e.from}->${e.to}-${i}`,
           source: e.from,
           target: e.to,
+          hidden: cache(e.from) || cache(e.to),
           ...(label ? { label } : {}),
           ...(e.departs_from_source ? { style: { strokeDasharray: "6 3" } } : {}),
           animated: false,
         };
       }),
     };
-  }, [data]);
+  }, [data, hiddenKinds]);
 
   if (isLoading) return <LoadingState />;
   if (error) return <ErrorState message={String(error)} />;
@@ -224,7 +283,17 @@ export function AgentLogicMapView({
         </button>
       </div>
 
-      <div className={expanded ? "h-[calc(100%-2.5rem)]" : "h-[70vh] min-h-[520px]"}>
+      <div className="mb-2">
+        <LogicMapControls
+          counts={kindCounts}
+          hiddenKinds={hiddenKinds}
+          onToggleKind={toggleKind}
+          groups={groupList}
+          onJumpToGroup={jumpToGroup}
+        />
+      </div>
+
+      <div className={expanded ? "h-[calc(100%-4.5rem)]" : "h-[70vh] min-h-[520px]"}>
         <ReactFlowProvider>
           <ReactFlow
             nodes={nodes}
@@ -239,6 +308,7 @@ export function AgentLogicMapView({
             <Background />
             <Controls showInteractive={false} />
             <FitWhenMeasured signature={`${packageId}:${nodes.length}`} />
+            <JumpHandle target={jump} />
           </ReactFlow>
         </ReactFlowProvider>
       </div>

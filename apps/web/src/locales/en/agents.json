@@ -538,7 +538,8 @@
         "uninstantiated_template": "Template left unfilled",
         "map_limitation": "A limit of the map, not of the agent"
       }
-    }
+    },
+    "jumpTo": "Jump to a section"
   },
   "map": {
     "tabs": {
