@@ -202,12 +202,12 @@ les skills). Nous **lisons** ce qui est écrit. Le pont est direct : un
 `capability_without_rule` ou une `contradiction`, c'est exactement ce qu'il faut résoudre
 avant de pouvoir écrire une règle exécutable.
 
-## La mesure que les chercheurs font et que nous ne faisions pas
+## La mesure que les chercheurs font, désormais faite
 
 MAST valide sa taxonomie par un **κ de Cohen à 0,88** entre trois annotateurs indépendants
-avant de l'automatiser. Nous n'avions mesuré que l'accord de la machine avec elle-même.
-Voici la première mesure humain contre machine, sur les quatre agents dont nous avons les
-deux cartes.
+avant de l'automatiser. Nous n'avions mesuré que l'accord de la machine avec elle-même. Deux mesures ont suivi :
+d'abord une comparaison humain contre machine sur les quatre agents dont nous avons les
+deux cartes, puis le vrai test inter-annotateurs, plus bas.
 
 Elle répond à deux questions distinctes, et la première tue la seconde.
 
@@ -243,9 +243,47 @@ Les deux trous concernés ont été reclassés, et celui de `mes-taches-clickup`
 trou = un défaut ». `unbounded_work` passe de 6 à 4 occurrences, toutes des absences
 totales de borne.
 
-**Ce qui reste à faire** : la vraie mesure inter-annotateurs demande un **second lecteur
-humain**. Celle-ci a été appariée par l'auteur des cartes, donc elle est optimiste, et elle
-ne dit rien de ce qu'un tiers rangerait.
+### Le test inter-annotateurs, fait le 2 août
+
+Trois annotateurs indépendants ont reçu les **137 messages, mélangés et privés de leur
+famille**, avec pour seule consigne les définitions et l'ordre des questions. Aucun n'a vu
+les cartes ni les réponses. Protocole calqué sur MAST, à ceci près que ce sont des modèles
+et non des humains.
+
+|                                    | résultat                   | MAST |
+| ---------------------------------- | -------------------------- | ---- |
+| accord brut entre annotateurs      | 92 %                       |      |
+| **kappa de Fleiss**                | **0,91** _(quasi parfait)_ | 0,88 |
+| unanimité des trois                | 121 / 137 (88 %)           |      |
+| accord avec la référence du corpus | 87 %                       |      |
+
+**Les définitions se suffisent.** Un κ de 0,91 sur treize familles très inégalement
+peuplées veut dire que trois lecteurs qui ne se sont pas parlé rangent presque toujours au
+même endroit. C'est ce que la fermeture cherchait, et c'est maintenant mesuré et non plus
+supposé.
+
+Les 13 % d'écart avec la référence ne sont **pas du bruit** : ils se concentrent. Six trous
+seulement voient au moins deux annotateurs s'écarter de la référence tout en divergeant
+entre eux, et ils posent tous la même question, celle de la **frontière entre un manque de
+règle et un manque de moyen** :
+
+| Trou                                                                  | Référence                 | Ce que les annotateurs ont lu |
+| --------------------------------------------------------------------- | ------------------------- | ----------------------------- |
+| le champ `list` est demandé « si connue » sans dire d'où il vient     | `rule_without_capability` | `unhandled_case` ×2           |
+| la section `## Checkpoint` n'a pas d'emplacement documenté            | `rule_without_capability` | `unhandled_case` ×2           |
+| « ne bloquer que sur un manquant bloquant » ne définit pas le blocage | `undefined_criterion`     | `contradiction` ×2            |
+| le label est posé « avec succès » alors que l'échec est non bloquant  | `undefined_criterion`     | `unhandled_failure` ×2        |
+
+La lecture qui se dégage : quand une information manque, l'auteur voit « le texte suppose
+une donnée que rien ne fournit » (moyen) là où un tiers voit « le texte ne dit pas quoi
+faire dans ce cas » (silence). Les deux sont défendables ; l'ordre des questions tranche
+pour le moyen, puisqu'il vient avant. Ces six trous sont le prochain endroit où préciser
+une définition, exactement comme la frontière du plafond mou l'a été.
+
+**La limite qui reste** : trois modèles ne sont pas trois humains. Ils partagent des biais
+que trois lecteurs différents n'auraient pas, et le κ est probablement optimiste pour cette
+raison. Il reste que la mesure existe, qu'elle est rejouable (le mélange des trous est
+déterministe) et qu'elle situe le format à hauteur de la littérature.
 
 ## Ce que la confrontation a révélé : un angle mort comblé, un écarté
 
