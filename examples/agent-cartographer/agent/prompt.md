@@ -224,6 +224,11 @@ Un défaut relevé
 │     │    outil, skill, entrée, cron ; ou portée plus large que ce que les règles emploient
 │     ├─ le texte le prescrit ou le suppose, rien ne le fournit  → rule_without_capability
 │     │    bash non déclaré, horloge absente, marqueur qui n'existe pas, entrée sans canal
+│     │    ⚠ PORTE FERMÉE contre PORTE OUVERTE, seule frontière que le test
+│     │    inter-annotateurs a montrée ambiguë. Ici tu dois pouvoir POINTER un nom
+│     │    précis absent de toute déclaration, ou dont le seul moyen de l'obtenir est
+│     │    interdit par le texte. Si tout existe et n'est qu'inaccessible faute de
+│     │    consigne, c'est la conduite qui manque : unhandled_case, question 5.
 │     └─ les deux le portent, mais pas pareil                    → declaration_mismatch
 │          identifiant, champ de sortie, schéma
 │

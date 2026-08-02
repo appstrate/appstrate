@@ -1358,7 +1358,7 @@
       "related_steps": ["t37", "t38", "t43"]
     },
     {
-      "kind": "contradiction",
+      "kind": "rule_without_capability",
       "message": "Le `SKILL.md` (l. 156) prescrit de persister les nouveaux mappings de marchands via `add-memory`, alors que le prompt interdit toute persistance unitaire et impose de tout reporter dans l'output. `add-memory` n'est déclaré nulle part dans le manifeste.",
       "related_steps": ["t35", "tg9"]
     },
@@ -1381,6 +1381,16 @@
       "kind": "unguarded_input",
       "message": "Même exposition que `compta-inbox`, sur le même pipeline : les relevés et factures téléchargés sont du contenu tiers, lu puis interprété pour produire le fichier comptable du trimestre. Rien dans les 675 lignes ne fixe le statut de ce contenu. L'agent dispose par ailleurs de bash et de scripts, ce qui élargit d'autant la portée d'une consigne glissée dans un document.",
       "related_steps": ["t20", "t21"]
+    },
+    {
+      "kind": "contradiction",
+      "message": "Le `SKILL.md` (l. 156) prescrit de persister les nouveaux mappings de marchands via `add-memory`, alors que le prompt interdit toute persistance unitaire et impose de tout reporter dans l'output. Deux textes du même bundle prescrivent des conduites incompatibles sur le même geste, sans qu'aucun ne dise lequel fait foi.",
+      "related_steps": []
+    },
+    {
+      "kind": "contradiction",
+      "message": "Le préflight 1.0 traite un prérequis manquant par un blocage, tandis que l'étape 3.4 traite le cas voisin (N_cc < 3) par un simple avertissement. Les deux passages couvrent partiellement la même situation avec des conséquences différentes, et rien ne dit lequel s'applique quand les deux pourraient.",
+      "related_steps": []
     }
   ],
   "overall_confidence": 0.94

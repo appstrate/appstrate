@@ -232,7 +232,7 @@
       "related_steps": ["s4"]
     },
     {
-      "kind": "rule_without_capability",
+      "kind": "unhandled_case",
       "message": "Le champ `list` de la sortie est demandé « si connue » sans dire d'où il vient. `clickup_filter_tasks` peut ne pas renvoyer le nom de liste ; le prompt n'autorise aucun appel supplémentaire pour le résoudre, et la contrainte de budget (l. 5) l'interdirait de fait.",
       "related_steps": ["s4", "s8"]
     },

@@ -83,11 +83,11 @@ trous. Un trou hybride est un trou que personne ne pourra comparer d'un run à l
 | Famille                   | Corpus | Ce qu'elle recouvre                                                                                                                                | Anciens noms absorbés                                                                                               |
 | ------------------------- | -----: | -------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
 | `capability_without_rule` |     22 | Déclaré, mais aucune règle ne dit quand s'en servir : outil, skill, entrée, cron. Ou portée plus large que ce que les règles emploient.            | `unused_capability`, `declared_trigger_without_rule`, `no_routing_rule`, `over_broad_capability`, `missing_trigger` |
-| `contradiction`           |     21 | Deux passages incompatibles, ou applicables au même cas sans arbitre.                                                                              | `conflicting_policies`, `self_contradiction`, `unaddressed_conflict`                                                |
-| `unhandled_case`          |     19 | Le texte se tait sur une situation atteignable.                                                                                                    | `unspecified_case`, `unreachable_output_contract`, `unspecified_actor`                                              |
-| `rule_without_capability` |     15 | Le texte prescrit ou suppose une capacité, un état, une information que rien ne fournit ni ne déclare.                                             | `undeclared_capability`, `unenforceable_rule`, `unreachable_input`, `no_time_semantics`, `undefined_reference`      |
-| `undefined_criterion`     |     13 | Seuil, adjectif ou critère projectif qu'on ne décide pas deux fois pareil.                                                                         | `ambiguous_condition`, `undefined_threshold`, `unverifiable_criterion`, `ambiguous_boundary`, `teaching_by_example` |
-| `unhandled_failure`       |     10 | Panne, refus, indisponibilité : aucun chemin écrit.                                                                                                | `unspecified_error_path`, `no_failure_path`                                                                         |
+| `contradiction`           |     22 | Deux passages incompatibles, ou applicables au même cas sans arbitre.                                                                              | `conflicting_policies`, `self_contradiction`, `unaddressed_conflict`                                                |
+| `unhandled_case`          |     22 | Le texte se tait sur une situation atteignable.                                                                                                    | `unspecified_case`, `unreachable_output_contract`, `unspecified_actor`                                              |
+| `rule_without_capability` |     14 | Le texte prescrit ou suppose une capacité, un état, une information que rien ne fournit ni ne déclare.                                             | `undeclared_capability`, `unenforceable_rule`, `unreachable_input`, `no_time_semantics`, `undefined_reference`      |
+| `undefined_criterion`     |     12 | Seuil, adjectif ou critère projectif qu'on ne décide pas deux fois pareil.                                                                         | `ambiguous_condition`, `undefined_threshold`, `unverifiable_criterion`, `ambiguous_boundary`, `teaching_by_example` |
+| `unhandled_failure`       |     11 | Panne, refus, indisponibilité : aucun chemin écrit.                                                                                                | `unspecified_error_path`, `no_failure_path`                                                                         |
 | `external_authority`      |      9 | Ce qui tranche vit hors du périmètre lu (skill non lu, sous-agent, `AGENTS.md`, source illisible). Ou un passage lu qui ne fait pas règle.         | `out_of_scope_source`, `self_declared_subordination`                                                                |
 | `unbounded_work`          |      4 | Répétition, délégation ou troncature dont **aucune** borne n'est écrite.                                                                           | `unbounded_work_loop`, `unbounded_delegation`, `unbounded_criterion`, `nondeterministic_truncation`                 |
 | `duplicated_rule`         |      5 | La même règle écrite deux fois, sans dire laquelle fait foi.                                                                                       | `duplicated_rule`                                                                                                   |
@@ -274,11 +274,48 @@ règle et un manque de moyen** :
 | « ne bloquer que sur un manquant bloquant » ne définit pas le blocage | `undefined_criterion`     | `contradiction` ×2            |
 | le label est posé « avec succès » alors que l'échec est non bloquant  | `undefined_criterion`     | `unhandled_failure` ×2        |
 
-La lecture qui se dégage : quand une information manque, l'auteur voit « le texte suppose
-une donnée que rien ne fournit » (moyen) là où un tiers voit « le texte ne dit pas quoi
-faire dans ce cas » (silence). Les deux sont défendables ; l'ordre des questions tranche
-pour le moyen, puisqu'il vient avant. Ces six trous sont le prochain endroit où préciser
-une définition, exactement comme la frontière du plafond mou l'a été.
+### Ce que les six litiges ont donné
+
+Les trois annotateurs ont été renvoyés sur ces six cas, cette fois pour concevoir : proposer
+une règle de partage, l'appliquer, et dire lequel y résiste. Leurs trois réponses ont
+corrigé la question autant que les réponses.
+
+**La question était mal posée.** Je supposais un axe unique, moyen contre conduite. Deux
+annotateurs sur trois ont répondu que **seuls deux des six** portent réellement là-dessus ;
+les autres opposent d'autres paires. « Une règle moyen contre règle ne peut pas arbitrer une
+dispute qui porte sur autre chose. »
+
+**Trois trous n'étaient pas des litiges de frontière mais des trous mal découpés.** Ils
+portaient chacun DEUX défauts, et le vote partagé n'était pas un désaccord : c'était la
+trace du découpage fautif, chaque annotateur ayant voté pour la moitié qu'il jugeait
+dominante. Ils sont désormais scindés, suivant la règle « un trou = un défaut » que le
+format posait déjà.
+
+**Un quatrième était une erreur de la référence**, au regard de son propre arbre : l'échec
+partiel d'un upload est une panne, donc la question 5 passe avant la 6, et
+`unhandled_failure` l'emporte sur `undefined_criterion`. Les trois annotateurs l'ont vu,
+l'auteur non.
+
+| Trou                              | Avant                     | Après                                  | Nature                 |
+| --------------------------------- | ------------------------- | -------------------------------------- | ---------------------- |
+| champ `list` « si connue »        | `rule_without_capability` | `unhandled_case`                       | reclassé, 2 voix sur 3 |
+| label posé « avec succès »        | `undefined_criterion`     | `unhandled_failure`                    | reclassé, 3 voix sur 3 |
+| `## Checkpoint` sans emplacement  | `rule_without_capability` | `unhandled_case`                       | reclassé, 3 voix sur 3 |
+| `add-memory` prescrit et interdit | `contradiction`           | `rule_without_capability` **+ 1 trou** | scindé                 |
+| « manquant bloquant » non défini  | `undefined_criterion`     | `undefined_criterion` **+ 1 trou**     | scindé                 |
+| « décision structurante »         | `undefined_criterion`     | `undefined_criterion` **+ 1 trou**     | scindé                 |
+
+Le corpus passe de 137 à 140 trous.
+
+**La règle, écrite dans le schéma** : porte FERMÉE contre porte OUVERTE. Fermée, donc
+`rule_without_capability` : on peut **pointer** une ressource précise absente de toute
+déclaration, ou dont le seul moyen de l'obtenir est interdit par le texte. Ouverte, donc
+`unhandled_case` : tout existe et est accessible, seule la conduite manque. Le test se fait
+par pointage, jamais par intention.
+
+Ce critère est meilleur que celui que l'auteur avait fixé de son côté avant de lire les
+réponses (« l'agent sait-il quoi faire ? »), pour une raison simple : il se vérifie en
+cherchant un nom dans un texte, là où l'autre demandait d'interpréter une intention.
 
 **La limite qui reste** : trois modèles ne sont pas trois humains. Ils partagent des biais
 que trois lecteurs différents n'auraient pas, et le κ est probablement optimiste pour cette

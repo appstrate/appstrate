@@ -250,16 +250,56 @@
     }
   ],
   "edges": [
-    { "from": "s1", "to": "s2", "condition": "section `## Checkpoint` présente" },
-    { "from": "s1", "to": "s3", "condition": "absente" },
-    { "from": "s2", "to": "s3", "condition": null },
-    { "from": "s3", "to": "s4", "condition": null },
-    { "from": "s4", "to": "s5", "condition": null },
-    { "from": "s5", "to": "s6", "condition": null },
-    { "from": "s6", "to": "s7", "condition": null },
-    { "from": "s7", "to": "s8", "condition": null },
-    { "from": "s8", "to": "s9", "condition": null },
-    { "from": "s9", "to": "s10", "condition": "décision structurante" }
+    {
+      "from": "s1",
+      "to": "s2",
+      "condition": "section `## Checkpoint` présente"
+    },
+    {
+      "from": "s1",
+      "to": "s3",
+      "condition": "absente"
+    },
+    {
+      "from": "s2",
+      "to": "s3",
+      "condition": null
+    },
+    {
+      "from": "s3",
+      "to": "s4",
+      "condition": null
+    },
+    {
+      "from": "s4",
+      "to": "s5",
+      "condition": null
+    },
+    {
+      "from": "s5",
+      "to": "s6",
+      "condition": null
+    },
+    {
+      "from": "s6",
+      "to": "s7",
+      "condition": null
+    },
+    {
+      "from": "s7",
+      "to": "s8",
+      "condition": null
+    },
+    {
+      "from": "s8",
+      "to": "s9",
+      "condition": null
+    },
+    {
+      "from": "s9",
+      "to": "s10",
+      "condition": "décision structurante"
+    }
   ],
   "gaps": [
     {
@@ -268,7 +308,7 @@
       "related_steps": []
     },
     {
-      "kind": "rule_without_capability",
+      "kind": "unhandled_case",
       "message": "La section `## Checkpoint` (l. 7) n'a pas d'emplacement documenté : ni le prompt ni le manifeste ne disent si elle est concaténée au `transcript`, au `contexte`, ou injectée hors des entrées déclarées. Un agent qui la cherche au mauvais endroit conclut « absente » et perd la continuité entre réunions, sans que rien ne le signale.",
       "related_steps": ["s1", "g1"]
     },
@@ -291,6 +331,11 @@
       "kind": "unhandled_case",
       "message": "Les actions encore ouvertes venues du checkpoint (l. 7) sont à « repérer » sans suite prescrite : rien ne dit si elles doivent être reconduites dans `actions`, listées dans `points_attention`, ou seulement reportées dans le nouveau `pin`. Les trois choix produisent des sorties très différentes.",
       "related_steps": ["s2", "s8"]
+    },
+    {
+      "kind": "unhandled_case",
+      "message": "Rien ne dit s'il faut un appel `note` par décision structurante ou un seul pour l'ensemble, ni quel format de contenu, alors que le format de `pin` est entièrement spécifié à la ligne du dessus. L'outil est déclaré et utilisable : c'est la cardinalité et le format de l'appel qui ne sont pas écrits.",
+      "related_steps": []
     }
   ],
   "overall_confidence": 0.94
