@@ -302,7 +302,7 @@ export function LogViewer({ entries }: LogViewerProps) {
               >
                 <div
                   className={cn(
-                    "text-muted-foreground hover:bg-muted/50 flex min-h-7 px-3 py-0.5 font-mono text-sm leading-7 select-none",
+                    "text-muted-foreground hover:bg-muted/50 flex min-h-7 px-3 font-mono text-sm leading-7 select-none",
                     entry.kind === "tool"
                       ? "items-center truncate"
                       : "items-start gap-1.5 break-words whitespace-normal",
@@ -345,7 +345,7 @@ export function LogViewer({ entries }: LogViewerProps) {
                     </>
                   ) : (
                     <>
-                      <span className="flex h-7 w-3.5 shrink-0 -translate-y-1 items-center justify-center">
+                      <span className="flex h-7 w-3.5 shrink-0 items-center justify-center">
                         <ExecutionEntryIcon entry={entry} />
                       </span>
                       {showTimestamps && (
@@ -355,7 +355,7 @@ export function LogViewer({ entries }: LogViewerProps) {
                       )}
                       <span
                         className={cn(
-                          "text-foreground/80 min-w-0 flex-1 font-sans text-sm break-words whitespace-pre-wrap",
+                          "text-foreground/80 min-w-0 flex-1 py-1 font-sans text-sm leading-5 break-words whitespace-pre-wrap",
                           entry.level && levelColors[entry.level],
                         )}
                       >
