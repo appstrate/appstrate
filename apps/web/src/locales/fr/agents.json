@@ -285,6 +285,8 @@
   "log.copyLogs": "Copier les logs",
   "log.copied": "Copié !",
   "log.toggleTimestamps": "Horodatages",
+  "log.showTools": "Afficher les tools",
+  "log.hideTools": "Masquer les tools",
   "log.autoScroll": "Défilement automatique",
   "log.toolDetails": "Détails du tool — {{tool}}",
   "log.arguments": "Arguments",

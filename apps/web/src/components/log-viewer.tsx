@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
@@ -17,6 +17,7 @@ import {
   CircleHelp,
   MessageSquareText,
   Bug,
+  Wrench,
 } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { ScrollArea } from "@appstrate/ui/components/scroll-area";
@@ -177,9 +178,14 @@ export function LogViewer({ entries }: LogViewerProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const [showTimestamps, setShowTimestamps] = useState(false);
+  const [showTools, setShowTools] = useState(true);
   const [autoScroll, setAutoScroll] = useState(true);
   const [copied, setCopied] = useState(false);
   const [selectedToolId, setSelectedToolId] = useState<string | null>(null);
+  const visibleEntries = useMemo(
+    () => (showTools ? entries : entries.filter((entry) => entry.kind !== "tool")),
+    [entries, showTools],
+  );
   const selectedTool =
     entries.find((entry): entry is ToolExecutionEntry => {
       return entry.kind === "tool" && entry.id === selectedToolId;
@@ -187,7 +193,7 @@ export function LogViewer({ entries }: LogViewerProps) {
 
   // eslint-disable-next-line react-hooks/incompatible-library
   const virtualizer = useVirtualizer({
-    count: entries.length,
+    count: visibleEntries.length,
     getScrollElement: () => scrollRef.current,
     estimateSize: () => 28,
     overscan: 10,
@@ -195,10 +201,10 @@ export function LogViewer({ entries }: LogViewerProps) {
 
   // Auto-scroll when entries are added OR a running tool row settles in place.
   useEffect(() => {
-    if (autoScroll && entries.length > 0) {
-      virtualizer.scrollToIndex(entries.length - 1, { align: "end" });
+    if (autoScroll && visibleEntries.length > 0) {
+      virtualizer.scrollToIndex(visibleEntries.length - 1, { align: "end" });
     }
-  }, [entries, autoScroll]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [visibleEntries, autoScroll]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Disable auto-scroll when user scrolls up
   useEffect(() => {
@@ -213,7 +219,7 @@ export function LogViewer({ entries }: LogViewerProps) {
   }, [autoScroll]);
 
   const handleCopy = () => {
-    const text = entries
+    const text = visibleEntries
       .map((e) => {
         const ts = showTimestamps ? `[${formatTimestamp(e.createdAt, i18n.language)}] ` : "";
         if (e.kind === "tool") {
@@ -252,11 +258,22 @@ export function LogViewer({ entries }: LogViewerProps) {
         <Button
           variant="ghost"
           size="icon"
+          className={cn("text-muted-foreground h-7 w-7", showTools && "text-primary")}
+          onClick={() => setShowTools((value) => !value)}
+          title={t(showTools ? "log.hideTools" : "log.showTools")}
+          aria-label={t(showTools ? "log.hideTools" : "log.showTools")}
+          aria-pressed={showTools}
+        >
+          <Wrench />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
           className={cn("text-muted-foreground h-7 w-7", autoScroll && "text-primary")}
           onClick={() => {
             setAutoScroll(true);
-            if (entries.length > 0) {
-              virtualizer.scrollToIndex(entries.length - 1, { align: "end" });
+            if (visibleEntries.length > 0) {
+              virtualizer.scrollToIndex(visibleEntries.length - 1, { align: "end" });
             }
           }}
           title={t("log.autoScroll")}
@@ -283,7 +300,7 @@ export function LogViewer({ entries }: LogViewerProps) {
           }}
         >
           {virtualizer.getVirtualItems().map((virtualRow) => {
-            const entry = entries[virtualRow.index]!;
+            const entry = visibleEntries[virtualRow.index]!;
             const hasToolDetails =
               entry.kind === "tool" && (entry.args !== undefined || entry.result !== undefined);
             return (
