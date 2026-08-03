@@ -10,12 +10,28 @@
 
 import { describe, it, expect } from "bun:test";
 import {
+  ASSISTANT_MESSAGE_PROGRESS_EVENT,
+  buildProgress,
   buildToolResultProgress,
   buildTurnProgress,
   TURN_PROGRESS_EVENT,
 } from "../../src/runner/event-builders.ts";
 
 const BASE = { runId: "run_builders", timestamp: 1_700_000_000_000 };
+
+describe("buildProgress — assistant message", () => {
+  it("tags model-authored text separately from other progress breadcrumbs", () => {
+    const ev = buildProgress(BASE, "Inspecting the repository");
+
+    expect(ev).toEqual({
+      type: "appstrate.progress",
+      timestamp: BASE.timestamp,
+      runId: BASE.runId,
+      message: "Inspecting the repository",
+      data: { event: ASSISTANT_MESSAGE_PROGRESS_EVENT },
+    });
+  });
+});
 
 describe("buildToolResultProgress — durationMs", () => {
   it("emits durationMs into data when supplied", () => {

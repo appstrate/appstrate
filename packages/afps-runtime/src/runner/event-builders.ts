@@ -22,9 +22,22 @@ interface EventBase {
   timestamp: number;
 }
 
-/** Assistant text (or any lifecycle breadcrumb) as an `appstrate.progress` event. */
+/**
+ * `data.event` discriminator for model-authored text. It is observability, not
+ * delivery: the platform persists it as a debug execution trace, while the
+ * agent must still use typed tools for anything intended for the user.
+ */
+export const ASSISTANT_MESSAGE_PROGRESS_EVENT = "assistant_message";
+
+/** One settled assistant message as an `appstrate.progress` debug breadcrumb. */
 export function buildProgress(base: EventBase, message: string): RunEvent {
-  return { type: "appstrate.progress", timestamp: base.timestamp, runId: base.runId, message };
+  return {
+    type: "appstrate.progress",
+    timestamp: base.timestamp,
+    runId: base.runId,
+    message,
+    data: { event: ASSISTANT_MESSAGE_PROGRESS_EVENT },
+  };
 }
 
 /** Tool invocation start → `appstrate.progress` carrying `{ tool, args, toolCallId? }`. */

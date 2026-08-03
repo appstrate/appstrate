@@ -19,6 +19,7 @@ import {
 } from "../src/pi-runner.ts";
 import { createFakeSession, createInternalCapture } from "./helpers.ts";
 import type { RunEvent } from "@appstrate/afps-runtime/types";
+import { ASSISTANT_MESSAGE_PROGRESS_EVENT } from "@appstrate/afps-runtime/runner";
 
 const RUN_ID = "run_bridge_test";
 
@@ -67,6 +68,9 @@ describe("installSessionBridge — message_end", () => {
     const textEvent = sink.events.find((e) => e.type === "appstrate.progress");
     expect(textEvent).toBeDefined();
     expect((textEvent as unknown as { message: string }).message).toBe("Line one\nLine two");
+    expect((textEvent as unknown as { data: { event: string } }).data.event).toBe(
+      ASSISTANT_MESSAGE_PROGRESS_EVENT,
+    );
   });
 
   it("emits appstrate.error when stopReason is error", () => {

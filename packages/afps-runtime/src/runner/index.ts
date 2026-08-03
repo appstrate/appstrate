@@ -18,6 +18,7 @@ export {
 } from "./token-cost.ts";
 export {
   buildProgress,
+  ASSISTANT_MESSAGE_PROGRESS_EVENT,
   buildToolStartProgress,
   buildToolResultProgress,
   buildMetric,
