@@ -1127,7 +1127,7 @@
   "accounts/fireworks/models/kimi-k2p5": {
     "label": "Accounts/fireworks/models/kimi K2p5",
     "contextWindow": 262144,
-    "maxTokens": null,
+    "maxTokens": 32768,
     "capabilities": [
       "text"
     ],
@@ -1140,7 +1140,7 @@
   "accounts/fireworks/models/kimi-k2p6": {
     "label": "Accounts/fireworks/models/kimi K2p6",
     "contextWindow": 262144,
-    "maxTokens": null,
+    "maxTokens": 32768,
     "capabilities": [
       "text",
       "image",
@@ -1155,7 +1155,7 @@
   "accounts/fireworks/models/kimi-k2p7-code": {
     "label": "Accounts/fireworks/models/kimi K2p7 Code",
     "contextWindow": 262144,
-    "maxTokens": null,
+    "maxTokens": 32768,
     "capabilities": [
       "text",
       "image",
@@ -3058,7 +3058,7 @@
   "accounts/fireworks/routers/kimi-k2p6-fast": {
     "label": "Accounts/fireworks/routers/kimi K2p6 Fast",
     "contextWindow": 262144,
-    "maxTokens": null,
+    "maxTokens": 32768,
     "capabilities": [
       "text",
       "image",
@@ -3073,7 +3073,7 @@
   "accounts/fireworks/routers/kimi-k2p7-code-fast": {
     "label": "Accounts/fireworks/routers/kimi K2p7 Code Fast",
     "contextWindow": 262144,
-    "maxTokens": null,
+    "maxTokens": 32768,
     "capabilities": [
       "text",
       "image",
@@ -3200,7 +3200,7 @@
   "kimi-k2p5": {
     "label": "Kimi K2p5",
     "contextWindow": 262144,
-    "maxTokens": null,
+    "maxTokens": 32768,
     "capabilities": [
       "text"
     ],
@@ -3213,7 +3213,7 @@
   "kimi-k2p6": {
     "label": "Kimi K2p6",
     "contextWindow": 262144,
-    "maxTokens": null,
+    "maxTokens": 32768,
     "capabilities": [
       "text",
       "image",
@@ -3228,7 +3228,7 @@
   "kimi-k2p6-fast": {
     "label": "Kimi K2p6 Fast",
     "contextWindow": 262144,
-    "maxTokens": null,
+    "maxTokens": 32768,
     "capabilities": [
       "text",
       "image",
@@ -3243,7 +3243,7 @@
   "kimi-k2p7-code": {
     "label": "Kimi K2p7 Code",
     "contextWindow": 262144,
-    "maxTokens": null,
+    "maxTokens": 32768,
     "capabilities": [
       "text",
       "image",
@@ -3258,7 +3258,7 @@
   "kimi-k2p7-code-fast": {
     "label": "Kimi K2p7 Code Fast",
     "contextWindow": 262144,
-    "maxTokens": null,
+    "maxTokens": 32768,
     "capabilities": [
       "text",
       "image",
