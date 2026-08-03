@@ -18,6 +18,7 @@ import { logger } from "../../lib/logger.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { SIDECAR_MEMORY_BYTES, SIDECAR_NANO_CPUS } from "./constants.ts";
 import { buildBaseSidecarEnv } from "./sidecar-env.ts";
+import { SidecarExitWatcher } from "./sidecar-exit-watcher.ts";
 
 class DockerWorkloadHandle implements WorkloadHandle {
   constructor(
@@ -70,14 +71,25 @@ const DOCKER_SIDECAR_ENDPOINTS: SidecarEndpoints = {
 };
 
 export class DockerOrchestrator implements RunOrchestrator {
-  /**
-   * Set of sidecar container IDs whose exit is expected (run is being
-   * torn down). The {@link watchSidecarExit} watcher consults this set
-   * to suppress the "sidecar exited unexpectedly" log on the cleanup
-   * path. Added in {@link stopWorkload}, consumed by the watcher, and
-   * defensively cleared in {@link removeWorkload} / {@link shutdown}.
-   */
-  private expectedSidecarExits = new Set<string>();
+  private readonly sidecarExitWatcher = new SidecarExitWatcher({
+    waitForExit: (containerId) => docker.waitForExit(containerId),
+    streamLogs: (containerId, signal) => docker.streamLogs(containerId, signal),
+    onUnexpectedExit: ({ runId, containerId, exitCode, tail }) => {
+      logger.error("Sidecar exited before run completed", {
+        runId,
+        containerId,
+        exitCode,
+        ...(tail ? { tail } : {}),
+      });
+    },
+    onWatcherError: ({ runId, containerId, error }) => {
+      logger.debug("Sidecar exit watcher errored", {
+        runId,
+        containerId,
+        error: getErrorMessage(error),
+      });
+    },
+  });
   /**
    * Images verified present in this process's lifetime (pre-pulled at
    * {@link initialize} or ensured by a prior run). {@link ensureImages}
@@ -123,10 +135,7 @@ export class DockerOrchestrator implements RunOrchestrator {
     // Removing it here used to break the runs of a concurrently-running
     // instance, whose cached network ID went stale.
     //
-    // Drop any residual entries — long-lived API processes accumulate
-    // one per timed-out / aborted run because `removeWorkload` always
-    // re-adds after `stopWorkload` consumed the watcher's match.
-    this.expectedSidecarExits.clear();
+    this.sidecarExitWatcher.clearExpectedExits();
   }
 
   async ensureImages(images: string[]): Promise<void> {
@@ -356,69 +365,9 @@ export class DockerOrchestrator implements RunOrchestrator {
     // operators see "sidecar exited 1 (npm not found)" rather than the
     // agent's eventual "deadline exceeded" hand-wave.
     await docker.startContainer(containerId);
-    this.watchSidecarExit(runId, containerId);
+    void this.sidecarExitWatcher.watch(runId, containerId);
 
     return new DockerWorkloadHandle(containerId, runId, "sidecar");
-  }
-
-  /**
-   * Non-blocking watcher: race the sidecar's exit against the run. The
-   * caller never awaits this — its only job is to surface a sidecar
-   * that crashes mid-handshake with a structured log line carrying the
-   * exit code + a snippet of the container's stderr. Without it, a
-   * dead-on-arrival sidecar manifests as an agent-side "MCP connect
-   * deadline exceeded after 30000ms" 30s later, with no platform-side
-   * evidence of root cause.
-   *
-   * Best-effort: errors are swallowed (the orchestrator's main lifecycle
-   * is the source of truth for failure surfaces). Errors here would only
-   * add noise to a path that's already going to fail loudly somewhere.
-   */
-  private watchSidecarExit(runId: string, containerId: string): void {
-    void (async () => {
-      try {
-        const exitCode = await docker.waitForExit(containerId);
-        // Cleanup path stops/removes the sidecar after the run terminates
-        // — those exits are expected and never indicate a problem.
-        if (this.expectedSidecarExits.has(containerId)) {
-          this.expectedSidecarExits.delete(containerId);
-          return;
-        }
-        if (exitCode !== 0) {
-          // Pull a short tail of logs — best-effort, bounded so we
-          // don't keep a generator open forever if logs are streamed.
-          // 2s window: on a busy Docker daemon the multiplexed-stream
-          // parser may not have emitted any complete lines under 500ms
-          // after the exit, which defeats the purpose of the watcher.
-          let tail = "";
-          try {
-            const abort = new AbortController();
-            const timer = setTimeout(() => abort.abort(), 2_000);
-            const lines: string[] = [];
-            for await (const line of docker.streamLogs(containerId, abort.signal)) {
-              lines.push(line);
-              if (lines.length >= 30) break;
-            }
-            clearTimeout(timer);
-            tail = lines.slice(-30).join("\n");
-          } catch {
-            // Swallow — diagnostic is best-effort.
-          }
-          logger.error("Sidecar exited before run completed", {
-            runId,
-            containerId,
-            exitCode,
-            ...(tail ? { tail } : {}),
-          });
-        }
-      } catch (err) {
-        logger.debug("Sidecar exit watcher errored", {
-          runId,
-          containerId,
-          error: getErrorMessage(err),
-        });
-      }
-    })();
   }
 
   async createWorkload(spec: WorkloadSpec, boundary: IsolationBoundary): Promise<WorkloadHandle> {
@@ -474,17 +423,23 @@ export class DockerOrchestrator implements RunOrchestrator {
   }
 
   async stopWorkload(handle: WorkloadHandle, timeoutSeconds?: number): Promise<void> {
-    if (handle.role === "sidecar") this.expectedSidecarExits.add(handle.id);
+    if (handle.role === "sidecar") {
+      await this.sidecarExitWatcher.expectExitDuring(handle.id, () =>
+        docker.stopContainer(handle.id, timeoutSeconds),
+      );
+      return;
+    }
     await docker.stopContainer(handle.id, timeoutSeconds);
   }
 
   async removeWorkload(handle: WorkloadHandle): Promise<void> {
-    // No `expectedSidecarExits.add` here: by the time we're removing the
-    // container its `waitForExit` watcher has already resolved (either
-    // through the happy path or via `stopWorkload`'s suppression). Adding
-    // again would leak one string per run for the process lifetime.
+    if (handle.role === "sidecar") {
+      await this.sidecarExitWatcher.expectExitDuring(handle.id, () =>
+        docker.removeContainer(handle.id),
+      );
+      return;
+    }
     await docker.removeContainer(handle.id);
-    if (handle.role === "sidecar") this.expectedSidecarExits.delete(handle.id);
   }
 
   async waitForExit(handle: WorkloadHandle): Promise<number> {

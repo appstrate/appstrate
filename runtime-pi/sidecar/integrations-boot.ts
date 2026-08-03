@@ -49,6 +49,7 @@ import {
   type AppstrateToolDefinition,
 } from "@appstrate/mcp-transport";
 import { planCaBundle, type CaBundle } from "@appstrate/connect/proxy-ca-planner";
+import { planHttpDeliveryInjection } from "@appstrate/afps-runtime/resolvers";
 import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
 
 import type { CredentialBundle } from "@appstrate/connect/connect";
@@ -316,10 +317,13 @@ export async function extractBundle(bytes: Uint8Array, namespace: string): Promi
  * Per-request flow:
  *   1. Read `source.snapshot().deliveryPlans[authKey]` — fresh after any
  *      refresh because the source replaces the whole payload in place.
- *   2. Inject `{ headerName: `${headerPrefix}${value}` }` on the outbound.
- *   3. On 401, call `refreshOnUnauthorized(authKey)` (no-op for static
- *      credentials — the source's per-authKey cooldown protects the
- *      platform endpoint from refresh storms) and retry once.
+ *   2. Apply the shared delivery decision: inject the platform credential by
+ *      default, or preserve a same-name caller header only when the manifest
+ *      explicitly allows it.
+ *   3. On 401 from a request that used the platform credential, call
+ *      `refreshOnUnauthorized(authKey)` (no-op for static credentials — the
+ *      source's per-authKey cooldown protects the platform endpoint from
+ *      refresh storms) and retry once. Caller-override 401s pass through.
  *
  * Auth selection: in practice the credentials payload carries EXACTLY ONE
  * auth — the platform's 5-layer connection cascade resolves a single
@@ -371,7 +375,7 @@ export interface ConnectRemoteHttpDeps {
 
 /**
  * Default SSE client builder — wires `SSEClientTransport` from the MCP SDK
- * with our `customFetch` (per-request Bearer + 401-retry). The SDK's SSE
+ * with our `customFetch` (per-request credential + 401-retry). The SDK's SSE
  * transport accepts a `fetch` override under `eventSourceInit` for the
  * stream and `requestInit` for outbound POSTs; we route both through the
  * same custom fetch so credential headers are injected on every hop.
@@ -464,14 +468,13 @@ export async function connectRemoteHttpIntegration(
   }
   const authKey = pickedAuth.authKey;
 
-  // Per-request header reader. Reading from the snapshot on every call
+  // Per-request injection planner. Reading from the snapshot on every call
   // means an OAuth refresh (which swaps `payload` in place) is picked up
   // automatically — no MCP transport restart needed. Static creds
   // (api_key) just return the same value forever.
-  const readHeader = (): { name: string; value: string } | null => {
+  const planInjection = (callerHeaderNames: readonly string[]) => {
     const plan = source.snapshot().deliveryPlans[authKey];
-    if (!plan) return null;
-    return { name: plan.headerName, value: `${plan.headerPrefix}${plan.value}` };
+    return plan ? planHttpDeliveryInjection(plan, callerHeaderNames) : { kind: "none" as const };
   };
 
   // SSRF-guard the egress — ALWAYS (P0-2): `guardedFetch` does per-hop DNS
@@ -494,10 +497,18 @@ export async function connectRemoteHttpIntegration(
   // away — the override stays a faithful drop-in for `fetch`.
   const customFetch: typeof fetch = Object.assign(
     async (input: Parameters<typeof fetch>[0], init: Parameters<typeof fetch>[1]) => {
-      const send = async (): Promise<Response> => {
+      const send = async (): Promise<{ response: Response; credentialInjected: boolean }> => {
         const headers = new Headers(init?.headers);
-        const h = readHeader();
-        if (h) headers.set(h.name, h.value);
+        const injection = planInjection([...headers.keys()]);
+        if (injection.kind === "inject") {
+          headers.set(injection.header.name, injection.header.value);
+        }
+        const sensitiveHeaderName =
+          injection.kind === "inject"
+            ? injection.header.name
+            : injection.kind === "caller_override"
+              ? injection.headerName
+              : null;
         // `guardedFetch` accepts `string | URL`; the MCP transports always
         // call with a URL/string target (headers/body ride in `init`), so a
         // stray `Request` is normalised to its URL for the type.
@@ -508,7 +519,7 @@ export async function connectRemoteHttpIntegration(
         // MCP server the platform-side spawn validation just allowed (internal
         // host explicitly allowlisted by the operator) would be re-blocked here
         // and fail opaquely in-run. Redirect discipline still applies.
-        return guardedFetch(
+        const response = await guardedFetch(
           target,
           { ...init, headers },
           {
@@ -518,17 +529,22 @@ export async function connectRemoteHttpIntegration(
             // builtin authorization/cookie strip set cannot know about it —
             // declare it, or a hostile server 302ing cross-origin would carry
             // the credential to another origin.
-            ...(h ? { sensitiveHeaders: [h.name] } : {}),
+            ...(sensitiveHeaderName ? { sensitiveHeaders: [sensitiveHeaderName] } : {}),
             ...(deps.resolveHost ? { resolve: deps.resolveHost } : {}),
           },
         );
+        return { response, credentialInjected: injection.kind === "inject" };
       };
-      let res = await send();
-      if (res.status === 401 && source.refreshOnUnauthorized) {
+      let attempt = await send();
+      if (
+        attempt.response.status === 401 &&
+        attempt.credentialInjected &&
+        source.refreshOnUnauthorized
+      ) {
         const refreshed = await source.refreshOnUnauthorized(authKey).catch(() => false);
-        if (refreshed) res = await send();
+        if (refreshed) attempt = await send();
       }
-      return res;
+      return attempt.response;
     },
     { preconnect: fetch.preconnect },
   );
@@ -538,7 +554,7 @@ export async function connectRemoteHttpIntegration(
     version: "0.1.0",
   };
   // AFPS §7.1 — dispatch on the manifest's declared transport. Both
-  // branches share the same per-request Bearer + 401-retry closure
+  // branches share the same per-request credential + 401-retry closure
   // (`customFetch` above), so credential injection + refresh semantics
   // are identical across Streamable HTTP and SSE.
   const toolTimeoutMs = toolTimeoutMsFromEnv();

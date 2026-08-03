@@ -43,8 +43,10 @@ export { resolvePackageRef, readPackageText, readPackageBytes } from "./bundle-a
 // Canonical `delivery.http` credential-injection resolver (shared with
 // `@appstrate/connect`, which re-exports these).
 export {
+  planHttpDeliveryInjection,
   resolveHttpDelivery,
   type HttpDeliveryConfig,
+  type HttpDeliveryInjectionDecision,
   type HttpDeliveryPlan,
 } from "./http-delivery.ts";
 

@@ -355,8 +355,8 @@ export interface IntegrationSpawnSpec {
   fileMounts?: Record<string, { content_b64: string; mode: string }>;
   /**
    * Phase 1.5 — per-auth `delivery.http` metadata. The sidecar starts a
-   * per-integration MITM HTTPS proxy and uses these plans to inject
-   * `headerName: headerPrefix + value` on every upstream request whose
+   * per-integration MITM HTTPS proxy and uses these plans to apply the shared
+   * header-prefix and caller-override policy on every upstream request whose
    * URL matches an `authorizedUris` pattern of the matching auth.
    *
    * Sensitive (`value` carries the live OAuth access_token / API key);

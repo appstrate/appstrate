@@ -110,7 +110,11 @@ export function buildProxyCredentialsPayload(opts: {
     authorizedUris: [...authorizedUris],
     allowAllUris,
     ...(plan && plan.headerName
-      ? { credentialHeaderName: plan.headerName, credentialHeaderPrefix: plan.headerPrefix }
+      ? {
+          credentialHeaderName: plan.headerName,
+          credentialHeaderPrefix: plan.headerPrefix,
+          credentialAllowServerOverride: plan.allowServerOverride === true,
+        }
       : {}),
     credentialFieldName: PROXY_INJECTED_FIELD,
   };

@@ -54,6 +54,7 @@ describe("createApiCallCredentialAdapter", () => {
     const creds = await adapter.fetchCredentials("@scope/integ");
     expect(creds.credentialHeaderName).toBe("Authorization");
     expect(creds.credentialHeaderPrefix).toBe("Bearer ");
+    expect(creds.credentialAllowServerOverride).toBe(false);
     expect(creds.credentialFieldName).toBe(PROXY_INJECTED_FIELD);
     expect(creds.credentials[PROXY_INJECTED_FIELD]).toBe("AT");
     // The raw auth fields stay available for {{var}} substitution.

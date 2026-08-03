@@ -209,6 +209,47 @@ describe("executeApiCall — auth-scheme template repair (#988)", () => {
 });
 
 describe("executeApiCall — 401 retry path", () => {
+  it("does not refresh or flag a 401 produced by an allowed caller override", async () => {
+    const fetchFn = mock(
+      async (_input: Parameters<typeof fetch>[0], _init?: RequestInit) =>
+        new Response("caller rejected", { status: 401 }),
+    );
+    const refreshCredentials = mock(async () => null);
+    const deps = makeDeps({
+      fetchFn: fetchFn as unknown as typeof fetch,
+      refreshCredentials,
+      fetchCredentials: mock(async (): Promise<CredentialsResponse> => ({
+        credentials: { access_token: "platform" },
+        authorizedUris: ["https://api.example.com/**"],
+        allowAllUris: false,
+        credentialHeaderName: "Authorization",
+        credentialHeaderPrefix: "Bearer",
+        credentialAllowServerOverride: true,
+        credentialFieldName: "access_token",
+      })),
+    });
+
+    const result = await executeApiCall(
+      {
+        integrationId: "gmail",
+        targetUrl: "https://api.example.com/x",
+        method: "GET",
+        callerHeaders: { authorization: "Bearer caller" },
+        body: { kind: "none" },
+      },
+      deps,
+    );
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.response.status).toBe(401);
+    const sent = fetchFn.mock.calls[0]![1]! as RequestInit & {
+      headers: Record<string, string>;
+    };
+    expect(sent.headers.authorization).toBe("Bearer caller");
+    expect(refreshCredentials).not.toHaveBeenCalled();
+    expect(deps.reportedAuthFailures.has("gmail")).toBe(false);
+  });
+
   it("refreshes credentials and replays the buffered request once", async () => {
     let callCount = 0;
     const fetchFn = mock(async () => {

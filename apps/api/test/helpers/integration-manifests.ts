@@ -14,8 +14,19 @@
 import type { IntegrationManifest } from "@appstrate/core/integration";
 
 /** AFPS `delivery.http` header block with a `{$credential.<field>}` value template. */
-export function httpHeaderDelivery(opts: { name: string; prefix?: string; field: string }): {
-  http: { in: "header"; name: string; prefix?: string; value: string };
+export function httpHeaderDelivery(opts: {
+  name: string;
+  prefix?: string;
+  field: string;
+  allowServerOverride?: boolean;
+}): {
+  http: {
+    in: "header";
+    name: string;
+    prefix?: string;
+    value: string;
+    allow_server_override?: boolean;
+  };
 } {
   return {
     http: {
@@ -23,6 +34,7 @@ export function httpHeaderDelivery(opts: { name: string; prefix?: string; field:
       name: opts.name,
       ...(opts.prefix !== undefined ? { prefix: opts.prefix } : {}),
       value: `{$credential.${opts.field}}`,
+      ...(opts.allowServerOverride ? { allow_server_override: true } : {}),
     },
   };
 }

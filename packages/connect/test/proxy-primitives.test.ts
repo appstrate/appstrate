@@ -196,6 +196,16 @@ describe("buildInjectedCredentialHeader", () => {
     expect(out).toEqual({ name: "Authorization", value: "Bearer abc" });
   });
 
+  it("keeps a composite Authorization prefix literal", () => {
+    const out = buildInjectedCredentialHeader({
+      credentials: { api_key: "abc" },
+      credentialHeaderName: "Authorization",
+      credentialHeaderPrefix: "Token token=",
+      credentialFieldName: "api_key",
+    });
+    expect(out).toEqual({ name: "Authorization", value: "Token token=abc" });
+  });
+
   it("omits the space when no prefix", () => {
     const out = buildInjectedCredentialHeader({
       credentials: { api_key: "secret" },
@@ -237,7 +247,7 @@ describe("applyInjectedCredentialHeader (record)", () => {
     expect(headers).toEqual({ Authorization: "Bearer abc" });
   });
 
-  it("respects a case-insensitive caller override", () => {
+  it("replaces a case-insensitive caller header by default", () => {
     const headers: Record<string, string> = { authorization: "Bearer caller" };
     applyInjectedCredentialHeader(headers, {
       credentials: { access_token: "server" },
@@ -245,7 +255,20 @@ describe("applyInjectedCredentialHeader (record)", () => {
       credentialHeaderPrefix: "Bearer",
       credentialFieldName: "access_token",
     });
+    expect(headers).toEqual({ Authorization: "Bearer server" });
+  });
+
+  it("respects a case-insensitive caller override when explicitly allowed", () => {
+    const headers: Record<string, string> = { authorization: "Bearer caller" };
+    const decision = applyInjectedCredentialHeader(headers, {
+      credentials: { access_token: "server" },
+      credentialHeaderName: "Authorization",
+      credentialHeaderPrefix: "Bearer",
+      credentialAllowServerOverride: true,
+      credentialFieldName: "access_token",
+    });
     expect(headers).toEqual({ authorization: "Bearer caller" });
+    expect(decision).toEqual({ kind: "caller_override", headerName: "Authorization" });
   });
 });
 
@@ -261,7 +284,7 @@ describe("applyInjectedCredentialHeaderToHeaders (Headers instance)", () => {
     expect(headers.get("authorization")).toBe("Bearer abc");
   });
 
-  it("respects a case-insensitive caller override", () => {
+  it("replaces a case-insensitive caller header by default", () => {
     const headers = new Headers({ Authorization: "Bearer caller" });
     applyInjectedCredentialHeaderToHeaders(headers, {
       credentials: { access_token: "server" },
@@ -269,7 +292,20 @@ describe("applyInjectedCredentialHeaderToHeaders (Headers instance)", () => {
       credentialHeaderPrefix: "Bearer",
       credentialFieldName: "access_token",
     });
+    expect(headers.get("authorization")).toBe("Bearer server");
+  });
+
+  it("respects a case-insensitive caller override when explicitly allowed", () => {
+    const headers = new Headers({ Authorization: "Bearer caller" });
+    const decision = applyInjectedCredentialHeaderToHeaders(headers, {
+      credentials: { access_token: "server" },
+      credentialHeaderName: "Authorization",
+      credentialHeaderPrefix: "Bearer",
+      credentialAllowServerOverride: true,
+      credentialFieldName: "access_token",
+    });
     expect(headers.get("authorization")).toBe("Bearer caller");
+    expect(decision).toEqual({ kind: "caller_override", headerName: "Authorization" });
   });
 });
 

@@ -59,7 +59,12 @@ import {
 } from "@appstrate/afps-shared/mcp-naming";
 import { guardedFetch, PreflightError, type HostResolver } from "./api-call-engine.ts";
 import { AuthorizedUrisError, ResolverError } from "../errors.ts";
-import { resolveHttpDelivery, type HttpDeliveryConfig } from "./http-delivery.ts";
+import {
+  planHttpDeliveryInjection,
+  resolveHttpDelivery,
+  type HttpDeliveryConfig,
+  type HttpDeliveryPlan,
+} from "./http-delivery.ts";
 import {
   projectHttpDeliveryConfig,
   type AfpsHttpDelivery,
@@ -421,14 +426,15 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
       }
       const target = substituteVars(req.target, fields);
 
-      // Strip agent overrides of reserved transport / credential headers
-      // (case-insensitive) BEFORE substitution + injection, so a tool call
-      // can neither spoof platform-imposed identity headers nor pre-seed the
-      // credential header the resolver is about to set. Platform-injected
-      // values are applied last (in `injectCredential`) and always win.
+      // Strip Appstrate transport headers before substitution. Authorization
+      // is different on this LOCAL path: it may be the manifest-authorised
+      // source override, so the shared delivery planner below decides whether
+      // it survives. The remote resolver still strips Authorization because it
+      // authenticates the request to Appstrate itself with that header.
       const headers: Record<string, string> = {};
       for (const [key, value] of Object.entries(req.headers ?? {})) {
-        if (RESERVED_TRANSPORT_HEADERS.has(key.toLowerCase())) continue;
+        const lowerKey = key.toLowerCase();
+        if (lowerKey !== "authorization" && RESERVED_TRANSPORT_HEADERS.has(lowerKey)) continue;
         if (referencesCredentialField(value, fields)) substitutesCredential = true;
         headers[key] = substituteVars(value, fields);
       }
@@ -563,22 +569,30 @@ function injectCredential(
     if (!rendered) return null;
     const headerName = entry.injection.headerName ?? "Authorization";
     const headerPrefix = entry.injection.headerPrefix ?? "";
-    headers[headerName] = `${headerPrefix}${rendered}`;
-    return headerName;
+    return applyDeliveryPlan(headers, {
+      headerName,
+      headerPrefix,
+      value: rendered,
+      allowServerOverride: false,
+    });
   }
 
   // 2. Manifest `delivery.http` plan (auth-type defaults).
   const plan = resolveHttpDelivery(meta.authType, fields, meta.http);
   if (!plan || !plan.headerName) return null;
-  // `allowServerOverride: false` (default) → strip a caller-supplied header
-  // of the same name before injecting (defence-in-depth, mirrors the sidecar).
-  if (!plan.allowServerOverride) {
-    for (const key of Object.keys(headers)) {
-      if (key.toLowerCase() === plan.headerName.toLowerCase()) delete headers[key];
-    }
+  return applyDeliveryPlan(headers, plan);
+}
+
+function applyDeliveryPlan(headers: Record<string, string>, plan: HttpDeliveryPlan): string | null {
+  const decision = planHttpDeliveryInjection(plan, Object.keys(headers));
+  if (decision.kind === "none") return null;
+  if (decision.kind === "caller_override") return decision.headerName;
+
+  for (const key of Object.keys(headers)) {
+    if (key.toLowerCase() === decision.header.name.toLowerCase()) delete headers[key];
   }
-  headers[plan.headerName] = `${plan.headerPrefix}${plan.value}`;
-  return plan.headerName;
+  headers[decision.header.name] = decision.header.value;
+  return decision.header.name;
 }
 
 // ─────────────────────────────────────────────

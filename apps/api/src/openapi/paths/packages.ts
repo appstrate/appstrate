@@ -1718,8 +1718,9 @@ export const packagesPaths = {
     post: {
       operationId: "createIntegrationPackage",
       tags: ["Packages"],
-      summary: "Create an integration package",
-      description: "Create a new integration package in the organization packages.",
+      summary: "Create an integration package, including a remote MCP",
+      description:
+        'Create a new integration package in the organization packages. An upstream-hosted MCP endpoint belongs here as an integration with `source.kind: "remote"`; use an MCP-server package only for a local executable referenced by `source.kind: "local"`.',
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
@@ -2301,8 +2302,9 @@ export const packagesPaths = {
     post: {
       operationId: "createMcpServerPackage",
       tags: ["Packages"],
-      summary: "Create an MCP-server package",
-      description: "Create a new MCP-server package in the organization packages.",
+      summary: "Create a local MCP-server executable package",
+      description:
+        'Create a local executable MCP-server package referenced by an integration with `source.kind: "local"`. For an upstream-hosted MCP endpoint, create an integration package with `source.kind: "remote"` instead.',
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },

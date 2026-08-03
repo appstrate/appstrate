@@ -34,7 +34,15 @@ function spec(): IntegrationSpawnSpec {
 
 function wire(
   auths: Array<{ authKey: string; authType: string }>,
-  deliveryPlans: Record<string, { headerName: string; headerPrefix: string; value: string }>,
+  deliveryPlans: Record<
+    string,
+    {
+      headerName: string;
+      headerPrefix: string;
+      value: string;
+      allowServerOverride?: boolean;
+    }
+  >,
 ): IntegrationCredentialsWire {
   return {
     auths: auths.map((a) => ({
@@ -43,7 +51,10 @@ function wire(
       authorizedUris: [],
     })),
     deliveryPlans: Object.fromEntries(
-      Object.entries(deliveryPlans).map(([k, p]) => [k, { ...p, allowServerOverride: false }]),
+      Object.entries(deliveryPlans).map(([k, p]) => [
+        k,
+        { ...p, allowServerOverride: p.allowServerOverride === true },
+      ]),
     ),
     expiresAtEpochMs: {},
   } as unknown as IntegrationCredentialsWire;
@@ -103,7 +114,7 @@ describe("connectRemoteHttpIntegration — credential injection", () => {
       ],
       {
         apikey: { headerName: "X-Api-Key", headerPrefix: "", value: "K" },
-        oauth: { headerName: "Authorization", headerPrefix: "Bearer ", value: "TOKEN" },
+        oauth: { headerName: "Authorization", headerPrefix: "Bearer", value: "TOKEN" },
       },
     );
     const { deps, source, getFetch } = makeDeps(initial, async () => true);
@@ -124,6 +135,38 @@ describe("connectRemoteHttpIntegration — credential injection", () => {
     // Cast: TS narrows a `let` assigned only inside a closure back to its
     // initializer type (`null`); the global fetch stub mutates it at runtime.
     expect(seen as string | null).toBe("Bearer TOKEN");
+  });
+
+  it("preserves an allowed caller override and does not refresh it on 401", async () => {
+    const initial = wire([{ authKey: "oauth", authType: "oauth2" }], {
+      oauth: {
+        headerName: "Authorization",
+        headerPrefix: "Bearer",
+        value: "PLATFORM",
+        allowServerOverride: true,
+      },
+    });
+    const { deps, source, getFetch, getRefreshCalls } = makeDeps(initial, async () => true);
+    await connectRemoteHttpIntegration(spec(), source, deps);
+
+    let seen: string | null = null;
+    const status = await withGlobalFetch(
+      (async (_input: unknown, init?: RequestInit) => {
+        seen = new Headers(init?.headers).get("Authorization");
+        return new Response("{}", { status: 401 });
+      }) as unknown as typeof fetch,
+      async () =>
+        (
+          await getFetch()(SERVER_URL, {
+            method: "POST",
+            headers: { authorization: "Bearer CALLER" },
+          })
+        ).status,
+    );
+
+    expect(seen as string | null).toBe("Bearer CALLER");
+    expect(status).toBe(401);
+    expect(getRefreshCalls()).toBe(0);
   });
 
   it("force-refreshes once and retries on a 401", async () => {

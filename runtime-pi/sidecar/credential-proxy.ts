@@ -462,13 +462,15 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
      * logging the secret itself.
      */
     requestHeaderNames: string[];
+    /** Whether this attempt used the platform credential or an allowed caller override. */
+    credentialInjection: "inject" | "caller_override" | "none";
   }> => {
     const resolvedHeaders: Record<string, string> = {};
     for (const [key, value] of Object.entries(callerHeaders)) {
       resolvedHeaders[key] = substituteVars(value, activeCreds.credentials);
     }
     // Server-side credential injection (Authorization, X-Api-Key, …).
-    applyInjectedCredentialHeader(resolvedHeaders, activeCreds);
+    const credentialInjection = applyInjectedCredentialHeader(resolvedHeaders, activeCreds);
     // Re-inject sticky cookies for the integration.
     const storedCookies = cookieJar.get(integrationId);
     if (storedCookies && storedCookies.length) {
@@ -526,6 +528,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
         finalUrl: response.url || resolvedUrl,
         hops: 0,
         requestHeaderNames: Object.keys(resolvedHeaders),
+        credentialInjection: credentialInjection.kind,
       };
     }
     const followed = await fetchFollowingRedirectsCapturingCookies({
@@ -534,7 +537,12 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
       fetchFn,
       cookieJar,
       integrationId,
-      injectedCredentialHeader: activeCreds.credentialHeaderName?.toLowerCase() ?? null,
+      injectedCredentialHeader:
+        credentialInjection.kind === "inject"
+          ? credentialInjection.header.name.toLowerCase()
+          : credentialInjection.kind === "caller_override"
+            ? credentialInjection.headerName.toLowerCase()
+            : null,
       authorizedUris: creds.authorizedUris ?? undefined,
       allowAllUris: creds.allowAllUris,
       // Thread the injected DNS resolver into the per-hop SSRF rebind
@@ -546,7 +554,11 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
       // Preserve the sidecar's structured per-hop refusal logging.
       logger,
     });
-    return { ...followed, requestHeaderNames: Object.keys(resolvedHeaders) };
+    return {
+      ...followed,
+      requestHeaderNames: Object.keys(resolvedHeaders),
+      credentialInjection: credentialInjection.kind,
+    };
   };
 
   // 7. First outbound request. Network/timeout errors surface as a
@@ -556,12 +568,14 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
   let upstreamFinalUrl: string = resolvedUrl;
   let upstreamHops = 0;
   let requestHeaderNames: string[] = [];
+  let credentialInjection: "inject" | "caller_override" | "none" = "none";
   try {
     const r = await doUpstreamRequest(creds);
     upstream = r.response;
     upstreamFinalUrl = r.finalUrl;
     upstreamHops = r.hops;
     requestHeaderNames = r.requestHeaderNames;
+    credentialInjection = r.credentialInjection;
   } catch (err) {
     return wrapRequestError(err, resolvedUrl);
   }
@@ -579,6 +593,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
     refreshCredentials &&
     config.platformApiUrl &&
     config.runToken &&
+    credentialInjection === "inject" &&
     !reportedAuthFailures.has(integrationId)
   ) {
     const fresh = await refreshCredentials(integrationId).catch(() => null);
@@ -590,6 +605,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
           upstreamFinalUrl = r.finalUrl;
           upstreamHops = r.hops;
           requestHeaderNames = r.requestHeaderNames;
+          credentialInjection = r.credentialInjection;
         } catch (err) {
           return wrapRequestError(err, resolvedUrl);
         }
@@ -610,7 +626,11 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
   //    set platform-side by the `/refresh` call above (which returns null on a
   //    terminal credential); here we only gate the one-refresh-attempt-per-run
   //    behaviour and surface a log line.
-  if (upstream.status === 401 && !reportedAuthFailures.has(integrationId)) {
+  if (
+    upstream.status === 401 &&
+    credentialInjection === "inject" &&
+    !reportedAuthFailures.has(integrationId)
+  ) {
     reportedAuthFailures.add(integrationId);
     logger.warn("Upstream returned 401 after refresh attempt", { integrationId });
   }
@@ -631,8 +651,9 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
     redirected: upstreamFinalUrl !== resolvedUrl,
     // How the credential was applied: a server-injected header (named, never
     // valued) or no injection at all (URL/query-embedded or anonymous).
-    authMode: creds.credentialHeaderName ? "header" : "none",
-    injectedHeader: creds.credentialHeaderName?.toLowerCase() ?? null,
+    authMode: credentialInjection === "inject" ? "header" : credentialInjection,
+    injectedHeader:
+      credentialInjection === "inject" ? (creds.credentialHeaderName?.toLowerCase() ?? null) : null,
     // Which URL-trust policy gated the call.
     urlPolicy: creds.allowAllUris
       ? "allow_all"

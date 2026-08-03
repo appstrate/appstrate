@@ -9,7 +9,11 @@
  * impossible by construction.
  */
 
-import { substituteVars as substituteVarsCore } from "@appstrate/afps-runtime/resolvers";
+import {
+  planHttpDeliveryInjection,
+  substituteVars as substituteVarsCore,
+  type HttpDeliveryInjectionDecision,
+} from "@appstrate/afps-runtime/resolvers";
 
 /**
  * Substitute `{{field}}` placeholders in `input` using `credentials`.
@@ -69,11 +73,17 @@ export interface ProxyCredentialsPayload {
    */
   credentialHeaderName?: string;
   /**
-   * Prefix prepended to the credential value — typically `Bearer` for
-   * OAuth, empty for most API-key providers. When set, the rendered
-   * header is `${prefix} ${credentials[credentialFieldName]}`.
+   * Literal prefix prepended to the credential value — typically `Bearer `
+   * for OAuth, empty for most API-key providers. For compatibility, a bare
+   * RFC auth-scheme token such as `Bearer` gets one separator only when the
+   * target is Authorization or Proxy-Authorization.
    */
   credentialHeaderPrefix?: string;
+  /**
+   * Whether a caller-supplied header with the same name wins. Optional for
+   * rolling compatibility; absent follows the AFPS default (`false`).
+   */
+  credentialAllowServerOverride?: boolean;
   /**
    * Name of the field in `credentials` that holds the secret to inject.
    * Always populated (defaults `access_token` / `api_key` by auth mode)
@@ -87,13 +97,35 @@ export interface ProxyCredentialsPayload {
  * Narrow subset the header-injection helpers actually read. Every
  * `ProxyCredentialsPayload` satisfies this shape trivially — the alias
  * exists so ad-hoc callers (tests, fixture builders) can construct the
- * four fields the injector needs without also filling in `authorizedUris`
+ * fields the injector needs without also filling in `authorizedUris`
  * / `allowAllUris` boilerplate.
  */
 type InjectableCredentials = Pick<
   ProxyCredentialsPayload,
-  "credentials" | "credentialHeaderName" | "credentialHeaderPrefix" | "credentialFieldName"
+  | "credentials"
+  | "credentialHeaderName"
+  | "credentialHeaderPrefix"
+  | "credentialAllowServerOverride"
+  | "credentialFieldName"
 >;
+
+function planInjectedCredentialHeader(
+  creds: InjectableCredentials,
+  callerHeaderNames: readonly string[],
+): HttpDeliveryInjectionDecision {
+  if (!creds.credentialHeaderName) return { kind: "none" };
+  const token = creds.credentials[creds.credentialFieldName];
+  if (!token) return { kind: "none" };
+  return planHttpDeliveryInjection(
+    {
+      headerName: creds.credentialHeaderName,
+      headerPrefix: creds.credentialHeaderPrefix ?? "",
+      value: token,
+      allowServerOverride: creds.credentialAllowServerOverride === true,
+    },
+    callerHeaderNames,
+  );
+}
 
 /**
  * Build the final header-name / header-value pair the proxy injects
@@ -105,31 +137,28 @@ type InjectableCredentials = Pick<
 export function buildInjectedCredentialHeader(
   creds: InjectableCredentials,
 ): { name: string; value: string } | undefined {
-  if (!creds.credentialHeaderName) return undefined;
-  const token = creds.credentials[creds.credentialFieldName];
-  if (!token) return undefined;
-  const prefix = creds.credentialHeaderPrefix?.trim();
-  const value = prefix ? `${prefix} ${token}` : token;
-  return { name: creds.credentialHeaderName, value };
+  const decision = planInjectedCredentialHeader(creds, []);
+  return decision.kind === "inject" ? decision.header : undefined;
 }
 
 /**
  * Apply {@link buildInjectedCredentialHeader} onto an existing header
- * map in-place. Caller headers win on case-insensitive match — if the
- * agent explicitly set the credential header (e.g. passing a per-call
- * token via input), we respect the override rather than clobbering it.
+ * map in-place. The platform credential replaces a case-insensitive caller
+ * match by default. A caller header is preserved only when the manifest
+ * explicitly declares `allowServerOverride: true`.
  */
 export function applyInjectedCredentialHeader(
   headers: Record<string, string>,
   creds: InjectableCredentials,
-): void {
-  const injected = buildInjectedCredentialHeader(creds);
-  if (!injected) return;
-  const lower = injected.name.toLowerCase();
+): HttpDeliveryInjectionDecision {
+  const decision = planInjectedCredentialHeader(creds, Object.keys(headers));
+  if (decision.kind !== "inject") return decision;
+  const lower = decision.header.name.toLowerCase();
   for (const key of Object.keys(headers)) {
-    if (key.toLowerCase() === lower) return; // caller override wins
+    if (key.toLowerCase() === lower) delete headers[key];
   }
-  headers[injected.name] = injected.value;
+  headers[decision.header.name] = decision.header.value;
+  return decision;
 }
 
 /**
@@ -140,16 +169,11 @@ export function applyInjectedCredentialHeader(
 export function applyInjectedCredentialHeaderToHeaders(
   headers: Headers,
   creds: InjectableCredentials,
-): void {
-  const injected = buildInjectedCredentialHeader(creds);
-  if (!injected) return;
-  const lower = injected.name.toLowerCase();
-  let overridden = false;
-  headers.forEach((_v, k) => {
-    if (k.toLowerCase() === lower) overridden = true;
-  });
-  if (overridden) return;
-  headers.set(injected.name, injected.value);
+): HttpDeliveryInjectionDecision {
+  const decision = planInjectedCredentialHeader(creds, [...headers.keys()]);
+  if (decision.kind !== "inject") return decision;
+  headers.set(decision.header.name, decision.header.value);
+  return decision;
 }
 
 /**
