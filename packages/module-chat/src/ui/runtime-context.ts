@@ -56,27 +56,18 @@ export function useSelectConversation(): SelectConversation | null {
   return useContext(SelectConversationContext);
 }
 
-/** Why the chat is asking its host to present a document. */
-export interface DocumentOpenOptions {
-  /** A direct click always wins over a later automatic primary presentation. */
-  trigger: "manual" | "primary";
-}
-
 /**
  * Presents a document through the host's in-app viewer. The same small interface
- * serves direct clicks and automatic primary-output presentation; `trigger` lets
- * the host keep user intent authoritative without leaking its panel state back
- * into module-chat.
+ * serves direct clicks and automatic primary-output presentation. The host does
+ * not need to know why it was called: both interactions select the document in
+ * the same conversation context panel.
  *
  * The module owns no preview component — dependency direction is web →
  * module-chat, so the host injects an opener and the chat delegates to it.
  * `null` means no opener was provided (embedded mounts): direct clicks then fall
  * back to the authenticated download, while automatic presentation is a no-op.
  */
-export type OpenDocument = (
-  doc: { id: string; name: string },
-  options: DocumentOpenOptions,
-) => void;
+export type OpenDocument = (doc: { id: string; name: string }) => void;
 
 /**
  * The host's authenticated document download (typed API client + user-facing

@@ -102,7 +102,12 @@ async function stageUpload(
 /** Seed a minimal run row in the given scope. */
 async function seedRunRow(
   scope: { orgId: string; applicationId: string },
-  extra: { endUserId?: string; input?: Record<string, unknown>; packageId?: string } = {},
+  extra: {
+    endUserId?: string;
+    input?: Record<string, unknown>;
+    packageId?: string;
+    chatSessionId?: string;
+  } = {},
 ): Promise<string> {
   const id = `run_${crypto.randomUUID()}`;
   await db.insert(runs).values({
@@ -112,6 +117,7 @@ async function seedRunRow(
     status: "running",
     endUserId: extra.endUserId ?? null,
     packageId: extra.packageId ?? null,
+    chatSessionId: extra.chatSessionId ?? null,
     input: extra.input ?? null,
     // Sink context so the materialization-failure path can route its terminal
     // transition through `synthesiseFinalize` (getRunSinkContext requires a
@@ -402,6 +408,63 @@ describe("documents service + routes", () => {
 
     const page = await listDocumentsForActor(scope, userActor, { runId });
     expect(page.data.map((d) => d.id)).toEqual([docB.id]);
+  });
+
+  it("lists the complete private chat context without parsing messages", async () => {
+    const sessionId = `chs_${crypto.randomUUID()}`;
+    await db.insert(chatSessions).values({ id: sessionId, orgId: ctx.orgId, userId: ctx.user.id });
+
+    const directUpload = await stageUpload(
+      scope,
+      ctx.user.id,
+      "brief.txt",
+      new TextEncoder().encode("brief"),
+    );
+    const direct = await createDocumentFromUpload(scope, userActor, directUpload, {
+      chatSessionId: sessionId,
+    });
+
+    const conversationRun = await seedRunRow(scope, { chatSessionId: sessionId });
+    const { row: produced } = await publishStream(scope, conversationRun, "result.txt", "result");
+
+    const sourceRun = await seedRunRow(scope);
+    const { row: consumed } = await publishStream(scope, sourceRun, "source.txt", "source");
+    await db.insert(documentLinks).values({
+      documentId: consumed.id,
+      consumerRunId: conversationRun,
+      orgId: ctx.orgId,
+    });
+
+    const page = await listDocumentsForActor(scope, userActor, {
+      contextChatSessionId: sessionId,
+    });
+    expect(new Set(page.data.map((document) => document.id))).toEqual(
+      new Set([direct.id, produced.id, consumed.id]),
+    );
+
+    const response = await app.request(
+      `/api/documents?context_chat_session_id=${encodeURIComponent(sessionId)}`,
+      { headers: authHeaders(ctx) },
+    );
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { data: Array<{ id: string }> };
+    expect(new Set(body.data.map((document) => document.id))).toEqual(
+      new Set([direct.id, produced.id, consumed.id]),
+    );
+  });
+
+  it("does not reveal another member's conversation context", async () => {
+    const other = await createTestUser({ email: "other-chat-owner@docs.test" });
+    await addOrgMember(ctx.orgId, other.id, "member");
+    const sessionId = `chs_${crypto.randomUUID()}`;
+    await db.insert(chatSessions).values({ id: sessionId, orgId: ctx.orgId, userId: other.id });
+    const runId = await seedRunRow(scope, { chatSessionId: sessionId });
+    await publishStream(scope, runId, "private-context.txt", "context");
+
+    const page = await listDocumentsForActor(scope, userActor, {
+      contextChatSessionId: sessionId,
+    });
+    expect(page.data).toEqual([]);
   });
 
   it("DELETE allowed for creator and for admin, forbidden otherwise", async () => {

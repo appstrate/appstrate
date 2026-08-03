@@ -25,9 +25,7 @@ export function documentActivation(
   // translated placeholder so the sentence stays grammatical in every language.
   const fileName = name || "document";
   const labelName = name || t("doc.unnamed");
-  const onActivate = opener
-    ? () => opener({ id, name: fileName }, { trigger: "manual" })
-    : () => download(id, fileName);
+  const onActivate = opener ? () => opener({ id, name: fileName }) : () => download(id, fileName);
   const label = opener
     ? t("doc.previewOf", { name: labelName })
     : t("doc.downloadOf", { name: labelName });

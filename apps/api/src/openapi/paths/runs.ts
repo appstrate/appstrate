@@ -716,7 +716,7 @@ export const runsPaths = {
       tags: ["Runs"],
       summary: "List runs across the application (global view)",
       description:
-        "Org + application scoped paginated list. Supports filtering by `user=me` (self-owned, also implicit for end-user impersonation), `kind` (all, package, inline), `status`, and a date range. Inline runs surface via `package_ephemeral: true` on each row. Note: `kind`, `status`, and date filters are ignored when `user=me` (self-view uses a simpler path).",
+        "Org + application scoped paginated list. Supports filtering by `user=me` (self-owned, also implicit for end-user impersonation), `kind` (all, package, inline), `status`, a date range, and the chat session that launched the run. Inline runs surface via `package_ephemeral: true` on each row. Note: global filters are ignored when `user=me` (self-view uses a simpler path).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
@@ -753,6 +753,12 @@ export const runsPaths = {
         },
         { name: "start_date", in: "query", schema: { type: "string", format: "date-time" } },
         { name: "end_date", in: "query", schema: { type: "string", format: "date-time" } },
+        {
+          name: "chat_session_id",
+          in: "query",
+          schema: { type: "string" },
+          description: "Return only runs launched from this chat session.",
+        },
       ],
       responses: {
         "200": {

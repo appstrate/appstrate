@@ -7,14 +7,14 @@ import type { OpenDocument } from "../src/ui/runtime-context.ts";
 const t = (key: string) => key;
 
 describe("documentActivation", () => {
-  it("reports a direct click as manual presentation to the host", () => {
+  it("delegates a direct click to the host's single document opener", () => {
     const calls: Parameters<OpenDocument>[] = [];
     const opener: OpenDocument = (...args) => calls.push(args);
     const activation = documentActivation({ id: "doc_1", name: "report.md" }, opener, () => {}, t);
 
     activation.onActivate();
 
-    expect(calls).toEqual([[{ id: "doc_1", name: "report.md" }, { trigger: "manual" }]]);
+    expect(calls).toEqual([[{ id: "doc_1", name: "report.md" }]]);
     expect(activation.label).toBe("doc.previewOf");
   });
 

@@ -15,8 +15,10 @@ export type DocumentDto =
 export interface DocumentListFilters {
   purpose?: "user_upload" | "agent_output";
   runId?: string;
+  contextChatSessionId?: string;
   startingAfter?: string;
   limit?: number;
+  enabled?: boolean;
 }
 
 /**
@@ -34,13 +36,14 @@ export function useDocuments(filters: DocumentListFilters = {}) {
         query: {
           purpose: filters.purpose,
           run_id: filters.runId,
+          context_chat_session_id: filters.contextChatSessionId,
           startingAfter: filters.startingAfter,
           limit: filters.limit,
         },
         header: scope.header,
       },
     },
-    { enabled: scope.enabled },
+    { enabled: scope.enabled && filters.enabled !== false },
   );
 }
 

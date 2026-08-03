@@ -7,37 +7,21 @@
 // download, authenticated image preview, staged upload) and the translator.
 // Lazy-loaded behind `features.chat`.
 
-import { useCallback, useEffect, useReducer, useState } from "react";
+import { useCallback, useEffect, useReducer } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ChatPage, type OpenDocument } from "@appstrate/module-chat/ui";
 import { buildScopingHeaders } from "../../lib/scoping-headers";
 import { useSidebarStore } from "../../stores/sidebar-store";
-import { DocumentPreview } from "../../components/document-preview";
 import { useDocumentDownload, useDocumentImageSrc } from "../../hooks/use-documents";
 import { useUploadClient } from "../../hooks/use-upload";
 import {
-  INITIAL_ARTIFACT_PRESENTATION_STATE,
-  artifactPresentationReducer,
-  visibleArtifact,
-} from "./artifact-presentation";
-import { ChatDocumentPanel } from "./document-panel";
+  INITIAL_CONVERSATION_SIDEBAR_STATE,
+  conversationSidebarReducer,
+} from "./conversation-sidebar-state";
+import { ConversationSidebar } from "./conversation-sidebar";
 
-const DESKTOP_ARTIFACT_QUERY = "(min-width: 1024px)";
-
-/** Wide enough for chat + artefact side by side without an overlay. */
-function useDesktopArtifactLayout(): boolean {
-  const [matches, setMatches] = useState(
-    () => typeof window !== "undefined" && window.matchMedia(DESKTOP_ARTIFACT_QUERY).matches,
-  );
-  useEffect(() => {
-    const media = window.matchMedia(DESKTOP_ARTIFACT_QUERY);
-    const onChange = () => setMatches(media.matches);
-    media.addEventListener("change", onChange);
-    return () => media.removeEventListener("change", onChange);
-  }, []);
-  return matches;
-}
+const DESKTOP_CONTEXT_QUERY = "(min-width: 1024px)";
 
 export function ChatModulePage() {
   // Auto-collapse the global sidebar while in chat, restore on leave (same
@@ -56,11 +40,17 @@ export function ChatModulePage() {
   // updates out of the back-history.
   const { conversationId } = useParams<{ conversationId?: string }>();
   const navigate = useNavigate();
-  const [artifactState, dispatchArtifact] = useReducer(
-    artifactPresentationReducer,
-    INITIAL_ARTIFACT_PRESENTATION_STATE,
+  const [sidebarState, dispatchSidebar] = useReducer(
+    conversationSidebarReducer,
+    INITIAL_CONVERSATION_SIDEBAR_STATE,
+    (initialState) => ({
+      ...initialState,
+      // An expanded panel is useful by default beside the desktop chat. On a
+      // compact screen the persistent rail starts collapsed so it never covers
+      // the conversation before the user (or a document) asks to open it.
+      expanded: typeof window !== "undefined" && window.matchMedia(DESKTOP_CONTEXT_QUERY).matches,
+    }),
   );
-  const desktopArtifactLayout = useDesktopArtifactLayout();
   // `location.key` is unique per history entry. The chat mints a fresh
   // conversation id whenever it changes (a new-chat navigation: "+", the nav
   // link, or deleting the active one), so a brand-new conversation is created
@@ -69,7 +59,7 @@ export function ChatModulePage() {
   const location = useLocation();
   const onConversationChange = useCallback(
     (id: string | null) => {
-      dispatchArtifact({ type: "reset" });
+      dispatchSidebar({ type: "conversation-change" });
       navigate(id ? `/chat/${id}` : "/chat", { replace: true });
     },
     [navigate],
@@ -91,30 +81,18 @@ export function ChatModulePage() {
     [t],
   );
   // One presentation interface for both direct clicks and automatic primary
-  // outputs. The reducer keeps user intent authoritative and refuses automatic
-  // overlays on compact layouts; module-chat never learns any shell UI state.
+  // outputs. There is intentionally no trigger/source policy here: selecting a
+  // document always opens the same Preview tab in the same sidebar.
   const presentDocument = useCallback<OpenDocument>(
-    (doc, options) => {
-      dispatchArtifact({
-        type: "present",
-        presentation: {
-          doc,
-          trigger: options.trigger,
-          navigationKey: location.key,
-        },
-        automaticPresentationAllowed: desktopArtifactLayout,
-      });
-    },
-    [desktopArtifactLayout, location.key],
+    (document) => dispatchSidebar({ type: "show-document", document }),
+    [],
   );
-  const artifact = visibleArtifact(artifactState, location.key);
-  const closeArtifact = useCallback(() => dispatchArtifact({ type: "close" }), []);
 
   // Browser back/forward bypasses the chat's selection callback. Clear from the
   // popstate callback (not an effect body) so returning to an old entry never
   // resurrects an artefact the user did not explicitly reopen.
   useEffect(() => {
-    const onHistoryNavigation = () => dispatchArtifact({ type: "reset" });
+    const onHistoryNavigation = () => dispatchSidebar({ type: "conversation-change" });
     window.addEventListener("popstate", onHistoryNavigation);
     return () => window.removeEventListener("popstate", onHistoryNavigation);
   }, []);
@@ -137,7 +115,7 @@ export function ChatModulePage() {
   // bottom. Without a definite height here the flex chain grows with the message
   // list and the composer scrolls off-screen.
   return (
-    <div className="flex h-[calc(100dvh-4rem)] min-h-0 min-w-0">
+    <div className="relative flex h-[calc(100dvh-4rem)] min-h-0 min-w-0">
       <div className="min-w-0 flex-1">
         <ChatPage
           getHeaders={getHeaders}
@@ -145,19 +123,17 @@ export function ChatModulePage() {
           newChatKey={location.key}
           onConversationChange={onConversationChange}
           onOpenDocument={presentDocument}
-          hideConversationList={desktopArtifactLayout && artifact !== null}
           downloadDocument={onDownloadDocument}
           useDocumentImageSrc={useDocumentImageSrc}
           uploadFile={uploadFile}
           t={translate}
         />
       </div>
-      {desktopArtifactLayout && artifact ? (
-        <ChatDocumentPanel doc={artifact.doc} onClose={closeArtifact} />
-      ) : null}
-      {!desktopArtifactLayout && artifact?.trigger === "manual" ? (
-        <DocumentPreview doc={artifact.doc} onClose={closeArtifact} />
-      ) : null}
+      <ConversationSidebar
+        conversationId={conversationId ?? null}
+        state={sidebarState}
+        dispatch={dispatchSidebar}
+      />
     </div>
   );
 }

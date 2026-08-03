@@ -202,28 +202,30 @@ describe("run-events helpers", () => {
         name: "out.csv",
         mime: "text/csv",
         size: 40,
-        presentation: "primary",
       },
     ]);
     expect(primaryDocumentFromLogs(logs)?.id).toBe("doc_9");
   });
 
-  it("merges document lists deduping by id while newer promotion metadata wins", () => {
-    const persisted = [
-      { id: "doc_1", uri: "document://doc_1", name: "report.html", presentation: null as null },
-    ];
+  it("merges regular document lists without projecting primary presentation", () => {
+    const persisted = [{ id: "doc_1", uri: "document://doc_1", name: "report" }];
     const live = [
       {
         id: "doc_1",
         uri: "document://doc_1",
         name: "report.html",
-        presentation: "primary" as const,
+        mime: "text/html",
       },
       { id: "doc_2", uri: "document://doc_2", name: "data.json" },
     ];
     const merged = mergeRunDocuments(persisted, live);
     expect(merged.map((d) => d.id)).toEqual(["doc_1", "doc_2"]);
-    expect(merged[0]?.presentation).toBe("primary");
+    expect(merged[0]).toEqual({
+      id: "doc_1",
+      uri: "document://doc_1",
+      name: "report.html",
+      mime: "text/html",
+    });
   });
 
   it("uses the last primary log when a run replaces its featured output", () => {

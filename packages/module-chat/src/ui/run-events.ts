@@ -324,8 +324,6 @@ export interface ChatRunDocument {
   name: string;
   mime?: string;
   size?: number;
-  /** Explicit run-page presentation role carried by document log events. */
-  presentation?: "primary" | null;
 }
 
 function asChatRunDocument(raw: unknown): ChatRunDocument | undefined {
@@ -340,8 +338,6 @@ function asChatRunDocument(raw: unknown): ChatRunDocument | undefined {
   const mime = nonEmptyString(r.mime);
   if (mime) doc.mime = mime;
   if (typeof r.size === "number") doc.size = r.size;
-  if (r.presentation === "primary") doc.presentation = "primary";
-  else if (r.presentation === null) doc.presentation = null;
   return doc;
 }
 
@@ -389,16 +385,17 @@ export function primaryDocumentFromLogs(logs: readonly RunLogLine[]): ChatRunDoc
   let primary: ChatRunDocument | undefined;
   for (const line of logs) {
     if (line.event !== "document" || !line.data || typeof line.data !== "object") continue;
+    if (asRecord(line.data)?.presentation !== "primary") continue;
     const doc = asChatRunDocument(line.data);
-    if (doc?.presentation === "primary") primary = doc;
+    if (doc) primary = doc;
   }
   return primary;
 }
 
 /**
- * Merge two document lists, deduping by id while letting newer metadata win.
- * This matters when an ordinary publication is later promoted through a dedup
- * replay: the second log carries `presentation: primary` for the same id.
+ * Merge two regular document lists, deduping by id while letting newer display
+ * metadata win. Presentation is intentionally not projected into this type:
+ * `primary` is only an automatic-open signal, never a different document kind.
  */
 export function mergeRunDocuments(
   a: readonly ChatRunDocument[],

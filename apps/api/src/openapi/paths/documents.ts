@@ -181,7 +181,8 @@ export const documentsPaths = {
         "`documents:read` permission (the family gate — mirrors `runs:read`); on top of it, " +
         "each row is filtered by its own container ACL, so members see their own documents " +
         "(and system-owned ones) and end-users see only their own. Filter by `purpose`, " +
-        "`run_id`, `packageId`, or `chat_session_id`; paginate with `startingAfter` + `limit`.",
+        "`run_id`, `packageId`, `chat_session_id`, or a chat session's complete context; " +
+        "paginate with `startingAfter` + `limit`.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
@@ -212,6 +213,14 @@ export const documentsPaths = {
           required: false,
           schema: { type: "string" },
           description: "Filter to documents anchored to this chat session.",
+        },
+        {
+          name: "context_chat_session_id",
+          in: "query",
+          required: false,
+          schema: { type: "string" },
+          description:
+            "Filter to the private conversation context: direct attachments plus documents produced or consumed by runs launched from the session.",
         },
         {
           name: "startingAfter",

@@ -14,8 +14,8 @@
  * deliverable into the conversation. This module therefore does two things:
  *
  *  1. {@link stampChatSessionOnRun} — at launch, record WHICH chat session
- *     started the run, on `runs.metadata.chatSessionId` (JSONB, already there:
- *     no column, no migration). Written by the chat itself rather than accepted
+ *     started the run, on the first-class `runs.chat_session_id` relationship.
+ *     Written by the chat itself rather than accepted
  *     from a request header, so the link can only ever exist for a run the chat
  *     genuinely launched — a header would have made "write a message into a chat
  *     session" reachable from the public run routes.
@@ -43,19 +43,13 @@
  *    worker or a table — all three out of proportion for this.
  */
 
-import { and, asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { chatSessions, documents, runs } from "@appstrate/db/schema";
 import { documentUri } from "@appstrate/core/document-uri";
 import { persistNotice } from "./persistence.ts";
 import { buildRunPageHref } from "./ui/run-events.ts";
 import { logger } from "./logger.ts";
-
-/**
- * `runs.metadata` key carrying the launching chat session. camelCase per the
- * universal DB-convention carve-out for `*Id` fields (CASING_CONVENTIONS.md).
- */
-const RUN_METADATA_CHAT_SESSION_KEY = "chatSessionId";
 
 /** One document named in the notice. */
 interface NoticedDocument {
@@ -125,18 +119,10 @@ export function runNoticeText(input: {
   );
 }
 
-/** Read the launching chat session id off a run's `metadata` JSONB, safely. */
-function readChatSessionId(metadata: unknown): string | null {
-  if (typeof metadata !== "object" || metadata === null || Array.isArray(metadata)) return null;
-  const value = (metadata as Record<string, unknown>)[RUN_METADATA_CHAT_SESSION_KEY];
-  return typeof value === "string" && value.length > 0 ? value : null;
-}
-
 /**
- * Record the launching chat session on a just-created run. Merges into the
- * existing JSONB (`jsonb_set` over `COALESCE(metadata,'{}')`) so it cannot
- * clobber a concurrent platform write to the same column (e.g.
- * `degraded_integrations`), and is scoped by `org_id` as well as `id`.
+ * Record the launching chat session on a just-created run. The dedicated
+ * relationship column keeps conversation context queryable and cannot clobber
+ * unrelated run metadata. The write is scoped by `org_id` as well as `id`.
  *
  * Best-effort: a failure here costs the reconciliation notice for this one run,
  * and must never fail the `run_and_wait` tool call that just succeeded.
@@ -149,9 +135,7 @@ export async function stampChatSessionOnRun(
   try {
     await db
       .update(runs)
-      .set({
-        metadata: sql`jsonb_set(COALESCE(${runs.metadata}, '{}'::jsonb), ${`{${RUN_METADATA_CHAT_SESSION_KEY}}`}, to_jsonb(${chatSessionId}::text), true)`,
-      })
+      .set({ chatSessionId })
       .where(and(eq(runs.id, runId), eq(runs.orgId, orgId)));
   } catch (err) {
     logger.warn("chat: failed to link run to its chat session", {
@@ -167,7 +151,7 @@ export async function stampChatSessionOnRun(
  * true only when a notice was actually written — every other outcome is a
  * deliberate skip:
  *
- *  - the run was not launched from a chat session (no metadata link);
+ *  - the run was not launched from a chat session;
  *  - its session is gone;
  *  - a turn is generating on that session (see the liveness rationale above);
  *  - the run published no document, so there is nothing to announce;
@@ -175,11 +159,15 @@ export async function stampChatSessionOnRun(
  */
 export async function reconcileChatRun(input: { runId: string; orgId: string }): Promise<boolean> {
   const [run] = await db
-    .select({ metadata: runs.metadata, packageId: runs.packageId, status: runs.status })
+    .select({
+      chatSessionId: runs.chatSessionId,
+      packageId: runs.packageId,
+      status: runs.status,
+    })
     .from(runs)
     .where(and(eq(runs.id, input.runId), eq(runs.orgId, input.orgId)))
     .limit(1);
-  const chatSessionId = readChatSessionId(run?.metadata);
+  const chatSessionId = run?.chatSessionId;
   if (!run || !chatSessionId) return false;
 
   const [session] = await db

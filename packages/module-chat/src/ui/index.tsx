@@ -40,7 +40,7 @@ import type {
   UploadFile,
   UseDocumentImageSrc,
 } from "./runtime-context.ts";
-export type { DocumentOpenOptions, OpenDocument } from "./runtime-context.ts";
+export type { OpenDocument } from "./runtime-context.ts";
 import { ThreadList, ActiveConversationTitle } from "./thread-list.tsx";
 import { ModelSelect } from "./model-select.tsx";
 import { fetchModels, type OrgModelOption } from "./models-data.ts";
@@ -96,8 +96,6 @@ export interface ChatPageProps {
    * tool UIs via context, not props.
    */
   onOpenDocument?: OpenDocument;
-  /** Hide the desktop conversation rail while the host shows a side artefact. */
-  hideConversationList?: boolean;
   /**
    * REQUIRED host services — the chat implements none of them itself (see
    * `runtime-context.ts`): the authenticated download, the authenticated image
@@ -115,7 +113,6 @@ export function ChatPage({
   newChatKey,
   onConversationChange,
   onOpenDocument,
-  hideConversationList = false,
   downloadDocument,
   useDocumentImageSrc,
   uploadFile,
@@ -219,11 +216,9 @@ export function ChatPage({
       <SelectConversationProvider value={onConversationChange ?? null}>
         <ChatHostProvider value={host}>
           <div className="bg-background flex h-full w-full">
-            {!hideConversationList && (
-              <aside className="hidden w-64 shrink-0 flex-col border-r md:flex">
-                <ThreadList activeId={conversationId ?? null} unreadIds={unreadIds} />
-              </aside>
-            )}
+            <aside className="hidden w-64 shrink-0 flex-col border-r md:flex">
+              <ThreadList activeId={conversationId ?? null} unreadIds={unreadIds} />
+            </aside>
 
             {mobileOpen && (
               <div className="fixed inset-0 z-40 md:hidden">
@@ -254,7 +249,7 @@ export function ChatPage({
                   type="button"
                   onClick={() => setMobileOpen(true)}
                   aria-label="Conversations"
-                  className={`hover:bg-accent -ml-1 rounded-md p-1.5 ${hideConversationList ? "" : "md:hidden"}`}
+                  className="hover:bg-accent -ml-1 rounded-md p-1.5 md:hidden"
                 >
                   <PanelLeftIcon className="size-5" />
                 </button>
