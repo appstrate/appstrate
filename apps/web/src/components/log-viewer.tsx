@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState, useEffect, useRef, type ReactNode } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
@@ -55,28 +55,25 @@ function LevelBadge({ level }: { level?: string }) {
   );
 }
 
-function ExecutionEntryLeading({ entry }: { entry: ExecutionEntry }) {
-  let content: ReactNode = null;
-
+function ExecutionEntryMetadata({ entry }: { entry: ExecutionEntry }) {
   if (entry.kind === "agent") {
-    content = <MessageSquareText className="size-3.5 text-violet-400" />;
-  } else if (entry.kind === "log") {
-    content = (
+    return <MessageSquareText className="size-3.5 text-violet-400" />;
+  }
+  if (entry.kind === "log") {
+    return (
       <>
         <MessageSquareText className="size-3.5" />
         <LevelBadge level={entry.level} />
       </>
     );
-  } else if (entry.kind === "runtime") {
-    if (!entry.level || entry.level === "debug") {
-      content = <span className="bg-primary size-1.5 rounded-full opacity-60" />;
-    } else if (levelConfig[entry.level]) {
-      content = <LevelBadge level={entry.level} />;
-    }
   }
-
-  if (!content) return null;
-  return <span className="mr-1.5 flex h-7 shrink-0 items-center gap-1.5">{content}</span>;
+  if (entry.kind === "runtime") {
+    if (!entry.level || entry.level === "debug") {
+      return <span className="bg-primary size-1.5 rounded-full opacity-60" />;
+    }
+    return levelConfig[entry.level] ? <LevelBadge level={entry.level} /> : null;
+  }
+  return null;
 }
 
 const toolStatusConfig = {
@@ -345,13 +342,13 @@ export function LogViewer({ entries }: LogViewerProps) {
                   tabIndex={hasToolDetails ? 0 : undefined}
                   aria-haspopup={hasToolDetails ? "dialog" : undefined}
                 >
-                  {showTimestamps && (
-                    <span className="text-muted-foreground/60 mr-2 flex h-7 shrink-0 items-center font-mono text-xs">
-                      {formatTimestamp(entry.createdAt, i18n.language)}
-                    </span>
-                  )}
                   {entry.kind === "tool" ? (
                     <>
+                      {showTimestamps && (
+                        <span className="text-muted-foreground/60 mr-2 flex h-7 shrink-0 items-center font-mono text-xs">
+                          {formatTimestamp(entry.createdAt, i18n.language)}
+                        </span>
+                      )}
                       <ToolStatus status={entry.status} />
                       <Wrench className="text-muted-foreground/60 ml-1.5 size-3.5 shrink-0" />
                       <span className="text-foreground ml-1.5 font-medium">{entry.tool}</span>
@@ -367,18 +364,25 @@ export function LogViewer({ entries }: LogViewerProps) {
                       )}
                     </>
                   ) : (
-                    <>
-                      <ExecutionEntryLeading entry={entry} />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex h-5 items-center gap-1.5">
+                        {showTimestamps && (
+                          <span className="text-muted-foreground/60 shrink-0 font-mono text-xs">
+                            {formatTimestamp(entry.createdAt, i18n.language)}
+                          </span>
+                        )}
+                        <ExecutionEntryMetadata entry={entry} />
+                      </div>
                       <span
                         className={cn(
-                          "text-foreground/80 min-w-0 flex-1 break-words whitespace-pre-wrap",
+                          "text-foreground/80 block min-w-0 break-words whitespace-pre-wrap",
                           (entry.kind === "agent" || entry.kind === "log") && "font-sans",
                           entry.level && levelColors[entry.level],
                         )}
                       >
                         {entry.message}
                       </span>
-                    </>
+                    </div>
                   )}
                 </div>
               </div>
