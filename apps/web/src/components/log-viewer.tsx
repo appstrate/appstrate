@@ -345,7 +345,7 @@ export function LogViewer({ entries }: LogViewerProps) {
                     </>
                   ) : (
                     <>
-                      <span className="flex h-7 w-3.5 shrink-0 items-center justify-center">
+                      <span className="flex h-7 w-3.5 shrink-0 -translate-y-1 items-center justify-center">
                         <ExecutionEntryIcon entry={entry} />
                       </span>
                       {showTimestamps && (
