@@ -16,6 +16,88 @@
     "model": null
   },
   "summary": "Documentaliste de mémoire : à chaque run, prend un verrou Drive, ingère le delta Gmail et Drive depuis des curseurs de manifeste, synthétise par retouches chirurgicales dans un wiki markdown OKF, régénère index et log, purge le brut et rend son compte rendu. Pipeline strictement ordonné (étapes 0 à 7) doublé d'un corpus de politiques de rédaction, de sélection et de sécurité qui n'a aucune place dans le flot.",
+  "groups": [
+    {
+      "name": "Cadre",
+      "shape": "policies",
+      "order": 0
+    },
+    {
+      "name": "0. Verrou",
+      "shape": "sequence",
+      "order": 1
+    },
+    {
+      "name": "1. Lire l'état",
+      "shape": "sequence",
+      "order": 2
+    },
+    {
+      "name": "2. Ingestion",
+      "shape": "sequence",
+      "order": 3
+    },
+    {
+      "name": "3. Diff",
+      "shape": "sequence",
+      "order": 4
+    },
+    {
+      "name": "4. Synthèse",
+      "shape": "sequence",
+      "order": 5
+    },
+    {
+      "name": "5. Conformité OKF",
+      "shape": "sequence",
+      "order": 6
+    },
+    {
+      "name": "6. Purge du brut",
+      "shape": "policies",
+      "order": 7
+    },
+    {
+      "name": "7. Clôture",
+      "shape": "sequence",
+      "order": 8
+    },
+    {
+      "name": "Premier run",
+      "shape": "sequence",
+      "order": 9
+    },
+    {
+      "name": "Budget de diff",
+      "shape": "policies",
+      "order": 10
+    },
+    {
+      "name": "Structure canonique",
+      "shape": "policies",
+      "order": 11
+    },
+    {
+      "name": "Frontmatter OKF",
+      "shape": "policies",
+      "order": 12
+    },
+    {
+      "name": "Disciplines de synthèse",
+      "shape": "policies",
+      "order": 13
+    },
+    {
+      "name": "Sécurité",
+      "shape": "policies",
+      "order": 14
+    },
+    {
+      "name": "Appels API",
+      "shape": "policies",
+      "order": 15
+    }
+  ],
   "steps": [
     {
       "id": "c1",
@@ -272,7 +354,8 @@
         "lines": [61, 61],
         "quote": "Pour chaque source, fais des appels datés à partir du curseur du manifeste, dépose le brut, puis réécris le manifeste avec le nouveau curseur."
       },
-      "confidence": 0.97
+      "confidence": 0.97,
+      "over": "les sources concernées (toutes, ou `input.source` seule)"
     },
     {
       "id": "s2.1",

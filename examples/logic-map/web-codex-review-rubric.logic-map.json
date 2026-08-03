@@ -16,6 +16,47 @@
     "model": null
   },
   "summary": "Rubrique de revue de code de Codex CLI : critères de qualification d'un bug, règles de rédaction des commentaires, attribution des règles du dépôt, échelle de priorité P0–P3 et schéma JSON de sortie strict. Document de critères, sans ordre global, terminé par une seule émission.",
+  "groups": [
+    {
+      "name": "0. Autorité et précédence",
+      "order": 0
+    },
+    {
+      "name": "1. Qualifier un bug",
+      "shape": "policies",
+      "order": 1
+    },
+    {
+      "name": "2. Rédiger le commentaire",
+      "shape": "policies",
+      "order": 2
+    },
+    {
+      "name": "3. Combien de constats",
+      "shape": "sequence",
+      "order": 3
+    },
+    {
+      "name": "4. Règles de revue",
+      "shape": "policies",
+      "order": 4
+    },
+    {
+      "name": "5. Attribution des règles du dépôt",
+      "shape": "sequence",
+      "order": 5
+    },
+    {
+      "name": "6. Priorité et verdict",
+      "shape": "sequence",
+      "order": 6
+    },
+    {
+      "name": "7. Sortie",
+      "shape": "policies",
+      "order": 7
+    }
+  ],
   "steps": [
     {
       "id": "meta1",
@@ -32,7 +73,6 @@
       },
       "confidence": 0.98
     },
-
     {
       "id": "q1",
       "kind": "guard",
@@ -153,7 +193,6 @@
       },
       "confidence": 0.98
     },
-
     {
       "id": "c1",
       "kind": "guard",
@@ -274,7 +313,6 @@
       },
       "confidence": 0.98
     },
-
     {
       "id": "n1",
       "kind": "decision",
@@ -320,7 +358,6 @@
       },
       "confidence": 0.97
     },
-
     {
       "id": "r1",
       "kind": "guard",
@@ -396,7 +433,6 @@
       },
       "confidence": 0.98
     },
-
     {
       "id": "ra1",
       "kind": "step",
@@ -532,7 +568,6 @@
       },
       "confidence": 0.98
     },
-
     {
       "id": "pr1",
       "kind": "decision",
@@ -608,7 +643,6 @@
       },
       "confidence": 0.97
     },
-
     {
       "id": "o1",
       "kind": "emit",
@@ -696,13 +730,41 @@
       "to": "n2",
       "condition": "aucun constat que l'auteur voudrait certainement corriger"
     },
-    { "from": "n1", "to": "n3", "condition": "au moins un constat qualifiant" },
-    { "from": "ra2", "to": "ra3", "condition": null },
-    { "from": "ra3", "to": "ra6", "condition": "rule-supported" },
-    { "from": "ra4", "to": "ra6", "condition": null },
-    { "from": "pr1", "to": "pr2", "condition": null },
-    { "from": "pr2", "to": "pr3", "condition": null },
-    { "from": "pr4", "to": "o1", "condition": null }
+    {
+      "from": "n1",
+      "to": "n3",
+      "condition": "au moins un constat qualifiant"
+    },
+    {
+      "from": "ra2",
+      "to": "ra3",
+      "condition": null
+    },
+    {
+      "from": "ra3",
+      "to": "ra6",
+      "condition": "rule-supported"
+    },
+    {
+      "from": "ra4",
+      "to": "ra6",
+      "condition": null
+    },
+    {
+      "from": "pr1",
+      "to": "pr2",
+      "condition": null
+    },
+    {
+      "from": "pr2",
+      "to": "pr3",
+      "condition": null
+    },
+    {
+      "from": "pr4",
+      "to": "o1",
+      "condition": null
+    }
   ],
   "gaps": [
     {

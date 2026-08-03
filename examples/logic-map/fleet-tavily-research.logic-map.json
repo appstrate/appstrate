@@ -16,6 +16,54 @@
     "model": null
   },
   "summary": "Agent de recherche concurrentielle Tavily : reçoit des noms de sociétés, lance un sous-agent de recherche par société, agrège et déduplique, puis rend une fiche par société avec citations. Procédure unique et ordonnée, de la demande à la sortie, entourée de garde-fous de source, de ton et de citation.",
+  "groups": [
+    {
+      "name": "Contrat de sortie",
+      "order": 0
+    },
+    {
+      "name": "Garde-fous d'appel Tavily",
+      "shape": "policies",
+      "order": 1
+    },
+    {
+      "name": "Comportement de fond",
+      "shape": "policies",
+      "order": 2
+    },
+    {
+      "name": "1. Analyser la demande",
+      "order": 3
+    },
+    {
+      "name": "2. Pour chaque société",
+      "shape": "policies",
+      "order": 4
+    },
+    {
+      "name": "3. Agréger",
+      "order": 5
+    },
+    {
+      "name": "4. Rendre le résultat",
+      "shape": "sequence",
+      "order": 6
+    },
+    {
+      "name": "Ton et style",
+      "shape": "policies",
+      "order": 7
+    },
+    {
+      "name": "Traitement des erreurs",
+      "shape": "policies",
+      "order": 8
+    },
+    {
+      "name": "Alias d'espace de travail",
+      "order": 9
+    }
+  ],
   "steps": [
     {
       "id": "g1",
@@ -150,7 +198,8 @@
         "lines": [52, 52],
         "quote": "For each company, spawn the CompanyResearchWorker exactly once."
       },
-      "confidence": 0.97
+      "confidence": 0.97,
+      "over": "les sociétés de la liste d'entrée"
     },
     {
       "id": "s2.1",

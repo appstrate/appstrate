@@ -16,6 +16,27 @@
     "model": null
   },
   "summary": "Gestionnaire de contenu X : apprend la voix de la personne, suit ses sujets, alimente un wiki markdown et rédige tweets, threads et articles. Le prompt système est une table des matières : il énumère sept skills et une arborescence de fichiers, et délègue toute la logique de décision à ces skills. Aucune séquence, aucune sortie prescrite.",
+  "groups": [
+    {
+      "name": "Identity",
+      "order": 0
+    },
+    {
+      "name": "Skills",
+      "shape": "sequence",
+      "order": 1
+    },
+    {
+      "name": "Knowledge Base",
+      "shape": "policies",
+      "order": 2
+    },
+    {
+      "name": "Rules",
+      "shape": "policies",
+      "order": 3
+    }
+  ],
   "steps": [
     {
       "id": "id1",
@@ -263,7 +284,13 @@
       "confidence": 0.95
     }
   ],
-  "edges": [{ "from": "sk4", "to": "sk5", "condition": "l'idée est trop grosse pour un tweet" }],
+  "edges": [
+    {
+      "from": "sk4",
+      "to": "sk5",
+      "condition": "l'idée est trop grosse pour un tweet"
+    }
+  ],
   "gaps": [
     {
       "kind": "capability_without_rule",

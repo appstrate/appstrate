@@ -16,6 +16,33 @@
     "model": null
   },
   "summary": "Transforme un transcript de réunion en décisions, actions assignées et points d'attention, restitue par `output` et `report`, puis mémorise un checkpoint par `pin` et archive les décisions structurantes par `note`. Seul agent du corpus qui écrit dans sa propre mémoire.",
+  "groups": [
+    {
+      "name": "1. Lire le contexte",
+      "shape": "sequence",
+      "order": 0
+    },
+    {
+      "name": "2. Analyser le transcript",
+      "shape": "sequence",
+      "order": 1
+    },
+    {
+      "name": "3. Restituer",
+      "shape": "sequence",
+      "order": 2
+    },
+    {
+      "name": "4. Mémoriser",
+      "shape": "sequence",
+      "order": 3
+    },
+    {
+      "name": "Règles",
+      "shape": "policies",
+      "order": 4
+    }
+  ],
   "steps": [
     {
       "id": "s1",

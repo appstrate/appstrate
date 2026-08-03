@@ -144,6 +144,33 @@ describe("logic-map schema", () => {
     expect(families.size).toBe(13);
   });
 
+  // Un champ ajouté au schéma que le corpus n'exerce jamais est un champ non éprouvé : la
+  // suite de non-régression le laisse passer quoi qu'il arrive. Trois l'étaient, et deux
+  // limites de lecture les réclamaient encore alors qu'ils existaient déjà.
+  it("keeps the corpus exercising the fields the format grew for it", () => {
+    const maps = exampleFiles.map(
+      (f) =>
+        JSON.parse(readFileSync(join(EXAMPLES_DIR, f), "utf8")) as {
+          groups?: unknown[];
+          steps: { kind: string; over?: unknown; until?: unknown; applies_to?: string[] }[];
+        },
+    );
+    const loops = maps.flatMap((m) => m.steps.filter((s) => s.kind === "loop"));
+
+    // Une boucle dit toujours CE QU'ELLE PARCOURT, ou jusqu'à quand elle tourne.
+    expect(loops.length).toBeGreaterThan(0);
+    expect(loops.filter((l) => l.over == null && l.until == null)).toEqual([]);
+
+    // `groups[]` porte la forme par grappe : sans elle, un hybride n'est pas exprimable.
+    expect(maps.filter((m) => (m.groups?.length ?? 0) > 0).length).toBeGreaterThanOrEqual(18);
+
+    // `applies_to` distingue une contrainte d'une posture ; au moins une carte le prouve.
+    const bornes = maps.flatMap((m) =>
+      m.steps.filter((s) => s.kind === "guard" && (s.applies_to?.length ?? 0) > 0),
+    );
+    expect(bornes.length).toBeGreaterThan(0);
+  });
+
   it("requires `aggregated` when a node declares how many gestures it folds", () => {
     const validate = makeValidator();
     const map = JSON.parse(readFileSync(join(EXAMPLES_DIR, exampleFiles[0]!), "utf8"));

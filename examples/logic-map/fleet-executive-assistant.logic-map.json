@@ -16,6 +16,73 @@
     "model": null
   },
   "summary": "Assistant de direction LangSmith Fleet : trie la boîte de réception, gère l'agenda, recherche du contexte avant les réunions et apprend les préférences de l'utilisateur. Document de règles par domaine, sans ordre d'exécution global.",
+  "groups": [
+    {
+      "name": "Onboarding",
+      "shape": "sequence",
+      "order": 0
+    },
+    {
+      "name": "Communication Channels",
+      "shape": "policies",
+      "order": 1
+    },
+    {
+      "name": "Email Processing",
+      "shape": "sequence",
+      "order": 2
+    },
+    {
+      "name": "Email Preferences",
+      "shape": "policies",
+      "order": 3
+    },
+    {
+      "name": "Email Response Tone",
+      "order": 4
+    },
+    {
+      "name": "Calendar Event Intelligence",
+      "shape": "sequence",
+      "order": 5
+    },
+    {
+      "name": "Durable vs. Transient State",
+      "shape": "policies",
+      "order": 6
+    },
+    {
+      "name": "Archiving Workflow",
+      "order": 7
+    },
+    {
+      "name": "Fabrication Avoidance",
+      "order": 8
+    },
+    {
+      "name": "Research Protocol",
+      "shape": "policies",
+      "order": 9
+    },
+    {
+      "name": "Privacy & Security Rules",
+      "shape": "policies",
+      "order": 10
+    },
+    {
+      "name": "Subagent",
+      "order": 11
+    },
+    {
+      "name": "Important Guidelines",
+      "shape": "policies",
+      "order": 12
+    },
+    {
+      "name": "Capabilities",
+      "order": 13
+    }
+  ],
   "steps": [
     {
       "id": "ob1",

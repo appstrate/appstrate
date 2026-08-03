@@ -16,6 +16,103 @@
     "model": null
   },
   "summary": "Prompt système complet de l'agent OpenHands (snapshot de test, variante navigateur + analyse de sécurité + CLI). Dix-huit sections balisées, presque toutes des règles par domaine, avec un seul flot ordonné au milieu (PROBLEM_SOLVING_WORKFLOW). Seules les lignes 1 à 199 sont cartographiées : au-delà commence le contexte dynamique du fixture de test.",
+  "groups": [
+    {
+      "name": "ROLE",
+      "shape": "policies",
+      "order": 0
+    },
+    {
+      "name": "MEMORY",
+      "shape": "policies",
+      "order": 1
+    },
+    {
+      "name": "EFFICIENCY",
+      "shape": "policies",
+      "order": 2
+    },
+    {
+      "name": "FILE_SYSTEM_GUIDELINES",
+      "shape": "policies",
+      "order": 3
+    },
+    {
+      "name": "CODE_QUALITY",
+      "shape": "policies",
+      "order": 4
+    },
+    {
+      "name": "VERSION_CONTROL",
+      "shape": "policies",
+      "order": 5
+    },
+    {
+      "name": "PULL_REQUESTS",
+      "shape": "policies",
+      "order": 6
+    },
+    {
+      "name": "PROBLEM_SOLVING_WORKFLOW",
+      "shape": "sequence",
+      "order": 7
+    },
+    {
+      "name": "SELF_DOCUMENTATION",
+      "shape": "policies",
+      "order": 8
+    },
+    {
+      "name": "SECURITY — sans consentement",
+      "shape": "policies",
+      "order": 9
+    },
+    {
+      "name": "SECURITY — consentement requis",
+      "shape": "policies",
+      "order": 10
+    },
+    {
+      "name": "SECURITY — jamais",
+      "shape": "policies",
+      "order": 11
+    },
+    {
+      "name": "SECURITY_RISK_ASSESSMENT",
+      "shape": "policies",
+      "order": 12
+    },
+    {
+      "name": "BROWSER_TOOLS",
+      "shape": "sequence",
+      "order": 13
+    },
+    {
+      "name": "EXTERNAL_SERVICES",
+      "shape": "policies",
+      "order": 14
+    },
+    {
+      "name": "ENVIRONMENT_SETUP",
+      "shape": "policies",
+      "order": 15
+    },
+    {
+      "name": "TROUBLESHOOTING",
+      "shape": "policies",
+      "order": 16
+    },
+    {
+      "name": "PROCESS_MANAGEMENT",
+      "shape": "policies",
+      "order": 17
+    },
+    {
+      "name": "IMPORTANT",
+      "shape": "policies",
+      "order": 18
+    }
+  ],
   "steps": [
     {
       "id": "ro1",
@@ -47,7 +144,6 @@
       },
       "confidence": 0.98
     },
-
     {
       "id": "me1",
       "kind": "policy",
@@ -78,7 +174,6 @@
       },
       "confidence": 0.94
     },
-
     {
       "id": "ef1",
       "kind": "guard",
@@ -109,7 +204,6 @@
       },
       "confidence": 0.95
     },
-
     {
       "id": "fs1",
       "kind": "guard",
@@ -215,7 +309,6 @@
       },
       "confidence": 0.98
     },
-
     {
       "id": "cq1",
       "kind": "guard",
@@ -306,7 +399,6 @@
       },
       "confidence": 0.97
     },
-
     {
       "id": "vc1",
       "kind": "policy",
@@ -397,7 +489,6 @@
       },
       "confidence": 0.98
     },
-
     {
       "id": "pr1",
       "kind": "guard",
@@ -473,7 +564,6 @@
       },
       "confidence": 0.96
     },
-
     {
       "id": "w1",
       "kind": "step",
@@ -639,7 +729,6 @@
       },
       "confidence": 0.97
     },
-
     {
       "id": "sd1",
       "kind": "policy",
@@ -670,7 +759,6 @@
       },
       "confidence": 0.98
     },
-
     {
       "id": "se1",
       "kind": "policy",
@@ -866,7 +954,6 @@
       },
       "confidence": 0.98
     },
-
     {
       "id": "sr1",
       "kind": "decision",
@@ -912,7 +999,6 @@
       },
       "confidence": 0.97
     },
-
     {
       "id": "bt1",
       "kind": "policy",
@@ -1003,7 +1089,6 @@
       },
       "confidence": 0.99
     },
-
     {
       "id": "es1",
       "kind": "policy",
@@ -1034,7 +1119,6 @@
       },
       "confidence": 0.98
     },
-
     {
       "id": "en1",
       "kind": "policy",
@@ -1065,7 +1149,6 @@
       },
       "confidence": 0.96
     },
-
     {
       "id": "tr1",
       "kind": "policy",
@@ -1096,7 +1179,6 @@
       },
       "confidence": 0.98
     },
-
     {
       "id": "pm1",
       "kind": "guard",
@@ -1127,7 +1209,6 @@
       },
       "confidence": 0.98
     },
-
     {
       "id": "im1",
       "kind": "guard",
@@ -1175,17 +1256,41 @@
     }
   ],
   "edges": [
-    { "from": "w1", "to": "w2", "condition": null },
-    { "from": "w2", "to": "w3", "condition": null },
-    { "from": "w3", "to": "w4", "condition": null },
-    { "from": "w4", "to": "w5", "condition": null },
+    {
+      "from": "w1",
+      "to": "w2",
+      "condition": null
+    },
+    {
+      "from": "w2",
+      "to": "w3",
+      "condition": null
+    },
+    {
+      "from": "w3",
+      "to": "w4",
+      "condition": null
+    },
+    {
+      "from": "w4",
+      "to": "w5",
+      "condition": null
+    },
     {
       "from": "w5",
       "to": "tr1",
       "condition": "les tests échouent encore après plusieurs tentatives"
     },
-    { "from": "tr1", "to": "w4", "condition": "traiter la cause la plus probable" },
-    { "from": "bt3", "to": "bt4", "condition": "toujours bloqué après changement d'approche" }
+    {
+      "from": "tr1",
+      "to": "w4",
+      "condition": "traiter la cause la plus probable"
+    },
+    {
+      "from": "bt3",
+      "to": "bt4",
+      "condition": "toujours bloqué après changement d'approche"
+    }
   ],
   "gaps": [
     {

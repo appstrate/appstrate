@@ -21,6 +21,45 @@
     "model": null
   },
   "summary": "Relève les factures PDF d'une boîte Gmail sur la fenêtre d'un trimestre fiscal et les dépose à plat dans l'Inbox Drive, avec dédup par label Gmail et par empreinte md5, puis marque les messages traités.",
+  "groups": [
+    {
+      "name": "Préambule",
+      "order": 0
+    },
+    {
+      "name": "1. Déterminer la fenêtre",
+      "shape": "sequence",
+      "order": 1
+    },
+    {
+      "name": "2. Label et index d'empreintes",
+      "shape": "sequence",
+      "order": 2
+    },
+    {
+      "name": "3. Chercher les messages",
+      "shape": "sequence",
+      "order": 3
+    },
+    {
+      "name": "4. Pour chaque message",
+      "shape": "sequence",
+      "order": 4
+    },
+    {
+      "name": "5. Mode dry_run",
+      "order": 5
+    },
+    {
+      "name": "6. Sortie",
+      "order": 6
+    },
+    {
+      "name": "Garde-fous",
+      "shape": "policies",
+      "order": 7
+    }
+  ],
   "steps": [
     {
       "id": "s1",
@@ -200,7 +239,8 @@
         "lines": [34, 34],
         "quote": "### 4. Pour chaque message"
       },
-      "confidence": 0.99
+      "confidence": 0.99,
+      "over": "les messages Gmail de la fenêtre"
     },
     {
       "id": "s12.1",
@@ -305,7 +345,8 @@
         "lines": [41, 41],
         "quote": "Pour chaque PDF retenu : télécharge la pièce jointe, **calcule son md5** (`md5sum`)"
       },
-      "confidence": 0.98
+      "confidence": 0.98,
+      "over": "les PDF retenus du message"
     },
     {
       "id": "s12.7.1",

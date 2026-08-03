@@ -16,6 +16,43 @@
     "model": null
   },
   "summary": "Ingénieur logiciel LangSmith Fleet : répond aux questions techniques, diagnostique, revoit et modifie du code dans un bac à sable par fil de conversation, en coordination avec GitHub, Linear et Slack. Document de politiques dominant (mission, environnement, définition du fini, contexte de collaboration, limites de contrôle) qui enferme DEUX enclaves ordonnées : la procédure d'implémentation de « Codebase Work » et la boucle orient/agir/observer/adapter de « Working Loop ».",
+  "groups": [
+    {
+      "name": "Mission",
+      "shape": "policies",
+      "order": 0
+    },
+    {
+      "name": "Operating Environment",
+      "shape": "policies",
+      "order": 1
+    },
+    {
+      "name": "Codebase Work",
+      "shape": "sequence",
+      "order": 2
+    },
+    {
+      "name": "Working Loop",
+      "shape": "sequence",
+      "order": 3
+    },
+    {
+      "name": "Completion",
+      "shape": "policies",
+      "order": 4
+    },
+    {
+      "name": "Collaboration Context",
+      "shape": "policies",
+      "order": 5
+    },
+    {
+      "name": "Control Boundaries",
+      "shape": "policies",
+      "order": 6
+    }
+  ],
   "steps": [
     {
       "id": "m1",
@@ -315,7 +352,9 @@
         "lines": [63, 63],
         "quote": "adapt until the outcome is complete or a concrete user decision is needed"
       },
-      "confidence": 0.87
+      "confidence": 0.87,
+      "until": "la tâche est complète, ou une décision de l'utilisateur est requise",
+      "over": null
     },
     {
       "id": "wl1",
@@ -630,38 +669,92 @@
     }
   ],
   "edges": [
-    { "from": "cw1", "to": "cw2", "condition": null },
-    { "from": "cw2", "to": "cw3", "condition": null },
-    { "from": "cw3", "to": "cw6", "condition": null },
-    { "from": "cw6", "to": "cw7", "condition": null },
-    { "from": "cw7", "to": "cw8", "condition": "changement étroit" },
-    { "from": "cw7", "to": "cw9", "condition": "comportement partagé ou contrat inter-modules" },
-    { "from": "cw8", "to": "cw10", "condition": null },
-    { "from": "cw9", "to": "cw10", "condition": null },
-    { "from": "cw10", "to": "cw11", "condition": null },
+    {
+      "from": "cw1",
+      "to": "cw2",
+      "condition": null
+    },
+    {
+      "from": "cw2",
+      "to": "cw3",
+      "condition": null
+    },
+    {
+      "from": "cw3",
+      "to": "cw6",
+      "condition": null
+    },
+    {
+      "from": "cw6",
+      "to": "cw7",
+      "condition": null
+    },
+    {
+      "from": "cw7",
+      "to": "cw8",
+      "condition": "changement étroit"
+    },
+    {
+      "from": "cw7",
+      "to": "cw9",
+      "condition": "comportement partagé ou contrat inter-modules"
+    },
+    {
+      "from": "cw8",
+      "to": "cw10",
+      "condition": null
+    },
+    {
+      "from": "cw9",
+      "to": "cw10",
+      "condition": null
+    },
+    {
+      "from": "cw10",
+      "to": "cw11",
+      "condition": null
+    },
     {
       "from": "cw11",
       "to": "cw12",
       "condition": "sauf si l'utilisateur ou le contexte source appelle un autre livrable"
     },
-    { "from": "cw12", "to": "co6", "condition": null },
-
-    { "from": "wl1", "to": "wl2", "condition": null },
-    { "from": "wl2", "to": "wl3", "condition": null },
-    { "from": "wl3", "to": "wl4", "condition": null },
-    { "from": "wl4", "to": "wl1", "condition": "ni complet, ni décision utilisateur requise" },
-    { "from": "wl4", "to": "co6", "condition": "complet, ou décision utilisateur requise" }
+    {
+      "from": "cw12",
+      "to": "co6",
+      "condition": null
+    },
+    {
+      "from": "wl1",
+      "to": "wl2",
+      "condition": null
+    },
+    {
+      "from": "wl2",
+      "to": "wl3",
+      "condition": null
+    },
+    {
+      "from": "wl3",
+      "to": "wl4",
+      "condition": null
+    },
+    {
+      "from": "wl4",
+      "to": "wl1",
+      "condition": "ni complet, ni décision utilisateur requise"
+    },
+    {
+      "from": "wl4",
+      "to": "co6",
+      "condition": "complet, ou décision utilisateur requise"
+    }
   ],
   "gaps": [
     {
       "kind": "map_limitation",
       "message": "Document de politiques qui enferme DEUX enclaves ordonnées, pas une. « Codebase Work » (AGENT.md:53-57) est une procédure d'implémentation de dix gestes avec une bifurcation ; « Working Loop » (AGENT.md:63) est une boucle orient/agir/observer/adapter de quatre gestes avec un retour arrière. Les deux ne sont reliées par aucune phrase du texte, et coexistent avec 21 nœuds sans place dans le flot. `shape` étant scalaire, la carte est étiquetée `policies` et rien ne dit au rendu que les grappes « Codebase Work » et « Working Loop » sont des sous-graphes séquentiels alors que les cinq autres sont des piles de règles.",
       "related_steps": ["cw1", "cw12", "wl0", "wl4"]
-    },
-    {
-      "kind": "map_limitation",
-      "message": "`loop` est défini comme « ça se répète pour chaque élément d'un ensemble ». `wl0` est une boucle `while` : elle ne parcourt aucun ensemble, elle répète jusqu'à ce qu'une condition d'arrêt soit vraie (AGENT.md:63). C'est le seul type qui permet de porter le corps par `parent`, donc il a été retenu, mais le vocabulaire ne distingue pas itération et répétition conditionnelle. Conséquence directe : `edges` contient un cycle (wl4→wl1), cas qu'aucune des deux cartes de référence ne produisait.",
-      "related_steps": ["wl0", "wl1", "wl4"]
     },
     {
       "kind": "uninstantiated_template",

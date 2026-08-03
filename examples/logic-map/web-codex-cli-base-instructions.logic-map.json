@@ -16,6 +16,72 @@
     "model": null
   },
   "summary": "Prompt système de base de Codex CLI (OpenAI) : douze domaines de règles — personnalité, spécification AGENTS.md, préambules, planification, exécution, validation, ambition, mises à jour, message final et sa typographie, outils. Aucun ordre global écrit, mais une boucle de travail non bornée au centre (« keep going until the query is completely resolved ») et une boucle de plan explicitée par l'outil `update_plan`.",
+  "groups": [
+    {
+      "name": "Personality",
+      "order": 0
+    },
+    {
+      "name": "AGENTS.md spec",
+      "shape": "policies",
+      "order": 1
+    },
+    {
+      "name": "Preamble messages",
+      "shape": "policies",
+      "order": 2
+    },
+    {
+      "name": "Planning",
+      "shape": "sequence",
+      "order": 3
+    },
+    {
+      "name": "Task execution",
+      "shape": "policies",
+      "order": 4
+    },
+    {
+      "name": "Coding guidelines",
+      "shape": "policies",
+      "order": 5
+    },
+    {
+      "name": "Validating your work",
+      "shape": "sequence",
+      "order": 6
+    },
+    {
+      "name": "Ambition vs. precision",
+      "shape": "policies",
+      "order": 7
+    },
+    {
+      "name": "Sharing progress updates",
+      "shape": "policies",
+      "order": 8
+    },
+    {
+      "name": "Final message",
+      "shape": "policies",
+      "order": 9
+    },
+    {
+      "name": "Final answer formatting",
+      "shape": "policies",
+      "order": 10
+    },
+    {
+      "name": "Tool Guidelines — Shell",
+      "shape": "policies",
+      "order": 11
+    },
+    {
+      "name": "update_plan",
+      "shape": "sequence",
+      "order": 12
+    }
+  ],
   "steps": [
     {
       "id": "pe1",
@@ -32,7 +98,6 @@
       },
       "confidence": 0.96
     },
-
     {
       "id": "ag1",
       "kind": "guard",
@@ -123,7 +188,6 @@
       },
       "confidence": 0.97
     },
-
     {
       "id": "pb1",
       "kind": "policy",
@@ -214,7 +278,6 @@
       },
       "confidence": 0.97
     },
-
     {
       "id": "pl1",
       "kind": "policy",
@@ -320,7 +383,6 @@
       },
       "confidence": 0.93
     },
-
     {
       "id": "te1",
       "kind": "guard",
@@ -411,7 +473,6 @@
       },
       "confidence": 0.99
     },
-
     {
       "id": "cg1",
       "kind": "guard",
@@ -592,7 +653,6 @@
       },
       "confidence": 0.98
     },
-
     {
       "id": "va1",
       "kind": "policy",
@@ -728,7 +788,6 @@
       },
       "confidence": 0.97
     },
-
     {
       "id": "am1",
       "kind": "policy",
@@ -774,7 +833,6 @@
       },
       "confidence": 0.96
     },
-
     {
       "id": "su1",
       "kind": "policy",
@@ -805,7 +863,6 @@
       },
       "confidence": 0.98
     },
-
     {
       "id": "fm1",
       "kind": "emit",
@@ -896,7 +953,6 @@
       },
       "confidence": 0.98
     },
-
     {
       "id": "ff1",
       "kind": "guard",
@@ -1047,7 +1103,6 @@
       },
       "confidence": 0.98
     },
-
     {
       "id": "tg1",
       "kind": "guard",
@@ -1078,7 +1133,6 @@
       },
       "confidence": 0.98
     },
-
     {
       "id": "up1",
       "kind": "tool_call",
@@ -1141,17 +1195,61 @@
     }
   ],
   "edges": [
-    { "from": "pl1", "to": "up1", "condition": "un des sept déclencheurs de plan est réuni" },
-    { "from": "up1", "to": "pl5", "condition": null },
-    { "from": "pl5", "to": "up2", "condition": "l'étape précédente est terminée" },
-    { "from": "up2", "to": "pl5", "condition": "il reste des étapes" },
-    { "from": "up2", "to": "up4", "condition": "toutes les étapes sont terminées" },
-    { "from": "pl5", "to": "pl6", "condition": "le plan doit changer" },
-    { "from": "pl6", "to": "pl5", "condition": null },
-    { "from": "up4", "to": "va1", "condition": null },
-    { "from": "va1", "to": "va4", "condition": "le formatage échoue" },
-    { "from": "va4", "to": "fm1", "condition": "3 tentatives épuisées" },
-    { "from": "va1", "to": "fm1", "condition": "validation satisfaisante" }
+    {
+      "from": "pl1",
+      "to": "up1",
+      "condition": "un des sept déclencheurs de plan est réuni"
+    },
+    {
+      "from": "up1",
+      "to": "pl5",
+      "condition": null
+    },
+    {
+      "from": "pl5",
+      "to": "up2",
+      "condition": "l'étape précédente est terminée"
+    },
+    {
+      "from": "up2",
+      "to": "pl5",
+      "condition": "il reste des étapes"
+    },
+    {
+      "from": "up2",
+      "to": "up4",
+      "condition": "toutes les étapes sont terminées"
+    },
+    {
+      "from": "pl5",
+      "to": "pl6",
+      "condition": "le plan doit changer"
+    },
+    {
+      "from": "pl6",
+      "to": "pl5",
+      "condition": null
+    },
+    {
+      "from": "up4",
+      "to": "va1",
+      "condition": null
+    },
+    {
+      "from": "va1",
+      "to": "va4",
+      "condition": "le formatage échoue"
+    },
+    {
+      "from": "va4",
+      "to": "fm1",
+      "condition": "3 tentatives épuisées"
+    },
+    {
+      "from": "va1",
+      "to": "fm1",
+      "condition": "validation satisfaisante"
+    }
   ],
   "gaps": [
     {

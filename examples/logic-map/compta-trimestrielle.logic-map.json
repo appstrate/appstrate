@@ -23,6 +23,73 @@
     "model": "claude-opus-4"
   },
   "summary": "Pipeline comptable trimestriel Tractr en 9 étapes : valide la structure Drive du trimestre, renomme les relevés BNC bruts dans les dossiers centralisés, sélectionne et télécharge les relevés du trimestre, extrait les transactions Mastercard (bun) et compte chèque (python), matérialise les CSV paiements et Interac depuis les stores annuels, classe les marchands, parse et concilie les factures, puis génère et upload le xlsx récapitulatif. Exécutable en entier ou étape par étape.",
+  "groups": [
+    {
+      "name": "Préambule",
+      "shape": "sequence",
+      "order": 0
+    },
+    {
+      "name": "Règles absolues",
+      "shape": "policies",
+      "order": 1
+    },
+    {
+      "name": "Mode `etape`",
+      "shape": "sequence",
+      "order": 2
+    },
+    {
+      "name": "0. Trimestre cible",
+      "shape": "sequence",
+      "order": 3
+    },
+    {
+      "name": "1. Validation de la structure",
+      "shape": "sequence",
+      "order": 4
+    },
+    {
+      "name": "2. Renommage des bruts",
+      "shape": "sequence",
+      "order": 5
+    },
+    {
+      "name": "3. Sélection et download",
+      "shape": "sequence",
+      "order": 6
+    },
+    {
+      "name": "4. Extraction des transactions",
+      "shape": "sequence",
+      "order": 7
+    },
+    {
+      "name": "4.5 Factures du trimestre",
+      "shape": "sequence",
+      "order": 8
+    },
+    {
+      "name": "5. Classification des transactions",
+      "shape": "sequence",
+      "order": 9
+    },
+    {
+      "name": "5.5 Conciliation factures ↔ transactions",
+      "shape": "sequence",
+      "order": 10
+    },
+    {
+      "name": "6. Génération xlsx",
+      "shape": "sequence",
+      "order": 11
+    },
+    {
+      "name": "7. Output + checkpoint",
+      "shape": "sequence",
+      "order": 12
+    }
+  ],
   "steps": [
     {
       "id": "t1",
@@ -370,7 +437,8 @@
         "lines": [131, 133],
         "quote": "Lister tous les fichiers PDF du dossier (sans descendre dans les sous-dossiers)."
       },
-      "confidence": 0.97
+      "confidence": 0.97,
+      "over": "les PDF du dossier centralisé Mastercard"
     },
     {
       "id": "t13.1",
@@ -433,7 +501,8 @@
         "lines": [140, 142],
         "quote": "#### 2.2 Centralisé CHQ (`config.drive_centralized_chq_folder_id`)"
       },
-      "confidence": 0.97
+      "confidence": 0.97,
+      "over": "les PDF du dossier centralisé compte chèque"
     },
     {
       "id": "t14.1",
@@ -756,7 +825,8 @@
         "lines": [326, 328],
         "quote": "Pour chaque facture à parser :"
       },
-      "confidence": 0.98
+      "confidence": 0.98,
+      "over": "les factures absentes de `factures-parsed.json`"
     },
     {
       "id": "t32.1",

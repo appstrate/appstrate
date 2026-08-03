@@ -16,6 +16,41 @@
     "model": null
   },
   "summary": "Sous-agent Claude Code de déploiement : tests → build → deploy → vérification live → mise à jour du document d'état, avec arrêt dur si les tests échouent et interdiction de déclarer « shipped » avant confirmation par le système en production.",
+  "groups": [
+    {
+      "name": "Garde-fous",
+      "shape": "policies",
+      "order": 0
+    },
+    {
+      "name": "1. Test",
+      "shape": "sequence",
+      "order": 1
+    },
+    {
+      "name": "2. Build",
+      "order": 2
+    },
+    {
+      "name": "3. Deploy",
+      "shape": "sequence",
+      "order": 3
+    },
+    {
+      "name": "4. Verify live",
+      "shape": "sequence",
+      "order": 4
+    },
+    {
+      "name": "5. Update state doc",
+      "shape": "sequence",
+      "order": 5
+    },
+    {
+      "name": "6. Report",
+      "order": 6
+    }
+  ],
   "steps": [
     {
       "id": "g0",
@@ -304,19 +339,71 @@
     }
   ],
   "edges": [
-    { "from": "s1", "to": "s2", "condition": null },
-    { "from": "s2", "to": "s3", "condition": "un test échoue" },
-    { "from": "s2", "to": "s4", "condition": "tous verts" },
-    { "from": "s4", "to": "s5", "condition": null },
-    { "from": "s5", "to": "s6", "condition": null },
-    { "from": "s6", "to": "s7", "condition": null },
-    { "from": "s7", "to": "s8", "condition": null },
-    { "from": "s8", "to": "s9", "condition": "l'endpoint ne montre pas la révision déployée" },
-    { "from": "s8", "to": "s10", "condition": "réponse saine et conforme" },
-    { "from": "s9", "to": "s13", "condition": null },
-    { "from": "s10", "to": "s11", "condition": null },
-    { "from": "s11", "to": "s12", "condition": null },
-    { "from": "s12", "to": "s13", "condition": null }
+    {
+      "from": "s1",
+      "to": "s2",
+      "condition": null
+    },
+    {
+      "from": "s2",
+      "to": "s3",
+      "condition": "un test échoue"
+    },
+    {
+      "from": "s2",
+      "to": "s4",
+      "condition": "tous verts"
+    },
+    {
+      "from": "s4",
+      "to": "s5",
+      "condition": null
+    },
+    {
+      "from": "s5",
+      "to": "s6",
+      "condition": null
+    },
+    {
+      "from": "s6",
+      "to": "s7",
+      "condition": null
+    },
+    {
+      "from": "s7",
+      "to": "s8",
+      "condition": null
+    },
+    {
+      "from": "s8",
+      "to": "s9",
+      "condition": "l'endpoint ne montre pas la révision déployée"
+    },
+    {
+      "from": "s8",
+      "to": "s10",
+      "condition": "réponse saine et conforme"
+    },
+    {
+      "from": "s9",
+      "to": "s13",
+      "condition": null
+    },
+    {
+      "from": "s10",
+      "to": "s11",
+      "condition": null
+    },
+    {
+      "from": "s11",
+      "to": "s12",
+      "condition": null
+    },
+    {
+      "from": "s12",
+      "to": "s13",
+      "condition": null
+    }
   ],
   "gaps": [
     {

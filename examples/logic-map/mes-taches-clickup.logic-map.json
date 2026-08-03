@@ -16,6 +16,28 @@
     "model": null
   },
   "summary": "Résout l'identifiant ClickUp d'Olivier, liste ses tâches ouvertes les plus récentes en un minimum d'appels, et rend `tasks` + `summary`. Procédure de trois étapes numérotées, chacune précédée d'un `log`.",
+  "groups": [
+    {
+      "name": "1. Résolution du membre",
+      "shape": "sequence",
+      "order": 0
+    },
+    {
+      "name": "2. Recherche des tâches",
+      "shape": "sequence",
+      "order": 1
+    },
+    {
+      "name": "3. Compte rendu",
+      "shape": "sequence",
+      "order": 2
+    },
+    {
+      "name": "Garde-fous",
+      "shape": "policies",
+      "order": 3
+    }
+  ],
   "steps": [
     {
       "id": "s1",

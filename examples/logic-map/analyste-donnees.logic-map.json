@@ -16,6 +16,31 @@
     "model": null
   },
   "summary": "Analyse un jeu de données tabulaire collé en texte : comprendre le schéma, calculer, restituer par `output` et `report`, proposer des visualisations décrites et non rendues. Aucune intégration, aucun appel réseau : toute la logique est de la discipline de raisonnement.",
+  "groups": [
+    {
+      "name": "1. Comprendre les données",
+      "shape": "sequence",
+      "order": 0
+    },
+    {
+      "name": "2. Calculer",
+      "order": 1
+    },
+    {
+      "name": "4. Visualisations",
+      "order": 2
+    },
+    {
+      "name": "3. Restituer",
+      "shape": "sequence",
+      "order": 3
+    },
+    {
+      "name": "Règles",
+      "shape": "policies",
+      "order": 4
+    }
+  ],
   "steps": [
     {
       "id": "s1",
@@ -251,19 +276,47 @@
     }
   ],
   "edges": [
-    { "from": "s1", "to": "s2", "condition": null },
-    { "from": "s2", "to": "s3", "condition": "`question` fournie" },
-    { "from": "s2", "to": "s4", "condition": "sinon" },
-    { "from": "s3", "to": "s5", "condition": null },
-    { "from": "s4", "to": "s5", "condition": null },
-    { "from": "s5", "to": "s6", "condition": null },
+    {
+      "from": "s1",
+      "to": "s2",
+      "condition": null
+    },
+    {
+      "from": "s2",
+      "to": "s3",
+      "condition": "`question` fournie"
+    },
+    {
+      "from": "s2",
+      "to": "s4",
+      "condition": "sinon"
+    },
+    {
+      "from": "s3",
+      "to": "s5",
+      "condition": null
+    },
+    {
+      "from": "s4",
+      "to": "s5",
+      "condition": null
+    },
+    {
+      "from": "s5",
+      "to": "s6",
+      "condition": null
+    },
     {
       "from": "s6",
       "to": "s7",
       "condition": null,
       "departs_from_source": "Le texte numérote l'émission du résultat en étape 3 (l. 10) et la production des visualisations en étape 4 (l. 12), alors que l'émission consomme les visualisations. Suivi à la lettre, le graphe émettrait un champ avant de le calculer. L'ordre est rétabli ici ; le défaut de la source est relevé dans les trous."
     },
-    { "from": "s7", "to": "s8", "condition": null }
+    {
+      "from": "s7",
+      "to": "s8",
+      "condition": null
+    }
   ],
   "gaps": [
     {

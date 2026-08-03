@@ -94,7 +94,7 @@ trous. Un trou hybride est un trou que personne ne pourra comparer d'un run à l
 | `unguarded_input`         |      5 | L'agent lit du contenu produit par un tiers (mail, document déposé, page web, ticket) et aucune règle ne dit que c'est une donnée et non un ordre. | _famille ouverte le 29 juillet, aucun ancien nom_                                                                   |
 | `uninstantiated_template` |      5 | Gabarit livré : ancrage vide, `{{variable}}`, bloc réécrit à l'onboarding, vestige d'un autre agent.                                               | `empty_configuration`, `template_not_instantiated`, `self_modifying_prompt`, `foreign_workspace_leftover`           |
 | `declaration_mismatch`    |      5 | Les deux côtés le portent, mais pas pareil : identifiant, champ de sortie, schéma.                                                                 | `package_id_mismatch`, `stale_identifier`, `output_mismatch`                                                        |
-| `map_limitation`          |      4 | **Seule famille qui parle de la CARTE et non de l'agent** : le vocabulaire n'a pas su rendre la source, ou un passage lu ne prescrit aucun geste.  | `hybrid_shape`, `type_vocabulary_mismatch`, `non_prescriptive_section`                                              |
+| `map_limitation`          |      2 | **Seule famille qui parle de la CARTE et non de l'agent** : le vocabulaire n'a pas su rendre la source, ou un passage lu ne prescrit aucun geste.  | `hybrid_shape`, `type_vocabulary_mismatch`, `non_prescriptive_section`                                              |
 
 Trois arbitrages valent d'être connus.
 
@@ -415,6 +415,42 @@ pas.
 
 La règle vaut pour la suite : **n'ouvrir une famille que si elle est peuplée par des trous
 réels, vérifiés sur la source**. Le test de non-régression la fait respecter mécaniquement.
+
+## Qui doit corriger : le critère qui périme les limites de lecture
+
+`map_limitation` est la seule famille dont le sujet est la carte. Sa question propre n'est
+donc pas « quel est le défaut ? » mais **qui peut le faire disparaître** :
+
+- modifier le prompt ou le manifeste suffit → c'est l'agent ;
+- il faut modifier le schéma `logic_map` → c'est nous.
+
+Appliqué aux quatre limites du corpus, ce critère en a **périmé deux**, et pour la même
+raison : le champ qui les résout avait été ajouté au format **en réponse à ces constats**,
+puis jamais renseigné dans les cartes.
+
+| Limite                                                         | Ce qui la résout                           | Sort        |
+| -------------------------------------------------------------- | ------------------------------------------ | ----------- |
+| `loop` ne distingue pas itération et répétition conditionnelle | `until` avec `over: null`, ajouté au jalon | **retirée** |
+| un `shape` scalaire ne dit pas où est l'hybride                | `groups[].shape`, ajouté au jalon          | **retirée** |
+| une grappe peut contenir un flot ET une pile de règles         | rien                                       | conservée   |
+| un passage qui ne prescrit aucun geste ne produit aucun nœud   | rien                                       | conservée   |
+
+L'inventaire qui a mené là est plus embarrassant que le résultat. **Cinq champs du format
+n'étaient exercés par aucune carte** : `groups[]` (0 sur 18), `over`/`until` (0 sur 18
+boucles, y compris celle qui avait fait naître `until`), `budget`, `aggregated` et la
+`confidence` d'arête. Le corpus sert de suite de non-régression : un champ qu'il n'exerce
+pas est un champ que rien ne vérifie, et deux limites de lecture réclamaient encore ce qui
+existait déjà.
+
+Le corpus renseigne désormais **187 grappes** et **18 boucles sur 18**. Les 23 grappes d'un
+seul nœud n'ont volontairement pas de `shape` : sans arête interne, leur forme est
+indéterminable, et l'omettre vaut mieux que d'affirmer un fait qu'on n'a pas observé.
+
+Un test empêche la rechute : une boucle sans `over` ni `until`, une carte sans `groups[]`
+ou l'absence totale de portée sur les gardes font échouer la suite. `aggregated` et
+`departs_from_source` restent hors de ce contrôle, à raison : les cartes écrites à la main
+sont exhaustives et n'agrègent rien, et un seul document du corpus a un ordre fautif à
+réparer.
 
 ## Ce que nous ne classons pas, et pourquoi
 

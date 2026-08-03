@@ -27,7 +27,7 @@ describe("partage des trous", () => {
     expect(ours.length + theirs.length).toBe(gaps.length);
   });
 
-  it("sépare les quatre limites de lecture du corpus réel", () => {
+  it("sépare les limites de lecture du corpus réel", () => {
     // Le corpus est la seule source qui dit combien il y en a vraiment, et sur quels agents.
     const parAgent = new Map<string, number>();
     let total = 0;
@@ -37,10 +37,12 @@ describe("partage des trous", () => {
       total += ours.length + theirs.length;
       if (ours.length) parAgent.set(file.replace(".logic-map.json", ""), ours.length);
     }
-    expect(total).toBe(140);
-    // Trois agents portent les quatre limites, et `software-engineer` en porte deux.
-    expect([...parAgent.values()].reduce((a, b) => a + b, 0)).toBe(4);
-    expect(parAgent.get("fleet-software-engineer")).toBe(2);
+    expect(total).toBe(138);
+    // Deux limites subsistent, sur deux agents. Les deux autres ont été retirées le
+    // 2 août : le format les couvrait depuis que `until` et `groups[].shape` existent,
+    // et les cartes ne les renseignaient simplement pas.
+    expect([...parAgent.values()].reduce((a, b) => a + b, 0)).toBe(2);
+    expect(parAgent.size).toBe(2);
   });
 
   it("laisse un agent sans limite de lecture entièrement du côté de l'agent", () => {

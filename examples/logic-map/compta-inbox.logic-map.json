@@ -23,6 +23,73 @@
     "model": "claude-opus-4"
   },
   "summary": "Range les documents déposés à la racine d'une Inbox Drive vers leur destination compta Tractr : relevés BNC bruts routés par regex de nom vers les dossiers centralisés, CSV BNC parsés et mergés dans des stores annuels, factures / dépôts / revenus gouvernementaux / Stripe identifiés par lecture du contenu PDF puis routés vers le trimestre fiscal, non identifiables déplacés dans `_needs-review/`, doublons dans `_doublons/`.",
+  "groups": [
+    {
+      "name": "Préambule",
+      "shape": "sequence",
+      "order": 0
+    },
+    {
+      "name": "Règles absolues",
+      "shape": "policies",
+      "order": 1
+    },
+    {
+      "name": "0. Lister l'inbox",
+      "shape": "sequence",
+      "order": 2
+    },
+    {
+      "name": "1. Tri rapide par regex de nom",
+      "shape": "sequence",
+      "order": 3
+    },
+    {
+      "name": "2. Lecture et classification",
+      "shape": "sequence",
+      "order": 4
+    },
+    {
+      "name": "3. Destination et conflits",
+      "shape": "sequence",
+      "order": 5
+    },
+    {
+      "name": "3bis. Dédup sémantique des factures",
+      "shape": "sequence",
+      "order": 6
+    },
+    {
+      "name": "4. Création des dossiers manquants",
+      "shape": "sequence",
+      "order": 7
+    },
+    {
+      "name": "5. Exécution des déplacements",
+      "shape": "sequence",
+      "order": 8
+    },
+    {
+      "name": "5.2 factures-parsed.json",
+      "shape": "sequence",
+      "order": 9
+    },
+    {
+      "name": "5.3 Stores annuels BNC",
+      "shape": "sequence",
+      "order": 10
+    },
+    {
+      "name": "6. Ambigus → _needs-review/",
+      "shape": "policies",
+      "order": 11
+    },
+    {
+      "name": "7. Output + checkpoint",
+      "shape": "sequence",
+      "order": 12
+    }
+  ],
   "steps": [
     {
       "id": "s1",
@@ -221,7 +288,8 @@
         "lines": [86, 88],
         "quote": "Pour chaque fichier de l'inbox, tester dans cet ordre :"
       },
-      "confidence": 0.99
+      "confidence": 0.99,
+      "over": "les fichiers de l'inbox"
     },
     {
       "id": "s5.1",
@@ -326,7 +394,8 @@
         "lines": [122, 124],
         "quote": "`needs_content_read[]` = fichiers à télécharger pour classification (incluant les CSV paiements pour extraction des dates)"
       },
-      "confidence": 0.97
+      "confidence": 0.97,
+      "over": "les fichiers de `needs_content_read[]`"
     },
     {
       "id": "s6.1",
@@ -551,7 +620,8 @@
         "lines": [321, 321],
         "quote": "Pour chaque fichier classifié (sauf relevés bruts CC/CHQ déjà routés à l'étape 1, `csv-paiements` traité à l'étape 5.3, et ambigus à l'étape 6) :"
       },
-      "confidence": 0.98
+      "confidence": 0.98,
+      "over": "les fichiers classifiés"
     },
     {
       "id": "s7.1",
@@ -764,7 +834,8 @@
         "lines": [442, 442],
         "quote": "Sinon, pour chaque fichier `will_skip` :"
       },
-      "confidence": 0.98
+      "confidence": 0.98,
+      "over": "les fichiers `will_skip`"
     },
     {
       "id": "s10.1",
@@ -813,7 +884,8 @@
         "lines": [489, 489],
         "quote": "#### 5.1 Pour chaque fichier (sauf ambigus et sauf `csv-paiements`) marqué `will_move`"
       },
-      "confidence": 0.98
+      "confidence": 0.98,
+      "over": "les fichiers `will_move`, hors ambigus et `csv-paiements`"
     },
     {
       "id": "s11.1",
@@ -873,7 +945,8 @@
         "lines": [516, 516],
         "quote": "**Pour chaque `{QTR}-Factures/` touché** (folder ID gardé en mémoire depuis l'étape 3.3)"
       },
-      "confidence": 0.98
+      "confidence": 0.98,
+      "over": "les dossiers `{QTR}-Factures/` touchés par le run"
     },
     {
       "id": "s12.1",
@@ -956,7 +1029,8 @@
         "lines": [598, 600],
         "quote": "**Pour chaque année fiscale `{AF}`**"
       },
-      "confidence": 0.97
+      "confidence": 0.97,
+      "over": "les années fiscales `{AF}` touchées par le run"
     },
     {
       "id": "s14.1",
@@ -1019,7 +1093,8 @@
         "lines": [623, 623],
         "quote": "Pour chaque fichier en catégorie `ambiguous` :"
       },
-      "confidence": 0.98
+      "confidence": 0.98,
+      "over": "les fichiers classés `ambiguous`"
     },
     {
       "id": "s16.1",

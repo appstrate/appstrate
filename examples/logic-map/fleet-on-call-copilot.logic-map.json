@@ -16,6 +16,83 @@
     "model": "claude-opus-4"
   },
   "summary": "Copilote d'astreinte LangSmith Fleet : normalise l'alerte, déréférence les liens, enquête dans le code, les traces et les runbooks, puis rédige le ticket et la mise à jour Slack que l'humain relit et publie. Document de règles par domaine, dont quinze ancrages de configuration vides et une méthodologie de dix principes numérotés qui n'est pas un ordre d'exécution. Deux séquences seulement : l'ordre de lecture de début de garde et le couple normaliser → filtrer le bruit.",
+  "groups": [
+    {
+      "name": "1. Identity",
+      "shape": "policies",
+      "order": 0
+    },
+    {
+      "name": "2. Read this first",
+      "shape": "sequence",
+      "order": 1
+    },
+    {
+      "name": "3. Knowledge Base",
+      "shape": "policies",
+      "order": 2
+    },
+    {
+      "name": "4. Your tools",
+      "shape": "policies",
+      "order": 3
+    },
+    {
+      "name": "5. Configured context — Tier 1",
+      "shape": "policies",
+      "order": 4
+    },
+    {
+      "name": "6. Configured context — Tier 2",
+      "shape": "policies",
+      "order": 5
+    },
+    {
+      "name": "7. The methodology",
+      "shape": "sequence",
+      "order": 6
+    },
+    {
+      "name": "8. Scheduled cadence",
+      "shape": "policies",
+      "order": 7
+    },
+    {
+      "name": "9. How you think",
+      "shape": "policies",
+      "order": 8
+    },
+    {
+      "name": "10. Self-improvement",
+      "shape": "policies",
+      "order": 9
+    },
+    {
+      "name": "11. Runtime — no sandbox",
+      "shape": "policies",
+      "order": 10
+    },
+    {
+      "name": "12. Writes — draft-first",
+      "shape": "policies",
+      "order": 11
+    },
+    {
+      "name": "13. Anti-fabrication",
+      "shape": "policies",
+      "order": 12
+    },
+    {
+      "name": "14. Failure handling",
+      "shape": "policies",
+      "order": 13
+    },
+    {
+      "name": "15. When in doubt",
+      "shape": "policies",
+      "order": 14
+    }
+  ],
   "steps": [
     {
       "id": "id1",

@@ -16,6 +16,94 @@
     "model": "claude-opus-4"
   },
   "summary": "Agent Go-To-Market LangSmith Fleet : rédige de l'outbound personnalisé, traite les signaux de leads entrants, recherche comptes et contacts, et remonte l'intelligence de compte depuis le CRM, la plateforme d'enregistrement d'appels et l'entrepôt. Document de règles par domaine (18 sections balisées), sans ordre d'exécution global, mais avec quatre séquences courtes enfouies : l'enrichissement avant rédaction, la livraison de brouillon, l'ordre CRM-puis-entrepôt sur une question de compte, et la boucle de datation des événements CRM.",
+  "groups": [
+    {
+      "name": "1. Identity",
+      "order": 0
+    },
+    {
+      "name": "2. Company context",
+      "order": 1
+    },
+    {
+      "name": "3. Customer stories",
+      "shape": "policies",
+      "order": 2
+    },
+    {
+      "name": "4. CRM schema",
+      "order": 3
+    },
+    {
+      "name": "5. Warehouse schema",
+      "order": 4
+    },
+    {
+      "name": "6. Subagents",
+      "shape": "sequence",
+      "order": 5
+    },
+    {
+      "name": "7. Memory guidelines",
+      "shape": "policies",
+      "order": 6
+    },
+    {
+      "name": "8. Communication guidelines",
+      "shape": "policies",
+      "order": 7
+    },
+    {
+      "name": "9. Email style conventions",
+      "shape": "policies",
+      "order": 8
+    },
+    {
+      "name": "10. Competitive analysis",
+      "shape": "policies",
+      "order": 9
+    },
+    {
+      "name": "11. Tooling guidelines",
+      "shape": "policies",
+      "order": 10
+    },
+    {
+      "name": "12. Meeting transcripts",
+      "shape": "policies",
+      "order": 11
+    },
+    {
+      "name": "13. Account intelligence",
+      "shape": "sequence",
+      "order": 12
+    },
+    {
+      "name": "14. Consumption data",
+      "shape": "policies",
+      "order": 13
+    },
+    {
+      "name": "15. Contact enrichment before drafting",
+      "shape": "sequence",
+      "order": 14
+    },
+    {
+      "name": "16. Web search",
+      "shape": "policies",
+      "order": 15
+    },
+    {
+      "name": "17. Draft delivery",
+      "shape": "sequence",
+      "order": 16
+    },
+    {
+      "name": "18. Timing context",
+      "shape": "sequence",
+      "order": 17
+    }
+  ],
   "steps": [
     {
       "id": "id1",
@@ -1034,7 +1122,8 @@
         "lines": [290, 290],
         "quote": "After querying CRM events/tasks, compare each record's activity date against the current date."
       },
-      "confidence": 0.94
+      "confidence": 0.94,
+      "over": "les événements et tâches CRM retournés"
     },
     {
       "id": "tc4.1",
@@ -1103,23 +1192,51 @@
       "to": "ai4",
       "condition": "puis, si des tables d'intelligence de compte sont configurées"
     },
-
-    { "from": "ce0", "to": "ce1", "condition": null },
-    { "from": "ce1", "to": "ce2", "condition": null },
-    { "from": "ce2", "to": "ce3", "condition": "contact trouvé" },
+    {
+      "from": "ce0",
+      "to": "ce1",
+      "condition": null
+    },
+    {
+      "from": "ce1",
+      "to": "ce2",
+      "condition": null
+    },
+    {
+      "from": "ce2",
+      "to": "ce3",
+      "condition": "contact trouvé"
+    },
     {
       "from": "ce2",
       "to": "ce4",
       "condition": "contact non trouvé — aucune prescription du texte"
     },
-    { "from": "ce3", "to": "ce4", "condition": null },
-
-    { "from": "dd1", "to": "dd2", "condition": null },
-    { "from": "dd2", "to": "dd3", "condition": null },
-
-    { "from": "tc4.1", "to": "tc4.2", "condition": "date d'activité future" },
-    { "from": "tc4.1", "to": "tc4.3", "condition": "date d'activité passée" },
-
+    {
+      "from": "ce3",
+      "to": "ce4",
+      "condition": null
+    },
+    {
+      "from": "dd1",
+      "to": "dd2",
+      "condition": null
+    },
+    {
+      "from": "dd2",
+      "to": "dd3",
+      "condition": null
+    },
+    {
+      "from": "tc4.1",
+      "to": "tc4.2",
+      "condition": "date d'activité future"
+    },
+    {
+      "from": "tc4.1",
+      "to": "tc4.3",
+      "condition": "date d'activité passée"
+    },
     {
       "from": "sa2",
       "to": "sa1",

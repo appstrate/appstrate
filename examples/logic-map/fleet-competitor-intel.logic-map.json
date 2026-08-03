@@ -16,6 +16,48 @@
     "model": null
   },
   "summary": "Bot d'intelligence concurrentielle orienté Slack : répond aux questions de l'équipe, entretient une base markdown sourcée dans `memories/`, et maintient une page de battlecard Notion. Document de règles par domaine (surface Slack, rafraîchissement planifié, base de connaissance, barre de qualité) traversé par trois fragments ordonnés : la séquence de synchronisation Notion, l'« Answering Workflow » numéroté en sept points, et l'onboarding conditionnel.",
+  "groups": [
+    {
+      "name": "Primary Surface",
+      "shape": "policies",
+      "order": 0
+    },
+    {
+      "name": "Scheduled Refreshes",
+      "shape": "sequence",
+      "order": 1
+    },
+    {
+      "name": "Onboarding",
+      "shape": "sequence",
+      "order": 2
+    },
+    {
+      "name": "Skills",
+      "shape": "policies",
+      "order": 3
+    },
+    {
+      "name": "Knowledge Base",
+      "shape": "policies",
+      "order": 4
+    },
+    {
+      "name": "Notion Battlecard",
+      "shape": "sequence",
+      "order": 5
+    },
+    {
+      "name": "Answering Workflow",
+      "shape": "sequence",
+      "order": 6
+    },
+    {
+      "name": "Quality Bar",
+      "shape": "policies",
+      "order": 7
+    }
+  ],
   "steps": [
     {
       "id": "ps1",
@@ -510,7 +552,8 @@
         "lines": [135, 135],
         "quote": "for each competitor or research thread"
       },
-      "confidence": 0.95
+      "confidence": 0.95,
+      "over": "les concurrents ou fils de recherche du roster"
     },
     {
       "id": "aw4.1",
@@ -684,38 +727,98 @@
       "to": "ob2",
       "condition": "le wiki ne contient pas la société par défaut et le roster"
     },
-    { "from": "ob2", "to": "ob3", "condition": null },
-
-    { "from": "sr1", "to": "sr2", "condition": null },
-    { "from": "sr2", "to": "sr3", "condition": "du renseignement sourcé nouveau a été trouvé" },
-
-    { "from": "nb1", "to": "nb2", "condition": "une page existante a été trouvée" },
-    { "from": "nb1", "to": "nb3", "condition": "aucune page n'existe" },
-    { "from": "nb2", "to": "nb4", "condition": null },
-    { "from": "nb3", "to": "nb5", "condition": null },
-    { "from": "nb4", "to": "nb5", "condition": null },
-
-    { "from": "aw1", "to": "aw2", "condition": null },
-    { "from": "aw2", "to": "aw3", "condition": null },
-    { "from": "aw3", "to": "aw4", "condition": "information à jour demandée, ou wiki périmé" },
-    { "from": "aw3", "to": "aw8", "condition": "la connaissance existante suffit" },
-    { "from": "aw4", "to": "aw5", "condition": null },
-    { "from": "aw5", "to": "aw6", "condition": null },
-    { "from": "aw6", "to": "aw7", "condition": null },
+    {
+      "from": "ob2",
+      "to": "ob3",
+      "condition": null
+    },
+    {
+      "from": "sr1",
+      "to": "sr2",
+      "condition": null
+    },
+    {
+      "from": "sr2",
+      "to": "sr3",
+      "condition": "du renseignement sourcé nouveau a été trouvé"
+    },
+    {
+      "from": "nb1",
+      "to": "nb2",
+      "condition": "une page existante a été trouvée"
+    },
+    {
+      "from": "nb1",
+      "to": "nb3",
+      "condition": "aucune page n'existe"
+    },
+    {
+      "from": "nb2",
+      "to": "nb4",
+      "condition": null
+    },
+    {
+      "from": "nb3",
+      "to": "nb5",
+      "condition": null
+    },
+    {
+      "from": "nb4",
+      "to": "nb5",
+      "condition": null
+    },
+    {
+      "from": "aw1",
+      "to": "aw2",
+      "condition": null
+    },
+    {
+      "from": "aw2",
+      "to": "aw3",
+      "condition": null
+    },
+    {
+      "from": "aw3",
+      "to": "aw4",
+      "condition": "information à jour demandée, ou wiki périmé"
+    },
+    {
+      "from": "aw3",
+      "to": "aw8",
+      "condition": "la connaissance existante suffit"
+    },
+    {
+      "from": "aw4",
+      "to": "aw5",
+      "condition": null
+    },
+    {
+      "from": "aw5",
+      "to": "aw6",
+      "condition": null
+    },
+    {
+      "from": "aw6",
+      "to": "aw7",
+      "condition": null
+    },
     {
       "from": "aw7",
       "to": "nb1",
       "condition": "la battlecard ou les pages concurrents ont changé"
     },
-    { "from": "aw7", "to": "aw8", "condition": null },
-    { "from": "sr3", "to": "nb1", "condition": null }
+    {
+      "from": "aw7",
+      "to": "aw8",
+      "condition": null
+    },
+    {
+      "from": "sr3",
+      "to": "nb1",
+      "condition": null
+    }
   ],
   "gaps": [
-    {
-      "kind": "map_limitation",
-      "message": "Deuxième hybride du corpus, et plus déséquilibré que `software-engineer` : la séquence enfouie n'est pas une boucle secondaire mais la colonne vertébrale de l'agent. « Answering Workflow » (AGENT.md:133-139) est numéroté 1 à 7, va de la question à la réponse, et absorbe la moitié des grappes du document au passage. Étiqueté `policies` parce que 27 nœuds sur 44 sont hors flot, ce qui perd l'information la plus utile : ici l'ordre est le contenu, alors que chez `software-engineer` l'ordre est un détail. Un `shape` scalaire ne distingue pas ces deux situations.",
-      "related_steps": ["aw1", "aw8", "nb1", "nb5"]
-    },
     {
       "kind": "contradiction",
       "message": "Ordre de la réponse Slack contradictoire. « Primary Surface » autorise à mettre à jour markdown et Notion « before or immediately after replying » (AGENT.md:41), tandis que « Answering Workflow » place la réponse Slack en étape 7, après la fusion wiki (4), la battlecard (5) et la synchro Notion (6) (AGENT.md:136-139). Rien ne dit laquelle prime quand une question exige une recherche fraîche.",
