@@ -17,8 +17,8 @@
 import { useTranslation } from "react-i18next";
 import { AlertTriangle } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
-import { Modal } from "../modal";
-import type { AgentMapDiagnostic } from "../../hooks/use-agent-map";
+import { Modal } from "../../components/modal";
+import type { AgentMapDiagnostic } from "./use-agent-map";
 import type { MapEditKind } from "./map-edit-dialog";
 import type { MapPanelKind } from "./map-panel-dialog";
 
@@ -57,14 +57,14 @@ export function MapIssuesDialog({
   onPanel: (kind: MapPanelKind) => void;
   onClose: () => void;
 }) {
-  const { t } = useTranslation("agents");
+  const { t } = useTranslation(["agents", "agent-map"]);
   if (!diagnostics) return null;
 
   return (
     <Modal
       open
       onClose={onClose}
-      title={t("map.issueCount", { count: diagnostics.length })}
+      title={t("agent-map:issueCount", { count: diagnostics.length })}
       className="sm:max-w-2xl"
     >
       <div className="flex max-h-[60vh] flex-col gap-2 overflow-y-auto">
@@ -92,7 +92,7 @@ export function MapIssuesDialog({
                     else onPanel(destination.kind);
                   }}
                 >
-                  {t("map.fixIssue")}
+                  {t("agent-map:fixIssue")}
                 </Button>
               )}
             </div>

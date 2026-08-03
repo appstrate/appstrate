@@ -263,44 +263,6 @@ export const agentsPaths = {
       },
     },
   },
-  "/api/agents/{scope}/{name}/map": {
-    get: {
-      operationId: "getAgentMap",
-      tags: ["Agents"],
-      summary: "Visual map of an agent",
-      description:
-        "Projects the agent's manifest into positioned nodes and edges (triggers and schedules on the left, the agent in the middle, toolbox / skills / mcp servers on the right) crossed with the installation state: resolved versions against declared ranges, per-integration connection status, admin pins, active schedules. `diagnostics[]` carries the readiness failures routed to the node and row they belong to, sourced from the same readiness gate and connection resolver as the run-kickoff 412 — so the map cannot disagree with what a run would do. Read-only: it owns no data and computes no verdict of its own. Cards that would be empty are omitted, so the node set varies per agent.",
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
-        { $ref: "#/components/parameters/PackageScope" },
-        { $ref: "#/components/parameters/PackageName" },
-        {
-          name: "version",
-          in: "query",
-          required: false,
-          schema: { type: "string" },
-          description:
-            "Which agent definition to map: `draft` (the live editor working copy), `published` (the latest published version), or a version spec (exact version, dist-tag, or semver range). **Omitting the parameter resolves the `draft`**, so a never-published agent still renders. Ignored for system agents.",
-        },
-      ],
-      responses: {
-        "200": {
-          description: "Agent visual map",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
-          content: {
-            "application/json": { schema: { $ref: "#/components/schemas/AgentMap" } },
-          },
-        },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { $ref: "#/components/responses/NotFound" },
-      },
-    },
-  },
   "/api/agents/{scope}/{name}/persistence": {
     get: {
       operationId: "listAgentPersistence",

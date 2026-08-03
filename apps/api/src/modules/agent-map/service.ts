@@ -27,26 +27,26 @@
  */
 
 import type { Context } from "hono";
-import type { AppEnv, LoadedPackage } from "../types/index.ts";
-import type { ValidationFieldError } from "../lib/errors.ts";
+import type { AppEnv, LoadedPackage } from "../../types/index.ts";
+import type { ValidationFieldError } from "../../lib/errors.ts";
 import type { EnrichedSchedule } from "@appstrate/shared-types";
-import { getPackageWithAccess } from "../services/package-catalog.ts";
-import { resolveDeclaredSkills } from "../services/package-catalog.ts";
+import { getPackageWithAccess } from "../../services/package-catalog.ts";
+import { resolveDeclaredSkills } from "../../services/package-catalog.ts";
 import {
   resolveAgentRunVersion,
   VERSION_SELECTOR_DRAFT,
-} from "../services/agent-version-resolver.ts";
-import { listPackageSchedules } from "../services/scheduler.ts";
-import { getPackageConfig } from "../services/application-packages.ts";
-import { resolveAgentConnectionReadiness } from "../services/integration-pins-service.ts";
-import { collectAgentReadinessErrors } from "../services/agent-readiness.ts";
-import { listOrgModels } from "../services/org-models.ts";
+} from "../../services/agent-version-resolver.ts";
+import { listPackageSchedules } from "../../services/scheduler.ts";
+import { getPackageConfig } from "../../services/application-packages.ts";
+import { resolveAgentConnectionReadiness } from "../../services/integration-pins-service.ts";
+import { collectAgentReadinessErrors } from "../../services/agent-readiness.ts";
+import { listOrgModels } from "../../services/org-models.ts";
 import { RUNTIME_TOOL_CATALOG } from "@appstrate/core/runtime-tools-catalog";
 import { RUNTIME_INJECTED_TOOLS } from "@appstrate/runner-pi/runtime-tools";
 import { isToolsWildcard, parseManifestIntegrations } from "@appstrate/core/dependencies";
 import { asJSONSchemaObject, mergeWithDefaults } from "@appstrate/core/form";
-import { getAppScope } from "../lib/scope.ts";
-import { getActor } from "../lib/actor.ts";
+import { getAppScope } from "../../lib/scope.ts";
+import { getActor } from "../../lib/actor.ts";
 
 // ---------------------------------------------------------------------------
 // Wire types

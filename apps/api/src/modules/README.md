@@ -351,6 +351,8 @@ Modules that expose HTTP routes should also provide `openApiPaths()` (path items
 
 Because discovery is filesystem-based, adding a new endpoint only requires touching the module's own `openapi/` directory — no central list to update.
 
+`verify-openapi` step 7b is fail-closed: every component schema in the spec must either pair with a shared-type in the core response-type registry, or be explicitly exempt with a reason. A module-owned schema with no shared-type twin declares its own exemption via `openApiExemptSchemas()` — `{ SchemaName: "why there is no shared-type" }` — so contributing a wire schema never means editing `apps/api/src/openapi/response-type-registry.ts`. The rules are the same as for a core entry: a name the module does not also contribute via `openApiComponentSchemas()` is reported stale, and a core registry entry wins a name collision. Reference: `oidc` (2 entries) and `agent-map` (3).
+
 ## Idempotency — in-tree modules can opt in, out-of-tree modules cannot
 
 The platform mounts `idempotencyGuard` (`apps/api/src/middleware/idempotency-guard.ts`) globally, **before** `registerModuleRoutes(app)`. Every mutating route a module registers is therefore subject to it: a request carrying `Idempotency-Key` on an unsafe method (`POST`/`PUT`/`PATCH`/`DELETE`) is refused with `400 idempotency_not_supported` unless the matched route mounts `idempotency()`.

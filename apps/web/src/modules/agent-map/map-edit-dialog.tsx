@@ -20,23 +20,23 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { Button } from "@appstrate/ui/components/button";
 import type { ResourceEntry } from "@appstrate/shared-types";
-import { Modal } from "../modal";
-import { Spinner } from "../spinner";
-import { ResourceSection } from "../agent-editor/resource-section";
-import { PromptEditor } from "../agent-editor/prompt-editor";
-import { RuntimeToolsGroup } from "../agent-editor/runtime-tools-group";
-import { SchemaSection, type SchemaField } from "../agent-editor/schema-section";
+import { Modal } from "../../components/modal";
+import { Spinner } from "../../components/spinner";
+import { ResourceSection } from "../../components/agent-editor/resource-section";
+import { PromptEditor } from "../../components/agent-editor/prompt-editor";
+import { RuntimeToolsGroup } from "../../components/agent-editor/runtime-tools-group";
+import { SchemaSection, type SchemaField } from "../../components/agent-editor/schema-section";
 import {
   caretRange,
   fieldsToSchema,
   getResourceEntries,
   manifestToSchemaFields,
   setResourceEntries,
-} from "../agent-editor/utils";
+} from "../../components/agent-editor/utils";
 import { usePackageDetail } from "../../hooks/use-packages";
 import { useUpdatePackage } from "../../hooks/use-mutations";
 import { useActivateIntegration } from "../../hooks/use-integrations";
-import { agentMapQueryKeyPrefix } from "../../hooks/use-agent-map";
+import { agentMapQueryKeyPrefix } from "./use-agent-map";
 import { LibraryPicker, type LibraryCandidate } from "./library-picker";
 
 /**
@@ -52,13 +52,13 @@ export type MapEditKind =
   "prompt" | "skills" | "integrations" | "runtime_tools" | "input" | "output" | "config";
 
 const TITLE_KEY: Record<MapEditKind, string> = {
-  prompt: "map.editPrompt",
-  skills: "map.addSkill",
-  runtime_tools: "map.systemTools",
-  integrations: "map.addIntegration",
-  input: "map.editInput",
-  output: "map.editOutput",
-  config: "map.editConfigSchema",
+  prompt: "agent-map:editPrompt",
+  skills: "agent-map:addSkill",
+  runtime_tools: "agent-map:systemTools",
+  integrations: "agent-map:addIntegration",
+  input: "agent-map:editInput",
+  output: "agent-map:editOutput",
+  config: "agent-map:editConfigSchema",
 };
 
 /**
@@ -76,7 +76,7 @@ interface MapEditDialogProps {
 }
 
 export function MapEditDialog({ kind, packageId, onClose }: MapEditDialogProps) {
-  const { t } = useTranslation("agents");
+  const { t } = useTranslation(["agents", "agent-map"]);
   const qc = useQueryClient();
   // Only fetched while open, and re-read on open so the draft starts from the
   // current definition rather than a stale cache entry.
@@ -132,7 +132,7 @@ function MapEditForm({
   lockVersion: number;
   onClose: () => void;
 }) {
-  const { t } = useTranslation(["agents", "common"]);
+  const { t } = useTranslation(["agents", "agent-map", "common"]);
   const qc = useQueryClient();
   const update = useUpdatePackage("agent", packageId, { redirect: false });
   const activate = useActivateIntegration();
@@ -230,7 +230,7 @@ function MapEditForm({
           <RuntimeToolsGroup selected={runtimeTools} onChange={setRuntimeTools} />
         ) : isSchemaKind(kind) ? (
           <SchemaSection
-            title={t(`agents:map.${kind}`)}
+            title={t(`agent-map:${kind}`)}
             mode={kind}
             fields={schemaFields}
             onChange={setSchemaFields}
@@ -238,8 +238,10 @@ function MapEditForm({
         ) : (
           <ResourceSection
             type={kind === "skills" ? "skill" : "integration"}
-            title={kind === "skills" ? t("map.skills") : t("map.toolbox")}
-            emptyLabel={kind === "skills" ? t("map.emptySkills") : t("map.emptyToolbox")}
+            title={kind === "skills" ? t("agent-map:skills") : t("agent-map:toolbox")}
+            emptyLabel={
+              kind === "skills" ? t("agent-map:emptySkills") : t("agent-map:emptyToolbox")
+            }
             selectedEntries={entries}
             onChange={(updater) =>
               setEntries((prev) => (typeof updater === "function" ? updater(prev) : updater))

@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useQuery } from "@tanstack/react-query";
-import { $api, type paths } from "../api/client";
-import { splitPackageRef } from "../lib/package-paths";
-import { isVersioned } from "../lib/version-selector";
-import { useCurrentOrgId } from "./use-org";
-import { useCurrentApplicationId } from "./use-current-application";
+import { $api, type paths } from "../../api/client";
+import { splitPackageRef } from "../../lib/package-paths";
+import { isVersioned } from "../../lib/version-selector";
+import { useCurrentOrgId } from "../../hooks/use-org";
+import { useCurrentApplicationId } from "../../hooks/use-current-application";
 
 const MAP_PATH = "/api/agents/{scope}/{name}/map" as const;
 

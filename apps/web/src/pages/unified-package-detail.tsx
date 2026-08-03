@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, lazy, Suspense } from "react";
 import { toast } from "sonner";
 import { useParams, Link, Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Tabs, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
+import { useAppConfig } from "../hooks/use-app-config";
 import {
   usePackageDetail,
   useVersionDetail,
@@ -46,7 +47,11 @@ import {
 } from "../components/package-detail/agent-tabs";
 import { AgentConnectionsSection } from "../components/package-detail/agent-connections-section";
 import { AgentConfigurationTab } from "../components/package-detail/agent-configuration-tab";
-import { AgentMapView } from "../components/agent-map/agent-map-view";
+// Mount point for the opt-in `agent-map` module. Lazy so React Flow and the
+// map's own chunk never enter the bundle of a deployment that runs without it.
+const AgentMapView = lazy(() =>
+  import("../modules/agent-map/agent-map-view").then((m) => ({ default: m.AgentMapView })),
+);
 import { RunAgentButton } from "../components/run-agent-button";
 import { PackageCard } from "../components/package-card";
 import { useAgentReadiness } from "../hooks/use-agent-readiness";
@@ -208,8 +213,12 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   } | null>(null);
 
   // ── State ──
+  // `agentMap` is contributed by the opt-in `agent-map` module; absent from
+  // MODULES it is `false`, and the tab is neither offered nor reachable by hash.
+  const { features } = useAppConfig();
+  const agentMapEnabled = !!features.agentMap;
   const allValidTabs: DetailTab[] = [
-    "map",
+    ...(agentMapEnabled ? (["map"] as DetailTab[]) : []),
     "connections",
     "runs",
     "configuration",
@@ -311,7 +320,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
 
   const agentTabs: Array<{ id: DetailTab; label: string }> = [
     { id: "runs", label: t("detail.tabRuns") },
-    { id: "map", label: t("detail.tabMap") },
+    ...(agentMapEnabled ? [{ id: "map" as DetailTab, label: t("detail.tabMap") }] : []),
     { id: "connections", label: t("detail.tabConnections") },
     ...(effectiveShowConfigTab
       ? [{ id: "configuration" as DetailTab, label: t("detail.tabConfiguration") }]
@@ -486,10 +495,12 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
           isHistorical={isHistoricalVersion}
         />
       )}
-      {type === "agent" && tab === "map" && (
+      {type === "agent" && agentMapEnabled && tab === "map" && (
         // Historical versions map the published manifest they pin, so the
         // drawing matches the definition being inspected.
-        <AgentMapView packageId={packageId} version={versionLabel} />
+        <Suspense fallback={<LoadingState />}>
+          <AgentMapView packageId={packageId} version={versionLabel} />
+        </Suspense>
       )}
       {type === "agent" && tab === "connections" && agentDetail && (
         <AgentConnectionsSection packageId={packageId} detail={agentDetail} />

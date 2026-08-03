@@ -28,8 +28,8 @@ import {
 import "@xyflow/react/dist/style.css";
 import { useTranslation } from "react-i18next";
 import { AlertTriangle, Maximize2, Minimize2 } from "lucide-react";
-import { useAgentMap } from "../../hooks/use-agent-map";
-import { ErrorState, LoadingState } from "../page-states";
+import { useAgentMap } from "./use-agent-map";
+import { ErrorState, LoadingState } from "../../components/page-states";
 import { MapEditDialog, type MapEditKind } from "./map-edit-dialog";
 import { MapIssuesDialog } from "./map-issues-dialog";
 import { MapPanelDialog, type MapPanelKind } from "./map-panel-dialog";
@@ -112,7 +112,7 @@ export function AgentMapView({
   packageId: string;
   version?: string | undefined;
 }) {
-  const { t } = useTranslation("agents");
+  const { t } = useTranslation(["agents", "agent-map"]);
   const { data, isLoading, error } = useAgentMap(packageId, version);
   const [editKind, setEditKind] = useState<MapEditKind | null>(null);
   const [panelKind, setPanelKind] = useState<MapPanelKind | null>(null);
@@ -180,7 +180,7 @@ export function AgentMapView({
   }, [data, editable, onEdit, onPanel]);
 
   if (isLoading) return <LoadingState />;
-  if (error || !data) return <ErrorState message={t("map.loadError")} />;
+  if (error || !data) return <ErrorState message={t("agent-map:loadError")} />;
 
   // Diagnostics with no node (an unrecognised readiness field) would otherwise
   // vanish from the UI — surface them above the canvas instead of dropping them.
@@ -198,8 +198,8 @@ export function AgentMapView({
       <div className="text-muted-foreground flex items-center gap-3 text-xs">
         <span>
           {data.agent.version_ref === "draft"
-            ? t("map.draftDefinition")
-            : t("map.pinnedDefinition", { version: data.agent.version_ref })}
+            ? t("agent-map:draftDefinition")
+            : t("agent-map:pinnedDefinition", { version: data.agent.version_ref })}
         </span>
         {data.diagnostics.length > 0 && (
           <button
@@ -208,7 +208,7 @@ export function AgentMapView({
             className="text-warning hover:text-warning/80 flex items-center gap-1 underline-offset-2 hover:underline"
           >
             <AlertTriangle className="size-3.5" />
-            {t("map.issueCount", { count: data.diagnostics.length })}
+            {t("agent-map:issueCount", { count: data.diagnostics.length })}
           </button>
         )}
         <button
@@ -217,7 +217,7 @@ export function AgentMapView({
           className="hover:text-foreground ml-auto flex items-center gap-1 transition-colors"
         >
           {expanded ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}
-          {expanded ? t("map.collapse") : t("map.expand")}
+          {expanded ? t("agent-map:collapse") : t("agent-map:expand")}
         </button>
       </div>
       {orphanDiagnostics.length > 0 && (

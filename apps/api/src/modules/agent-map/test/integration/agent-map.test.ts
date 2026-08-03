@@ -15,17 +15,24 @@
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
-import { getTestApp } from "../../helpers/app.ts";
-import { truncateAll } from "../../helpers/db.ts";
-import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
-import { seedAgent, seedPackage, seedSchedule } from "../../helpers/seed.ts";
-import { installPackage } from "../../../src/services/application-packages.ts";
+import { getTestApp } from "../../../../../test/helpers/app.ts";
+import agentMapModule from "../../index.ts";
+import { truncateAll } from "../../../../../test/helpers/db.ts";
+import {
+  createTestContext,
+  authHeaders,
+  type TestContext,
+} from "../../../../../test/helpers/auth.ts";
+import { seedAgent, seedPackage, seedSchedule } from "../../../../../test/helpers/seed.ts";
+import { installPackage } from "../../../../services/application-packages.ts";
 import {
   localIntegrationManifest,
   httpHeaderDelivery,
-} from "../../helpers/integration-manifests.ts";
+} from "../../../../../test/helpers/integration-manifests.ts";
 
-const app = getTestApp();
+// The map route is module-owned: core's `getTestApp()` loads no modules, so the
+// endpoint 404s without this. Same wiring every module test uses.
+const app = getTestApp({ modules: [agentMapModule] });
 
 const AGENT = "@maporg/agent";
 const INTEGRATION = "@maporg/svc";

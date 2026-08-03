@@ -18,18 +18,21 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { Plus } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
-import { Modal } from "../modal";
-import { Spinner } from "../spinner";
-import { AgentConnectionsSection } from "../package-detail/agent-connections-section";
-import { AgentMemoryTab } from "../package-detail/agent-tabs";
-import { ConfigSection, ModelSection } from "../package-detail/agent-configuration-tab";
+import { Modal } from "../../components/modal";
+import { Spinner } from "../../components/spinner";
+import { AgentConnectionsSection } from "../../components/package-detail/agent-connections-section";
+import { AgentMemoryTab } from "../../components/package-detail/agent-tabs";
+import {
+  ConfigSection,
+  ModelSection,
+} from "../../components/package-detail/agent-configuration-tab";
 import { asJSONSchemaObject } from "@appstrate/core/form";
-import { ModelFormModal } from "../model-form-modal";
-import { ScheduleForm } from "../schedule-form";
+import { ModelFormModal } from "../../components/model-form-modal";
+import { ScheduleForm } from "../../components/schedule-form";
 import { usePackageDetail } from "../../hooks/use-packages";
 import { useModels, useModelFormHandler } from "../../hooks/use-models";
 import { useCreateSchedule, useScheduleFormDeps } from "../../hooks/use-schedules";
-import { agentMapQueryKeyPrefix } from "../../hooks/use-agent-map";
+import { agentMapQueryKeyPrefix } from "./use-agent-map";
 
 /** Which existing panel to show. */
 export type MapPanelKind = "connections" | "schedules" | "memory" | "model" | "config";
@@ -38,8 +41,8 @@ const TITLE_KEY: Record<MapPanelKind, string> = {
   connections: "detail.tabConnections",
   schedules: "schedule.titleNew",
   memory: "detail.tabMemory",
-  model: "map.model",
-  config: "map.editConfig",
+  model: "agent-map:model",
+  config: "agent-map:editConfig",
 };
 
 /**
@@ -57,7 +60,7 @@ const TITLE_KEY: Record<MapPanelKind, string> = {
  * buried the one action a plus can mean behind a second click.
  */
 function NewSchedulePanel({ packageId, onDone }: { packageId: string; onDone: () => void }) {
-  const { t } = useTranslation(["agents", "common"]);
+  const { t } = useTranslation(["agents", "agent-map", "common"]);
   const { data: detail } = usePackageDetail("agent", packageId);
   const deps = useScheduleFormDeps(packageId);
   const createSchedule = useCreateSchedule(packageId);
@@ -95,7 +98,7 @@ function NewSchedulePanel({ packageId, onDone }: { packageId: string; onDone: ()
  * the fix: add a model here, and the card resolves without leaving the map.
  */
 function ModelPanel({ packageId }: { packageId: string }) {
-  const { t } = useTranslation(["agents", "settings"]);
+  const { t } = useTranslation(["agents", "agent-map", "settings"]);
   const { data: orgModels } = useModels();
   const [adding, setAdding] = useState(false);
   const { isPending, onSubmit } = useModelFormHandler({ onSuccess: () => setAdding(false) });
@@ -131,7 +134,7 @@ function ModelPanel({ packageId }: { packageId: string }) {
  * open a blank dialog.
  */
 function ConfigPanel({ packageId }: { packageId: string }) {
-  const { t } = useTranslation("agents");
+  const { t } = useTranslation(["agents", "agent-map"]);
   const { data: detail } = usePackageDetail("agent", packageId);
   const schema = detail?.config?.schema ? asJSONSchemaObject(detail.config.schema) : null;
 
@@ -143,7 +146,7 @@ function ConfigPanel({ packageId }: { packageId: string }) {
     );
   }
   if (!schema?.properties || Object.keys(schema.properties).length === 0) {
-    return <p className="text-muted-foreground text-sm">{t("map.emptyConfig")}</p>;
+    return <p className="text-muted-foreground text-sm">{t("agent-map:emptyConfig")}</p>;
   }
   return <ConfigSection packageId={packageId} schema={schema} />;
 }
@@ -157,7 +160,7 @@ export function MapPanelDialog({
   packageId: string;
   onClose: () => void;
 }) {
-  const { t } = useTranslation("agents");
+  const { t } = useTranslation(["agents", "agent-map"]);
   const qc = useQueryClient();
   // Only the connections panel needs the detail DTO; fetching it for every kind
   // costs nothing extra (the page already holds it in cache).

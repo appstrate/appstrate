@@ -23,7 +23,7 @@ import { Input } from "@appstrate/ui/components/input";
 import { ShieldCheck } from "lucide-react";
 import type { OrgPackageItem } from "@appstrate/shared-types";
 import { usePackageList } from "../../hooks/use-packages";
-import { Spinner } from "../spinner";
+import { Spinner } from "../../components/spinner";
 
 export interface LibraryCandidate {
   id: string;
@@ -40,7 +40,7 @@ export function LibraryPicker({
   selected: LibraryCandidate[];
   onToggle: (candidate: LibraryCandidate) => void;
 }) {
-  const { t } = useTranslation("agents");
+  const { t } = useTranslation(["agents", "agent-map"]);
   // Full catalogue (no `active` filter) — the point of this picker.
   const { data: items, isLoading } = usePackageList("integration");
   const [query, setQuery] = useState("");
@@ -71,17 +71,17 @@ export function LibraryPicker({
   return (
     <div className="border-border mt-4 rounded-lg border">
       <div className="border-border bg-background text-foreground border-b px-4 py-3 text-xs font-semibold tracking-wide uppercase">
-        {t("map.library")}
+        {t("agent-map:library")}
       </div>
       <div className="space-y-3 p-4">
-        <p className="text-muted-foreground text-xs">{t("map.libraryHint")}</p>
+        <p className="text-muted-foreground text-xs">{t("agent-map:libraryHint")}</p>
         <Input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder={t("map.librarySearch")}
+          placeholder={t("agent-map:librarySearch")}
         />
         {inactive.length === 0 ? (
-          <p className="text-muted-foreground text-xs">{t("map.libraryNoMatch")}</p>
+          <p className="text-muted-foreground text-xs">{t("agent-map:libraryNoMatch")}</p>
         ) : (
           <div className="max-h-[240px] space-y-1 overflow-y-auto">
             {inactive.map((item) => (

@@ -35,9 +35,9 @@ import {
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
-import type { AgentMapDiagnostic } from "../../hooks/use-agent-map";
+import type { AgentMapDiagnostic } from "./use-agent-map";
 import { packageDetailPath } from "../../lib/package-paths";
-import { Modal } from "../modal";
+import { Modal } from "../../components/modal";
 import type { MapEditKind } from "./map-edit-dialog";
 import type { MapPanelKind } from "./map-panel-dialog";
 
@@ -121,23 +121,23 @@ function CardActionButton({ action }: { action: CardAction }) {
  * lines so an explanation can breathe.
  */
 function ConceptButton({ concept }: { concept: string }) {
-  const { t } = useTranslation("agents");
+  const { t } = useTranslation(["agents", "agent-map"]);
   const [open, setOpen] = useState(false);
-  const title = t(`map.concept.${concept}.title`);
+  const title = t(`agent-map:concept.${concept}.title`);
   return (
     <>
       <button
         type="button"
         onClick={() => setOpen(true)}
-        title={t("map.explain", { concept: title })}
-        aria-label={t("map.explain", { concept: title })}
+        title={t("agent-map:explain", { concept: title })}
+        aria-label={t("agent-map:explain", { concept: title })}
         className={ACTION_CLASS}
       >
         <Info className="size-3.5" />
       </button>
       <Modal open={open} onClose={() => setOpen(false)} title={title}>
         <div className="space-y-3 text-sm leading-relaxed">
-          {t(`map.concept.${concept}.body`)
+          {t(`agent-map:concept.${concept}.body`)
             .split("\n\n")
             .map((paragraph) => (
               <p key={paragraph.slice(0, 24)}>{paragraph}</p>
@@ -422,20 +422,20 @@ function cardAction<K extends MapEditKind | MapPanelKind>(
 // ---------------------------------------------------------------------------
 
 export function SchedulesNode({ data }: NodeProps) {
-  const { t } = useTranslation("agents");
+  const { t } = useTranslation(["agents", "agent-map"]);
   const list = items<ScheduleItem>(data);
   return (
     <Card
-      title={t("map.schedules")}
+      title={t("agent-map:schedules")}
       concept="schedules"
       count={list.length}
       sources={["right"]}
-      emptyLabel={t("map.emptySchedules")}
+      emptyLabel={t("agent-map:emptySchedules")}
       // Straight to the create form, agent pre-selected. It used to open a panel
       // that re-listed the schedules this card already shows and offered its own
       // "add" link — two clicks and a duplicated list to reach the one thing a
       // plus can mean.
-      action={cardAction(data, "onPanel", "schedules", t("map.addSchedule"))}
+      action={cardAction(data, "onPanel", "schedules", t("agent-map:addSchedule"))}
     >
       {list.map((item) => (
         <Row
@@ -453,7 +453,7 @@ export function SchedulesNode({ data }: NodeProps) {
           href={`/schedules/${item.id}`}
           right={
             !item.enabled ? (
-              <span className="text-muted-foreground text-[10px]">{t("map.disabled")}</span>
+              <span className="text-muted-foreground text-[10px]">{t("agent-map:disabled")}</span>
             ) : undefined
           }
         />
@@ -463,15 +463,15 @@ export function SchedulesNode({ data }: NodeProps) {
 }
 
 export function AgentNode({ data }: NodeProps) {
-  const { t } = useTranslation("agents");
+  const { t } = useTranslation(["agents", "agent-map"]);
   const d = data as unknown as AgentData & { diagnostics?: AgentMapDiagnostic[] };
   const diags = diagnostics(data);
-  const edit = cardAction(data, "onEdit", "prompt", t("map.editPrompt"), "edit");
+  const edit = cardAction(data, "onEdit", "prompt", t("agent-map:editPrompt"), "edit");
   const facts = [d.timeout ? `${d.timeout}s` : null].filter(Boolean);
 
   return (
     <Card
-      title={t("map.agent")}
+      title={t("agent-map:agent")}
       concept="agent"
       targets={["left", "top"]}
       sources={["right", "bottom"]}
@@ -506,10 +506,10 @@ export function AgentNode({ data }: NodeProps) {
           className="border-border w-full border-t pt-2 text-left"
         >
           <div className="text-muted-foreground mb-1 text-[10px] font-semibold uppercase">
-            {t("map.instructions")}
+            {t("agent-map:instructions")}
           </div>
           <p className="text-muted-foreground line-clamp-6 text-[11px] whitespace-pre-wrap">
-            {d.prompt?.trim() || t("map.noPrompt")}
+            {d.prompt?.trim() || t("agent-map:noPrompt")}
           </p>
         </SectionButton>
       </div>
@@ -518,26 +518,26 @@ export function AgentNode({ data }: NodeProps) {
 }
 
 export function ToolboxNode({ data }: NodeProps) {
-  const { t } = useTranslation("agents");
+  const { t } = useTranslation(["agents", "agent-map"]);
   const list = items<ToolboxItem>(data);
   const diags = diagnostics(data);
   const connect = cardAction(data, "onPanel", "connections", t("detail.tabConnections"));
   return (
     <Card
-      title={t("map.toolbox")}
+      title={t("agent-map:toolbox")}
       concept="toolbox"
       count={list.length}
       targets={["left"]}
-      emptyLabel={t("map.emptyToolbox")}
-      action={cardAction(data, "onEdit", "integrations", t("map.addIntegration"))}
+      emptyLabel={t("agent-map:emptyToolbox")}
+      action={cardAction(data, "onEdit", "integrations", t("agent-map:addIntegration"))}
     >
       {list.map((item) => {
         const toolLabel =
           item.tools === "*"
-            ? t("map.allTools")
+            ? t("agent-map:allTools")
             : item.tools
-              ? t("map.toolCount", { count: item.tools.length })
-              : t("map.noTools");
+              ? t("agent-map:toolCount", { count: item.tools.length })
+              : t("agent-map:noTools");
         return (
           <Row
             key={item.id}
@@ -553,7 +553,7 @@ export function ToolboxNode({ data }: NodeProps) {
             right={
               <span className="flex items-center gap-1">
                 {item.locked && (
-                  <span className="text-muted-foreground" title={t("map.adminLocked")}>
+                  <span className="text-muted-foreground" title={t("agent-map:adminLocked")}>
                     <Lock className="size-3" />
                   </span>
                 )}
@@ -568,17 +568,17 @@ export function ToolboxNode({ data }: NodeProps) {
 }
 
 export function SkillsNode({ data }: NodeProps) {
-  const { t } = useTranslation("agents");
+  const { t } = useTranslation(["agents", "agent-map"]);
   const list = items<SkillItem>(data);
   const diags = diagnostics(data);
-  const edit = cardAction(data, "onEdit", "skills", t("map.addSkill"));
+  const edit = cardAction(data, "onEdit", "skills", t("agent-map:addSkill"));
   return (
     <Card
-      title={t("map.skills")}
+      title={t("agent-map:skills")}
       concept="skills"
       count={list.length}
       targets={["left"]}
-      emptyLabel={t("map.emptySkills")}
+      emptyLabel={t("agent-map:emptySkills")}
       action={edit}
     >
       {list.map((item) => (
@@ -602,14 +602,14 @@ export function SkillsNode({ data }: NodeProps) {
 }
 
 export function ModelNode({ data }: NodeProps) {
-  const { t } = useTranslation("agents");
+  const { t } = useTranslation(["agents", "agent-map"]);
   const d = data as unknown as ModelData;
   // One model, changed rather than added — a pencil, and the row itself opens
   // the same picker so the content is clickable.
-  const choose = cardAction(data, "onPanel", "model", t("map.chooseModel"), "edit");
+  const choose = cardAction(data, "onPanel", "model", t("agent-map:chooseModel"), "edit");
   return (
     <Card
-      title={t("map.model")}
+      title={t("agent-map:model")}
       concept="model"
       // An input card: the model feeds the agent (edge `model->agent`).
       sources={["right"]}
@@ -619,44 +619,54 @@ export function ModelNode({ data }: NodeProps) {
     >
       <Row
         icon={<Cpu className="size-3.5" />}
-        label={d.resolved_model_label ?? t("map.noModel")}
+        label={d.resolved_model_label ?? t("agent-map:noModel")}
         sublabel={
           d.resolved
             ? d.inherited
-              ? t("map.modelInherited")
-              : t("map.modelPinned")
-            : t("map.noModelHint")
+              ? t("agent-map:modelInherited")
+              : t("agent-map:modelPinned")
+            : t("agent-map:noModelHint")
         }
         dimmed={!d.resolved}
         onClick={choose?.onClick}
         right={
           d.resolved ? undefined : (
-            <span className="text-warning shrink-0" title={t("map.noModelHint")}>
+            <span className="text-warning shrink-0" title={t("agent-map:noModelHint")}>
               <AlertTriangle className="size-3.5" />
             </span>
           )
         }
       />
       {d.proxyId && d.proxyId !== "none" && (
-        <Row icon={<Globe className="size-3.5" />} label={d.proxyId} sublabel={t("map.proxy")} />
+        <Row
+          icon={<Globe className="size-3.5" />}
+          label={d.proxyId}
+          sublabel={t("agent-map:proxy")}
+        />
       )}
     </Card>
   );
 }
 
 export function SystemToolsNode({ data }: NodeProps) {
-  const { t } = useTranslation("agents");
+  const { t } = useTranslation(["agents", "agent-map"]);
   const list = items<SystemToolItem>(data);
-  const browse = cardAction(data, "onPanel", "memory", t("map.openMemory"));
+  const browse = cardAction(data, "onPanel", "memory", t("agent-map:openMemory"));
   // A checklist you tick, not a list you append to.
-  const grant = cardAction(data, "onEdit", "runtime_tools", t("map.grantSystemTools"), "edit");
+  const grant = cardAction(
+    data,
+    "onEdit",
+    "runtime_tools",
+    t("agent-map:grantSystemTools"),
+    "edit",
+  );
   return (
     <Card
-      title={t("map.systemTools")}
+      title={t("agent-map:systemTools")}
       concept="systemTools"
       count={list.length}
       targets={["left"]}
-      emptyLabel={t("map.emptySystemTools")}
+      emptyLabel={t("agent-map:emptySystemTools")}
       // These are granted in the manifest (`runtime_tools`), so the affordance
       // opens the same checklist the editor uses.
       action={grant}
@@ -665,8 +675,8 @@ export function SystemToolsNode({ data }: NodeProps) {
         <Row
           key={item.id}
           icon={<Brain className="size-3.5" />}
-          label={t(`map.systemTool.${item.id}`, { defaultValue: item.id })}
-          sublabel={item.always ? t("map.toolAlways") : t("map.toolGranted")}
+          label={t(`agent-map:systemTool.${item.id}`, { defaultValue: item.id })}
+          sublabel={item.always ? t("agent-map:toolAlways") : t("agent-map:toolGranted")}
           // An always-on tool is not in the checklist, so sending its row there
           // would open a dialog that cannot show it.
           onClick={item.always ? undefined : grant?.onClick}
@@ -677,7 +687,7 @@ export function SystemToolsNode({ data }: NodeProps) {
       {browse && (
         <Row
           icon={<Archive className="size-3.5" />}
-          label={t("map.openMemory")}
+          label={t("agent-map:openMemory")}
           onClick={browse.onClick}
         />
       )}
@@ -696,7 +706,7 @@ export function SystemToolsNode({ data }: NodeProps) {
  * will refuse it), which is exactly the mismatch a reader needs to see.
  */
 function ContractNode({ data, side }: { data: Record<string, unknown>; side: "input" | "output" }) {
-  const { t } = useTranslation("agents");
+  const { t } = useTranslation(["agents", "agent-map"]);
   const list = items<ContractField>(data);
   // A schema is one shape you reshape, not a list you append to — hence the
   // pencil, and rows that open the same field editor the package editor uses.
@@ -704,16 +714,16 @@ function ContractNode({ data, side }: { data: Record<string, unknown>; side: "in
     data,
     "onEdit",
     side,
-    side === "input" ? t("map.editInput") : t("map.editOutput"),
+    side === "input" ? t("agent-map:editInput") : t("agent-map:editOutput"),
     "edit",
   );
   return (
     <Card
-      title={side === "input" ? t("map.input") : t("map.output")}
+      title={side === "input" ? t("agent-map:input") : t("agent-map:output")}
       concept={side}
       count={list.length}
       {...(side === "input" ? { sources: ["bottom" as const] } : { targets: ["top" as const] })}
-      emptyLabel={side === "input" ? t("map.emptyInput") : t("map.emptyOutput")}
+      emptyLabel={side === "input" ? t("agent-map:emptyInput") : t("agent-map:emptyOutput")}
       action={edit}
     >
       {list.map((field) => (
@@ -727,7 +737,7 @@ function ContractNode({ data, side }: { data: Record<string, unknown>; side: "in
             )
           }
           label={field.title ?? field.name}
-          sublabel={[field.type, field.required ? t("map.fieldRequired") : null]
+          sublabel={[field.type, field.required ? t("agent-map:fieldRequired") : null]
             .filter(Boolean)
             .join(" · ")}
           onClick={edit?.onClick}
@@ -747,7 +757,7 @@ function ContractNode({ data, side }: { data: Record<string, unknown>; side: "in
  * setting, not the contract.
  */
 export function ConfigNode({ data }: NodeProps) {
-  const { t } = useTranslation("agents");
+  const { t } = useTranslation(["agents", "agent-map"]);
   const list = items<ConfigItem>(data);
   const diags = diagnostics(data);
   // Two different things, so two entry points. The header edits the DECLARED
@@ -755,15 +765,15 @@ export function ConfigNode({ data }: NodeProps) {
   // do; a row sets its VALUE for this application. An empty card only has the
   // first — offering the values form with no field to fill was a dialog that
   // could do nothing, which is what an empty card must never open onto.
-  const declare = cardAction(data, "onEdit", "config", t("map.editConfigSchema"), "edit");
-  const setValues = cardAction(data, "onPanel", "config", t("map.editConfig"), "edit");
+  const declare = cardAction(data, "onEdit", "config", t("agent-map:editConfigSchema"), "edit");
+  const setValues = cardAction(data, "onPanel", "config", t("agent-map:editConfig"), "edit");
   return (
     <Card
-      title={t("map.config")}
+      title={t("agent-map:config")}
       concept="config"
       count={list.length}
       sources={["right"]}
-      emptyLabel={t("map.emptyConfig")}
+      emptyLabel={t("agent-map:emptyConfig")}
       action={declare}
     >
       {list.map((field) => (
@@ -773,7 +783,7 @@ export function ConfigNode({ data }: NodeProps) {
           label={field.title ?? field.name}
           // The value is the point of this card; the type only matters when
           // there is no value to show yet.
-          sublabel={field.value ?? t("map.configUnset")}
+          sublabel={field.value ?? t("agent-map:configUnset")}
           dimmed={field.value === null}
           onClick={setValues?.onClick}
           right={<DiagnosticBadge diagnostics={diagnosticsFor(diags, field.name)} />}
@@ -792,16 +802,16 @@ export function OutputNode({ data }: NodeProps) {
 }
 
 export function McpServersNode({ data }: NodeProps) {
-  const { t } = useTranslation("agents");
+  const { t } = useTranslation(["agents", "agent-map"]);
   const list = items<McpServerItem>(data);
   const diags = diagnostics(data);
   return (
     <Card
-      title={t("map.mcpServers")}
+      title={t("agent-map:mcpServers")}
       concept="mcpServers"
       count={list.length}
       targets={["left"]}
-      emptyLabel={t("map.emptyMcpServers")}
+      emptyLabel={t("agent-map:emptyMcpServers")}
     >
       {list.map((item) => (
         <Row

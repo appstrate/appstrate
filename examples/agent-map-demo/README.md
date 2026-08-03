@@ -25,6 +25,14 @@ definitions, so the files remain the single source of truth.
 
 ## Run it
 
+The map is an **opt-in module** — enable it before seeding, or the `Carte` tab
+is absent and `GET /api/agents/:scope/:name/map` 404s:
+
+```sh
+# .env
+MODULES=oidc,webhooks,mcp,core-providers,@appstrate/module-chat,agent-map
+```
+
 ```sh
 bun examples/agent-map-demo/seed.ts                        # against localhost:3000
 BASE=http://localhost:3300 bun examples/agent-map-demo/seed.ts

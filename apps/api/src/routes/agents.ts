@@ -35,7 +35,6 @@ import { readJsonBody } from "../lib/request-body.ts";
 import { asJSONSchemaObject, mergeWithDefaults } from "@appstrate/core/form";
 import { getAppScope } from "../lib/scope.ts";
 import { resolveAgentConnectionReadiness } from "../services/integration-pins-service.ts";
-import { buildAgentMap } from "../services/agent-map.ts";
 import { assertExplicitModelExists } from "../services/org-models.ts";
 import {
   buildBundleForAgentExport,
@@ -179,26 +178,6 @@ export function createAgentsRouter() {
           version: c.req.query("version"),
         }),
       );
-    },
-  );
-
-  // GET /api/agents/:scope/:name/map — visual map of the agent: manifest
-  // projection (triggers, schedules, toolbox, skills, mcp servers) crossed with
-  // the installation state, plus readiness diagnostics routed to the node they
-  // belong to. Read-only — owns no data and adds no verdict of its own.
-  router.get(
-    `/${SCOPED_PACKAGE_ROUTE}/map`,
-    requireAgent(),
-    requirePermission("agents", "read"),
-    async (c) => {
-      const agent = c.get("package");
-      const version = c.req.query("version");
-      const map = await buildAgentMap(c, {
-        itemId: agent.id,
-        ...(version ? { version } : {}),
-      });
-      if (!map) throw notFound(`Agent '${agent.id}' not found`);
-      return c.json(map);
     },
   );
 
