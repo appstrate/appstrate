@@ -143,6 +143,7 @@ function makeUploader(publishedKeys: Set<string>, overrides?: Partial<RunDocumen
     sinkSecret: SECRET,
     workspace,
     publishedKeys,
+    publishedSourceHashes: new Map(),
     // No real backoff waits in tests; retry-specific cases inject a recorder.
     sleepFn: async () => {},
     ...overrides,
@@ -422,6 +423,7 @@ describe("sweepOutputs", () => {
       uploader: makeUploader(keys),
       workspace,
       publishedKeys: keys,
+      publishedSourceHashes: new Map(),
       maxFileBytes: 1024,
       emit: (e) => {
         events.push(e);
@@ -451,6 +453,7 @@ describe("sweepOutputs", () => {
       uploader: makeUploader(keys),
       workspace,
       publishedKeys: keys,
+      publishedSourceHashes: new Map(),
       maxFileBytes: 1024,
       emit: (e) => {
         events.push(e);
@@ -473,6 +476,7 @@ describe("sweepOutputs", () => {
       uploader: makeUploader(keys),
       workspace,
       publishedKeys: keys,
+      publishedSourceHashes: new Map(),
       maxFileBytes: 1024,
       emit: (e) => {
         events.push(e);
@@ -482,6 +486,55 @@ describe("sweepOutputs", () => {
     expect(config.received).toHaveLength(0);
     expect(events).toHaveLength(0);
     expect(result.skipped).toEqual([{ name: "dup.txt", reason: "already_published" }]);
+  });
+
+  it("does not sweep an unchanged output already published under a display name", async () => {
+    await seedOutput("report.html", "same-deliverable");
+    const keys = new Set<string>();
+    const sourceHashes = new Map<string, string>();
+    const events: unknown[] = [];
+    const uploader = makeUploader(keys, { publishedSourceHashes: sourceHashes });
+
+    const published = await uploader("outputs/report.html", "Quarterly overview", "primary");
+    const result = await sweepOutputs({
+      uploader,
+      workspace,
+      publishedKeys: keys,
+      publishedSourceHashes: sourceHashes,
+      maxFileBytes: 1024,
+      emit: (event) => {
+        events.push(event);
+      },
+    });
+
+    expect(published.name).toBe("Quarterly overview");
+    expect(config.received).toHaveLength(1);
+    expect(events).toHaveLength(0);
+    expect(result.published).toHaveLength(0);
+    expect(result.skipped).toEqual([{ name: "report.html", reason: "already_published" }]);
+  });
+
+  it("sweeps final bytes when an explicitly published output changed", async () => {
+    await seedOutput("report.html", "draft");
+    const keys = new Set<string>();
+    const sourceHashes = new Map<string, string>();
+    const uploader = makeUploader(keys, { publishedSourceHashes: sourceHashes });
+
+    await uploader("outputs/report.html", "Quarterly overview", "primary");
+    await seedOutput("report.html", "final");
+    const result = await sweepOutputs({
+      uploader,
+      workspace,
+      publishedKeys: keys,
+      publishedSourceHashes: sourceHashes,
+      maxFileBytes: 1024,
+      emit: () => {},
+    });
+
+    expect(config.received).toHaveLength(2);
+    expect(config.received[1]!.name).toBe("report.html");
+    expect(result.published).toHaveLength(1);
+    expect(result.skipped).toHaveLength(0);
   });
 
   it("skips a symlink under outputs/ with a warning and publishes regular files", async () => {
@@ -501,6 +554,7 @@ describe("sweepOutputs", () => {
       uploader: makeUploader(keys),
       workspace,
       publishedKeys: keys,
+      publishedSourceHashes: new Map(),
       maxFileBytes: 1024,
       emit: (e) => {
         events.push(e);
@@ -524,6 +578,7 @@ describe("sweepOutputs", () => {
       uploader: makeUploader(new Set()),
       workspace,
       publishedKeys: new Set(),
+      publishedSourceHashes: new Map(),
       maxFileBytes: 4,
       emit: () => {},
       logWarn: (m) => warnings.push(m),
@@ -544,6 +599,7 @@ describe("sweepOutputs", () => {
       uploader: makeUploader(new Set()),
       workspace,
       publishedKeys: new Set(),
+      publishedSourceHashes: new Map(),
       maxFileBytes: 1024,
       emit: (e) => {
         events.push(e);
@@ -588,6 +644,7 @@ describe("sweepOutputs", () => {
       }),
       workspace,
       publishedKeys: new Set(),
+      publishedSourceHashes: new Map(),
       maxFileBytes: 1024,
       emit: (e) => {
         events.push(e);
@@ -621,6 +678,7 @@ describe("sweepOutputs", () => {
       uploader: makeUploader(keys),
       workspace,
       publishedKeys: keys,
+      publishedSourceHashes: new Map(),
       maxFileBytes: 1024,
       emit: (e) => {
         events.push(e);
@@ -649,6 +707,7 @@ describe("sweepOutputs", () => {
       uploader: makeUploader(keys),
       workspace,
       publishedKeys: keys,
+      publishedSourceHashes: new Map(),
       maxFileBytes: 1024,
       emit: (e) => {
         events.push(e);
@@ -678,6 +737,7 @@ describe("sweepOutputs", () => {
       uploader: makeUploader(keys),
       workspace,
       publishedKeys: keys,
+      publishedSourceHashes: new Map(),
       maxFileBytes: 1024,
       emit: (e) => {
         events.push(e);
@@ -704,6 +764,7 @@ describe("sweepOutputs", () => {
       uploader: makeUploader(keys),
       workspace,
       publishedKeys: keys,
+      publishedSourceHashes: new Map(),
       maxFileBytes: 1024,
       emit: (e) => {
         events.push(e);
@@ -730,6 +791,7 @@ describe("sweepOutputs", () => {
       uploader: makeUploader(keys),
       workspace,
       publishedKeys: keys,
+      publishedSourceHashes: new Map(),
       maxFileBytes: 1024,
       emit: () => {
         throw new Error("sink unreachable");

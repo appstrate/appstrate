@@ -229,19 +229,22 @@ const bridge = attachStdoutBridge({ sink, runId: AGENT_RUN_ID });
 const bridgedSink = bridge.sink;
 
 // --- 0b. Document publishing (run → platform) ---
-// `${sha256}:${name}` identities this run has published, shared by the
-// `publish_document` tool and the end-of-run outputs sweep so a file published
-// explicitly is not swept again — while two files with identical bytes but
-// different names both still publish. Matches the server dedup identity
-// `(runId, sha256, name)`. The uploader streams a workspace file to
+// Server `${sha256}:${name}` identities and canonical source-path → sha256
+// identities this run has published, shared by the `publish_document` tool and
+// the end-of-run outputs sweep. The source identity prevents an unchanged file
+// published under a display-name override from being swept again, while the
+// server identity still allows two distinct files with identical bytes but
+// different names. The uploader streams a workspace file to
 // POST /api/runs/:id/documents, signed with the same run HMAC as the workspace
 // provisioning fetches.
 const publishedDocumentKeys = new Set<string>();
+const publishedDocumentSourceHashes = new Map<string, string>();
 const uploadRunDocument = createRunDocumentUploader({
   sinkUrl: env.sink.url,
   sinkSecret: env.sink.secret,
   workspace: env.workspaceDir,
   publishedKeys: publishedDocumentKeys,
+  publishedSourceHashes: publishedDocumentSourceHashes,
 });
 
 /**
@@ -879,6 +882,7 @@ async function runOutputsSweep(): Promise<SweepResult | null> {
     uploader: uploadRunDocument,
     workspace: WORKSPACE,
     publishedKeys: publishedDocumentKeys,
+    publishedSourceHashes: publishedDocumentSourceHashes,
     maxFileBytes: OUTPUTS_SWEEP_MAX_FILE_BYTES,
     emit: (event) => {
       void bridgedSink.handle(event as RunEvent);
