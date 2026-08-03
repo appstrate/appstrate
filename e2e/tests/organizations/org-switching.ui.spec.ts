@@ -46,7 +46,7 @@ test.describe("Org switching in UI", () => {
     await agents.expectAgentNotVisible(agentB);
   });
 
-  test("Switching org shows the other org agents @critical", async ({
+  test("Switching org returns home and shows the other org agents @critical", async ({
     authedPage: page,
     clientA,
     clientB,
@@ -67,6 +67,8 @@ test.describe("Org switching in UI", () => {
     const sidebar = new Sidebar(page);
     await sidebar.switchOrg(orgB.orgName);
 
+    await page.getByRole("link", { name: "Agents", exact: true }).click();
+    await agents.waitForLoaded();
     await agents.expectAgentVisible(agentB);
     await agents.expectAgentNotVisible(agentA);
   });
@@ -92,6 +94,8 @@ test.describe("Org switching in UI", () => {
     const sidebar = new Sidebar(page);
     await sidebar.switchOrg(orgB.orgName);
 
+    await page.getByRole("link", { name: "Agents", exact: true }).click();
+    await agents.waitForLoaded();
     await agents.expectAgentNotVisible(uniqueAgent);
   });
 });
