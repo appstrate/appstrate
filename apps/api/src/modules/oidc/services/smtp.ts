@@ -68,6 +68,7 @@ export interface SpiedSmtpSend {
   to: string;
   from: string;
   subject: string;
+  html: string;
 }
 let smtpSpy: ((e: SpiedSmtpSend) => void) | null = null;
 export function _setSmtpSpy(fn: ((e: SpiedSmtpSend) => void) | null): void {
@@ -82,7 +83,13 @@ function wrapForSpy(transport: Transporter, source: "per-app" | "instance"): Tra
     if (smtpSpy) {
       const to = Array.isArray(mail.to) ? mail.to.join(",") : String(mail.to ?? "");
       const from = typeof mail.from === "string" ? mail.from : String(mail.from ?? "");
-      smtpSpy({ source, to, from, subject: String(mail.subject ?? "") });
+      smtpSpy({
+        source,
+        to,
+        from,
+        subject: String(mail.subject ?? ""),
+        html: String(mail.html ?? ""),
+      });
     }
     return result;
   };

@@ -40,14 +40,14 @@ let verifyAudiencesCache: { appBase: string; audiences: string[] } | null = null
 
 /** Canonical per-org MCP resource URI — byte-stable (org id, not slug). */
 export function getMcpOrgResourceUri(orgId: string): string {
-  return `${getEnv().APP_URL.replace(/\/+$/, "")}/api/mcp/o/${orgId}`;
+  return `${getEnv().APP_URL}/api/mcp/o/${orgId}`;
 }
 
 /**
  * Parse an org id out of a per-org MCP resource URI.
  *
  * Returns `<id>` iff `uri` is EXACTLY `${APP_URL}/api/mcp/o/<id>` — same
- * `APP_URL` normalization as `getMcpOrgResourceUri` (trailing slashes stripped),
+ * canonical `APP_URL` as `getMcpOrgResourceUri`,
  * with `<id>` being a single non-empty path segment and NOTHING after it. The
  * trailing-segment guard is deliberate: a token whose audience is a SUB-path
  * (`…/o/<id>/extra`) or a query-decorated variant must NOT be read as a binding
@@ -56,7 +56,7 @@ export function getMcpOrgResourceUri(orgId: string): string {
  * real org (that membership re-check happens later in org-context).
  */
 export function orgIdFromMcpAudience(uri: string): string | undefined {
-  const prefix = `${getEnv().APP_URL.replace(/\/+$/, "")}/api/mcp/o/`;
+  const prefix = `${getEnv().APP_URL}/api/mcp/o/`;
   if (!uri.startsWith(prefix)) return undefined;
   const rest = uri.slice(prefix.length);
   // Exactly one path segment and nothing else: non-empty and free of any URL

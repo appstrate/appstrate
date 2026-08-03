@@ -25,7 +25,7 @@
  */
 
 import { escapeHtml } from "@appstrate/core/html";
-import { getEnv } from "@appstrate/env";
+import { getPublicAppOrigin } from "./public-url.ts";
 
 /**
  * Target origin for the `postMessage` to `window.opener`. Scoping the message
@@ -35,7 +35,7 @@ import { getEnv } from "@appstrate/env";
  * served from `APP_URL`, so its origin is the correct (and only) audience.
  */
 function appOrigin(): string {
-  return new URL(getEnv().APP_URL).origin;
+  return getPublicAppOrigin();
 }
 
 /** Channel name shared with the chat auth card (`packages/module-chat`). */
