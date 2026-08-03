@@ -9,7 +9,6 @@ import {
   CheckCircle2,
   Clock,
   ArrowDown,
-  WrapText,
   Info,
   AlertTriangle,
   XCircle,
@@ -20,15 +19,17 @@ import {
   MessageSquareText,
 } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
+import { ScrollArea } from "@appstrate/ui/components/scroll-area";
 import { cn } from "@appstrate/ui/cn";
 import { formatDuration } from "@appstrate/core/format";
 import {
   formatTimestamp,
-  getExecutionEntryDisclosure,
   levelColors,
   type ExecutionEntry,
+  type ToolExecutionEntry,
   type ToolExecutionStatus,
 } from "./log-utils";
+import { Modal } from "./modal";
 
 const levelConfig: Record<string, { icon: typeof Info; className: string; label: string }> = {
   info: { icon: Info, className: "text-blue-400 bg-blue-400/10", label: "INFO" },
@@ -78,36 +79,59 @@ function ExecutionEntryLeading({ entry }: { entry: ExecutionEntry }) {
   return <span className="mr-1.5 flex h-7 shrink-0 items-center gap-1.5">{content}</span>;
 }
 
-const toolStatusClasses: Record<ToolExecutionStatus, string> = {
-  running: "text-blue-400",
-  success: "text-success",
-  failed: "text-destructive",
-  interrupted: "text-amber-400",
-  unknown: "text-muted-foreground",
-};
+const toolStatusConfig = {
+  running: {
+    icon: Loader2,
+    className: "text-blue-400 animate-spin",
+    labelKey: "log.toolStatus.running",
+  },
+  success: {
+    icon: CheckCircle2,
+    className: "text-success",
+    labelKey: "log.toolStatus.success",
+  },
+  failed: {
+    icon: XCircle,
+    className: "text-destructive",
+    labelKey: "log.toolStatus.failed",
+  },
+  interrupted: {
+    icon: CircleSlash2,
+    className: "text-amber-400",
+    labelKey: "log.toolStatus.interrupted",
+  },
+  unknown: {
+    icon: CircleHelp,
+    className: "text-muted-foreground",
+    labelKey: "log.toolStatus.unknown",
+  },
+} satisfies Record<
+  ToolExecutionStatus,
+  { icon: typeof Loader2; className: string; labelKey: string }
+>;
 
-function ToolStatusIcon({ status }: { status: ToolExecutionStatus }) {
+function ToolStatus({
+  status,
+  showLabel = false,
+}: {
+  status: ToolExecutionStatus;
+  showLabel?: boolean;
+}) {
   const { t } = useTranslation("agents");
-  const className = cn("size-3.5 shrink-0", toolStatusClasses[status]);
-  const label = {
-    running: t("log.toolStatus.running"),
-    success: t("log.toolStatus.success"),
-    failed: t("log.toolStatus.failed"),
-    interrupted: t("log.toolStatus.interrupted"),
-    unknown: t("log.toolStatus.unknown"),
-  }[status];
-  switch (status) {
-    case "running":
-      return <Loader2 className={cn(className, "animate-spin")} aria-label={label} />;
-    case "success":
-      return <CheckCircle2 className={className} aria-label={label} />;
-    case "failed":
-      return <XCircle className={className} aria-label={label} />;
-    case "interrupted":
-      return <CircleSlash2 className={className} aria-label={label} />;
-    case "unknown":
-      return <CircleHelp className={className} aria-label={label} />;
-  }
+  const config = toolStatusConfig[status];
+  const Icon = config.icon;
+  const label = t(config.labelKey);
+
+  return (
+    <span className="inline-flex shrink-0 items-center gap-1.5">
+      <Icon
+        className={cn("size-3.5 shrink-0", config.className)}
+        aria-hidden={showLabel || undefined}
+        aria-label={showLabel ? undefined : label}
+      />
+      {showLabel && <span>{label}</span>}
+    </span>
+  );
 }
 
 function formatStructuredValue(value: unknown): string {
@@ -117,6 +141,55 @@ function formatStructuredValue(value: unknown): string {
   } catch {
     return String(value);
   }
+}
+
+function ToolDetailsModal({
+  entry,
+  onClose,
+}: {
+  entry: ToolExecutionEntry | null;
+  onClose: () => void;
+}) {
+  const { t } = useTranslation("agents");
+
+  return (
+    <Modal
+      open={entry !== null}
+      onClose={onClose}
+      title={t("log.toolDetails", { tool: entry?.tool ?? "" })}
+      className="grid h-[85vh] max-h-[48rem] grid-rows-[auto_minmax(0,1fr)] sm:max-w-4xl"
+    >
+      {entry && (
+        <ScrollArea className="min-h-0">
+          <div className="flex flex-col gap-5 pr-4">
+            <div className="text-muted-foreground flex flex-wrap items-center gap-3 text-sm">
+              <ToolStatus status={entry.status} showLabel />
+              {entry.durationMs !== undefined && (
+                <span className="tabular-nums">{formatDuration(entry.durationMs)}</span>
+              )}
+              {entry.detail && <span>{entry.detail}</span>}
+            </div>
+            {entry.args !== undefined && (
+              <section className="flex flex-col gap-2">
+                <h3 className="text-sm font-medium">{t("log.arguments")}</h3>
+                <pre className="bg-muted text-foreground/80 overflow-x-auto rounded-md p-3 font-mono text-xs break-words whitespace-pre-wrap select-text">
+                  {formatStructuredValue(entry.args)}
+                </pre>
+              </section>
+            )}
+            {entry.result !== undefined && (
+              <section className="flex flex-col gap-2">
+                <h3 className="text-sm font-medium">{t("log.result")}</h3>
+                <pre className="bg-muted text-foreground/80 overflow-x-auto rounded-md p-3 font-mono text-xs break-words whitespace-pre-wrap select-text">
+                  {formatStructuredValue(entry.result)}
+                </pre>
+              </section>
+            )}
+          </div>
+        </ScrollArea>
+      )}
+    </Modal>
+  );
 }
 
 interface LogViewerProps {
@@ -130,8 +203,11 @@ export function LogViewer({ entries }: LogViewerProps) {
   const [showTimestamps, setShowTimestamps] = useState(false);
   const [autoScroll, setAutoScroll] = useState(true);
   const [copied, setCopied] = useState(false);
-  const [expandAll, setExpandAll] = useState(false);
-  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [selectedToolId, setSelectedToolId] = useState<string | null>(null);
+  const selectedTool =
+    entries.find((entry): entry is ToolExecutionEntry => {
+      return entry.kind === "tool" && entry.id === selectedToolId;
+    }) ?? null;
 
   // eslint-disable-next-line react-hooks/incompatible-library
   const virtualizer = useVirtualizer({
@@ -191,17 +267,7 @@ export function LogViewer({ entries }: LogViewerProps) {
         <Button
           variant="ghost"
           size="icon"
-          className={cn("text-muted-foreground h-7 w-7", expandAll && "text-primary")}
-          onClick={() => setExpandAll((v) => !v)}
-          title={t("log.expandAll")}
-          style={{ marginLeft: "auto" }}
-        >
-          <WrapText size={14} />
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          className={cn("text-muted-foreground h-7 w-7", showTimestamps && "text-primary")}
+          className={cn("text-muted-foreground ml-auto h-7 w-7", showTimestamps && "text-primary")}
           onClick={() => setShowTimestamps((v) => !v)}
           title={t("log.toggleTimestamps")}
         >
@@ -242,15 +308,8 @@ export function LogViewer({ entries }: LogViewerProps) {
         >
           {virtualizer.getVirtualItems().map((virtualRow) => {
             const entry = entries[virtualRow.index]!;
-            const disclosure = getExecutionEntryDisclosure(entry);
-            const expanded = disclosure.expandable && (expandAll || expandedId === entry.id);
-            const visibleMessage =
-              entry.kind === "tool" ? null : expanded ? entry.message : disclosure.collapsedMessage;
-            const wrapMessage = entry.kind !== "tool" && expanded;
-            const messageClassName = cn(
-              "min-w-0 flex-1",
-              wrapMessage ? "break-words whitespace-pre-wrap" : "truncate whitespace-nowrap",
-            );
+            const hasToolDetails =
+              entry.kind === "tool" && (entry.args !== undefined || entry.result !== undefined);
             return (
               <div
                 key={entry.id}
@@ -263,23 +322,28 @@ export function LogViewer({ entries }: LogViewerProps) {
                   width: "100%",
                   transform: `translateY(${virtualRow.start}px)`,
                 }}
-                onClick={() => {
-                  if (disclosure.expandable) {
-                    setExpandedId((prev) => (prev === entry.id ? null : entry.id));
-                  }
-                }}
               >
                 <div
                   className={cn(
                     "text-muted-foreground hover:bg-muted/50 flex min-h-7 px-3 py-0.5 font-mono text-sm leading-7 select-none",
-                    wrapMessage ? "items-start" : "items-center",
+                    entry.kind === "tool"
+                      ? "items-center truncate"
+                      : "items-start break-words whitespace-normal",
                     entry.level && levelColors[entry.level],
-                    disclosure.expandable && "cursor-pointer",
-                    entry.kind === "tool" || !wrapMessage
-                      ? "truncate"
-                      : "break-words whitespace-normal",
-                    expanded && "bg-muted/30 break-words whitespace-normal",
+                    hasToolDetails && "cursor-pointer",
                   )}
+                  onClick={() => {
+                    if (hasToolDetails) setSelectedToolId(entry.id);
+                  }}
+                  onKeyDown={(event) => {
+                    if (hasToolDetails && (event.key === "Enter" || event.key === " ")) {
+                      event.preventDefault();
+                      setSelectedToolId(entry.id);
+                    }
+                  }}
+                  role={hasToolDetails ? "button" : undefined}
+                  tabIndex={hasToolDetails ? 0 : undefined}
+                  aria-haspopup={hasToolDetails ? "dialog" : undefined}
                 >
                   {showTimestamps && (
                     <span className="text-muted-foreground/60 mr-2 flex h-7 shrink-0 items-center font-mono text-xs">
@@ -288,7 +352,7 @@ export function LogViewer({ entries }: LogViewerProps) {
                   )}
                   {entry.kind === "tool" ? (
                     <>
-                      <ToolStatusIcon status={entry.status} />
+                      <ToolStatus status={entry.status} />
                       <Wrench className="text-muted-foreground/60 ml-1.5 size-3.5 shrink-0" />
                       <span className="text-foreground ml-1.5 font-medium">{entry.tool}</span>
                       {entry.detail && (
@@ -307,48 +371,22 @@ export function LogViewer({ entries }: LogViewerProps) {
                       <ExecutionEntryLeading entry={entry} />
                       <span
                         className={cn(
-                          messageClassName,
+                          "min-w-0 flex-1 break-words whitespace-pre-wrap",
                           entry.kind === "agent" && "text-foreground/80 font-sans",
                           entry.kind === "log" && "font-sans",
                         )}
                       >
-                        {visibleMessage}
+                        {entry.message}
                       </span>
                     </>
                   )}
                 </div>
-                {expanded && entry.kind === "tool" && (
-                  <div
-                    className="border-border bg-muted/20 border-t px-8 py-2 text-xs"
-                    onClick={(event) => event.stopPropagation()}
-                  >
-                    {entry.args !== undefined && (
-                      <div className="mb-2 last:mb-0">
-                        <div className="text-muted-foreground mb-1 font-medium">
-                          {t("log.arguments")}
-                        </div>
-                        <pre className="text-foreground/80 overflow-x-auto whitespace-pre-wrap select-text">
-                          {formatStructuredValue(entry.args)}
-                        </pre>
-                      </div>
-                    )}
-                    {entry.result !== undefined && (
-                      <div>
-                        <div className="text-muted-foreground mb-1 font-medium">
-                          {t("log.result")}
-                        </div>
-                        <pre className="text-foreground/80 overflow-x-auto whitespace-pre-wrap select-text">
-                          {formatStructuredValue(entry.result)}
-                        </pre>
-                      </div>
-                    )}
-                  </div>
-                )}
               </div>
             );
           })}
         </div>
       </div>
+      <ToolDetailsModal entry={selectedTool} onClose={() => setSelectedToolId(null)} />
     </div>
   );
 }

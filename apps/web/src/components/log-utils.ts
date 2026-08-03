@@ -61,29 +61,6 @@ export interface RuntimeExecutionEntry extends ExecutionEntryBase {
 export type ExecutionEntry =
   AgentExecutionEntry | ToolExecutionEntry | ExplicitLogExecutionEntry | RuntimeExecutionEntry;
 
-export interface ExecutionEntryDisclosure {
-  expandable: boolean;
-  /** First logical line, or the full text when it contains no line break. */
-  collapsedMessage?: string;
-}
-
-/**
- * Describe the shared collapsed/expanded behaviour of an execution entry.
- * Text entries expand from one rendered line to their full content; tools
- * reveal structured arguments/results. The viewer owns only interaction state.
- */
-export function getExecutionEntryDisclosure(entry: ExecutionEntry): ExecutionEntryDisclosure {
-  if (entry.kind === "tool") {
-    return { expandable: entry.args !== undefined || entry.result !== undefined };
-  }
-
-  const firstLineBreak = entry.message.search(/[\r\n]/);
-  return {
-    expandable: true,
-    collapsedMessage: firstLineBreak < 0 ? entry.message : entry.message.slice(0, firstLineBreak),
-  };
-}
-
 /**
  * One settled assistant turn, projected from a `data.event === "turn"` run-log
  * row (emitted by `buildTurnProgress` in `@appstrate/afps-runtime`).
