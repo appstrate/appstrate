@@ -314,6 +314,82 @@ export async function createOAuthCredential(input: CreateOAuthCredentialInput): 
   return row!.id;
 }
 
+export interface ReconnectOAuthCredentialInput {
+  orgId: string;
+  id: string;
+  providerId: string;
+  accessToken: string;
+  refreshToken: string;
+  expiresAt?: number | null;
+  accountId?: string;
+  email?: string;
+}
+
+/**
+ * Replace an existing OAuth credential's token bundle in place. The row id,
+ * label, discovered models, and every `org_models.credential_id` reference
+ * stay stable. Fresh identity wins; omitted identity slots are preserved when
+ * the old blob is still decryptable. A corrupt OAuth blob is recoverable by
+ * design — reconnect is the user-facing repair path for that state too.
+ */
+export async function reconnectOAuthCredential(
+  input: ReconnectOAuthCredentialInput,
+): Promise<boolean> {
+  const [row] = await db
+    .select({ credentialsEncrypted: modelProviderCredentials.credentialsEncrypted })
+    .from(modelProviderCredentials)
+    .where(
+      scopedWhere(modelProviderCredentials, {
+        orgId: input.orgId,
+        extra: [
+          eq(modelProviderCredentials.id, input.id),
+          eq(modelProviderCredentials.providerId, input.providerId),
+        ],
+      }),
+    )
+    .limit(1);
+  if (!row) return false;
+
+  const existing = decryptBlob(row.credentialsEncrypted);
+  const existingOAuth = existing?.kind === "oauth" ? existing : null;
+  const expiresAt = input.expiresAt ?? null;
+  const accountId = input.accountId ?? existingOAuth?.accountId;
+  const email = input.email ?? existingOAuth?.email;
+  const blob: OAuthBlob = {
+    kind: "oauth",
+    accessToken: input.accessToken,
+    refreshToken: input.refreshToken,
+    expiresAt,
+    needsReconnection: false,
+    ...(accountId ? { accountId } : {}),
+    ...(email ? { email } : {}),
+  };
+
+  const updated = await db
+    .update(modelProviderCredentials)
+    .set({
+      credentialsEncrypted: encryptCredentials(blob as unknown as Record<string, unknown>),
+      expiresAt: expiresAt !== null ? new Date(expiresAt) : null,
+      refreshFailureCount: 0,
+      lastRefreshFailureAt: null,
+      updatedAt: new Date(),
+    })
+    .where(
+      scopedWhere(modelProviderCredentials, {
+        orgId: input.orgId,
+        extra: [
+          eq(modelProviderCredentials.id, input.id),
+          eq(modelProviderCredentials.providerId, input.providerId),
+        ],
+      }),
+    )
+    .returning({ id: modelProviderCredentials.id });
+
+  if (updated.length === 0) return false;
+  clearResolvedModelCache();
+  return true;
+}
+
 // ─── Update ────────────────────────────────────────────────────────────────
 
 export interface UpdateModelProviderCredentialPatch {

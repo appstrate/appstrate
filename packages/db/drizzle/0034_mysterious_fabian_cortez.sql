@@ -1,0 +1,1 @@
+ALTER TABLE "model_provider_pairings" ADD COLUMN "reconnect_credential_id" uuid;

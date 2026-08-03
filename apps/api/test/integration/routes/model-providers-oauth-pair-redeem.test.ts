@@ -17,14 +17,19 @@ import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
 import { seedTestModelProviders } from "../../helpers/model-providers.ts";
+import {
+  createOAuthCredential,
+  markCredentialNeedsReconnection,
+} from "../../../src/services/model-providers/credentials.ts";
+import { createOrgModel } from "../../../src/services/org-models.ts";
 
 const app = getTestApp();
 
-async function mintPairing(ctx: TestContext, providerId = "test-oauth") {
+async function mintPairing(ctx: TestContext, providerId = "test-oauth", credentialId?: string) {
   const res = await app.request("/api/model-providers-oauth/pairing", {
     method: "POST",
     headers: authHeaders(ctx, { "Content-Type": "application/json" }),
-    body: JSON.stringify({ providerId }),
+    body: JSON.stringify({ providerId, ...(credentialId ? { credentialId } : {}) }),
   });
   expect(res.status).toBe(200);
   return (await res.json()) as {
@@ -70,6 +75,77 @@ describe("POST /api/model-providers-oauth/pair/redeem — canonical route", () =
     const body = (await res.json()) as { providerId: string; credentialId: string };
     expect(body.providerId).toBe("test-oauth");
     expect(body.credentialId).toBeTruthy();
+  });
+
+  it("reconnects the targeted credential in place", async () => {
+    const originalCredentialId = await createOAuthCredential({
+      orgId: ctx.orgId,
+      userId: ctx.user.id,
+      providerId: "test-oauth",
+      label: "Target connection",
+      accessToken: "expired-access",
+      refreshToken: "revoked-refresh",
+      expiresAt: Date.now() - 60_000,
+      email: "same-account@example.test",
+    });
+    const modelId = await createOrgModel(
+      ctx.orgId,
+      "Target model",
+      "test-model",
+      ctx.user.id,
+      originalCredentialId,
+    );
+    await markCredentialNeedsReconnection(ctx.orgId, originalCredentialId);
+
+    const pairing = await mintPairing(ctx, "test-oauth", originalCredentialId);
+    const reconnect = await app.request("/api/model-providers-oauth/pair/redeem", {
+      method: "POST",
+      headers: bearerHeaders(pairing.token),
+      body: JSON.stringify({
+        ...VALID_BODY("test-oauth"),
+        label: "Ignored replacement label",
+        accessToken: "fresh-access-token",
+        refreshToken: "fresh-refresh-token",
+        email: "same-account@example.test",
+      }),
+    });
+    expect(reconnect.status).toBe(200);
+    const reconnected = (await reconnect.json()) as { credentialId: string };
+    expect(reconnected.credentialId).toBe(originalCredentialId);
+
+    const credentialsResponse = await app.request("/api/model-provider-credentials", {
+      headers: authHeaders(ctx),
+    });
+    expect(credentialsResponse.status).toBe(200);
+    const credentials = (await credentialsResponse.json()) as {
+      data: Array<{
+        id: string;
+        label: string;
+        providerId?: string | null;
+        needs_reconnection: boolean;
+      }>;
+    };
+    expect(credentials.data.filter((credential) => credential.providerId === "test-oauth")).toEqual(
+      [
+        expect.objectContaining({
+          id: originalCredentialId,
+          label: "Target connection",
+          needs_reconnection: false,
+        }),
+      ],
+    );
+
+    const modelsResponse = await app.request("/api/models", { headers: authHeaders(ctx) });
+    expect(modelsResponse.status).toBe(200);
+    const models = (await modelsResponse.json()) as {
+      data: Array<{ id: string; credentialId: string | null; needs_reconnection: boolean }>;
+    };
+    expect(models.data.find((model) => model.id === modelId)).toEqual(
+      expect.objectContaining({
+        credentialId: originalCredentialId,
+        needs_reconnection: false,
+      }),
+    );
   });
 
   it("does NOT emit Deprecation / Link successor-version response headers", async () => {

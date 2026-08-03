@@ -42,6 +42,8 @@ import { getCurrentOrgId } from "../stores/org-store";
 
 interface OAuthPairingBodyProps {
   providerId: string;
+  /** Existing credential targeted by a reconnect; omitted for a new connection. */
+  credentialId?: string;
   /**
    * Fires once the helper has consumed the pairing token and the platform
    * has persisted the credential. Caller is responsible for closing the
@@ -56,7 +58,12 @@ interface OAuthPairingBodyProps {
   onBusyChange?: (busy: boolean) => void;
 }
 
-export function OAuthPairingBody({ providerId, onConnected, onBusyChange }: OAuthPairingBodyProps) {
+export function OAuthPairingBody({
+  providerId,
+  credentialId,
+  onConnected,
+  onBusyChange,
+}: OAuthPairingBodyProps) {
   const { t } = useTranslation(["settings", "common"]);
   const qc = useQueryClient();
   const [copied, setCopied] = useState(false);
@@ -82,9 +89,9 @@ export function OAuthPairingBody({ providerId, onConnected, onBusyChange }: OAut
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Notify the parent for in-context behavior (auto-select the new
+  // Notify the parent for in-context behavior (auto-select the resulting
   // credential, close the modal). The global success side effects — toast
-  // and credential-list invalidation — are normally owned by
+  // and credential/model-list invalidation — are normally owned by
   // `<PendingPairingsWatcher>` so they fire even when this modal was already
   // closed. If the pairing was NOT registered with the watcher (no org
   // context at mint), the watcher never polls it, so own those side effects
@@ -97,6 +104,7 @@ export function OAuthPairingBody({ providerId, onConnected, onBusyChange }: OAut
     if (!registeredRef.current) {
       toast.success(t("credentials.oauth.callbackSuccess"));
       void qc.invalidateQueries({ queryKey: ["get", "/api/model-provider-credentials"] });
+      void qc.invalidateQueries({ queryKey: ["get", "/api/models"] });
     }
     const credentialId = pairingStatus.data.credentialId;
     if (credentialId && onConnected) queueMicrotask(() => onConnected(credentialId));
@@ -122,7 +130,9 @@ export function OAuthPairingBody({ providerId, onConnected, onBusyChange }: OAut
     firedRef.current = false;
     registeredRef.current = false;
     try {
-      const res = await createPairing.mutateAsync({ body: { providerId } });
+      const res = await createPairing.mutateAsync({
+        body: { providerId, ...(credentialId ? { credentialId } : {}) },
+      });
       setPairing({ id: res.id, command: res.command });
       // Register so `<PendingPairingsWatcher>` can poll this to completion
       // even if the modal is closed before the helper redeems the token.

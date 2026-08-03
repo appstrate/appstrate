@@ -2204,7 +2204,7 @@ export interface paths {
         put?: never;
         /**
          * Redeem a pairing token: post the OAuth credential bundle back to the platform
-         * @description Canonical pairing-redeem route used by `@appstrate/connect-helper`. Bearer-only — authenticated by the pairing token previously minted via `POST /api/model-providers-oauth/pairing` (carry as `Authorization: Bearer appp_<token>`). The pairing's `userId` / `orgId` / `providerId` are pinned at mint time and override anything the request body claims, so a tampered helper cannot redirect the redeem to a different org or provider. Cookie/API-key requests 401. Server-side this re-derives identity slots defensively via the provider's `extractTokenIdentity` hook before persisting into `model_provider_credentials`.
+         * @description Canonical pairing-redeem route used by `@appstrate/connect-helper`. Bearer-only — authenticated by the pairing token previously minted via `POST /api/model-providers-oauth/pairing` (carry as `Authorization: Bearer appp_<token>`). The pairing's `userId` / `orgId` / `providerId` and optional reconnect target are pinned at mint time, so a tampered helper cannot redirect the redeem to a different org, provider, or credential. Cookie/API-key requests 401. Server-side this re-derives identity slots defensively via the provider's `extractTokenIdentity` hook before creating or updating `model_provider_credentials`.
          */
         post: operations["redeemOAuthModelProviderPairing"];
         delete?: never;
@@ -2224,7 +2224,7 @@ export interface paths {
         put?: never;
         /**
          * Mint a one-shot pairing token for the connect helper
-         * @description Creates a single-use pairing token surfaced in the dashboard as a `npx @appstrate/connect-helper <token>` command. The user runs the command on their machine; the helper completes the loopback OAuth dance against the provider's authorization server, then POSTs the resulting credentials back to `/api/model-providers-oauth/pair/redeem` using this token as Bearer credentials. The plaintext token is returned exactly once — only its SHA-256 hash is persisted. Org-scoped: only `X-Org-Id` is required (no `X-Application-Id` — the resulting credential lives in `model_provider_credentials`, which has no app affinity).
+         * @description Creates a single-use pairing token surfaced in the dashboard as a `npx @appstrate/connect-helper <token>` command. The user runs the command on their machine; the helper completes the loopback OAuth dance against the provider's authorization server, then POSTs the resulting credentials back to `/api/model-providers-oauth/pair/redeem` using this token as Bearer credentials. Pass `credentialId` to reconnect that exact org credential in place; omit it to create a new connection. The plaintext token is returned exactly once — only its SHA-256 hash is persisted. Org-scoped: only `X-Org-Id` is required (no `X-Application-Id` — the resulting credential lives in `model_provider_credentials`, which has no app affinity).
          */
         post: operations["createOAuthModelProviderPairing"];
         delete?: never;
@@ -13134,7 +13134,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Credential persisted in model_provider_credentials. Deliberate operation-result shape (NOT the credential resource — flow-completion exception to the bare-resource rule, #657): the helper's bearer is single-use and consumed by this very request, so it cannot fetch anything afterwards, so the models the helper prints in its terminal summary have to travel back in this response. `availableModelIds` is therefore a projection of the credential's own servable set — byte-for-byte what `available_model_ids` reports for this `credentialId` on `GET /api/model-provider-credentials`, resolved through the same accessor, so the terminal and the dashboard can never disagree. For subscription providers (`codex`, `claude-code`) that set is derived from the provider definition ∩ the pricing catalog with no upstream call; for probe-validated providers it is the empirically discovered list, which is empty here because nothing has been probed yet (the model form's `Refresh models` fills it in). The dashboard obtains the created credential via `GET /pairing/{id}` polling (`credentialId`) + the credentials list. */
+            /** @description Credential created or reconnected in model_provider_credentials. Deliberate operation-result shape (NOT the credential resource — flow-completion exception to the bare-resource rule, #657): the helper's bearer is single-use and consumed by this very request, so it cannot fetch anything afterwards, so the models the helper prints in its terminal summary have to travel back in this response. `availableModelIds` is therefore a projection of the credential's own servable set — byte-for-byte what `available_model_ids` reports for this `credentialId` on `GET /api/model-provider-credentials`, resolved through the same accessor, so the terminal and the dashboard can never disagree. For subscription providers (`codex`, `claude-code`) that set is derived from the provider definition ∩ the pricing catalog with no upstream call; for probe-validated providers a reconnect preserves the credential's empirically discovered list. The dashboard obtains the resulting credential via `GET /pairing/{id}` polling (`credentialId`) + the credentials list. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -13179,6 +13179,11 @@ export interface operations {
                 "application/json": {
                     /** @description Canonical provider id. Must resolve to an OAuth provider registered by a loaded module (discoverable via `GET /api/model-provider-credentials/registry`). Unknown/unregistered ids → 400 (validation error). The enum is intentionally open: OAuth providers ship as modules, so the platform spec stays model-agnostic. */
                     providerId: string;
+                    /**
+                     * Format: uuid
+                     * @description Existing OAuth credential to reconnect in place. It must belong to the current organization and match `providerId`; omit it when connecting a new account.
+                     */
+                    credentialId?: string;
                 };
             };
         };
