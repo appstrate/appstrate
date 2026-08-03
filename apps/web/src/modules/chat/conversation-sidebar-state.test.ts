@@ -10,6 +10,10 @@ import {
 const doc = (id: string) => ({ id, name: `${id}.md` });
 
 describe("conversation sidebar state", () => {
+  it("starts collapsed until context is explicitly requested", () => {
+    expect(INITIAL_CONVERSATION_SIDEBAR_STATE.expanded).toBe(false);
+  });
+
   it("shows every document through the same preview action", () => {
     const first = conversationSidebarReducer(INITIAL_CONVERSATION_SIDEBAR_STATE, {
       type: "show-document",

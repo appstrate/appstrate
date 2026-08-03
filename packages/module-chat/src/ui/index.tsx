@@ -264,10 +264,12 @@ export function ChatPage({
                 >
                   <PanelLeftIcon className="size-5" />
                 </button>
-                <div className="min-w-0 flex-1">
+                <div className="flex min-w-0 flex-1 items-center overflow-hidden">
                   <ActiveConversationTitle activeId={conversationId ?? null} />
                 </div>
-                {headerActions ? <div className="shrink-0">{headerActions}</div> : null}
+                {headerActions ? (
+                  <div className="flex shrink-0 items-center">{headerActions}</div>
+                ) : null}
               </div>
               <main className="min-h-0 min-w-0 flex-1 overflow-hidden">
                 <Conversation

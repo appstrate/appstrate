@@ -23,7 +23,7 @@ export type ConversationSidebarAction =
   | { type: "conversation-change" };
 
 export const INITIAL_CONVERSATION_SIDEBAR_STATE: ConversationSidebarState = {
-  expanded: true,
+  expanded: false,
   activeTab: "preview",
   selectedDocument: null,
   modalDocument: null,

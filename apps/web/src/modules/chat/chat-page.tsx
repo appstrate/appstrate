@@ -21,8 +21,6 @@ import {
 } from "./conversation-sidebar-state";
 import { ConversationContextActions, ConversationSidebar } from "./conversation-sidebar";
 
-const DESKTOP_CONTEXT_QUERY = "(min-width: 1024px)";
-
 export function ChatModulePage() {
   // Auto-collapse the global sidebar while in chat, restore on leave (same
   // pattern as settings/profile). Transient setter leaves the user's persisted
@@ -40,16 +38,12 @@ export function ChatModulePage() {
   // updates out of the back-history.
   const { conversationId } = useParams<{ conversationId?: string }>();
   const navigate = useNavigate();
+  // Context starts closed on every viewport. Selecting a context tab or
+  // presenting any document (including a newly published primary output)
+  // expands it through the reducer's single action path.
   const [sidebarState, dispatchSidebar] = useReducer(
     conversationSidebarReducer,
     INITIAL_CONVERSATION_SIDEBAR_STATE,
-    (initialState) => ({
-      ...initialState,
-      // An expanded panel is useful by default beside the desktop chat. On a
-      // compact screen the persistent rail starts collapsed so it never covers
-      // the conversation before the user (or a document) asks to open it.
-      expanded: typeof window !== "undefined" && window.matchMedia(DESKTOP_CONTEXT_QUERY).matches,
-    }),
   );
   // `location.key` is unique per history entry. The chat mints a fresh
   // conversation id whenever it changes (a new-chat navigation: "+", the nav
