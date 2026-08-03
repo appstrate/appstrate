@@ -9,8 +9,9 @@
  * the modal mid-flow (tab switch, accidental dismiss) no longer kills the
  * token. This component, mounted once for all authenticated routes, polls
  * each pending pairing and fires the global success side effects (toast +
- * credential-list invalidation) the moment the helper consumes the token,
- * then drops it from the store. The TTL is the backstop for abandoned ones.
+ * credential/model-list invalidation) the moment the helper consumes the
+ * token, then drops it from the store. The TTL is the backstop for abandoned
+ * ones.
  *
  * Polling is scoped to the active org: the status route 404s cross-tenant
  * reads, so a pairing minted in another org resumes only once the user
@@ -41,6 +42,7 @@ function PairingPoll({ pairing }: { pairing: PendingPairing }) {
     if (s === "consumed") {
       toast.success(t("credentials.oauth.callbackSuccess"));
       void qc.invalidateQueries({ queryKey: ["get", "/api/model-provider-credentials"] });
+      void qc.invalidateQueries({ queryKey: ["get", "/api/models"] });
       removePendingPairing(pairing.id);
     } else if (s === "expired") {
       removePendingPairing(pairing.id);

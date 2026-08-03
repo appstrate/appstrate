@@ -45,6 +45,8 @@ export interface CreatePairingArgs {
   userId: string;
   orgId: string;
   providerId: string;
+  /** Existing org credential to update; omitted when connecting a new account. */
+  reconnectCredentialId?: string;
   /** Public platform URL embedded in the token so the helper knows where to POST back. */
   platformUrl: string;
   /** Lifetime in seconds — typically 300 (5 min). */
@@ -66,6 +68,7 @@ export interface ConsumedPairing {
   userId: string;
   orgId: string;
   providerId: string;
+  reconnectCredentialId: string | null;
   expiresAt: Date;
   consumedAt: Date;
 }
@@ -111,6 +114,7 @@ export async function createPairing(args: CreatePairingArgs): Promise<CreatePair
     userId: args.userId,
     orgId: args.orgId,
     providerId: args.providerId,
+    reconnectCredentialId: args.reconnectCredentialId ?? null,
     expiresAt,
   });
 
@@ -148,6 +152,7 @@ export async function consumePairing(token: string, fromIp?: string): Promise<Co
       userId: modelProviderPairings.userId,
       orgId: modelProviderPairings.orgId,
       providerId: modelProviderPairings.providerId,
+      reconnectCredentialId: modelProviderPairings.reconnectCredentialId,
       expiresAt: modelProviderPairings.expiresAt,
       consumedAt: modelProviderPairings.consumedAt,
     });
@@ -162,6 +167,7 @@ export async function consumePairing(token: string, fromIp?: string): Promise<Co
     userId: row.userId,
     orgId: row.orgId,
     providerId: row.providerId,
+    reconnectCredentialId: row.reconnectCredentialId,
     expiresAt: row.expiresAt,
     consumedAt: row.consumedAt,
   };
@@ -187,11 +193,11 @@ export async function getPairing(id: string, orgId: string): Promise<PairingRow 
 }
 
 /**
- * Link the credential created by the helper's POST /import back to its
- * pairing row, so the dashboard's poll endpoint can surface the resulting
- * credential id without a separate list call. Best-effort: if the pairing
- * disappears between consume and link (TTL purge race), log and continue —
- * the credential is already persisted.
+ * Link the credential created or reconnected by the helper back to its pairing
+ * row, so the dashboard's poll endpoint can surface the resulting credential
+ * id without a separate list call. Best-effort: if the pairing disappears
+ * between consume and link (TTL purge race), log and continue — the credential
+ * is already persisted.
  */
 export async function linkPairingCredential(
   pairingId: string,

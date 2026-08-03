@@ -27,6 +27,8 @@ import {
   createOAuthCredential,
   dedupeCredentialLabel,
   findMissingIdentityClaims,
+  getOrgModelProviderCredential,
+  reconnectOAuthCredential,
   resolveCredentialModelIds,
   type CreateOAuthCredentialInput,
 } from "./credentials.ts";
@@ -50,6 +52,8 @@ export interface ImportOAuthModelProviderResult {
  */
 export type ImportOAuthModelProviderInput = Omit<CreateOAuthCredentialInput, "label"> & {
   label?: string;
+  /** Existing credential to update in place; omitted for a new connection. */
+  credentialId?: string;
 };
 
 /**
@@ -65,6 +69,7 @@ export type ImportOAuthModelProviderInput = Omit<CreateOAuthCredentialInput, "la
 export async function importOAuthModelProviderConnection(
   input: ImportOAuthModelProviderInput,
 ): Promise<ImportOAuthModelProviderResult> {
+  const { credentialId: reconnectCredentialId, ...credentialInput } = input;
   const config = getModelProvider(input.providerId);
   if (!config || config.authMode !== "oauth2" || !config.oauth) {
     throw notFound(`Unknown OAuth model provider: ${input.providerId} (not in registry)`);
@@ -72,13 +77,6 @@ export async function importOAuthModelProviderConnection(
   if (!input.accessToken || !input.refreshToken) {
     throw invalidRequest("`accessToken` and `refreshToken` are required");
   }
-  // Always dedupe, even when the caller (the connect-helper CLI) supplies a
-  // label — its default (`ChatGPT`, `Claude`) is the same on every redeem, so
-  // honouring it verbatim would name every connection identically. The base
-  // is the supplied label, else the provider's displayName.
-  const base = input.label?.trim() || config.displayName || config.providerId;
-  const label = await dedupeCredentialLabel(input.orgId, base);
-
   // Identity extraction is delegated to the provider's module via the
   // `extractTokenIdentity` hook, which maps provider-specific claims into
   // the platform's abstract identity slots (`accountId`, `email`). The CLI
@@ -103,13 +101,44 @@ export async function importOAuthModelProviderConnection(
   }
   logger.info("oauth model provider connection import", {
     providerId: config.providerId,
+    reconnect: !!reconnectCredentialId,
     hasAccountIdFromBody: !!input.accountId,
     hasAccountIdFinal: !!accountId,
     accountIdLength: accountId?.length ?? 0,
   });
 
+  if (reconnectCredentialId) {
+    const reconnected = await reconnectOAuthCredential({
+      orgId: input.orgId,
+      id: reconnectCredentialId,
+      providerId: input.providerId,
+      accessToken: input.accessToken,
+      refreshToken: input.refreshToken,
+      expiresAt: input.expiresAt,
+      ...(accountId ? { accountId } : {}),
+      ...(email ? { email } : {}),
+    });
+    if (!reconnected) {
+      throw notFound("OAuth model provider credential not found");
+    }
+    const credential = await getOrgModelProviderCredential(input.orgId, reconnectCredentialId);
+    return {
+      credentialId: reconnectCredentialId,
+      providerId: input.providerId,
+      email,
+      availableModelIds: credential?.available_model_ids ?? [],
+    };
+  }
+
+  // Always dedupe new connections, even when the caller (the connect-helper
+  // CLI) supplies a label — its default (`ChatGPT`, `Claude`) is the same on
+  // every redeem. A reconnect deliberately skips this path and preserves the
+  // targeted row's label.
+  const base = input.label?.trim() || config.displayName || config.providerId;
+  const label = await dedupeCredentialLabel(input.orgId, base);
+
   const credentialId = await createOAuthCredential({
-    ...input,
+    ...credentialInput,
     label,
     ...(accountId ? { accountId } : {}),
     ...(email ? { email } : {}),

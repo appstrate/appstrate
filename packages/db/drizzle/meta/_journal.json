@@ -239,6 +239,13 @@
       "when": 1785749444794,
       "tag": "0033_green_jimmy_woo",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1785770677855,
+      "tag": "0034_mysterious_fabian_cortez",
+      "breakpoints": true
     }
   ]
 }

@@ -228,7 +228,7 @@ function CredentialsSection({
   onEdit: (pk: ModelProviderCredentialInfo) => void;
   onDelete: (pk: ModelProviderCredentialInfo) => void;
   onRename: (pk: ModelProviderCredentialInfo, newLabel: string) => void;
-  onConnectOAuth: (providerId: string) => void;
+  onConnectOAuth: (credential: ModelProviderCredentialInfo) => void;
 }) {
   const { t } = useTranslation(["settings", "common"]);
   const testMutation = useTestModelProviderCredential();
@@ -367,7 +367,7 @@ function CredentialsSection({
                                 variant="ghost"
                                 size="sm"
                                 className="h-7 text-xs"
-                                onClick={() => onConnectOAuth(pk.providerId!)}
+                                onClick={() => onConnectOAuth(pk)}
                               >
                                 {t("credentials.oauth.reconnect")}
                               </Button>
@@ -428,9 +428,6 @@ export function OrgSettingsModelsPage() {
 
   const [pkModalOpen, setPkModalOpen] = useState(false);
   const [editPk, setEditPk] = useState<ModelProviderCredentialInfo | null>(null);
-  // Preselect an OAuth provider when opening the unified modal — used by
-  // the "reconnect" affordance on stale OAuth rows and any direct deep-link.
-  const [connectingOauthProviderId, setConnectingOauthProviderId] = useState<string | null>(null);
   const { data: credentials, isLoading: pkLoading, error: pkError } = useModelProviderCredentials();
   const createPkMutation = useCreateModelProviderCredential();
   const updatePkMutation = useUpdateModelProviderCredential();
@@ -472,12 +469,10 @@ export function OrgSettingsModelsPage() {
           error={pkError}
           onCreate={() => {
             setEditPk(null);
-            setConnectingOauthProviderId(null);
             setPkModalOpen(true);
           }}
           onEdit={(pk) => {
             setEditPk(pk);
-            setConnectingOauthProviderId(null);
             setPkModalOpen(true);
           }}
           onDelete={(pk) =>
@@ -489,9 +484,8 @@ export function OrgSettingsModelsPage() {
               body: { label: newLabel },
             });
           }}
-          onConnectOAuth={(providerId) => {
-            setEditPk(null);
-            setConnectingOauthProviderId(providerId);
+          onConnectOAuth={(credential) => {
+            setEditPk(credential);
             setPkModalOpen(true);
           }}
         />
@@ -507,12 +501,8 @@ export function OrgSettingsModelsPage() {
 
       <CredentialFormModal
         open={pkModalOpen}
-        onClose={() => {
-          setPkModalOpen(false);
-          setConnectingOauthProviderId(null);
-        }}
+        onClose={() => setPkModalOpen(false)}
         credential={editPk}
-        initialOauthProviderId={connectingOauthProviderId}
         isPending={createPkMutation.isPending || updatePkMutation.isPending}
         onSubmit={(data) => {
           if (editPk) {
