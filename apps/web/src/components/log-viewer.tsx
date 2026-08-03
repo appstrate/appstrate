@@ -371,9 +371,9 @@ export function LogViewer({ entries }: LogViewerProps) {
                       <ExecutionEntryLeading entry={entry} />
                       <span
                         className={cn(
-                          "min-w-0 flex-1 break-words whitespace-pre-wrap",
-                          entry.kind === "agent" && "text-foreground/80 font-sans",
-                          entry.kind === "log" && "font-sans",
+                          "text-foreground/80 min-w-0 flex-1 break-words whitespace-pre-wrap",
+                          (entry.kind === "agent" || entry.kind === "log") && "font-sans",
+                          entry.level && levelColors[entry.level],
                         )}
                       >
                         {entry.message}
