@@ -426,22 +426,33 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
       }
       const target = substituteVars(req.target, fields);
 
+      const deliveryPlan = resolveLocalDeliveryPlan(meta, entry);
+      const allowsAuthorizationOverride =
+        deliveryPlan?.allowServerOverride === true &&
+        deliveryPlan.headerName.toLowerCase() === "authorization";
+
       // Strip Appstrate transport headers before substitution. Authorization
-      // is different on this LOCAL path: it may be the manifest-authorised
-      // source override, so the shared delivery planner below decides whether
-      // it survives. The remote resolver still strips Authorization because it
-      // authenticates the request to Appstrate itself with that header.
+      // survives on this LOCAL path only when the delivery plan targets that
+      // header and explicitly authorises a caller override. The remote resolver
+      // always strips it because it authenticates to Appstrate with that header.
       const headers: Record<string, string> = {};
       for (const [key, value] of Object.entries(req.headers ?? {})) {
         const lowerKey = key.toLowerCase();
-        if (lowerKey !== "authorization" && RESERVED_TRANSPORT_HEADERS.has(lowerKey)) continue;
+        if (
+          RESERVED_TRANSPORT_HEADERS.has(lowerKey) &&
+          !(lowerKey === "authorization" && allowsAuthorizationOverride)
+        ) {
+          continue;
+        }
         if (referencesCredentialField(value, fields)) substitutesCredential = true;
         headers[key] = substituteVars(value, fields);
       }
       // Inject the credential header locally and capture its name so the
       // shared engine's redirect-follower knows which header to strip on
       // an out-of-boundary cross-origin hop.
-      const injectedCredentialHeader = injectCredential(headers, meta, entry);
+      const injectedCredentialHeader = deliveryPlan
+        ? applyDeliveryPlan(headers, deliveryPlan)
+        : null;
 
       // A call that substitutes a credential field into the agent-controlled
       // URL / headers / body MUST respect the auth's `authorized_uris`
@@ -541,24 +552,18 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
 }
 
 /**
- * Inject the credential header into an outgoing request. Precedence:
+ * Resolve the local credential-delivery plan. Precedence:
  *   1. explicit `entry.injection` override (header name/prefix + template),
  *   2. the integration manifest's `delivery.http` plan (auth-type defaults
  *      applied) — mirrors `@appstrate/connect`'s `resolveHttpDelivery`.
  *
  * When neither yields a header (e.g. `custom` auth with no `delivery.http`),
- * nothing is injected — the agent supplies its own auth via `{{var}}`
- * substitution, as for a `custom` auth.
- *
- * Returns the name of the header it injected (or `null` when nothing was
- * injected) so the caller can hand it to the shared engine's
- * redirect-follower for cross-origin credential stripping.
+ * returns `null` and the caller injects nothing.
  */
-function injectCredential(
-  headers: Record<string, string>,
+function resolveLocalDeliveryPlan(
   meta: ApiCallIntegrationMeta,
   entry: LocalIntegrationCredentialsFile["integrations"][string],
-): string | null {
+): HttpDeliveryPlan | null {
   const fields = entry.fields;
 
   // 1. Explicit override from the creds file.
@@ -569,18 +574,16 @@ function injectCredential(
     if (!rendered) return null;
     const headerName = entry.injection.headerName ?? "Authorization";
     const headerPrefix = entry.injection.headerPrefix ?? "";
-    return applyDeliveryPlan(headers, {
+    return {
       headerName,
       headerPrefix,
       value: rendered,
       allowServerOverride: false,
-    });
+    };
   }
 
   // 2. Manifest `delivery.http` plan (auth-type defaults).
-  const plan = resolveHttpDelivery(meta.authType, fields, meta.http);
-  if (!plan || !plan.headerName) return null;
-  return applyDeliveryPlan(headers, plan);
+  return resolveHttpDelivery(meta.authType, fields, meta.http);
 }
 
 function applyDeliveryPlan(headers: Record<string, string>, plan: HttpDeliveryPlan): string | null {

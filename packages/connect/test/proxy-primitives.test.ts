@@ -270,6 +270,18 @@ describe("applyInjectedCredentialHeader (record)", () => {
     expect(headers).toEqual({ authorization: "Bearer caller" });
     expect(decision).toEqual({ kind: "caller_override", headerName: "Authorization" });
   });
+
+  it("identifies an allowed caller override when the platform field is empty", () => {
+    const headers: Record<string, string> = { "x-api-key": "caller" };
+    const decision = applyInjectedCredentialHeader(headers, {
+      credentials: { api_key: "" },
+      credentialHeaderName: "X-Api-Key",
+      credentialAllowServerOverride: true,
+      credentialFieldName: "api_key",
+    });
+    expect(headers).toEqual({ "x-api-key": "caller" });
+    expect(decision).toEqual({ kind: "caller_override", headerName: "X-Api-Key" });
+  });
 });
 
 describe("applyInjectedCredentialHeaderToHeaders (Headers instance)", () => {

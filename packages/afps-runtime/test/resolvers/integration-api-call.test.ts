@@ -547,7 +547,11 @@ describe("LocalIntegrationResolver", () => {
     const tools = await resolver.resolve([{ name: "@acme/api", version: "^1" }], bundle);
     const { ctx } = makeCtx();
     await tools[0]!.execute(
-      { method: "GET", target: "https://api.acme.com/v1/me", headers: { "x-api-key": "forged" } },
+      {
+        method: "GET",
+        target: "https://api.acme.com/v1/me",
+        headers: { "x-api-key": "forged", authorization: "Bearer unrelated" },
+      },
       ctx,
     );
     const h = calls[0]!.init.headers as Record<string, string>;
@@ -555,6 +559,7 @@ describe("LocalIntegrationResolver", () => {
     const apiKeyHeaders = Object.entries(h).filter(([k]) => k.toLowerCase() === "x-api-key");
     expect(apiKeyHeaders).toHaveLength(1);
     expect(apiKeyHeaders[0]![1]).toBe("real");
+    expect(Object.keys(h).some((key) => key.toLowerCase() === "authorization")).toBe(false);
   });
 
   it("preserves a case-insensitive caller header only when allowServerOverride is true", async () => {

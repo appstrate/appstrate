@@ -451,7 +451,9 @@ export class DockerOrchestrator implements RunOrchestrator {
   }
 
   async stopByRunId(runId: string, timeoutSeconds?: number): Promise<StopResult> {
-    return docker.stopContainersByRun(runId, timeoutSeconds);
+    return this.sidecarExitWatcher.expectRunExitDuring(runId, () =>
+      docker.stopContainersByRun(runId, timeoutSeconds),
+    );
   }
 
   /**

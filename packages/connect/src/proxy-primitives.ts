@@ -114,13 +114,11 @@ function planInjectedCredentialHeader(
   callerHeaderNames: readonly string[],
 ): HttpDeliveryInjectionDecision {
   if (!creds.credentialHeaderName) return { kind: "none" };
-  const token = creds.credentials[creds.credentialFieldName];
-  if (!token) return { kind: "none" };
   return planHttpDeliveryInjection(
     {
       headerName: creds.credentialHeaderName,
       headerPrefix: creds.credentialHeaderPrefix ?? "",
-      value: token,
+      value: creds.credentials[creds.credentialFieldName] ?? "",
       allowServerOverride: creds.credentialAllowServerOverride === true,
     },
     callerHeaderNames,

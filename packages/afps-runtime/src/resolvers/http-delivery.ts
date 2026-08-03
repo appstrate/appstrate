@@ -76,7 +76,7 @@ export function planHttpDeliveryInjection(
   plan: Pick<HttpDeliveryPlan, "headerName" | "headerPrefix" | "value" | "allowServerOverride">,
   callerHeaderNames: readonly string[],
 ): HttpDeliveryInjectionDecision {
-  if (plan.headerName.length === 0 || plan.value.length === 0) return { kind: "none" };
+  if (plan.headerName.length === 0) return { kind: "none" };
 
   const callerSetHeader = callerHeaderNames.some(
     (name) => name.toLowerCase() === plan.headerName.toLowerCase(),
@@ -84,6 +84,7 @@ export function planHttpDeliveryInjection(
   if (plan.allowServerOverride && callerSetHeader) {
     return { kind: "caller_override", headerName: plan.headerName };
   }
+  if (plan.value.length === 0) return { kind: "none" };
 
   const lowerHeaderName = plan.headerName.toLowerCase();
   const isAuthorization =

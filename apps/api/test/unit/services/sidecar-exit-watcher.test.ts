@@ -42,6 +42,20 @@ describe("SidecarExitWatcher", () => {
     expect(unexpected).toEqual([]);
   });
 
+  it("suppresses an expected exit for a bulk run stop", async () => {
+    const exit = deferred<number>();
+    const unexpected: UnexpectedSidecarExit[] = [];
+    const watcher = createWatcher(exit.promise, unexpected);
+    const watching = watcher.watch("run-bulk", "sidecar-bulk");
+
+    const result = await watcher.expectRunExitDuring("run-bulk", async () => "stopped" as const);
+    exit.resolve(137);
+    await watching;
+
+    expect(result).toBe("stopped");
+    expect(unexpected).toEqual([]);
+  });
+
   it("reports an unexpected non-zero exit with its log tail", async () => {
     const unexpected: UnexpectedSidecarExit[] = [];
     const watcher = createWatcher(Promise.resolve(1), unexpected);

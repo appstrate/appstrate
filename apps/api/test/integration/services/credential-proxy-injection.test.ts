@@ -250,7 +250,7 @@ describe("proxyCall — server-side credential injection (integration-backed)", 
     expect(captured?.["x-api-key"]).toBe("platform-pinned-key");
   });
 
-  it("respects a caller-supplied header when allow_server_override is true", async () => {
+  it("strips an allowed caller override on redirect even when the platform value is empty", async () => {
     const packageId = "@cpinjectorg/override";
     await seedIntegration(
       ctx.orgId,
@@ -261,7 +261,8 @@ describe("proxyCall — server-side credential injection (integration-backed)", 
         auths: {
           api: {
             type: "api_key",
-            authorizedUris: ["https://api.example.com/**"],
+            authorizedUris: ["https://1.1.1.1/**"],
+            allowAllUris: true,
             delivery: httpHeaderDelivery({
               name: "X-Api-Key",
               field: "api_key",
@@ -271,14 +272,23 @@ describe("proxyCall — server-side credential injection (integration-backed)", 
         },
       }),
     );
-    await installAndConnect(ctx, packageId, "api", { api_key: "platform-pinned-key" });
+    await installAndConnect(ctx, packageId, "api", { api_key: "" });
 
-    let captured: Record<string, string> | undefined;
-    const fakeFetch = ((_url: string, init: RequestInit) => {
-      captured = {};
+    const captured: Array<Record<string, string>> = [];
+    const fakeFetch = ((url: string | URL, init: RequestInit) => {
+      const headers: Record<string, string> = {};
       new Headers(init.headers).forEach((v, k) => {
-        captured![k] = v;
+        headers[k] = v;
       });
+      captured.push(headers);
+      if (url.toString().startsWith("https://1.1.1.1")) {
+        return Promise.resolve(
+          new Response(null, {
+            status: 302,
+            headers: { location: "https://8.8.8.8/redirected" },
+          }),
+        );
+      }
       return Promise.resolve(new Response("{}", { status: 401 }));
     }) as unknown as typeof fetch;
 
@@ -287,12 +297,13 @@ describe("proxyCall — server-side credential injection (integration-backed)", 
       actor: { type: "user", id: ctx.user.id },
       integrationId: packageId,
       method: "GET",
-      target: "https://api.example.com/thing",
+      target: "https://1.1.1.1/thing",
       headers: { "x-api-key": "caller-override-key" },
       fetch: fakeFetch,
     });
 
-    expect(captured?.["x-api-key"]).toBe("caller-override-key");
+    expect(captured[0]?.["x-api-key"]).toBe("caller-override-key");
+    expect(captured[1]?.["x-api-key"]).toBeUndefined();
     const [connection] = await db
       .select({ needsReconnection: integrationConnections.needsReconnection })
       .from(integrationConnections)

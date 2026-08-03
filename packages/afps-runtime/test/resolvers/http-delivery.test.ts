@@ -168,4 +168,18 @@ describe("planHttpDeliveryInjection", () => {
       header: { name: "Authorization", value: "Bearer secret" },
     });
   });
+
+  it("identifies an allowed caller override even when the platform value is empty", () => {
+    expect(
+      planHttpDeliveryInjection(
+        plan({
+          headerName: "X-Api-Key",
+          headerPrefix: "",
+          value: "",
+          allowServerOverride: true,
+        }),
+        ["x-api-key"],
+      ),
+    ).toEqual({ kind: "caller_override", headerName: "X-Api-Key" });
+  });
 });
