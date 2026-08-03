@@ -49,7 +49,9 @@ jobs:
       # apps/api/test/integration/ and apps/api/src/modules/oidc/test/integration/
       # remain in the heavier `integration` job below — they need DB seeding and
       # are slower to run, so they stay opt-in via the `integration` label or
-      # post-merge on main. Anything pure-unit must run on every PR.
+      # post-merge on main. The public-origin regression is the deliberate fast
+      # exception: it protects a production-only proxy boundary on every PR.
+      # Anything pure-unit must run on every PR.
       # --coverage on the always-on unit job is what gives every PR a coverage
       # signal (Codecov patch coverage + the `unit` flag) without paying for the
       # heavier `integration` job below. The full project total is reconstructed
@@ -62,6 +64,7 @@ jobs:
             apps/api/src/modules/firecracker/test/unit/ \
             apps/api/src/modules/mcp/test/unit/ \
             apps/api/src/modules/oidc/test/unit/ \
+            apps/api/src/modules/oidc/test/integration/routes/oauth-public-origin.test.ts \
             apps/api/src/modules/webhooks/test/unit/ \
             apps/web/src/ \
             packages/module-chat/ \
