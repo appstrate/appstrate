@@ -9,7 +9,10 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { resolveHttpDelivery } from "../../src/resolvers/http-delivery.ts";
+import {
+  planHttpDeliveryInjection,
+  resolveHttpDelivery,
+} from "../../src/resolvers/http-delivery.ts";
 
 describe("resolveHttpDelivery — defaults per auth type", () => {
   it("oauth2 → Authorization: Bearer <accessToken>", () => {
@@ -89,5 +92,94 @@ describe("resolveHttpDelivery — explicit overrides", () => {
       { allowServerOverride: true },
     );
     expect(plan!.allowServerOverride).toBe(true);
+  });
+});
+
+describe("planHttpDeliveryInjection", () => {
+  const plan = (
+    overrides: Partial<{
+      headerName: string;
+      headerPrefix: string;
+      value: string;
+      allowServerOverride: boolean;
+    }> = {},
+  ) => ({
+    headerName: "Authorization",
+    headerPrefix: "Bearer ",
+    value: "secret",
+    allowServerOverride: false,
+    ...overrides,
+  });
+
+  it("repairs a bare Authorization auth scheme without touching the secret", () => {
+    expect(
+      planHttpDeliveryInjection(
+        plan({ headerPrefix: "Bearer", value: "bearerXYZ-tokenlive_sk_123" }),
+        [],
+      ),
+    ).toEqual({
+      kind: "inject",
+      header: { name: "Authorization", value: "Bearer bearerXYZ-tokenlive_sk_123" },
+    });
+  });
+
+  it("keeps canonical, vendor-composite, and custom-header prefixes literal", () => {
+    expect(planHttpDeliveryInjection(plan(), [])).toEqual({
+      kind: "inject",
+      header: { name: "Authorization", value: "Bearer secret" },
+    });
+    expect(planHttpDeliveryInjection(plan({ headerPrefix: "Token token=" }), [])).toEqual({
+      kind: "inject",
+      header: { name: "Authorization", value: "Token token=secret" },
+    });
+    expect(
+      planHttpDeliveryInjection(
+        plan({ headerName: "Cookie", headerPrefix: "session=", value: "SESS" }),
+        [],
+      ),
+    ).toEqual({
+      kind: "inject",
+      header: { name: "Cookie", value: "session=SESS" },
+    });
+  });
+
+  it("supports arbitrary bare Authorization schemes", () => {
+    for (const headerPrefix of ["Basic", "Zoho-oauthtoken", "AWS4-HMAC-SHA256"]) {
+      expect(planHttpDeliveryInjection(plan({ headerPrefix }), [])).toEqual({
+        kind: "inject",
+        header: { name: "Authorization", value: `${headerPrefix} secret` },
+      });
+    }
+  });
+
+  it("returns none for an empty header name or credential value", () => {
+    expect(planHttpDeliveryInjection(plan({ headerName: "" }), [])).toEqual({ kind: "none" });
+    expect(planHttpDeliveryInjection(plan({ value: "" }), ["Authorization"])).toEqual({
+      kind: "none",
+    });
+  });
+
+  it("lets a case-insensitive caller header win only when explicitly allowed", () => {
+    expect(
+      planHttpDeliveryInjection(plan({ allowServerOverride: true }), ["authorization"]),
+    ).toEqual({ kind: "caller_override", headerName: "Authorization" });
+    expect(planHttpDeliveryInjection(plan(), ["authorization"])).toEqual({
+      kind: "inject",
+      header: { name: "Authorization", value: "Bearer secret" },
+    });
+  });
+
+  it("identifies an allowed caller override even when the platform value is empty", () => {
+    expect(
+      planHttpDeliveryInjection(
+        plan({
+          headerName: "X-Api-Key",
+          headerPrefix: "",
+          value: "",
+          allowServerOverride: true,
+        }),
+        ["x-api-key"],
+      ),
+    ).toEqual({ kind: "caller_override", headerName: "X-Api-Key" });
   });
 });

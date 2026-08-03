@@ -209,6 +209,47 @@ describe("executeApiCall — auth-scheme template repair (#988)", () => {
 });
 
 describe("executeApiCall — 401 retry path", () => {
+  it("does not refresh or flag a 401 produced by an allowed caller override", async () => {
+    const fetchFn = mock(
+      async (_input: Parameters<typeof fetch>[0], _init?: RequestInit) =>
+        new Response("caller rejected", { status: 401 }),
+    );
+    const refreshCredentials = mock(async () => null);
+    const deps = makeDeps({
+      fetchFn: fetchFn as unknown as typeof fetch,
+      refreshCredentials,
+      fetchCredentials: mock(async (): Promise<CredentialsResponse> => ({
+        credentials: { access_token: "platform" },
+        authorizedUris: ["https://api.example.com/**"],
+        allowAllUris: false,
+        credentialHeaderName: "Authorization",
+        credentialHeaderPrefix: "Bearer",
+        credentialAllowServerOverride: true,
+        credentialFieldName: "access_token",
+      })),
+    });
+
+    const result = await executeApiCall(
+      {
+        integrationId: "gmail",
+        targetUrl: "https://api.example.com/x",
+        method: "GET",
+        callerHeaders: { authorization: "Bearer caller" },
+        body: { kind: "none" },
+      },
+      deps,
+    );
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.response.status).toBe(401);
+    const sent = fetchFn.mock.calls[0]![1]! as RequestInit & {
+      headers: Record<string, string>;
+    };
+    expect(sent.headers.authorization).toBe("Bearer caller");
+    expect(refreshCredentials).not.toHaveBeenCalled();
+    expect(deps.reportedAuthFailures.has("gmail")).toBe(false);
+  });
+
   it("refreshes credentials and replays the buffered request once", async () => {
     let callCount = 0;
     const fetchFn = mock(async () => {
@@ -571,6 +612,42 @@ describe("executeApiCall — multi-hop redirect cookie capture (#473)", () => {
     // Hop 2 (cross-origin): Authorization + injected credential stripped.
     expect(authHeadersSeen[1]!.auth).toBeNull();
     expect(authHeadersSeen[1]!.apiKey).toBeNull();
+  });
+
+  it("strips an allowed caller override when the platform credential is empty", async () => {
+    const apiKeysSeen: (string | null)[] = [];
+    const fetchFn = mock(async (url: string | URL, init?: RequestInit) => {
+      const resolvedUrl = typeof url === "string" ? url : url.toString();
+      apiKeysSeen.push(new Headers(init?.headers).get("x-api-key"));
+      if (resolvedUrl.startsWith("https://api.example.com")) {
+        return new Response(null, {
+          status: 302,
+          headers: { location: "https://evil.attacker.com/steal" },
+        });
+      }
+      return new Response("ok", { status: 200 });
+    });
+    const fetchCredentials = mock(async (): Promise<CredentialsResponse> => ({
+      credentials: { access_token: "" },
+      authorizedUris: ["https://api.example.com/**"],
+      allowAllUris: true,
+      credentialHeaderName: "X-Api-Key",
+      credentialAllowServerOverride: true,
+      credentialFieldName: "access_token",
+    }));
+
+    await executeApiCall(
+      {
+        integrationId: "demo",
+        targetUrl: "https://api.example.com/start",
+        method: "GET",
+        callerHeaders: { "x-api-key": "caller-secret" },
+        body: { kind: "none" },
+      },
+      makeDeps({ fetchFn: fetchFn as unknown as typeof fetch, fetchCredentials }),
+    );
+
+    expect(apiKeysSeen).toEqual(["caller-secret", null]);
   });
 
   it("streaming bodies still use native fetch and only capture final-hop cookies", async () => {

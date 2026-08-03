@@ -99,9 +99,11 @@ export interface ProxyCallInput {
    * substituted when `substituteBody` is true. A `ReadableStream` is
    * forwarded verbatim (streaming upload path — no substitution possible,
    * no 401-retry). When a `ReadableStream` body is provided and the
-   * upstream returns 401, the result carries `authRefreshed: true` (creds
-   * were refreshed server-side) but the response is passed through as-is —
-   * the caller must replay the next request with a fresh body.
+   * upstream returns 401 after using the platform credential, the result
+   * carries `authRefreshed: true` (creds were refreshed server-side) but the
+   * response is passed through as-is — the caller must replay the next
+   * request with a fresh body. An explicitly allowed caller override is never
+   * attributed to the platform credential and therefore is not refreshed.
    */
   body?: string | Uint8Array | ReadableStream<Uint8Array> | null;
   substituteBody?: boolean;
@@ -345,8 +347,12 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
     if (substituted !== template) sensitiveHeaderNames.add(k);
     headers.set(k, substituted);
   }
-  applyInjectedCredentialHeaderToHeaders(headers, resolved);
-  if (resolved.credentialHeaderName) sensitiveHeaderNames.add(resolved.credentialHeaderName);
+  let credentialInjection = applyInjectedCredentialHeaderToHeaders(headers, resolved);
+  if (credentialInjection.kind === "inject") {
+    sensitiveHeaderNames.add(credentialInjection.header.name);
+  } else if (credentialInjection.kind === "caller_override") {
+    sensitiveHeaderNames.add(credentialInjection.headerName);
+  }
 
   // Body substitution (opt-in; body may be bytes). Bun's global fetch
   // accepts string / Uint8Array / ReadableStream directly.
@@ -452,7 +458,7 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
   // replayed safely → refresh + retry once. Streaming bodies fall through
   // to the authRefreshed escape-hatch below (caller must re-issue with a
   // fresh body stream).
-  if (res.status === 401 && !isStreamBody) {
+  if (res.status === 401 && !isStreamBody && credentialInjection.kind === "inject") {
     try {
       const refreshedResult = await forceRefreshIntegrationProxyCredentials({
         integrationId: input.integrationId,
@@ -462,17 +468,16 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
       });
       const refreshed = refreshedResult?.payload ?? null;
       if (refreshed) {
-        // Rebuild the credential header from the rotated token. We drop
-        // the previous injected header first so `applyInjectedCredentialHeaderToHeaders`
-        // re-installs the new value (its caller-override-wins semantics
-        // would otherwise keep the stale Bearer).
+        // Rebuild the credential header from the rotated token. Drop the
+        // previous platform-injected value first so the refreshed delivery
+        // plan can install its current header name and value cleanly.
+        headers.delete(credentialInjection.header.name);
         if (refreshed.credentialHeaderName) {
-          headers.delete(refreshed.credentialHeaderName);
           // Keep the strip set in sync — the refreshed payload may name a
           // different header than the original resolution.
           sensitiveHeaderNames.add(refreshed.credentialHeaderName);
         }
-        applyInjectedCredentialHeaderToHeaders(headers, refreshed);
+        credentialInjection = applyInjectedCredentialHeaderToHeaders(headers, refreshed);
         res = await performFetch({
           ...fetchInit,
           headers,
@@ -497,7 +502,7 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
   // server-side (so the *next* call from the caller uses fresh tokens)
   // but we cannot replay the body — surface authRefreshed so the route
   // can signal the client to retry itself with a fresh body stream.
-  if (res.status === 401 && isStreamBody) {
+  if (res.status === 401 && isStreamBody && credentialInjection.kind === "inject") {
     try {
       await forceRefreshIntegrationProxyCredentials({
         integrationId: input.integrationId,
