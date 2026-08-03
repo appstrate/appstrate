@@ -17,6 +17,7 @@ import {
   CircleSlash2,
   CircleHelp,
   MessageSquareText,
+  Bug,
 } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { ScrollArea } from "@appstrate/ui/components/scroll-area";
@@ -31,49 +32,28 @@ import {
 } from "./log-utils";
 import { Modal } from "./modal";
 
-const levelConfig: Record<string, { icon: typeof Info; className: string; label: string }> = {
-  info: { icon: Info, className: "text-blue-400 bg-blue-400/10", label: "INFO" },
-  warn: { icon: AlertTriangle, className: "text-amber-400 bg-amber-400/10", label: "WARN" },
-  error: { icon: XCircle, className: "text-destructive bg-destructive/10", label: "ERROR" },
+const levelIconConfig: Record<string, { icon: typeof Info; className: string; label: string }> = {
+  debug: { icon: Bug, className: "text-muted-foreground", label: "DEBUG" },
+  info: { icon: Info, className: "text-primary", label: "INFO" },
+  warn: { icon: AlertTriangle, className: "text-warning", label: "WARN" },
+  error: { icon: XCircle, className: "text-destructive", label: "ERROR" },
 };
 
-function LevelBadge({ level }: { level?: string }) {
-  if (!level || level === "debug") return null;
-  const config = levelConfig[level];
-  if (!config) return null;
+function ExecutionEntryIcon({ entry }: { entry: ExecutionEntry }) {
+  if (entry.kind === "agent") {
+    return <MessageSquareText className="text-primary size-3.5" />;
+  }
+  if (entry.kind === "runtime" && (!entry.level || entry.level === "debug")) {
+    return <span className="bg-primary size-1.5 rounded-full opacity-60" />;
+  }
+
+  const config = levelIconConfig[entry.level ?? "debug"] ?? levelIconConfig.debug!;
   const Icon = config.icon;
   return (
-    <span
-      className={cn(
-        "inline-flex shrink-0 items-center gap-0.5 rounded px-1 py-px text-[10px] leading-none font-semibold",
-        config.className,
-      )}
-    >
-      <Icon size={10} />
-      {config.label}
-    </span>
+    <Icon className={cn("size-3.5", config.className)} role="img" aria-label={config.label}>
+      <title>{config.label}</title>
+    </Icon>
   );
-}
-
-function ExecutionEntryMetadata({ entry }: { entry: ExecutionEntry }) {
-  if (entry.kind === "agent") {
-    return <MessageSquareText className="size-3.5 text-violet-400" />;
-  }
-  if (entry.kind === "log") {
-    return (
-      <>
-        <MessageSquareText className="size-3.5" />
-        <LevelBadge level={entry.level} />
-      </>
-    );
-  }
-  if (entry.kind === "runtime") {
-    if (!entry.level || entry.level === "debug") {
-      return <span className="bg-primary size-1.5 rounded-full opacity-60" />;
-    }
-    return levelConfig[entry.level] ? <LevelBadge level={entry.level} /> : null;
-  }
-  return null;
 }
 
 const toolStatusConfig = {
@@ -325,7 +305,7 @@ export function LogViewer({ entries }: LogViewerProps) {
                     "text-muted-foreground hover:bg-muted/50 flex min-h-7 px-3 py-0.5 font-mono text-sm leading-7 select-none",
                     entry.kind === "tool"
                       ? "items-center truncate"
-                      : "items-start break-words whitespace-normal",
+                      : "items-start gap-1.5 break-words whitespace-normal",
                     entry.level && levelColors[entry.level],
                     hasToolDetails && "cursor-pointer",
                   )}
@@ -364,25 +344,24 @@ export function LogViewer({ entries }: LogViewerProps) {
                       )}
                     </>
                   ) : (
-                    <div className="min-w-0 flex-1">
-                      <div className="flex h-5 items-center gap-1.5">
-                        {showTimestamps && (
-                          <span className="text-muted-foreground/60 shrink-0 font-mono text-xs">
-                            {formatTimestamp(entry.createdAt, i18n.language)}
-                          </span>
-                        )}
-                        <ExecutionEntryMetadata entry={entry} />
-                      </div>
+                    <>
+                      <span className="flex h-7 w-3.5 shrink-0 items-center justify-center">
+                        <ExecutionEntryIcon entry={entry} />
+                      </span>
+                      {showTimestamps && (
+                        <span className="text-muted-foreground/60 flex h-7 shrink-0 items-center font-mono text-xs">
+                          {formatTimestamp(entry.createdAt, i18n.language)}
+                        </span>
+                      )}
                       <span
                         className={cn(
-                          "text-foreground/80 block min-w-0 break-words whitespace-pre-wrap",
-                          (entry.kind === "agent" || entry.kind === "log") && "font-sans",
+                          "text-foreground/80 min-w-0 flex-1 font-sans text-sm break-words whitespace-pre-wrap",
                           entry.level && levelColors[entry.level],
                         )}
                       >
                         {entry.message}
                       </span>
-                    </div>
+                    </>
                   )}
                 </div>
               </div>
