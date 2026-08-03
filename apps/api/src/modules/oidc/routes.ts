@@ -130,6 +130,11 @@ export function isLoginLinkExpired(expParam: string | null): boolean {
   return exp < Date.now() / 1000;
 }
 
+/** Canonical public base for URLs that leave the process. */
+function getPublicAppBaseUrl(): string {
+  return getEnv().APP_URL.replace(/\/+$/, "");
+}
+
 // ─── Zod schemas ──────────────────────────────────────────────────────────────
 
 const redirectUriSchema = z
@@ -1536,8 +1541,11 @@ export function createOidcRouter() {
     // `scope=openid+profile+email` (or `%2B` in the PKCE `sig`) as a
     // space — failing the regex. Absolute URLs go through the origin
     // comparison branch instead and bypass the regex entirely.
-    const callbackURL = `${url.origin}/api/auth/oauth2/authorize${url.search}`;
-    const errorCallbackURL = `${url.origin}/api/oauth/login${url.search}`;
+    // The request URL can carry the proxy-to-app HTTP scheme after TLS is
+    // terminated upstream. APP_URL is the canonical browser-facing origin.
+    const appBaseUrl = getPublicAppBaseUrl();
+    const callbackURL = `${appBaseUrl}/api/auth/oauth2/authorize${url.search}`;
+    const errorCallbackURL = `${appBaseUrl}/api/oauth/login${url.search}`;
 
     const authApi = getOidcAuthApi();
     // CRIT-15: bind the magic link to the OAuth transaction the server
@@ -1691,7 +1699,7 @@ export function createOidcRouter() {
     // Hand off to Better Auth's verify endpoint in the USER's browser — BA
     // consumes the single-use token, sets the session cookie on their origin,
     // and 302s to callbackURL (the authorize endpoint).
-    const verifyUrl = new URL("/api/auth/magic-link/verify", url.origin);
+    const verifyUrl = new URL("/api/auth/magic-link/verify", getPublicAppBaseUrl());
     verifyUrl.searchParams.set("token", token);
     const callbackURL = url.searchParams.get("callbackURL");
     const errorCallbackURL = url.searchParams.get("errorCallbackURL");
@@ -1768,7 +1776,8 @@ export function createOidcRouter() {
     // Absolute URL so Better Auth's origin-check accepts it — see the
     // magic-link route above for the full rationale (BA's relative-path
     // regex rejects spaces in the query string).
-    const redirectTo = `${url.origin}/api/oauth/reset-password${url.search}`;
+    const appBaseUrl = getPublicAppBaseUrl();
+    const redirectTo = `${appBaseUrl}/api/oauth/reset-password${url.search}`;
 
     const authApi = getOidcAuthApi();
     try {
