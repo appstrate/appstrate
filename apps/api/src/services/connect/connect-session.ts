@@ -73,7 +73,7 @@ export function buildConnectUrl(input: ConnectSessionInput): {
     exp: expSeconds,
   };
   const token = mintConnectSession(claims, connectSessionSecret());
-  const base = getEnv().APP_URL.replace(/\/$/, "");
+  const base = getEnv().APP_URL;
   const connectUrl = `${base}/api/integrations/connect/start?token=${encodeURIComponent(token)}`;
   return { connectUrl, expiresAt: expSeconds * 1000 };
 }

@@ -381,7 +381,34 @@ const envSchema = z
     MODULE_CONTRACT_ENFORCE: z.enum(["fail", "warn"]).default("fail"),
 
     // App
-    APP_URL: z.string().default("http://localhost:3000"),
+    APP_URL: z
+      .string()
+      .default("http://localhost:3000")
+      .transform((value, ctx) => {
+        let url: URL;
+        try {
+          url = new URL(value);
+        } catch {
+          ctx.addIssue({ code: "custom", message: "must be an absolute URL" });
+          return z.NEVER;
+        }
+        if (url.protocol !== "http:" && url.protocol !== "https:") {
+          ctx.addIssue({ code: "custom", message: "only http: and https: are supported" });
+          return z.NEVER;
+        }
+        if (url.username || url.password) {
+          ctx.addIssue({ code: "custom", message: "credentials are not supported" });
+          return z.NEVER;
+        }
+        if (url.pathname !== "/" || url.search || url.hash) {
+          ctx.addIssue({
+            code: "custom",
+            message: "must be an origin only (no path, query, or fragment)",
+          });
+          return z.NEVER;
+        }
+        return url.origin;
+      }),
     TRUSTED_ORIGINS: z
       .string()
       .default("http://localhost:3000,http://localhost:5173")
@@ -815,8 +842,8 @@ const envSchema = z
       if (!env.USERCONTENT_URL) return true;
       const appHost = urlHost(env.APP_URL);
       const previewHost = urlHost(env.USERCONTENT_URL);
-      // `APP_URL` is not URL-validated; when it cannot be parsed there is
-      // nothing to compare against and its own malformation is the real bug.
+      // APP_URL was normalized to an origin above. Keep the null fallback for
+      // the optional preview URL so this cross-field refinement never throws.
       return appHost === null || previewHost === null || appHost !== previewHost;
     },
     {

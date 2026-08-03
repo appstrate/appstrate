@@ -235,8 +235,9 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
 
   // --- Communication contract ---
   // The platform parses ONLY the typed events your tools emit. Plain
-  // assistant text (prose, reasoning, chat-style replies) is never wired
-  // to the user — it lives and dies inside this container. Weaker models
+  // assistant text (prose, reasoning, chat-style replies) is never delivered
+  // to the user as a result — it is retained only as a debug execution trace.
+  // Weaker models
   // default to "here are your results: …" free text, which silently
   // reaches no one. State the invariant explicitly so every result,
   // status update, question, or error is routed through a tool call.
@@ -246,7 +247,7 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
   sections.push("### Communication");
   sections.push(
     "Anything you write as plain text — outside a tool call — is **never delivered to the user**. " +
-      "It stays inside this ephemeral container and is discarded when the run ends. " +
+      "The platform may retain it as a debug execution trace for run operators, but it is not a result or user-facing message. " +
       "The user does not see your prose, your reasoning, or any chat-style reply.\n",
   );
   sections.push(

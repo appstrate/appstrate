@@ -26,9 +26,10 @@
 
 import type { Context, MiddlewareHandler } from "hono";
 import type { AppEnv } from "../types/index.ts";
+import { getPublicAppOrigin } from "./public-url.ts";
 
 export interface AuthChallengeArgs {
-  /** Origin of the inbound request, e.g. `https://instance.example`. */
+  /** Canonical public app origin, e.g. `https://instance.example`. */
   origin: string;
   /**
    * Path of the inbound request, e.g. `/api/mcp/o/<orgId>`. A prefix-registered
@@ -117,7 +118,7 @@ export function authChallengeResponder(): MiddlewareHandler<AppEnv> {
     const build = resolveAuthChallenge(c.req.path);
     let challenge: string | undefined;
     if (build) {
-      challenge = build({ origin: new URL(c.req.url).origin, path: c.req.path, status });
+      challenge = build({ origin: getPublicAppOrigin(), path: c.req.path, status });
     } else if (status === 401) {
       challenge = c.req.header("Authorization") ? 'Bearer error="invalid_token"' : "Bearer";
     }

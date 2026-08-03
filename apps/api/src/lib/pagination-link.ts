@@ -21,6 +21,7 @@
  */
 
 import type { Context } from "hono";
+import { toPublicAppUrl } from "./public-url.ts";
 
 interface CursorLinkArgs {
   /** Hono context — the request URL is read from `c.req.url`. */
@@ -36,9 +37,9 @@ interface CursorLinkArgs {
 }
 
 function buildUrl(c: Context, mutate: (params: URLSearchParams) => void): string {
-  // `c.req.url` is the full URL — preserve scheme + host + path so the
-  // Link href is dereferenceable directly by clients (curl, fetch).
-  const url = new URL(c.req.url);
+  // Preserve the inbound path/query, but pin scheme + host to APP_URL so the
+  // absolute Link remains dereferenceable outside the reverse proxy.
+  const url = toPublicAppUrl(c.req.url);
   // Strip cursor query params before adding the new one — `next` and
   // `prev` are mutually exclusive in cursor pagination, and stale
   // values from the inbound URL would break the next round-trip.
@@ -93,7 +94,7 @@ interface SinceLinkArgs {
  */
 export function setSinceLinkHeader({ c, hasMore, lastId }: SinceLinkArgs): void {
   if (!hasMore || lastId === undefined) return;
-  const url = new URL(c.req.url);
+  const url = toPublicAppUrl(c.req.url);
   url.searchParams.set("since", String(lastId));
   c.header("Link", `<${url.toString()}>; rel="next"`);
 }
@@ -111,7 +112,7 @@ interface OffsetLinkArgs {
 }
 
 function buildOffsetUrl(c: Context, limit: number, offset: number): string {
-  const url = new URL(c.req.url);
+  const url = toPublicAppUrl(c.req.url);
   url.searchParams.set("limit", String(limit));
   if (offset > 0) {
     url.searchParams.set("offset", String(offset));
