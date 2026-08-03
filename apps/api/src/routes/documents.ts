@@ -66,7 +66,8 @@ export function createDocumentsRouter() {
   const router = new Hono<AppEnv>();
 
   // GET /api/documents — gallery list. Filters: purpose, run_id, packageId,
-  // chat_session_id; keyset pagination via startingAfter + limit. Query-param
+  // chat_session_id, context_chat_session_id; keyset pagination via
+  // startingAfter + limit. Query-param
   // casing follows the wire DTO (CASING_CONVENTIONS.md carve-out 4b): `packageId`
   // and the `startingAfter` pagination param are camelCase; `run_id` /
   // `chat_session_id` are snake_case domain fields.
@@ -83,6 +84,8 @@ export function createDocumentsRouter() {
     if (packageId) filters.packageId = packageId;
     const chatSessionId = c.req.query("chat_session_id");
     if (chatSessionId) filters.chatSessionId = chatSessionId;
+    const contextChatSessionId = c.req.query("context_chat_session_id");
+    if (contextChatSessionId) filters.contextChatSessionId = contextChatSessionId;
     const startingAfter = c.req.query("startingAfter");
     if (startingAfter) filters.startingAfter = startingAfter;
     // Documented query-int idiom (routes/models.ts): coerce + clamp + default.

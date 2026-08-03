@@ -63,6 +63,12 @@ function handleConnectionUpdate(qc: QueryClient) {
  */
 function handleChatSessionUpdate(qc: QueryClient) {
   void qc.invalidateQueries({ queryKey: CHAT_SESSIONS_QUERY_KEY });
+  // The context sidebar reads the active session detail and the union of its
+  // direct/run-linked documents. A message persistence signal can create the
+  // session itself or materialize a new attachment, so both typed query
+  // families need the same immediate reconciliation as the conversation list.
+  void qc.invalidateQueries({ queryKey: ["get", "/api/chat/sessions/{id}"] });
+  void qc.invalidateQueries({ queryKey: ["get", "/api/documents"] });
 }
 
 /**
@@ -159,6 +165,9 @@ function handleSSEMessage(
   // prefix so a run status change refreshes the agent's config/model tabs.
   broad.schedule(packageKeys.familyInOrg("agents", orgId));
   broad.schedule(paginatedRunsKeys.all);
+  // The chat context sidebar uses the typed global collection with a
+  // `chat_session_id` filter rather than the legacy paginated-runs hook.
+  broad.schedule(["get", "/api/runs"]);
 
   // Invalidate schedule-specific caches
   if (scheduleId) {
@@ -174,6 +183,9 @@ function handleSSEMessage(
     invalidateNotificationQueries(qc);
     qc.invalidateQueries({ queryKey: runsKeys.all });
     qc.invalidateQueries({ queryKey: runKeys.all });
+    // A terminal run has completed its output sweep; refresh every scoped
+    // document collection, including conversation-context filters.
+    qc.invalidateQueries({ queryKey: ["get", "/api/documents"] });
     qc.invalidateQueries({ queryKey: billingKeys.forOrg(orgId) });
   }
 }

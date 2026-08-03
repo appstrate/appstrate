@@ -9,9 +9,14 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { db } from "../../helpers/db.ts";
 import { eq } from "drizzle-orm";
-import { packages, documents, runs } from "@appstrate/db/schema";
+import { packages, documents, runs, chatSessions } from "@appstrate/db/schema";
 import { truncateAll } from "../../helpers/db.ts";
-import { createTestContext, type TestContext } from "../../helpers/auth.ts";
+import {
+  addOrgMember,
+  createTestContext,
+  createTestUser,
+  type TestContext,
+} from "../../helpers/auth.ts";
 import { seedPackage, seedRun } from "../../helpers/seed.ts";
 import { insertShadowPackage } from "../../../src/services/inline-run.ts";
 import { listGlobalRuns } from "../../../src/services/state/runs.ts";
@@ -134,6 +139,32 @@ describe("listGlobalRuns", () => {
     );
     expect(result.total).toBe(1);
     expect(result.data[0]?.status).toBe("failed");
+  });
+
+  it("filters by the caller-owned chat session that launched the run", async () => {
+    const ownSessionId = `chs_${crypto.randomUUID()}`;
+    await db.insert(chatSessions).values({
+      id: ownSessionId,
+      orgId: ctx.orgId,
+      userId: ctx.user.id,
+    });
+    const linked = await seedPackageRun();
+    await db.update(runs).set({ chatSessionId: ownSessionId }).where(eq(runs.id, linked.id));
+    await seedPackageRun();
+
+    const result = await listGlobalRuns(
+      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+      { chatSessionId: ownSessionId, actor: { type: "user", id: ctx.user.id } },
+    );
+    expect(result.data.map((run) => run.id)).toEqual([linked.id]);
+
+    const other = await createTestUser({ email: "other-run-chat-owner@test.local" });
+    await addOrgMember(ctx.orgId, other.id, "member");
+    const denied = await listGlobalRuns(
+      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+      { chatSessionId: ownSessionId, actor: { type: "user", id: other.id } },
+    );
+    expect(denied.data).toEqual([]);
   });
 
   it("filters by startDate / endDate", async () => {

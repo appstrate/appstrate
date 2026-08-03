@@ -17,7 +17,15 @@
  *    `GET /api/chat/sessions/:id/stream`.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import {
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { AssistantRuntimeProvider, type AttachmentAdapter } from "@assistant-ui/react";
 import { useAISDKRuntime } from "@assistant-ui/react-ai-sdk";
 import { useChat } from "@ai-sdk/react";
@@ -40,6 +48,7 @@ import type {
   UploadFile,
   UseDocumentImageSrc,
 } from "./runtime-context.ts";
+export type { OpenDocument } from "./runtime-context.ts";
 import { ThreadList, ActiveConversationTitle } from "./thread-list.tsx";
 import { ModelSelect } from "./model-select.tsx";
 import { fetchModels, type OrgModelOption } from "./models-data.ts";
@@ -89,12 +98,14 @@ export interface ChatPageProps {
    */
   onConversationChange?: SelectConversation;
   /**
-   * Opens the host's in-app document preview for a clicked chat document
-   * (attachment thumbnail/chip or a run card's document chip). Optional: when
-   * absent the chat falls back to `downloadDocument`. Delivered to deep tool UIs
-   * via context, not props.
+   * Presents a clicked chat document or a live run's primary output through the
+   * host's in-app viewer. Optional: without it direct clicks fall back to
+   * `downloadDocument` and automatic presentation is skipped. Delivered to deep
+   * tool UIs via context, not props.
    */
   onOpenDocument?: OpenDocument;
+  /** Optional host-owned actions displayed beside the conversation title. */
+  headerActions?: ReactNode;
   /**
    * REQUIRED host services — the chat implements none of them itself (see
    * `runtime-context.ts`): the authenticated download, the authenticated image
@@ -112,6 +123,7 @@ export function ChatPage({
   newChatKey,
   onConversationChange,
   onOpenDocument,
+  headerActions,
   downloadDocument,
   useDocumentImageSrc,
   uploadFile,
@@ -252,9 +264,12 @@ export function ChatPage({
                 >
                   <PanelLeftIcon className="size-5" />
                 </button>
-                <div className="min-w-0 flex-1">
+                <div className="flex min-w-0 flex-1 items-center overflow-hidden">
                   <ActiveConversationTitle activeId={conversationId ?? null} />
                 </div>
+                {headerActions ? (
+                  <div className="flex shrink-0 items-center">{headerActions}</div>
+                ) : null}
               </div>
               <main className="min-h-0 min-w-0 flex-1 overflow-hidden">
                 <Conversation

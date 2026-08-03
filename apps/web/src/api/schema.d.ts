@@ -1286,7 +1286,7 @@ export interface paths {
         };
         /**
          * List documents
-         * @description List the documents visible to the caller in the current application. Requires the `documents:read` permission (the family gate — mirrors `runs:read`); on top of it, each row is filtered by its own container ACL, so members see their own documents (and system-owned ones) and end-users see only their own. Filter by `purpose`, `run_id`, `packageId`, or `chat_session_id`; paginate with `startingAfter` + `limit`.
+         * @description List the documents visible to the caller in the current application. Requires the `documents:read` permission (the family gate — mirrors `runs:read`); on top of it, each row is filtered by its own container ACL, so members see their own documents (and system-owned ones) and end-users see only their own. Filter by `purpose`, `run_id`, `packageId`, `chat_session_id`, or a chat session's complete context; paginate with `startingAfter` + `limit`.
          */
         get: operations["listDocuments"];
         put?: never;
@@ -3844,7 +3844,7 @@ export interface paths {
         };
         /**
          * List runs across the application (global view)
-         * @description Org + application scoped paginated list. Supports filtering by `user=me` (self-owned, also implicit for end-user impersonation), `kind` (all, package, inline), `status`, and a date range. Inline runs surface via `package_ephemeral: true` on each row. Note: `kind`, `status`, and date filters are ignored when `user=me` (self-view uses a simpler path).
+         * @description Org + application scoped paginated list. Supports filtering by `user=me` (self-owned, also implicit for end-user impersonation), `kind` (all, package, inline), `status`, a date range, and the chat session that launched the run. Inline runs surface via `package_ephemeral: true` on each row. Note: global filters are ignored when `user=me` (self-view uses a simpler path).
          */
         get: operations["listRuns"];
         put?: never;
@@ -9788,6 +9788,8 @@ export interface operations {
                 packageId?: string;
                 /** @description Filter to documents anchored to this chat session. */
                 chat_session_id?: string;
+                /** @description Filter to the private conversation context: direct attachments plus documents produced or consumed by runs launched from the session. */
+                context_chat_session_id?: string;
                 /** @description Keyset cursor — document id to page after (newest-first order). */
                 startingAfter?: string;
                 /** @description Page size (1–100, default 20). */
@@ -18140,6 +18142,8 @@ export interface operations {
                 status?: "pending" | "running" | "success" | "failed" | "timeout" | "cancelled";
                 start_date?: string;
                 end_date?: string;
+                /** @description Return only runs launched from this chat session. */
+                chat_session_id?: string;
             };
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */

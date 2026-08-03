@@ -57,11 +57,15 @@ export function useSelectConversation(): SelectConversation | null {
 }
 
 /**
- * Opens the host's in-app document preview (the same modal the documents library
- * uses). The module owns no preview component — dependency direction is web →
+ * Presents a document through the host's in-app viewer. The same small interface
+ * serves direct clicks and automatic primary-output presentation. The host does
+ * not need to know why it was called: both interactions select the document in
+ * the same conversation context panel.
+ *
+ * The module owns no preview component — dependency direction is web →
  * module-chat, so the host injects an opener and the chat delegates to it.
- * `null` means no opener was provided (embedded mounts): callers must then fall
- * back to the authenticated download.
+ * `null` means no opener was provided (embedded mounts): direct clicks then fall
+ * back to the authenticated download, while automatic presentation is a no-op.
  */
 export type OpenDocument = (doc: { id: string; name: string }) => void;
 

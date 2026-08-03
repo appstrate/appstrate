@@ -34,11 +34,12 @@ import {
   inArray,
   notInArray,
   notExists,
+  exists,
   sql,
   type SQL,
 } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { documents, documentLinks, organizations, chatSessions } from "@appstrate/db/schema";
+import { documents, documentLinks, organizations, chatSessions, runs } from "@appstrate/db/schema";
 import type { DocumentPurpose } from "@appstrate/db/schema";
 import {
   uploadStream as storageUploadStream,
@@ -1497,6 +1498,7 @@ export interface ListDocumentsFilters {
   packageId?: string;
   runId?: string;
   chatSessionId?: string;
+  contextChatSessionId?: string;
   limit?: number;
   startingAfter?: string;
 }
@@ -1521,6 +1523,65 @@ async function runContainerFilter(scope: AppScope, runId: string): Promise<SQL> 
   const inputDocIds = run ? extractDocumentIds(run.input) : [];
   if (inputDocIds.length === 0) return eq(documents.runId, runId);
   return or(eq(documents.runId, runId), inArray(documents.id, inputDocIds))!;
+}
+
+/**
+ * Documents that make up one conversation's context: direct chat attachments,
+ * outputs produced by its runs, and documents consumed by those runs. The
+ * session ownership check is load-bearing because chat sessions are private
+ * even though dashboard members may read the org-wide run list.
+ */
+async function chatContextDocumentFilter(
+  scope: AppScope,
+  actor: Actor,
+  chatSessionId: string,
+): Promise<SQL> {
+  if (actor.type !== "user") return sql`false`;
+
+  const [session] = await db
+    .select({ id: chatSessions.id })
+    .from(chatSessions)
+    .where(
+      and(
+        eq(chatSessions.id, chatSessionId),
+        eq(chatSessions.orgId, scope.orgId),
+        eq(chatSessions.userId, actor.id),
+      ),
+    )
+    .limit(1);
+  if (!session) return sql`false`;
+
+  return or(
+    eq(documents.chatSessionId, chatSessionId),
+    exists(
+      db
+        .select({ id: runs.id })
+        .from(runs)
+        .where(
+          and(
+            eq(documents.runId, runs.id),
+            eq(runs.orgId, scope.orgId),
+            eq(runs.applicationId, scope.applicationId),
+            eq(runs.chatSessionId, chatSessionId),
+          ),
+        ),
+    ),
+    exists(
+      db
+        .select({ documentId: documentLinks.documentId })
+        .from(documentLinks)
+        .innerJoin(runs, eq(documentLinks.consumerRunId, runs.id))
+        .where(
+          and(
+            eq(documentLinks.documentId, documents.id),
+            eq(documentLinks.orgId, scope.orgId),
+            eq(runs.orgId, scope.orgId),
+            eq(runs.applicationId, scope.applicationId),
+            eq(runs.chatSessionId, chatSessionId),
+          ),
+        ),
+    ),
+  )!;
 }
 
 /**
@@ -1571,6 +1632,9 @@ export async function listDocumentsForActor(
   if (filters.packageId) conditions.push(eq(documents.packageId, filters.packageId));
   if (filters.runId) conditions.push(await runContainerFilter(scope, filters.runId));
   if (filters.chatSessionId) conditions.push(eq(documents.chatSessionId, filters.chatSessionId));
+  if (filters.contextChatSessionId) {
+    conditions.push(await chatContextDocumentFilter(scope, actor, filters.contextChatSessionId));
+  }
 
   if (filters.startingAfter) {
     const [cursor] = await db

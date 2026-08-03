@@ -15,6 +15,7 @@ import {
   gte,
   lte,
   max,
+  exists,
   type SQL,
   sql,
 } from "drizzle-orm";
@@ -32,6 +33,7 @@ import {
   organizations,
   documents,
   documentLinks,
+  chatSessions,
   activeRunStatusValues,
   terminalRunStatusValues,
   type RunStatus,
@@ -1341,6 +1343,7 @@ export interface ListGlobalRunsOptions {
   startDate?: Date;
   endDate?: Date;
   endUserId?: string | null;
+  chatSessionId?: string;
   actor?: Actor | null;
 }
 
@@ -1356,6 +1359,7 @@ export async function listGlobalRuns(
     startDate,
     endDate,
     endUserId,
+    chatSessionId,
     actor = null,
   } = options;
 
@@ -1364,6 +1368,25 @@ export async function listGlobalRuns(
   if (startDate) conditions.push(gte(runs.startedAt, startDate));
   if (endDate) conditions.push(lte(runs.startedAt, endDate));
   if (endUserId) conditions.push(eq(runs.endUserId, endUserId));
+  if (chatSessionId) {
+    conditions.push(eq(runs.chatSessionId, chatSessionId));
+    conditions.push(
+      actor?.type === "user"
+        ? exists(
+            db
+              .select({ id: chatSessions.id })
+              .from(chatSessions)
+              .where(
+                and(
+                  eq(chatSessions.id, chatSessionId),
+                  eq(chatSessions.orgId, scope.orgId),
+                  eq(chatSessions.userId, actor.id),
+                ),
+              ),
+          )
+        : sql`false`,
+    );
+  }
 
   // Kind filter via JOINed `packages.ephemeral`. After migration 0017, runs
   // can outlive their source package (`runs.package_id ON DELETE SET NULL`),

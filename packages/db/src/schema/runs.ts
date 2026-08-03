@@ -215,6 +215,12 @@ export const runs = pgTable(
     apiKeyId: text("api_key_id").references(() => apiKeys.id, {
       onDelete: "set null",
     }),
+    /**
+     * Chat session that launched this run, when it came from `run_and_wait`.
+     * This is first-class relationship data: the chat context sidebar filters
+     * runs and their documents by it without parsing messages or JSON metadata.
+     */
+    chatSessionId: text("chat_session_id"),
     metadata: jsonb("metadata").$type<Record<string, unknown>>(),
     config: jsonb("config").$type<Record<string, unknown>>(),
     // Per-run override layer — the delta the caller sent on top of
@@ -339,6 +345,9 @@ export const runs = pgTable(
     index("idx_runs_model_credential_id")
       .on(table.modelCredentialId)
       .where(sql`${table.modelCredentialId} IS NOT NULL`),
+    index("idx_runs_chat_session_started")
+      .on(table.chatSessionId, table.startedAt)
+      .where(sql`${table.chatSessionId} IS NOT NULL`),
     index("idx_runs_org_id").on(table.orgId),
     // Referenced target of the composite tenant-integrity FK on
     // `llm_usage(run_id, org_id)` (CRIT-07): Postgres needs a unique index
@@ -354,6 +363,15 @@ export const runs = pgTable(
     index("idx_runs_stall_sweep")
       .on(table.lastHeartbeatAt)
       .where(sql`${table.sinkClosedAt} IS NULL AND ${table.sinkExpiresAt} IS NOT NULL`),
+    // Tenant-integrity FK for the launching conversation. The live migration
+    // uses PostgreSQL's column-list `SET NULL (chat_session_id)` so deleting a
+    // session detaches the run without trying to null the NOT-NULL org_id.
+    // Drizzle cannot express that column list; see the analogous llm_usage FKs.
+    foreignKey({
+      name: "runs_chat_session_id_org_id_fk",
+      columns: [table.chatSessionId, table.orgId],
+      foreignColumns: [chatSessions.id, chatSessions.orgId],
+    }).onDelete("set null"),
     check("runs_at_most_one_actor", sql`NOT (user_id IS NOT NULL AND end_user_id IS NOT NULL)`),
     // Invariant: an open sink row (has an expires_at) must have a secret to
     // verify against. Enforced for every origin so platform and remote share

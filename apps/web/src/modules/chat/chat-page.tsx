@@ -7,15 +7,19 @@
 // download, authenticated image preview, staged upload) and the translator.
 // Lazy-loaded behind `features.chat`.
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useReducer } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { ChatPage } from "@appstrate/module-chat/ui";
+import { ChatPage, type OpenDocument } from "@appstrate/module-chat/ui";
 import { buildScopingHeaders } from "../../lib/scoping-headers";
 import { useSidebarStore } from "../../stores/sidebar-store";
-import { DocumentPreview } from "../../components/document-preview";
 import { useDocumentDownload, useDocumentImageSrc } from "../../hooks/use-documents";
 import { useUploadClient } from "../../hooks/use-upload";
+import {
+  INITIAL_CONVERSATION_SIDEBAR_STATE,
+  conversationSidebarReducer,
+} from "./conversation-sidebar-state";
+import { ConversationContextActions, ConversationSidebar } from "./conversation-sidebar";
 
 export function ChatModulePage() {
   // Auto-collapse the global sidebar while in chat, restore on leave (same
@@ -34,6 +38,13 @@ export function ChatModulePage() {
   // updates out of the back-history.
   const { conversationId } = useParams<{ conversationId?: string }>();
   const navigate = useNavigate();
+  // Context starts closed on every viewport. Selecting a context tab or
+  // presenting any document (including a newly published primary output)
+  // expands it through the reducer's single action path.
+  const [sidebarState, dispatchSidebar] = useReducer(
+    conversationSidebarReducer,
+    INITIAL_CONVERSATION_SIDEBAR_STATE,
+  );
   // `location.key` is unique per history entry. The chat mints a fresh
   // conversation id whenever it changes (a new-chat navigation: "+", the nav
   // link, or deleting the active one), so a brand-new conversation is created
@@ -41,7 +52,10 @@ export function ChatModulePage() {
   // previous one on a bare `/chat`.
   const location = useLocation();
   const onConversationChange = useCallback(
-    (id: string | null) => navigate(id ? `/chat/${id}` : "/chat", { replace: true }),
+    (id: string | null) => {
+      dispatchSidebar({ type: "conversation-change" });
+      navigate(id ? `/chat/${id}` : "/chat", { replace: true });
+    },
     [navigate],
   );
   // Scoping headers + the active UI language, so the assistant replies in the
@@ -60,11 +74,22 @@ export function ChatModulePage() {
     (key: string, params?: Record<string, string | number>) => t(key, params ?? {}),
     [t],
   );
-  // Clicking a chat document (attachment thumbnail/chip or a run card's document
-  // chip) opens the SAME in-app preview modal the documents library uses. The
-  // chat module delegates via this callback (dependency direction is web →
-  // module-chat, so the module can't import the preview component).
-  const [previewDoc, setPreviewDoc] = useState<{ id: string; name: string } | null>(null);
+  // One presentation interface for both direct clicks and automatic primary
+  // outputs. There is intentionally no trigger/source policy here: selecting a
+  // document always opens the same Preview tab in the same sidebar.
+  const presentDocument = useCallback<OpenDocument>(
+    (document) => dispatchSidebar({ type: "show-document", document }),
+    [],
+  );
+
+  // Browser back/forward bypasses the chat's selection callback. Clear from the
+  // popstate callback (not an effect body) so returning to an old entry never
+  // resurrects an artefact the user did not explicitly reopen.
+  useEffect(() => {
+    const onHistoryNavigation = () => dispatchSidebar({ type: "conversation-change" });
+    window.addEventListener("popstate", onHistoryNavigation);
+    return () => window.removeEventListener("popstate", onHistoryNavigation);
+  }, []);
   // Document services the module consumes instead of reimplementing: the typed
   // download (reports failures with a toast) and the typed image preview.
   const downloadDocument = useDocumentDownload();
@@ -84,19 +109,28 @@ export function ChatModulePage() {
   // bottom. Without a definite height here the flex chain grows with the message
   // list and the composer scrolls off-screen.
   return (
-    <div className="h-[calc(100dvh-4rem)] min-h-0">
-      <ChatPage
-        getHeaders={getHeaders}
+    <div className="relative flex h-[calc(100dvh-4rem)] min-h-0 min-w-0">
+      <div className="min-w-0 flex-1">
+        <ChatPage
+          getHeaders={getHeaders}
+          conversationId={conversationId ?? null}
+          newChatKey={location.key}
+          onConversationChange={onConversationChange}
+          onOpenDocument={presentDocument}
+          headerActions={
+            <ConversationContextActions state={sidebarState} dispatch={dispatchSidebar} />
+          }
+          downloadDocument={onDownloadDocument}
+          useDocumentImageSrc={useDocumentImageSrc}
+          uploadFile={uploadFile}
+          t={translate}
+        />
+      </div>
+      <ConversationSidebar
         conversationId={conversationId ?? null}
-        newChatKey={location.key}
-        onConversationChange={onConversationChange}
-        onOpenDocument={setPreviewDoc}
-        downloadDocument={onDownloadDocument}
-        useDocumentImageSrc={useDocumentImageSrc}
-        uploadFile={uploadFile}
-        t={translate}
+        state={sidebarState}
+        dispatch={dispatchSidebar}
       />
-      {previewDoc && <DocumentPreview doc={previewDoc} onClose={() => setPreviewDoc(null)} />}
     </div>
   );
 }

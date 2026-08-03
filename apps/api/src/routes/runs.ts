@@ -346,7 +346,8 @@ export function createRunsRouter() {
 
   // GET /api/runs — global paginated run list across the application.
   // Supports filtering by ?user=me (self-owned runs), ?kind=inline|package|all
-  // for inline-run filtering, ?status, ?start_date/?end_date.
+  // for inline-run filtering, ?status, ?start_date/?end_date, and
+  // ?chat_session_id for the conversation context sidebar.
   //
   // `user`, `kind` and `status` are all closed sets and all go through
   // `closedSetQuery`: an unrecognised value is a 400, not a dropped filter.
@@ -387,6 +388,7 @@ export function createRunsRouter() {
     const status = closedSetQuery(c, "status", runStatusValues);
     const startDateRaw = c.req.query("start_date");
     const endDateRaw = c.req.query("end_date");
+    const chatSessionId = c.req.query("chat_session_id") || undefined;
     const startDate = startDateRaw ? new Date(startDateRaw) : undefined;
     const endDate = endDateRaw ? new Date(endDateRaw) : undefined;
     if (startDate && Number.isNaN(startDate.getTime())) {
@@ -403,6 +405,7 @@ export function createRunsRouter() {
       status,
       startDate,
       endDate,
+      chatSessionId,
       actor,
     });
     setOffsetLinkHeader({ c, limit, offset, total: result.total });
