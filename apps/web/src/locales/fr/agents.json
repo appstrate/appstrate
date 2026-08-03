@@ -537,7 +537,9 @@
         "external_authority": "Ce qui fait foi est ailleurs",
         "uninstantiated_template": "Gabarit non rempli",
         "map_limitation": "Limite de la carte, pas de l'agent"
-      }
+      },
+      "ours": "Limites de notre lecture",
+      "oursHint": "Ces points ne sont pas des défauts de votre agent : le format de carte n’a pas su rendre fidèlement un passage de sa définition. C’est à nous de les corriger, pas à vous."
     },
     "jumpTo": "Aller à une section"
   },

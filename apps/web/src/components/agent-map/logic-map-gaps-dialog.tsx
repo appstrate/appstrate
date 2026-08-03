@@ -40,6 +40,22 @@ const FAMILY_ORDER = [
   "map_limitation",
 ];
 
+/**
+ * Sépare ce que le propriétaire de l'agent peut corriger de ce qui nous revient.
+ *
+ * `map_limitation` est la seule famille dont le sujet est la CARTE et non l'agent : sur le
+ * corpus, ses quatre occurrences visent un hybride que `shape` ne sait pas rendre, une
+ * boucle conditionnelle que `loop` ne distingue pas d'une itération, et un passage qui ne
+ * prescrit rien. Les compter avec les autres reviendrait à présenter comme un défaut à
+ * corriger une limite que personne d'autre que nous ne peut lever.
+ */
+export function splitGaps(gaps: LogicMapGap[]): { ours: LogicMapGap[]; theirs: LogicMapGap[] } {
+  return {
+    ours: gaps.filter((g) => g.kind === "map_limitation"),
+    theirs: gaps.filter((g) => g.kind !== "map_limitation"),
+  };
+}
+
 export function LogicMapGapsDialog({
   gaps,
   labelForStep,
@@ -53,8 +69,10 @@ export function LogicMapGapsDialog({
   const { t } = useTranslation("agents");
   if (!gaps) return null;
 
+  const { ours, theirs } = splitGaps(gaps);
+
   const byFamily = new Map<string, LogicMapGap[]>();
-  for (const gap of gaps) {
+  for (const gap of theirs) {
     const list = byFamily.get(gap.kind) ?? [];
     list.push(gap);
     byFamily.set(gap.kind, list);
@@ -71,7 +89,7 @@ export function LogicMapGapsDialog({
     <Modal
       open
       onClose={onClose}
-      title={t("logicMap.gaps.title", { count: gaps.length })}
+      title={t("logicMap.gaps.title", { count: theirs.length })}
       className="sm:max-w-3xl"
     >
       <p className="text-muted-foreground mb-3 text-xs">{t("logicMap.gaps.hint")}</p>
@@ -104,6 +122,23 @@ export function LogicMapGapsDialog({
             </div>
           </section>
         ))}
+
+        {ours.length > 0 && (
+          <section className="border-border border-t pt-3">
+            <h3 className="mb-1 flex items-baseline gap-2 text-sm font-medium">
+              {t("logicMap.gaps.ours")}
+              <span className="text-muted-foreground text-xs font-normal">{ours.length}</span>
+            </h3>
+            <p className="text-muted-foreground mb-2 text-xs">{t("logicMap.gaps.oursHint")}</p>
+            <div className="flex flex-col gap-2">
+              {ours.map((gap, i) => (
+                <div key={`ours:${i}`} className="border-border bg-muted/30 rounded-lg border p-3">
+                  <p className="text-sm">{gap.message}</p>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
       </div>
     </Modal>
   );

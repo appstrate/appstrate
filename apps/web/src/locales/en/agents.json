@@ -537,7 +537,9 @@
         "external_authority": "What settles it lives elsewhere",
         "uninstantiated_template": "Template left unfilled",
         "map_limitation": "A limit of the map, not of the agent"
-      }
+      },
+      "ours": "Limits of our reading",
+      "oursHint": "These are not defects in your agent: the map format could not faithfully render a passage of its definition. They are ours to fix, not yours."
     },
     "jumpTo": "Jump to a section"
   },

@@ -108,6 +108,10 @@ export function AgentLogicMapView({
   // Les trous vivent dans la carte, à côté des étapes, et non dans les diagnostics :
   // ils viennent de la LECTURE du texte, pas du croisement avec le manifeste.
   const gaps = (data?.map as { gaps?: LogicMapGap[] } | null)?.gaps ?? [];
+  // Le badge annonce ce qui est ACTIONNABLE par le propriétaire de l agent. Les
+  // `map_limitation` sont nos limites de lecture et vivent à part dans le panneau ;
+  // les compter ici ferait passer un défaut du format pour un défaut de son agent.
+  const gapsSiens = gaps.filter((g) => g.kind !== "map_limitation");
   const stepLabels = useMemo(() => {
     const entries = ((data?.map as { steps?: Record<string, unknown>[] } | null)?.steps ?? []).map(
       (s) => [s["id"] as string, (s["label"] as string) ?? (s["id"] as string)] as const,
@@ -263,14 +267,14 @@ export function AgentLogicMapView({
             {t("logicMap.stale")}
           </span>
         )}
-        {gaps.length > 0 && (
+        {gapsSiens.length > 0 && (
           <button
             type="button"
             onClick={() => setGapsOpen(true)}
             className="flex items-center gap-1.5 rounded bg-neutral-900 px-2 py-1 text-neutral-400 hover:text-neutral-200 focus:outline-none focus-visible:ring-1 focus-visible:ring-neutral-500"
           >
             <ListChecks className="h-3.5 w-3.5" aria-hidden />
-            {t("logicMap.gaps.badge", { count: gaps.length })}
+            {t("logicMap.gaps.badge", { count: gapsSiens.length })}
           </button>
         )}
         <button
