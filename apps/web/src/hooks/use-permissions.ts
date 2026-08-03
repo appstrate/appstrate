@@ -16,12 +16,6 @@ export function roleI18nKey(role: OrgRole): string {
   return ROLE_I18N_KEY[role];
 }
 
-/** Assignable roles for invitations (excludes owner). */
-export const INVITE_ROLES = ["viewer", "member", "admin"] as const;
-
-/** All roles including owner (for member role change by owner). */
-export const ALL_ROLES = ["viewer", "member", "admin", "owner"] as const;
-
 /**
  * Role-based permission helpers for UI gating.
  *

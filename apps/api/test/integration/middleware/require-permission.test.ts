@@ -20,12 +20,15 @@ import {
 } from "../../helpers/auth.ts";
 import { seedPackage } from "../../helpers/seed.ts";
 import { installPackage } from "../../../src/services/application-packages.ts";
-import type { AssignableRole } from "../../../src/services/invitations.ts";
+import type { AssignableOrgRole } from "@appstrate/shared-types";
 
 const app = getTestApp();
 
 /** Build a context for a user with a specific role in the owner's org. */
-async function contextForRole(ownerCtx: TestContext, role: AssignableRole): Promise<TestContext> {
+async function contextForRole(
+  ownerCtx: TestContext,
+  role: AssignableOrgRole,
+): Promise<TestContext> {
   const user = await createTestUser();
   await addOrgMember(ownerCtx.orgId, user.id, role);
   return { ...ownerCtx, user, cookie: user.cookie };

@@ -2749,7 +2749,7 @@ export interface paths {
         get?: never;
         /**
          * Change invitation role
-         * @description Change the role assigned to a pending invitation. Owner only.
+         * @description Change the role assigned to a pending invitation. Admin or owner required.
          */
         put: operations["changeInvitationRole"];
         post?: never;
@@ -2793,7 +2793,7 @@ export interface paths {
         get?: never;
         /**
          * Change member role
-         * @description Change a member's role within the organization. Owner only.
+         * @description Change a member's role. Owners can manage any non-owner; admins can manage viewers and members.
          */
         put: operations["changeMemberRole"];
         post?: never;

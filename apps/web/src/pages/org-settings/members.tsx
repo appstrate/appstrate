@@ -18,26 +18,33 @@ import { useQueryClient } from "@tanstack/react-query";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { $api, type components } from "../../api/client";
 import { useOrg } from "../../hooks/use-org";
-import { usePermissions, roleI18nKey, INVITE_ROLES, ALL_ROLES } from "../../hooks/use-permissions";
+import { useAuth } from "../../hooks/use-auth";
+import { usePermissions, roleI18nKey } from "../../hooks/use-permissions";
 import { ConfirmModal } from "../../components/confirm-modal";
 import { CopyLinkButton } from "../../components/copy-link-button";
 import { LoadingState, ErrorState, EmptyState } from "../../components/page-states";
 import { Spinner } from "../../components/spinner";
 import { toast } from "sonner";
-import type { OrgRole } from "@appstrate/shared-types";
+import {
+  ASSIGNABLE_ORG_ROLES,
+  assignableRolesForMember,
+  canRemoveMember,
+  type AssignableOrgRole,
+} from "@appstrate/shared-types";
 
 type OrgMember = components["schemas"]["OrgMember"];
 
 export function OrgSettingsMembersPage() {
   const { t } = useTranslation(["settings", "common"]);
   const { currentOrg } = useOrg();
-  const { isOwner, isAdmin } = usePermissions();
+  const { user } = useAuth();
+  const { role, isAdmin } = usePermissions();
   const queryClient = useQueryClient();
   const orgId = currentOrg?.id;
 
   const [confirmState, setConfirmState] = useState<{ label: string; id: string } | null>(null);
 
-  const inviteForm = useForm<{ email: string; role: "viewer" | "member" | "admin" }>({
+  const inviteForm = useForm<{ email: string; role: AssignableOrgRole }>({
     defaultValues: { email: "", role: "member" },
   });
   const inviteRole = useWatch({ control: inviteForm.control, name: "role" });
@@ -103,7 +110,7 @@ export function OrgSettingsMembersPage() {
   if (isLoading) return <LoadingState />;
   if (error) return <ErrorState message={getErrorMessage(error)} />;
 
-  const handleInvite = (data: { email: string; role: "viewer" | "member" | "admin" }) => {
+  const handleInvite = (data: { email: string; role: AssignableOrgRole }) => {
     const trimmed = data.email.trim();
     if (!trimmed || !orgId) return;
     addMemberMutation.mutate({
@@ -117,12 +124,11 @@ export function OrgSettingsMembersPage() {
     setConfirmState({ label, id: member.userId });
   };
 
-  const handleRoleChange = (userId: string, role: OrgRole) => {
+  const handleRoleChange = (userId: string, newRole: AssignableOrgRole) => {
     if (!orgId) return;
-    // The wire enum excludes "owner"; the owner row never renders this select.
     changeRoleMutation.mutate({
       params: { path: { orgId, userId } },
-      body: { role: role as "viewer" | "member" | "admin" },
+      body: { role: newRole },
     });
   };
 
@@ -142,15 +148,13 @@ export function OrgSettingsMembersPage() {
               />
               <Select
                 value={inviteRole}
-                onValueChange={(v) =>
-                  inviteForm.setValue("role", v as "viewer" | "member" | "admin")
-                }
+                onValueChange={(v) => inviteForm.setValue("role", v as AssignableOrgRole)}
               >
                 <SelectTrigger className="w-[140px]">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {INVITE_ROLES.map((r) => (
+                  {ASSIGNABLE_ORG_ROLES.map((r) => (
                     <SelectItem key={r} value={r}>
                       {t(roleI18nKey(r))}
                     </SelectItem>
@@ -174,6 +178,13 @@ export function OrgSettingsMembersPage() {
         {members.map((member) => {
           const label = member.displayName || member.email || member.userId;
           const isMemberOwner = member.role === "owner";
+          const isSelf = member.userId === user?.id;
+          const assignableRoles = role
+            ? assignableRolesForMember({ actorRole: role, targetRole: member.role, isSelf })
+            : [];
+          const canRemove = role
+            ? canRemoveMember({ actorRole: role, targetRole: member.role, isSelf })
+            : false;
           return (
             <div key={member.userId} className="border-border bg-card rounded-lg border p-5">
               <div className="flex items-center gap-3">
@@ -191,19 +202,19 @@ export function OrgSettingsMembersPage() {
                   {t(roleI18nKey(member.role))}
                 </Badge>
               </div>
-              {!isMemberOwner && (
+              {(assignableRoles.length > 0 || canRemove) && (
                 <div className="border-border mt-3 flex gap-2 border-t pt-3">
-                  {isOwner && (
+                  {assignableRoles.length > 0 && (
                     <Select
                       value={member.role}
-                      onValueChange={(v) => handleRoleChange(member.userId, v as OrgRole)}
+                      onValueChange={(v) => handleRoleChange(member.userId, v as AssignableOrgRole)}
                       disabled={changeRoleMutation.isPending}
                     >
                       <SelectTrigger className="w-[140px]">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        {ALL_ROLES.map((r) => (
+                        {assignableRoles.map((r) => (
                           <SelectItem key={r} value={r}>
                             {t(roleI18nKey(r))}
                           </SelectItem>
@@ -211,7 +222,7 @@ export function OrgSettingsMembersPage() {
                       </SelectContent>
                     </Select>
                   )}
-                  {isAdmin && (
+                  {canRemove && (
                     <Button
                       variant="destructive"
                       size="sm"
@@ -247,13 +258,13 @@ export function OrgSettingsMembersPage() {
                   <Badge variant="pending">{t("orgSettings.invited")}</Badge>
                 </div>
                 <div className="border-border mt-3 flex gap-2 border-t pt-3">
-                  {isOwner && (
+                  {isAdmin && (
                     <Select
                       value={inv.role}
                       onValueChange={(v) =>
                         changeInvitationRoleMutation.mutate({
                           params: { path: { orgId: orgId ?? "", invitationId: inv.id } },
-                          body: { role: v as "viewer" | "member" | "admin" },
+                          body: { role: v as AssignableOrgRole },
                         })
                       }
                       disabled={changeInvitationRoleMutation.isPending}
@@ -262,7 +273,7 @@ export function OrgSettingsMembersPage() {
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        {INVITE_ROLES.map((r) => (
+                        {ASSIGNABLE_ORG_ROLES.map((r) => (
                           <SelectItem key={r} value={r}>
                             {t(roleI18nKey(r))}
                           </SelectItem>
