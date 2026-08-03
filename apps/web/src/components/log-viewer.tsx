@@ -329,7 +329,7 @@ export function LogViewer({ entries }: LogViewerProps) {
                           {formatTimestamp(entry.createdAt, i18n.language)}
                         </span>
                       )}
-                      <span className="text-foreground font-medium">{entry.tool}</span>
+                      <span className="text-foreground text-xs font-semibold">{entry.tool}</span>
                       {entry.detail && (
                         <span className="text-muted-foreground truncate text-xs">
                           {entry.detail}
