@@ -57,7 +57,6 @@
   "addSchedule": "Add a schedule",
   "addIntegration": "Add an integration",
   "addSkill": "Add a skill",
-  "addMcpServer": "Add an MCP server",
   "editPrompt": "Edit the instructions",
   "editInput": "Edit the input",
   "editOutput": "Edit the output",
