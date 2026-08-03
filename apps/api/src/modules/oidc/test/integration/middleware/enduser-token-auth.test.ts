@@ -170,6 +170,28 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
     expect(res.status).toBe(200);
   });
 
+  // RFC 9110 §11.4 — the auth-scheme is a case-insensitive token, so the
+  // strategy's fast no-match path must not hinge on the exact bytes
+  // `Bearer `. The JWT itself is case-sensitive and passes through verbatim.
+  it("claims the request when the scheme is lowercase `bearer`", async () => {
+    const token = await mintToken({
+      sub: authUserId,
+      actor_type: "end_user",
+      end_user_id: endUserId,
+      application_id: applicationId,
+      email: "stage3@example.com",
+      name: "Stage Three",
+      scope: "openid runs:read",
+    });
+    const res = await app.request(`/api/runs`, {
+      headers: {
+        Authorization: `bearer ${token}`,
+        "X-Application-Id": applicationId,
+      },
+    });
+    expect(res.status).toBe(200);
+  });
+
   it("rejects Appstrate-User under an OAuth (end-user token) auth method with 400", async () => {
     const token = await mintToken({
       sub: authUserId,

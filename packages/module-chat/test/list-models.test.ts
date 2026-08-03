@@ -41,15 +41,16 @@ describe("listModels", () => {
     expect(await listModels(ORIGIN, {}, fetchReturning({}))).toEqual([]);
   });
 
-  it("requests the metadata-only variant when asked", async () => {
+  it("requests the plain catalog URL — no query variant", async () => {
+    // The retired `?metadata_only=true` variant used to skip the credential
+    // decrypt; the route no longer reads the parameter (a row must be decrypted
+    // to know its liveness), and liveness now rides the listed rows as
+    // `needs_reconnection`. One URL, one shape.
     let seen = "";
     const spy = (async (url: string | URL | Request) => {
       seen = String(url);
       return new Response(JSON.stringify({ object: "list", data: [], hasMore: false }));
     }) as typeof fetch;
-
-    await listModels(ORIGIN, {}, spy, { metadataOnly: true });
-    expect(seen).toBe(`${ORIGIN}/api/models?metadata_only=true`);
 
     await listModels(ORIGIN, {}, spy);
     expect(seen).toBe(`${ORIGIN}/api/models`);

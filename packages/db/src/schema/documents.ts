@@ -84,6 +84,13 @@ export const documents = pgTable(
     size: bigint("size", { mode: "number" }).notNull(),
     /** SHA-256 of the bytes, computed while streaming. Integrity + future dedup. */
     sha256: text("sha256").notNull(),
+    /**
+     * Optional run-page presentation role. `primary` is deliberately a text
+     * literal rather than a PostgreSQL enum: there is one role today, while the
+     * CHECK below keeps both its value and its valid container/purpose shape a
+     * hard database invariant.
+     */
+    presentation: text("presentation").$type<"primary">(),
     /** Retention deadline. NULL = permanent (default). Swept by the GC when < now(). */
     expiresAt: timestamp("expires_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -111,6 +118,12 @@ export const documents = pgTable(
     uniqueIndex("uq_documents_run_output_dedup")
       .on(table.runId, table.sha256, table.name)
       .where(sql`${table.purpose} = 'agent_output'`),
+    // One featured deliverable per run. Normal outputs never enter this small
+    // partial index; switching the primary first clears the previous row inside
+    // the same transaction, so readers can never observe two committed winners.
+    uniqueIndex("uq_documents_run_primary")
+      .on(table.runId)
+      .where(sql`${table.presentation} = 'primary'`),
     // FK-side index for the `end_users` cascade. Postgres indexes the
     // REFERENCED side of a foreign key, never the referencing one, so without
     // this every end-user deletion seq-scans the whole of `documents` while
@@ -160,6 +173,13 @@ export const documents = pgTable(
     check(
       "chk_documents_single_container",
       sql`NOT (${table.runId} IS NOT NULL AND ${table.chatSessionId} IS NOT NULL)`,
+    ),
+    // Presentation is reserved for agent-produced, run-attached outputs.
+    // Detached documents must clear it because there is no longer a run page on
+    // which the document could be featured.
+    check(
+      "chk_documents_presentation",
+      sql`${table.presentation} IS NULL OR (${table.presentation} = 'primary' AND ${table.purpose} = 'agent_output' AND ${table.runId} IS NOT NULL AND ${table.chatSessionId} IS NULL)`,
     ),
   ],
 );

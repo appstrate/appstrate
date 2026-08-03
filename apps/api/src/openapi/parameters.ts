@@ -58,7 +58,12 @@ export const parameters = {
     in: "header" as const,
     required: false,
     description:
-      "Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Cached for 24 hours.",
+      "Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Cached for 24 hours, " +
+      "scoped to the organization and application: a repeat with the same body replays the original response with " +
+      "`Idempotent-Replayed: true`, the same key with a different body is `422 idempotency_conflict`, and a concurrent duplicate " +
+      "is `409 idempotency_in_progress`. This operation honours the header because it declares this parameter — operations that " +
+      "do not declare it refuse the header with `400 idempotency_not_supported` rather than silently ignoring it (see the " +
+      "“Idempotency” section of the API description).",
     schema: { type: "string", maxLength: 255 },
   },
   SseAppId: {
@@ -103,7 +108,10 @@ export const parameters = {
     in: "query" as const,
     required: false,
     description:
-      "When `true`, narrows the list to packages installed and enabled in the current application.",
+      "When `true`, narrows the list to packages installed and enabled in the current " +
+      "application — system packages with no install row drop out. Integrations are the one " +
+      "exception: they are filtered on effective activation, so an environment-provided " +
+      "system integration stays listed even though it has no install row.",
     schema: { type: "string", enum: ["true"] as const },
   },
 } as const;

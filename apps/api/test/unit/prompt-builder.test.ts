@@ -9,6 +9,8 @@ import type {
 } from "../../src/services/run-launcher/types.ts";
 import type { ExecutionContext } from "@appstrate/afps-runtime/types";
 import type { Bundle, BundlePackage, PackageIdentity } from "@appstrate/afps-runtime/bundle";
+import { _resetCacheForTesting } from "@appstrate/env";
+import { defaultTestAgentResources } from "../helpers/run-resources.ts";
 
 interface TestSchemas {
   input?: import("@appstrate/core/form").JSONSchemaObject;
@@ -113,6 +115,7 @@ interface PromptContext {
   availableMcpServers?: ToolMeta[];
   packageDocs?: Array<{ id: string; content: string }>;
   runtimeTools?: string[];
+  resources?: AppstrateRunPlan["resources"];
 }
 
 function splitLegacy(ctx: PromptContext): {
@@ -148,6 +151,7 @@ function splitLegacy(ctx: PromptContext): {
     ...(ctx.runToken !== undefined ? { runToken: ctx.runToken } : {}),
     proxyUrl: ctx.proxyUrl,
     timeout: ctx.timeout ?? 0,
+    resources: ctx.resources ?? defaultTestAgentResources(),
     files: ctx.files,
   };
   return { context, plan };
@@ -179,6 +183,29 @@ function baseContext(overrides?: Partial<PromptContext>): PromptContext {
     },
     ...overrides,
   };
+}
+
+/** Render a prompt under a given backend + tmpfs cap, then restore the env. */
+async function promptWithEnv(
+  adapter: string,
+  tmpfsMb?: string,
+  overrides?: Partial<PromptContext>,
+): Promise<string> {
+  const prevAdapter = process.env.RUN_ADAPTER;
+  const prevTmpfs = process.env.WORKSPACE_TMPFS_SIZE_MB;
+  process.env.RUN_ADAPTER = adapter;
+  if (tmpfsMb === undefined) delete process.env.WORKSPACE_TMPFS_SIZE_MB;
+  else process.env.WORKSPACE_TMPFS_SIZE_MB = tmpfsMb;
+  _resetCacheForTesting();
+  try {
+    return await buildEnrichedPrompt(baseContext(overrides));
+  } finally {
+    if (prevAdapter === undefined) delete process.env.RUN_ADAPTER;
+    else process.env.RUN_ADAPTER = prevAdapter;
+    if (prevTmpfs === undefined) delete process.env.WORKSPACE_TMPFS_SIZE_MB;
+    else process.env.WORKSPACE_TMPFS_SIZE_MB = prevTmpfs;
+    _resetCacheForTesting();
+  }
 }
 
 /** Context with all system tools available (mimics backward compat behavior). */
@@ -226,6 +253,115 @@ describe("buildEnrichedPrompt — core structure", () => {
     const ctx = baseContext({ timeout: undefined });
     const prompt = await buildEnrichedPrompt(ctx);
     expect(prompt).not.toContain("**Timeout**");
+  });
+});
+
+// ─── Workspace disk cap (issue #1019) ──────────────────────
+
+describe("buildEnrichedPrompt — workspace disk cap", () => {
+  it("states the cap and points bulky work at /tmp on the docker backend", async () => {
+    // The docker backend mounts the workspace as tmpfs, so an agent that
+    // installs dependencies into it dies with ENOSPC unless the prompt says so.
+    const prompt = await promptWithEnv("docker");
+    expect(prompt).toContain("**Disk**: the workspace is a RAM-backed tmpfs capped at 512 MB");
+    expect(prompt).toContain("`/tmp`");
+  });
+
+  it("interpolates the operator's WORKSPACE_TMPFS_SIZE_MB, not a hardcoded default", async () => {
+    const prompt = await promptWithEnv("docker", "2048");
+    expect(prompt).toContain("capped at 2048 MB");
+    expect(prompt).not.toContain("512 MB");
+  });
+
+  it("stays silent when the docker workspace cap does not apply", async () => {
+    // WORKSPACE_TMPFS_SIZE_MB=0 disables the tmpfs even under docker, while
+    // process and undeclared backends have no core-owned tmpfs contract. A
+    // module id alone is never enough: the plan must carry the capability.
+    expect(await promptWithEnv("docker", "0")).not.toContain("**Disk**");
+    expect(await promptWithEnv("process")).not.toContain("**Disk**");
+    expect(await promptWithEnv("module-backend")).not.toContain("**Disk**");
+    expect(await promptWithEnv("firecracker")).not.toContain("**Disk**");
+  });
+
+  it("states a backend-declared writable-root budget without suggesting /tmp as an escape", async () => {
+    const prompt = await promptWithEnv("module-backend", undefined, {
+      resources: {
+        ...defaultTestAgentResources(),
+        semantics: "sizing",
+        writableRootTmpfsPercent: 50,
+      },
+    });
+    const diskLine = prompt.split("\n").find((line) => line.startsWith("- **Disk**"));
+    expect(diskLine).toBe(
+      "- **Disk**: the writable root, including the workspace, is a RAM-backed tmpfs capped at 50% of guest RAM. " +
+        "All writes consume guest RAM shared with the agent, system, and sidecar. " +
+        "Keep installations, clones, and verification artifacts lean; " +
+        "write user deliverables under `./outputs/`.",
+    );
+    expect(diskLine).not.toContain("/tmp");
+  });
+});
+
+// ─── Effective agent resources ─────────────────────────────
+
+describe("buildEnrichedPrompt — effective agent resources", () => {
+  it("interpolates effective hard limits, never requested or default values", async () => {
+    const prompt = await buildEnrichedPrompt(
+      baseContext({
+        resources: {
+          requested: { memoryMb: 8192, cpu: 8 },
+          effective: { memoryMb: 2048, cpu: 3 },
+          memoryCapped: true,
+          cpuCapped: true,
+          semantics: "limits",
+          workload: { memoryBytes: 2_147_483_648, nanoCpus: 3_000_000_000 },
+        },
+      }),
+    );
+
+    expect(prompt).toContain("hard container limits: 2048 MiB RAM and 3 vCPU quota");
+    expect(prompt).not.toContain("8192 MiB");
+    expect(prompt).not.toContain("8 vCPU");
+    expect(prompt).not.toContain("1536 MiB");
+  });
+
+  it("interpolates the effective microVM sizing budget", async () => {
+    const prompt = await promptWithEnv("module-backend", undefined, {
+      resources: {
+        requested: { memoryMb: 8192, cpu: 8 },
+        effective: { memoryMb: 4096, cpu: 7 },
+        memoryCapped: true,
+        cpuCapped: true,
+        semantics: "sizing",
+        writableRootTmpfsPercent: 50,
+        workload: { memoryBytes: 4_294_967_296, nanoCpus: 7_000_000_000 },
+      },
+    });
+
+    expect(prompt).toContain("agent sizing budget: 4096 MiB RAM and 7 vCPU");
+    expect(prompt).toContain("capped at 50% of guest RAM");
+    expect(prompt).not.toContain("hard container limits");
+    expect(prompt).not.toContain("workspace counts toward this container RAM limit");
+    expect(prompt).not.toContain("8192 MiB");
+    expect(prompt).not.toContain("8 vCPU");
+  });
+
+  it("stays silent when the resolved plan has no resource semantics", async () => {
+    const prompt = await buildEnrichedPrompt(
+      baseContext({
+        resources: {
+          requested: { memoryMb: 3072, cpu: 5 },
+          effective: { memoryMb: 3072, cpu: 5 },
+          memoryCapped: false,
+          cpuCapped: false,
+          workload: { memoryBytes: 3_221_225_472, nanoCpus: 5_000_000_000 },
+        },
+      }),
+    );
+
+    expect(prompt).not.toContain("**Compute**");
+    expect(prompt).not.toContain("3072 MiB");
+    expect(prompt).not.toContain("5 vCPU");
   });
 });
 

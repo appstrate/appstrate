@@ -18,8 +18,17 @@ import { resolveProxy } from "./org-proxies.ts";
 import { resolveModel } from "./org-models.ts";
 import { extractManifestSchemas } from "../lib/manifest-utils.ts";
 import { resolveIntegrationSpawns } from "./integration-spawn-resolver.ts";
+import {
+  DEFAULT_RUN_TIMEOUT_SECONDS,
+  getPlatformRunLimits,
+  resolveAgentResources,
+} from "./run-limits.ts";
 import type { IntegrationManifestCache } from "./integration-service.ts";
 import type { ResolvedConnectionMap } from "@appstrate/core/integration";
+import type { ModelCost } from "@appstrate/core/module";
+import { getAgentResourceHints } from "@appstrate/core/validation";
+import { getExecutionMode } from "../infra/mode.ts";
+import { orchestratorAgentResources } from "./orchestrator/registry.ts";
 
 export class ModelNotConfiguredError extends Error {
   constructor() {
@@ -113,6 +122,7 @@ export async function buildRunContext(params: {
   proxyLabel: string | null;
   modelLabel: string | null;
   modelSource: string | null;
+  modelCost: ModelCost | null;
 }> {
   const { runId, agent, orgId, applicationId, actor, input, files } = params;
 
@@ -193,6 +203,14 @@ export async function buildRunContext(params: {
   const proxyLabel = proxyResult?.label ?? null;
   const modelLabel = modelResult.label;
   const modelSource = modelResult.isSystemModel ? "system" : "org";
+  // The rates the run LAUNCHES with — the same object `buildRuntimePiEnv`
+  // serialises into `MODEL_COST`. Persisted on `runs.model_cost` so the runner's
+  // ledger row can be classified server-side: the container reports the cost, so
+  // only a platform-side snapshot can say whether that number was backed by real
+  // rates. `null` when the model resolved to none (catalog miss + no
+  // `org_models.cost` override) — which is exactly the run whose `$0.00` would
+  // otherwise read as "free".
+  const modelCost = modelResult.cost ?? null;
 
   // Step 3: resolve the persisted version display fields.
   let versionLabel: string | null = params.overrideVersionLabel ?? null;
@@ -238,6 +256,12 @@ export async function buildRunContext(params: {
   const runtimeTools = Array.isArray(manifestRuntimeTools)
     ? manifestRuntimeTools.filter((t): t is string => typeof t === "string")
     : undefined;
+  const resourceHints = getAgentResourceHints(agent.manifest);
+  const resources = resolveAgentResources(
+    resourceHints,
+    getPlatformRunLimits(),
+    orchestratorAgentResources(getExecutionMode()),
+  );
 
   const plan: AppstrateRunPlan = {
     bundle,
@@ -247,7 +271,10 @@ export async function buildRunContext(params: {
     llmConfig: modelResult,
     runToken: signRunToken(runId),
     proxyUrl,
-    timeout: (agent.manifest.timeout as number | undefined) ?? 300,
+    // The manifest reaching here is already ceiling-clamped by
+    // `runPreflightGates`; only the no-declaration default is left to apply.
+    timeout: (agent.manifest.timeout as number | undefined) ?? DEFAULT_RUN_TIMEOUT_SECONDS,
+    resources,
     files,
     ...(integrationSpawns.length > 0 ? { integrations: integrationSpawns } : {}),
   };
@@ -261,5 +288,6 @@ export async function buildRunContext(params: {
     proxyLabel,
     modelLabel,
     modelSource,
+    modelCost,
   };
 }

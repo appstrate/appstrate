@@ -22,6 +22,102 @@ export interface Dependencies {
   integrations?: Record<string, string>;
 }
 
+// ─────────────────────────────────────────────
+// Retired dependency vocabulary (AFPS 1.x → 2.0)
+// ─────────────────────────────────────────────
+
+/**
+ * The `dependencies` map keys AFPS 1.x defined and AFPS 2.0 retired, each
+ * mapped to the key that replaced it.
+ *
+ * A table rather than a chain of per-key `if`s so the two directions that
+ * consume it — the author-input rejection ({@link findRetiredDependencyKeys},
+ * folded into `validateManifest`) and the install-time warning (API layer) —
+ * can never enumerate a different set, and so adding a future retirement is
+ * one line here.
+ *
+ * These keys are NOT closed out by the schema, and deliberately so: AFPS
+ * mandates extensibility for objects it does not explicitly close (§10), so
+ * `dependencies` stays a loose object and `dependencies._meta` remains legal.
+ * The rejection below is a POLICY on author input, not a shape constraint —
+ * which is what lets already-published manifests carrying a retired key keep
+ * validating (and therefore keep running) forever. See
+ * {@link import("./validation.ts").RetiredRuntimeToolsPolicy}.
+ */
+const RETIRED_DEPENDENCY_KEYS = {
+  tools: "mcp_servers",
+  providers: "integrations",
+} as const satisfies Record<string, keyof Dependencies>;
+
+/** A `dependencies` map key retired by AFPS 2.0. */
+export type RetiredDependencyKey = keyof typeof RETIRED_DEPENDENCY_KEYS;
+
+/** One retired `dependencies` key found on a manifest, with its replacement. */
+export interface RetiredDependencyKeyUse {
+  /** The retired key as it appears in the manifest (e.g. `"tools"`). */
+  key: RetiredDependencyKey;
+  /** The AFPS 2.0 key that replaced it (e.g. `"mcp_servers"`). */
+  replacement: keyof Dependencies;
+}
+
+/**
+ * List the retired AFPS 1.x `dependencies` keys a manifest declares.
+ *
+ * Type-agnostic: every package type may carry `dependencies`, and the retired
+ * spelling is equally inert on all of them ({@link RETIRED_DEPENDENCY_KEYS}).
+ *
+ * Pure and non-mutating: returns what was found, decides nothing. Callers
+ * apply the direction-dependent policy — reject on author input, warn (never
+ * rewrite) on already-persisted manifests.
+ */
+export function findRetiredDependencyKeys(manifest: unknown): RetiredDependencyKeyUse[] {
+  if (typeof manifest !== "object" || manifest === null) return [];
+  const deps = (manifest as { dependencies?: unknown }).dependencies;
+  if (typeof deps !== "object" || deps === null || Array.isArray(deps)) return [];
+
+  const found: RetiredDependencyKeyUse[] = [];
+  for (const [key, replacement] of Object.entries(RETIRED_DEPENDENCY_KEYS)) {
+    // `hasOwnProperty.call`, not `Object.hasOwn` — core is compiled against
+    // the web app's older `lib` target too. Own-property only: an inherited
+    // key was not authored.
+    if (Object.prototype.hasOwnProperty.call(deps, key)) {
+      found.push({ key: key as RetiredDependencyKey, replacement });
+    }
+  }
+  return found;
+}
+
+/**
+ * Strip the retired AFPS 1.x `dependencies` keys from an EDITABLE manifest.
+ *
+ * The mirror image of `dropRetiredRuntimeTools` in `validation.ts`, and used
+ * for the same reason: an agent whose draft carries a retired key (imported
+ * from a bundle assembled out of a legacy published version, say) would
+ * otherwise round-trip it forever, and the first save through the author path
+ * — where the key is rejected — would fail on a field the editor cannot even
+ * display. Normalising on LOAD makes the key disappear on the next save
+ * instead, while typing one into a raw-JSON tab still surfaces the rejection.
+ * Nothing is lost — the key is inert ({@link RETIRED_DEPENDENCY_KEYS}).
+ *
+ * Purely structural: no Zod round-trip, surviving keys keep their order, and
+ * the input is returned by the SAME reference when there is nothing to drop.
+ * An emptied `dependencies` is left as `{}` rather than deleted — `{}` is the
+ * shape the editor itself mints for a fresh agent, so both writers agree.
+ *
+ * NOT wired into any stored/published path — there the key is tolerated and
+ * surfaced as an install warning instead.
+ */
+export function dropRetiredDependencyKeys(
+  manifest: Record<string, unknown>,
+): Record<string, unknown> {
+  const found = findRetiredDependencyKeys(manifest);
+  if (found.length === 0) return manifest;
+
+  const deps = { ...(manifest.dependencies as Record<string, unknown>) };
+  for (const { key } of found) delete deps[key];
+  return { ...manifest, dependencies: deps };
+}
+
 /**
  * Wildcard literal for {@link IntegrationConfiguration.tools} / {@link
  * ManifestIntegrationEntry.tools} (AFPS §4.4). When set, the agent forgoes
@@ -124,11 +220,17 @@ export function extractDependencies(manifest: Record<string, unknown>): DepEntry
  * version range from `dependencies.integrations[id]` (§4.1) merged with the
  * tool/scope/auth selection from `integrations_configuration[id]` (§4.4).
  *
- * `tools === undefined` means the agent declared the dep but didn't
- * pick any tool — the runtime treats this as "0 tools used, integration
- * effectively inert". An explicit empty array carries the same meaning;
- * the distinction is preserved only so editor round-trips don't promote
- * `undefined` to `[]` on every save.
+ * `tools === undefined` and `tools === []` are DIFFERENT selections, and the
+ * difference is load-bearing — do not collapse them. `undefined` means the
+ * agent expressed no preference and inherits the integration's declared
+ * `default_tools` (§4.4, resolved by `resolveEffectiveToolSelection` in
+ * `./integration.ts`); `[]` is an explicit override that selects nothing.
+ *
+ * Neither is a shippable end state when it RESOLVES to nothing: an integration
+ * declared with an empty effective selection exposes no callable tool, which
+ * publish/import refuse (`no_tools_selected`) and the sidecar boot gate turns
+ * into a failed run. The way out is to select a tool or to drop the
+ * `dependencies.integrations` entry.
  */
 export interface ManifestIntegrationEntry {
   id: string;

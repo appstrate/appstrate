@@ -20,7 +20,6 @@ import { describe, expect, it } from "bun:test";
 import {
   RUN_RESULT_INLINE_MAX_BYTES,
   runAndWaitStepsWithDocuments,
-  runResultExceedsInlineLimit,
   truncateRunAndWaitPayload,
   type RunAndWaitDocument,
 } from "../src/run-and-wait-client.ts";
@@ -41,29 +40,6 @@ const reportDocument: RunAndWaitDocument = {
   mime: "text/html",
   size: 22_846,
 };
-
-describe("run result inline limit", () => {
-  it("measures the serialized result and only fires on a strict overrun", () => {
-    expect(runResultExceedsInlineLimit(resultOfExactlyBytes(RUN_RESULT_INLINE_MAX_BYTES))).toBe(
-      false,
-    );
-    expect(runResultExceedsInlineLimit(resultOfExactlyBytes(RUN_RESULT_INLINE_MAX_BYTES + 1))).toBe(
-      true,
-    );
-  });
-
-  it("does not fire on the sizes that produced the audited incident (9–11.6 KB)", () => {
-    expect(runResultExceedsInlineLimit(resultOfExactlyBytes(9_057))).toBe(false);
-    expect(runResultExceedsInlineLimit(resultOfExactlyBytes(11_583))).toBe(false);
-  });
-
-  it("reports false for an unserializable result rather than throwing", () => {
-    const cyclic: Record<string, unknown> = {};
-    cyclic.self = cyclic;
-    expect(runResultExceedsInlineLimit(cyclic)).toBe(false);
-    expect(runResultExceedsInlineLimit(undefined)).toBe(false);
-  });
-});
 
 describe("truncateRunAndWaitPayload", () => {
   const base = { id: "run_1", packageId: "@acme/writer", status: "success", done: true };
@@ -114,6 +90,20 @@ describe("truncateRunAndWaitPayload", () => {
     expect(String(out.message)).toContain("getRun");
   });
 
+  it("leaves the sizes that produced the audited incident alone (9–11.6 KB)", () => {
+    for (const size of [9_057, 11_583]) {
+      const payload = { ...base, result: resultOfExactlyBytes(size) };
+      expect(truncateRunAndWaitPayload(payload)).toBe(payload);
+    }
+  });
+
+  it("passes an unserializable result through rather than throwing", () => {
+    const cyclic: Record<string, unknown> = {};
+    cyclic.self = cyclic;
+    const payload = { ...base, result: cyclic };
+    expect(truncateRunAndWaitPayload(payload)).toBe(payload);
+  });
+
   it("leaves a resultless payload alone", () => {
     const payload = { ...base };
     expect(truncateRunAndWaitPayload(payload)).toBe(payload);
@@ -134,7 +124,10 @@ describe("run_and_wait terminal step", () => {
         });
       if (url.endsWith("/run")) return json({ id: "run_1", status: "pending" });
       if (url.includes("/api/documents")) {
-        return json({ object: "list", data: documents, hasMore: false });
+        // The list route reports each row's own container; `fetchRunDocuments`
+        // keeps only the ones this run produced.
+        const data = documents.map((doc) => ({ ...doc, run_id: "run_1" }));
+        return json({ object: "list", data, hasMore: false });
       }
       return json({ id: "run_1", packageId: "@acme/writer", status: "success", result: bigResult });
     }) as unknown as typeof fetch;

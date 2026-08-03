@@ -784,10 +784,17 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
       'inline run (`kind:"inline"`) you MUST therefore (1) declare `"runtime_tools": ["log"]` in ' +
       "the manifest AND (2) instruct the run, in its `prompt`, to call the `log` " +
       "tool to report each meaningful step — otherwise the in-chat run progress component stays empty. " +
+      "For every inline run, set `manifest.display_name` to a concise, task-specific human " +
+      "title in the user's language and `manifest.name` to a matching descriptive " +
+      "`@inline/<kebab-case-slug>`; never use an id or a generic label such as `one-shot`. " +
       "File deliverables: every file the run writes under its workspace `outputs/` directory is " +
       "published as a document when the run ends and returned here as a `resource_link` — when the " +
       "goal is a downloadable file (report, CSV, image…), instruct the run's `prompt` to write it " +
-      "into `outputs/`; content merely returned in the output payload never becomes a document. " +
+      "into `outputs/` with a descriptive, task-specific filename that remains understandable " +
+      "outside this run; never use context-free names such as `report.md`, `summary.md`, or " +
+      "`output.md`. For inline runs, run_and_wait automatically exposes `publish_document`; that " +
+      "tool's own description defines when and how the run should select a primary deliverable. " +
+      "Content merely returned in the output payload never becomes a document. " +
       "Chaining runs (kind:inline): feed earlier runs' deliverables to a later one by passing " +
       "their `document://` URIs in `context_documents` — never by copying their content into " +
       "`prompt`. " +
@@ -829,7 +836,11 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
         manifest: {
           type: "object",
           description:
-            'Inline agent manifest to run (kind:inline). Include `"runtime_tools": ["log"]` so the ' +
+            "Inline agent manifest to run (kind:inline). REQUIRED naming: set `display_name` to " +
+            "a concise human title in the user's language describing this run's exact action or " +
+            "outcome, and set `name` to a matching descriptive `@inline/<kebab-case-slug>`. " +
+            "Never use an id or a generic label such as `one-shot`, `inline-agent`, or `task`. " +
+            'Include `"log"` in `runtime_tools` so the ' +
             "run can emit progress lines the chat shows live (the panel surfaces only `log`-tool " +
             "output). Do NOT put the prompt inside the manifest — it goes in the separate " +
             "top-level `prompt` argument.",
@@ -840,12 +851,28 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
           description:
             "REQUIRED for kind:inline. The inline run's system prompt, as a top-level argument " +
             "alongside `manifest` (never nested inside it). Tell the run to call the `log` tool " +
-            "to report each meaningful step — those lines are what the chat shows live.",
+            "to report each meaningful step — those lines are what the chat shows live. When the " +
+            "run produces files, require descriptive, task-specific names that remain clear " +
+            "outside this run; never generic names such as `report.md`, `summary.md`, or `output.md`.",
         },
         config: {
           type: "object",
           description: "Per-run config override (either kind).",
           additionalProperties: true,
+        },
+        connection_overrides: {
+          type: "object",
+          additionalProperties: { type: "string" },
+          description:
+            'Which connection to use per integration (either kind): `{ "@scope/integration": ' +
+            '"<connection_id>" }`, exactly one connection id per integration. This is the retry ' +
+            "path for a `412 must_choose_connection` launch error — that error lists the " +
+            "ambiguous integration and its `candidate_connection_ids`; pick one id from that " +
+            "list and retry the SAME call with it here. Each key is the integration id itself " +
+            "(`@scope/integration`) — NOT the `integrations.<id>` field path the error reports " +
+            "it under, which matches no integration and is ignored. TOP-LEVEL argument, " +
+            "alongside `manifest`/`config` — pass the object itself; JSON-encoding it is " +
+            "refused before the launch.",
         },
         context_documents: {
           type: "array",

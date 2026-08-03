@@ -15,7 +15,7 @@
  * asserted here is the orchestrator's contract, not VMM behavior.
  */
 
-import { describe, it, expect, afterEach } from "bun:test";
+import { describe, it, expect, afterEach, spyOn } from "bun:test";
 import { mkdtemp, mkdir, rm, writeFile, chmod } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -417,6 +417,51 @@ describe("cleanupOrphans positive kill path", () => {
 });
 
 describe("bounded VMM reap after SIGKILL (D-state guard)", () => {
+  it("clears losing graceful and reap timers after a prompt VMM exit", async () => {
+    const { exec } = fakeExec();
+    const orch = readyOrchestrator(exec);
+    await orch.createIsolationBoundary("run_prompt_exit");
+    const vm = getVm(orch, "run_prompt_exit");
+    const proc = Bun.spawn(["sh", "-c", "exit 0"]);
+    spawned.push(proc);
+    await proc.exited;
+    vm.proc = proc;
+
+    const reapTimeoutMs = 17;
+    const graceTimeoutMs = 23;
+    Reflect.set(orch, "vmmReapTimeoutMs", reapTimeoutMs);
+    const killVm = Reflect.get(orch, "killVm") as (
+      v: unknown,
+      graceSeconds: number,
+    ) => Promise<boolean>;
+
+    const realClearTimeout = globalThis.clearTimeout.bind(globalThis);
+    const setTimeoutSpy = spyOn(globalThis, "setTimeout");
+    const clearTimeoutSpy = spyOn(globalThis, "clearTimeout");
+    try {
+      // Already-exited proc: both timeout promises lose their race. They
+      // must still be reclaimed or Bun keeps the process alive until the
+      // last timeout expires (10 seconds in production).
+      expect(await killVm.call(orch, vm, graceTimeoutMs / 1000)).toBe(true);
+      expect(await killVm.call(orch, vm, 0)).toBe(true);
+
+      for (const timeoutMs of [graceTimeoutMs, reapTimeoutMs]) {
+        const callIndex = setTimeoutSpy.mock.calls.findIndex(([, delay]) => delay === timeoutMs);
+        expect(callIndex).toBeGreaterThanOrEqual(0);
+        const timer = setTimeoutSpy.mock.results[callIndex]?.value;
+        expect(clearTimeoutSpy.mock.calls.some(([cleared]) => cleared === timer)).toBe(true);
+      }
+    } finally {
+      for (const result of setTimeoutSpy.mock.results) {
+        if (result.type === "return") {
+          realClearTimeout(result.value as ReturnType<typeof setTimeout>);
+        }
+      }
+      clearTimeoutSpy.mockRestore();
+      setTimeoutSpy.mockRestore();
+    }
+  });
+
   it("stopByRunId returns even when the VMM never reaps", async () => {
     const { exec } = fakeExec();
     const orch = readyOrchestrator(exec);

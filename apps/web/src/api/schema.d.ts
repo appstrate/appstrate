@@ -228,7 +228,7 @@ export interface paths {
         };
         /**
          * Export an agent as an .afps-bundle
-         * @description Streams a canonical multi-package .afps-bundle archive containing the agent and all its transitive dependencies. The archive is deterministic (byte-identical across calls with the same inputs) and carries per-file RECORD hashes plus a bundle-level SRI digest (also echoed in the `X-Bundle-Integrity` response header). Two modes: `?source=published` (default) exports the version installed for this application (falls back to the `latest` dist-tag, or pass `?version=` to pin); `?source=draft` bundles the agent's current draft state — used by the CLI's run-by-id flow to mirror the dashboard Run button on never-published agents. `?source=draft` cannot be combined with `?version=`.
+         * @description Streams a canonical multi-package .afps-bundle archive containing the agent and all its transitive dependencies. The archive is deterministic (byte-identical across calls with the same inputs) and carries per-file RECORD hashes plus a bundle-level SRI digest (also echoed in the `X-Bundle-Integrity` response header). Two modes: `?source=published` (default) exports the version installed for this application (falls back to the `latest` dist-tag, or pass `?version=` to pin); `?source=draft` bundles the agent's current draft state — used by the CLI's run-by-id flow to mirror the dashboard Run button on never-published agents. `?source=draft` cannot be combined with `?version=`. Assembly reads the same stored artifacts a run does, so it reports the same coded bundle failures — see the 422 and 500 responses.
          */
         get: operations["exportAgentBundle"];
         put?: never;
@@ -1306,7 +1306,7 @@ export interface paths {
         };
         /**
          * List documents
-         * @description List the documents visible to the caller in the current application. Requires the `documents:read` permission (the family gate — mirrors `runs:read`); on top of it, each row is filtered by its own container ACL, so members see their own documents (and system-owned ones) and end-users see only their own. Filter by `purpose`, `run_id`, `packageId`, or `chat_session_id`; paginate with `startingAfter` + `limit`.
+         * @description List the documents visible to the caller in the current application. Requires the `documents:read` permission (the family gate — mirrors `runs:read`); on top of it, each row is filtered by its own container ACL, so members see their own documents (and system-owned ones) and end-users see only their own. Filter by `purpose`, `run_id`, `packageId`, `chat_session_id`, or a chat session's complete context; paginate with `startingAfter` + `limit`.
          */
         get: operations["listDocuments"];
         put?: never;
@@ -2184,7 +2184,7 @@ export interface paths {
         put?: never;
         /**
          * Discover the models this credential serves
-         * @description Discovers the models a credential serves and persists them as `available_model_ids`. For `probe`-validation (API-key) providers this is empirical: each discovery candidate is probed against the live credential (1-token inference requests on the account's own quota) and the ids that answered are persisted. For `offline`-validation providers (subscription: codex, claude-code) NO upstream call is made — the provider's static candidate set (intersected with the catalog) is persisted instead; real per-model availability is validated at the first run on the Pi engine. Synchronous; rate limited to 6 requests per minute. An auth failure or an all-failure round leaves the previously persisted list untouched.
+         * @description Discovers the models a credential serves. For `probe`-validation (API-key) providers this is empirical: each discovery candidate is probed against the live credential (1-token inference requests on the account's own quota) and the ids that answered are persisted as `available_model_ids`. For `offline`-validation providers (subscription: codex, claude-code) this is a no-op that reports the current list: NO upstream call is made and NOTHING is persisted, because their served set is derived from the provider definition and the pricing catalog on every read — `probed_count` is 0 and the response carries the freshly derived list. Real per-model availability is validated at the first run on the Pi engine. Synchronous; rate limited to 6 requests per minute. On the probe path an auth failure or an all-failure round leaves the previously persisted list untouched.
          */
         post: operations["refreshModelProviderCredentialModels"];
         delete?: never;
@@ -2860,7 +2860,7 @@ export interface paths {
         };
         /**
          * List agent packages
-         * @description List all agent packages (system + org) in the organization.
+         * @description List the agent packages available to the current application (`X-Application-Id`): system packages, plus organization packages installed in this application. Organization packages that exist but are not installed here are NOT returned — for the organization-wide catalogue with per-application install state, use `GET /api/library`.
          */
         get: operations["listAgentPackages"];
         put?: never;
@@ -3088,7 +3088,7 @@ export interface paths {
         };
         /**
          * List integration packages
-         * @description List all integration packages (system + org) in the organization.
+         * @description List the integration packages available to the current application (`X-Application-Id`): system packages, plus organization packages installed in this application. Organization packages that exist but are not installed here are NOT returned — for the organization-wide catalogue with per-application install state, use `GET /api/library`.
          */
         get: operations["listIntegrationPackages"];
         put?: never;
@@ -3256,7 +3256,7 @@ export interface paths {
         };
         /**
          * List MCP-server packages
-         * @description List all MCP-server packages (system + org) in the organization.
+         * @description List the MCP-server packages available to the current application (`X-Application-Id`): system packages, plus organization packages installed in this application. Organization packages that exist but are not installed here are NOT returned — for the organization-wide catalogue with per-application install state, use `GET /api/library`.
          */
         get: operations["listMcpServerPackages"];
         put?: never;
@@ -3424,7 +3424,7 @@ export interface paths {
         };
         /**
          * List skills
-         * @description List all skills (system + org) in the organization.
+         * @description List the skills available to the current application (`X-Application-Id`): system packages, plus organization packages installed in this application. Organization packages that exist but are not installed here are NOT returned — for the organization-wide catalogue with per-application install state, use `GET /api/library`.
          */
         get: operations["listSkills"];
         put?: never;
@@ -3864,7 +3864,7 @@ export interface paths {
         };
         /**
          * List runs across the application (global view)
-         * @description Org + application scoped paginated list. Supports filtering by `user=me` (self-owned, also implicit for end-user impersonation), `kind` (all, package, inline), `status`, and a date range. Inline runs surface via `package_ephemeral: true` on each row. Note: `kind`, `status`, and date filters are ignored when `user=me` (self-view uses a simpler path).
+         * @description Org + application scoped paginated list. Supports filtering by `user=me` (self-owned, also implicit for end-user impersonation), `kind` (all, package, inline), `status`, a date range, and the chat session that launched the run. Inline runs surface via `package_ephemeral: true` on each row. Note: global filters are ignored when `user=me` (self-view uses a simpler path).
          */
         get: operations["listRuns"];
         put?: never;
@@ -4016,7 +4016,7 @@ export interface paths {
         put?: never;
         /**
          * Publish an agent-produced document (HMAC, streaming)
-         * @description Posted by the agent runtime — via the `publish_document` runtime tool or the end-of-run `outputs/` sweep — to store a file the agent produced as a durable `agent_output` document attached to the run. The raw file bytes are the request body (streamed straight to storage, up to `DOCUMENT_MAX_FILE_BYTES`, 100 MiB by default); metadata is carried in the `X-Document-Name` and `Content-Type` headers. Same Standard Webhooks HMAC auth as the other run routes, verified over an EMPTY body (the bytes stream unbuffered; integrity is the returned sha256). Enforced synchronously: the per-file cap and per-run output budget cut the stream mid-flight (413, deleting any partial object); the org storage quota returns 403. Idempotent for sweep retries: an identical (run, sha256, name) upload returns the existing document with 200 instead of storing it twice. Requires the run to be `running` (409 `run_not_running` otherwise). Each `webhook-id` is single-use: because the signature covers an empty body, replaying a captured header set with different bytes is refused with 409 `message_replayed` (the runtime signs a fresh id per attempt, so retries are unaffected).
+         * @description Posted by the agent runtime — via the `publish_document` runtime tool or the end-of-run `outputs/` sweep — to store a file the agent produced as a durable `agent_output` document attached to the run. The raw file bytes are the request body (streamed straight to storage, up to `DOCUMENT_MAX_FILE_BYTES`, 100 MiB by default); metadata is carried in the `X-Document-Name`, optional `X-Document-Presentation`, and `Content-Type` headers. `X-Document-Presentation: primary` atomically makes this the run's featured deliverable; the last successful primary publication wins, while an ordinary publication never changes the selection. Same Standard Webhooks HMAC auth as the other run routes, verified over an EMPTY body (the bytes stream unbuffered; integrity is the returned sha256). Enforced synchronously: the per-file cap and per-run output budget cut the stream mid-flight (413, deleting any partial object); the org storage quota returns 403. Idempotent for sweep retries: an identical (run, sha256, name) upload returns the existing document with 200 instead of storing it twice, and can still promote that existing document. Requires the run to be `running` (409 `run_not_running` otherwise). Each `webhook-id` is single-use: because the signature covers an empty body, replaying a captured header set with different bytes is refused with 409 `message_replayed` (the runtime signs a fresh id per attempt, so retries are unaffected).
          */
         post: operations["publishRunDocument"];
         delete?: never;
@@ -4681,6 +4681,8 @@ export interface components {
             forked_from: string | null;
             /** @description Whether the active version has changes not yet archived as a version */
             has_unarchived_changes?: boolean;
+            /** @description Run timeout that will actually be enforced, in seconds: the manifest's `timeout` (or the platform default when it declares none) clamped to this deployment's `PLATFORM_RUN_LIMITS.timeout_ceiling_seconds`. Compare with `manifest.timeout` to detect a capped declaration. Emitted for system agents too, which do not expose `manifest`. */
+            effective_timeout_seconds: number;
         };
         AgentListItem: {
             id: string;
@@ -5183,7 +5185,7 @@ export interface components {
             providerId?: string | null;
             oauth_email?: string | null;
             needs_reconnection?: boolean;
-            /** @description Model ids this credential is authorized to seed, persisted by model discovery (POST /:id/refresh-models, also fired after OAuth import) — the server-side authorization record gating model seeding. For `probe`-validation (API-key) providers these are empirically verified against the live credential; for `offline`-validation providers (subscription: codex, claude-code) these are the provider's static candidate set (∩ catalog), persisted with zero upstream calls. Null = discovery never ran. Per-credential because availability depends on the account's plan. */
+            /** @description Model ids this credential is authorized to seed — the server-side authorization record gating model seeding. For `probe`-validation (API-key) providers these are empirically verified against the live credential and persisted by model discovery (POST /:id/refresh-models); empty when discovery never ran, and per-credential because availability depends on the account's plan. For `offline`-validation providers (subscription: codex, claude-code) nothing is ever persisted: the list is derived on every read from the provider definition and the pricing catalog, so a catalog refresh carries a new model generation through without any write. */
             available_model_ids?: string[] | null;
             created_by: string | null;
             /** Format: date-time */
@@ -5295,6 +5297,8 @@ export interface components {
             reasoning?: boolean | null;
             enabled: boolean;
             is_default: boolean;
+            /** @description True when the model's stored credential can no longer be used for inference — an OAuth credential flagged as needing reconnection, or (either auth mode) a stored secret that no longer decrypts. The model is listed so it can be inspected, detached or deleted, but it is not usable for inference and cannot be made the organization default. Always false for built-in models, which read their key from the environment. */
+            needs_reconnection: boolean;
             /** @description Managed-model flag. When true, the binding (`modelId`, `apiShape`, `baseUrl`, `credentialId`, capabilities/cost) is not exposed in this projection — these fields are `null`; render a managed badge. */
             aliased: boolean;
             /** @description Display-icon key for the UI (a client provider-icon key, e.g. `anthropic`, `openai`). A deliberate public choice on the model — decoupled from the provider, so a managed model can show an icon without exposing its binding. `null` means resolve the icon from the (visible) `apiShape`/`baseUrl`, or fall back to a generic icon. */
@@ -5391,7 +5395,7 @@ export interface components {
         };
         /** @description Organization settings (extensible) */
         OrgSettings: {
-            /** @description Pinned API version for this organization (format: YYYY-MM-DD). Automatically set to the current version at org creation. New API versions do not affect existing orgs until explicitly updated. */
+            /** @description Pinned API version for this organization (format: YYYY-MM-DD). Automatically set to the current version at org creation. New API versions do not affect existing orgs until explicitly updated. On write, a version the server cannot serve is rejected with `400 unsupported_api_version` — an unserveable pin would make every org-scoped route fail for this organization. */
             api_version?: string;
             /** @description When true, org-level (dashboard) OAuth clients can be created and the SSO tab is exposed in the org settings UI. Defaults to false — most orgs only need application-level SSO for their end-users. */
             dashboard_sso_enabled?: boolean;
@@ -5499,7 +5503,7 @@ export interface components {
                 output?: unknown;
                 /**
                  * @deprecated
-                 * @description HISTORICAL ONLY. Markdown left by the removed `report` runtime tool. The platform no longer writes this field — it is served verbatim on runs finalized before the removal. Agent reports are markdown documents now (`outputs/report.md`).
+                 * @description HISTORICAL ONLY. Markdown left by the removed `report` runtime tool. The platform no longer writes this field — it is served verbatim on runs finalized before the removal. Agent reports are descriptively named markdown documents now (`outputs/<task-specific-name>.md`).
                  */
                 text?: string;
                 /**
@@ -5554,6 +5558,11 @@ export interface components {
             model_source: string | null;
             /** @description Run cost in dollars */
             cost: number | null;
+            /**
+             * @description How much of `cost` is backed by real per-token rates. `priced`: every token bucket that carried usage had a rate, so the figure is complete. `partial`: part of the consumption (cached input) had no rate and was priced at zero, so the figure is a FLOOR, not the full amount. `unpriced`: no rates were available for the model at all — a `cost` of 0 alongside this value means "not priced", NOT "free"; do not bill or display it as zero spend. `null` on runs finalized before this field existed and on runs that produced no usage rows; never read `null` as `priced`.
+             * @enum {string|null}
+             */
+            cost_pricing_status: "priced" | "partial" | "unpriced" | null;
             /** @description End-user ID (eu_ prefix) if executed on behalf of an end-user */
             endUserId: string | null;
             /** @description API key ID that triggered the run (null for dashboard/schedule runs) */
@@ -5597,6 +5606,8 @@ export interface components {
                 /** @description Documents produced by the run. */
                 output: number;
             };
+            /** @description Document id of the run's explicitly selected primary deliverable, or null. The referenced document remains part of the ordinary run document list. */
+            primary_document_id: string | null;
             /** @description Inline runs only. Snapshot of the manifest submitted at run time. Null once the shadow has been compacted (see INLINE_RUN_LIMITS.retention_days). */
             inline_manifest?: {
                 [key: string]: unknown;
@@ -5946,7 +5957,7 @@ export interface components {
         AppstrateUser: string;
         /** @description API version override (format: YYYY-MM-DD). Defaults to the org's pinned version or the current platform version. */
         AppstrateVersion: string;
-        /** @description Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Cached for 24 hours. */
+        /** @description Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Cached for 24 hours, scoped to the organization and application: a repeat with the same body replays the original response with `Idempotent-Replayed: true`, the same key with a different body is `422 idempotency_conflict`, and a concurrent duplicate is `409 idempotency_in_progress`. This operation honours the header because it declares this parameter — operations that do not declare it refuse the header with `400 idempotency_not_supported` rather than silently ignoring it (see the “Idempotency” section of the API description). */
         IdempotencyKey: string;
         /** @description Application ID. Required for cookie auth (SSE cannot send X-Application-Id header). Not needed for API key auth (app resolved from key). */
         SseAppId: string;
@@ -5958,7 +5969,7 @@ export interface components {
         PackageScope: string;
         /** @description Package name */
         PackageName: string;
-        /** @description When `true`, narrows the list to packages installed and enabled in the current application. */
+        /** @description When `true`, narrows the list to packages installed and enabled in the current application — system packages with no install row drop out. Integrations are the one exception: they are filtered on effective activation, so an environment-provided system integration stays listed even though it has no install row. */
         PackageActiveFilter: "true";
     };
     requestBodies: never;
@@ -6443,7 +6454,26 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            /** @description The bundle cannot be assembled from stored artifacts. `dependency_unresolved`: a declared dependency resolves to no published version, or it resolved but its artifact is absent from storage or out of this organization's scope — the detail names the dependency. `bundle_invalid`: a stored archive or manifest is malformed or exceeds an archive limit (for example an archive with no `manifest.json` at its root); the package must be republished. `bundle_signature_invalid`: rejected by `AFPS_SIGNATURE_POLICY` */
+            422: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
             429: components["responses"]["RateLimited"];
+            /** @description Unexpected server error (`internal_error`), or a dependency artifact's bytes no longer match the integrity hash recorded when that version was published (`bundle_integrity_mismatch`) — corruption or tampering at rest; retrying will not help, republish the named dependency or contact the operator */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
         };
     };
     saveAgentConfig: {
@@ -6926,7 +6956,7 @@ export interface operations {
                 "Appstrate-User"?: components["parameters"]["AppstrateUser"];
                 /** @description API version override (format: YYYY-MM-DD). Defaults to the org's pinned version or the current platform version. */
                 "Appstrate-Version"?: components["parameters"]["AppstrateVersion"];
-                /** @description Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Cached for 24 hours. */
+                /** @description Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Cached for 24 hours, scoped to the organization and application: a repeat with the same body replays the original response with `Idempotent-Replayed: true`, the same key with a different body is `422 idempotency_conflict`, and a concurrent duplicate is `409 idempotency_in_progress`. This operation honours the header because it declares this parameter — operations that do not declare it refuse the header with `400 idempotency_not_supported` rather than silently ignoring it (see the “Idempotency” section of the API description). */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path: {
@@ -7043,7 +7073,8 @@ export interface operations {
                      *       "document_counts": {
                      *         "input": 0,
                      *         "output": 0
-                     *       }
+                     *       },
+                     *       "primary_document_id": null
                      *     }
                      */
                     "application/json": components["schemas"]["Run"];
@@ -9865,6 +9896,8 @@ export interface operations {
                 packageId?: string;
                 /** @description Filter to documents anchored to this chat session. */
                 chat_session_id?: string;
+                /** @description Filter to the private conversation context: direct attachments plus documents produced or consumed by runs launched from the session. */
+                context_chat_session_id?: string;
                 /** @description Keyset cursor — document id to page after (newest-first order). */
                 startingAfter?: string;
                 /** @description Page size (1–100, default 20). */
@@ -9901,6 +9934,11 @@ export interface operations {
                             uri: string;
                             /** @enum {string} */
                             purpose: "user_upload" | "agent_output";
+                            /**
+                             * @description User-facing presentation role selected by the producing agent. `primary` identifies the run's featured deliverable; null means the document remains a regular output.
+                             * @enum {string|null}
+                             */
+                            presentation: "primary" | null;
                             applicationId: string;
                             /** @description Run container, or null. */
                             run_id: string | null;
@@ -9993,6 +10031,11 @@ export interface operations {
                         uri: string;
                         /** @enum {string} */
                         purpose: "user_upload" | "agent_output";
+                        /**
+                         * @description User-facing presentation role selected by the producing agent. `primary` identifies the run's featured deliverable; null means the document remains a regular output.
+                         * @enum {string|null}
+                         */
+                        presentation: "primary" | null;
                         applicationId: string;
                         /** @description Run container, or null. */
                         run_id: string | null;
@@ -10041,7 +10084,7 @@ export interface operations {
                         createdAt: string;
                         /**
                          * Format: uri
-                         * @description Absolute URL of a hardened, cookie-less preview (short-lived signed token in the query). Minted ONLY on this single-document GET — the list rows and the `keep` response carry `previewable` instead. Non-null only for a previewable document. Load in a `sandbox="allow-scripts"` iframe: for an `html` document served same-origin (no `USERCONTENT_URL`) that iframe is the ONLY context in which the markup is served as active HTML — a top-level navigation to the same URL is served as inert `text/plain` source so agent script can never run on the app origin. On the `USERCONTENT_URL` origin when the instance configures a separate preview domain, else same-origin.
+                         * @description Absolute URL of a hardened, cookie-less preview (short-lived signed token in the query). Minted ONLY on this single-document GET — the list rows and the `keep` response carry `previewable` instead. Non-null only for a previewable document. Load in a `sandbox="allow-scripts"` iframe: for an `html` document that iframe is the ONLY context in which the markup is served as active HTML, whether or not the instance configures a separate `USERCONTENT_URL` preview origin. Any other loading context — a top-level navigation to the same URL above all — is served as inert `text/plain` source, because a top-level agent document can navigate itself and so cannot be contained. Minted on the `USERCONTENT_URL` origin when the instance configures a separate preview domain, else same-origin.
                          */
                         preview_url?: string | null;
                     };
@@ -10186,6 +10229,11 @@ export interface operations {
                         uri: string;
                         /** @enum {string} */
                         purpose: "user_upload" | "agent_output";
+                        /**
+                         * @description User-facing presentation role selected by the producing agent. `primary` identifies the run's featured deliverable; null means the document remains a regular output.
+                         * @enum {string|null}
+                         */
+                        presentation: "primary" | null;
                         applicationId: string;
                         /** @description Run container, or null. */
                         run_id: string | null;
@@ -10326,7 +10374,7 @@ export interface operations {
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
                 /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
                 "X-Application-Id"?: components["parameters"]["XAppId"];
-                /** @description Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Cached for 24 hours. */
+                /** @description Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Cached for 24 hours, scoped to the organization and application: a repeat with the same body replays the original response with `Idempotent-Replayed: true`, the same key with a different body is `422 idempotency_conflict`, and a concurrent duplicate is `409 idempotency_in_progress`. This operation honours the header because it declares this parameter — operations that do not declare it refuse the header with `400 idempotency_not_supported` rather than silently ignoring it (see the “Idempotency” section of the API description). */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path?: never;
@@ -12090,8 +12138,6 @@ export interface operations {
             header?: {
                 /** @description Optional run id (`run_…`) to attribute the call to. Populated by `appstrate run` once the platform mints a remote run record; rolls up into the run's cost/token totals. */
                 "X-Run-Id"?: string;
-                /** @description Optional idempotency key; replays are served from the stored response for 24h (see Applications idempotency spec). */
-                "Idempotency-Key"?: string;
                 /** @description Forwarded verbatim to upstream. Defaults to `2023-06-01` when omitted. */
                 "anthropic-version"?: string;
                 /** @description Forwarded verbatim to upstream (e.g. `prompt-caching-2024-07-31`). */
@@ -12168,8 +12214,6 @@ export interface operations {
             header?: {
                 /** @description Optional run id (`run_…`) to attribute the call to. Populated by `appstrate run` once the platform mints a remote run record; rolls up into the run's cost/token totals. */
                 "X-Run-Id"?: string;
-                /** @description Optional idempotency key; replays are served from the stored response for 24h (see Applications idempotency spec). */
-                "Idempotency-Key"?: string;
             };
             path?: never;
             cookie?: never;
@@ -12240,8 +12284,6 @@ export interface operations {
             header?: {
                 /** @description Optional run id (`run_…`) to attribute the call to. Populated by `appstrate run` once the platform mints a remote run record; rolls up into the run's cost/token totals. */
                 "X-Run-Id"?: string;
-                /** @description Optional idempotency key; replays are served from the stored response for 24h (see Applications idempotency spec). */
-                "Idempotency-Key"?: string;
             };
             path?: never;
             cookie?: never;
@@ -12562,7 +12604,7 @@ export interface operations {
                             source: "own" | "shared" | "both";
                             /** @description The integration package's own manifest version, when known. Use it to pin a satisfiable dependencies.integrations range. */
                             version?: string;
-                            /** @description AFPS §4.4 — tool(s) an agent inherits when it declares this integration without an `integrations_configuration.<id>.tools` selection. Absent when none declared; `[]` means the integration is inert. To use any other tool, inspect the full `tool_catalog` via GET /api/integrations/{packageId}. */
+                            /** @description AFPS §4.4 — tool(s) an agent inherits when it declares this integration without an `integrations_configuration.<id>.tools` selection. Absent or `[]` means an agent that declares this integration without its own selection ends up with nothing callable, which publish/import reject and the run aborts on — such an agent must select a tool explicitly. To use any other tool, inspect the full `tool_catalog` via GET /api/integrations/{packageId}. */
                             default_tools?: string[] | "*";
                         }[];
                         /** @description Agents the caller can run in the current application (capped). Only present when the caller holds the `agents:run` permission; empty otherwise. When `agents_truncated` is true, the long tail is reachable via the MCP `search_operations` tool. */
@@ -13122,11 +13164,11 @@ export interface operations {
                 content: {
                     "application/json": {
                         /**
-                         * @description `ok` — list persisted. `auth_failed` — credential rejected upstream, nothing persisted. `nothing_verified` — every probe failed (network incident or none served), previous list kept. `no_candidates` — provider declares no discovery candidates.
+                         * @description `ok` — list resolved (persisted on the probe path; derived, nothing written, for `offline`-validation providers). `auth_failed` — credential rejected upstream, nothing persisted. `nothing_verified` — every probe failed (network incident or none served), previous list kept. `no_candidates` — provider resolves no discovery candidate.
                          * @enum {string}
                          */
                         outcome: "ok" | "auth_failed" | "nothing_verified" | "no_candidates";
-                        /** @description Number of candidates considered, not necessarily models live-probed. For `offline`-validation providers (codex, claude-code) candidates are considered with zero upstream calls. */
+                        /** @description Number of models live-probed against the credential. Always 0 for `offline`-validation providers (codex, claude-code): their list is derived, never probed. */
                         probed_count: number;
                         available_model_ids: string[] | null;
                     };
@@ -13200,7 +13242,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Credential persisted in model_provider_credentials. Deliberate operation-result shape (NOT the credential resource — flow-completion exception to the bare-resource rule, #657): the helper's bearer is single-use and consumed by this very request, so it cannot fetch anything afterwards, and `availableModelIds` is registry-derived operation info the helper prints in its terminal summary. The dashboard obtains the created credential via `GET /pairing/{id}` polling (`credentialId`) + the credentials list. */
+            /** @description Credential persisted in model_provider_credentials. Deliberate operation-result shape (NOT the credential resource — flow-completion exception to the bare-resource rule, #657): the helper's bearer is single-use and consumed by this very request, so it cannot fetch anything afterwards, so the models the helper prints in its terminal summary have to travel back in this response. `availableModelIds` is therefore a projection of the credential's own servable set — byte-for-byte what `available_model_ids` reports for this `credentialId` on `GET /api/model-provider-credentials`, resolved through the same accessor, so the terminal and the dashboard can never disagree. For subscription providers (`codex`, `claude-code`) that set is derived from the provider definition ∩ the pricing catalog with no upstream call; for probe-validated providers it is the empirically discovered list, which is empty here because nothing has been probed yet (the model form's `Refresh models` fills it in). The dashboard obtains the created credential via `GET /pairing/{id}` polling (`credentialId`) + the credentials list. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -13351,10 +13393,7 @@ export interface operations {
     };
     listModels: {
         parameters: {
-            query?: {
-                /** @description When true, resolve each model's protocol family and base URL from the provider registry WITHOUT decrypting its credential. Faster for callers that only need to pick a model (e.g. the chat model picker); a model whose secret is unusable is not filtered and surfaces an error only at inference time. */
-                metadata_only?: boolean;
-            };
+            query?: never;
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
@@ -13389,6 +13428,7 @@ export interface operations {
                      *           "source": "built-in",
                      *           "enabled": true,
                      *           "is_default": false,
+                     *           "needs_reconnection": false,
                      *           "aliased": false,
                      *           "credentialId": "pk_abc123",
                      *           "contextWindow": 128000,
@@ -13511,6 +13551,15 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            /** @description The model's stored credential can no longer be used for inference (`model_needs_reconnection`) — see the `needs_reconnection` field on `OrgModel`. Such a model is listed so it can be inspected or detached, but it cannot become the organization default: every run and chat would fail at inference time. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
         };
     };
     searchOpenRouterModels: {
@@ -14126,7 +14175,7 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Cached for 24 hours. */
+                /** @description Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Cached for 24 hours, scoped to the organization and application: a repeat with the same body replays the original response with `Idempotent-Replayed: true`, the same key with a different body is `422 idempotency_conflict`, and a concurrent duplicate is `409 idempotency_in_progress`. This operation honours the header because it declares this parameter — operations that do not declare it refuse the header with `400 idempotency_not_supported` rather than silently ignoring it (see the “Idempotency” section of the API description). */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path?: never;
@@ -15022,7 +15071,7 @@ export interface operations {
     listAgentPackages: {
         parameters: {
             query?: {
-                /** @description When `true`, narrows the list to packages installed and enabled in the current application. */
+                /** @description When `true`, narrows the list to packages installed and enabled in the current application — system packages with no install row drop out. Integrations are the one exception: they are filtered on effective activation, so an environment-provided system integration stays listed even though it has no install row. */
                 active?: components["parameters"]["PackageActiveFilter"];
             };
             header?: {
@@ -15643,7 +15692,7 @@ export interface operations {
                         type: string;
                         /** @description Imported manifest version (semver). Omitted when the manifest carries no version field. */
                         version?: string;
-                        /** @description Non-blocking install warnings (e.g. connect.login engine-subset or _meta soft-fails). Present only when warnings were emitted. */
+                        /** @description Non-blocking install warnings (e.g. connect.login engine-subset, _meta soft-fails, or an agent `timeout` above this deployment's ceiling). Present only when warnings were emitted. */
                         warnings?: string[];
                     };
                 };
@@ -15721,7 +15770,7 @@ export interface operations {
                         root_installed: boolean;
                         root_package_id: string;
                         root_version: string;
-                        /** @description Non-blocking install-time warnings (AFPS §7.7) — e.g. `connect.login` selector/criteria patterns the runtime engine cannot evaluate. Empty when nothing is degraded. */
+                        /** @description Non-blocking install-time warnings (AFPS §7.7) — e.g. `connect.login` selector/criteria patterns the runtime engine cannot evaluate, or an agent `timeout` above this deployment's ceiling. Empty when nothing is degraded. */
                         warnings: string[];
                     };
                 };
@@ -15785,7 +15834,7 @@ export interface operations {
                         type: string;
                         /** @description Imported manifest version (semver). Omitted when the manifest carries no version field. */
                         version?: string;
-                        /** @description Non-blocking install warnings (e.g. connect.login engine-subset or _meta soft-fails). Present only when warnings were emitted. */
+                        /** @description Non-blocking install warnings (e.g. connect.login engine-subset, _meta soft-fails, or an agent `timeout` above this deployment's ceiling). Present only when warnings were emitted. */
                         warnings?: string[];
                     };
                 };
@@ -15816,7 +15865,7 @@ export interface operations {
     listIntegrationPackages: {
         parameters: {
             query?: {
-                /** @description When `true`, narrows the list to packages installed and enabled in the current application. */
+                /** @description When `true`, narrows the list to packages installed and enabled in the current application — system packages with no install row drop out. Integrations are the one exception: they are filtered on effective activation, so an environment-provided system integration stays listed even though it has no install row. */
                 active?: components["parameters"]["PackageActiveFilter"];
             };
             header?: {
@@ -16375,7 +16424,7 @@ export interface operations {
     listMcpServerPackages: {
         parameters: {
             query?: {
-                /** @description When `true`, narrows the list to packages installed and enabled in the current application. */
+                /** @description When `true`, narrows the list to packages installed and enabled in the current application — system packages with no install row drop out. Integrations are the one exception: they are filtered on effective activation, so an environment-provided system integration stays listed even though it has no install row. */
                 active?: components["parameters"]["PackageActiveFilter"];
             };
             header?: {
@@ -16946,7 +16995,7 @@ export interface operations {
     listSkills: {
         parameters: {
             query?: {
-                /** @description When `true`, narrows the list to packages installed and enabled in the current application. */
+                /** @description When `true`, narrows the list to packages installed and enabled in the current application — system packages with no install row drop out. Integrations are the one exception: they are filtered on effective activation, so an environment-provided system integration stays listed even though it has no install row. */
                 active?: components["parameters"]["PackageActiveFilter"];
             };
             header?: {
@@ -18191,14 +18240,18 @@ export interface operations {
     listRuns: {
         parameters: {
             query?: {
-                /** @description Filter runs by user. `me` returns only the current user's runs. Omit for all org runs. */
+                /** @description Filter runs by user. `me` is the only accepted value and returns only the current user's runs. Omit (or send an empty value) for all org runs the caller may see. Any other value — an arbitrary user id, for instance — is rejected with `400`; it is never ignored, so a filtered response is never silently widened to the whole org. */
                 user?: "me";
                 limit?: number;
                 offset?: number;
+                /** @description Filter runs by kind. Omit (or send an empty value) for every kind. Any value outside the enum is rejected with `400`; it is never ignored, so a filtered response is never silently widened. */
                 kind?: "all" | "package" | "inline";
-                status?: string;
+                /** @description Filter runs by lifecycle status. Omit (or send an empty value) for every status. Any value outside the enum is rejected with `400`; it is never ignored, so a filtered response is never silently widened. */
+                status?: "pending" | "running" | "success" | "failed" | "timeout" | "cancelled";
                 start_date?: string;
                 end_date?: string;
+                /** @description Return only runs launched from this chat session. */
+                chat_session_id?: string;
             };
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
@@ -18231,7 +18284,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Invalid query parameter (e.g. malformed date) */
+            /** @description Invalid query parameter (unknown `user` value, malformed date, …) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -18255,7 +18308,7 @@ export interface operations {
                 "Appstrate-User"?: components["parameters"]["AppstrateUser"];
                 /** @description API version override (format: YYYY-MM-DD). Defaults to the org's pinned version or the current platform version. */
                 "Appstrate-Version"?: components["parameters"]["AppstrateVersion"];
-                /** @description Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Cached for 24 hours. */
+                /** @description Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Cached for 24 hours, scoped to the organization and application: a repeat with the same body replays the original response with `Idempotent-Replayed: true`, the same key with a different body is `422 idempotency_conflict`, and a concurrent duplicate is `409 idempotency_in_progress`. This operation honours the header because it declares this parameter — operations that do not declare it refuse the header with `400 idempotency_not_supported` rather than silently ignoring it (see the “Idempotency” section of the API description). */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path?: never;
@@ -18267,8 +18320,8 @@ export interface operations {
                  * @example {
                  *       "manifest": {
                  *         "$schema": "https://schemas.afps.dev/v0/agent.schema.json",
-                 *         "name": "@inline/one-shot",
-                 *         "display_name": "One-shot summary",
+                 *         "name": "@inline/summarize-attached-document",
+                 *         "display_name": "Summarize attached document",
                  *         "version": "0.0.0",
                  *         "type": "agent",
                  *         "schema_version": "0.1",
@@ -18281,7 +18334,7 @@ export interface operations {
                  *     }
                  */
                 "application/json": {
-                    /** @description Full AFPS manifest (agent type). All referenced skills/integrations must already exist in the org or system catalog — registry-only dependencies. */
+                    /** @description Full AFPS manifest (agent type). Give each inline run a concise, task-specific `display_name` in the user's language and a matching descriptive `@inline/<kebab-case-slug>` name — never an id or a generic label such as `one-shot`. All referenced skills/integrations must already exist in the org or system catalog — registry-only dependencies. */
                     manifest: Record<string, never>;
                     /** @description Contents of prompt.md — the agent's system prompt. */
                     prompt: string;
@@ -18291,6 +18344,10 @@ export interface operations {
                     config?: Record<string, never>;
                     /** @description `document://doc_xxx` URIs to mount read-only into the run's `documents/` directory — fan-in by reference, without declaring a file field in the manifest. The platform declares a reserved `_context_documents` input field for them, so they go through the same ACL, byte/count caps and `document_links` chaining as any other document input, and are announced to the agent in its prompt. A manifest (or `input`) that already declares `_context_documents` is rejected with a `400` — the name is reserved. */
                     context_documents?: string[];
+                    /** @description Per-integration connection picks for THIS run (flat-connections mechanism #2). Flat map: `{ "@scope/integration": "<connection_id>" }` — one connection per integration; the chosen connection carries its own authKey. Loses to admin pins (mechanism #1), beats the schedule-frozen layer (#3) and the actor-fallback (#4). Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same pick. Returns 412 `missing_integration_connection` if the chosen id is not accessible to the actor. */
+                    connection_overrides?: {
+                        [key: string]: string;
+                    };
                     modelId?: string | null;
                     proxyId?: string | null;
                 };
@@ -18344,7 +18401,7 @@ export interface operations {
                      *       "runner_name": null,
                      *       "runner_kind": null,
                      *       "agent_scope": "@inline",
-                     *       "agent_name": "one-shot",
+                     *       "agent_name": "Summarize attached document",
                      *       "runOrigin": "platform",
                      *       "contextSnapshot": null,
                      *       "modelCredentialId": "mpc_8h2k4m6n",
@@ -18360,10 +18417,11 @@ export interface operations {
                      *         "input": 0,
                      *         "output": 0
                      *       },
+                     *       "primary_document_id": null,
                      *       "inline_manifest": {
                      *         "$schema": "https://schemas.afps.dev/v0/agent.schema.json",
-                     *         "name": "@inline/one-shot",
-                     *         "display_name": "One-shot summary",
+                     *         "name": "@inline/summarize-attached-document",
+                     *         "display_name": "Summarize attached document",
                      *         "version": "0.0.0",
                      *         "type": "agent",
                      *         "schema_version": "0.1",
@@ -18456,12 +18514,17 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
+                    /** @description Full AFPS manifest, with the same task-specific `display_name` and descriptive `@inline/<kebab-case-slug>` naming guidance as `POST /api/runs/inline`. */
                     manifest: Record<string, never>;
                     prompt: string;
                     input?: Record<string, never>;
                     config?: Record<string, never>;
                     /** @description Same field as `POST /api/runs/inline` — validated here for shape and for the reserved `_context_documents` name collision, never mounted. */
                     context_documents?: string[];
+                    /** @description Same field as `POST /api/runs/inline` — applied to the integration readiness check so a pick that clears `must_choose_connection` here clears it on the real launch too. Never persisted; no run is created. */
+                    connection_overrides?: {
+                        [key: string]: string;
+                    };
                     modelId?: string | null;
                     proxyId?: string | null;
                 };
@@ -18515,7 +18578,7 @@ export interface operations {
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
                 /** @description API version override (format: YYYY-MM-DD). Defaults to the org's pinned version or the current platform version. */
                 "Appstrate-Version"?: components["parameters"]["AppstrateVersion"];
-                /** @description Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Cached for 24 hours. */
+                /** @description Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Cached for 24 hours, scoped to the organization and application: a repeat with the same body replays the original response with `Idempotent-Replayed: true`, the same key with a different body is `422 idempotency_conflict`, and a concurrent duplicate is `409 idempotency_in_progress`. This operation honours the header because it declares this parameter — operations that do not declare it refuse the header with `400 idempotency_not_supported` rather than silently ignoring it (see the “Idempotency” section of the API description). */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path?: never;
@@ -18725,7 +18788,8 @@ export interface operations {
                      *       "document_counts": {
                      *         "input": 0,
                      *         "output": 0
-                     *       }
+                     *       },
+                     *       "primary_document_id": null
                      *     }
                      */
                     "application/json": components["schemas"]["Run"];
@@ -18830,7 +18894,8 @@ export interface operations {
                      *       "document_counts": {
                      *         "input": 0,
                      *         "output": 0
-                     *       }
+                     *       },
+                     *       "primary_document_id": null
                      *     }
                      */
                     "application/json": components["schemas"]["Run"];
@@ -18977,6 +19042,8 @@ export interface operations {
             header: {
                 /** @description Display name for the document, percent-encoded with `encodeURIComponent` (an HTTP header value cannot carry a raw non-ASCII filename). The server decodes it strictly and returns 400 on a malformed encoding, then sanitises the decoded name (path separators, control characters and `..` collapsed, 255 chars max). */
                 "X-Document-Name": string;
+                /** @description Set to `primary` to feature this document on the run page. The last successful primary publication wins atomically. Omit for an ordinary output. */
+                "X-Document-Presentation"?: "primary";
                 /** @description MIME type of the document bytes. */
                 "Content-Type": string;
                 "webhook-id": string;
@@ -19007,6 +19074,8 @@ export interface operations {
                         mime: string;
                         size: number;
                         sha256: string;
+                        /** @enum {string|null} */
+                        presentation: "primary" | null;
                     };
                 };
             };
@@ -19024,10 +19093,12 @@ export interface operations {
                         mime: string;
                         size: number;
                         sha256: string;
+                        /** @enum {string|null} */
+                        presentation: "primary" | null;
                     };
                 };
             };
-            /** @description X-Document-Name missing or not a valid percent-encoded filename / Content-Type header missing / empty body */
+            /** @description X-Document-Name missing or not a valid percent-encoded filename / X-Document-Presentation has an unsupported value / Content-Type header missing / empty body */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -19157,6 +19228,11 @@ export interface operations {
                     /** @constant */
                     datacontenttype: "application/json";
                     data: Record<string, never>;
+                    /**
+                     * Format: uri
+                     * @description OPTIONAL CloudEvents attribute identifying the JSON Schema the `data` payload adheres to. Emitted for canonical event types (e.g. `https://schemas.afps.dev/v0/events/memory.added.schema.json`); absent for third-party `@scope/tool.verb` events.
+                     */
+                    dataschema?: string;
                     sequence: number;
                 };
             };
@@ -19896,7 +19972,7 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Cached for 24 hours. */
+                /** @description Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Cached for 24 hours, scoped to the organization and application: a repeat with the same body replays the original response with `Idempotent-Replayed: true`, the same key with a different body is `422 idempotency_conflict`, and a concurrent duplicate is `409 idempotency_in_progress`. This operation honours the header because it declares this parameter — operations that do not declare it refuse the header with `400 idempotency_not_supported` rather than silently ignoring it (see the “Idempotency” section of the API description). */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path?: never;

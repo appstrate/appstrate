@@ -3,7 +3,7 @@
   "info": {
     "title": "Appstrate API",
     "version": "1.0.0",
-    "description": "API for Appstrate — an open-source platform for running autonomous AI agents in sandboxed Docker containers. Manage agents, runs, schedules, providers, API keys, and more.\n\n## Common Response Headers\n\nAll API responses include a `Request-Id` header (`req_` prefix) for tracing. All authenticated responses additionally include an `Appstrate-Version` header with the resolved API version (format: `YYYY-MM-DD`). Rate-limited endpoints return `RateLimit` and `RateLimit-Policy` headers on every response (not just 429).",
+    "description": "API for Appstrate — an open-source platform for running autonomous AI agents in sandboxed Docker containers. Manage agents, runs, schedules, providers, API keys, and more.\n\n## Common Response Headers\n\nAll API responses include a `Request-Id` header (`req_` prefix) for tracing. All authenticated responses additionally include an `Appstrate-Version` header with the resolved API version (format: `YYYY-MM-DD`). Rate-limited endpoints return `RateLimit` and `RateLimit-Policy` headers on every response (not just 429).\n\n## Idempotency\n\n`Idempotency-Key` is honoured **only** on the operations that declare it as a parameter. Sending it anywhere else is refused, not ignored: any other request with an unsafe method (`POST`, `PUT`, `PATCH`, `DELETE`, …) that carries the header is rejected before it reaches the handler with `400` `application/problem+json`, `code: \"idempotency_not_supported\"`. Safe methods (`GET`, `HEAD`, `OPTIONS`) ignore the header — replaying them is already free of effect (RFC 9110 §9.2.1), so there is no guarantee to correct.\n\nThis response is produced by a request-level middleware rather than by any operation, so it is documented here instead of on each of the ~130 operations that can emit it. A client that never sends `Idempotency-Key` outside the operations declaring it will never see it. Do not stamp the header onto every outbound request: on this API that turns a working call into a `400`.\n\nOn the operations that do honour it, the key is stored for 24h scoped to the organization and application: a repeat with the same key and the same body replays the original response with `Idempotent-Replayed: true`; the same key with a different body is `422` `idempotency_conflict`; a concurrent in-flight duplicate is `409` `idempotency_in_progress`.\n\n**Not covered:** `/api/auth/*` (Better Auth) terminates the request chain before this middleware runs. Those endpoints — sign-up/sign-in/sign-out, the device flow, `cli/token`, `cli/revoke`, `organization/*` — neither honour nor refuse the header; they ignore it.",
     "contact": {
       "name": "Appstrate",
       "url": "https://appstrate.dev",
@@ -1761,7 +1761,8 @@
                   "document_counts": {
                     "input": 0,
                     "output": 0
-                  }
+                  },
+                  "primary_document_id": null
                 }
               }
             }
@@ -2199,6 +2200,7 @@
                     "input": 0,
                     "output": 0
                   },
+                  "primary_document_id": null,
                   "inline_manifest": {
                     "$schema": "https://schemas.afps.dev/v0/agent.schema.json",
                     "name": "@inline/one-shot",
@@ -2440,7 +2442,7 @@
               "type": "string",
               "enum": ["me"]
             },
-            "description": "Filter runs by user. `me` returns only the current user's runs. Omit for all org runs."
+            "description": "Filter runs by user. `me` is the only accepted value and returns only the current user's runs. Omit (or send an empty value) for all org runs the caller may see. Any other value — an arbitrary user id, for instance — is rejected with `400`; it is never ignored, so a filtered response is never silently widened to the whole org."
           },
           {
             "name": "limit",
@@ -2467,14 +2469,17 @@
             "schema": {
               "type": "string",
               "enum": ["all", "package", "inline"]
-            }
+            },
+            "description": "Filter runs by kind. Omit (or send an empty value) for every kind. Any value outside the enum is rejected with `400`; it is never ignored, so a filtered response is never silently widened."
           },
           {
             "name": "status",
             "in": "query",
             "schema": {
-              "type": "string"
-            }
+              "type": "string",
+              "enum": ["pending", "running", "success", "failed", "timeout", "cancelled"]
+            },
+            "description": "Filter runs by lifecycle status. Omit (or send an empty value) for every status. Any value outside the enum is rejected with `400`; it is never ignored, so a filtered response is never silently widened."
           },
           {
             "name": "start_date",
@@ -2535,7 +2540,7 @@
             }
           },
           "400": {
-            "description": "Invalid query parameter (e.g. malformed date)",
+            "description": "Invalid query parameter (unknown `user` value, malformed date, …)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2677,7 +2682,8 @@
                   "document_counts": {
                     "input": 0,
                     "output": 0
-                  }
+                  },
+                  "primary_document_id": null
                 }
               }
             }
@@ -2910,7 +2916,8 @@
                   "document_counts": {
                     "input": 0,
                     "output": 0
-                  }
+                  },
+                  "primary_document_id": null
                 }
               }
             }
@@ -3245,6 +3252,11 @@
                   },
                   "data": {
                     "type": "object"
+                  },
+                  "dataschema": {
+                    "type": "string",
+                    "format": "uri",
+                    "description": "OPTIONAL CloudEvents attribute identifying the JSON Schema the `data` payload adheres to. Emitted for canonical event types (e.g. `https://schemas.afps.dev/v0/events/memory.added.schema.json`); absent for third-party `@scope/tool.verb` events."
                   },
                   "sequence": {
                     "type": "integer",
@@ -3723,7 +3735,7 @@
         "operationId": "publishRunDocument",
         "tags": ["Runs"],
         "summary": "Publish an agent-produced document (HMAC, streaming)",
-        "description": "Posted by the agent runtime — via the `publish_document` runtime tool or the end-of-run `outputs/` sweep — to store a file the agent produced as a durable `agent_output` document attached to the run. The raw file bytes are the request body (streamed straight to storage, up to `DOCUMENT_MAX_FILE_BYTES`, 100 MiB by default); metadata is carried in the `X-Document-Name` and `Content-Type` headers. Same Standard Webhooks HMAC auth as the other run routes, verified over an EMPTY body (the bytes stream unbuffered; integrity is the returned sha256). Enforced synchronously: the per-file cap and per-run output budget cut the stream mid-flight (413, deleting any partial object); the org storage quota returns 403. Idempotent for sweep retries: an identical (run, sha256, name) upload returns the existing document with 200 instead of storing it twice. Requires the run to be `running` (409 `run_not_running` otherwise). Each `webhook-id` is single-use: because the signature covers an empty body, replaying a captured header set with different bytes is refused with 409 `message_replayed` (the runtime signs a fresh id per attempt, so retries are unaffected).",
+        "description": "Posted by the agent runtime — via the `publish_document` runtime tool or the end-of-run `outputs/` sweep — to store a file the agent produced as a durable `agent_output` document attached to the run. The raw file bytes are the request body (streamed straight to storage, up to `DOCUMENT_MAX_FILE_BYTES`, 100 MiB by default); metadata is carried in the `X-Document-Name`, optional `X-Document-Presentation`, and `Content-Type` headers. `X-Document-Presentation: primary` atomically makes this the run's featured deliverable; the last successful primary publication wins, while an ordinary publication never changes the selection. Same Standard Webhooks HMAC auth as the other run routes, verified over an EMPTY body (the bytes stream unbuffered; integrity is the returned sha256). Enforced synchronously: the per-file cap and per-run output budget cut the stream mid-flight (413, deleting any partial object); the org storage quota returns 403. Idempotent for sweep retries: an identical (run, sha256, name) upload returns the existing document with 200 instead of storing it twice, and can still promote that existing document. Requires the run to be `running` (409 `run_not_running` otherwise). Each `webhook-id` is single-use: because the signature covers an empty body, replaying a captured header set with different bytes is refused with 409 `message_replayed` (the runtime signs a fresh id per attempt, so retries are unaffected).",
         "parameters": [
           {
             "name": "runId",
@@ -3741,6 +3753,16 @@
               "type": "string"
             },
             "description": "Display name for the document, percent-encoded with `encodeURIComponent` (an HTTP header value cannot carry a raw non-ASCII filename). The server decodes it strictly and returns 400 on a malformed encoding, then sanitises the decoded name (path separators, control characters and `..` collapsed, 255 chars max)."
+          },
+          {
+            "name": "X-Document-Presentation",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["primary"]
+            },
+            "description": "Set to `primary` to feature this document on the run page. The last successful primary publication wins atomically. Omit for an ordinary output."
           },
           {
             "name": "Content-Type",
@@ -3795,7 +3817,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["id", "uri", "name", "mime", "size", "sha256"],
+                  "required": ["id", "uri", "name", "mime", "size", "sha256", "presentation"],
                   "properties": {
                     "id": {
                       "type": "string"
@@ -3814,6 +3836,10 @@
                     },
                     "sha256": {
                       "type": "string"
+                    },
+                    "presentation": {
+                      "type": ["string", "null"],
+                      "enum": ["primary", null]
                     }
                   }
                 }
@@ -3826,7 +3852,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["id", "uri", "name", "mime", "size", "sha256"],
+                  "required": ["id", "uri", "name", "mime", "size", "sha256", "presentation"],
                   "properties": {
                     "id": {
                       "type": "string"
@@ -3846,6 +3872,10 @@
                     },
                     "sha256": {
                       "type": "string"
+                    },
+                    "presentation": {
+                      "type": ["string", "null"],
+                      "enum": ["primary", null]
                     }
                   }
                 }
@@ -3853,7 +3883,7 @@
             }
           },
           "400": {
-            "description": "X-Document-Name missing or not a valid percent-encoded filename / Content-Type header missing / empty body"
+            "description": "X-Document-Name missing or not a valid percent-encoded filename / X-Document-Presentation has an unsupported value / Content-Type header missing / empty body"
           },
           "401": {
             "description": "Signature verification failed"
@@ -7805,15 +7835,6 @@
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
-          },
-          {
-            "name": "metadata_only",
-            "in": "query",
-            "required": false,
-            "description": "When true, resolve each model's protocol family and base URL from the provider registry WITHOUT decrypting its credential. Faster for callers that only need to pick a model (e.g. the chat model picker); a model whose secret is unusable is not filtered and surfaces an error only at inference time.",
-            "schema": {
-              "type": "boolean"
-            }
           }
         ],
         "responses": {
@@ -7864,6 +7885,7 @@
                       "source": "built-in",
                       "enabled": true,
                       "is_default": false,
+                      "needs_reconnection": false,
                       "aliased": false,
                       "credentialId": "pk_abc123",
                       "contextWindow": 128000,
@@ -8062,6 +8084,16 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "The model's stored credential can no longer be used for inference (`model_needs_reconnection`) — see the `needs_reconnection` field on `OrgModel`. Such a model is listed so it can be inspected or detached, but it cannot become the organization default: every run and chat would fail at inference time.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           }
         }
       }
@@ -9232,7 +9264,7 @@
         "operationId": "refreshModelProviderCredentialModels",
         "tags": ["Model Provider Credentials"],
         "summary": "Discover the models this credential serves",
-        "description": "Discovers the models a credential serves and persists them as `available_model_ids`. For `probe`-validation (API-key) providers this is empirical: each discovery candidate is probed against the live credential (1-token inference requests on the account's own quota) and the ids that answered are persisted. For `offline`-validation providers (subscription: codex, claude-code) NO upstream call is made — the provider's static candidate set (intersected with the catalog) is persisted instead; real per-model availability is validated at the first run on the Pi engine. Synchronous; rate limited to 6 requests per minute. An auth failure or an all-failure round leaves the previously persisted list untouched.",
+        "description": "Discovers the models a credential serves. For `probe`-validation (API-key) providers this is empirical: each discovery candidate is probed against the live credential (1-token inference requests on the account's own quota) and the ids that answered are persisted as `available_model_ids`. For `offline`-validation providers (subscription: codex, claude-code) this is a no-op that reports the current list: NO upstream call is made and NOTHING is persisted, because their served set is derived from the provider definition and the pricing catalog on every read — `probed_count` is 0 and the response carries the freshly derived list. Real per-model availability is validated at the first run on the Pi engine. Synchronous; rate limited to 6 requests per minute. On the probe path an auth failure or an all-failure round leaves the previously persisted list untouched.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -9266,11 +9298,11 @@
                     "outcome": {
                       "type": "string",
                       "enum": ["ok", "auth_failed", "nothing_verified", "no_candidates"],
-                      "description": "`ok` — list persisted. `auth_failed` — credential rejected upstream, nothing persisted. `nothing_verified` — every probe failed (network incident or none served), previous list kept. `no_candidates` — provider declares no discovery candidates."
+                      "description": "`ok` — list resolved (persisted on the probe path; derived, nothing written, for `offline`-validation providers). `auth_failed` — credential rejected upstream, nothing persisted. `nothing_verified` — every probe failed (network incident or none served), previous list kept. `no_candidates` — provider resolves no discovery candidate."
                     },
                     "probed_count": {
                       "type": "integer",
-                      "description": "Number of candidates considered, not necessarily models live-probed. For `offline`-validation providers (codex, claude-code) candidates are considered with zero upstream calls."
+                      "description": "Number of models live-probed against the credential. Always 0 for `offline`-validation providers (codex, claude-code): their list is derived, never probed."
                     },
                     "available_model_ids": {
                       "type": ["array", "null"],
@@ -9543,7 +9575,7 @@
         },
         "responses": {
           "200": {
-            "description": "Credential persisted in model_provider_credentials. Deliberate operation-result shape (NOT the credential resource — flow-completion exception to the bare-resource rule, #657): the helper's bearer is single-use and consumed by this very request, so it cannot fetch anything afterwards, and `availableModelIds` is registry-derived operation info the helper prints in its terminal summary. The dashboard obtains the created credential via `GET /pairing/{id}` polling (`credentialId`) + the credentials list.",
+            "description": "Credential persisted in model_provider_credentials. Deliberate operation-result shape (NOT the credential resource — flow-completion exception to the bare-resource rule, #657): the helper's bearer is single-use and consumed by this very request, so it cannot fetch anything afterwards, so the models the helper prints in its terminal summary have to travel back in this response. `availableModelIds` is therefore a projection of the credential's own servable set — byte-for-byte what `available_model_ids` reports for this `credentialId` on `GET /api/model-provider-credentials`, resolved through the same accessor, so the terminal and the dashboard can never disagree. For subscription providers (`codex`, `claude-code`) that set is derived from the provider definition ∩ the pricing catalog with no upstream call; for probe-validated providers it is the empirically discovered list, which is empty here because nothing has been probed yet (the model form's `Refresh models` fills it in). The dashboard obtains the created credential via `GET /pairing/{id}` polling (`credentialId`) + the credentials list.",
             "content": {
               "application/json": {
                 "schema": {
@@ -18985,6 +19017,7 @@
                           "id",
                           "uri",
                           "purpose",
+                          "presentation",
                           "applicationId",
                           "run_id",
                           "chat_session_id",
@@ -19015,6 +19048,11 @@
                           "purpose": {
                             "type": "string",
                             "enum": ["user_upload", "agent_output"]
+                          },
+                          "presentation": {
+                            "type": ["string", "null"],
+                            "enum": ["primary", null],
+                            "description": "User-facing presentation role selected by the producing agent. `primary` identifies the run's featured deliverable; null means the document remains a regular output."
                           },
                           "applicationId": {
                             "type": "string"
@@ -19181,6 +19219,7 @@
                     "id",
                     "uri",
                     "purpose",
+                    "presentation",
                     "applicationId",
                     "run_id",
                     "chat_session_id",
@@ -19211,6 +19250,11 @@
                     "purpose": {
                       "type": "string",
                       "enum": ["user_upload", "agent_output"]
+                    },
+                    "presentation": {
+                      "type": ["string", "null"],
+                      "enum": ["primary", null],
+                      "description": "User-facing presentation role selected by the producing agent. `primary` identifies the run's featured deliverable; null means the document remains a regular output."
                     },
                     "applicationId": {
                       "type": "string"
@@ -19299,7 +19343,7 @@
                     "preview_url": {
                       "type": ["string", "null"],
                       "format": "uri",
-                      "description": "Absolute URL of a hardened, cookie-less preview (short-lived signed token in the query). Minted ONLY on this single-document GET — the list rows and the `keep` response carry `previewable` instead. Non-null only for a previewable document. Load in a `sandbox=\"allow-scripts\"` iframe: for an `html` document served same-origin (no `USERCONTENT_URL`) that iframe is the ONLY context in which the markup is served as active HTML — a top-level navigation to the same URL is served as inert `text/plain` source so agent script can never run on the app origin. On the `USERCONTENT_URL` origin when the instance configures a separate preview domain, else same-origin."
+                      "description": "Absolute URL of a hardened, cookie-less preview (short-lived signed token in the query). Minted ONLY on this single-document GET — the list rows and the `keep` response carry `previewable` instead. Non-null only for a previewable document. Load in a `sandbox=\"allow-scripts\"` iframe: for an `html` document that iframe is the ONLY context in which the markup is served as active HTML, whether or not the instance configures a separate `USERCONTENT_URL` preview origin. Any other loading context — a top-level navigation to the same URL above all — is served as inert `text/plain` source, because a top-level agent document can navigate itself and so cannot be contained. Minted on the `USERCONTENT_URL` origin when the instance configures a separate preview domain, else same-origin."
                     }
                   }
                 }
@@ -19431,6 +19475,7 @@
                     "id",
                     "uri",
                     "purpose",
+                    "presentation",
                     "applicationId",
                     "run_id",
                     "chat_session_id",
@@ -19461,6 +19506,11 @@
                     "purpose": {
                       "type": "string",
                       "enum": ["user_upload", "agent_output"]
+                    },
+                    "presentation": {
+                      "type": ["string", "null"],
+                      "enum": ["primary", null],
+                      "description": "User-facing presentation role selected by the producing agent. `primary` identifies the run's featured deliverable; null means the document remains a regular output."
                     },
                     "applicationId": {
                       "type": "string"
@@ -20810,16 +20860,6 @@
             "schema": {
               "type": "string"
             }
-          },
-          {
-            "name": "Idempotency-Key",
-            "in": "header",
-            "required": false,
-            "description": "Optional idempotency key; replays are served from the stored response for 24h (see Applications idempotency spec).",
-            "schema": {
-              "type": "string",
-              "maxLength": 256
-            }
           }
         ],
         "requestBody": {
@@ -20919,16 +20959,6 @@
             "description": "Optional run id (`run_…`) to attribute the call to. Populated by `appstrate run` once the platform mints a remote run record; rolls up into the run's cost/token totals.",
             "schema": {
               "type": "string"
-            }
-          },
-          {
-            "name": "Idempotency-Key",
-            "in": "header",
-            "required": false,
-            "description": "Optional idempotency key; replays are served from the stored response for 24h (see Applications idempotency spec).",
-            "schema": {
-              "type": "string",
-              "maxLength": 256
             }
           },
           {
@@ -21060,16 +21090,6 @@
             "description": "Optional run id (`run_…`) to attribute the call to. Populated by `appstrate run` once the platform mints a remote run record; rolls up into the run's cost/token totals.",
             "schema": {
               "type": "string"
-            }
-          },
-          {
-            "name": "Idempotency-Key",
-            "in": "header",
-            "required": false,
-            "description": "Optional idempotency key; replays are served from the stored response for 24h (see Applications idempotency spec).",
-            "schema": {
-              "type": "string",
-              "maxLength": 256
             }
           }
         ],
@@ -21360,7 +21380,7 @@
         "name": "Idempotency-Key",
         "in": "header",
         "required": false,
-        "description": "Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Cached for 24 hours.",
+        "description": "Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Cached for 24 hours, scoped to the organization and application: a repeat with the same body replays the original response with `Idempotent-Replayed: true`, the same key with a different body is `422 idempotency_conflict`, and a concurrent duplicate is `409 idempotency_in_progress`. This operation honours the header because it declares this parameter — operations that do not declare it refuse the header with `400 idempotency_not_supported` rather than silently ignoring it (see the “Idempotency” section of the API description).",
         "schema": {
           "type": "string",
           "maxLength": 255
@@ -21671,7 +21691,7 @@
         "properties": {
           "api_version": {
             "type": "string",
-            "description": "Pinned API version for this organization (format: YYYY-MM-DD). Automatically set to the current version at org creation. New API versions do not affect existing orgs until explicitly updated."
+            "description": "Pinned API version for this organization (format: YYYY-MM-DD). Automatically set to the current version at org creation. New API versions do not affect existing orgs until explicitly updated. On write, a version the server cannot serve is rejected with `400 unsupported_api_version` — an unserveable pin would make every org-scoped route fail for this organization."
           },
           "dashboard_sso_enabled": {
             "type": "boolean",
@@ -22290,6 +22310,7 @@
           "completed_at",
           "duration",
           "cost",
+          "cost_pricing_status",
           "runNumber",
           "token_usage",
           "version_label",
@@ -22313,7 +22334,8 @@
           "connections_used",
           "package_ephemeral",
           "unread",
-          "document_counts"
+          "document_counts",
+          "primary_document_id"
         ],
         "properties": {
           "id": {
@@ -22460,6 +22482,11 @@
             "type": ["number", "null"],
             "description": "Run cost in dollars"
           },
+          "cost_pricing_status": {
+            "type": ["string", "null"],
+            "enum": ["priced", "partial", "unpriced", null],
+            "description": "How much of `cost` is backed by real per-token rates. `priced`: every token bucket that carried usage had a rate, so the figure is complete. `partial`: part of the consumption (cached input) had no rate and was priced at zero, so the figure is a FLOOR, not the full amount. `unpriced`: no rates were available for the model at all — a `cost` of 0 alongside this value means \"not priced\", NOT \"free\"; do not bill or display it as zero spend. `null` on runs finalized before this field existed and on runs that produced no usage rows; never read `null` as `priced`."
+          },
           "endUserId": {
             "type": ["string", "null"],
             "description": "End-user ID (eu_ prefix) if executed on behalf of an end-user"
@@ -22539,6 +22566,10 @@
                 "description": "Documents produced by the run."
               }
             }
+          },
+          "primary_document_id": {
+            "type": ["string", "null"],
+            "description": "Document id of the run's explicitly selected primary deliverable, or null. The referenced document remains part of the ordinary run document list."
           },
           "inline_manifest": {
             "type": ["object", "null"],
@@ -23033,7 +23064,7 @@
             "items": {
               "type": "string"
             },
-            "description": "Model ids this credential is authorized to seed, persisted by model discovery (POST /:id/refresh-models, also fired after OAuth import) — the server-side authorization record gating model seeding. For `probe`-validation (API-key) providers these are empirically verified against the live credential; for `offline`-validation providers (subscription: codex, claude-code) these are the provider's static candidate set (∩ catalog), persisted with zero upstream calls. Null = discovery never ran. Per-credential because availability depends on the account's plan."
+            "description": "Model ids this credential is authorized to seed — the server-side authorization record gating model seeding. For `probe`-validation (API-key) providers these are empirically verified against the live credential and persisted by model discovery (POST /:id/refresh-models); empty when discovery never ran, and per-credential because availability depends on the account's plan. For `offline`-validation providers (subscription: codex, claude-code) nothing is ever persisted: the list is derived on every read from the provider definition and the pricing catalog, so a catalog refresh carries a new model generation through without any write."
           },
           "created_by": {
             "type": ["string", "null"]
@@ -23060,6 +23091,7 @@
           "modelId",
           "enabled",
           "is_default",
+          "needs_reconnection",
           "aliased",
           "iconUrl",
           "source",
@@ -23115,6 +23147,10 @@
           },
           "is_default": {
             "type": "boolean"
+          },
+          "needs_reconnection": {
+            "type": "boolean",
+            "description": "True when the model's stored credential can no longer be used for inference — an OAuth credential flagged as needing reconnection, or (either auth mode) a stored secret that no longer decrypts. The model is listed so it can be inspected, detached or deleted, but it is not usable for inference and cannot be made the organization default. Always false for built-in models, which read their key from the environment."
           },
           "aliased": {
             "type": "boolean",

@@ -1853,6 +1853,27 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
   private async killVm(vm: VmRecord, graceSeconds: number): Promise<boolean> {
     const proc = vm.proc;
     if (!proc) return true;
+
+    // Bun keeps losing Promise.race timers referenced on its event loop.
+    // Reclaim each timeout even when the VMM exit wins immediately; otherwise
+    // a clean runner shutdown waits for the full grace/reap bound.
+    const exitBeforeTimeout = async (
+      exitPromise: Promise<true>,
+      timeoutMs: number,
+    ): Promise<boolean> => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        return await Promise.race([
+          exitPromise,
+          new Promise<false>((resolve) => {
+            timer = setTimeout(() => resolve(false), timeoutMs);
+          }),
+        ]);
+      } finally {
+        clearTimeout(timer);
+      }
+    };
+
     if (graceSeconds > 0) {
       try {
         await fetch("http://localhost/actions", {
@@ -1869,10 +1890,10 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
         // aarch64 / wedged VMM / socket already gone — fall through to
         // the kill.
       }
-      const exited = await Promise.race([
-        proc.exited.then(() => true),
-        new Promise<false>((r) => setTimeout(() => r(false), graceSeconds * 1000)),
-      ]);
+      const exited = await exitBeforeTimeout(
+        proc.exited.then(() => true as const),
+        graceSeconds * 1000,
+      );
       if (exited) return true;
     }
     try {
@@ -1885,13 +1906,13 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
     // unbounded await here would hang cancel/teardown/shutdown behind
     // one broken VM. Time-box, log loudly, and move on: the leaked
     // process and its resources are reclaimed by the boot-time sweep.
-    const reaped = await Promise.race([
+    const reaped = await exitBeforeTimeout(
       proc.exited.then(
-        () => true,
-        () => true,
+        () => true as const,
+        () => true as const,
       ),
-      new Promise<false>((r) => setTimeout(() => r(false), this.vmmReapTimeoutMs)),
-    ]);
+      this.vmmReapTimeoutMs,
+    );
     if (!reaped) {
       logger.error(
         "VMM did not reap after SIGKILL — possible D-state; leaking the process, " +

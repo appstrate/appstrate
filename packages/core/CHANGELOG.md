@@ -9,30 +9,81 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `@appstrate/core/chat-turn-metadata` — the chat turn's TIME budget alongside its
-  existing step budget: `CHAT_TURN_DEADLINE_MS`, `CHAT_TURN_SAFETY_MARGIN_MS`,
-  `CHAT_MIN_RUN_BUDGET_MS`, `CHAT_THIN_RUN_BUDGET_MS`, `CHAT_LAUNCH_THRESHOLD_MS`,
-  plus the pure
-  `computeTurnRunBudget()`, `formatBudgetDuration()` and `formatTurnBudgetNote()`.
-  Both chat engines derive a child call's wait from an absolute turn deadline
-  instead of silently taking `RUN_AND_WAIT_MAX_MS` (30 min), which is three times
-  longer than a turn.
-- `@appstrate/core/run-and-wait-client` — `RUN_RESULT_INLINE_MAX_BYTES` (32 KB),
-  `runResultExceedsInlineLimit()` and `truncateRunAndWaitPayload()`: a run result
-  over the cap is cut to a usable head that points back at the run, whose
-  `runs.result` already holds the whole payload (`getRun` returns it) — no copy is
-  made. `launchRunAndWait` forwards the new `context_documents` argument (inline
-  runs only).
+- `publish_document.presentation: "primary"` — lets an agent explicitly select
+  the run's featured deliverable after writing its final bytes. The published
+  document and `document.published` event carry the selected presentation. The
+  public uploader keeps its existing positional signature with an optional
+  third argument, so existing 6.x consumers remain source-compatible.
+- `@appstrate/core/platform-types` — `InlineRunBody.connection_overrides`, the
+  flat `{ "@scope/integration": "<connection_id>" }` map (resolver mechanism #2).
+  `POST /api/runs/inline` and `/inline/validate` read it, so an inline caller can
+  escape a `412 must_choose_connection` by re-posting its pick — until now that
+  remedy existed only on the cataloged run route. Optional and NOT nullable:
+  both routes reject an explicit `null` on the wire.
 
 ### Changed
 
-- `ChatTurnFinishReason` gains `"deadline"` — a turn cut by the engine's
-  wall-clock ceiling is no longer disguised as its last step's provider reason.
+- `@appstrate/core/run-and-wait-client` — `launchRunAndWait` forwards the new
+  `connection_overrides` argument on BOTH kinds (`agent` and `inline`), and
+  refuses it pre-dispatch whenever it is present but is not a plain object
+  (a JSON-encoded string, an array, a number, a boolean, `null`). A dropped map
+  produces the identical `412` on retry with nothing saying the argument was
+  ignored, so the refusal — with a message naming the mistake — is the only
+  signal the caller can act on.
 
-### Removed
+### Fixed
 
-- `appendFinalStepSystemPrompt()` — the final-step directive is now carried as a
-  separate system block rather than concatenated, leaving this with no importer.
+- `publish_document` now carries the complete conditional primary-selection rule in its shared
+  tool descriptor, so named agents and inline runs receive identical guidance whenever the
+  capability is available. `run_and_wait` still equips inline manifests idempotently, but no
+  longer rewrites their prompts with a second copy of that policy.
+
+- `@appstrate/core/run-and-wait-client` — `fetchRunDocuments` now returns only
+  the documents the run itself produced. `GET /api/documents?run_id=…` answers
+  the run's whole document CONTAINER, inputs included, and a `document://`
+  chained in from an earlier run keeps `purpose: 'agent_output'` — so the
+  purpose filter alone let a previous run's output be reported (and rendered in
+  the chat run card) as this run's deliverable. Rows are now kept only when
+  their own `run_id` matches.
+
+## [6.1.0] — 2026-07-29
+
+Additive release. It exists because `packages/core/src` had drifted from the
+published `6.0.0` by 191 lines while carrying the same version number — npm and
+the in-tree source were no longer the same code under the same label, which is
+invisible to anyone consuming core from the registry.
+
+### Added
+
+- **`findRetiredDependencyKeys()`**, plus the `RetiredDependencyKey` and
+  `RetiredDependencyKeyUse` types (`@appstrate/core/dependencies`). Lists the
+  AFPS 1.x `dependencies` keys that AFPS 2.0 retired, each paired with its
+  replacement: `tools` → `mcp_servers`, `providers` → `integrations`. Pure and
+  non-mutating — it reports what it found and decides nothing, so callers apply
+  the direction-dependent policy themselves (reject on author input, warn and
+  never rewrite on already-persisted manifests).
+- **`totalTokens()`** (`@appstrate/core/token-usage`). Sums a `TokenUsage`
+  across all four counters, cache creation and cache read included. Summing
+  only `input_tokens + output_tokens` under-reports every cached turn.
+- **`LlmUsageLedgerRow.pricingStatus`** (`@appstrate/core/module`), optional,
+  `"priced" | "partial" | "unpriced" | null`. Lets a reader distinguish a row
+  priced at zero from a row whose price could not be resolved — previously
+  indistinguishable, both surfacing as `0`.
+
+### Changed
+
+- **`validateManifest()` under `retiredRuntimeTools: "reject"` now also rejects
+  retired `dependencies` keys**, naming the replacement key in the error.
+  Author input carrying `dependencies.tools` or `dependencies.providers` was
+  silently accepted and then inert; it now fails at authoring time.
+
+  Note the asymmetry, which is deliberate: this is a policy on author input,
+  not a shape constraint. `dependencies` stays a loose object (AFPS §10
+  mandates extensibility for objects it does not explicitly close), so
+  **already-published manifests carrying a retired key keep validating and keep
+  running**. Only the `"reject"` policy path is affected — a caller that
+  previously passed such a manifest through `validateManifest` and got a pass
+  will now get a failure.
 
 ## [6.0.0] — 2026-07-26
 
@@ -40,58 +91,18 @@ Major release grouping every contract change the repository accumulated after
 `5.0.0` into ONE coordinated break, so consumers pay a single lockstep cycle:
 the `report` runtime tool is retired in favour of published documents,
 `checkUsageAllowed` gains a required argument, two module-contract signatures
-that were optional-but-always-supplied become required, and a set of exports
-with no importer anywhere is deleted.
+that were optional-but-always-supplied become required, a model provider's
+`featuredModels` / `modelDiscoveryCandidates` widen to `ModelIdSelection` and
+break every READER of those fields, `ChatTurnFinishReason` gains a `"deadline"`
+member that breaks exhaustive switches, `isFinalChatStep` loses its `maxSteps`
+parameter, and a set of exports with no importer anywhere is deleted.
 
-> **Release ordering — consumers FIRST, then the tag.** `@appstrate/afps-shared`
-> stays at `^0.3.1` (already published, nothing to release before this).
->
-> 1. **Bump the five external consumers to `^6.0.0`** in their own repos and
->    push to each repo's **default branch** —
->    `scripts/check-consumer-versions.ts` is the authoritative list and reads
->    each `package.json` off the default branch through the GitHub contents
->    API: `registry` (root + `apps/api` + `apps/web`), `cloud`, `portal`,
->    `connect-helper`, `module-claude-code`. Workspace packages inside this
->    monorepo resolve `workspace:*` and need no bump.
->
->    **Measure this before scheduling the release — for four of the five it is
->    not a version edit.** Actual pins as of 2026-07-26, read off each default
->    branch: `cloud` `^5.0.0`, but `registry` `^2.13.0` (root) / `^2.12.0`
->    (`apps/api`, `apps/web`), `portal` `^2.10.8`, `connect-helper` `^2.19.0`,
->    `module-claude-code` `^2.19.0`. Going to `^6.0.0` means absorbing **four
->    majors** of breaking changes in each of those repos.
->
->    That drift is not new and this release does not cause it — it was simply
->    invisible while the gate fell back to a `GITHUB_TOKEN` that 404'd on every
->    private consumer. Note also that publishing `6.0.0` breaks none of them:
->    a `^2` range keeps resolving 2.x. The gate is a _drift alarm_, not a
->    compatibility guard. So the honest choice at release time is one of:
->    migrate the four repos, publish with an auditable
->    `CONSUMER_DRIFT_POLICY=warn`, or narrow the consumer list in
->    `scripts/check-consumer-versions.ts` to the repos actually kept in
->    lockstep. Decide deliberately; do not discover it when the gate fires.
->
-> 2. **Make sure the repository secret `CONSUMER_LOCKSTEP_TOKEN` exists**
->    (PAT / GitHub App token with `contents:read` on those five repos).
-> 3. **Only then** tag `core@6.0.0` and push it.
->
-> This order is not a preference, it is the only one that can execute:
-> `.github/workflows/publish-core.yml` runs the lockstep gate **before**
-> `npm publish`, and the gate hard-fails on a major mismatch
-> (`cMaj !== lMaj` → `failures++` → `exit 1`). A consumer still pinned to
-> `^5` therefore blocks the publish it was supposedly waiting on.
->
-> The known cost of going first: each consumer's own CI stays red between
-> step 1 and step 3, because `^6.0.0` does not resolve until core is on npm.
-> That window is expected — do not "fix" it by publishing core first.
->
-> **The gate only bites with a token that can read private repos.** All five
-> consumers are private; on a 404 the script logs `not present, skipping` and
-> counts nothing, so a missing/underscoped token makes it report
-> `0 failure(s), 0 warning(s)` having verified nothing. The workflow's
-> "Assert the lockstep gate can actually run" step exists precisely to turn
-> that silent pass into a loud failure — bypassing it is the deliberate act of
-> setting the repository variable `CONSUMER_DRIFT_POLICY` to `warn` or `off`.
+> **How this one shipped:** published 2026-07-27 through the
+> `CONSUMER_DRIFT_POLICY=warn` bypass — variable set, tag pushed, variable
+> deleted immediately. The `X.0.0` carve-out did not exist yet, and three
+> consumers (`registry`, `portal`, `connect-helper`) were four majors behind on
+> a list that still included them. The procedure lives in
+> [`docs/deployment/RELEASING_CORE.md`](../../docs/deployment/RELEASING_CORE.md).
 
 > **Deploy ordering — modules BEFORE the platform**, for the same reason as
 > `5.0.0`: a module implementing `beforeUsage` / `checkUsageAllowed` must be on
@@ -116,6 +127,46 @@ with no importer anywhere is deleted.
   selects the OAuth request shape from `apiKey.includes("sk-ant-oat")` alone, so
   a placeholder missing that marker silently emits the api-key shape and
   upstream rejects it. Non-breaking; nothing existing changes meaning.
+
+- `@appstrate/core/chat-turn-metadata` — the chat turn's TIME budget alongside its
+  existing step budget: `CHAT_TURN_DEADLINE_MS`, `CHAT_TURN_SAFETY_MARGIN_MS`,
+  `CHAT_MIN_RUN_BUDGET_MS`, `CHAT_LAUNCH_THRESHOLD_MS`, plus the pure
+  `computeTurnRunBudget()`, `formatBudgetDuration()` and `formatTurnBudgetNote()`.
+  Both chat engines derive a child call's wait from an absolute turn deadline
+  instead of silently taking `RUN_AND_WAIT_MAX_MS` (30 min), which is three times
+  longer than a turn.
+
+- `@appstrate/core/bearer` — `parseBearer()`, the `Authorization` header parser
+  the module-authoring contract now points `authStrategies()` at: RFC 9110 §11.4
+  makes the auth-scheme a case-insensitive token separated from the credentials
+  by `1*SP`, so a conformant `authorization: bearer ey…` must match, which
+  `startsWith("Bearer ")` rejects. First release carrying the subpath — a module
+  built against an earlier core must parse the header itself.
+
+- `@appstrate/core/run-and-wait-client` — `RUN_RESULT_INLINE_MAX_BYTES` (32 KB) and
+  `truncateRunAndWaitPayload()`: a run result over the cap is cut to a usable
+  head that points back at the run, whose
+  `runs.result` already holds the whole payload (`getRun` returns it) — no copy is
+  made. `launchRunAndWait` forwards the new `context_documents` argument (inline
+  runs only).
+
+- `@appstrate/core/module` — `CatalogModelSelector`, `ModelIdSelection` and the
+  `isCatalogModelSelector()` narrowing guard: a model provider can declare its
+  model lists as `{ catalogFamilies, generations }` instead of enumerating ids.
+  The platform resolves a selector against its vendored pricing catalog on every
+  read, so a new vendor generation reaches the picker with the weekly catalog
+  refresh and no module edit. Meant for providers that track the vendor's
+  current generation and cannot probe (`claude-code`); an explicit array stays
+  right when the served set is defined outside the catalog (`codex`).
+
+### Changed
+
+- `buildPublishDocumentDef()` — the `publish_document` tool description now leads with what
+  only the tool can do (publish DURING the run, get the durable `document://` URI back) instead
+  of steering agents away from it. The `outputs/` sweep is unconditional and shares the same
+  uploader, so the previous "use this tool only to publish a deliverable that lives elsewhere in
+  the workspace" named the one replaceable case and hid the reason to call it at all. Behaviour
+  and schema are unchanged.
 
 ### Changed (BREAKING)
 
@@ -212,6 +263,30 @@ with no importer anywhere is deleted.
   (`droppedRuntimeTools: []` for a synthesised manifest). It is required rather
   than optional so readers never need a `?? []`.
 
+- **`@appstrate/core/chat-turn-metadata` — `isFinalChatStep` loses its
+  `maxSteps` parameter.** The signature is now `(stepNumber: number) => boolean`
+  and the function reads `CHAT_MAX_STEPS` directly. The parameter defaulted to
+  that same constant and no call site ever passed anything else, in this
+  repository or outside it — an option with one possible value is not
+  flexibility, it is a second place the step ceiling can be stated. Callers
+  passing the constant explicitly drop the argument; callers already relying on
+  the default are unaffected. Landed inside this major precisely because it is a
+  source break on a symbol that shipped in `5.0.0` (see #1010).
+
+- `ChatTurnFinishReason` gains `"deadline"` — a turn cut by the engine's
+  wall-clock ceiling is no longer disguised as its last step's provider reason.
+  Breaking for readers: widening the union stops any exhaustive `switch` over it
+  from compiling until the new member is handled.
+
+- `ModelProviderDefinition.featuredModels` widens from `readonly string[]` to
+  `ModelIdSelection` (`readonly string[] | CatalogModelSelector`), and
+  `modelDiscoveryCandidates` with it. **Asymmetric for consumers**: a module
+  that only WRITES these fields — every module passing an array — compiles
+  unchanged, since the array arm is unchanged. Code that READS
+  `def.featuredModels` as a `string[]` (mapping, spreading, `.includes()`) stops
+  compiling and must narrow with `isCatalogModelSelector()` first, or resolve
+  the selection platform-side.
+
 ### Removed (BREAKING)
 
 - **The `report` runtime tool is gone.** It was a deprecated compatibility
@@ -259,6 +334,9 @@ with no importer anywhere is deleted.
   `packageTypeEnum.options` under another name. Use
   `packageTypeEnum.options` (the enum itself is live and re-exported from
   `@afps-spec/schema`).
+
+- `appendFinalStepSystemPrompt()` — the final-step directive is now carried as a
+  separate system block rather than concatenated, leaving this with no importer.
 
 - **`@appstrate/core/semver` — `satisfiesRange()` removed.** No caller.
   `matchVersion`, `isValidRange`, `normalizeVersion`, `compareVersionsDesc`,

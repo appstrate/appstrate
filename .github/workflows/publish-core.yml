@@ -1,5 +1,35 @@
 name: Publish @appstrate/core to npm
 
+# ── RELEASE POLICY for @appstrate/core ───────────────────────────────────────
+# Cadence, not numbering, is what costs consumers. Core shipped four majors in
+# nineteen days — 3.0.0 (2026-07-08), 4.0.0 (07-23), 5.0.0 (07-25), 6.0.0
+# (07-27) — and each one forced a lockstep cycle on every consumer. 6.0.0 is
+# the shape to copy: it grouped every contract change accumulated after 5.0.0
+# into ONE coordinated break.
+#
+# 1. BATCH. Breaking changes accumulate under `[Unreleased]` in
+#    packages/core/CHANGELOG.md until a deliberate major. One major per batch,
+#    not one per break. Why "this break is small, ship it now" is never the
+#    reason to skip the batch: out-of-tree modules import a WIDE surface. The
+#    in-tree modules — the only proxy we can measure — reach for 22 distinct
+#    `@appstrate/core/*` subpaths out of 48 exported (top: errors, module,
+#    permissions, platform-types, chat-turn-metadata, chat-contract). Nearly
+#    half the package faces module authors, and this repo cannot see who
+#    imports what.
+# 2. DECOUPLE FROM THE PLATFORM TRAIN. Publish core when a consumer or an
+#    out-of-tree module author needs the change — not on every platform
+#    release. Core's version is not the platform's.
+# 3. DELETING AN EXPORT WITH NO IMPORTER IS STILL TECHNICALLY BREAKING, but it
+#    does not have to TRIGGER a major — it rides in the next batch. And per (1),
+#    "no importer" only ever means none this repo can see.
+#
+# Batching is a deliberate choice about consumer cost, not a workaround for a
+# broken release path: executing a major is cheap since #1032 removed the
+# structural deadlock (an `X.0.0` release tolerates a consumer exactly one
+# major behind — see the release-ordering procedure in
+# docs/deployment/RELEASING_CORE.md).
+# ─────────────────────────────────────────────────────────────────────────────
+
 on:
   push:
     tags:
@@ -34,7 +64,21 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "22"
-          registry-url: "https://registry.npmjs.org"
+          # NO `registry-url`. It makes setup-node write
+          # `//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}` into ~/.npmrc,
+          # and npm then authenticates with that value instead of falling back
+          # to OIDC. With NODE_AUTH_TOKEN unset the line resolves to an EMPTY
+          # token, which npm sends anyway — failing as unauthenticated rather
+          # than exchanging its OIDC id-token. registry.npmjs.org is already
+          # the default registry, so the input bought nothing.
+
+      # Trusted publishing requires npm >= 11.5.1; Node 22 ships npm 10.x.
+      # Without this the publish fails with a confusing auth error rather
+      # than a version complaint.
+      - name: Upgrade npm for trusted publishing
+        run: |
+          npm install -g npm@latest
+          npm --version
 
       - name: Install dependencies
         run: bun install
@@ -60,61 +104,17 @@ jobs:
             exit 1
           fi
 
-      # ── Precondition for the lockstep gate below ────────────────────────────
-      # `check-consumer-versions.ts` reads five consumer repos through the
-      # GitHub contents API. ALL FIVE ARE PRIVATE (registry, cloud, portal,
-      # connect-helper, module-claude-code). `secrets.GITHUB_TOKEN` is scoped to
-      # THIS repo only, so for a private consumer the API answers 404 — and the
-      # script treats 404 as "not present, skipping" (a legitimate outcome for a
-      # repo that genuinely has no package.json at that path, so the script
-      # cannot tell the two apart).
+      # Release procedure (ordering, bypass, token): docs/deployment/RELEASING_CORE.md
       #
-      # Net effect without a cross-repo token: the gate prints
-      # "0 failure(s), 0 warning(s)" and passes having verified NOTHING. That is
-      # worse than having no gate at all — a fail-closed check that has never
-      # once closed. Make the missing precondition loud instead.
-      #
-      # Bypassing stays possible, but it must be a deliberate act (set the repo
-      # variable CONSUMER_DRIFT_POLICY to `warn` or `off`), never the accident
-      # of an absent secret.
-      - name: Assert the lockstep gate can actually run
-        working-directory: .
-        env:
-          LOCKSTEP_TOKEN: ${{ secrets.CONSUMER_LOCKSTEP_TOKEN }}
-          CONSUMER_DRIFT_POLICY: ${{ vars.CONSUMER_DRIFT_POLICY || 'fail' }}
-        run: |
-          if [ -n "$LOCKSTEP_TOKEN" ]; then
-            echo "CONSUMER_LOCKSTEP_TOKEN is set — the lockstep gate can read the private consumer repos."
-            exit 0
-          fi
-          MSG="CONSUMER_LOCKSTEP_TOKEN is not set. Every consumer repo (appstrate/registry, cloud, portal, connect-helper, module-claude-code) is private, so the fallback GITHUB_TOKEN gets a 404 on all of them and the lockstep gate verifies NOTHING while reporting success."
-          if [ "$CONSUMER_DRIFT_POLICY" = "fail" ]; then
-            echo "::error title=Consumer lockstep gate cannot run::${MSG} Fix: add a repository secret CONSUMER_LOCKSTEP_TOKEN (PAT or GitHub App token with contents:read on those repos). To publish anyway, set the repository variable CONSUMER_DRIFT_POLICY to 'warn' or 'off' — a deliberate, auditable bypass."
-            {
-              echo "### ❌ Consumer lockstep gate: NOT EXECUTED"
-              echo ""
-              echo "${MSG}"
-            } >> "$GITHUB_STEP_SUMMARY"
-            exit 1
-          fi
-          echo "::warning title=Consumer lockstep gate NOT executed::${MSG} CONSUMER_DRIFT_POLICY=${CONSUMER_DRIFT_POLICY} — publishing without verifying consumer versions."
-          {
-            echo "### ⚠️ Consumer lockstep gate: NOT EXECUTED"
-            echo ""
-            echo "${MSG}"
-            echo ""
-            echo "Bypassed on purpose via \`CONSUMER_DRIFT_POLICY=${CONSUMER_DRIFT_POLICY}\`."
-          } >> "$GITHUB_STEP_SUMMARY"
-
+      # Both consumers are private, so there is deliberately no GITHUB_TOKEN
+      # fallback. The script handles every non-2xx according to policy. Only
+      # exact `warn` and `off` values bypass; unknown values fail closed.
       - name: Check consumer-repo lockstep
         working-directory: .
         env:
-          # No `|| secrets.GITHUB_TOKEN` fallback: it cannot read the private
-          # consumer repos, and silently degrading to it is exactly what made
-          # this gate inert. The step above guarantees this is non-empty unless
-          # CONSUMER_DRIFT_POLICY was deliberately relaxed.
           GITHUB_TOKEN: ${{ secrets.CONSUMER_LOCKSTEP_TOKEN }}
-          # `fail` blocks publish if any consumer is >= 2 minors behind.
+          # `fail` blocks on any blocking drift verdict, an unreadable consumer,
+          # or an unparsable range. One-major-behind at X.0.0 remains a warning.
           # Set to `warn` for an emergency hotfix that intentionally outpaces
           # consumers, or `off` to bypass entirely.
           CONSUMER_DRIFT_POLICY: ${{ vars.CONSUMER_DRIFT_POLICY || 'fail' }}
@@ -133,11 +133,30 @@ jobs:
         run: bun scripts/verify-package-resolves.ts packages/core
 
       - name: Publish to npm
+        # Authentication is OIDC trusted publishing, NOT a token — same move as
+        # publish-cli.yml, for a different reason. The CLI HAD to migrate: its
+        # package is unscoped, therefore owned by a personal account whose 2FA
+        # is in `auth-and-writes` mode, and npm refuses every token-based write
+        # under it. `@appstrate/core` never hit that wall because it is
+        # org-owned and governed by the organization's policy instead — token
+        # publishes kept working here throughout. This migrates anyway, so the
+        # publish identity is the workflow rather than a long-lived shared
+        # credential, and so NPM_TOKEN can eventually leave the repository.
+        #
+        # No `--tag`: core versions are stable releases (6.0.0, …), and npm
+        # assigns `latest` to those by default. The CLI needs an explicit
+        # `--tag latest` only because every release on that line is a
+        # `1.0.0-beta.X` prerelease, which npm >= 11 refuses to tag
+        # implicitly. Should core ever publish a prerelease, this step will
+        # fail with that same error — which is the correct outcome: a core
+        # prerelease must NOT silently take over the `latest` dist-tag that
+        # every consumer's `^6.0.0` range resolves against.
+        #
+        # Requires a Trusted Publisher on npmjs.com for @appstrate/core,
+        # pinned to THIS workflow filename.
         run: npm publish --access public --provenance
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3.0.1
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
           generate_release_notes: true

@@ -11,8 +11,15 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { installSessionBridge, truncateToolResult, type InternalSink } from "../src/pi-runner.ts";
+import {
+  derivePiCompactionSettings,
+  installSessionBridge,
+  truncateToolResult,
+  type InternalSink,
+} from "../src/pi-runner.ts";
 import { createFakeSession, createInternalCapture } from "./helpers.ts";
+import type { RunEvent } from "@appstrate/afps-runtime/types";
+import { ASSISTANT_MESSAGE_PROGRESS_EVENT } from "@appstrate/afps-runtime/runner";
 
 const RUN_ID = "run_bridge_test";
 
@@ -61,6 +68,9 @@ describe("installSessionBridge — message_end", () => {
     const textEvent = sink.events.find((e) => e.type === "appstrate.progress");
     expect(textEvent).toBeDefined();
     expect((textEvent as unknown as { message: string }).message).toBe("Line one\nLine two");
+    expect((textEvent as unknown as { data: { event: string } }).data.event).toBe(
+      ASSISTANT_MESSAGE_PROGRESS_EVENT,
+    );
   });
 
   it("emits appstrate.error when stopReason is error", () => {
@@ -982,5 +992,273 @@ describe("installSessionBridge — terminal tools (early stop on output)", () =>
       code: "adapter_error",
       message: "Request was aborted",
     });
+  });
+});
+
+describe("installSessionBridge — tool duration stamping", () => {
+  /** `data` of every tool-result event the bridge emitted, in order. */
+  const resultData = (sink: { events: RunEvent[] }): Array<Record<string, unknown>> =>
+    sink.events
+      .map((e) => (e as unknown as { data?: Record<string, unknown> }).data)
+      .filter((d): d is Record<string, unknown> => d !== undefined && "isError" in d);
+
+  it("stamps durationMs on a start → end pair sharing a toolCallId", async () => {
+    const sink = createInternalCapture();
+    const session = createFakeSession();
+    installSessionBridge(session, sink, RUN_ID);
+
+    session.emit({ type: "tool_execution_start", toolName: "bash", toolCallId: "c1", args: {} });
+    await Bun.sleep(25);
+    session.emit({ type: "tool_execution_end", toolName: "bash", toolCallId: "c1", result: "ok" });
+
+    const ev = sink.events[1] as unknown as { data: { durationMs: number } };
+    expect(ev.data.durationMs).toBeGreaterThanOrEqual(20);
+    expect(ev.data.durationMs).toBeLessThan(5000);
+  });
+
+  it("omits durationMs when the SDK reported no toolCallId", () => {
+    const sink = createInternalCapture();
+    const session = createFakeSession();
+    installSessionBridge(session, sink, RUN_ID);
+
+    session.emit({ type: "tool_execution_start", toolName: "bash", args: {} });
+    session.emit({ type: "tool_execution_end", toolName: "bash", result: "ok" });
+
+    const ev = sink.events[1] as unknown as { data: Record<string, unknown> };
+    expect("durationMs" in ev.data).toBe(false);
+  });
+
+  it("omits durationMs when an end arrives with no matching start", () => {
+    const sink = createInternalCapture();
+    const session = createFakeSession();
+    installSessionBridge(session, sink, RUN_ID);
+
+    // Only the result was observed — e.g. the bridge was installed mid-call.
+    session.emit({ type: "tool_execution_end", toolName: "bash", toolCallId: "c1", result: "ok" });
+
+    const ev = sink.events[0] as unknown as { data: Record<string, unknown> };
+    expect("durationMs" in ev.data).toBe(false);
+  });
+
+  it("attributes durations per call across an interleaved parallel batch", async () => {
+    const sink = createInternalCapture();
+    const session = createFakeSession();
+    installSessionBridge(session, sink, RUN_ID);
+
+    // A-start, B-start, B-end, A-end — the shape a parallel `bash` batch takes.
+    // Both calls share a tool NAME, so a name-keyed map would swap the two.
+    session.emit({ type: "tool_execution_start", toolName: "bash", toolCallId: "a", args: {} });
+    await Bun.sleep(25);
+    session.emit({ type: "tool_execution_start", toolName: "bash", toolCallId: "b", args: {} });
+    await Bun.sleep(25);
+    session.emit({ type: "tool_execution_end", toolName: "bash", toolCallId: "b", result: "ok" });
+    await Bun.sleep(25);
+    session.emit({ type: "tool_execution_end", toolName: "bash", toolCallId: "a", result: "ok" });
+
+    const results = resultData(sink);
+    expect(results).toHaveLength(2);
+    const [b, a] = results as [
+      { toolCallId: string; durationMs: number },
+      { toolCallId: string; durationMs: number },
+    ];
+    expect(b.toolCallId).toBe("b");
+    expect(a.toolCallId).toBe("a");
+    // B ran for one sleep, A for three — the pairing is by id, not by arrival.
+    expect(b.durationMs).toBeGreaterThanOrEqual(20);
+    expect(a.durationMs).toBeGreaterThan(b.durationMs);
+    expect(a.durationMs).toBeGreaterThanOrEqual(65);
+  });
+
+  it("releases each entry on settle, so the map is bounded by in-flight calls", () => {
+    const sink = createInternalCapture();
+    const session = createFakeSession();
+    installSessionBridge(session, sink, RUN_ID);
+
+    for (let i = 0; i < 50; i++) {
+      session.emit({
+        type: "tool_execution_start",
+        toolName: "bash",
+        toolCallId: `c${i}`,
+        args: {},
+      });
+      session.emit({
+        type: "tool_execution_end",
+        toolName: "bash",
+        toolCallId: `c${i}`,
+        result: "ok",
+      });
+    }
+    // The map is private; a replayed end for an already-settled id is the
+    // observable proof that its entry was deleted rather than retained.
+    session.emit({ type: "tool_execution_end", toolName: "bash", toolCallId: "c0", result: "ok" });
+
+    const replay = sink.events[sink.events.length - 1] as unknown as {
+      data: Record<string, unknown>;
+    };
+    expect("durationMs" in replay.data).toBe(false);
+    expect(resultData(sink)).toHaveLength(51);
+  });
+});
+
+describe("installSessionBridge — per-turn context breadcrumb", () => {
+  /** `data` of every `event: "turn"` breadcrumb, in order. */
+  const turns = (sink: { events: RunEvent[] }): Array<Record<string, unknown>> =>
+    sink.events
+      .map((e) => (e as unknown as { data?: Record<string, unknown> }).data)
+      .filter((d): d is Record<string, unknown> => d?.event === "turn");
+
+  /** Settle one assistant turn with the given per-turn usage. */
+  const settleTurn = (session: ReturnType<typeof createFakeSession>, usage?: unknown): void => {
+    session.emit({ type: "message_start", message: { role: "assistant" } });
+    session.pushMessage({ role: "assistant", content: [], ...(usage ? { usage } : {}) });
+    session.emit({ type: "message_end" });
+  };
+
+  it("reports each turn's OWN deltas, not the running totals", () => {
+    const sink = createInternalCapture();
+    const session = createFakeSession();
+    installSessionBridge(session, sink, RUN_ID);
+
+    settleTurn(session, { input: 10, output: 5, cacheRead: 1000, cacheWrite: 200 });
+    settleTurn(session, { input: 4, output: 7, cacheRead: 3000, cacheWrite: 50 });
+
+    const [t1, t2] = turns(sink);
+    expect(t1).toMatchObject({
+      event: "turn",
+      index: 1,
+      inputTokens: 10,
+      outputTokens: 5,
+      cacheReadTokens: 1000,
+      cacheWriteTokens: 200,
+      // input + cacheRead + cacheWrite — output excluded by contract.
+      contextTokens: 1210,
+    });
+    expect(t2).toMatchObject({
+      index: 2,
+      inputTokens: 4,
+      outputTokens: 7,
+      cacheReadTokens: 3000,
+      cacheWriteTokens: 50,
+      contextTokens: 3054,
+    });
+    // The cumulative `appstrate.metric` still carries totals — the breadcrumb
+    // is additive, it does not replace it.
+    const metrics = sink.events.filter((e) => e.type === "appstrate.metric");
+    expect(metrics).toHaveLength(2);
+    expect((metrics[1] as unknown as { usage: { input_tokens: number } }).usage.input_tokens).toBe(
+      14,
+    );
+  });
+
+  it("measures latencyMs from the assistant message_start", async () => {
+    const sink = createInternalCapture();
+    const session = createFakeSession();
+    installSessionBridge(session, sink, RUN_ID);
+
+    session.emit({ type: "message_start", message: { role: "assistant" } });
+    await Bun.sleep(25);
+    session.pushMessage({ role: "assistant", content: [], usage: { input: 1, output: 1 } });
+    session.emit({ type: "message_end" });
+
+    const latency = turns(sink)[0]?.latencyMs as number;
+    expect(latency).toBeGreaterThanOrEqual(20);
+    expect(latency).toBeLessThan(5000);
+  });
+
+  it("omits latencyMs when only a non-assistant message_start was seen", () => {
+    const sink = createInternalCapture();
+    const session = createFakeSession();
+    installSessionBridge(session, sink, RUN_ID);
+
+    // A toolResult frame must not start the model-latency clock.
+    session.emit({ type: "message_start", message: { role: "toolResult" } });
+    session.pushMessage({ role: "assistant", content: [], usage: { input: 1, output: 1 } });
+    session.emit({ type: "message_end" });
+
+    expect("latencyMs" in (turns(sink)[0] ?? {})).toBe(false);
+  });
+
+  it("emits no breadcrumb for a turn the SDK reported without usage", () => {
+    const sink = createInternalCapture();
+    const session = createFakeSession();
+    installSessionBridge(session, sink, RUN_ID);
+
+    settleTurn(session); // no `usage` at all
+    settleTurn(session, { input: 0, output: 0, cacheRead: 500 }); // zero counters
+
+    expect(turns(sink)).toHaveLength(0);
+    // Same gate as the cumulative metric — the two never disagree.
+    expect(sink.events.filter((e) => e.type === "appstrate.metric")).toHaveLength(0);
+  });
+
+  it("keeps the index on settled assistant turns, so a skipped turn is visible", () => {
+    const sink = createInternalCapture();
+    const session = createFakeSession();
+    installSessionBridge(session, sink, RUN_ID);
+
+    settleTurn(session); // settled but usage-less → counted, not emitted
+    settleTurn(session, { input: 3, output: 2 });
+
+    expect(turns(sink).map((t) => t.index)).toEqual([2]);
+  });
+
+  it("stamps the context budget on EVERY turn, so a pruned run's gauge still has a scale", () => {
+    const sink = createInternalCapture();
+    const session = createFakeSession();
+    installSessionBridge(session, sink, RUN_ID, { contextWindow: 200_000 });
+
+    settleTurn(session, { input: 10, output: 5 });
+    settleTurn(session, { input: 4, output: 7 });
+
+    for (const turn of turns(sink)) {
+      expect(turn.contextWindow).toBe(200_000);
+    }
+    expect(turns(sink)).toHaveLength(2);
+  });
+
+  it("omits the key when the bridge was installed without a budget", () => {
+    const sink = createInternalCapture();
+    const session = createFakeSession();
+    installSessionBridge(session, sink, RUN_ID);
+
+    settleTurn(session, { input: 10, output: 5 });
+
+    const turn = turns(sink)[0] ?? {};
+    expect("contextWindow" in turn).toBe(false);
+  });
+
+  it("emits the window derivePiCompactionSettings actually used — the two cannot drift", () => {
+    // Guards the bug this design replaced: a denominator computed by a layer
+    // that does not apply the fallback reported 200 000 for a run the runner
+    // was really sizing at its own default. Feeding the breadcrumb from the
+    // SAME call that sizes the SDK makes that class of drift unrepresentable.
+    for (const model of [
+      { contextWindow: 128_000, maxTokens: 16_384 },
+      { contextWindow: 1_000_000, maxTokens: 32_000 },
+      // Declares no window: only the runner knows what it fell back to.
+      { maxTokens: 16_384 },
+      { contextWindow: null, maxTokens: null },
+    ]) {
+      const derived = derivePiCompactionSettings(model, {});
+      const sink = createInternalCapture();
+      const session = createFakeSession();
+      installSessionBridge(session, sink, RUN_ID, { contextWindow: derived.contextWindow });
+
+      settleTurn(session, { input: 1, output: 1 });
+
+      const turn = turns(sink)[0] ?? {};
+      expect(turn.contextWindow).toBe(derived.contextWindow);
+    }
+  });
+
+  it("a model declaring no window emits the runner's real default, not a caller's guess", () => {
+    const derived = derivePiCompactionSettings({ maxTokens: 16_384 }, {});
+    const sink = createInternalCapture();
+    const session = createFakeSession();
+    installSessionBridge(session, sink, RUN_ID, { contextWindow: derived.contextWindow });
+
+    settleTurn(session, { input: 1, output: 1 });
+
+    expect(turns(sink)[0]?.contextWindow).toBe(200_000);
   });
 });

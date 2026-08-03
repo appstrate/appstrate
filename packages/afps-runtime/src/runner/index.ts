@@ -10,12 +10,20 @@ export {
   type ReduceOptions,
 } from "./reducer.ts";
 export { truncateToolResult, toolResultByteLimit } from "./tool-result.ts";
-export { computeTokenCost, type TokenCost } from "./token-cost.ts";
+export {
+  computeTokenCost,
+  classifyTokenPricing,
+  type TokenCost,
+  type TokenPricingStatus,
+} from "./token-cost.ts";
 export {
   buildProgress,
+  ASSISTANT_MESSAGE_PROGRESS_EVENT,
   buildToolStartProgress,
   buildToolResultProgress,
   buildMetric,
+  buildTurnProgress,
+  TURN_PROGRESS_EVENT,
   buildError,
 } from "./event-builders.ts";
 export {

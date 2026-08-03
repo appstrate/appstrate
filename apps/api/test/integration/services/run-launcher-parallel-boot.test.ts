@@ -34,6 +34,7 @@ import { runPlatformContainer } from "../../../src/services/run-launcher/pi.ts";
 import { mintSinkCredentials } from "../../../src/lib/mint-sink-credentials.ts";
 import type { AppstrateRunPlan } from "../../../src/services/run-launcher/types.ts";
 import type { ExecutionContext } from "@appstrate/afps-runtime/types";
+import { defaultTestAgentResources } from "../../helpers/run-resources.ts";
 
 // ---------------------------------------------------------------------------
 // Fake orchestrator with timing observability
@@ -172,6 +173,7 @@ function buildRunPlan(): AppstrateRunPlan {
       },
     ],
     timeout: 60,
+    resources: defaultTestAgentResources(),
   };
 }
 

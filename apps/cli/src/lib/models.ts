@@ -26,6 +26,14 @@ export interface ModelPreset {
   apiShape: string;
   enabled: boolean;
   isDefault: boolean;
+  /**
+   * The preset's stored credential can no longer serve inference. Such a
+   * preset is LISTED by `GET /api/models` (so it can be reconnected or
+   * deleted) but resolving one would only fail later at the llm-proxy.
+   * Optional + `!== true` semantics: an instance older than this CLI does
+   * not send the field, and absent means live.
+   */
+  needs_reconnection?: boolean;
   source: "built-in" | "custom";
   contextWindow: number | null;
   maxTokens: number | null;

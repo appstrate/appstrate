@@ -268,8 +268,14 @@ describe("bootIntegrations — synthetic api_call surface", () => {
       ),
     );
     try {
-      expect(result.failed).toEqual([]);
       expect(result.tools).toEqual([]);
+      // Hiding `api_call` takes its upload companion with it, which leaves the
+      // integration with nothing callable — a boot-contract violation, so the
+      // spec lands on `failed[]` and the run aborts (see
+      // integrations-boot-zero-tools.test.ts).
+      expect(result.failed).toHaveLength(1);
+      expect(result.failed[0]!.integrationId).toBe(INTEGRATION_ID);
+      expect(result.report.ok).toBe(false);
     } finally {
       await result.shutdown();
     }

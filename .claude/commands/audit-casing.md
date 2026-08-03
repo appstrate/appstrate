@@ -48,7 +48,7 @@ When invoked, this skill:
    - **Agent C — Drizzle TS schema**: every `pgTable()` in `packages/db/src/schema/*.ts` + module schemas. Confirms TS field property names are camelCase, SQL aliases are snake_case.
    - **Agent D — Frontend consumers**: `apps/web/src/` reads of wire DTOs. Confirms no camelCase reads on snake_case fields (would return undefined at runtime).
    - **Agent E — Carve-outs**: Better Auth tables, OIDC plugin tables, ModelProviderDefinition, profile reads, module hook contracts, CloudEvents, Webhooks, BullMQ, audit logs, SSE transform, JSONB internals.
-   - **Agent F — Cross-repo + tests**: cloud, docs, website, module-claude-code, connect-helper, afps-spec + test fixtures + e2e helpers. Confirms no drift introduced by parallel work.
+   - **Agent F — Cross-repo + tests**: cloud, docs, website, connect-helper, afps-spec + test fixtures + e2e helpers. Confirms no drift introduced by parallel work.
 
 Each sub-agent produces a structured report classified by severity:
 
@@ -115,7 +115,7 @@ The sub-agents are **read-only**. They never modify files. After consolidation, 
 - **Every** Drizzle pgTable in `packages/db/src/schema/` is read
 - **Every** OpenAPI component in `apps/api/src/openapi/` is verified
 - **Every** module under `apps/api/src/modules/` is included
-- Cross-repo: cloud, docs, website, module-claude-code, connect-helper, afps-spec (skip `_dev/`)
+- Cross-repo: cloud, docs, website, connect-helper, afps-spec (skip `_dev/`)
 
 ### Performance
 
@@ -271,7 +271,7 @@ For each carve-out:
 4b. Universal DB convention fields: stay camelCase EVERYWHERE (wire + Drizzle + frontend) — verify
 4c. Profile/Member reads: camelCase displayName — verify no profile.display_name violations
 4d. Module hook contracts (module.ts): camelCase interfaces — verify
-4e. ModelProviderDefinition: camelCase — verify in core-providers, module-claude-code, module-codex
+4e. ModelProviderDefinition: camelCase — verify in the in-tree `apps/api/src/modules/core-providers`, `packages/module-claude-code`, `packages/module-codex`
 4f. Connect-helper internal types: camelCase — verify
 4g. JSONB contracts — SPLIT by exposure (this carve-out ONLY covers JSONB that never crosses the wire verbatim):
     - Internal-only JSONB → producer-defined casing OK: token_usage interior snake_case, runs.metadata.creditsUsed camelCase — verify
@@ -291,7 +291,9 @@ Output: per-carve-out ✅/🔴 verdict + any violation found.
 ```
 Mission: verify cross-repo coherence (skip _dev/) + test fixtures.
 
-Repos: cloud, docs, website, module-claude-code, connect-helper, afps-spec
+Repos: cloud, docs, website, connect-helper, afps-spec
+
+Not in this list, and do not add them back: `module-claude-code` (PR #460 moved it in-tree as `packages/module-claude-code` — already covered by the in-tree `packages/` scope), `registry` and `portal` (retired products, same reason they left the core lockstep gate in #1033).
 
 For each:
 - Grep for any 1.x manifest residue (displayName, schemaVersion, fileConstraints, etc.)

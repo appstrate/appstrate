@@ -3,6 +3,7 @@
 import { Hono, type Context } from "hono";
 import { z } from "zod";
 import { getEnv } from "@appstrate/env";
+import { parseBearer } from "@appstrate/core/bearer";
 import type { AppEnv } from "../types/index.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
@@ -87,13 +88,13 @@ const importBody = z.object({
  */
 async function handlePairRedeem(c: Context<AppEnv>) {
   const authHeader = c.req.header("authorization") ?? c.req.header("Authorization");
-  if (!authHeader?.startsWith("Bearer appp_")) {
+  const token = parseBearer(authHeader);
+  if (!token?.startsWith("appp_")) {
     throw unauthorized(
       "POST /api/model-providers-oauth/pair/redeem requires a pairing-token bearer (Authorization: Bearer appp_…)",
     );
   }
 
-  const token = authHeader.slice(7);
   const fromIp = getClientIp(c);
   const consumed = await consumePairing(token, fromIp === "unknown" ? undefined : fromIp);
 
@@ -136,9 +137,11 @@ async function handlePairRedeem(c: Context<AppEnv>) {
   // Deliberate operation-result shape (NOT the bare credential resource —
   // flow-completion exception to the strict rule, #657): the helper's bearer
   // is single-use and consumed by this request, so it cannot follow up with a
-  // GET, and `availableModelIds` is registry-derived operation info (the
-  // provider's featuredModels) that is not part of the credential resource.
-  // The dashboard gets the created credential via GET /pairing/:id polling.
+  // GET. `availableModelIds` is a convenience projection of the credential's
+  // own servable set, resolved through the same accessor the credentials list
+  // uses — the helper's terminal summary and the dashboard must not be able
+  // to print two different lists for one connection. The dashboard gets the
+  // created credential via GET /pairing/:id polling.
   return c.json(result);
 }
 

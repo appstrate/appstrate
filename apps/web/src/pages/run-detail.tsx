@@ -5,8 +5,7 @@ import { useParams, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@appstrate/ui/components/button";
-import { Tabs, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
-import { useTabWithHash } from "../hooks/use-tab-with-hash";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
 import { usePackageDetail } from "../hooks/use-packages";
 import { useRun, useRunLogs } from "../hooks/use-runs";
 import { useRunAgent, useCancelRun } from "../hooks/use-mutations";
@@ -15,14 +14,18 @@ import { useRunRealtime, type RunMetricEvent, type RunLogEvent } from "../hooks/
 import { useCurrentOrgId } from "../hooks/use-org";
 import { useCurrentApplicationId } from "../hooks/use-current-application";
 import { LogViewer } from "../components/log-viewer";
-import { buildLogEntries } from "../components/log-utils";
+import { buildLogEntries, buildTurnRows } from "../components/log-utils";
 import { RunModal } from "../components/run-modal";
 import { PageHeader } from "../components/page-header";
 import { LoadingState, ErrorState } from "../components/page-states";
 import { RunInfoTab } from "../components/run-info-tab";
 import { RunDocumentsTab } from "../components/run-documents-tab";
+import { RunDeliverableTab } from "../components/run-deliverable-tab";
+import { RunDetailTabsController } from "../components/run-detail-tabs-controller";
 import { invalidateOrgStorage } from "../hooks/use-documents";
 import { RunRow } from "../components/run-row";
+import { RunCostReadout } from "../components/run-cost-readout";
+import { ContextGaugeReadout } from "../components/run-context-gauge";
 import { RunDegradedBanner } from "../components/run-degraded-banner";
 import { RunArtifactsBanner } from "../components/run-artifacts-banner";
 import { useMarkReadByRun } from "../hooks/use-notifications";
@@ -31,9 +34,11 @@ import type { components } from "../api/client";
 import { formatDateField } from "../lib/markdown";
 import { JsonView } from "../components/json-view";
 import { useRunMemories, useRunPinned } from "../hooks/use-persistence";
-import { runKeys } from "../lib/query-keys";
+import { runKeys, invalidateRunLogs } from "../lib/query-keys";
+import { inlineRunDisplayName, runPageTitle } from "../lib/run-title";
 import { MemoryPanel } from "../components/persistence/memory-panel";
 import { Play } from "lucide-react";
+import type { RunDetailTab } from "../lib/run-detail-tabs";
 
 /** Wire shape of a persisted log row (spec `RunLog`); `createdAt` is an ISO string. */
 type RunLogEntry = components["schemas"]["RunLog"];
@@ -58,6 +63,7 @@ export function RunDetailPage() {
   // `run?.status` is sufficient — no local mirror needed.
   const status = run?.status;
   const isRunning = !!status && (ACTIVE_RUN_STATUSES as ReadonlySet<string>).has(status);
+  const isTerminal = !!status && !isRunning;
 
   const { data: logs } = useRunLogs(runId);
 
@@ -65,29 +71,36 @@ export function RunDetailPage() {
 
   const markRead = useMarkReadByRun();
 
-  // Auto-mark notification as read when viewing a terminal run. Keyed on
-  // `status`: the SSE run patch carries `status` (see `runUpdateToRunPatch`),
-  // so a run that finalizes while the page is open marks read the moment
-  // status flips terminal. Idempotent server-side (no-op for a non-recipient /
-  // already-read), and `status` is stable once terminal so the effect does not
-  // re-fire on subsequent renders.
+  // Auto-mark notification as read when viewing a terminal run, and refetch the
+  // run's logs. Keyed on `status`: the SSE run patch carries `status` (see
+  // `runUpdateToRunPatch`), so a run that finalizes while the page is open acts
+  // the moment status flips terminal. Idempotent server-side (no-op for a
+  // non-recipient / already-read), and `status` is stable once terminal so the
+  // effect does not re-fire on subsequent renders.
+  //
+  // Why the log refetch is a separate call rather than a consequence of the
+  // global invalidation: see `invalidateRunLogs`. It cannot loop — the effect
+  // depends on `status`/`runId`, never on the logs it refetches.
   useEffect(() => {
     const terminal = !!status && !(ACTIVE_RUN_STATUSES as ReadonlySet<string>).has(status);
     if (run && runId && terminal) {
       markRead.mutate({ params: { path: { runId } } });
+      void invalidateRunLogs(qc, orgId, applicationId, runId);
     }
   }, [status, runId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const runAgent = useRunAgent(packageId);
   const cancelRun = useCancelRun();
   const [inputOpen, setInputOpen] = useState(false);
-  const { historicalLogs, structuredOutput } = useMemo(() => {
+  const { historicalLogs, structuredOutput, turnRows } = useMemo(() => {
     if (!logs) {
-      return { historicalLogs: [], structuredOutput: null };
+      return { historicalLogs: [], structuredOutput: null, turnRows: [] };
     }
-    const { entries, output } = buildLogEntries(logs);
-    return { historicalLogs: entries, structuredOutput: output };
-  }, [logs]);
+    const { entries, output } = buildLogEntries(logs, { isRunTerminal: isTerminal });
+    // Turn breadcrumbs are filtered OUT of the log stream by `buildLogEntries`
+    // and projected here into the Info tab's per-turn table instead.
+    return { historicalLogs: entries, structuredOutput: output, turnRows: buildTurnRows(logs) };
+  }, [logs, isTerminal]);
 
   // `EnrichedRun.result` mirrors the jsonb column as `unknown`; the generated
   // OpenAPI schema is the authority on its shape, so narrow to that rather
@@ -98,6 +111,19 @@ export function RunDetailPage() {
     structuredOutput || (execResult?.output as Record<string, unknown> | undefined) || null;
   const hasOutput = !!finalOutput && Object.keys(finalOutput).length > 0;
   const allLogs = historicalLogs;
+  const primaryDocumentId = run?.primary_document_id ?? null;
+  const hasDeliverable = !!primaryDocumentId;
+  const handlePrimaryDocumentUnavailable = useCallback(
+    (documentId: string) => {
+      const key = runKeys.detail(orgId, applicationId, runId);
+      qc.setQueryData<EnrichedRun>(key, (previous) => {
+        if (!previous || previous.primary_document_id !== documentId) return previous;
+        return { ...previous, primary_document_id: null };
+      });
+      void qc.invalidateQueries({ queryKey: key });
+    },
+    [applicationId, orgId, qc, runId],
+  );
 
   // Run-level memory rows (only those touched during this run).
   const { data: runMemories } = useRunMemories(packageId, runId);
@@ -111,20 +137,6 @@ export function RunDetailPage() {
   // page size; the list query now runs only when the tab is actually opened.
   const documentCount = (run?.document_counts.input ?? 0) + (run?.document_counts.output ?? 0);
 
-  // Default tab: "result" if the run emitted a structured output. Anything
-  // meant for a human is a document, surfaced by the Documents tab.
-  // useTabWithHash respects the URL hash if present.
-  const defaultTab = hasOutput ? "result" : "logs";
-  const [activeTab, setActiveTab] = useTabWithHash(
-    ["result", "logs", "memory", "documents", "info"] as const,
-    defaultTab,
-  );
-  // A bookmarked `#result` on a run with no output selects a tab
-  // whose trigger/content are gated off — render "logs" instead of a blank
-  // pane. Clamp at render only (the hash stays "result"), so if late SSE flips
-  // `hasOutput` true the Result tab reappears and the user's choice is honored.
-  const effectiveTab = activeTab === "result" && !hasOutput ? "logs" : activeTab;
-
   // Per-run SSE for log inserts + live metric updates. Status patches
   // come from `useGlobalRunSync` (mounted in MainLayout), which writes
   // directly into the same `["run", orgId, applicationId, runId]`
@@ -136,9 +148,14 @@ export function RunDetailPage() {
         // `newLog` is runtime-validated by `runLogEventSchema`. Type the patch
         // against the wire `RunLog` (spec) so this writer and `useRunLogs` agree
         // on the element type of the shared `runKeys.logs` cache. Spread carries
-        // the matching fields (id/createdAt are ISO strings on both); only the
-        // spec's lossy `data` (`object`) needs a localized narrow — the SSE frame
-        // strips `data` server-side (`stripPayload`), so it is null in practice.
+        // the matching fields (id/createdAt are ISO strings on both).
+        //
+        // `data` needs a localized narrow, but NOT because the frame is empty:
+        // `use-realtime.ts` opens this stream with `verbose=true`, the flag that
+        // makes `routes/realtime.ts` send `evt.data` rather than
+        // `stripPayload(evt)`, so payloads arrive populated. The cast bridges a
+        // generated-type mismatch: the spec declares `data` as a bare object, so
+        // `schema.d.ts` emits `Record<string, never> | null`.
         const entry: RunLogEntry = {
           ...newLog,
           data: (newLog.data ?? null) as RunLogEntry["data"],
@@ -170,12 +187,18 @@ export function RunDetailPage() {
         // `cost_so_far` instead. The next terminal-status invalidation
         // refetches the canonical row so this in-cache shadow is
         // bounded by the run's lifetime.
+        //
+        // The provenance is patched WITH the number, never separately: a
+        // live `cost` paired with the stale (or absent) status of the
+        // previous read is how a run nothing could price ends up showing a
+        // confident $0.0000 for its whole duration.
         qc.setQueryData<EnrichedRun>(runKeys.detail(orgId, applicationId, runId), (prev) => {
           if (!prev) return prev;
           return {
             ...prev,
             token_usage: metric.tokenUsage ?? prev.token_usage,
             cost: metric.costSoFar,
+            cost_pricing_status: metric.costPricingStatus,
           };
         });
       },
@@ -190,20 +213,27 @@ export function RunDetailPage() {
   const enrichedRun = run;
   const date = run.started_at ? formatDateField(run.started_at) : "";
   const isInline = enrichedRun.package_ephemeral === true;
+  const hasInlineName = !!enrichedRun.agent_name?.trim();
+  const inlineName = inlineRunDisplayName(enrichedRun.agent_name, t("runs.inlineBadge"));
 
   // For inline runs the agent crumb *is* the last crumb (the run itself),
   // so omit href — PageHeader renders it as the current-page indicator.
   const agentCrumb = isInline
     ? {
-        label: enrichedRun.agent_name
-          ? `${enrichedRun.agent_name} (${t("runs.inlineBadge").toLowerCase()})`
-          : t("runs.inlineBadge"),
+        label: hasInlineName
+          ? `${inlineName} (${t("runs.inlineBadge").toLowerCase()})`
+          : inlineName,
       }
     : { label: agent?.display_name || packageId || "", href: `/agents/${packageId}` };
 
   const runCrumbLabel = runNumber
     ? t("run.breadcrumb", { number: runNumber })
     : date || runId?.slice(0, 8) || "";
+  const title = runPageTitle({
+    isInline,
+    inlineName,
+    numberedTitle: runCrumbLabel,
+  });
 
   // Inline agents are 1:1 with their single run — the agent crumb already
   // identifies the run, so a trailing "Run #N" crumb is redundant.
@@ -216,10 +246,10 @@ export function RunDetailPage() {
 
   return (
     <div className="p-6">
-      <PageHeader title={runCrumbLabel} emoji="▶️" breadcrumbs={breadcrumbs} />
+      <PageHeader title={title} breadcrumbs={breadcrumbs} />
 
       <div className="border-border mb-4 rounded-md border">
-        <RunRow run={enrichedRun} disableLink />
+        <RunRow run={enrichedRun} variant="detail" />
       </div>
 
       {agent && (
@@ -252,97 +282,130 @@ export function RunDetailPage() {
 
       <RunArtifactsBanner artifacts={run.artifacts} />
 
-      <div className="mb-4 flex items-center justify-between gap-4">
-        <Tabs
-          value={effectiveTab}
-          onValueChange={(v) =>
-            setActiveTab(v as "logs" | "result" | "memory" | "documents" | "info")
-          }
-        >
-          <TabsList>
-            {hasOutput && <TabsTrigger value="result">{t("run.tabResultGroup")}</TabsTrigger>}
-            <TabsTrigger value="logs">
-              {t("run.tabLogs")}
-              {allLogs.length > 0 && (
-                <span className="bg-primary/15 text-primary ml-1.5 inline-flex items-center justify-center rounded-full px-1.5 py-0.5 text-[10px] leading-none font-medium">
-                  {allLogs.length}
-                </span>
-              )}
-            </TabsTrigger>
-            {hasRunMemory && (
-              <TabsTrigger value="memory">
-                {t("run.tabMemory")}
-                <span className="bg-primary/15 text-primary ml-1.5 inline-flex items-center justify-center rounded-full px-1.5 py-0.5 text-[10px] leading-none font-medium">
-                  {runMemoryCount}
-                </span>
-              </TabsTrigger>
-            )}
-            <TabsTrigger value="documents">
-              {t("run.tabDocuments")}
-              {documentCount > 0 && (
-                <span className="bg-primary/15 text-primary ml-1.5 inline-flex items-center justify-center rounded-full px-1.5 py-0.5 text-[10px] leading-none font-medium">
-                  {documentCount}
-                </span>
-              )}
-            </TabsTrigger>
-            <TabsTrigger value="info">{t("run.tabInfo")}</TabsTrigger>
-          </TabsList>
-        </Tabs>
-        <div className="flex items-center gap-2">
-          {/* Token + cost readout — shown at all times (pending, running,
-              terminal). While the run is active the pulse dot animates and
-              `onMetric` SSE patches `run.token_usage` + `run.cost` in place
-              at the throttled 250 ms cadence; once finalized, the same
-              fields hold the authoritative aggregate written by
-              `finalizeRun`. Defaults to zeros for runs that never produced
-              tokens (the readout is structural, not conditional on data). */}
-          {(() => {
-            const liveUsage = run.token_usage as {
-              input_tokens?: number;
-              output_tokens?: number;
-            } | null;
-            const totalTokens = (liveUsage?.input_tokens ?? 0) + (liveUsage?.output_tokens ?? 0);
-            return (
-              <div className="text-muted-foreground bg-muted/50 flex items-center gap-2 rounded-md px-2.5 py-1 text-xs tabular-nums">
-                {isRunning && (
-                  <span className="bg-primary size-1.5 animate-pulse rounded-full" aria-hidden />
-                )}
-                <span>{totalTokens.toLocaleString()} tokens</span>
-                <span aria-hidden>·</span>
-                <span className="text-foreground font-medium">${(run.cost ?? 0).toFixed(4)}</span>
+      <RunDetailTabsController
+        key={runId}
+        availability={{ hasDeliverable, hasResult: hasOutput, hasMemory: hasRunMemory }}
+      >
+        {({ activeTab, setActiveTab }) => (
+          <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as RunDetailTab)}>
+            {/* `flex-wrap`, not a fixed row: at 375px the tab list alone eats most of
+                the width, and the actions group (cost pill, context gauge, Re-run /
+                Cancel) cannot fit beside it. The tabs themselves scroll inside
+                their bounded region rather than widening the page. */}
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-4">
+              <div className="max-w-full min-w-0 overflow-x-auto pb-1">
+                <TabsList className="w-max">
+                  {hasDeliverable && (
+                    <TabsTrigger value="deliverable">{t("run.tabDeliverable")}</TabsTrigger>
+                  )}
+                  {hasOutput && <TabsTrigger value="result">{t("run.tabResultGroup")}</TabsTrigger>}
+                  <TabsTrigger value="logs">
+                    {t("run.tabLogs")}
+                    {allLogs.length > 0 && (
+                      <span className="bg-primary/15 text-primary ml-1.5 inline-flex items-center justify-center rounded-full px-1.5 py-0.5 text-[10px] leading-none font-medium">
+                        {allLogs.length}
+                      </span>
+                    )}
+                  </TabsTrigger>
+                  {hasRunMemory && (
+                    <TabsTrigger value="memory">
+                      {t("run.tabMemory")}
+                      <span className="bg-primary/15 text-primary ml-1.5 inline-flex items-center justify-center rounded-full px-1.5 py-0.5 text-[10px] leading-none font-medium">
+                        {runMemoryCount}
+                      </span>
+                    </TabsTrigger>
+                  )}
+                  <TabsTrigger value="documents">
+                    {t("run.tabDocuments")}
+                    {documentCount > 0 && (
+                      <span className="bg-primary/15 text-primary ml-1.5 inline-flex items-center justify-center rounded-full px-1.5 py-0.5 text-[10px] leading-none font-medium">
+                        {documentCount}
+                      </span>
+                    )}
+                  </TabsTrigger>
+                  <TabsTrigger value="info">{t("run.tabInfo")}</TabsTrigger>
+                </TabsList>
               </div>
-            );
-          })()}
-          {!isRunning && !isInline && agent && (
-            <Button variant="outline" size="sm" onClick={() => setInputOpen(true)}>
-              <Play className="size-3.5" />
-              {t("run.rerun")}
-            </Button>
-          )}
-          {/* Cancel hidden for remote-origin runs — the process runs on the
+              <div className="flex items-center gap-2">
+                {/* Cost readout — shown at all times (pending, running, terminal).
+              While the run is active the pulse dot animates and `onMetric` SSE
+              patches `run.cost` in place at the throttled 250 ms cadence; once
+              finalized, the field holds the authoritative aggregate written by
+              `finalizeRun`. Structural, not conditional on data. The token
+              count that used to sit beside it moved into the run row's details
+              panel (#1046): it is a diagnostic, read once, where the `$` is a
+              governance figure read at a glance. */}
+                <div className="text-muted-foreground bg-muted/50 flex items-center gap-2 rounded-md px-2.5 py-1 text-xs tabular-nums">
+                  {isRunning && (
+                    <span className="bg-primary size-1.5 animate-pulse rounded-full" aria-hidden />
+                  )}
+                  <RunCostReadout
+                    cost={run.cost}
+                    pricingStatus={run.cost_pricing_status}
+                    className="text-foreground font-medium"
+                  />
+                </div>
+                {/* Context gauge — the state metric the cumulative token total never
+              was (#1046). Numerator AND denominator both ride `turnRows`, so
+              nothing is threaded from the run DTO; see `ContextGaugeReadout`
+              for the readings, the live cadence and when it renders nothing. */}
+                <ContextGaugeReadout turns={turnRows} status={run.status} />
+                {!isRunning && !isInline && agent && (
+                  <Button variant="outline" size="sm" onClick={() => setInputOpen(true)}>
+                    <Play className="size-3.5" />
+                    {t("run.rerun")}
+                  </Button>
+                )}
+                {/* Cancel hidden for remote-origin runs — the process runs on the
               caller's host and the platform cannot signal it. A soft-cancel
               (server flag + CLI poll) is tracked as a follow-up. */}
-          {isRunning && enrichedRun.runOrigin !== "remote" && (
-            <Button
-              variant="destructive"
-              onClick={() => cancelRun.mutate(runId!)}
-              disabled={cancelRun.isPending}
-            >
-              {cancelRun.isPending && <Spinner />} {t("btn.cancel")}
-            </Button>
-          )}
-        </div>
-      </div>
+                {isRunning && enrichedRun.runOrigin !== "remote" && (
+                  <Button
+                    variant="destructive"
+                    onClick={() => cancelRun.mutate(runId!)}
+                    disabled={cancelRun.isPending}
+                  >
+                    {cancelRun.isPending && <Spinner />} {t("btn.cancel")}
+                  </Button>
+                )}
+              </div>
+            </div>
 
-      {effectiveTab === "result" && hasOutput && <JsonView data={finalOutput} />}
+            {hasDeliverable && primaryDocumentId && (
+              <TabsContent value="deliverable" className="mt-0">
+                <RunDeliverableTab
+                  documentId={primaryDocumentId}
+                  onUnavailable={handlePrimaryDocumentUnavailable}
+                />
+              </TabsContent>
+            )}
 
-      {effectiveTab === "logs" && <LogViewer entries={allLogs} />}
+            {hasOutput && (
+              <TabsContent value="result" className="mt-0">
+                <JsonView data={finalOutput} />
+              </TabsContent>
+            )}
 
-      {effectiveTab === "memory" && <MemoryPanel packageId={packageId} runId={runId} />}
+            <TabsContent value="logs" className="mt-0">
+              <LogViewer entries={allLogs} />
+            </TabsContent>
 
-      {effectiveTab === "documents" && runId && <RunDocumentsTab runId={runId} />}
+            {hasRunMemory && (
+              <TabsContent value="memory" className="mt-0">
+                <MemoryPanel packageId={packageId} runId={runId} />
+              </TabsContent>
+            )}
 
-      {effectiveTab === "info" && <RunInfoTab run={enrichedRun} />}
+            <TabsContent value="documents" className="mt-0">
+              {runId && <RunDocumentsTab runId={runId} />}
+            </TabsContent>
+
+            <TabsContent value="info" className="mt-0">
+              <RunInfoTab run={enrichedRun} turns={turnRows} />
+            </TabsContent>
+          </Tabs>
+        )}
+      </RunDetailTabsController>
     </div>
   );
 }

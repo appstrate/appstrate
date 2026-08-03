@@ -26,6 +26,7 @@ import { requestId } from "../../src/middleware/request-id.ts";
 import { errorHandler } from "../../src/middleware/error-handler.ts";
 import { apiVersion } from "../../src/middleware/api-version.ts";
 import { requireAppContext } from "../../src/middleware/app-context.ts";
+import { idempotencyGuard } from "../../src/middleware/idempotency-guard.ts";
 import { getOrgSettings } from "../../src/services/organizations.ts";
 import { initSystemProxies } from "../../src/services/proxy-registry.ts";
 import { initSystemModelProviderKeys } from "../../src/services/model-registry.ts";
@@ -238,6 +239,10 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
     if (!c.get("user")) return next();
     return apiVersionMiddleware(c, next);
   });
+
+  // `Idempotency-Key` honesty guard — mirrors production wiring in
+  // `apps/api/src/index.ts` (last middleware, before every router).
+  app.use("*", idempotencyGuard());
 
   // Mount routes (same order as production)
   const userAgentsRouter = createUserAgentsRouter();

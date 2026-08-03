@@ -35,7 +35,19 @@ permissions:
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # 90, not 30. These are multi-arch builds (`linux/amd64,linux/arm64`) whose
+    # `linux/arm64` half runs under QEMU emulation on an amd64 runner, and the
+    # only thing that normally keeps them short is the `type=gha` layer cache.
+    # That cache is a single repo-wide 10 GB LRU shared with every other
+    # workflow, so an ordinary run of Test/Firecracker/preview between two
+    # releases can evict it. A warm build of the `appstrate` image takes ~7-9
+    # min (beta.41: 6m44, beta.42: 8m41); the cold build that follows an
+    # eviction emulates the whole web bundle on arm64 and blew past 30 min,
+    # which cancelled v1.0.0-beta.43 mid-flight and burnt the tag (release.yml
+    # has no `workflow_dispatch`, so a cancelled release costs a version bump).
+    # The ceiling exists to catch a genuinely hung build, not to bound a cold
+    # cache — keep it well above the cold-build cost.
+    timeout-minutes: 90
     strategy:
       matrix:
         # ⚠️  DUPLICATED MATRIX — keep in lockstep with the identical `include:`
@@ -114,7 +126,7 @@ jobs:
         uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
 
       - name: Log in to GHCR
-        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
+        uses: docker/login-action@371161bbe7024a29a25c5e19bfcbc0804fe9ad2c # v4.5.2
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -774,7 +786,7 @@ jobs:
           fi
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3.0.1
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
           body: ${{ steps.notes.outputs.body }}
           # `fail_on_unmatched_files: false` (the default, pinned explicit for

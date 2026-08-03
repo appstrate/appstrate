@@ -263,13 +263,63 @@ describe("boolean env vars accept empty string (compose `${VAR:-}` pattern)", ()
   });
 });
 
+describe("APP_URL is the canonical public origin", () => {
+  let s: Snap;
+
+  beforeEach(() => {
+    s = snap();
+    setBaseEnv();
+    _resetCacheForTesting();
+  });
+
+  afterEach(() => {
+    restore(s);
+    _resetCacheForTesting();
+  });
+
+  it("normalizes an absolute HTTP(S) URL to its origin", () => {
+    process.env.APP_URL = "https://APP.Example.COM:443/";
+    expect(getEnv().APP_URL).toBe("https://app.example.com");
+  });
+
+  it("rejects a deployment subpath", () => {
+    process.env.APP_URL = "https://app.example.com/app";
+    expect(() => getEnv()).toThrow(/APP_URL: must be an origin only/);
+  });
+
+  it("rejects a malformed absolute URL with an actionable env error", () => {
+    process.env.APP_URL = "app.example.com";
+    expect(() => getEnv()).toThrow(/APP_URL: must be an absolute URL/);
+  });
+
+  it("rejects a non-HTTP(S) scheme", () => {
+    process.env.APP_URL = "ftp://app.example.com";
+    expect(() => getEnv()).toThrow(/APP_URL: only http: and https: are supported/);
+  });
+
+  it("rejects embedded credentials", () => {
+    process.env.APP_URL = "https://operator:secret@app.example.com";
+    expect(() => getEnv()).toThrow(/APP_URL: credentials are not supported/);
+  });
+
+  it("rejects a query string", () => {
+    process.env.APP_URL = "https://app.example.com?tenant=one";
+    expect(() => getEnv()).toThrow(/APP_URL: must be an origin only/);
+  });
+});
+
 // USERCONTENT_URL is the origin agent-authored HTML previews are served from.
-// The preview route reads its PRESENCE as proof of isolation and then serves
-// that HTML as active content in every loading context (`mayServeActiveHtml`),
-// so a value sharing APP_URL's host means untrusted inline script executes on
-// the app's own host. The floor is host inequality — stricter than origin
-// inequality (cookies are host-scoped, so another port/scheme is not
-// separation), and boot must fail rather than silently degrade.
+// Its presence grants no extra execution context — `mayServeActiveHtml` serves
+// active HTML only for a proven iframe load, in every mode. What a value
+// sharing APP_URL's host costs is NOT a stripped response header (the SPA
+// iframe's own `sandbox` attribute survives that, so the document stays
+// opaque-origin): it is a UA that ignores sandboxing entirely, a future
+// app-origin page that frames the preview WITHOUT the attribute (which
+// `frame-ancestors` permits, leaving the response header as the only control),
+// and the storage/cookie/process partition itself. The floor is host
+// inequality — stricter than origin inequality (cookies are host-scoped, so
+// another port/scheme is not separation), and boot must fail rather than
+// silently degrade.
 describe("USERCONTENT_URL must be a genuinely separate preview origin", () => {
   let s: Snap;
 

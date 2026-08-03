@@ -12,6 +12,7 @@ import { useAppConfig } from "../../hooks/use-app-config";
 import { useModels } from "../../hooks/use-models";
 import { useBilling } from "../../hooks/use-billing";
 import { $api } from "../../api/client";
+import { ModelUnavailableBadge } from "../../components/model-availability-badge";
 import { CheckCircle2 } from "lucide-react";
 
 export function OnboardingDoneStep() {
@@ -32,6 +33,9 @@ export function OnboardingDoneStep() {
   );
 
   const defaultModel = models?.find((m) => m.is_default);
+  // A default whose credential is dead is not a completed step — it is named
+  // and marked (recap surface), but it doesn't get the green check.
+  const modelReady = !!defaultModel && !defaultModel.needs_reconnection;
   const invitationCount = orgData?.invitations?.length ?? 0;
 
   if (!orgId) return null;
@@ -73,9 +77,7 @@ export function OnboardingDoneStep() {
           <div className="flex items-center gap-3">
             <CheckCircle2
               size={20}
-              className={
-                defaultModel ? "shrink-0 text-green-500" : "text-muted-foreground shrink-0"
-              }
+              className={modelReady ? "shrink-0 text-green-500" : "text-muted-foreground shrink-0"}
             />
             <div className="flex-1">
               <h3 className="text-sm font-semibold">{t("onboarding.summaryModel")}</h3>
@@ -83,6 +85,7 @@ export function OnboardingDoneStep() {
                 {defaultModel ? defaultModel.label : t("onboarding.summaryModelNone")}
               </span>
             </div>
+            {defaultModel?.needs_reconnection && <ModelUnavailableBadge className="shrink-0" />}
           </div>
         </div>
 

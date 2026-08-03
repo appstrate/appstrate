@@ -47,7 +47,9 @@ import { Spinner } from "../../components/spinner";
 import { TestResultSpan } from "../../components/test-result-span";
 import { InlineEditableLabel } from "../../components/inline-editable-label";
 import { SourceBadge } from "../../components/source-badge";
+import { ModelUnavailableBadge } from "../../components/model-availability-badge";
 import { DefaultCell } from "../../components/default-cell";
+import { isModelUnpriced } from "./model-pricing";
 
 function ModelsList({
   models,
@@ -94,6 +96,10 @@ function ModelsList({
             <TableBody>
               {models.map((m) => {
                 const isBuiltIn = m.source === "built-in";
+                // Pre-spend counterpart of the run's `cost_pricing_status`,
+                // which only reports after the fact. Rule + exclusions live in
+                // `model-pricing.ts`, where they are covered.
+                const isUnpriced = isModelUnpriced(m);
                 const ProviderIcon = getModelIcon(m, registry ?? []);
                 return (
                   <TableRow key={m.id} data-testid={`model-row-${m.id}`}>
@@ -104,6 +110,12 @@ function ModelsList({
                         {!isBuiltIn && !m.enabled && (
                           <Badge variant="secondary" className="opacity-60">
                             {t("models.disabled")}
+                          </Badge>
+                        )}
+                        {m.needs_reconnection && <ModelUnavailableBadge />}
+                        {isUnpriced && (
+                          <Badge variant="warning" title={t("models.unpricedHint")}>
+                            {t("models.unpriced")}
                           </Badge>
                         )}
                       </div>
@@ -120,11 +132,18 @@ function ModelsList({
                       </div>
                     </TableCell>
                     <TableCell>
+                      {/* Shown but disabled, not hidden: `PUT /api/models/default`
+                          answers 409 `model_needs_reconnection` for such a row,
+                          and a control that silently vanishes is what made this
+                          state impossible to reason about. The why is on the
+                          row's `ModelUnavailableBadge` (first cell), whose
+                          `title` sits on a hoverable element. */}
                       <DefaultCell
                         isDefault={m.is_default}
                         defaultLabel={t("models.default")}
                         setLabel={t("models.setDefault")}
                         onSetDefault={() => onSetDefault(m)}
+                        disabled={m.needs_reconnection}
                         testId={`set-default-model-${m.id}`}
                       />
                     </TableCell>
@@ -284,8 +303,14 @@ function CredentialsSection({
                     </TableCell>
                     <TableCell>
                       {pk.needs_reconnection ? (
+                        // The flag also fires on a stored secret that no longer
+                        // decrypts, which reaches api-key credentials — where
+                        // the fix is to re-enter the key (Edit), not to
+                        // reconnect an account.
                         <Badge variant="destructive">
-                          {t("credentials.oauth.needsReconnection")}
+                          {isOauth
+                            ? t("credentials.oauth.needsReconnection")
+                            : t("models.credentialUnavailable")}
                         </Badge>
                       ) : pk.source === "built-in" ? (
                         <span className="text-muted-foreground text-xs">{t("source.builtIn")}</span>

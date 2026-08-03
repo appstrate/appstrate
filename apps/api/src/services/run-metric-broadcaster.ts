@@ -9,7 +9,7 @@
  *
  * Why a separate module — the broadcaster reads
  * `runs (org_id, application_id, package_id)` and aggregates the run's
- * ledger cost via {@link computeRunCost}. Doing that inline in
+ * ledger spend via {@link computeRunSpend}. Doing that inline in
  * {@link PersistingEventSink} would couple the metric write-through to
  * the broadcast read path (two extra queries inside the ingestion hot
  * path) and force the throttle state into the per-event sink instances
@@ -38,9 +38,9 @@
 
 import { db } from "@appstrate/db/client";
 import { runs } from "@appstrate/db/schema";
-import { and, eq, isNull, lt, or } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { notifyRunMetric, type RunMetricNotifyPayload } from "@appstrate/db/notify";
-import { computeRunCost } from "./state/runs.ts";
+import { computeRunSpend } from "./state/runs.ts";
 import { logger } from "../lib/logger.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 
@@ -190,11 +190,39 @@ async function fireBroadcast(runId: string): Promise<void> {
     // jumped back to $0. Bounded by the throttle (one UPDATE per 250 ms
     // window per run). Monotonic-max via WHERE keeps a late finalize
     // race or out-of-order tick from regressing the persisted aggregate.
-    if (payload.cost_so_far > 0) {
+    //
+    // The provenance is written in the SAME `set` so the persisted pair can
+    // never disagree: a refresh that reads a `partial` total without its
+    // caveat marker is the same class of lie as the `$0.0000` this issue is
+    // about. Both are best-effort mid-run — `finalizeRun` writes the
+    // authoritative pair.
+    //
+    // Provenance must NOT inherit the cost's magnitude guard. The two facts
+    // move independently, and every way of coupling them loses the flagship
+    // case: an `unpriced` run accrues tokens and exactly ZERO dollars, so a
+    // `cost_so_far > 0` gate would leave `cost_pricing_status` NULL for the
+    // whole run and a mid-run refresh would render the confident `$0.0000`
+    // this is meant to kill — the live SSE stream being the only honest
+    // surface. Likewise a status can WORSEN while the total stands still (the
+    // first cached call on a model with no `cacheRead` rate is priced at zero),
+    // which a `WHERE cost < new` predicate would swallow.
+    //
+    // So the monotonicity moves INTO the value: `GREATEST` keeps `cost` from
+    // regressing on a late or out-of-order tick, and the row is free to be
+    // updated whenever the status needs it. The status itself is recomputed
+    // from the whole ledger on every tick, so the newest write is the most
+    // informed one; `finalizeRun` still writes the authoritative pair.
+    // Still nothing to say when the ledger holds neither dollars nor a verdict
+    // (a run that has not spent yet): writing `cost = 0` there would replace a
+    // meaningful NULL — "no accounting fact yet" — with a claim of zero spend.
+    if (payload.cost_so_far > 0 || payload.cost_pricing_status !== null) {
       await db
         .update(runs)
-        .set({ cost: payload.cost_so_far })
-        .where(and(eq(runs.id, runId), or(isNull(runs.cost), lt(runs.cost, payload.cost_so_far))));
+        .set({
+          cost: sql`GREATEST(COALESCE(${runs.cost}, 0), ${payload.cost_so_far})`,
+          costPricingStatus: payload.cost_pricing_status,
+        })
+        .where(eq(runs.id, runId));
     }
     await notifyRunMetric(db, payload);
   } catch (err) {
@@ -230,12 +258,16 @@ async function loadRunMetricPayload(runId: string): Promise<RunMetricNotifyPaylo
   // missing package id.
   if (!runRow.packageId) return null;
 
-  // Delegate to `computeRunCost` — the single read path for aggregate run
+  // Delegate to `computeRunSpend` — the single read path for aggregate run
   // cost. It carries the (run_id, org_id) tenant scoping (CRIT-07) AND the
   // remote-run mirror-row exclusion; a local SUM here would have to mirror
   // both filters and had already drifted once (missing the mirror exclusion,
   // double-counting live cost for remote runs on the system proxy).
-  const costSoFar = await computeRunCost(runId, runRow.orgId);
+  //
+  // The provenance rides along for free (same query, same rows): without it a
+  // running unpriced run would stream a confident `$0.0000` and only admit
+  // "unpriced" once finalize caches `runs.cost_pricing_status`.
+  const { costUsd, pricingStatus } = await computeRunSpend(runId, runRow.orgId);
 
   return {
     run_id: runId,
@@ -243,6 +275,7 @@ async function loadRunMetricPayload(runId: string): Promise<RunMetricNotifyPaylo
     application_id: runRow.applicationId,
     package_id: runRow.packageId,
     token_usage: (runRow.tokenUsage as RunMetricNotifyPayload["token_usage"]) ?? null,
-    cost_so_far: costSoFar,
+    cost_so_far: costUsd,
+    cost_pricing_status: pricingStatus,
   };
 }

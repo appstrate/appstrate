@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { META_NAMESPACE_KEY_REGEX } from "@appstrate/core/validation";
+import { findRetiredDependencyKeys } from "@appstrate/core/dependencies";
 
 /**
  * Install-time warnings for `integration` manifests whose `connect.login`
@@ -112,6 +113,29 @@ export function collectConnectLoginWarnings(manifest: unknown): string[] {
   }
 
   return warnings;
+}
+
+/**
+ * Collect install-time warnings for AFPS 1.x `dependencies` keys AFPS 2.0
+ * retired (`tools` → `mcp_servers`, `providers` → `integrations`).
+ *
+ * Author input carrying one is REJECTED upstream by `validateManifest` — this
+ * channel exists for the other direction: a manifest the platform already holds
+ * (a published, integrity-checked artifact re-ingested through a bundle) cannot
+ * be repaired in place, so it is validated with `retiredRuntimeTools: "drop"`
+ * and keeps its retired key. The key is inert (no reader has ever read it), so
+ * nothing is stripped and nothing breaks — but the operator should learn that
+ * the dependencies declared under it were never honoured, and that a republish
+ * is the fix.
+ *
+ * Applies to ALL package types — every type's manifest may declare
+ * `dependencies`. Pure function; returns `[]` for a clean manifest.
+ */
+export function collectRetiredDependencyKeyWarnings(manifest: unknown): string[] {
+  return findRetiredDependencyKeys(manifest).map(
+    ({ key, replacement }) =>
+      `dependencies.${key} is a retired AFPS 1.x key (renamed to dependencies.${replacement}) and is ignored — republish to remove it`,
+  );
 }
 
 /**

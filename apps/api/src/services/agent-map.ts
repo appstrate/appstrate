@@ -375,9 +375,9 @@ export async function buildAgentMap(
             version: versionRef,
           })
         : Promise.resolve(null),
-      // `metadataOnly` resolves each model's provider from the registry without
-      // decrypting its credential — the map only needs ids and the default flag.
-      listOrgModels(orgId, { metadataOnly: true }),
+      // The map only needs ids and the default flag; the resolver's own
+      // credential probe is what decides which rows are renderable.
+      listOrgModels(orgId),
     ]);
 
   const configSchema = agent.manifest.config?.schema

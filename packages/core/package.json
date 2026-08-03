@@ -1,6 +1,6 @@
 {
   "name": "@appstrate/core",
-  "version": "6.0.0",
+  "version": "6.1.0",
   "description": "Shared validation, storage, and utility library for Appstrate packages",
   "license": "Apache-2.0",
   "type": "module",
@@ -84,6 +84,7 @@
     "./chat-contract": "./src/chat-contract.ts",
     "./document-uri": "./src/document-uri.ts",
     "./chat-turn-metadata": "./src/chat-turn-metadata.ts",
+    "./bearer": "./src/bearer.ts",
     "./oauth-bearer-swap": "./src/oauth-bearer-swap.ts",
     "./run-and-wait-client": "./src/run-and-wait-client.ts"
   },

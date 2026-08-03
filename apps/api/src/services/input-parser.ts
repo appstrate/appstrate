@@ -451,12 +451,10 @@ export function assertDocsWithinCap(files: { size: number }[], maxBytes: number)
  * `documents × 5 MiB`. Bounding it keeps the per-run streaming memory floor flat
  * regardless of document count.
  *
- * Exported as the single per-run document fan-out bound: any other per-document
- * loop on the run-launch path (e.g. the inline-run prompt-repair ACL probe)
- * reuses it rather than picking a second number. A probe is strictly cheaper
- * than the stream it precedes, so this ceiling is safe for both.
+ * Module-private: its one consumer is the `mapWithConcurrency` fan-out below
+ * that streams resolved uploads into the run workspace.
  */
-export const DOC_STREAM_CONCURRENCY = 4;
+const DOC_STREAM_CONCURRENCY = 4;
 
 /**
  * Map over `items` running at most `limit` callbacks concurrently, preserving

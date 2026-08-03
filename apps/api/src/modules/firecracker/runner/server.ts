@@ -25,6 +25,7 @@ import type {
   WorkloadSpec,
 } from "@appstrate/core/platform-types";
 import { getErrorMessage } from "@appstrate/core/errors";
+import { parseBearer } from "@appstrate/core/bearer";
 import { logger } from "./logger.ts";
 import {
   BoundaryExistsError,
@@ -157,8 +158,7 @@ export function createRunnerApp(deps: RunnerAppDeps): Hono {
   });
 
   app.use("*", async (c, next) => {
-    const header = c.req.header("authorization");
-    const presented = header?.startsWith("Bearer ") ? header.slice("Bearer ".length) : "";
+    const presented = parseBearer(c.req.header("authorization"));
     if (!presented || !tokenMatches(presented, token)) {
       return c.json({ error: "unauthorized" }, 401);
     }

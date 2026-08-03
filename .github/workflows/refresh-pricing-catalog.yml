@@ -36,6 +36,11 @@ jobs:
         uses: ./.github/actions/bun-setup
 
       - name: Refresh catalog (apply)
+        env:
+          # Per-provider cache-rate coverage + delta, for the PR body assembled
+          # below. Written to the runner temp dir, NEVER the worktree — see the
+          # body-path rationale in the drift step.
+          PRICING_COVERAGE_SUMMARY_PATH: ${{ runner.temp }}/pricing-coverage.md
         run: bun scripts/refresh-pricing-catalog.ts --apply
 
       # rationale: see .github/actions/bun-setup/action.yml
@@ -47,16 +52,92 @@ jobs:
         # without this the drift PR breaks the Check workflow's format:check.
         run: bunx prettier --write "apps/api/src/data/**"
 
+      # Both generated trees count as drift. `subscription-watch/` used to be
+      # outside this condition, so a week where ONLY the ChatGPT model set moved
+      # opened no PR and the regenerated snapshot was discarded on runner
+      # teardown — the "review the curated Codex list when chatgpt.json drifts"
+      # signal that `scripts/refresh-pricing-catalog.ts` and the codex provider
+      # both point at could never actually fire.
       - name: Check for drift
         id: drift
         run: |
-          if git diff --quiet apps/api/src/data/pricing; then
+          git diff --quiet apps/api/src/data/pricing && pricing=false || pricing=true
+          git diff --quiet apps/api/src/data/subscription-watch && watch=false || watch=true
+
+          if [ "$pricing" = false ] && [ "$watch" = false ]; then
             echo "drift=false" >> "$GITHUB_OUTPUT"
             echo "No upstream changes — nothing to commit."
-          else
-            echo "drift=true" >> "$GITHUB_OUTPUT"
-            git diff --stat apps/api/src/data/pricing
+            exit 0
           fi
+
+          echo "drift=true" >> "$GITHUB_OUTPUT"
+          git diff --stat apps/api/src/data
+
+          # The PR body is assembled here rather than inlined on the PR step so
+          # it can name WHICH tree moved. Written to the runner temp dir, never
+          # the worktree: create-pull-request commits every change it finds, and
+          # a body file inside the repo would land in the PR it describes.
+          body="${RUNNER_TEMP}/pr-body.md"
+          {
+          cat <<'EOF'
+          Automated weekly refresh of the vendored LiteLLM catalog. Upstream source:
+          https://github.com/BerriAI/litellm/blob/main/litellm/model_prices_and_context_window_backup.json
+
+          Two generated trees, two different consequences:
+          - `apps/api/src/data/pricing/*.json` — prices + model metadata, read at
+            module-load time by `apps/api/src/services/pricing-catalog.ts`. Merging
+            redeploys with the new prices on the next release.
+          - `apps/api/src/data/subscription-watch/*.json` — id snapshots of
+            subscription backends. Nothing imports them at runtime; they exist as
+            the review signal for the hand-curated subscription lists, and the
+            blocking gate `apps/api/test/unit/services/curated-model-drift.test.ts`
+            reads them at test time. If this PR's checks are red on that test, the
+            snapshot gained an id nobody has ruled on — that is the gate working,
+            not a flake.
+
+          Reviewer checklist:
+          EOF
+
+          if [ "$pricing" = true ]; then
+          cat <<'EOF'
+          - Spot-check 1-2 model price changes against
+            https://openai.com/api/pricing / https://www.anthropic.com/pricing.
+          - Confirm no models we rely on were removed (search `model:`
+            in `apps/api/src/services/llm-proxy/` if unsure).
+          - Read the cache-rate coverage table below. `cacheRead` coverage is
+            inherited from LiteLLM, so it drifts on its own, and a model with no
+            `cacheRead` prices its cached input tokens at zero.
+          EOF
+
+          # Inlined verbatim so the coverage change is reviewed rather than merged
+          # blind. Written by the refresh step to $RUNNER_TEMP (outside the
+          # worktree, same reason as the body itself).
+          coverage="${RUNNER_TEMP}/pricing-coverage.md"
+          if [ -f "$coverage" ]; then
+            printf '\n'
+            cat "$coverage"
+          else
+            printf '\n_Coverage summary missing — the refresh step did not write %s._\n' "$coverage"
+          fi
+          fi
+
+          if [ "$watch" = true ]; then
+          cat <<'EOF'
+          - **The subscription watch snapshot MOVED** — the model set OpenAI serves
+            to ChatGPT sign-in changed. Review the curated Codex list in
+            `packages/module-codex/src/index.ts` (`featuredModels` +
+            `modelDiscoveryCandidates`) against the authoritative doc,
+            https://learn.chatgpt.com/docs/models. For each new id: curate it if the
+            subscription serves it, otherwise record it as reviewed-and-excluded in
+            `apps/api/src/data/subscription-watch/reviewed.json`. This list is
+            documentation-defined, so no probe and no catalog derivation can correct
+            it — a human reading that page is the only mechanism.
+          EOF
+          fi
+          } > "$body"
+
+          echo "body-path=$body" >> "$GITHUB_OUTPUT"
+          cat "$body"
 
       - name: Open PR
         if: steps.drift.outputs.drift == 'true'
@@ -68,24 +149,12 @@ jobs:
           commit-message: |
             chore(pricing): refresh LiteLLM pricing catalog
 
-            Weekly refresh of `apps/api/src/data/pricing/*.json` from
+            Weekly refresh of `apps/api/src/data/pricing/*.json` and
+            `apps/api/src/data/subscription-watch/*.json` from
             BerriAI/litellm (MIT).
           title: "chore(pricing): refresh LiteLLM pricing catalog"
-          body: |
-            Automated weekly refresh of the vendored LiteLLM pricing
-            catalog. Upstream source:
-            https://github.com/BerriAI/litellm/blob/main/litellm/model_prices_and_context_window_backup.json
-
-            Diff scope is `apps/api/src/data/pricing/*.json`.
-            Cost lookup in `apps/api/src/services/pricing-catalog.ts` reads
-            these files at module-load time — merging this PR redeploys with
-            the new prices on the next release.
-
-            Reviewer checklist:
-            - Spot-check 1-2 model price changes against
-              https://openai.com/api/pricing / https://www.anthropic.com/pricing.
-            - Confirm no models we rely on were removed (search `model:`
-              in `apps/api/src/services/llm-proxy/` if unsure).
+          # Assembled by the drift step — it knows which tree moved.
+          body-path: ${{ steps.drift.outputs.body-path }}
           labels: |
             pricing
             automated

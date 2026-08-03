@@ -50,8 +50,10 @@ import {
   activeRunMetricThrottleCount,
 } from "../../../src/services/run-metric-broadcaster.ts";
 import { getRunFull } from "../../../src/services/state/runs.ts";
+import { recordLlmUsage } from "../../../src/services/llm-usage-ledger.ts";
 import type { RunArtifactsSummary } from "@appstrate/db/schema";
-import type { AppstrateModule, RunStatusChangeParams } from "@appstrate/core/module";
+import type { AppstrateModule, ModelCost, RunStatusChangeParams } from "@appstrate/core/module";
+import type { TokenPricingStatus } from "@appstrate/afps-runtime/runner";
 
 const app = getTestApp();
 
@@ -83,6 +85,8 @@ async function seedRunWithSink(
     tokenUsage?: Record<string, number> | null;
     /** Persisted on `runs.modelSource` — forwarded to the terminal broadcast. */
     modelSource?: string | null;
+    /** Persisted on `runs.modelCost` — the kickoff rate snapshot the runner row is classified against. */
+    modelCost?: ModelCost | null;
     /** Persisted on `runs.versionRef` — pins the manifest finalize validates against. */
     versionRef?: string;
   } = {},
@@ -105,6 +109,7 @@ async function seedRunWithSink(
         ? { input_tokens: 100, output_tokens: 50 }
         : overrides.tokenUsage,
     ...(overrides.modelSource !== undefined ? { modelSource: overrides.modelSource } : {}),
+    ...(overrides.modelCost !== undefined ? { modelCost: overrides.modelCost } : {}),
   });
   return runId;
 }
@@ -198,6 +203,42 @@ describe("POST /api/runs/:runId/events — ingestion without Redis-specific coup
 
     const logs = await db.select().from(runLogs).where(eq(runLogs.runId, runId));
     expect(logs).toHaveLength(0);
+  });
+
+  // The envelope schema is `.strict()`, so every CloudEvents attribute the
+  // runtime emits must be modelled or the whole POST 400s. The runtime now
+  // stamps the OPTIONAL `dataschema` attribute on canonical events — assert
+  // the sink accepts it, and that strictness still rejects anything else.
+  it("accepts an envelope carrying the optional dataschema attribute", async () => {
+    const runId = await seedRunWithSink(ctx, "@test/ingest-agent");
+
+    const envelope = {
+      ...buildEnvelope(runId, "log.written", { level: "info", message: "hi" }, 1),
+      dataschema: "https://schemas.afps.dev/v0/events/log.written.schema.json",
+    };
+    const res = await postEvent(runId, envelope);
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean; outcome: string; sequence: number };
+    expect(body).toMatchObject({ ok: true, outcome: "persisted", sequence: 1 });
+
+    // `dataschema` is envelope metadata — it must not leak into the
+    // reconstructed RunEvent payload written to run_logs.
+    const logs = await db.select().from(runLogs).where(eq(runLogs.runId, runId));
+    expect(logs).toHaveLength(1);
+    expect(JSON.stringify(logs[0])).not.toContain("schemas.afps.dev");
+  });
+
+  it("still rejects an unmodelled envelope attribute (strictness preserved)", async () => {
+    const runId = await seedRunWithSink(ctx, "@test/ingest-agent");
+
+    const envelope = {
+      ...buildEnvelope(runId, "log.written", { level: "info", message: "hi" }, 1),
+      subject: "not-modelled",
+    };
+    const res = await postEvent(runId, envelope);
+
+    expect(res.status).toBe(400);
   });
 
   it("dedupes replayed webhook-ids — a second POST with the same id returns replay", async () => {
@@ -590,6 +631,7 @@ describe("POST /api/runs/:runId/events — ingestion without Redis-specific coup
       mime: "text/html",
       size: 1234,
       sha256: "f".repeat(64),
+      presentation: "primary",
     };
     const envelope = buildEnvelope(runId, "document.published", payload, 1);
     const res = await postEvent(runId, envelope);
@@ -608,6 +650,7 @@ describe("POST /api/runs/:runId/events — ingestion without Redis-specific coup
       name: "report.html",
       mime: "text/html",
       size: 1234,
+      presentation: "primary",
     });
   });
 });
@@ -1534,6 +1577,91 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
     const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
     expect(row?.status).toBe("failed");
     expect(row?.tokenUsage).toMatchObject({ input_tokens: 10, output_tokens: 5 });
+  });
+
+  // -------------------------------------------------------------------
+  // Terminal pricing-provenance cache (`runs.cost_pricing_status`) —
+  // written next to `runs.cost`, over the SAME ledger rows, as the WORST
+  // verdict among them. A run can mix per-call proxy rows with its one
+  // cumulative runner row, and a single unpriced call is enough to make the
+  // cached total an undercount.
+  // -------------------------------------------------------------------
+  describe("terminal pricing-provenance cache", () => {
+    /** One per-call proxy row on the run, with an explicit verdict. */
+    async function seedProxyRow(runId: string, pricingStatus: TokenPricingStatus, costUsd: number) {
+      await recordLlmUsage({
+        source: "proxy",
+        orgId: ctx.orgId,
+        runId,
+        credentialSource: "system",
+        inputTokens: 10,
+        outputTokens: 10,
+        costUsd,
+        pricingStatus,
+        requestId: `req_${crypto.randomUUID()}`,
+      });
+    }
+
+    async function finalizeAndRead(runId: string) {
+      const res = await postFinalize(runId, {
+        status: "success",
+        output: { ok: true },
+        durationMs: 100,
+        usage: { input_tokens: 100, output_tokens: 50 },
+        cost: 0.002,
+      });
+      expect(res.status).toBe(200);
+      const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+      return row;
+    }
+
+    it("mixed rows: one `unpriced` runner row poisons an otherwise `priced` run", async () => {
+      const runId = await seedRunWithSink(ctx, "@test/final-agent", {
+        modelSource: "system",
+        modelCost: null, // the model resolved no rates → runner row is `unpriced`
+      });
+      await seedProxyRow(runId, "priced", 0.01);
+
+      const row = await finalizeAndRead(runId);
+      expect(row?.costPricingStatus).toBe("unpriced");
+      // The cached cost still sums both rows — the status qualifies it, it
+      // does not replace it.
+      expect(row?.cost).toBeCloseTo(0.012, 5);
+    });
+
+    it("mixed rows: `partial` wins over `priced` but loses to `unpriced`", async () => {
+      const runId = await seedRunWithSink(ctx, "@test/final-agent", {
+        modelSource: "system",
+        modelCost: { input: 3, output: 15 },
+      });
+      await seedProxyRow(runId, "priced", 0.01);
+      await seedProxyRow(runId, "partial", 0.01);
+
+      expect((await finalizeAndRead(runId))?.costPricingStatus).toBe("partial");
+    });
+
+    it("every row priced → `priced`", async () => {
+      const runId = await seedRunWithSink(ctx, "@test/final-agent", {
+        modelSource: "org",
+        modelCost: { input: 3, output: 15, cacheRead: 0.3 },
+      });
+      await seedProxyRow(runId, "priced", 0.01);
+
+      expect((await finalizeAndRead(runId))?.costPricingStatus).toBe("priced");
+    });
+
+    it("a run whose rows carry no verdict stays NULL — never coerced to `priced`", async () => {
+      // Remote-origin shape: `model_source` NULL ⟹ the runner row carries no
+      // platform verdict, and there is nothing else on the ledger.
+      const runId = await seedRunWithSink(ctx, "@test/final-agent", {
+        modelSource: null,
+        modelCost: null,
+      });
+
+      const row = await finalizeAndRead(runId);
+      expect(row?.costPricingStatus).toBeNull();
+      expect(row?.cost).toBeCloseTo(0.002, 5);
+    });
   });
 });
 

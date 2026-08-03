@@ -23,6 +23,7 @@ import { logger } from "../../lib/logger.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { computeTokenCost } from "@appstrate/afps-runtime/runner";
 import { recordLlmUsageReliably } from "../llm-usage-retry.ts";
+import { resolvePricingStatus } from "../pricing-provenance.ts";
 import type { LlmUsageEntry } from "../llm-usage-ledger.ts";
 import type { ModelCost } from "@appstrate/core/module";
 import type { ModelSwap } from "@appstrate/core/sidecar-types";
@@ -210,6 +211,28 @@ export async function recordProxyUsage(
   }
   const usage: UpstreamUsage = inputs.usage ?? { inputTokens: 0, outputTokens: 0 };
 
+  // Provenance of the cost below, classified from the SAME inputs the cost is
+  // computed from. The `usage-unparsed:` row is classified identically, on
+  // purpose: `pricing_status` answers "did the platform have rates for this
+  // model", which is orthogonal to "could the reply's usage be parsed". The two
+  // failures must stay separable — the parse gap already has its own marker on
+  // `request_id` (see {@link UNPARSED_USAGE_REQUEST_ID_PREFIX}), so folding it
+  // into this column would destroy one signal to restate another. A zero-token
+  // row on an unpriced model is therefore `unpriced`, which is the honest
+  // reading: no rates existed, whatever the token counts turned out to be.
+  const pricingStatus = resolvePricingStatus({
+    orgId: inputs.principal.orgId,
+    model: inputs.presetId,
+    usage: {
+      input_tokens: usage.inputTokens,
+      output_tokens: usage.outputTokens,
+      cache_read_input_tokens: usage.cacheReadTokens ?? 0,
+      cache_creation_input_tokens: usage.cacheWriteTokens ?? 0,
+    },
+    cost: inputs.resolved.cost ?? null,
+    context: { source: "proxy", runId: inputs.runId, realModel: inputs.resolved.modelId },
+  });
+
   await writeEntry({
     source: "proxy",
     orgId: inputs.principal.orgId,
@@ -235,6 +258,7 @@ export async function recordProxyUsage(
     cacheReadTokens: usage.cacheReadTokens ?? null,
     cacheWriteTokens: usage.cacheWriteTokens ?? null,
     costUsd: computeCostUsd(usage, inputs.resolved.cost ?? null),
+    pricingStatus,
     durationMs: inputs.durationMs,
     // Stable across durable retries. `proxy-idempotent` maps an uncertain
     // post-commit acknowledgement to a no-op on replay.

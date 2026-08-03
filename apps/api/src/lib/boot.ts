@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { db, isEmbeddedDb, reservePgConnection, toRows } from "@appstrate/db/client";
+import { CURRENT_API_VERSION, listSupportedVersions } from "./api-versions.ts";
+import { listOrgsWithUnsupportedApiVersion } from "../services/organizations.ts";
 import { expireOldInvitations } from "../services/invitations.ts";
 import { cleanupExpiredKeys } from "../services/api-keys.ts";
 import { cleanupExpiredUploads, startUploadGc } from "../services/uploads.ts";
@@ -239,6 +241,13 @@ export async function bootBackground(): Promise<void> {
   // Reconcile the loaded system packages into the DB + S3.
   await syncSystemPackagesToDb().catch((err) => {
     logger.warn("Could not sync system packages", {
+      error: getErrorMessage(err),
+    });
+  });
+
+  // Surface orgs whose stored API-version pin this build cannot serve.
+  await warnOnUnserveableApiVersionPins().catch((err) => {
+    logger.warn("Could not check organization API version pins", {
       error: getErrorMessage(err),
     });
   });
@@ -587,4 +596,92 @@ function warnOnTrustProxyMisconfig(trustProxy: string, nodeEnv: string): void {
   // runs with TRUST_PROXY=true don't colour the logs red.
   if (nodeEnv === "production") logger.error(msg);
   else logger.info(msg);
+}
+
+/**
+ * Boot-time audit of stored org API-version pins.
+ *
+ * `middleware/api-version.ts` 400s on a pin this build cannot serve, and it is
+ * mounted on `*` — so an org holding an unserveable value fails EVERY org-scoped
+ * route, with the only trace being that org's own 400s. Nothing else notices:
+ * the platform boots clean, health checks pass, other tenants are unaffected.
+ *
+ * Two things can put such a value in the table, and neither is visible in the
+ * code alone. A version dropped from `SUPPORTED_VERSIONS` without the backfill
+ * its docblock mandates; or a historical `PUT /api/orgs/:orgId/settings` from
+ * before that route validated `api_version` (it took a bare `z.string()`, and
+ * the field is declared writable in the OpenAPI spec, so a hand-rolled client
+ * could persist anything). This check covers both.
+ *
+ * Deliberately a LOG, not a migration and not a fail-fast:
+ *   - A migration would repoint the rows, which is a silent write to tenant
+ *     configuration on a hypothesis. It would also fix today's rows once and
+ *     leave the next dropped version unguarded; this fires on every boot.
+ *   - Aborting boot would convert one tenant's misconfiguration into a
+ *     platform-wide outage — strictly worse than the fault it reports.
+ *
+ * Emitted at `error` for the same reason as `warnOnTrustProxyMisconfig`: the
+ * deployment most likely to hit this is the one running `LOG_LEVEL=error`, and
+ * the remedy (one `PUT` per named org) is only actionable if the ids are in the
+ * line. Silent on a healthy instance — zero rows, zero output.
+ */
+async function warnOnUnserveableApiVersionPins(): Promise<void> {
+  const supported = listSupportedVersions();
+  const offenders = await listOrgsWithUnsupportedApiVersion(supported);
+  if (offenders.length === 0) return;
+
+  logger.error(
+    `${offenders.length} organization(s) are pinned to an API version this build cannot serve. ` +
+      `Every org-scoped route will answer 400 unsupported_api_version for them until the pin is ` +
+      `repaired (PUT /api/orgs/:orgId/settings with a supported api_version).`,
+    {
+      supportedVersions: supported,
+      currentVersion: CURRENT_API_VERSION,
+      orgs: offenders.map((o) => ({ orgId: o.id, pinnedVersion: o.apiVersion })),
+    },
+  );
+}
+
+/**
+ * Boot-time reachability probe for `USERCONTENT_URL` (issue #1001).
+ *
+ * The platform *signs* preview URLs (`services/documents.ts` → `mintPreviewUrl`)
+ * but never fetches them — so if `USERCONTENT_URL` is set to a host the browser
+ * cannot reach, every `preview_url` this instance mints is dead with zero
+ * server-side trace. This probe fires ONE unauthenticated GET at the preview
+ * route on that origin and, unless it gets the expected `401` (route exists and
+ * enforces the preview token — the healthy case), emits a single `error`-level
+ * line naming the URL and observed status.
+ *
+ * Never fatal, never awaited, never blocks readiness: it is kicked off
+ * fire-and-forget from `index.ts` AFTER `markServerReady()` so it can't race the
+ * boot gate (which 503s every route until ready — a mid-boot probe against a
+ * hairpin route would see that 503 instead of the real 401 and false-positive on
+ * every boot). Only runs when `USERCONTENT_URL` is defined.
+ */
+export async function probeUsercontentReachability(): Promise<void> {
+  const env = (await import("@appstrate/env")).getEnv();
+  if (!env.USERCONTENT_URL) return; // only meaningful when the origin is configured
+  // Replicate `mintPreviewUrl`'s slash-trim so we probe the exact base we sign.
+  let base = env.USERCONTENT_URL;
+  while (base.endsWith("/")) base = base.slice(0, -1);
+  const url = `${base}/preview/documents/_probe`;
+  const status: number | null = await fetch(url, {
+    method: "GET",
+    redirect: "manual",
+    signal: AbortSignal.timeout(3000),
+  })
+    .then((res) => res.status)
+    // Timeout / connection refused / DNS failure — treated as "not 401".
+    .catch(() => null);
+  if (status === 401) return; // route reached AND enforcing auth → healthy, stay silent
+  logger.error(
+    `USERCONTENT_URL preview probe did not return 401 (got ${status ?? "no response"}). ` +
+      `Every preview_url this instance signs points at ${base} — if that host is unrouted, all ` +
+      `document previews are dead with no server-side trace. NOTE: this probe reaches the host from ` +
+      `INSIDE the container network; a failure here can be a false positive when hairpin-NAT / ` +
+      `split-horizon DNS prevents the container from reaching its own public hostname while browsers ` +
+      `reach it fine. Verify a preview actually fails before acting.`,
+    { url, status },
+  );
 }

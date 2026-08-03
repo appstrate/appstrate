@@ -5,7 +5,7 @@ import { eq } from "drizzle-orm";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestUser, createTestOrg } from "../../helpers/auth.ts";
 import { seedPackage, seedSchedule } from "../../helpers/seed.ts";
-import { schedules } from "@appstrate/db/schema";
+import { organizations, schedules } from "@appstrate/db/schema";
 import {
   createOrganization,
   getUserOrganizations,
@@ -16,9 +16,10 @@ import {
   removeMember,
   updateMemberRole,
   getOrgSettings,
+  listOrgsWithUnsupportedApiVersion,
 } from "../../../src/services/organizations.ts";
 import { toSlug } from "@appstrate/core/naming";
-import { CURRENT_API_VERSION } from "../../../src/lib/api-versions.ts";
+import { CURRENT_API_VERSION, listSupportedVersions } from "../../../src/lib/api-versions.ts";
 
 const slugify = (v: string) => toSlug(v, 50);
 
@@ -75,6 +76,61 @@ describe("organizations service", () => {
 
       const settings = await getOrgSettings(org.id);
       expect(settings.api_version).toBe(CURRENT_API_VERSION);
+    });
+  });
+
+  // ── listOrgsWithUnsupportedApiVersion ─────────────────────
+
+  // Powers the boot-time diagnostic (`lib/boot.ts`). An org holding a pin this
+  // build cannot serve 400s on every org-scoped route with no other signal, so
+  // this query is the only thing that turns that into a startup log line.
+  describe("listOrgsWithUnsupportedApiVersion", () => {
+    const supported = listSupportedVersions();
+
+    async function setPin(orgId: string, orgSettings: Record<string, unknown>) {
+      await db.update(organizations).set({ orgSettings }).where(eq(organizations.id, orgId));
+    }
+
+    it("is silent when every org is pinned to a supported version", async () => {
+      await createOrganization("Healthy", "healthy-pin", userId);
+
+      expect(await listOrgsWithUnsupportedApiVersion(supported)).toEqual([]);
+    });
+
+    it("reports orgs pinned to a version that was dropped, with the offending value", async () => {
+      const org = await createOrganization("Stale", "stale-pin", userId);
+      await setPin(org.id, { api_version: "2020-01-01" });
+
+      const rows = await listOrgsWithUnsupportedApiVersion(supported);
+
+      expect(rows).toEqual([{ id: org.id, apiVersion: "2020-01-01" }]);
+    });
+
+    it("reports a malformed pin too — the middleware rejects it identically", async () => {
+      const org = await createOrganization("Garbage", "garbage-pin", userId);
+      await setPin(org.id, { api_version: "not-a-date" });
+
+      const rows = await listOrgsWithUnsupportedApiVersion(supported);
+
+      expect(rows.map((r) => r.apiVersion)).toEqual(["not-a-date"]);
+    });
+
+    it("ignores orgs with no pin at all — absence falls back, it does not fail", async () => {
+      const org = await createOrganization("Unpinned", "unpinned", userId);
+      await setPin(org.id, { dashboard_sso_enabled: true });
+
+      expect(await listOrgsWithUnsupportedApiVersion(supported)).toEqual([]);
+    });
+
+    it("separates healthy orgs from unserveable ones in a mixed table", async () => {
+      const healthy = await createOrganization("Mixed OK", "mixed-ok", userId);
+      const broken = await createOrganization("Mixed Bad", "mixed-bad", userId);
+      await setPin(broken.id, { api_version: "1999-12-31" });
+
+      const rows = await listOrgsWithUnsupportedApiVersion(supported);
+
+      expect(rows.map((r) => r.id)).toEqual([broken.id]);
+      expect(rows.map((r) => r.id)).not.toContain(healthy.id);
     });
   });
 

@@ -219,6 +219,18 @@ export async function resolvePresetModel(inputs: PresetResolutionInputs): Promis
   return { model, apiKey };
 }
 
+/**
+ * A listed-but-dead preset. Fails here rather than at the first LLM call:
+ * `GET /api/models` no longer hides such a preset, so without this the id
+ * would resolve and the run would die at the llm-proxy with an opaque error.
+ */
+function deadPresetError(presetId: string): ModelResolutionError {
+  return new ModelResolutionError(
+    `Preset "${presetId}" can no longer be used for inference`,
+    "Its credential needs to be reconnected in Settings → Models. Pick another preset, or run with --model-source env.",
+  );
+}
+
 function pickPreset(presets: ModelPreset[], requestedId?: string): ModelPreset {
   if (presets.length === 0) {
     throw new ModelResolutionError(
@@ -241,9 +253,11 @@ function pickPreset(presets: ModelPreset[], requestedId?: string): ModelPreset {
         "Pick another preset or ask an admin to enable it.",
       );
     }
+    if (match.needs_reconnection === true) throw deadPresetError(requestedId);
     return match;
   }
   const defaultPreset = presets.find((p) => p.isDefault && p.enabled);
+  if (defaultPreset?.needs_reconnection === true) throw deadPresetError(defaultPreset.id);
   if (!defaultPreset) {
     throw new ModelResolutionError(
       "No default preset is set on this instance",

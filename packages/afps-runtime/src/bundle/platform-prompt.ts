@@ -64,6 +64,29 @@ export interface PlatformPromptOptions {
   platformName?: string;
   /** Run timeout in seconds — surfaced in the `## System` section. */
   timeoutSeconds?: number;
+  /**
+   * Size cap (MB) of the RAM-backed workspace, when the runner backs it
+   * with a tmpfs. Surfaced as the `- **Disk**` bullet so the agent keeps
+   * bulky scratch work (dependency installs, clones) off the capped
+   * mount. Omit (or pass 0) on backends whose workspace is disk-backed —
+   * the bullet then renders nothing rather than stating a wrong limit.
+   */
+  workspaceTmpfsSizeMb?: number;
+  /**
+   * Percentage cap of the RAM-backed writable root, including the workspace.
+   * Used by microVM backends where all writable paths share one guest-RAM
+   * budget. `workspaceTmpfsSizeMb` takes precedence when both are provided.
+   */
+  workspaceTmpfsSizePercent?: number;
+  /**
+   * Effective agent allocation and the backend semantics that make it
+   * actionable. Omit when the backend does not enforce or size from it.
+   */
+  agentResources?: {
+    readonly memoryMb: number;
+    readonly cpu: number;
+    readonly semantics: "limits" | "sizing";
+  };
 
   /**
    * Bundled skills catalogue. Skills are workspace file references, not
@@ -171,13 +194,50 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
       (hasUploads
         ? "Input documents are available under `./documents/` (relative to cwd) and listed in the `## Documents` section below. "
         : "") +
-      "You may use the filesystem for temporary processing during this run only.\n",
+      "You may use the filesystem for temporary processing during this run only.",
   );
+  // Disk bullet (#1019, #1044). The workspace bullet above invites filesystem
+  // use; without the cap next to it, a dependency install can die with ENOSPC
+  // mid-run. MB takes precedence if a caller accidentally supplies both
+  // backend representations, keeping the output deterministic.
+  if (opts.workspaceTmpfsSizeMb) {
+    sections.push(
+      `- **Disk**: the workspace is a RAM-backed tmpfs capped at ${opts.workspaceTmpfsSizeMb} MB. ` +
+        "Keep dependency installs, clones and other bulky scratch work under `/tmp`, " +
+        "outside this workspace cap. Write user deliverables under `./outputs/`.",
+    );
+  } else if (opts.workspaceTmpfsSizePercent) {
+    sections.push(
+      `- **Disk**: the writable root, including the workspace, is a RAM-backed tmpfs capped at ${opts.workspaceTmpfsSizePercent}% of guest RAM. ` +
+        "All writes consume guest RAM shared with the agent, system, and sidecar. " +
+        "Keep installations, clones, and verification artifacts lean; " +
+        "write user deliverables under `./outputs/`.",
+    );
+  }
+  if (opts.agentResources?.semantics === "limits") {
+    sections.push(
+      `- **Compute**: hard container limits: ${opts.agentResources.memoryMb} MiB RAM and ` +
+        `${opts.agentResources.cpu} vCPU quota. ` +
+        (opts.workspaceTmpfsSizeMb
+          ? "The RAM-backed workspace counts toward this container RAM limit. "
+          : "") +
+        "Exceeding the memory limit can kill a process " +
+        "(often exit 137); fit installations and verification work within this budget.",
+    );
+  } else if (opts.agentResources?.semantics === "sizing") {
+    sections.push(
+      `- **Compute**: agent sizing budget: ${opts.agentResources.memoryMb} MiB RAM and ` +
+        `${opts.agentResources.cpu} vCPU. The microVM adds or shares capacity for the system ` +
+        "and sidecar, so the total visible capacity may be higher; keep agent work within this budget.",
+    );
+  }
+  sections.push("");
 
   // --- Communication contract ---
   // The platform parses ONLY the typed events your tools emit. Plain
-  // assistant text (prose, reasoning, chat-style replies) is never wired
-  // to the user — it lives and dies inside this container. Weaker models
+  // assistant text (prose, reasoning, chat-style replies) is never delivered
+  // to the user as a result — it is retained only as a debug execution trace.
+  // Weaker models
   // default to "here are your results: …" free text, which silently
   // reaches no one. State the invariant explicitly so every result,
   // status update, question, or error is routed through a tool call.
@@ -187,7 +247,7 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
   sections.push("### Communication");
   sections.push(
     "Anything you write as plain text — outside a tool call — is **never delivered to the user**. " +
-      "It stays inside this ephemeral container and is discarded when the run ends. " +
+      "The platform may retain it as a debug execution trace for run operators, but it is not a result or user-facing message. " +
       "The user does not see your prose, your reasoning, or any chat-style reply.\n",
   );
   sections.push(
@@ -197,6 +257,19 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
       'writing a summary or "here are your results", call the appropriate tool instead. ' +
       "If no available tool can carry a given piece of information, that information cannot reach " +
       "the user — do not assume a final text message will be read.\n",
+  );
+  // Batching (#1029). Measured on a reference run: 1.24 tool calls per turn,
+  // 84 of 108 turns carrying exactly one, median turn latency 5.3s / p90
+  // 24.1s — serialised independent calls, not model thinking, dominate the
+  // wall clock. Models default to one call per turn unless told otherwise,
+  // and nothing else in the preamble says they may batch. Stays tool-agnostic
+  // per the #368 contract above; this text is paid for on every run.
+  sections.push(
+    "**Batch independent tool calls.** Every turn is a full round trip to the model, so a turn " +
+      "carrying one call costs the same as a turn carrying five: when several calls do not depend " +
+      "on each other's results, issue them together in the same turn — one turn per question, not " +
+      "one turn per file. Only a call whose input comes from a previous call's result has to wait " +
+      "for its own turn.\n",
   );
 
   // Tools are advertised to the model via MCP `tools/list` (name +
@@ -385,8 +458,13 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
       "Write any file you produce for the user (generated documents, exports, data files) " +
         "under `./outputs/` — everything there is published automatically as a downloadable " +
         "document when the run ends. Hidden files (dotfiles, and anything under a hidden " +
-        "directory) are ignored by this automatic publish. If the user expects a written " +
-        "report or summary, write it as markdown to `./outputs/report.md`.\n",
+        "directory) are ignored by this automatic publish. Give every deliverable a concise, " +
+        "descriptive, task-specific kebab-case filename in the user's language, including enough " +
+        "subject or scope to remain understandable outside this run (for example, " +
+        "`./outputs/analyse-concurrents-restaurants-lyon.md`). Never use context-free names such " +
+        "as `report.md`, `summary.md`, `output.md`, `result.md`, or `document.md`. If the user " +
+        "expects a written report or summary without specifying a format, use markdown with such " +
+        "a descriptive filename.\n",
     );
   }
 

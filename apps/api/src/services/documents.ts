@@ -34,11 +34,12 @@ import {
   inArray,
   notInArray,
   notExists,
+  exists,
   sql,
   type SQL,
 } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { documents, documentLinks, organizations, chatSessions } from "@appstrate/db/schema";
+import { documents, documentLinks, organizations, chatSessions, runs } from "@appstrate/db/schema";
 import type { DocumentPurpose } from "@appstrate/db/schema";
 import {
   uploadStream as storageUploadStream,
@@ -223,9 +224,13 @@ export interface DocumentRow {
   mime: string;
   size: number;
   sha256: string;
+  presentation: DocumentPresentation | null;
   expiresAt: Date | null;
   createdAt: Date;
 }
+
+/** The optional run-page role an agent can assign to a published output. */
+export type DocumentPresentation = "primary";
 
 /**
  * The full access-capability set for one document + caller — the single source
@@ -513,6 +518,8 @@ export interface DocumentDto {
    * to a non-creator reader.
    */
   sha256?: string;
+  /** Optional run-page presentation role assigned by the producing agent. */
+  presentation: DocumentPresentation | null;
   downloadable: boolean;
   /**
    * The full access-capability set for this caller ({@link DocumentCapabilities}).
@@ -542,8 +549,11 @@ export interface DocumentDto {
    * single-document GET (never in list rows, to avoid signing a short-lived
    * token per gallery row). Non-null only for a previewable document. Carries a
    * short-lived signed token (`?t=`); the SPA loads it in an
-   * `sandbox="allow-scripts"` iframe. On the `USERCONTENT_URL` origin when set,
-   * else on `APP_URL`. Absent (undefined) on list rows.
+   * `sandbox="allow-scripts"` iframe — the ONLY context in which an `html`
+   * document is served as active content (any other load, a top-level
+   * navigation above all, gets inert `text/plain` source, in every mode). On
+   * the `USERCONTENT_URL` origin when set, else on `APP_URL`. Absent
+   * (undefined) on list rows.
    */
   preview_url?: string | null;
   expiresAt: string | null;
@@ -612,6 +622,7 @@ export function toDocumentDto(
     mime: view.mime,
     size: row.size,
     ...(view.sha256 !== undefined ? { sha256: view.sha256 } : {}),
+    presentation: row.presentation,
     downloadable: capabilities.download,
     capabilities,
     previewable,
@@ -694,7 +705,7 @@ export async function createDocumentFromUpload(
 
   const { bytes: byteCount, sha256 } = digester.result();
 
-  return commitDocumentRow({
+  const committed = await commitDocumentRow({
     scope,
     documentId,
     storagePath,
@@ -709,6 +720,14 @@ export async function createDocumentFromUpload(
     sha256,
     expiresAt: retentionExpiry(env.DOCUMENT_RETENTION_DAYS),
   });
+  return committed.row;
+}
+
+/** Transactional outcome of committing a just-streamed document object. */
+interface CommittedDocumentRow {
+  row: DocumentRow;
+  deduped: boolean;
+  presentationChanged: boolean;
 }
 
 /**
@@ -734,6 +753,7 @@ async function commitDocumentRow(params: {
   mime: string;
   byteCount: number;
   sha256: string;
+  presentation?: DocumentPresentation;
   expiresAt: Date | null;
   /**
    * Per-run output ceiling ({@link createDocumentFromStream} only). When set,
@@ -754,10 +774,10 @@ async function commitDocumentRow(params: {
    * first — same rationale as the byte cap.
    */
   runMaxDocuments?: number;
-}): Promise<DocumentRow> {
+}): Promise<CommittedDocumentRow> {
   const { scope, documentId, storagePath, byteCount, attribution } = params;
   try {
-    const [row] = await db.transaction(async (tx) => {
+    const committed = await db.transaction(async (tx): Promise<CommittedDocumentRow> => {
       // Lock the org row so a concurrent write cannot both pass the quota
       // re-check on a stale `used`. Exact byte count re-checked here against the
       // org's effective limit (per-org override ?? env quota).
@@ -770,6 +790,33 @@ async function commitDocumentRow(params: {
         .where(eq(organizations.id, scope.orgId))
         .for("update")
         .limit(1);
+
+      // Re-check dedup AFTER acquiring the serialization lock and BEFORE every
+      // quota/cap gate. Two identical concurrent publishes can both miss the
+      // optimistic pre-commit lookup; the loser must still resolve to the
+      // winner even when that winner has just filled the run/org quota. When
+      // requested, promotion happens in this same transaction.
+      if (params.runId && params.purpose === "agent_output") {
+        const existing = await findDedupDocument(
+          tx,
+          scope,
+          params.runId,
+          params.sha256,
+          params.name,
+        );
+        if (existing) {
+          if (params.presentation === "primary" && existing.presentation !== "primary") {
+            const promoted = await promoteRunDocument(tx, scope, params.runId, existing.id);
+            return {
+              row: promoted,
+              deduped: true,
+              presentationChanged: true,
+            };
+          }
+          return { row: existing, deduped: true, presentationChanged: false };
+        }
+      }
+
       assertWithinOrgQuota(
         orgLocked?.used ?? 0,
         byteCount,
@@ -799,6 +846,12 @@ async function commitDocumentRow(params: {
           }
         }
       }
+      if (params.presentation === "primary") {
+        // Switching the featured output is part of the publication transaction:
+        // any later insert failure rolls this update back and preserves the
+        // previous primary. The org lock above serializes competing switches.
+        await clearRunPrimary(tx, scope, params.runId!);
+      }
       const inserted = await tx
         .insert(documents)
         .values({
@@ -816,6 +869,7 @@ async function commitDocumentRow(params: {
           mime: params.mime,
           size: byteCount,
           sha256: params.sha256,
+          presentation: params.presentation ?? null,
           expiresAt: params.expiresAt,
         })
         .returning();
@@ -823,8 +877,16 @@ async function commitDocumentRow(params: {
         .update(organizations)
         .set({ documentsBytesUsed: sql`${organizations.documentsBytesUsed} + ${byteCount}` })
         .where(eq(organizations.id, scope.orgId));
-      return inserted;
+      return {
+        row: inserted[0] as DocumentRow,
+        deduped: false,
+        presentationChanged: params.presentation === "primary",
+      };
     });
+    if (committed.deduped) {
+      await dropDocumentObject(storagePath, "dedup_duplicate");
+      return committed;
+    }
     // Best-effort audit — `recordAudit` swallows its own failures. Emitted from
     // the service (not a route) because these writes run without a request
     // context (materialization behind `createRun`; agent-output ingestion is
@@ -843,7 +905,7 @@ async function commitDocumentRow(params: {
     // One durable document committed (the sole commit seam — an agent-output
     // dedup replay never reaches here, so it is correctly not counted).
     recordDocumentCreated({ purpose: params.purpose });
-    return row as DocumentRow;
+    return committed;
   } catch (err) {
     // DB failed after the bytes landed — drop the object so its bytes are not
     // stranded uncounted in the bucket.
@@ -903,6 +965,8 @@ export interface CreatedDocumentFromStream {
   row: DocumentRow;
   /** True when an identical (run, sha256, name) document already existed. */
   deduped: boolean;
+  /** True when this call changed which document is featured for the run. */
+  presentationChanged: boolean;
 }
 
 /**
@@ -927,12 +991,13 @@ function isUniqueViolation(err: unknown): boolean {
  * concurrent-insert race.
  */
 async function findDedupDocument(
+  executor: DbOrTx,
   scope: AppScope,
   runId: string,
   sha256: string,
   name: string,
 ): Promise<DocumentRow | null> {
-  const [existing] = await db
+  const [existing] = await executor
     .select(documentSelect)
     .from(documents)
     .where(
@@ -947,6 +1012,87 @@ async function findDedupDocument(
     )
     .limit(1);
   return (existing as DocumentRow) ?? null;
+}
+
+/** Clear the featured output for one run inside the caller's transaction. */
+async function clearRunPrimary(executor: DbOrTx, scope: AppScope, runId: string): Promise<void> {
+  await executor
+    .update(documents)
+    .set({ presentation: null })
+    .where(
+      and(
+        eq(documents.runId, runId),
+        eq(documents.orgId, scope.orgId),
+        eq(documents.applicationId, scope.applicationId),
+        eq(documents.presentation, "primary"),
+      ),
+    );
+}
+
+/**
+ * Make an existing run output primary. The clear + promote pair stays behind
+ * this transaction-local seam so every dedup path applies the same invariant.
+ */
+async function promoteRunDocument(
+  executor: DbOrTx,
+  scope: AppScope,
+  runId: string,
+  documentId: string,
+): Promise<DocumentRow> {
+  await clearRunPrimary(executor, scope, runId);
+  const [promoted] = await executor
+    .update(documents)
+    .set({ presentation: "primary" })
+    .where(eq(documents.id, documentId))
+    .returning(documentSelect);
+  if (!promoted) {
+    throw new Error(`Document ${documentId} vanished while selecting the run primary`);
+  }
+  return promoted as DocumentRow;
+}
+
+/**
+ * Promote an already-committed dedup winner without creating a second object.
+ * Uses the same org-first lock as fresh document commits so promotion races and
+ * run teardown share one ordering. Returns null only if the candidate vanished
+ * after the caller's optimistic dedup lookup, in which case ingestion can
+ * continue with the freshly streamed object.
+ */
+async function promoteExistingDocument(
+  scope: AppScope,
+  runId: string,
+  documentId: string,
+): Promise<{ row: DocumentRow; changed: boolean } | null> {
+  return db.transaction(async (tx) => {
+    await tx
+      .select({ id: organizations.id })
+      .from(organizations)
+      .where(eq(organizations.id, scope.orgId))
+      .for("update")
+      .limit(1);
+
+    const [candidate] = await tx
+      .select(documentSelect)
+      .from(documents)
+      .where(
+        and(
+          eq(documents.id, documentId),
+          eq(documents.runId, runId),
+          eq(documents.orgId, scope.orgId),
+          eq(documents.applicationId, scope.applicationId),
+          eq(documents.purpose, "agent_output"),
+        ),
+      )
+      .for("update")
+      .limit(1);
+    if (!candidate) return null;
+    if (candidate.presentation === "primary") {
+      return { row: candidate as DocumentRow, changed: false };
+    }
+
+    const promoted = await promoteRunDocument(tx, scope, runId, documentId);
+    return { row: promoted, changed: true };
+  });
 }
 
 /**
@@ -975,7 +1121,12 @@ export async function createDocumentFromStream(
   runId: string,
   attribution: { userId: string | null; endUserId: string | null },
   packageId: string | null,
-  input: { name: string; mime: string; body: ReadableStream<Uint8Array> },
+  input: {
+    name: string;
+    mime: string;
+    body: ReadableStream<Uint8Array>;
+    presentation?: DocumentPresentation;
+  },
 ): Promise<CreatedDocumentFromStream> {
   const env = getEnv();
   const documentId = prefixedId("doc");
@@ -1018,14 +1169,34 @@ export async function createDocumentFromStream(
   // Dedup fast path: an identical (run, sha256, name) agent_output already
   // exists — the sweep re-published a file the tool already stored, or a retried
   // POST. Drop the freshly-written object and return the existing row.
-  const existing = await findDedupDocument(scope, runId, sha256, input.name);
+  const existing = await findDedupDocument(db, scope, runId, sha256, input.name);
   if (existing) {
-    await dropDocumentObject(storagePath, "dedup_duplicate");
-    return { row: existing, deduped: true };
+    let selected: { row: DocumentRow; changed: boolean } | null;
+    try {
+      selected =
+        input.presentation === "primary"
+          ? await promoteExistingDocument(scope, runId, existing.id)
+          : { row: existing, changed: false };
+    } catch (err) {
+      // The duplicate bytes already landed under a fresh object key, but a
+      // failed promotion creates no row that could own or later GC them.
+      // Preserve the write path's drop-on-error invariant before surfacing the
+      // database failure.
+      await dropDocumentObject(storagePath, "dedup_promotion_failure");
+      throw err;
+    }
+    if (selected) {
+      await dropDocumentObject(storagePath, "dedup_duplicate");
+      return {
+        row: selected.row,
+        deduped: true,
+        presentationChanged: selected.changed,
+      };
+    }
   }
 
   try {
-    const row = await commitDocumentRow({
+    const committed = await commitDocumentRow({
       scope,
       documentId,
       storagePath,
@@ -1039,6 +1210,7 @@ export async function createDocumentFromStream(
       mime: storedMime,
       byteCount,
       sha256,
+      presentation: input.presentation,
       expiresAt: retentionExpiry(env.DOCUMENT_RETENTION_DAYS),
       // Authoritative (and only) per-run cap checks — re-summed/re-counted under
       // the org `FOR UPDATE` lock inside commitDocumentRow. Enforced here, not
@@ -1047,15 +1219,27 @@ export async function createDocumentFromStream(
       runOutputCap: env.RUN_MAX_OUTPUT_BYTES,
       runMaxDocuments: env.RUN_MAX_DOCUMENTS,
     });
-    return { row, deduped: false };
+    return committed;
   } catch (err) {
     // Lost the concurrent-insert race: another publish committed the same
     // (run, sha256, name) between our SELECT and INSERT, so the partial unique
     // index rejected ours. commitDocumentRow already dropped OUR object; recover
     // the winner's row and return it as the dedup case (never double-counts).
     if (isUniqueViolation(err)) {
-      const winner = await findDedupDocument(scope, runId, sha256, input.name);
-      if (winner) return { row: winner, deduped: true };
+      const winner = await findDedupDocument(db, scope, runId, sha256, input.name);
+      if (winner) {
+        const selected =
+          input.presentation === "primary"
+            ? await promoteExistingDocument(scope, runId, winner.id)
+            : { row: winner, changed: false };
+        if (selected) {
+          return {
+            row: selected.row,
+            deduped: true,
+            presentationChanged: selected.changed,
+          };
+        }
+      }
     }
     throw err;
   }
@@ -1170,6 +1354,7 @@ const documentSelect = {
   mime: documents.mime,
   size: documents.size,
   sha256: documents.sha256,
+  presentation: documents.presentation,
   expiresAt: documents.expiresAt,
   createdAt: documents.createdAt,
 } as const;
@@ -1313,6 +1498,7 @@ export interface ListDocumentsFilters {
   packageId?: string;
   runId?: string;
   chatSessionId?: string;
+  contextChatSessionId?: string;
   limit?: number;
   startingAfter?: string;
 }
@@ -1337,6 +1523,65 @@ async function runContainerFilter(scope: AppScope, runId: string): Promise<SQL> 
   const inputDocIds = run ? extractDocumentIds(run.input) : [];
   if (inputDocIds.length === 0) return eq(documents.runId, runId);
   return or(eq(documents.runId, runId), inArray(documents.id, inputDocIds))!;
+}
+
+/**
+ * Documents that make up one conversation's context: direct chat attachments,
+ * outputs produced by its runs, and documents consumed by those runs. The
+ * session ownership check is load-bearing because chat sessions are private
+ * even though dashboard members may read the org-wide run list.
+ */
+async function chatContextDocumentFilter(
+  scope: AppScope,
+  actor: Actor,
+  chatSessionId: string,
+): Promise<SQL> {
+  if (actor.type !== "user") return sql`false`;
+
+  const [session] = await db
+    .select({ id: chatSessions.id })
+    .from(chatSessions)
+    .where(
+      and(
+        eq(chatSessions.id, chatSessionId),
+        eq(chatSessions.orgId, scope.orgId),
+        eq(chatSessions.userId, actor.id),
+      ),
+    )
+    .limit(1);
+  if (!session) return sql`false`;
+
+  return or(
+    eq(documents.chatSessionId, chatSessionId),
+    exists(
+      db
+        .select({ id: runs.id })
+        .from(runs)
+        .where(
+          and(
+            eq(documents.runId, runs.id),
+            eq(runs.orgId, scope.orgId),
+            eq(runs.applicationId, scope.applicationId),
+            eq(runs.chatSessionId, chatSessionId),
+          ),
+        ),
+    ),
+    exists(
+      db
+        .select({ documentId: documentLinks.documentId })
+        .from(documentLinks)
+        .innerJoin(runs, eq(documentLinks.consumerRunId, runs.id))
+        .where(
+          and(
+            eq(documentLinks.documentId, documents.id),
+            eq(documentLinks.orgId, scope.orgId),
+            eq(runs.orgId, scope.orgId),
+            eq(runs.applicationId, scope.applicationId),
+            eq(runs.chatSessionId, chatSessionId),
+          ),
+        ),
+    ),
+  )!;
 }
 
 /**
@@ -1387,6 +1632,9 @@ export async function listDocumentsForActor(
   if (filters.packageId) conditions.push(eq(documents.packageId, filters.packageId));
   if (filters.runId) conditions.push(await runContainerFilter(scope, filters.runId));
   if (filters.chatSessionId) conditions.push(eq(documents.chatSessionId, filters.chatSessionId));
+  if (filters.contextChatSessionId) {
+    conditions.push(await chatContextDocumentFilter(scope, actor, filters.contextChatSessionId));
+  }
 
   if (filters.startingAfter) {
     const [cursor] = await db
@@ -1544,12 +1792,17 @@ export async function detachOrDeleteContainedDocuments(
     const detachIds = containedIds.filter((id) => protectedSet.has(id));
     const deleteIds = containedIds.filter((id) => !protectedSet.has(id));
 
-    // Protected → detach: NULL the container, everything else preserved.
+    // Protected → detach. A run-detached document cannot stay featured on the
+    // deleted run's page, so clear its presentation role in the same update.
     if (detachIds.length > 0) {
       await exec
         .update(documents)
         .set(
-          runIds ? { runId: null } : chatSessionId ? { chatSessionId: null } : { endUserId: null },
+          runIds
+            ? { runId: null, presentation: null }
+            : chatSessionId
+              ? { chatSessionId: null }
+              : { endUserId: null },
         )
         .where(inArray(documents.id, detachIds));
     }

@@ -283,15 +283,36 @@ describe("OAuth clients admin routes (polymorphic)", () => {
     expect(res.status).toBe(201);
   });
 
-  it("POST accepts http://localhost redirect URI in dev mode", async () => {
+  // #1012: the admin path used to accept `http://` only for the two literals
+  // `localhost` / `127.0.0.1`, and only when the platform itself ran on a
+  // localhost APP_URL. It now applies the same RFC 8252 §7.3 loopback test as
+  // the Dynamic Client Registration path, in every environment — so the whole
+  // loopback family registers through the dashboard route.
+  for (const redirectUri of [
+    "http://localhost:5173/auth/callback",
+    "http://127.0.0.1:63785/auth/callback",
+    "http://[::1]:54321/auth/callback",
+    "http://127.5.6.7/auth/callback",
+  ]) {
+    it(`POST accepts the loopback redirect URI ${redirectUri}`, async () => {
+      const res = await app.request("/api/oauth/clients", {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify(applicationLevelBody(ctx, { redirectUris: [redirectUri] })),
+      });
+      expect(res.status).toBe(201);
+    });
+  }
+
+  it("POST still rejects a plain http redirect URI on a non-loopback host", async () => {
     const res = await app.request("/api/oauth/clients", {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
       body: JSON.stringify(
-        applicationLevelBody(ctx, { redirectUris: ["http://localhost:5173/auth/callback"] }),
+        applicationLevelBody(ctx, { redirectUris: ["http://satellite.example.com/cb"] }),
       ),
     });
-    expect(res.status).toBe(201);
+    expect(res.status).toBe(400);
   });
 
   it("POST rejects scopes outside the Appstrate scopes whitelist", async () => {

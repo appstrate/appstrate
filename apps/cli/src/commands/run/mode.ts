@@ -51,6 +51,8 @@ export interface ModeResolutionOpts {
   report?: string;
   reportFallback?: string;
   sinkTtl?: number;
+  // Remote-only flag — flagged at validation time when in local mode.
+  cancelOnExit?: boolean | undefined;
 }
 
 export class ExecutionModeError extends Error {
@@ -96,14 +98,28 @@ export function resolveExecutionMode(target: RunTarget, opts: ModeResolutionOpts
 /**
  * Validate that the user-supplied flags are compatible with the resolved
  * execution mode. Local-only flags are rejected in remote mode with a
- * clear hint pointing at `--local` as the opt-in.
+ * clear hint pointing at `--local` as the opt-in, and symmetrically for
+ * remote-only flags in local mode.
  *
  * Kept separate from `resolveExecutionMode` so the dispatch can branch
- * on mode FIRST (allows the local path to call this and ignore remote-
- * only checks symmetrically — currently there are no remote-only flags).
+ * on mode FIRST.
  */
 export function validateOptsForMode(mode: ExecutionMode, opts: ModeResolutionOpts): void {
-  if (mode === "local") return;
+  if (mode === "local") {
+    // `--cancel-on-exit` decides what a signal does to a PLATFORM-side
+    // run. A local run executes in this very process — it dies with the
+    // CLI no matter what — so the flag has nothing to act on. Reject
+    // rather than accept-and-ignore, same contract as the remote branch.
+    if (opts.cancelOnExit !== undefined) {
+      const flag = opts.cancelOnExit ? "--cancel-on-exit" : "--no-cancel-on-exit";
+      throw new ExecutionModeError(
+        `The following flags are not supported in local execution mode:\n` +
+          `  ${flag} — the in-process runner dies with the CLI; there is no platform-side run to keep alive`,
+        "Drop the flag, or pass --remote to run the agent on the pinned instance.",
+      );
+    }
+    return;
+  }
 
   // Remote mode — surface anything that only makes sense locally.
   // `--report*` and `--sink-ttl` are tied to the **local-execution**

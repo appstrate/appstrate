@@ -43,7 +43,7 @@ import {
   setResourceEntries,
   getRuntimeTools,
   setRuntimeTools,
-  withNormalizedRuntimeTools,
+  withNormalizedManifest,
   toResourceEntry,
   fieldsToSchema,
 } from "../components/agent-editor/utils";
@@ -76,11 +76,18 @@ function AgentEditorInner({
   resolvedDeps,
   packageId,
   isEdit,
+  effectiveTimeoutSeconds,
 }: {
   initialState: AgentEditorState;
   resolvedDeps: { skills: unknown[] } | null;
   packageId: string | undefined;
   isEdit: boolean;
+  /**
+   * Timeout this deployment will actually enforce (server-computed: declared
+   * value clamped to `PLATFORM_RUN_LIMITS.timeout_ceiling_seconds`). Read off
+   * the agent detail the page already loaded — undefined when creating.
+   */
+  effectiveTimeoutSeconds?: number;
 }) {
   const { t } = useTranslation(["agents", "common"]);
   const navigate = useNavigate();
@@ -117,6 +124,27 @@ function AgentEditorInner({
 
   const metadata = useMemo(() => manifestToMetadata(state.manifest), [state.manifest]);
   const onMetadataChange = (m: MetadataState) => updateManifest(metadataToManifestPatch(m));
+
+  // Deployment run-timeout ceiling, surfaced as a non-blocking hint under the
+  // timeout field. The server sends only `effective_timeout_seconds`
+  // (= min(declared, ceiling)), which pins the ceiling EXACTLY when it clamped
+  // the saved declaration. When it did not clamp, the ceiling is only known to
+  // be >= that value, so we stay silent rather than warn about a number we
+  // cannot judge. `undefined` here = no hint.
+  const savedTimeout =
+    typeof initialState.manifest.timeout === "number" ? initialState.manifest.timeout : undefined;
+  const declaredTimeout =
+    typeof state.manifest.timeout === "number" ? state.manifest.timeout : undefined;
+  const knownCeiling =
+    effectiveTimeoutSeconds !== undefined &&
+    savedTimeout !== undefined &&
+    effectiveTimeoutSeconds < savedTimeout
+      ? effectiveTimeoutSeconds
+      : undefined;
+  const timeoutCeilingSeconds =
+    knownCeiling !== undefined && declaredTimeout !== undefined && declaredTimeout > knownCeiling
+      ? knownCeiling
+      : undefined;
 
   // Schema fields are stored in local state to preserve fields being edited (empty key).
   // Only complete fields are persisted to the manifest via fieldsToSchema.
@@ -189,21 +217,34 @@ function AgentEditorInner({
     >
       {activeTab === "general" && (
         <MetadataSection value={metadata} onChange={onMetadataChange} isEdit={isEdit}>
-          <FormField
-            id="meta-timeout"
-            label={t("editor.execTimeout")}
-            type="number"
-            min={1}
-            value={typeof state.manifest.timeout === "number" ? String(state.manifest.timeout) : ""}
-            onChange={(v) => {
-              const n = parseInt(v, 10);
-              // `undefined` clears the key through the shallow manifest merge
-              // (JSON serialization drops it on save → server default, 300s).
-              updateManifest({ timeout: Number.isNaN(n) ? undefined : n });
-            }}
-            placeholder="300"
-            description={t("editor.execTimeoutDesc")}
-          />
+          <div className="space-y-2">
+            <FormField
+              id="meta-timeout"
+              label={t("editor.execTimeout")}
+              type="number"
+              min={1}
+              value={
+                typeof state.manifest.timeout === "number" ? String(state.manifest.timeout) : ""
+              }
+              onChange={(v) => {
+                const n = parseInt(v, 10);
+                // `undefined` clears the key through the shallow manifest merge
+                // (JSON serialization drops it on save → server default, 300s).
+                updateManifest({ timeout: Number.isNaN(n) ? undefined : n });
+              }}
+              placeholder="300"
+              description={t("editor.execTimeoutDesc")}
+            />
+            {/* Non-blocking: the ceiling is deployment-specific, so a manifest
+                declaring above it stays valid (and portable to a deployment
+                with a higher ceiling). We only tell the author what this
+                deployment will actually enforce — never clamp the input. */}
+            {timeoutCeilingSeconds !== undefined && (
+              <p className="text-sm text-amber-400">
+                {t("editor.execTimeoutCapped", { seconds: timeoutCeilingSeconds })}
+              </p>
+            )}
+          </div>
         </MetadataSection>
       )}
       {activeTab === "prompt" && (
@@ -575,7 +616,7 @@ export function PackageEditorPage({ type }: { type: PackageType }) {
     const initialState: AgentEditorState =
       isEdit && agentDetail
         ? {
-            manifest: withNormalizedRuntimeTools(agentDetail.manifest ?? {}),
+            manifest: withNormalizedManifest(agentDetail.manifest ?? {}),
             prompt: agentDetail.prompt || "",
             lock_version: agentDetail.lock_version,
           }
@@ -588,6 +629,7 @@ export function PackageEditorPage({ type }: { type: PackageType }) {
         resolvedDeps={agentDetail?.dependencies ?? null}
         packageId={packageId}
         isEdit={isEdit}
+        effectiveTimeoutSeconds={agentDetail?.effective_timeout_seconds}
       />
     );
   }

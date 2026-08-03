@@ -84,6 +84,15 @@ describe("Internal API", () => {
       expect(res.status).toBe(403);
     });
 
+    // RFC 9110 §11.4 — the auth-scheme is a case-insensitive token. The run
+    // token itself stays byte-exact; only the scheme folds.
+    it("accepts a lowercase `bearer` scheme on the run token", async () => {
+      const res = await app.request("/internal/run-history", {
+        headers: { Authorization: `bearer ${runningToken}` },
+      });
+      expect(res.status).toBe(200);
+    });
+
     it("returns empty array for first run (no prior history)", async () => {
       const res = await app.request("/internal/run-history", {
         headers: { Authorization: `Bearer ${runningToken}` },

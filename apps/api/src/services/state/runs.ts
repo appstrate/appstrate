@@ -15,6 +15,7 @@ import {
   gte,
   lte,
   max,
+  exists,
   type SQL,
   sql,
 } from "drizzle-orm";
@@ -32,10 +33,11 @@ import {
   organizations,
   documents,
   documentLinks,
-  runStatusValues,
+  chatSessions,
   activeRunStatusValues,
   terminalRunStatusValues,
   type RunStatus,
+  type PricingStatus,
 } from "@appstrate/db/schema";
 import { extractDocumentIds } from "@appstrate/core/document-uri";
 import { getEnv } from "@appstrate/env";
@@ -54,7 +56,7 @@ import { ApiError, conflict, invalidRequest } from "../../lib/errors.ts";
 import { getPlatformRunLimits } from "../run-limits.ts";
 import { detachOrDeleteContainedDocuments } from "../documents.ts";
 import { normalizeScope } from "@appstrate/core/naming";
-import type { LlmUsageLedgerRow } from "@appstrate/core/module";
+import type { LlmUsageLedgerRow, ModelCost } from "@appstrate/core/module";
 import type { AppScope, OrgScope } from "../../lib/scope.ts";
 import type {
   RunWireDto,
@@ -147,6 +149,17 @@ function enrichedRunSelect(actor: Actor | null) {
       select count(*) from ${documents}
       where ${documents.runId} = ${runs.id} and ${documents.purpose} = 'agent_output'
     )`,
+    // The presentation role lives on the produced document so its lifecycle
+    // remains the single source of truth. The partial unique index on
+    // documents(run_id) WHERE presentation = 'primary' makes this scalar
+    // lookup deterministic and cheap.
+    primaryDocumentId: sql<string | null>`(
+      select ${documents.id} from ${documents}
+      where ${documents.runId} = ${runs.id}
+        and ${documents.purpose} = 'agent_output'
+        and ${documents.presentation} = 'primary'
+      limit 1
+    )`,
   };
 }
 
@@ -186,6 +199,7 @@ type EnrichedRunRow = {
   packageEphemeral: boolean | null;
   unread: boolean;
   outputDocumentCount: number;
+  primaryDocumentId: string | null;
 };
 
 /**
@@ -235,6 +249,7 @@ function runRowToWireDto(row: typeof runs.$inferSelect): RunWireDto {
     completed_at: row.completedAt?.toISOString() ?? null,
     duration: row.duration,
     cost: row.cost,
+    cost_pricing_status: row.costPricingStatus,
     runNumber: row.runNumber,
     token_usage: row.tokenUsage,
     version_label: row.versionLabel,
@@ -293,6 +308,7 @@ function mapEnrichedRun(r: EnrichedRunRow): EnrichedRun {
       input: extractDocumentIds(r.run.input).length,
       output: Number(r.outputDocumentCount),
     },
+    primary_document_id: r.primaryDocumentId ?? null,
   };
 }
 
@@ -405,6 +421,13 @@ interface CreateRunParams {
   proxyLabel?: string;
   modelLabel?: string;
   modelSource?: string;
+  /**
+   * Per-1M-token rates the run is launched with (the `MODEL_COST` the container
+   * receives). Persisted so the runner's ledger row — whose `cost` the container
+   * computes — is classified against a platform-side fact rather than the
+   * container's word. Absent/null = the model resolved no pricing.
+   */
+  modelCost?: ModelCost | null;
   apiKeyId?: string;
   /** Snapshot of the agent's @scope (e.g. "@acme") at run creation. */
   agentScope?: string | null;
@@ -536,6 +559,7 @@ export async function createRun(scope: AppScope, params: CreateRunParams): Promi
       proxyLabel: params.proxyLabel,
       modelLabel: params.modelLabel,
       modelSource: params.modelSource,
+      modelCost: params.modelCost ?? null,
       applicationId: scope.applicationId,
       apiKeyId: params.apiKeyId,
       runNumber,
@@ -723,7 +747,7 @@ export async function recordRunDegradedIntegration(
  * SQL boolean — is this ledger row something OTHER than the runner mirror of a
  * proxy-metered run? The single expression of the no-double-count rule, applied
  * by EVERY read of the ledger: the aggregate `runs.cost` read
- * ({@link computeRunCost}) and the module-facing cursor read
+ * ({@link computeRunSpend}) and the module-facing cursor read
  * ({@link listLlmUsage} / {@link getSettledFrontierId}).
  *
  * A remote-origin run whose inference flows through the system llm-proxy gets
@@ -756,20 +780,45 @@ const notRunnerMirrorSql = sql<boolean>`NOT (
   )
 )`;
 
+/** A run's attributable spend and how much of it is backed by real rates. */
+export interface RunSpend {
+  /** Total attributable spend in USD. */
+  costUsd: number;
+  /**
+   * Provenance of {@link costUsd} — the WORST of the contributing rows'
+   * statuses. `null` when no contributing row carries one, never coerced to
+   * `priced`.
+   */
+  pricingStatus: PricingStatus | null;
+}
+
 /**
- * Compute the total attributable spend for a run from the unified
- * `llm_usage` ledger (proxy + runner rows). Called by `finalizeRun` to
- * cache the canonical `runs.cost` value at terminal time. This is the
- * SINGLE read path for aggregate run cost — no caller should SUM the
- * ledger directly. `credential_proxy_usage` is intentionally NOT summed:
- * it holds no cost. When the first metered integration ships, route its
- * rows through `llm_usage` with a new `source` enum value (e.g.
- * `credential_proxy`) — that keeps the single ledger invariant and
- * avoids adding a redundant SUM here.
+ * Compute a run's total attributable spend from the unified `llm_usage` ledger
+ * (proxy + runner rows), TOGETHER with the pricing provenance of that number.
+ * Called by `finalizeRun` to cache the canonical `runs.cost` +
+ * `runs.cost_pricing_status` at terminal time. This is the SINGLE read path for
+ * aggregate run cost — no caller should SUM the ledger directly.
+ * `credential_proxy_usage` is intentionally NOT summed: it holds no cost. When
+ * the first metered integration ships, route its rows through `llm_usage` with
+ * a new `source` enum value (e.g. `credential_proxy`) — that keeps the single
+ * ledger invariant and avoids adding a redundant SUM here.
  *
- * One scalar SUM over the `(run_id)` index — cheap even on long runs.
- * The runner mirror of a proxy-metered run is excluded via the shared
- * {@link notRunnerMirrorSql} predicate.
+ * Cost and status are ONE query, not two, and that is a correctness property
+ * rather than an optimisation: a status computed over a different row set than
+ * the cost it qualifies could mark a number `priced` on the strength of a row
+ * that number does not contain. Sharing the `WHERE` makes the two structurally
+ * inseparable. (It is also cheaper — one scan over the `(run_id)` index on a
+ * path that runs at every finalize and at every throttled metric broadcast.)
+ *
+ * The runner mirror of a proxy-metered run is excluded from both aggregates via
+ * the shared {@link notRunnerMirrorSql} predicate.
+ *
+ * The run-level verdict is the worst of the contributing rows — any `unpriced`
+ * ⟹ unpriced, else any `partial` ⟹ partial, else `priced` — because it is
+ * consumed as a confidence claim about the displayed total: one unpriced call
+ * is enough to make that total an undercount, and averaging or majority-voting
+ * would hide it. `null` when no row carries a status at all (a run finalized
+ * before the column existed, or one that produced no ledger rows).
  *
  * `orgId` is mandatory: `llm_usage.run_id` alone is caller-suppliable on the
  * proxy path (`X-Run-Id`), so the aggregate must be structurally inseparable
@@ -778,15 +827,27 @@ const notRunnerMirrorSql = sql<boolean>`NOT (
  * `(run_id, org_id) → runs(id, org_id)` enforces the same invariant at the
  * DB level for new rows; this filter covers any pre-constraint legacy rows.
  */
-export async function computeRunCost(runId: string, orgId: string): Promise<number> {
-  const [llm] = await db
+export async function computeRunSpend(runId: string, orgId: string): Promise<RunSpend> {
+  const [row] = await db
     .select({
       total: sql<string>`COALESCE(SUM(${llmUsage.costUsd}), 0)`,
+      anyUnpriced: sql<boolean | null>`bool_or(${llmUsage.pricingStatus} = 'unpriced')`,
+      anyPartial: sql<boolean | null>`bool_or(${llmUsage.pricingStatus} = 'partial')`,
+      anyStatus: sql<boolean | null>`bool_or(${llmUsage.pricingStatus} IS NOT NULL)`,
     })
     .from(llmUsage)
     .where(and(eq(llmUsage.runId, runId), eq(llmUsage.orgId, orgId), notRunnerMirrorSql));
 
-  return Number(llm?.total ?? 0);
+  return {
+    costUsd: Number(row?.total ?? 0),
+    pricingStatus: !row?.anyStatus
+      ? null
+      : row.anyUnpriced
+        ? "unpriced"
+        : row.anyPartial
+          ? "partial"
+          : "priced",
+  };
 }
 
 /**
@@ -1260,20 +1321,29 @@ export async function listPackageRuns(
  * `GET /api/runs` view. Joins `packages.ephemeral` so the response carries
  * the inline flag — UI uses it for the "Inline" badge.
  */
-export type GlobalRunKind = "all" | "package" | "inline";
-
-function isRunStatus(value: string): value is RunStatus {
-  return (runStatusValues as readonly string[]).includes(value);
-}
+/**
+ * The closed set `?kind=` accepts, as a value — the route validates the query
+ * parameter against it, so the tuple and the type cannot drift.
+ */
+export const GLOBAL_RUN_KINDS = ["all", "package", "inline"] as const;
+export type GlobalRunKind = (typeof GLOBAL_RUN_KINDS)[number];
 
 export interface ListGlobalRunsOptions {
   limit?: number;
   offset?: number;
   kind?: GlobalRunKind;
-  status?: string;
+  /**
+   * `RunStatus`, not `string`. This used to take a `string` and quietly drop
+   * anything outside the enum (`if (status && isRunStatus(status))`), which
+   * turned a typo into "no status filter" — the whole list, read as filtered.
+   * The route now rejects an unknown value with a 400; the narrow type is what
+   * keeps a future caller from re-opening that hole.
+   */
+  status?: RunStatus;
   startDate?: Date;
   endDate?: Date;
   endUserId?: string | null;
+  chatSessionId?: string;
   actor?: Actor | null;
 }
 
@@ -1289,14 +1359,34 @@ export async function listGlobalRuns(
     startDate,
     endDate,
     endUserId,
+    chatSessionId,
     actor = null,
   } = options;
 
   const conditions = [eq(runs.orgId, scope.orgId), eq(runs.applicationId, scope.applicationId)];
-  if (status && isRunStatus(status)) conditions.push(eq(runs.status, status));
+  if (status) conditions.push(eq(runs.status, status));
   if (startDate) conditions.push(gte(runs.startedAt, startDate));
   if (endDate) conditions.push(lte(runs.startedAt, endDate));
   if (endUserId) conditions.push(eq(runs.endUserId, endUserId));
+  if (chatSessionId) {
+    conditions.push(eq(runs.chatSessionId, chatSessionId));
+    conditions.push(
+      actor?.type === "user"
+        ? exists(
+            db
+              .select({ id: chatSessions.id })
+              .from(chatSessions)
+              .where(
+                and(
+                  eq(chatSessions.id, chatSessionId),
+                  eq(chatSessions.orgId, scope.orgId),
+                  eq(chatSessions.userId, actor.id),
+                ),
+              ),
+          )
+        : sql`false`,
+    );
+  }
 
   // Kind filter via JOINed `packages.ephemeral`. After migration 0017, runs
   // can outlive their source package (`runs.package_id ON DELETE SET NULL`),
@@ -1475,6 +1565,49 @@ export async function listRunLogs(args: {
 }
 
 /**
+ * Last structured payload the agent emitted through the `output` runtime
+ * tool, read back from the `run_logs` row the `output.emitted` ingestion
+ * path wrote (`type='result'`, `event='output'` — see `persistRunEvent`).
+ *
+ * WHY this read exists: `output` is persisted the moment it is emitted, but
+ * `runs.result` is only written at finalize from the RunResult the runner
+ * posts. Every platform-synthesised terminal (cancel, timeout, stall,
+ * orphan sweep) therefore has to recover the deliverable from here, or it
+ * drops a payload that is already on disk (issue #1020).
+ *
+ * Ordered by the append-only `run_logs.id` DESC: `output` has
+ * replace-on-emit semantics, so the highest id is the payload the agent
+ * last meant to deliver.
+ *
+ * Returns the raw JSONB value as `unknown` — the column's TS type is a
+ * write-side assertion, not a runtime guarantee, so the caller narrows.
+ * A row whose `data` is null reads back as `null` and MUST NOT be turned
+ * into an empty object by the caller.
+ *
+ * Org-scoped like {@link listRunLogs} — `run_logs` has no `applicationId`
+ * column; app-scoped callers verify run ownership separately.
+ */
+export async function readLastEmittedOutput(args: {
+  runId: string;
+  orgId: string;
+}): Promise<unknown> {
+  const [row] = await db
+    .select({ data: runLogs.data })
+    .from(runLogs)
+    .where(
+      and(
+        eq(runLogs.runId, args.runId),
+        eq(runLogs.orgId, args.orgId),
+        eq(runLogs.type, "result"),
+        eq(runLogs.event, "output"),
+      ),
+    )
+    .orderBy(desc(runLogs.id))
+    .limit(1);
+  return row?.data ?? null;
+}
+
+/**
  * List all in-flight run IDs at server startup. The caller (boot) feeds
  * each id through `synthesiseFinalize` so the same lifecycle that fires
  * for clean termination (terminal log, onRunStatusChange) also
@@ -1572,6 +1705,7 @@ export async function listLlmUsage(args: {
       runId: llmUsage.runId,
       chatSessionId: llmUsage.chatSessionId,
       credentialSource: llmUsage.credentialSource,
+      pricingStatus: llmUsage.pricingStatus,
       settled: settledSql,
     })
     .from(llmUsage)
@@ -1594,6 +1728,7 @@ export async function listLlmUsage(args: {
     contextType: r.runId ? "run" : r.chatSessionId ? "chat" : null,
     contextId: r.runId ?? r.chatSessionId ?? null,
     credentialSource: r.credentialSource,
+    pricingStatus: r.pricingStatus,
     settled: r.settled,
   }));
 }

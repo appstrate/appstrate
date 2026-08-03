@@ -227,14 +227,15 @@ function ModelFormBody({
   // User-driven provider/model overrides — `null` means "follow auto-detect".
   const [providerOverride, setProviderOverride] = useState<string | null>(null);
   const [modelOverride, setModelOverride] = useState<string | null>(null);
-  const [cost, setCost] = useState<ModelCost | null>(null);
   /**
-   * True once the user explicitly edits cost (or imports an OpenRouter cost
-   * different from the catalog). Cost lives outside RHF, so we track its
-   * dirty state separately — on submit, we only send `cost` when the user
-   * really overrode it, otherwise the server's catalog fallback applies.
+   * Rates imported from the OpenRouter live search — the only cost the form
+   * submits. OpenRouter has no vendored catalog entry, so `resolveCatalogDefaults`
+   * cannot resolve these on read and they must be persisted as an explicit
+   * `org_models.cost` override. Every other path (catalog preset, editing an
+   * existing row) leaves this `null`, which keeps the server resolving from the
+   * catalog so weekly refreshes still propagate.
    */
-  const [costEdited, setCostEdited] = useState(false);
+  const [importedCost, setImportedCost] = useState<ModelCost | null>(null);
 
   // Prefer the persisted `providerId` — it distinguishes subscription
   // providers (claude-code, codex) that share an `apiShape` with their
@@ -347,13 +348,18 @@ function ModelFormBody({
   const oauthDismiss = usePairingDismissConfirm(() => setOauthDialogOpen(false));
 
   // Synchronous model discovery. The model dropdown for OAuth providers is
-  // sourced from THIS credential's verified ids (the account's plan), so the
-  // credential must be probed before the user can pick a model.
+  // sourced from THIS credential's served ids, so the endpoint is called
+  // before the user can pick a model. What the endpoint DOES depends on the
+  // provider's discovery mode: `mode: "static"` (both current subscription
+  // providers) derives the list server-side from the provider definition ∩
+  // catalog and probes nothing; a probe provider runs one 1-token inference
+  // per candidate. Same response shape either way — one code path here.
   const refreshModels = useRefreshCredentialModels();
-  // This-session probe result, per credential: the ids the live probe just
-  // verified. It — NOT the persisted `available_model_ids` — drives the
-  // dropdown, so a stale plan is never shown. Null until the call returns
-  // (detector spinner shows); empty array = probed, nothing served.
+  // This-session result, per credential: the ids the call just reported. It —
+  // NOT the credential row's `available_model_ids` — drives the dropdown, so a
+  // stale plan is never shown (and for a static provider the row is
+  // deliberately empty). Null until the call returns (detector spinner shows);
+  // empty array = answered, nothing served.
   const [probeResult, setProbeResult] = useState<{ id: string; modelIds: string[] } | null>(null);
   // Credentials already probed THIS form-open (the body remounts per open,
   // so this resets each time the modal is reopened → a fresh probe every
@@ -363,9 +369,10 @@ function ModelFormBody({
   const probeCredential = (id: string) => {
     if (probeAttempted.current.has(id)) return;
     probeAttempted.current.add(id);
-    // The probe persists the verified ids server-side (the seed gate reads
-    // that list); the dropdown reads them straight off the mutation response
-    // below — nothing cached needs invalidating.
+    // The dropdown reads the ids straight off the mutation response below, so
+    // nothing cached needs invalidating either way — and for a static provider
+    // there is nothing to invalidate at all: the call writes nothing, the seed
+    // gate re-derives the same list from the definition ∩ catalog on its own.
     refreshModels.mutate(
       { params: { path: { id } } },
       {
@@ -386,10 +393,11 @@ function ModelFormBody({
     probeCredential(newId);
   };
 
-  // "Select key → fetch the plan's models." Probes on every selection (the
-  // persisted list is intentionally NOT trusted — a subscription's served
-  // models drift over time while the credential doesn't). `probeAttempted`
-  // bounds it to one call per credential per form-open.
+  // "Select key → fetch the plan's models." Refetches on every selection
+  // rather than reusing anything stored: a subscription's served models drift
+  // over time while the credential doesn't, and a static provider's list is
+  // derived per request from a catalog the weekly refresh moves.
+  // `probeAttempted` bounds it to one call per credential per form-open.
   useEffect(() => {
     if (!isOauthProvider || !credentialId || !selectedCredential) return;
     probeCredential(credentialId);
@@ -406,10 +414,11 @@ function ModelFormBody({
   const selectedProvider = isCustomProvider ? undefined : getProviderById(providerId, registry);
 
   // Models offered in the dropdown. For OAuth (subscription) providers the
-  // list is EXACTLY what the discovery probe verified for the selected
-  // credential's plan — no static "featured" floor. Empty until the probe
-  // returns, which is why the dropdown stays hidden until then. API-key
-  // providers keep the full registry list (static catalog, no discovery).
+  // list is EXACTLY what discovery reported for the selected credential —
+  // derived server-side for a static provider, probe-verified for a probe one
+  // — with no static "featured" floor. Empty until the call returns, which is
+  // why the dropdown stays hidden until then. API-key providers keep the full
+  // registry list (static catalog, no discovery).
   const modelOptions = useMemo(() => {
     if (!selectedProvider) return [];
     if (!isOauthProvider) return selectedProvider.models;
@@ -433,8 +442,7 @@ function ModelFormBody({
     setValue("contextWindow", "");
     setValue("maxTokens", "");
     setValue("reasoning", false);
-    setCost(null);
-    setCostEdited(false);
+    setImportedCost(null);
   };
 
   const handleProviderChange = (id: string) => {
@@ -477,20 +485,8 @@ function ModelFormBody({
     setValue("contextWindow", preset.contextWindow.toString());
     setValue("maxTokens", (preset.maxTokens ?? 0).toString());
     setValue("reasoning", caps.includes("reasoning"));
-    // Display the catalog cost in the UI without flagging it as "edited".
-    // Server-side `resolveCatalogDefaults` will resolve it on read, so we
-    // intentionally omit it from the POST payload.
-    setCost(
-      preset.cost
-        ? {
-            input: preset.cost.input ?? 0,
-            output: preset.cost.output ?? 0,
-            cacheRead: preset.cost.cacheRead ?? 0,
-            cacheWrite: preset.cost.cacheWrite ?? 0,
-          }
-        : null,
-    );
-    setCostEdited(false);
+    // Not a repair — the only non-null writer (OpenRouter combobox) never renders with this Select.
+    setImportedCost(null);
   };
 
   const onFormSubmit = handleSubmit((data) => {
@@ -526,8 +522,7 @@ function ModelFormBody({
     // stayed at their preset values are omitted from the payload — the
     // server's `resolveCatalogDefaults` resolves them on read so weekly
     // catalog refreshes propagate. Same rationale for `label` (custom
-    // input only) and `cost` (tracked separately because it lives outside
-    // RHF).
+    // input only) and `cost` (imported from OpenRouter, tracked outside RHF).
     const labelDirty = dirtyFields.label === true;
     const inputDirty = dirtyFields.inputText === true || dirtyFields.inputImage === true;
     const cwDirty = dirtyFields.contextWindow === true;
@@ -556,14 +551,14 @@ function ModelFormBody({
       ...(cwDirty && cw ? { contextWindow: cw } : {}),
       ...(mtDirty && mt ? { maxTokens: mt } : {}),
       ...(reasoningDirty ? { reasoning: data.reasoning } : {}),
-      ...(costEdited && cost ? { cost } : {}),
+      ...(importedCost ? { cost: importedCost } : {}),
     });
   });
 
   const title = model ? t("models.form.editTitle") : t("models.form.title");
 
   // Model dropdown. OAuth (subscription) providers show a FLAT list of the
-  // probe-verified models — every entry is equally "available on the plan",
+  // models discovery reported — every entry is equally "available on the plan",
   // so the Featured/All split (and the Custom escape hatch, which would fail
   // the server's verified-only seed gate) is meaningless. Catalog-covered
   // API-key providers keep the split (50-100+ models) + Custom.
@@ -853,8 +848,9 @@ function ModelFormBody({
                 setValue("inputText", m.input?.includes("text") !== false, { shouldDirty: true });
                 setValue("inputImage", m.input?.includes("image") ?? false, { shouldDirty: true });
                 setValue("reasoning", m.reasoning ?? false, { shouldDirty: true });
-                setCost(m.cost ?? null);
-                setCostEdited(m.cost != null);
+                // `useOpenRouterModels` already narrows the wire cost to
+                // `ModelCost | null` in its `select`, so no re-normalisation here.
+                setImportedCost(m.cost);
               }}
             />
           </div>

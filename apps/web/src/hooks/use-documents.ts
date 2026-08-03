@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
 import { $api, client, type paths } from "../api/client";
+import { invalidateRunDetails } from "../lib/query-keys";
 import { useOrgScope } from "./use-org-scope";
 
 /** Wire shape of a single document (OpenAPI list-item schema). */
@@ -14,8 +15,10 @@ export type DocumentDto =
 export interface DocumentListFilters {
   purpose?: "user_upload" | "agent_output";
   runId?: string;
+  contextChatSessionId?: string;
   startingAfter?: string;
   limit?: number;
+  enabled?: boolean;
 }
 
 /**
@@ -33,13 +36,14 @@ export function useDocuments(filters: DocumentListFilters = {}) {
         query: {
           purpose: filters.purpose,
           run_id: filters.runId,
+          context_chat_session_id: filters.contextChatSessionId,
           startingAfter: filters.startingAfter,
           limit: filters.limit,
         },
         header: scope.header,
       },
     },
-    { enabled: scope.enabled },
+    { enabled: scope.enabled && filters.enabled !== false },
   );
 }
 
@@ -85,7 +89,10 @@ function invalidateDocuments(qc: ReturnType<typeof useQueryClient>) {
 export function useDeleteDocument() {
   const qc = useQueryClient();
   return $api.useMutation("delete", "/api/documents/{id}", {
-    onSuccess: () => invalidateDocuments(qc),
+    onSuccess: () => {
+      invalidateDocuments(qc);
+      void invalidateRunDetails(qc);
+    },
   });
 }
 

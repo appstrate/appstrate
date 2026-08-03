@@ -114,6 +114,46 @@ function asNonEmptyArray(value: unknown): unknown[] | undefined {
   return Array.isArray(value) && value.length > 0 ? value : undefined;
 }
 
+/**
+ * The tool's `connection_overrides` argument — the documented remedy for a
+ * `412 must_choose_connection`, where the model must name one connection per
+ * ambiguous integration and retry.
+ *
+ * Refused before dispatch whenever it is present but does not resolve to a
+ * plain object. The MCP transport does not validate tool arguments, so a
+ * wrong-typed value is otherwise dropped on the floor: the launch answers the
+ * IDENTICAL 412, with nothing in it saying the argument was ignored, and the
+ * retry loop has no exit. This is the only place that signal can exist. A
+ * string gets its own message because it names the real mistake (a JSON-encoded
+ * map); an array / number / boolean / `null` gets the generic one. Validating
+ * the map's VALUES stays server-side — the route answers those with a
+ * field-precise 400.
+ */
+function connectionOverridesArgument(args: Record<string, unknown>): {
+  overrides?: Record<string, unknown>;
+  error?: string;
+} {
+  const present = args.connection_overrides !== undefined;
+  if (typeof args.connection_overrides === "string") {
+    return {
+      error:
+        "`connection_overrides` must be a JSON object mapping each integration id to a " +
+        'connection id (`{"@scope/integration": "<connection_id>"}`), not a string. Pass the ' +
+        "object itself — do not JSON-encode it.",
+    };
+  }
+  const overrides = asRecord(args.connection_overrides);
+  if (!overrides && present) {
+    return {
+      error:
+        "`connection_overrides` must be a JSON object mapping each integration id to a " +
+        'connection id (`{"@scope/integration": "<connection_id>"}`). Omit the argument ' +
+        "entirely when you have no connection to pin.",
+    };
+  }
+  return { overrides };
+}
+
 export function isRunAndWaitTerminalStatus(status: unknown): boolean {
   return typeof status === "string" && RUN_AND_WAIT_TERMINAL_STATUSES.has(status);
 }
@@ -155,22 +195,6 @@ function serializedResultBytes(value: unknown): Uint8Array | null {
     return null;
   }
   return typeof json === "string" ? TEXT_ENCODER.encode(json) : null;
-}
-
-/**
- * Does this run result overrun the inline tool-result ceiling? The WRITE side of
- * the spill (the platform's finalize path) asks this so both sides use one
- * threshold and one measurement.
- *
- * The two sides do not measure byte-identical inputs: the writer measures the
- * in-process object, the reader measures the same value after a `jsonb`
- * round-trip (which reorders keys but preserves length). A disagreement is
- * therefore benign in both directions — an unused spill document, or an
- * untruncated payload, never a truncation with no pointer.
- */
-export function runResultExceedsInlineLimit(result: unknown): boolean {
-  const bytes = serializedResultBytes(result);
-  return bytes !== null && bytes.length > RUN_RESULT_INLINE_MAX_BYTES;
 }
 
 /**
@@ -306,6 +330,14 @@ export async function launchRunAndWait(
   const kind = asString(args.kind);
   const headers = jsonHeaders(opts.headers);
 
+  const connectionOverrides = connectionOverridesArgument(args);
+  if (connectionOverrides.error) {
+    return {
+      ok: false,
+      step: { payload: { error: connectionOverrides.error }, isError: true },
+    };
+  }
+
   let launchPath: string;
   let launchBody: Record<string, unknown> | undefined;
   const contextDocuments = asNonEmptyArray(args.context_documents);
@@ -392,8 +424,25 @@ export async function launchRunAndWait(
         },
       };
     }
+    const selected = manifest.runtime_tools;
+    if (selected !== undefined && !Array.isArray(selected)) {
+      return {
+        ok: false,
+        step: {
+          payload: { error: "`manifest.runtime_tools` must be an array for kind:'inline'." },
+          isError: true,
+        },
+      };
+    }
+    const runtimeTools = (selected ?? []) as unknown[];
+    const launchManifest = {
+      ...manifest,
+      runtime_tools: runtimeTools.includes("publish_document")
+        ? runtimeTools
+        : [...runtimeTools, "publish_document"],
+    };
     launchPath = "/api/runs/inline";
-    launchBody = { manifest, prompt };
+    launchBody = { manifest: launchManifest, prompt };
     if (asRecord(args.input)) launchBody.input = args.input;
     if (asRecord(args.config)) launchBody.config = args.config;
     // Fan-in by reference: forwarded verbatim; the route resolves each URI
@@ -404,6 +453,11 @@ export async function launchRunAndWait(
       ok: false,
       step: { payload: { error: "`kind` must be 'agent' or 'inline'." }, isError: true },
     };
+  }
+
+  // Both run bodies carry the same field, so one forward covers both kinds.
+  if (connectionOverrides.overrides) {
+    launchBody = { ...launchBody, connection_overrides: connectionOverrides.overrides };
   }
 
   const launchRes = await opts.fetch(apiUrl(opts.origin, launchPath), {
@@ -527,6 +581,12 @@ export async function* runAndWaitSteps(
  * name, mime, size }` shape the tool result embeds. Best-effort: any failure
  * (network, non-2xx, malformed body) yields an empty list — a missing document
  * list must never turn a successful run into a tool error.
+ *
+ * `GET /api/documents?run_id=…` answers the run's whole document CONTAINER —
+ * the documents it produced PLUS the ones mounted as its input (a chained
+ * `document://` from an earlier run keeps `purpose: 'agent_output'`, so the
+ * purpose filter alone does not exclude it). This list is the run's OUTPUT, so
+ * rows are kept only when their own `run_id` is this run.
  */
 export async function fetchRunDocuments(
   runId: string,
@@ -544,6 +604,7 @@ export async function fetchRunDocuments(
     const out: RunAndWaitDocument[] = [];
     for (const raw of data) {
       const r = asRecord(raw);
+      if (asString(r?.run_id) !== runId) continue;
       const id = asString(r?.id);
       const uri = asString(r?.uri);
       const name = asString(r?.name);

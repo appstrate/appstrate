@@ -17,6 +17,8 @@ import {
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import type { TokenUsage } from "@appstrate/afps-shared/token-usage";
+import type { ModelCost } from "@appstrate/core/module";
+import type { PricingStatus } from "../pricing-status.ts";
 import { runStatusEnum, llmUsageSourceEnum, runOriginEnum, credentialSourceEnum } from "./enums.ts";
 import { user } from "./auth.ts";
 import { applications, endUsers } from "./applications.ts";
@@ -63,6 +65,26 @@ export type RunArtifactsSummary = {
   published: number;
   failed: Array<{ name: string; code: string }>;
 };
+
+/**
+ * Pricing provenance of a recorded `cost_usd` — see {@link PricingStatus}. Both
+ * the type and its literal tuple live in the import-free `../pricing-status.ts`
+ * so the browser bundle can build the SSE Zod enum from the same source the
+ * columns below are typed against; re-exported here because this is where the
+ * two columns that carry it are declared.
+ */
+export type { PricingStatus };
+
+/**
+ * Snapshot of the per-1M-token USD rates a run was launched with, persisted on
+ * `runs.model_cost` — `@appstrate/core`'s `ModelCost`, imported rather than
+ * restated (this package already depends on core; see `auth.ts`).
+ *
+ * Column typing is a claim about intent, not a guarantee: the value is JSONB, so
+ * the read path narrows it with `modelCostSchema` before classifying
+ * (`appstrate-event-sink.ts:resolveRunnerPricingStatus`).
+ */
+export type RunModelCost = ModelCost;
 
 export const runs = pgTable(
   "runs",
@@ -139,7 +161,26 @@ export const runs = pgTable(
     proxyLabel: text("proxy_label"),
     modelLabel: text("model_label"),
     modelSource: text("model_source"),
+    // Snapshot of the per-1M-token rates the run was LAUNCHED with — the exact
+    // object the launcher serialises into the container's `MODEL_COST` env var.
+    // It exists so the runner's ledger row can be classified SERVER-SIDE: the
+    // container computes `cost` itself, so without this the platform has no way
+    // to tell a genuinely-free run from one whose model it could not price, and
+    // asking the container would mean trusting an untrusted party about its own
+    // bill. NULL = no pricing was available at kickoff (catalog miss with no
+    // `org_models.cost` override, or a remote-origin run that resolved no
+    // platform model at all).
+    modelCost: jsonb("model_cost").$type<RunModelCost>(),
     cost: doublePrecision("cost"),
+    // Terminal cache of the run-level pricing provenance, written exactly where
+    // `cost` is (finalize) and computed over the SAME ledger rows: the WORST of
+    // the run's `llm_usage.pricing_status` values (any `unpriced` ⟹ unpriced,
+    // else any `partial` ⟹ partial, else `priced`). A run may mix per-call proxy
+    // rows and one cumulative runner row, and a `$0.0000` that is really "we
+    // don't know" must not be rendered as a confident zero. NULL when no row of
+    // the run carries a status — including every run finalized before this
+    // column existed.
+    costPricingStatus: text("cost_pricing_status").$type<PricingStatus>(),
     runNumber: integer("run_number"),
     // Per-run integration connection overrides — the caller's explicit
     // choice at run kickoff (e.g. "for this run, use my Gmail-Boulot
@@ -174,6 +215,12 @@ export const runs = pgTable(
     apiKeyId: text("api_key_id").references(() => apiKeys.id, {
       onDelete: "set null",
     }),
+    /**
+     * Chat session that launched this run, when it came from `run_and_wait`.
+     * This is first-class relationship data: the chat context sidebar filters
+     * runs and their documents by it without parsing messages or JSON metadata.
+     */
+    chatSessionId: text("chat_session_id"),
     metadata: jsonb("metadata").$type<Record<string, unknown>>(),
     config: jsonb("config").$type<Record<string, unknown>>(),
     // Per-run override layer — the delta the caller sent on top of
@@ -298,6 +345,9 @@ export const runs = pgTable(
     index("idx_runs_model_credential_id")
       .on(table.modelCredentialId)
       .where(sql`${table.modelCredentialId} IS NOT NULL`),
+    index("idx_runs_chat_session_started")
+      .on(table.chatSessionId, table.startedAt)
+      .where(sql`${table.chatSessionId} IS NOT NULL`),
     index("idx_runs_org_id").on(table.orgId),
     // Referenced target of the composite tenant-integrity FK on
     // `llm_usage(run_id, org_id)` (CRIT-07): Postgres needs a unique index
@@ -313,6 +363,15 @@ export const runs = pgTable(
     index("idx_runs_stall_sweep")
       .on(table.lastHeartbeatAt)
       .where(sql`${table.sinkClosedAt} IS NULL AND ${table.sinkExpiresAt} IS NOT NULL`),
+    // Tenant-integrity FK for the launching conversation. The live migration
+    // uses PostgreSQL's column-list `SET NULL (chat_session_id)` so deleting a
+    // session detaches the run without trying to null the NOT-NULL org_id.
+    // Drizzle cannot express that column list; see the analogous llm_usage FKs.
+    foreignKey({
+      name: "runs_chat_session_id_org_id_fk",
+      columns: [table.chatSessionId, table.orgId],
+      foreignColumns: [chatSessions.id, chatSessions.orgId],
+    }).onDelete("set null"),
     check("runs_at_most_one_actor", sql`NOT (user_id IS NOT NULL AND end_user_id IS NOT NULL)`),
     // Invariant: an open sink row (has an expires_at) must have a secret to
     // verify against. Enforced for every origin so platform and remote share
@@ -332,6 +391,13 @@ export const runs = pgTable(
     // and holds ACCESS EXCLUSIVE until it commits either way. The scan is why a
     // pre-existing negative row aborts the deploy — see `docs/architecture/RUN_COST.md`.
     check("runs_cost_non_negative", sql`cost >= 0`),
+    // Closed vocabulary for the terminal provenance cache. NULL-friendly by
+    // standard CHECK semantics (`NULL IN (…)` is NULL, which passes), which is
+    // exactly the intent: pre-feature rows carry no verdict at all.
+    check(
+      "runs_cost_pricing_status_valid",
+      sql`cost_pricing_status IN ('priced', 'partial', 'unpriced')`,
+    ),
   ],
 );
 
@@ -530,6 +596,27 @@ export const llmUsage = pgTable(
     cacheReadTokens: integer("cache_read_tokens"),
     cacheWriteTokens: integer("cache_write_tokens"),
     costUsd: doublePrecision("cost_usd").notNull().default(0),
+    // Provenance of `cost_usd` — see {@link PricingStatus}. Stamped by the
+    // single ledger writer from a REQUIRED field on `LlmUsageEntry`, so every
+    // producer (proxy, chat, runner) has to decide rather than default into
+    // silence; `unpriced` is what turns "this org burned tokens the platform
+    // could not price" from an invisible zero into a `WHERE pricing_status =
+    // 'unpriced'` query.
+    //
+    // NULL is "no claim", and it has TWO live populations — a query that
+    // treats it as one will misread the ledger:
+    //   1. rows written before this column existed. DELIBERATELY NOT
+    //      BACKFILLED: inventing `'priced'` for them would manufacture exactly
+    //      the false confidence the column exists to remove, and the rates in
+    //      force at the time of those calls were never recorded, so they
+    //      cannot be classified retroactively either;
+    //   2. the runner row of a REMOTE-origin run (`runs.model_source IS NULL`),
+    //      which resolves no platform model — its spend is accounted by the
+    //      per-call proxy rows that carry their own status, so claiming
+    //      `unpriced` would report a platform pricing gap that isn't one
+    //      (`appstrate-event-sink.ts:resolveRunnerPricingStatus`).
+    // What NULL never means is `priced`.
+    pricingStatus: text("pricing_status").$type<PricingStatus>(),
     durationMs: integer("duration_ms"),
     // Proxy dedup key — one per upstream call minted by the proxy route.
     // Null on runner-source rows (they dedup on run_id instead).
@@ -624,6 +711,12 @@ export const llmUsage = pgTable(
     // being bypassed. Added validated in migration 0029 — see the sibling floor
     // on `runs.cost` for why it is not split into `NOT VALID` + `VALIDATE`.
     check("llm_usage_cost_usd_non_negative", sql`cost_usd >= 0`),
+    // Closed vocabulary — same NULL-friendly semantics as the run-level twin
+    // (`runs_cost_pricing_status_valid`): a pre-feature row carries no verdict.
+    check(
+      "llm_usage_pricing_status_valid",
+      sql`pricing_status IN ('priced', 'partial', 'unpriced')`,
+    ),
   ],
 );
 

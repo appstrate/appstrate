@@ -80,11 +80,17 @@ const LITELLM_TO_OURS: Record<string, string> = {
  * moving set of models. The weekly diff on this snapshot is the review
  * signal for that curation (new subscription models, deprecations).
  * No Anthropic equivalent exists — LiteLLM carries no claude-
- * subscription provider, so the claude-code module's curation stays
- * manual.
+ * subscription provider, but claude-code needs none: it declares a
+ * catalog selector and re-derives from anthropic.json on every read.
  *
  * Snapshots land in `apps/api/src/data/subscription-watch/<name>.json`
- * as a sorted id array. Nothing imports them at runtime.
+ * as a sorted id array. Nothing imports them at RUNTIME; the blocking
+ * drift gate (`apps/api/test/unit/services/curated-model-drift.test.ts`)
+ * reads them at test time, unioned with the pricing catalog, because
+ * most subscription-specific ids appear in no pricing catalog at all.
+ * The snapshot is a lagging third-party feed, never an authority: the
+ * vendor's own doc decides, and disagreements are recorded in
+ * `subscription-watch/reviewed.json`.
  */
 const SUBSCRIPTION_WATCH: readonly string[] = ["chatgpt"];
 const WATCH_DIR = resolve(REPO_ROOT, "apps/api/src/data/subscription-watch");
@@ -164,6 +170,111 @@ interface Summary {
   removed: string[];
   changed: string[];
   unchanged: boolean;
+}
+
+/**
+ * Cache-rate coverage of one provider snapshot, with its previous state.
+ *
+ * `cost.cacheRead` / `cost.cacheWrite` are emitted only when the upstream
+ * LiteLLM entry carries the corresponding field ({@link projectEntry}), so
+ * coverage is INHERITED and drifts week to week with no signal. The
+ * consequence is not cosmetic: a model whose entry lacks `cacheRead` while
+ * its provider reports cached tokens has those tokens priced at exactly
+ * zero by the run-cost ledger. Surfacing the counts + delta in the weekly
+ * PR body is what turns that drift into something a human reviews.
+ */
+interface CoverageRow {
+  provider: string;
+  entries: number;
+  cacheRead: number;
+  cacheWrite: number;
+  /** Same three counts on the catalog currently vendored (the drift baseline). */
+  prevEntries: number;
+  prevCacheRead: number;
+  prevCacheWrite: number;
+}
+
+interface CacheRateCounts {
+  entries: number;
+  cacheRead: number;
+  cacheWrite: number;
+}
+
+/** Count entries carrying each optional cache rate. Pure — unit-tested. */
+function countCacheRates(snapshot: Record<string, CompactEntry>): CacheRateCounts {
+  let cacheRead = 0;
+  let cacheWrite = 0;
+  for (const entry of Object.values(snapshot)) {
+    if (typeof entry.cost?.cacheRead === "number") cacheRead++;
+    if (typeof entry.cost?.cacheWrite === "number") cacheWrite++;
+  }
+  return { entries: Object.keys(snapshot).length, cacheRead, cacheWrite };
+}
+
+/**
+ * Coverage of `upstream` against the `local` file it replaces. `local` is the
+ * snapshot the diff already read — no second read of the vendored files, and
+ * the delta is computed BEFORE `--apply` overwrites them.
+ */
+function coverageRow(
+  provider: string,
+  local: Record<string, CompactEntry>,
+  upstream: Record<string, CompactEntry>,
+): CoverageRow {
+  const now = countCacheRates(upstream);
+  const before = countCacheRates(local);
+  return {
+    provider,
+    entries: now.entries,
+    cacheRead: now.cacheRead,
+    cacheWrite: now.cacheWrite,
+    prevEntries: before.entries,
+    prevCacheRead: before.cacheRead,
+    prevCacheWrite: before.cacheWrite,
+  };
+}
+
+/** Markdown table for the weekly PR body. Pure — unit-tested. */
+function formatCoverageSummary(rows: readonly CoverageRow[]): string {
+  const delta = (now: number, before: number): string => {
+    const d = now - before;
+    return d === 0 ? "·" : d > 0 ? `+${d}` : `${d}`;
+  };
+  const share = (n: number, total: number): string =>
+    total === 0 ? "—" : `${n} (${Math.round((n / total) * 100)}%)`;
+
+  const lines = [
+    "### Cache-rate coverage",
+    "",
+    "`cost.cacheRead` / `cost.cacheWrite` are vendored only when the upstream LiteLLM",
+    "entry carries them, so this coverage is inherited and moves on its own. A model",
+    "whose entry has no `cacheRead` while its provider reports cached tokens gets those",
+    "tokens priced at exactly **zero**. The Δ columns are the change this PR makes —",
+    "a large negative Δ means models lost their cache rate upstream.",
+    "",
+    "| Provider | Entries | Δ | cacheRead | Δ | cacheWrite | Δ |",
+    "| --- | ---: | ---: | ---: | ---: | ---: | ---: |",
+  ];
+  for (const r of rows) {
+    const flag = r.entries > 0 && r.cacheRead === 0 ? " ⚠️" : "";
+    lines.push(
+      `| \`${r.provider}\` | ${r.entries} | ${delta(r.entries, r.prevEntries)} ` +
+        `| ${share(r.cacheRead, r.entries)}${flag} | ${delta(r.cacheRead, r.prevCacheRead)} ` +
+        `| ${share(r.cacheWrite, r.entries)} | ${delta(r.cacheWrite, r.prevCacheWrite)} |`,
+    );
+  }
+
+  const zero = rows.filter((r) => r.entries > 0 && r.cacheRead === 0).map((r) => r.provider);
+  if (zero.length > 0) {
+    lines.push(
+      "",
+      `⚠️ No \`cacheRead\` rate at all: ${zero.map((p) => `\`${p}\``).join(", ")} — every cached` +
+        ` input token on these providers is currently billed at 0. Not a regression this PR` +
+        ` introduces; it is the standing gap, restated so it stops being invisible.`,
+    );
+  }
+  lines.push("");
+  return lines.join("\n");
 }
 
 /**
@@ -454,11 +565,13 @@ async function main(): Promise<void> {
   const [upstream, modelsDev] = await Promise.all([fetchUpstream(), fetchModelsDev()]);
   const summaries: Summary[] = [];
   const snapshots: Record<string, Record<string, CompactEntry>> = {};
+  const coverageRows: CoverageRow[] = [];
 
   for (const [litellmProvider, ourName] of Object.entries(LITELLM_TO_OURS)) {
     const upstreamSnapshot = buildProviderSnapshot(upstream, litellmProvider);
     snapshots[ourName] = upstreamSnapshot;
     const local = readLocal(ourName);
+    coverageRows.push(coverageRow(ourName, local, upstreamSnapshot));
     const diff = diffSnapshots(local, upstreamSnapshot);
     const summary: Summary = {
       provider: ourName,
@@ -567,6 +680,27 @@ async function main(): Promise<void> {
     }
   }
 
+  // Cache-rate coverage — always computed (it is a state report, not a diff),
+  // printed for the local operator and, in CI, written to the path the caller
+  // names.
+  //
+  // File over "parse it back out of stdout": this script's stdout already
+  // interleaves per-provider diff lines, `→ wrote …` lines and warnings, so
+  // fishing a markdown table out of it would need sentinel markers plus sed —
+  // fragile, and silently truncating on the day someone adds a log line. An
+  // explicit out-path is unambiguous. It MUST point outside the worktree
+  // (the workflow uses `$RUNNER_TEMP`): `create-pull-request` commits every
+  // change it finds, so a summary file in the repo would land in the very PR
+  // it describes.
+  const coverageMarkdown = formatCoverageSummary(coverageRows);
+  console.log(`\n${coverageMarkdown}`);
+  const coveragePath = (globalThis as { process?: { env?: Record<string, string | undefined> } })
+    .process?.env?.PRICING_COVERAGE_SUMMARY_PATH;
+  if (coveragePath) {
+    writeFileSync(coveragePath, coverageMarkdown, "utf8");
+    console.log(`→ wrote coverage summary to ${coveragePath}`);
+  }
+
   const drift = summaries.some((s) => !s.unchanged);
   console.log(
     `\n${drift ? "DRIFT" : "OK"} — ${summaries.filter((s) => !s.unchanged).length}/${summaries.length} snapshot(s) changed`,
@@ -583,4 +717,5 @@ if (import.meta.main) {
   await main();
 }
 
-export { aliasedBackings, buildFeatured };
+export { aliasedBackings, buildFeatured, countCacheRates, coverageRow, formatCoverageSummary };
+export type { CoverageRow };

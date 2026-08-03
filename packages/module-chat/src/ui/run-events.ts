@@ -43,6 +43,18 @@ export function isTerminalStatus(status: string | null | undefined): status is R
 }
 
 /**
+ * Automatic artefacts belong to a call that mounted live, never to completed
+ * history. Capture this result once at card mount; later phase changes must not
+ * revoke a live card's eligibility before its final document event arrives.
+ */
+export function isPrimaryAutoPresentationEligible(
+  phase: "pending" | "running" | "success" | "error",
+  initialStatus: string | null | undefined,
+): boolean {
+  return (phase === "pending" || phase === "running") && !isTerminalStatus(initialStatus);
+}
+
+/**
  * i18n key for the settled line a terminal run's card shows instead of its last
  * log. A KEY, not a sentence: this module ships no literal user-facing text —
  * the card resolves it through the host translator (same pattern as the web
@@ -98,6 +110,16 @@ export const runUpdateLiteSchema = z.object({
   duration: z.number().nullable().optional(),
 });
 export type RunUpdateLite = z.infer<typeof runUpdateLiteSchema>;
+
+/**
+ * The one extra field the full run resource carries beyond realtime updates.
+ * It is the authoritative CURRENT primary selection, unlike append-only
+ * `document.published` logs which also retain superseded selections.
+ */
+export const runResourceLiteSchema = runUpdateLiteSchema.extend({
+  primary_document_id: z.string().nullable().optional(),
+});
+export type RunResourceLite = z.infer<typeof runResourceLiteSchema>;
 
 /**
  * Pull the launched run id out of a tool-call result. The invoke-operation
@@ -162,8 +184,8 @@ export function parseRunUpdateFrame(raw: string): RunUpdateLite | undefined {
  * transient launch status (`pending`), so without this the card would read
  * "Lancement" for an already-running run until the first live frame arrives.
  */
-export function parseRunResource(body: unknown): RunUpdateLite | undefined {
-  const parsed = runUpdateLiteSchema.safeParse(body);
+export function parseRunResource(body: unknown): RunResourceLite | undefined {
+  const parsed = runResourceLiteSchema.safeParse(body);
   return parsed.success ? parsed.data : undefined;
 }
 
@@ -358,13 +380,32 @@ export function publishedDocumentsFromLogs(logs: readonly RunLogLine[]): ChatRun
   return out;
 }
 
-/** Merge two document lists, deduping by id (first occurrence wins). */
+/** The last primary publication in an ordered log list (last-successful-wins). */
+export function primaryDocumentFromLogs(logs: readonly RunLogLine[]): ChatRunDocument | undefined {
+  let primary: ChatRunDocument | undefined;
+  for (const line of logs) {
+    if (line.event !== "document" || !line.data || typeof line.data !== "object") continue;
+    if (asRecord(line.data)?.presentation !== "primary") continue;
+    const doc = asChatRunDocument(line.data);
+    if (doc) primary = doc;
+  }
+  return primary;
+}
+
+/**
+ * Merge two regular document lists, deduping by id while letting newer display
+ * metadata win. Presentation is intentionally not projected into this type:
+ * `primary` is only an automatic-open signal, never a different document kind.
+ */
 export function mergeRunDocuments(
   a: readonly ChatRunDocument[],
   b: readonly ChatRunDocument[],
 ): ChatRunDocument[] {
   const byId = new Map<string, ChatRunDocument>();
-  for (const doc of [...a, ...b]) if (!byId.has(doc.id)) byId.set(doc.id, doc);
+  for (const doc of [...a, ...b]) {
+    const previous = byId.get(doc.id);
+    byId.set(doc.id, previous ? { ...previous, ...doc } : doc);
+  }
   return [...byId.values()];
 }
 

@@ -16,6 +16,7 @@ import { OnboardingQuickConnect } from "../../components/onboarding-quick-connec
 import { useModels, useModelFormHandler } from "../../hooks/use-models";
 import { useProvidersRegistry } from "../../hooks/use-model-provider-credentials";
 import { getModelIcon } from "../../components/icons";
+import { ModelUnavailableBadge } from "../../components/model-availability-badge";
 
 export function OnboardingModelStep() {
   const { t } = useTranslation(["settings", "common"]);
@@ -73,6 +74,9 @@ export function OnboardingModelStep() {
                       <div className="truncate text-sm font-medium">{m.label}</div>
                       <div className="text-muted-foreground truncate text-xs">{m.modelId}</div>
                     </div>
+                    {/* Recap list, not a picker: it shows every seeded model,
+                        so a dead one must say so rather than look configured. */}
+                    {m.needs_reconnection && <ModelUnavailableBadge className="shrink-0" />}
                     {m.is_default && (
                       <Badge variant="success" className="shrink-0 text-[0.65rem]">
                         {t("models.default")}

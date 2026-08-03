@@ -20,6 +20,7 @@ import {
 } from "../services/package-versions.ts";
 import { getLastRun, getRunningRunsForPackage } from "../services/state/runs.ts";
 import { getPackageConfig } from "../services/application-packages.ts";
+import { resolveRunTimeout } from "../services/run-limits.ts";
 import { isToolsWildcard, parseManifestIntegrations } from "@appstrate/core/dependencies";
 import { parseScopedName } from "@appstrate/core/naming";
 import { mergeWithDefaults, asJSONSchemaObject } from "@appstrate/core/form";
@@ -163,6 +164,13 @@ export async function buildAgentDetailDto(
       : null,
     version_count: versionCount,
     has_unarchived_changes: hasUnarchivedChanges,
+    // What a run actually gets: the EFFECTIVE manifest's `timeout` clamped to
+    // `PLATFORM_RUN_LIMITS.timeout_ceiling_seconds` (or the platform default
+    // when none is declared). Emitted UNCONDITIONALLY — the declared value is
+    // only visible through `manifest`, which the branch below withholds from
+    // system agents, so making this field conditional too would leave a system
+    // agent's cap undiscoverable from the API.
+    effective_timeout_seconds: resolveRunTimeout(m.timeout).effectiveSeconds,
     forked_from: rawItem?.forked_from ?? null,
     ...(agent.source !== "system" && rawItem
       ? {

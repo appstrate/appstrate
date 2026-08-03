@@ -16,7 +16,7 @@ import {
   seedOrgModelProviderOAuth,
 } from "../../helpers/seed.ts";
 import { db } from "@appstrate/db/client";
-import { orgModels, organizations } from "@appstrate/db/schema";
+import { modelProviderCredentials, orgModels, organizations } from "@appstrate/db/schema";
 import { eq, and } from "drizzle-orm";
 import { initSystemModelProviderKeys } from "../../../src/services/model-registry.ts";
 import { listCatalogModels } from "../../../src/services/pricing-catalog.ts";
@@ -24,6 +24,23 @@ import { TEST_OAUTH_PROVIDER_ID } from "../../helpers/test-oauth-provider.ts";
 import { mintLoopbackToken } from "../../../../../packages/module-chat/src/loopback-auth.ts";
 
 const app = getTestApp();
+
+// ─── OpenRouter catalog stub ──────────────────────────────
+// `GET /api/models/openrouter` proxies openrouter.ai through `globalThis.fetch`
+// (no DI seam at the route boundary). Pin the REAL fetch once at module load —
+// re-capturing it inside the helper would snapshot a stub as the "original" and
+// leak the override into unrelated tests.
+const realFetch: typeof fetch = globalThis.fetch;
+function mockOpenRouterCatalog(data: unknown[]): void {
+  globalThis.fetch = (async () =>
+    new Response(JSON.stringify({ data }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    })) as unknown as typeof fetch;
+}
+function restoreFetch(): void {
+  if (realFetch) globalThis.fetch = realFetch;
+}
 
 describe("Models API", () => {
   let ctx: TestContext;
@@ -146,6 +163,61 @@ describe("Models API", () => {
       expect(row.modelId).toBe(realModelId);
       expect(row.apiShape).not.toBeNull();
       expect(row.credentialId).toBe(credentialId);
+    });
+  });
+
+  describe("GET /api/models/openrouter", () => {
+    afterEach(() => {
+      restoreFetch();
+    });
+
+    it("omits a cache rate OpenRouter does not report instead of fabricating a 0 (#1042)", async () => {
+      mockOpenRouterCatalog([
+        {
+          id: "vendor/with-cache-read",
+          name: "With cache read",
+          pricing: { prompt: "0.000003", completion: "0.000015", input_cache_read: "0.0000003" },
+        },
+        {
+          id: "vendor/without-cache-read",
+          name: "Without cache read",
+          pricing: { prompt: "0.000001", completion: "0.000002" },
+        },
+      ]);
+
+      const res = await app.request("/api/models/openrouter", { headers: authHeaders(ctx) });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as any;
+
+      const withCacheRead = body.data.find((m: any) => m.id === "vendor/with-cache-read");
+      expect(withCacheRead.cost.input).toBeCloseTo(3);
+      expect(withCacheRead.cost.output).toBeCloseTo(15);
+      expect(withCacheRead.cost.cacheRead).toBeCloseTo(0.3);
+
+      // The whole point of #1042: the key must be ABSENT, not `undefined`-ish.
+      // `classifyTokenPricing` tests `cost.cacheRead == null`, and an explicit
+      // `0` reads as a real vendor price — so a fabricated zero would stamp an
+      // unpriceable model `priced` and silently drop its cached tokens.
+      const withoutCacheRead = body.data.find((m: any) => m.id === "vendor/without-cache-read");
+      expect(withoutCacheRead.cost.input).toBeCloseTo(1);
+      expect(withoutCacheRead.cost.output).toBeCloseTo(2);
+      expect("cacheRead" in withoutCacheRead.cost).toBe(false);
+
+      // `cacheWrite` is never reported by this endpoint — it is never invented
+      // for either entry.
+      expect("cacheWrite" in withCacheRead.cost).toBe(false);
+      expect("cacheWrite" in withoutCacheRead.cost).toBe(false);
+    });
+
+    it("returns a null cost when prompt/completion pricing is missing", async () => {
+      mockOpenRouterCatalog([
+        { id: "vendor/unpriced", name: "Unpriced", pricing: { completion: "0.000002" } },
+      ]);
+
+      const res = await app.request("/api/models/openrouter", { headers: authHeaders(ctx) });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as any;
+      expect(body.data.find((m: any) => m.id === "vendor/unpriced").cost).toBeNull();
     });
   });
 
@@ -470,6 +542,84 @@ describe("Models API", () => {
       expect(body.label).toBe("After");
       expect(body.enabled).toBe(false);
       expect(body.source).toBe("custom");
+    });
+
+    // Since #1040 removed the dashboard's pricing inputs, PUT is the ONLY way a
+    // human sets or clears a cost override. These three pin that escape hatch:
+    // `buildUpdateSet` skips `undefined` but writes `null`, so an explicit null
+    // clears back to the catalog while an omitted key preserves the override.
+    it("stores a cost override sent through PUT", async () => {
+      const credentialId = await createProviderKey();
+      const createRes = await app.request("/api/models", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ label: "Priced", modelId: "gpt-4o", credentialId }),
+      });
+      expect(createRes.status).toBe(201);
+      const { id } = (await createRes.json()) as { id: string };
+
+      const res = await app.request(`/api/models/${id}`, {
+        method: "PUT",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ cost: { input: 3, output: 15 } }),
+      });
+      expect(res.status).toBe(200);
+
+      const [row] = await db.select().from(orgModels).where(eq(orgModels.id, id));
+      expect(row!.cost).toEqual({ input: 3, output: 15 });
+    });
+
+    it("clears a cost override back to the catalog with an explicit null", async () => {
+      const credentialId = await createProviderKey();
+      const createRes = await app.request("/api/models", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          label: "Priced",
+          modelId: "gpt-4o",
+          credentialId,
+          cost: { input: 3, output: 15 },
+        }),
+      });
+      expect(createRes.status).toBe(201);
+      const { id } = (await createRes.json()) as { id: string };
+
+      const res = await app.request(`/api/models/${id}`, {
+        method: "PUT",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ cost: null }),
+      });
+      expect(res.status).toBe(200);
+
+      const [row] = await db.select().from(orgModels).where(eq(orgModels.id, id));
+      expect(row!.cost).toBeNull();
+    });
+
+    it("leaves an existing cost override intact when PUT does not mention cost", async () => {
+      const credentialId = await createProviderKey();
+      const createRes = await app.request("/api/models", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          label: "Priced",
+          modelId: "gpt-4o",
+          credentialId,
+          cost: { input: 3, output: 15 },
+        }),
+      });
+      expect(createRes.status).toBe(201);
+      const { id } = (await createRes.json()) as { id: string };
+
+      const res = await app.request(`/api/models/${id}`, {
+        method: "PUT",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ label: "Renamed" }),
+      });
+      expect(res.status).toBe(200);
+
+      const [row] = await db.select().from(orgModels).where(eq(orgModels.id, id));
+      expect(row!.label).toBe("Renamed");
+      expect(row!.cost).toEqual({ input: 3, output: 15 });
     });
 
     it("rejects switching to a needs-reconnection credential with 400, model unchanged", async () => {
@@ -804,6 +954,143 @@ describe("Models API", () => {
 
       expect(res.status).toBe(204);
       expect(await res.text()).toBe("");
+    });
+  });
+
+  /**
+   * The production deadlock, walked end to end over HTTP.
+   *
+   * `listOrgModels` used to DROP a model whose credential could no longer serve
+   * inference, while `org_models.credential_id` (ON DELETE RESTRICT) kept that
+   * credential undeletable: the model was invisible, so it could not be
+   * detached, so the credential could not be deleted. The service-level tests
+   * pin the serializer; only these pin the sequence a user actually performs —
+   * in particular the final credential DELETE, without which a future
+   * reachability guard on `DELETE /api/models/:id` would reinstate the
+   * deadlock with the whole suite green.
+   */
+  describe("dead credential — end-to-end recovery over HTTP", () => {
+    /** A `needsReconnection` OAuth credential with one enabled model bound to it. */
+    async function seedDeadPair(label: string) {
+      const cred = await seedOrgModelProviderOAuth({
+        orgId: ctx.orgId,
+        providerId: TEST_OAUTH_PROVIDER_ID,
+        label: `${label} credential`,
+        needsReconnection: true,
+      });
+      const model = await seedOrgModel({
+        orgId: ctx.orgId,
+        credentialId: cred.id,
+        label,
+        modelId: "gpt-4o",
+        enabled: true,
+      });
+      return { cred, model };
+    }
+
+    it("lists the dead model, detaches it, then deletes the credential (204, not 409 credential_in_use)", async () => {
+      const { cred, model } = await seedDeadPair("Dead model");
+
+      // 1. It surfaces on GET — through the real serializer + alias projection.
+      const list = await app.request("/api/models", { headers: authHeaders(ctx) });
+      expect(list.status).toBe(200);
+      const listed = ((await list.json()) as any).data.find((m: any) => m.id === model.id);
+      expect(listed).toBeDefined();
+      expect(listed.needs_reconnection).toBe(true);
+
+      // 2. …so it can be detached,
+      const delModel = await app.request(`/api/models/${model.id}`, {
+        method: "DELETE",
+        headers: authHeaders(ctx),
+      });
+      expect(delModel.status).toBe(204);
+
+      // 3. …which releases the FK. This is the 409 the user could never escape.
+      const delCred = await app.request(`/api/model-provider-credentials/${cred.id}`, {
+        method: "DELETE",
+        headers: authHeaders(ctx),
+      });
+      expect(delCred.status).toBe(204);
+    });
+
+    it("refuses a dead model as the org default — 409 model_needs_reconnection", async () => {
+      const { model } = await seedDeadPair("Dead default candidate");
+
+      const res = await app.request("/api/models/default", {
+        method: "PUT",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ modelId: model.id }),
+      });
+
+      expect(res.status).toBe(409);
+      expect(((await res.json()) as any).code).toBe("model_needs_reconnection");
+
+      const [org] = await db
+        .select({ defaultModelId: organizations.defaultModelId })
+        .from(organizations)
+        .where(eq(organizations.id, ctx.orgId))
+        .limit(1);
+      expect(org!.defaultModelId).toBeNull();
+    });
+
+    it("still accepts a model whose credential's providerId is unregistered", async () => {
+      // NOT a 409: the credential is healthy — its provider module was dropped
+      // from `MODULES`, which is why the model is absent from GET /api/models
+      // in the first place. "Reconnect this credential" would be misdirection
+      // about a row the client cannot even see; the fix is to restore the
+      // module. So this behaves exactly as it did before the flag existed.
+      const { cred, model } = await seedDeadPair("Orphaned provider");
+      await db
+        .update(modelProviderCredentials)
+        .set({ providerId: "@gone/provider" })
+        .where(eq(modelProviderCredentials.id, cred.id));
+
+      const list = await app.request("/api/models", { headers: authHeaders(ctx) });
+      expect(((await list.json()) as any).data.find((m: any) => m.id === model.id)).toBeUndefined();
+
+      const res = await app.request("/api/models/default", {
+        method: "PUT",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ modelId: model.id }),
+      });
+      // 204, not 200: the write lands, but the handler re-reads the list to
+      // echo the effective default and the row is not in it. Pre-existing
+      // shape, unchanged by this branch — the assertion of record is the
+      // stored pointer below.
+      expect(res.status).toBe(204);
+
+      const [org] = await db
+        .select({ defaultModelId: organizations.defaultModelId })
+        .from(organizations)
+        .where(eq(organizations.id, ctx.orgId))
+        .limit(1);
+      expect(org!.defaultModelId).toBe(model.id);
+    });
+
+    it("answers the Test action with a failed result, not a 404, on a dead model", async () => {
+      // The settings table renders "Test" on every listed row, dead ones
+      // included — a 404 "Model not found" about a row on screen is the wrong
+      // answer. Same envelope the client already renders for a failed probe.
+      const { model } = await seedDeadPair("Dead test target");
+
+      const res = await app.request(`/api/models/${model.id}/test`, {
+        method: "POST",
+        headers: authHeaders(ctx),
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as any;
+      expect(body.ok).toBe(false);
+      expect(body.error).toBe("NEEDS_RECONNECTION");
+      expect(body.message).toContain("reconnected");
+    });
+
+    it("still 404s the Test action for a model id that does not exist", async () => {
+      const res = await app.request(`/api/models/${crypto.randomUUID()}/test`, {
+        method: "POST",
+        headers: authHeaders(ctx),
+      });
+      expect(res.status).toBe(404);
     });
   });
 

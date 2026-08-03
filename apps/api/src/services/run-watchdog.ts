@@ -43,7 +43,7 @@ import { and, isNotNull, isNull, lt, sql } from "drizzle-orm";
 import { db, isEmbeddedDb } from "@appstrate/db/client";
 import { runs } from "@appstrate/db/schema";
 import { logger } from "../lib/logger.ts";
-import { finalizeRun, getRunSinkContext } from "./run-event-ingestion.ts";
+import { applyRecoveredOutput, finalizeRun, getRunSinkContext } from "./run-event-ingestion.ts";
 import { stopWorkloadAndWait } from "./stop-workload.ts";
 import { emptyRunResult } from "@appstrate/afps-runtime/runner";
 import { getErrorMessage } from "@appstrate/core/errors";
@@ -228,6 +228,18 @@ async function finalizeStalledRun(runId: string, stallThresholdSeconds: number):
       runId,
     });
   }
+
+  // A runner that stalled AFTER its agent emitted `output` still produced a
+  // deliverable — durable in `run_logs`, but dropped by this path, which
+  // builds its own `emptyRunResult()` instead of going through
+  // `synthesiseFinalize`. Payload only: the terminal stays `failed`.
+  //
+  // Read AFTER the stop: a stalled runner is not necessarily a dead one (see
+  // above), so a still-live workload can emit `output` during the stop window
+  // — reading before it would miss exactly the payload this exists to save.
+  // Same ordering as the cancel path (`abortRun` → `stopWorkloadAndWait` →
+  // `synthesiseFinalize`, which reads inside).
+  await applyRecoveredOutput(run, result);
 
   await finalizeRun({ run, result });
 }

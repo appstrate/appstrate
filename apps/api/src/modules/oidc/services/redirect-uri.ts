@@ -8,23 +8,33 @@
  *
  * Defense layers (in order):
  * 1. Must parse as an absolute URL.
- * 2. Scheme must be `https:` — `http:` is only allowed when pointing at
- *    `localhost`/`127.0.0.1` AND the platform itself is running in dev
- *    mode (`APP_URL` is HTTP/localhost). Production cannot register HTTP
- *    redirect URIs at all.
- * 3. Host must not resolve to a blocked network: SSRF targets (RFC1918,
- *    link-local `169.254.0.0/16`, cloud metadata, loopback in production,
- *    IPv6 variants), `javascript:`/`data:`/`file:` schemes. Enforced via
- *    `@appstrate/core/ssrf:isBlockedUrl`, which is the same helper used
- *    by the webhooks delivery path.
+ * 2. `http:` is allowed only when the host is loopback (`localhost` and any
+ *    RFC 6761 `.localhost` subdomain, `127.0.0.0/8`, `::1` — RFC 8252 §7.3),
+ *    regardless of environment. Native and CLI clients are loopback-only by
+ *    construction, and a redirect URI is a browser navigation target — never
+ *    a URL the server fetches — so the SSRF concern that gates outbound
+ *    loopback does not apply.
  *
- * Dev-mode localhost is explicitly re-allowed after the SSRF check so
- * satellites can register `http://localhost:5173/callback` etc. during
- * local development — only when `APP_URL` is itself a localhost URL.
+ *    The predicate is the SAME `isLoopbackHost` the Dynamic Client
+ *    Registration path uses (`@better-auth/core/utils/host`, reached from
+ *    `SafeUrlSchema` inside `@better-auth/oauth-provider`), so the admin path
+ *    accepts exactly what DCR accepts — a local re-implementation would drift
+ *    on the edge forms upstream normalizes (IPv4-mapped IPv6, zone ids,
+ *    trailing dots, `tenant.localhost`), which is the asymmetry #1012 is
+ *    about. Upstream's docstring steers redirect *matching* to `isLoopbackIP`;
+ *    that warning is about matching an authorization request against a
+ *    registration, not about registration policy, where `SafeUrlSchema`
+ *    itself uses `isLoopbackHost`.
+ * 3. Every other host must be `https:` AND must not resolve to a blocked
+ *    network: SSRF targets (RFC1918, link-local `169.254.0.0/16`, cloud
+ *    metadata, loopback, IPv6 variants). Enforced via
+ *    `@appstrate/core/ssrf:isBlockedUrl`, the same helper used by the
+ *    webhooks delivery path. Non-`http:`/`https:` schemes
+ *    (`javascript:`/`data:`/`file:`) fall through to `false`.
  */
 
 import { isBlockedUrl } from "@appstrate/core/ssrf";
-import { isDevEnvironment, LOCALHOST_HOSTS } from "../../../services/redirect-validation.ts";
+import { isLoopbackHost } from "@better-auth/core/utils/host";
 
 export function isValidRedirectUri(raw: string): boolean {
   let parsed: URL;
@@ -33,12 +43,11 @@ export function isValidRedirectUri(raw: string): boolean {
   } catch {
     return false;
   }
-  const isLocalhost = LOCALHOST_HOSTS.has(parsed.hostname);
+  if (parsed.protocol === "http:") {
+    return isLoopbackHost(parsed.hostname);
+  }
   if (parsed.protocol === "https:") {
     return !isBlockedUrl(raw);
-  }
-  if (parsed.protocol === "http:" && isLocalhost && isDevEnvironment()) {
-    return true;
   }
   return false;
 }

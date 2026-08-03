@@ -441,19 +441,24 @@ untrusted preview script can never reach the app's session even if the sandbox
 is somehow defeated. A sibling subdomain (`usercontent.example.com`) is the
 weaker fallback: it is a different origin and a different storage partition, but
 it still receives any cookie scoped to the parent domain. When unset, previews
-are served same-origin on `APP_URL` (still hardened, and agent HTML is only
-served as active content inside the dashboard's sandboxed iframe) — fine for
-render-only content, but a separate origin is recommended once agents can emit
-HTML for other users to view.
+are served same-origin on `APP_URL` (still hardened) — fine for render-only
+content, but a separate origin is recommended once agents can emit HTML for
+other users to view.
 
-**Do not point `USERCONTENT_URL` at `APP_URL`'s host.** Setting the variable is
-what tells the platform the preview origin is isolated, which makes it serve
-agent HTML as active content in _every_ loading context — including a top-level
-tab. On the app's own host that means agent-authored inline script running with
-the dashboard's `localStorage` and non-HttpOnly cookies. The platform enforces
-this: a `USERCONTENT_URL` sharing `APP_URL`'s host (identical value, or the same
-host on another port or scheme) **fails boot**, as does a non-`https://` value
-when `NODE_ENV=production`.
+**Setting it changes no behaviour, only isolation.** Agent HTML is rendered as
+active content **only** inside the dashboard's sandboxed iframe (`Sec-Fetch-Dest:
+iframe`), in _every_ mode — set or unset. Opening a `preview_url` in a top-level
+tab shows the document's source, never a rendered page, whatever this variable
+says. There is no "configured ⇒ trusted" exemption.
+
+**Do not point `USERCONTENT_URL` at `APP_URL`'s host.** A same-host value is not
+a separate origin, so it buys none of the isolation above: no separate cookie
+jar, storage partition or process, and nothing left over if the preview
+response's sandbox is ever not in force — a user agent that ignores sandboxing,
+or a future dashboard page that frames the preview without the `sandbox`
+attribute. The platform enforces this: a `USERCONTENT_URL` sharing `APP_URL`'s
+host (identical value, or the same host on another port or scheme) **fails
+boot**, as does a non-`https://` value when `NODE_ENV=production`.
 
 ### Reverse proxy body size & timeouts (uploads)
 

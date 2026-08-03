@@ -105,6 +105,17 @@ export async function startTestServer(
           // Point same-origin to /json.
           return Response.redirect(new URL("/json", req.url).toString(), 302);
         }
+        case "/redirect/307": {
+          // 307 with a ZERO-byte body — the exact shape of
+          // `GET /api/documents/{id}/content` when S3 has a public
+          // endpoint (Hono's `c.redirect()` sends no body). Reproduces
+          // the "0 bytes, exit 0, no warning" papercut (#1021).
+          calls.push(log);
+          return new Response(null, {
+            status: 307,
+            headers: { Location: new URL("/json", req.url).toString() },
+          });
+        }
         case "/redirect/cross": {
           // Cross-origin redirect — target points at the peer server.
           calls.push(log);

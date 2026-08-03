@@ -461,7 +461,7 @@ export const modelProviderCredentialsPaths = {
       tags: ["Model Provider Credentials"],
       summary: "Discover the models this credential serves",
       description:
-        "Discovers the models a credential serves and persists them as `available_model_ids`. For `probe`-validation (API-key) providers this is empirical: each discovery candidate is probed against the live credential (1-token inference requests on the account's own quota) and the ids that answered are persisted. For `offline`-validation providers (subscription: codex, claude-code) NO upstream call is made — the provider's static candidate set (intersected with the catalog) is persisted instead; real per-model availability is validated at the first run on the Pi engine. Synchronous; rate limited to 6 requests per minute. An auth failure or an all-failure round leaves the previously persisted list untouched.",
+        "Discovers the models a credential serves. For `probe`-validation (API-key) providers this is empirical: each discovery candidate is probed against the live credential (1-token inference requests on the account's own quota) and the ids that answered are persisted as `available_model_ids`. For `offline`-validation providers (subscription: codex, claude-code) this is a no-op that reports the current list: NO upstream call is made and NOTHING is persisted, because their served set is derived from the provider definition and the pricing catalog on every read — `probed_count` is 0 and the response carries the freshly derived list. Real per-model availability is validated at the first run on the Pi engine. Synchronous; rate limited to 6 requests per minute. On the probe path an auth failure or an all-failure round leaves the previously persisted list untouched.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
@@ -483,12 +483,12 @@ export const modelProviderCredentialsPaths = {
                     type: "string",
                     enum: ["ok", "auth_failed", "nothing_verified", "no_candidates"],
                     description:
-                      "`ok` — list persisted. `auth_failed` — credential rejected upstream, nothing persisted. `nothing_verified` — every probe failed (network incident or none served), previous list kept. `no_candidates` — provider declares no discovery candidates.",
+                      "`ok` — list resolved (persisted on the probe path; derived, nothing written, for `offline`-validation providers). `auth_failed` — credential rejected upstream, nothing persisted. `nothing_verified` — every probe failed (network incident or none served), previous list kept. `no_candidates` — provider resolves no discovery candidate.",
                   },
                   probed_count: {
                     type: "integer",
                     description:
-                      "Number of candidates considered, not necessarily models live-probed. For `offline`-validation providers (codex, claude-code) candidates are considered with zero upstream calls.",
+                      "Number of models live-probed against the credential. Always 0 for `offline`-validation providers (codex, claude-code): their list is derived, never probed.",
                   },
                   available_model_ids: {
                     type: ["array", "null"],

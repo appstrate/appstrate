@@ -10,8 +10,8 @@
  * single-writer persistence path as every other chat message.
  *
  * What is asserted here:
- *   - the launching session is recorded on `runs.metadata.chatSessionId` without
- *     clobbering whatever else the platform put in that JSONB column;
+ *   - the launching session is recorded on `runs.chat_session_id` without
+ *     clobbering unrelated run metadata;
  *   - the notice is posted exactly ONCE, even on a replayed terminal event;
  *   - nothing is posted while a turn is live on that session (that turn is the
  *     writer, and it is the one reporting the result);
@@ -59,13 +59,17 @@ describe("orphaned chat run reconciliation", () => {
     return id;
   }
 
-  async function createRun(metadata: Record<string, unknown> | null) {
+  async function createRun(
+    chatSessionId: string | null,
+    metadata: Record<string, unknown> | null = null,
+  ) {
     const run = await seedRun({
       packageId,
       orgId: ctx.orgId,
       applicationId: ctx.defaultAppId,
       userId: ctx.user.id,
       status: "success",
+      ...(chatSessionId ? { chatSessionId } : {}),
       ...(metadata ? { metadata } : {}),
     });
     return run.id;
@@ -98,26 +102,38 @@ describe("orphaned chat run reconciliation", () => {
       .orderBy(asc(chatMessages.seq));
   }
 
-  it("records the launching session on runs.metadata without clobbering it", async () => {
+  it("records the launching session without clobbering run metadata", async () => {
     const sessionId = await createSession();
-    const runId = await createRun({ degraded_integrations: ["@acme/gmail"] });
+    const runId = await createRun(null, { degraded_integrations: ["@acme/gmail"] });
 
     await stampChatSessionOnRun(runId, ctx.orgId, sessionId);
 
     const [row] = await db
-      .select({ metadata: runs.metadata })
+      .select({ chatSessionId: runs.chatSessionId, metadata: runs.metadata })
       .from(runs)
       .where(eq(runs.id, runId))
       .limit(1);
-    expect(row?.metadata).toEqual({
-      degraded_integrations: ["@acme/gmail"],
-      chatSessionId: sessionId,
-    });
+    expect(row?.chatSessionId).toBe(sessionId);
+    expect(row?.metadata).toEqual({ degraded_integrations: ["@acme/gmail"] });
+  });
+
+  it("detaches the relationship when its conversation is deleted", async () => {
+    const sessionId = await createSession();
+    const runId = await createRun(sessionId);
+
+    await db.delete(chatSessions).where(eq(chatSessions.id, sessionId));
+
+    const [row] = await db
+      .select({ id: runs.id, chatSessionId: runs.chatSessionId })
+      .from(runs)
+      .where(eq(runs.id, runId))
+      .limit(1);
+    expect(row).toEqual({ id: runId, chatSessionId: null });
   });
 
   it("posts the notice once, naming the run and its documents", async () => {
     const sessionId = await createSession();
-    const runId = await createRun({ chatSessionId: sessionId });
+    const runId = await createRun(sessionId);
     await publishDocument(runId, "report.html");
 
     await expect(reconcileChatRun({ runId, orgId: ctx.orgId })).resolves.toBe(true);
@@ -145,7 +161,7 @@ describe("orphaned chat run reconciliation", () => {
 
   it("does not double-post on a replayed terminal event", async () => {
     const sessionId = await createSession();
-    const runId = await createRun({ chatSessionId: sessionId });
+    const runId = await createRun(sessionId);
     await publishDocument(runId, "report.html");
 
     await expect(reconcileChatRun({ runId, orgId: ctx.orgId })).resolves.toBe(true);
@@ -170,7 +186,7 @@ describe("orphaned chat run reconciliation", () => {
 
   it("stays silent while a turn is live on the session", async () => {
     const sessionId = await createSession({ activeStreamId: "stream_live" });
-    const runId = await createRun({ chatSessionId: sessionId });
+    const runId = await createRun(sessionId);
     await publishDocument(runId, "report.html");
 
     await expect(reconcileChatRun({ runId, orgId: ctx.orgId })).resolves.toBe(false);
@@ -179,7 +195,7 @@ describe("orphaned chat run reconciliation", () => {
 
   it("stays silent when the run produced nothing", async () => {
     const sessionId = await createSession();
-    const runId = await createRun({ chatSessionId: sessionId });
+    const runId = await createRun(sessionId);
 
     await expect(reconcileChatRun({ runId, orgId: ctx.orgId })).resolves.toBe(false);
     expect(await messages(sessionId)).toHaveLength(0);
@@ -196,7 +212,7 @@ describe("orphaned chat run reconciliation", () => {
 
   it("ignores a run whose org does not match (cross-tenant id)", async () => {
     const sessionId = await createSession();
-    const runId = await createRun({ chatSessionId: sessionId });
+    const runId = await createRun(sessionId);
     await publishDocument(runId, "report.html");
 
     await expect(

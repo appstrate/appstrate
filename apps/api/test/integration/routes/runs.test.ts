@@ -6,7 +6,13 @@ import { db } from "@appstrate/db/client";
 import { auditEvents, runLogs, runs } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
-import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
+import {
+  createTestContext,
+  authHeaders,
+  createTestUser,
+  addOrgMember,
+  type TestContext,
+} from "../../helpers/auth.ts";
 import {
   seedAgent,
   seedRun,
@@ -20,15 +26,8 @@ import { installPackage } from "../../../src/services/application-packages.ts";
 import { createApiKeyCredential } from "../../../src/services/model-providers/credentials.ts";
 import { createOrgModel, setDefaultModel } from "../../../src/services/org-models.ts";
 import { waitForInFlight } from "../../../src/services/run-tracker.ts";
-import {
-  _setOrchestratorForTesting,
-  type RunOrchestrator,
-  type WorkloadHandle,
-  type WorkloadSpec,
-  type IsolationBoundary,
-  type CleanupReport,
-  type StopResult,
-} from "../../../src/services/orchestrator/index.ts";
+import { _setOrchestratorForTesting } from "../../../src/services/orchestrator/index.ts";
+import { createFakeOrchestrator } from "../../helpers/run-connection-fixtures.ts";
 
 const app = getTestApp();
 
@@ -372,56 +371,6 @@ describe("Runs API", () => {
   // orchestrator (no Docker) so it settles in-process within the test,
   // instead of a slow real image pull racing the next test's truncateAll.
   describe("POST /api/agents/:scope/:name/run — resolved model echo", () => {
-    /** Minimal no-op orchestrator: workloads "run" instantly and exit 0. */
-    function createFakeOrchestrator(): RunOrchestrator {
-      const handle = (runId: string, role: string): WorkloadHandle => ({
-        id: `${role}_${runId}`,
-        runId,
-        role,
-      });
-      return {
-        async initialize() {},
-        async shutdown() {},
-        async cleanupOrphans(): Promise<CleanupReport> {
-          return { workloads: 0, isolationBoundaries: 0, workspaces: 0 };
-        },
-        async ensureImages() {},
-        async createIsolationBoundary(runId: string): Promise<IsolationBoundary> {
-          return {
-            id: `net_${runId}`,
-            name: `appstrate-exec-${runId}`,
-            workspace: { kind: "directory", path: `/tmp/test-ws-${runId}` },
-            sidecarEndpoints: {
-              sidecarUrl: "http://sidecar:8080",
-              llmProxyUrl: "http://sidecar:8080/llm",
-              forwardProxyUrl: "http://sidecar:8081",
-              noProxy: "sidecar,localhost,127.0.0.1",
-            },
-          };
-        },
-        async removeIsolationBoundary() {},
-        async createSidecar(runId: string): Promise<WorkloadHandle> {
-          return handle(runId, "sidecar");
-        },
-        async createWorkload(spec: WorkloadSpec): Promise<WorkloadHandle> {
-          return handle(spec.runId, spec.role);
-        },
-        async startWorkload() {},
-        async stopWorkload() {},
-        async removeWorkload() {},
-        async waitForExit(): Promise<number> {
-          return 0;
-        },
-        async *streamLogs(): AsyncGenerator<string> {},
-        async stopByRunId(): Promise<StopResult> {
-          return "stopped";
-        },
-        async resolvePlatformApiUrl(): Promise<string> {
-          return "http://platform:3000";
-        },
-      };
-    }
-
     beforeAll(() => {
       _setOrchestratorForTesting(createFakeOrchestrator());
     });
@@ -505,6 +454,15 @@ describe("Runs API", () => {
       const [row] = await db.select().from(runs).where(eq(runs.id, body.id!));
       expect(row!.modelLabel).toBe("Echo Default GPT");
       expect(row!.modelSource).toBe("org");
+      // Kickoff pricing snapshot (issue #1025 §C) — the platform-side fact the
+      // run's runner ledger row is classified against, resolved here from the
+      // vendored catalog (the org_models row carries no `cost` override). The
+      // RATES are catalog content and refresh weekly; what this pins is that a
+      // priced model reaches the row with a usable rate table at all.
+      expect(row!.modelCost).toMatchObject({
+        input: expect.any(Number),
+        output: expect.any(Number),
+      });
 
       // The trigger leaves an audit trail (run.triggered, actor = the caller).
       const auditRows = await db
@@ -642,6 +600,52 @@ describe("Runs API", () => {
       expect(body.status).toBe("success");
     });
 
+    // #1025: a run the platform could not price finalizes with `cost = NULL`
+    // and `cost_pricing_status = 'unpriced'`. Both facts must cross the wire —
+    // the number alone lets every consumer (SPA included) render a confident
+    // `$0.0000` for spend nobody could compute.
+    it("exposes cost_pricing_status alongside cost", async () => {
+      await seedAgent({ id: "@runorg/unpriced-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
+      const run = await seedRun({
+        packageId: "@runorg/unpriced-agent",
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        userId: ctx.user.id,
+        status: "success",
+        cost: null,
+        costPricingStatus: "unpriced",
+      });
+
+      const res = await app.request(`/api/runs/${run.id}`, { headers: authHeaders(ctx) });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        cost: number | null;
+        cost_pricing_status: string | null;
+      };
+      expect(body.cost).toBeNull();
+      expect(body.cost_pricing_status).toBe("unpriced");
+    });
+
+    it("emits cost_pricing_status as null on a run that carries no verdict", async () => {
+      // The field is REQUIRED on the wire (declared in the Run schema's
+      // `required`), so it must be present-and-null, never absent.
+      await seedAgent({ id: "@runorg/plain-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
+      const run = await seedRun({
+        packageId: "@runorg/plain-agent",
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        userId: ctx.user.id,
+        status: "success",
+        cost: 0.25,
+      });
+
+      const res = await app.request(`/api/runs/${run.id}`, { headers: authHeaders(ctx) });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as Record<string, unknown>;
+      expect(body).toHaveProperty("cost_pricing_status");
+      expect(body.cost_pricing_status).toBeNull();
+    });
+
     it("returns 404 for non-existent run", async () => {
       const res = await app.request("/api/runs/exec_nonexistent", {
         headers: authHeaders(ctx),
@@ -705,6 +709,258 @@ describe("Runs API", () => {
       const detailBody = (await detail.json()) as { id: string; data?: unknown };
       expect(detailBody.id).toBe(run.id);
       expect(detailBody.data).toBeUndefined();
+    });
+  });
+
+  // ─── GET /api/runs — ?user is a closed set ─────────────────
+
+  // `user` used to accept `me` and silently ignore everything else, so
+  // `?user=<some id>` came back as the full org list while the caller read it
+  // as filtered. The param is now validated against its declared enum.
+  describe("GET /api/runs — ?user validation", () => {
+    // Two members, one run each — enough to tell "all org runs" apart from
+    // "only mine" in the responses below.
+    async function seedTwoMembersRuns() {
+      const otherUser = await createTestUser();
+      await addOrgMember(ctx.orgId, otherUser.id);
+      await seedAgent({ id: "@runorg/uservalid-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
+      await seedRun({
+        packageId: "@runorg/uservalid-agent",
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        userId: ctx.user.id,
+        status: "success",
+      });
+      await seedRun({
+        packageId: "@runorg/uservalid-agent",
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        userId: otherUser.id,
+        status: "success",
+      });
+    }
+
+    it("still restricts to the caller with ?user=me", async () => {
+      await seedTwoMembersRuns();
+
+      const res = await app.request("/api/runs?user=me", { headers: authHeaders(ctx) });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { data: { userId: string }[]; total: number };
+      expect(body.total).toBe(1);
+      expect(body.data[0]!.userId).toBe(ctx.user.id);
+    });
+
+    it("lists all org runs when no ?user param is given", async () => {
+      await seedTwoMembersRuns();
+
+      const res = await app.request("/api/runs", { headers: authHeaders(ctx) });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { data: unknown[]; total: number };
+      expect(body.total).toBe(2);
+    });
+
+    it("rejects an unknown ?user value with 400 naming the param", async () => {
+      await seedTwoMembersRuns();
+
+      const res = await app.request(`/api/runs?user=${ctx.user.id}`, { headers: authHeaders(ctx) });
+
+      expect(res.status).toBe(400);
+      expect(res.headers.get("content-type")).toContain("application/problem+json");
+      const body = (await res.json()) as { param?: string; code?: string };
+      expect(body.param).toBe("user");
+      expect(body.code).toBe("invalid_request");
+    });
+
+    it("rejects a non-id garbage ?user value too", async () => {
+      const res = await app.request("/api/runs?user=everyone", { headers: authHeaders(ctx) });
+
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { param?: string };
+      expect(body.param).toBe("user");
+    });
+
+    // Present-but-empty is the shape a client emits for an unset filter — read
+    // as absent, exactly like the `kind`/`status`/date params on this route.
+    it("treats a present-but-empty ?user= as absent (full org list)", async () => {
+      await seedTwoMembersRuns();
+
+      const res = await app.request("/api/runs?user=", { headers: authHeaders(ctx) });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { data: unknown[]; total: number };
+      expect(body.total).toBe(2);
+    });
+
+    it("restricts an end-user caller to their own runs", async () => {
+      await seedAgent({ id: "@runorg/eu-filter-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
+      const endUser = await seedEndUser({
+        applicationId: ctx.defaultAppId,
+        orgId: ctx.orgId,
+        externalId: "ext-user-filter",
+      });
+      const apiKey = await seedApiKey({
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        createdBy: ctx.user.id,
+        name: "user-filter-key",
+      });
+      const ownRun = await seedRun({
+        packageId: "@runorg/eu-filter-agent",
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        endUserId: endUser.id,
+        status: "success",
+      });
+      // A member-owned run the end-user must never see.
+      await seedRun({
+        packageId: "@runorg/eu-filter-agent",
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        userId: ctx.user.id,
+        status: "success",
+      });
+
+      const euHeaders = {
+        Authorization: `Bearer ${apiKey.rawKey}`,
+        "X-Application-Id": ctx.defaultAppId,
+        "Appstrate-User": endUser.id,
+      };
+
+      // No param — still restricted.
+      const bare = await app.request("/api/runs", { headers: euHeaders });
+      expect(bare.status).toBe(200);
+      const bareBody = (await bare.json()) as { data: { id: string }[]; total: number };
+      expect(bareBody.total).toBe(1);
+      expect(bareBody.data.map((r) => r.id)).toEqual([ownRun.id]);
+
+      // `?user=me` — accepted, same restriction.
+      const explicit = await app.request("/api/runs?user=me", { headers: euHeaders });
+      expect(explicit.status).toBe(200);
+      const explicitBody = (await explicit.json()) as { data: { id: string }[] };
+      expect(explicitBody.data.map((r) => r.id)).toEqual([ownRun.id]);
+    });
+
+    // The param is validated before the end-user branch, so a bad value 400s
+    // for every caller rather than being swallowed by the implicit
+    // self-restriction — the same URL means the same thing for everyone.
+    it("still rejects an unknown ?user value for an end-user caller", async () => {
+      const endUser = await seedEndUser({
+        applicationId: ctx.defaultAppId,
+        orgId: ctx.orgId,
+        externalId: "ext-user-filter-bad",
+      });
+      const apiKey = await seedApiKey({
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        createdBy: ctx.user.id,
+        name: "user-filter-key-bad",
+      });
+
+      const res = await app.request("/api/runs?user=garbage", {
+        headers: {
+          Authorization: `Bearer ${apiKey.rawKey}`,
+          "X-Application-Id": ctx.defaultAppId,
+          "Appstrate-User": endUser.id,
+        },
+      });
+
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { param?: string };
+      expect(body.param).toBe("user");
+    });
+  });
+
+  // ─── GET /api/runs — ?kind and ?status are closed sets ─────
+
+  // Same failure mode `?user` had, in the same handler: an unrecognised value
+  // resolved to `undefined`, which applied NO filter and returned every kind /
+  // every status to a caller reading the list as narrowed. Both are now
+  // validated against the set the OpenAPI operation declares.
+  describe("GET /api/runs — ?kind and ?status validation", () => {
+    // One inline run and one package run, in two different statuses, so a
+    // dropped filter is visible as a wider `total` rather than a lucky match.
+    async function seedMixedRuns() {
+      await seedAgent({ id: "@runorg/kindstatus-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
+      await seedRun({
+        packageId: "@runorg/kindstatus-agent",
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        userId: ctx.user.id,
+        status: "success",
+      });
+      await seedRun({
+        packageId: "@runorg/kindstatus-agent",
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        userId: ctx.user.id,
+        status: "failed",
+      });
+    }
+
+    it("rejects an unknown ?kind with 400 naming the param", async () => {
+      await seedMixedRuns();
+
+      // The typo the previous code silently widened to "every kind".
+      const res = await app.request("/api/runs?kind=inlinee", { headers: authHeaders(ctx) });
+
+      expect(res.status).toBe(400);
+      expect(res.headers.get("content-type")).toContain("application/problem+json");
+      const body = (await res.json()) as { param?: string; code?: string };
+      expect(body.param).toBe("kind");
+      expect(body.code).toBe("invalid_request");
+    });
+
+    it("rejects an unknown ?status with 400 naming the param", async () => {
+      await seedMixedRuns();
+
+      const res = await app.request("/api/runs?status=bogus", { headers: authHeaders(ctx) });
+
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { param?: string; code?: string };
+      expect(body.param).toBe("status");
+      expect(body.code).toBe("invalid_request");
+    });
+
+    it("treats a present-but-empty ?kind= as absent (no filter)", async () => {
+      await seedMixedRuns();
+
+      const res = await app.request("/api/runs?kind=", { headers: authHeaders(ctx) });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { total: number };
+      expect(body.total).toBe(2);
+    });
+
+    it("treats a present-but-empty ?status= as absent (no filter)", async () => {
+      await seedMixedRuns();
+
+      const res = await app.request("/api/runs?status=", { headers: authHeaders(ctx) });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { total: number };
+      expect(body.total).toBe(2);
+    });
+
+    it("still applies the declared values", async () => {
+      await seedMixedRuns();
+
+      const failed = await app.request("/api/runs?status=failed", { headers: authHeaders(ctx) });
+      expect(failed.status).toBe(200);
+      const failedBody = (await failed.json()) as { data: { status: string }[]; total: number };
+      expect(failedBody.total).toBe(1);
+      expect(failedBody.data[0]!.status).toBe("failed");
+
+      // No inline runs were seeded, so `kind=inline` must come back empty —
+      // the assertion a widened filter would break.
+      const inline = await app.request("/api/runs?kind=inline", { headers: authHeaders(ctx) });
+      expect(inline.status).toBe(200);
+      expect(((await inline.json()) as { total: number }).total).toBe(0);
+
+      const pkg = await app.request("/api/runs?kind=package", { headers: authHeaders(ctx) });
+      expect(pkg.status).toBe(200);
+      expect(((await pkg.json()) as { total: number }).total).toBe(2);
     });
   });
 

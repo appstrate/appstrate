@@ -86,7 +86,7 @@
       "cache": false
     },
     "//#typecheck:scripts": {
-      "inputs": ["scripts/verify-module-contract.ts", "scripts/tsconfig.json", "tsconfig.base.json"]
+      "inputs": ["scripts/**/*.ts", "scripts/tsconfig.json", "tsconfig.base.json"]
     }
   }
 }

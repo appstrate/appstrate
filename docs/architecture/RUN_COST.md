@@ -5,11 +5,11 @@ Extracted from `CLAUDE.md` Backend section. Canonical read path + ingestion chai
 ## The two invariants
 
 - **Single writer**: every `llm_usage` row is inserted by `recordLlmUsage` (`apps/api/src/services/llm-usage-ledger.ts`). No producer builds its own `db.insert(llmUsage)`.
-- **Single read path**: aggregate run cost is `computeRunCost(runId, orgId)` (`apps/api/src/services/state/runs.ts`), which SUMs the ledger. No caller SUMs it directly. `runs.cost` is that value, cached at terminal time.
+- **Single read path**: aggregate run spend is `computeRunSpend(runId, orgId)` (`apps/api/src/services/state/runs.ts`), which SUMs the ledger AND reports what that sum is worth (see _Pricing provenance_). No caller SUMs it directly. `runs.cost` / `runs.cost_pricing_status` are those two values, cached at terminal time.
 
 ## Ingestion — four producers, one ledger
 
-1. **Platform-side runs (Pi container)**: `SYSTEM_PROVIDER_KEYS` cost config → `ModelDefinition.cost` → `ResolvedModel.cost` → `PromptContext.llmConfig.cost` → `MODEL_COST` env var in the Pi container → Pi SDK computes cost → `RunMessage.cost` → `appstrate.metric` event → **one cumulative `source="runner"` row per run** (`writeRunnerLedgerRow`). DB models (`org_models`) also support an optional `cost` (jsonb); OpenRouter models auto-populate it from the pricing API.
+1. **Platform-side runs (Pi container)**: `SYSTEM_PROVIDER_KEYS` cost config → `ModelDefinition.cost` → `ResolvedModel.cost` → `PromptContext.llmConfig.cost` → `MODEL_COST` env var in the Pi container → Pi SDK computes cost → `RunMessage.cost` → `appstrate.metric` event → **one cumulative `source="runner"` row per run** (`writeRunnerLedgerRow`). DB models (`org_models`) also support an optional `cost` (jsonb); OpenRouter models auto-populate it from the pricing API. The dashboard exposes no pricing fields (operator-only, by design); `PUT /api/models/{id}` with `{"cost": {...}}` sets the override and `{"cost": null}` clears it back to the catalog.
 2. **Server-side proxy (`/api/llm-proxy/*`, remote runs + chat's ai-sdk path)**: resolves the preset, forwards upstream, and inserts **one `source="proxy"` row per call**, `cost_usd = Σ(tokens × ResolvedModel.cost / 1e6)` over the four buckets. Pricing comes from `ModelDefinition.cost`, identical to the platform chain.
 3. **Runner reconciliation at finalize**: `POST /api/runs/{runId}/events/finalize` writes the run's terminal cumulative snapshot through the same `writeRunnerLedgerRow` upsert (see _Terminal ledger barrier_ below).
 4. **In-process chat engine** (`chat-subscription.ts:recordChatUsage`): the Pi chat engine serving oauth-subscription providers (claude-code, codex) never traverses the proxy, so it meters its own turn — one row per turn, attributed by `chat_session_id`, always `credential_source="org"` (it spends the user's own subscription), priced by the same `computeTokenCost`. It is stamped `source="proxy"`, which is a **known labelling inaccuracy**: the enum has only `proxy | runner`, and `proxy` is the correct half of that pair here because the row is immutable at insert (see _Settlement_). A dedicated third enum value would need a DB enum migration plus a `PlatformServices` contract change.
@@ -32,6 +32,32 @@ input          = max(0, prompt_tokens − cacheRead − cacheWrite)
 Every count is floored at zero at the adapter boundary (`helpers.tokenCount`, and the same clamp in `recordChatUsage`): a negative count would produce a negative `cost_usd` that SUBTRACTS from the run's cost and from the corresponding debit. That application-side floor is backed by two DB constraints — `llm_usage_cost_usd_non_negative` and `runs_cost_non_negative` (migration `0029`) — so a write path that bypasses `recordLlmUsage` fails loudly instead of silently crediting an org.
 
 Both constraints validate pre-existing rows when they are added. On an instance carrying a historical negative row the boot migration aborts, by design: a negative cost is a billing error that must surface at deploy time rather than keep subtracting. Check before deploying with `SELECT count(*) FROM llm_usage WHERE cost_usd < 0;` and `SELECT count(*) FROM runs WHERE cost < 0;` — both must return 0.
+
+## Pricing provenance — a `0` says which kind of zero it is
+
+The formula above is permissive on purpose: `computeTokenCost` returns `0` for an absent `cost`, and defaults both cache rates to `0`. That is correct arithmetic, but it made `cost_usd = 0` unattributable — a genuinely free subscription-backed call, a model the platform failed to price, and a call whose cached fraction was priced at zero were the same row.
+
+`llm_usage.pricing_status` records which one it is. `classifyTokenPricing` (`@appstrate/afps-runtime/runner`, next to the formula) is the only place the rules live:
+
+- **`unpriced`** — no rates at all (`ResolvedModel.cost == null`). `resolveCatalogDefaults` returns `{}` on any catalog miss (unmapped provider, unknown model id, an entry LiteLLM dropped for lacking pricing), and `POST /api/models` does not require the id to be in the catalog — so this is reachable, not theoretical. The `0` is an absence of pricing.
+- **`partial`** — the model had rates, but a bucket that carried tokens had none: `cost.cacheRead` absent while `cache_read_input_tokens > 0`. Those tokens were already carved out of `input` by the normalisation above, so they are billed in no bucket at all. The figure is a floor. A missing `cacheWrite` rate deliberately does NOT trigger this — several vendors bill no write premium, and vendored coverage is so thin (5 of 89 openai entries) that flagging it would mark nearly everything `partial`.
+- **`priced`** — every bucket that carried tokens had a rate.
+- **`NULL`** — no claim. Rows written before the column existed (never backfilled — inventing `priced` would be the same false confidence), and the runner row of a run that resolved no platform model.
+
+All three producers stamp it through `apps/api/src/services/pricing-provenance.ts`, which classifies and warns once per `(org, model, status)` per process. The runner path cannot ask the container — the container computed the cost — so the rates the run was launched with are snapshotted as `runs.model_cost` at kickoff and the row is classified server-side against that. A run whose `model_source` is NULL is a remote-origin run that resolved no platform model; its row is left NULL rather than `unpriced`, because its inference is accounted elsewhere (typically as proxy rows carrying their own status).
+
+`computeRunSpend` rolls the rows up worst-of — any `unpriced` ⟹ `unpriced`, else any `partial` ⟹ `partial` — over the SAME rows it sums, and `finalizeRun` caches that on `runs.cost_pricing_status` beside `runs.cost`. The UI withholds the amount for an `unpriced` run rather than rendering `$0.0000`, and marks a `partial` one as a floor.
+
+Separating the causes is now one query:
+
+```sql
+SELECT pricing_status, count(*), sum(cost_usd)
+FROM llm_usage
+WHERE cost_usd = 0 AND (input_tokens > 0 OR output_tokens > 0)
+GROUP BY 1;
+```
+
+Two zeros that this status does NOT explain, by design: a subscription-backed run (`@appstrate/module-codex`, `@appstrate/module-claude-code`) resolves through `catalogProviderId` and is therefore `priced` at imputed public API rates even though the user pays a flat subscription — that imputation is deliberate; and an unparseable-usage 2xx keeps its own separate marker on `request_id` (see below), since a parse gap and a pricing gap are different failures.
 
 ## Every paid call reaches the ledger
 
@@ -59,7 +85,7 @@ A `source="runner"` row is **always** written for a run that consumed tokens; it
 
 A remote-origin run whose inference flows through the system llm-proxy carries BOTH per-call proxy rows (each with `credential_source` stamped) AND the runner's NULL-`credential_source` cumulative mirror (a remote run resolves no platform model, so `runs.model_source` is NULL). A platform run's runner row carries a non-NULL `credential_source` and stays authoritative; a remote run with ONLY a runner row keeps it; a detached row (`run_id IS NULL`) is never a mirror.
 
-The predicate is applied by **all three** ledger reads — `computeRunCost`, `listLlmUsage` (`PlatformServices.usage.list`) and `getSettledFrontierId` (`.settledFrontier`) — so a metering consumer that applies no filter of its own can no longer double-count a remote run. Skipping those ids is safe for the cursor: a batch is the next `limit` VISIBLE rows after `afterId`, so an empty batch still means "caught up", and an in-flight remote run's invisible mirror no longer pins the frontier.
+The predicate is applied by **all three** ledger reads — `computeRunSpend`, `listLlmUsage` (`PlatformServices.usage.list`) and `getSettledFrontierId` (`.settledFrontier`) — so a metering consumer that applies no filter of its own can no longer double-count a remote run. Skipping those ids is safe for the cursor: a batch is the next `limit` VISIBLE rows after `afterId`, so an empty batch still means "caught up", and an in-flight remote run's invisible mirror no longer pins the frontier.
 
 ## Settlement (what a cursor consumer may bill)
 
@@ -67,7 +93,7 @@ The predicate is applied by **all three** ledger reads — `computeRunCost`, `li
 
 **Ledger detach semantics (context deletion)**: an `llm_usage` row is an org-level accounting fact, billed after the fact by a cursor consumer (the `cloud/` module sweeps `services.usage.list` on a periodic tick, default 300s). A row can lose its **context** but never its **existence** while it may still be unswept. The context FKs are therefore `ON DELETE SET NULL`: deleting a run nulls `llm_usage.run_id`; deleting a chat session nulls `chat_session_id`. The row stays on the org's ledger with `org_id` and `credential_source` intact. The composite tenant-integrity FKs (`(run_id, org_id) → runs`, `(chat_session_id, org_id) → chat_sessions`) use the PG15+ column-list form `ON DELETE SET NULL (context_col)` so only the context column is nulled and the NOT-NULL `org_id` survives — hand-written in migration `0028_detach_llm_usage_context.sql` (Drizzle cannot express the column list). **Org deletion still cascades** the whole ledger (`org_id` FK) — total teardown of a deleted tenant is accepted. This closes a billing-evasion loop where deleting a terminal run before the sweep erased its not-yet-billed rows.
 
-`orgId` is mandatory on `computeRunCost`: `llm_usage.run_id` is caller-suppliable on the proxy path (`X-Run-Id`), so the aggregate must be structurally inseparable from the tenant (CRIT-07). The composite FK enforces the same invariant at the DB level for new rows.
+`orgId` is mandatory on `computeRunSpend`: `llm_usage.run_id` is caller-suppliable on the proxy path (`X-Run-Id`), so the aggregate must be structurally inseparable from the tenant (CRIT-07). The composite FK enforces the same invariant at the DB level for new rows.
 
 ## Known trade-offs (deferred)
 

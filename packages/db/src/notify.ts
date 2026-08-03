@@ -2,6 +2,7 @@
 
 import { sql as drizzleSql } from "drizzle-orm";
 import type { Db } from "./client.ts";
+import type { PricingStatus } from "./pricing-status.ts";
 
 /**
  * Wire payload for `run_metric` PG NOTIFY broadcasts.
@@ -34,6 +35,14 @@ export interface RunMetricNotifyPayload {
   } | null;
   /** Running aggregate of `llm_usage.cost_usd` for this run, in USD. */
   cost_so_far: number;
+  /**
+   * Pricing provenance of {@link cost_so_far}, over the SAME ledger rows. Rides
+   * along because the number alone is ambiguous: without it a RUNNING run on a
+   * model nothing could price streams a confident `$0.0000` until it
+   * terminates, and only then flips to "unpriced" from the cached
+   * `runs.cost_pricing_status`. NULL when no row of the run carries a status.
+   */
+  cost_pricing_status: PricingStatus | null;
 }
 
 /**
@@ -45,7 +54,7 @@ export interface RunMetricNotifyPayload {
  *
  * The payload is JSON-encoded inline; postgres truncates NOTIFY
  * payloads at 8 KB but ours is bounded by the four `token_usage`
- * integers + a float, well under that ceiling.
+ * integers, a float and a one-word status, well under that ceiling.
  */
 export async function notifyRunMetric(db: Db, payload: RunMetricNotifyPayload): Promise<void> {
   await db.execute(drizzleSql`SELECT pg_notify('run_metric', ${JSON.stringify(payload)})`);

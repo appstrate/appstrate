@@ -162,7 +162,7 @@ export const schemas = {
       api_version: {
         type: "string",
         description:
-          "Pinned API version for this organization (format: YYYY-MM-DD). Automatically set to the current version at org creation. New API versions do not affect existing orgs until explicitly updated.",
+          "Pinned API version for this organization (format: YYYY-MM-DD). Automatically set to the current version at org creation. New API versions do not affect existing orgs until explicitly updated. On write, a version the server cannot serve is rejected with `400 unsupported_api_version` — an unserveable pin would make every org-scoped route fail for this organization.",
       },
       dashboard_sso_enabled: {
         type: "boolean",
@@ -339,6 +339,7 @@ export const schemas = {
       "running_runs",
       "last_run",
       "forked_from",
+      "effective_timeout_seconds",
     ],
     properties: {
       id: { type: "string" },
@@ -477,6 +478,11 @@ export const schemas = {
         type: "boolean",
         description: "Whether the active version has changes not yet archived as a version",
       },
+      effective_timeout_seconds: {
+        type: "integer",
+        description:
+          "Run timeout that will actually be enforced, in seconds: the manifest's `timeout` (or the platform default when it declares none) clamped to this deployment's `PLATFORM_RUN_LIMITS.timeout_ceiling_seconds`. Compare with `manifest.timeout` to detect a capped declaration. Emitted for system agents too, which do not expose `manifest`.",
+      },
     },
   },
   AgentVersion: {
@@ -565,6 +571,7 @@ export const schemas = {
       "completed_at",
       "duration",
       "cost",
+      "cost_pricing_status",
       "runNumber",
       "token_usage",
       "version_label",
@@ -589,6 +596,7 @@ export const schemas = {
       "package_ephemeral",
       "unread",
       "document_counts",
+      "primary_document_id",
     ],
     properties: {
       id: { type: "string" },
@@ -622,7 +630,7 @@ export const schemas = {
             type: "string",
             deprecated: true,
             description:
-              "HISTORICAL ONLY. Markdown left by the removed `report` runtime tool. The platform no longer writes this field — it is served verbatim on runs finalized before the removal. Agent reports are markdown documents now (`outputs/report.md`).",
+              "HISTORICAL ONLY. Markdown left by the removed `report` runtime tool. The platform no longer writes this field — it is served verbatim on runs finalized before the removal. Agent reports are descriptively named markdown documents now (`outputs/<task-specific-name>.md`).",
           },
           text_truncated: {
             type: "boolean",
@@ -706,6 +714,12 @@ export const schemas = {
           "Model source: 'system' (platform-provided) or 'org' (user-configured). Resolved at run creation — an org-default change between triggers applies to subsequent runs unless the run was pinned via the runAgent `modelId` override.",
       },
       cost: { type: ["number", "null"], description: "Run cost in dollars" },
+      cost_pricing_status: {
+        type: ["string", "null"],
+        enum: ["priced", "partial", "unpriced", null],
+        description:
+          'How much of `cost` is backed by real per-token rates. `priced`: every token bucket that carried usage had a rate, so the figure is complete. `partial`: part of the consumption (cached input) had no rate and was priced at zero, so the figure is a FLOOR, not the full amount. `unpriced`: no rates were available for the model at all — a `cost` of 0 alongside this value means "not priced", NOT "free"; do not bill or display it as zero spend. `null` on runs finalized before this field existed and on runs that produced no usage rows; never read `null` as `priced`.',
+      },
       endUserId: {
         type: ["string", "null"],
         description: "End-user ID (eu_ prefix) if executed on behalf of an end-user",
@@ -793,6 +807,12 @@ export const schemas = {
             description: "Documents produced by the run.",
           },
         },
+      },
+      primary_document_id: {
+        type: ["string", "null"],
+        description:
+          "Document id of the run's explicitly selected primary deliverable, or null. The " +
+          "referenced document remains part of the ordinary run document list.",
       },
       inline_manifest: {
         type: ["object", "null"],
@@ -1136,7 +1156,7 @@ export const schemas = {
         type: ["array", "null"],
         items: { type: "string" },
         description:
-          "Model ids this credential is authorized to seed, persisted by model discovery (POST /:id/refresh-models, also fired after OAuth import) — the server-side authorization record gating model seeding. For `probe`-validation (API-key) providers these are empirically verified against the live credential; for `offline`-validation providers (subscription: codex, claude-code) these are the provider's static candidate set (∩ catalog), persisted with zero upstream calls. Null = discovery never ran. Per-credential because availability depends on the account's plan.",
+          "Model ids this credential is authorized to seed — the server-side authorization record gating model seeding. For `probe`-validation (API-key) providers these are empirically verified against the live credential and persisted by model discovery (POST /:id/refresh-models); empty when discovery never ran, and per-credential because availability depends on the account's plan. For `offline`-validation providers (subscription: codex, claude-code) nothing is ever persisted: the list is derived on every read from the provider definition and the pricing catalog, so a catalog refresh carries a new model generation through without any write.",
       },
       created_by: { type: ["string", "null"] },
       createdAt: { type: "string", format: "date-time" },
@@ -1155,6 +1175,7 @@ export const schemas = {
       "modelId",
       "enabled",
       "is_default",
+      "needs_reconnection",
       "aliased",
       "iconUrl",
       "source",
@@ -1195,6 +1216,11 @@ export const schemas = {
       reasoning: { type: ["boolean", "null"] },
       enabled: { type: "boolean" },
       is_default: { type: "boolean" },
+      needs_reconnection: {
+        type: "boolean",
+        description:
+          "True when the model's stored credential can no longer be used for inference — an OAuth credential flagged as needing reconnection, or (either auth mode) a stored secret that no longer decrypts. The model is listed so it can be inspected, detached or deleted, but it is not usable for inference and cannot be made the organization default. Always false for built-in models, which read their key from the environment.",
+      },
       aliased: {
         type: "boolean",
         description:

@@ -93,6 +93,29 @@ describe("parseRuntimeEnv — happy path", () => {
   });
 });
 
+// An unpriced model degrades accounting; it does NOT make the run invalid.
+// These pin the split between the fatal `issues` channel and the non-fatal
+// `warnings` one — issue #1025 asked for `issues.push()`, which would have
+// crashed every run on a model the platform could not price.
+describe("parseRuntimeEnv — non-fatal warnings", () => {
+  it("warns (does NOT throw) when MODEL_COST is absent", () => {
+    const env = parseRuntimeEnv(VALID);
+    expect(env.warnings).toHaveLength(1);
+    expect(env.warnings[0]).toContain("MODEL_COST");
+    // The run still gets a usable (all-zero) rate table.
+    expect(env.modelCost).toEqual({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
+  });
+
+  it("emits no warning when MODEL_COST is present", () => {
+    const env = parseRuntimeEnv({ ...VALID, MODEL_COST: '{"input":1,"output":2}' });
+    expect(env.warnings).toEqual([]);
+  });
+
+  it("keeps a malformed MODEL_COST FATAL — a present-but-broken value is a contract violation", () => {
+    expect(() => parseRuntimeEnv({ ...VALID, MODEL_COST: "{bad}" })).toThrow(RuntimeEnvError);
+  });
+});
+
 describe("parseRuntimeEnv — fail-fast errors", () => {
   it("collects every missing required field in one shot", () => {
     let caught: unknown;

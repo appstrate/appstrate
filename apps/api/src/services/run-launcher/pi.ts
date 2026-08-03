@@ -397,7 +397,7 @@ async function runPlatformContainerImpl(
           role: "agent",
           image: getEnv().PI_IMAGE,
           env: containerEnv,
-          resources: { memoryBytes: 1536 * 1024 * 1024, nanoCpus: 2_000_000_000 },
+          resources: plan.resources.workload,
           // Without a sidecar there is no egress proxy — the agent must
           // reach the upstream LLM and the platform sink directly, so it
           // goes on the egress network instead of the internal boundary.

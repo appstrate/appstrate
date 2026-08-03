@@ -367,9 +367,12 @@ services:
       - S3_PUBLIC_ENDPOINT=${S3_PUBLIC_ENDPOINT:-}
       # Separate origin for agent-generated HTML previews. SECURITY-RELEVANT:
       # unset => previews fall back to same-origin on APP_URL (hardened, but a
-      # weaker posture). Set it and the platform serves agent HTML as ACTIVE
-      # content — which is why boot FAILS if its host equals APP_URL's. Bare
-      # passthrough: an absent host env must stay absent, not become "".
+      # weaker posture). It grants NO behavioural exemption — agent HTML is
+      # rendered as active content only inside the dashboard's sandboxed iframe,
+      # in EVERY mode; what a configured value buys is isolation (own cookie
+      # jar, storage partition, process). Boot FAILS if its host equals
+      # APP_URL's, because then it buys none of that. Bare passthrough: an
+      # absent host env must stay absent, not become "".
       - USERCONTENT_URL
       # ── Observability (OpenTelemetry, optional) ──
       # Off by default; a complete no-op until enabled. Enabling needs

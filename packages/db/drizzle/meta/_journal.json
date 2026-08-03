@@ -211,6 +211,34 @@
       "when": 1784929744239,
       "tag": "0029_documents_tenant_integrity",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1785172574257,
+      "tag": "0030_null_static_provider_available_models",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1785190457502,
+      "tag": "0031_jittery_satana",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1785483236565,
+      "tag": "0032_sour_marvel_zombies",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1785749444794,
+      "tag": "0033_green_jimmy_woo",
+      "breakpoints": true
     }
   ]
 }

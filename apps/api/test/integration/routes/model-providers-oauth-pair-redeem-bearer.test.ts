@@ -142,6 +142,23 @@ describe("POST /api/model-providers-oauth/pair/redeem — pairing-bearer track",
     expect(res.status).toBe(200);
   });
 
+  // RFC 9110 §11.4 — the auth-scheme is a case-insensitive token. Both the
+  // `skipAuth` bypass in auth-pipeline.ts and the handler's own check have to
+  // agree on that, otherwise a lowercase scheme is diverted into the
+  // cookie/API-key chain and 401s before the handler ever sees it.
+  it("accepts a lowercase `bearer` scheme end to end (bypass + handler)", async () => {
+    const pairing = await mintPairing(ctx, "test-oauth");
+    const res = await app.request("/api/model-providers-oauth/pair/redeem", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `bearer ${pairing.token}`,
+      },
+      body: JSON.stringify(VALID_BODY("test-oauth")),
+    });
+    expect(res.status).toBe(200);
+  });
+
   it("rejects session-cookie requests without a pairing-bearer (bearer-only route)", async () => {
     // The route is bearer-only — cookie/API-key requests reach the handler
     // (auth-pipeline only bypasses on `Bearer appp_`) and 401 there.

@@ -83,7 +83,8 @@
     "contextWindow": 1000000,
     "maxTokens": 8192,
     "capabilities": [
-      "text"
+      "text",
+      "reasoning"
     ],
     "cost": {
       "input": 0.14,
@@ -97,7 +98,8 @@
     "contextWindow": 1000000,
     "maxTokens": 8192,
     "capabilities": [
-      "text"
+      "text",
+      "reasoning"
     ],
     "cost": {
       "input": 0.435,

@@ -109,13 +109,12 @@ export async function postInstallPackage(params: {
   // row diverge from the ZIP — and pinned runs read the manifest FROM the ZIP,
   // so the divergence would be silent.
   //
-  // ONE caller breaks the "`files` and `zipBuffer` carry the same manifest"
-  // assumption: the skill-only-ZIP fallback (`routes/packages.ts`, the
-  // `handleImport(c, parsed, buffer, …)` call on the `/import` routes) passes
-  // the ORIGINAL upload, which by construction has no `manifest.json` — that
-  // absence is what triggered the fallback — while `files` carries the manifest
-  // synthesized from `SKILL.md`. There the stored row is the only manifest
-  // there is; nothing diverges because the ZIP declares none.
+  // PRECONDITION: `zipBuffer` and `files` declare the same `manifest.json`.
+  // Callers that synthesize a manifest (the skill-only-ZIP fallback on the
+  // `/import` routes) must rebuild the archive before calling, not pass the
+  // original upload — otherwise the row is fine while the stored archive is
+  // unreadable to `extractRootFromAfps`, and every bundle export and pinned run
+  // touching the package fails.
   await createVersionAndUpload({
     packageId,
     version,

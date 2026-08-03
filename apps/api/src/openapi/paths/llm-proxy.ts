@@ -22,15 +22,14 @@ const baseParameters = [
       "up into the run's cost/token totals.",
     schema: { type: "string" },
   },
-  {
-    name: "Idempotency-Key",
-    in: "header",
-    required: false,
-    description:
-      "Optional idempotency key; replays are served from the stored " +
-      "response for 24h (see Applications idempotency spec).",
-    schema: { type: "string", maxLength: 256 },
-  },
+  // No `Idempotency-Key`: these routes have never mounted `idempotency()`
+  // (verified across every revision of `routes/llm-proxy.ts` since the
+  // endpoint landed), so the parameter this file used to declare — "replays
+  // are served from the stored response for 24h" — was a promise the runtime
+  // never kept. It now reads as one: `idempotencyGuard` answers
+  // `400 idempotency_not_supported` here like on any other unsupported
+  // mutating route. The `x-llm-proxy-cache-status` header below documents the
+  // separate, content-addressed response cache these routes *do* have.
 ] as const;
 
 const baseResponses = {

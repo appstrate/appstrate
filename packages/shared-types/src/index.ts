@@ -52,6 +52,7 @@ export interface ListEnvelope<T> {
 }
 
 import type { RunStatus as _RunStatus } from "@appstrate/db/run-status";
+import type { PricingStatus as _PricingStatus } from "@appstrate/db/pricing-status";
 
 /**
  * Wire-shape Run DTO returned to API consumers. The Drizzle `Run` row keeps
@@ -89,6 +90,15 @@ export interface RunWireDto {
   completed_at: string | null;
   duration: number | null;
   cost: number | null;
+  /**
+   * How much of {@link cost} is backed by real per-token rates:
+   * `"priced"` (all of it), `"partial"` (part of the consumption had no rate
+   * and was priced at zero — the figure is a FLOOR), `"unpriced"` (nothing
+   * could be priced — a `0` here is an absence of pricing, not a free run).
+   * `null` on runs finalized before the column existed and on runs that
+   * produced no ledger rows; never assume `"priced"` from it.
+   */
+  cost_pricing_status: _PricingStatus | null;
   runNumber: number | null;
   token_usage: unknown;
   version_label: string | null;
@@ -166,6 +176,11 @@ export type EnrichedRun = RunWireDto & {
    * input; `output` is the number of documents the run produced.
    */
   document_counts: { input: number; output: number };
+  /**
+   * The run's user-facing primary deliverable, selected explicitly by the
+   * publishing agent. Null when the run has no primary output.
+   */
+  primary_document_id: string | null;
   /** True if the run's source package is an inline/ephemeral shadow (POST /api/runs/inline). */
   package_ephemeral?: boolean;
   /** For inline runs only — snapshot of the manifest submitted at run time. Null after compaction. */
@@ -497,6 +512,14 @@ export interface AgentDetail {
   version_count?: number;
   has_unarchived_changes?: boolean;
   forked_from: string | null;
+  /**
+   * Run timeout actually enforced, in seconds: the manifest's `timeout` (or the
+   * platform default when it declares none) clamped to this deployment's
+   * `PLATFORM_RUN_LIMITS.timeout_ceiling_seconds`. Compare with
+   * `manifest.timeout` to detect a capped declaration. Always emitted —
+   * including for system agents, which do not expose `manifest`.
+   */
+  effective_timeout_seconds: number;
 }
 
 // --- Organization Package Types ---
@@ -674,6 +697,19 @@ export interface OrgModelInfo extends ModelMetadata {
   modelId: string | null;
   enabled: boolean;
   is_default: boolean;
+  /**
+   * True when the model's stored credential can no longer be used for
+   * inference — an OAuth credential flagged `needsReconnection` (revoked
+   * refresh token), or, for either auth mode, a stored blob that no longer
+   * decrypts (e.g. a key rotation that retired a kid still in use). The model
+   * is listed (so it can be inspected/detached/deleted) but must never be
+   * selectable for inference. Always false for built-in/system models, which
+   * read their key from the environment and have no stored blob.
+   *
+   * snake_case on purpose: mirrors {@link ModelProviderCredentialInfo.needs_reconnection}
+   * and `IntegrationConnection.needs_reconnection` on the same wire.
+   */
+  needs_reconnection: boolean;
   /**
    * Model-alias flag (LLM-gateway alias pattern). When true, the `id` is a
    * public alias; user-facing surfaces strip the real binding (`modelId`,

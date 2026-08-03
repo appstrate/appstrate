@@ -4,10 +4,105 @@ import { describe, expect, it } from "bun:test";
 import {
   extractDependencies,
   detectCycle,
+  dropRetiredDependencyKeys,
+  findRetiredDependencyKeys,
   parseManifestIntegrations,
   writeManifestIntegrations,
 } from "../src/dependencies.ts";
 import type { DepEntry } from "../src/dependencies.ts";
+
+describe("findRetiredDependencyKeys", () => {
+  it("finds dependencies.tools", () => {
+    expect(findRetiredDependencyKeys({ dependencies: { tools: { "@a/b": "^1.0.0" } } })).toEqual([
+      { key: "tools", replacement: "mcp_servers" },
+    ]);
+  });
+
+  it("finds dependencies.providers", () => {
+    expect(findRetiredDependencyKeys({ dependencies: { providers: {} } })).toEqual([
+      { key: "providers", replacement: "integrations" },
+    ]);
+  });
+
+  it("returns nothing for the canonical maps or an unrelated extension key", () => {
+    expect(
+      findRetiredDependencyKeys({
+        dependencies: {
+          skills: { "@a/s": "^1.0.0" },
+          mcp_servers: { "@a/m": "^1.0.0" },
+          integrations: { "@a/i": "^1.0.0" },
+          _meta: { "dev.appstrate/x": 1 },
+        },
+      }),
+    ).toEqual([]);
+  });
+
+  it("returns nothing for a manifest with no or malformed dependencies", () => {
+    expect(findRetiredDependencyKeys({})).toEqual([]);
+    expect(findRetiredDependencyKeys({ dependencies: null })).toEqual([]);
+    expect(findRetiredDependencyKeys({ dependencies: ["tools"] })).toEqual([]);
+    expect(findRetiredDependencyKeys(null)).toEqual([]);
+    expect(findRetiredDependencyKeys("nope")).toEqual([]);
+  });
+
+  // `Object.hasOwn`, not truthiness: an explicit `tools: {}` or `tools: null`
+  // is still the retired key being authored.
+  it("detects the key even when its value is empty or null", () => {
+    expect(findRetiredDependencyKeys({ dependencies: { tools: {} } })).toHaveLength(1);
+    expect(findRetiredDependencyKeys({ dependencies: { tools: null } })).toHaveLength(1);
+  });
+
+  it("does not treat an inherited key as declared", () => {
+    const deps = Object.create({ tools: { "@a/b": "^1.0.0" } }) as Record<string, unknown>;
+    expect(findRetiredDependencyKeys({ dependencies: deps })).toEqual([]);
+  });
+});
+
+describe("dropRetiredDependencyKeys", () => {
+  it("drops the retired key and keeps the canonical maps", () => {
+    const manifest = dropRetiredDependencyKeys({
+      name: "@a/agent",
+      dependencies: { tools: { "@a/t": "^1.0.0" }, skills: { "@a/s": "^1.0.0" } },
+    });
+    expect(manifest.dependencies).toEqual({ skills: { "@a/s": "^1.0.0" } });
+  });
+
+  it("drops every retired key at once", () => {
+    const manifest = dropRetiredDependencyKeys({
+      dependencies: { tools: {}, providers: {} },
+    });
+    expect(manifest.dependencies).toEqual({});
+  });
+
+  // Structural, not a canonicaliser: surviving keys keep their order and
+  // unknown fields survive, so the result can be serialised without surprises.
+  it("preserves key order and unrelated fields", () => {
+    const manifest = dropRetiredDependencyKeys({
+      name: "@a/agent",
+      dependencies: { skills: {}, tools: {}, _meta: { "dev.x/y": 1 } },
+      custom_field: "must-survive",
+    });
+    expect(Object.keys(manifest)).toEqual(["name", "dependencies", "custom_field"]);
+    expect(Object.keys(manifest.dependencies as Record<string, unknown>)).toEqual([
+      "skills",
+      "_meta",
+    ]);
+    expect(manifest.custom_field).toBe("must-survive");
+  });
+
+  it("returns the same reference when there is nothing to drop", () => {
+    const clean = { name: "@a/agent", dependencies: { skills: {} } };
+    expect(dropRetiredDependencyKeys(clean)).toBe(clean);
+    const noDeps = { name: "@a/agent" };
+    expect(dropRetiredDependencyKeys(noDeps)).toBe(noDeps);
+  });
+
+  it("does not mutate the input", () => {
+    const input = { dependencies: { tools: { "@a/t": "^1.0.0" } } };
+    dropRetiredDependencyKeys(input);
+    expect(input.dependencies.tools).toEqual({ "@a/t": "^1.0.0" });
+  });
+});
 
 describe("extractDependencies", () => {
   it("manifest with skills and integrations", () => {

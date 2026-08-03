@@ -34,7 +34,9 @@ import {
   type Api,
   type KnownApi,
   type Model,
+  type Transport,
 } from "./pi-sdk.ts";
+import { scheduleDeadlineNudges } from "./deadline-nudges.ts";
 import type { ModelApiShape } from "@appstrate/core/sidecar-types";
 import { deriveResponseReserveTokens } from "@appstrate/core/token-budget";
 import type { RunEvent, ExecutionContext } from "@appstrate/afps-runtime/types";
@@ -44,6 +46,7 @@ import {
   buildProgress,
   buildToolResultProgress,
   buildToolStartProgress,
+  buildTurnProgress,
   emptyRunResult,
   finalizeThrownFailure,
   reduceEvents,
@@ -111,6 +114,11 @@ export interface PiRunnerOptions {
   /** Pi SDK thinking level. Defaults to `"medium"`. */
   thinkingLevel?: "low" | "medium" | "high";
   /**
+   * Preferred transport for providers that support multiple transports.
+   * Providers that do not support this option ignore it. Defaults to `"auto"`.
+   */
+  transport?: Transport;
+  /**
    * Tool names whose first successful execution ends the run. When one of
    * these tools completes without error the runner aborts the Pi session
    * instead of paying one more LLM round-trip for a trailing text-only turn
@@ -153,13 +161,33 @@ const KEEP_RECENT_FRACTION = 0.1;
  * `MODEL_COMPACTION_ENABLED=false` (mirrors the existing
  * `MODEL_RETRY_ENABLED` pattern) — useful when stacking external
  * compaction middleware. See appstrate#445.
+ *
+ * Returns TWO members, and the split is load-bearing. `compaction` is exactly
+ * the Pi SDK's `CompactionSettings` and is what gets handed to it. `contextWindow`
+ * is OURS: the fallback-resolved number this session really runs against, which
+ * {@link installSessionBridge} stamps on every turn breadcrumb as the denominator
+ * of the run's context gauge (so it stays meaningful with compaction off).
+ * Returning it here keeps the fallback in ONE place, so the number emitted
+ * cannot drift from the number handed to the SDK.
+ *
+ * Nested rather than flat because the SDK declares no `contextWindow` and its
+ * settings type is all-optional: a flat result assigns to `CompactionSettings`
+ * with no error, so nothing would stop a call site from posting our key into a
+ * third party's settings object. Under this shape that is `TS2559` at the call
+ * site — the boundary is enforced by the compiler instead of by a convention.
  */
 export function derivePiCompactionSettings(
   model: { contextWindow?: number | null; maxTokens?: number | null },
   env: Record<string, string | undefined> = process.env,
-): { enabled: false } | { enabled: true; reserveTokens: number; keepRecentTokens: number } {
-  if (env["MODEL_COMPACTION_ENABLED"] === "false") return { enabled: false };
+): {
+  compaction:
+    { enabled: false } | { enabled: true; reserveTokens: number; keepRecentTokens: number };
+  contextWindow: number;
+} {
   const contextWindow = model.contextWindow ?? DEFAULT_CONTEXT_WINDOW;
+  if (env["MODEL_COMPACTION_ENABLED"] === "false") {
+    return { compaction: { enabled: false }, contextWindow };
+  }
   // Shared clamp (see `@appstrate/core/token-budget`): honours a usable
   // `maxTokens`, but treats an impossible `maxTokens >= contextWindow`
   // (corrupt catalog/override data) as unset and derives a sane reserve —
@@ -170,7 +198,7 @@ export function derivePiCompactionSettings(
     MIN_KEEP_RECENT_TOKENS,
     Math.floor(contextWindow * KEEP_RECENT_FRACTION),
   );
-  return { enabled: true, reserveTokens, keepRecentTokens };
+  return { compaction: { enabled: true, reserveTokens, keepRecentTokens }, contextWindow };
 }
 
 // The `MODEL_API` → provider-key map lives in `provider-map.ts` (no Pi SDK
@@ -418,6 +446,10 @@ export class PiRunner implements Runner {
 
     const modelRegistry = ModelRegistry.create(authStorage);
 
+    // ONE call, so the window stamped on every turn breadcrumb cannot drift
+    // from the one that sized this session's compaction pass.
+    const budget = derivePiCompactionSettings(model, process.env);
+
     const resourceLoader = new DefaultResourceLoader({
       cwd,
       agentDir,
@@ -440,7 +472,8 @@ export class PiRunner implements Runner {
       resourceLoader,
       sessionManager: SessionManager.inMemory(),
       settingsManager: SettingsManager.inMemory({
-        compaction: derivePiCompactionSettings(model, process.env),
+        compaction: budget.compaction,
+        transport: this.opts.transport ?? "auto",
         // Pi SDK's built-in retry (Retry-After honoring + jitter) covers
         // transient 429/5xx upstream — including OpenAI's mid-stream 5xx
         // `server_error`, which the Codex/Responses adapter surfaces as a
@@ -456,9 +489,14 @@ export class PiRunner implements Runner {
       }),
     });
 
+    // Widen the tool set BEFORE the first prompt — see {@link enableSearchTools}
+    // for why this placement is the cheap one.
+    enableSearchTools(session);
+
     const terminalTools = this.opts.terminalTools ?? [];
     const bridge = installSessionBridge(session, internalSink, context.runId, {
       terminalTools,
+      contextWindow: budget.contextWindow,
       // Early-stop: abort the SDK loop as soon as a terminal tool has
       // executed successfully. `session.abort()` resolves once the agent
       // is idle; detached because the bridge callback is synchronous.
@@ -483,7 +521,35 @@ export class PiRunner implements Runner {
       ? <T>(promise: Promise<T>): Promise<T> => Promise.race([promise, abortPromise])
       : <T>(promise: Promise<T>): Promise<T> => promise;
 
-    await raceAbort(session.prompt(startMessage ?? systemPrompt));
+    // Mid-run wall-clock steering (#1029). The agent has no clock: the budget is
+    // stated once in the turn-1 system prompt and never again, so it over-explores
+    // and the watchdog kills it at 100% with nothing delivered.
+    //
+    // Timing asymmetry, stated rather than left implicit: the watchdog in `run()`
+    // counts from ITS `runStart`, while these checkpoints only start counting
+    // here, after session construction (SDK eval, auth storage, resource loader,
+    // MCP-backed extensions) — call that delta D. Each nudge therefore fires D
+    // late and advertises D seconds more runway than the watchdog will actually
+    // grant. Accepted, not ignored: D is bounded by session construction (sub-
+    // second on a warm SDK, a couple of seconds cold) against budgets of minutes,
+    // so the figure is honest at the granularity the agent plans in, and closing
+    // the gap would mean threading `runStart` through a protected method that
+    // exists to be overridden. Revisit if D ever becomes a visible share of a
+    // real budget.
+    const cancelDeadlineNudges = scheduleDeadlineNudges({
+      timeoutSeconds: context.timeoutSeconds ?? 0,
+      steer: (text) => session.steer(text),
+      emit: (event) => internalSink.emit(event),
+      runId: context.runId,
+    });
+    try {
+      await raceAbort(session.prompt(startMessage ?? systemPrompt));
+    } finally {
+      // Stand the nudges down the moment the loop settles — before the
+      // missing-`output` re-prompt below, so a checkpoint firing during that
+      // corrective turn cannot compete with it for the agent's attention.
+      cancelDeadlineNudges();
+    }
 
     // The agent loop settled on its own. When the agent owed a structured
     // `output` and never delivered one, this is the LAST moment its context
@@ -522,26 +588,64 @@ const OUTPUT_TERMINAL_TOOL = "output";
 
 /**
  * `run_logs` event name carried in the re-prompt breadcrumb's `data`, so
- * operators can measure how often models drift off the output contract
+ * operators can measure output-contract drift
  * (`SELECT count(*) FROM run_logs WHERE data->>'event' = 'output_reprompt'`).
  */
 const OUTPUT_REPROMPT_EVENT = "output_reprompt";
 
 /**
- * The single corrective turn. Deliberately narrow: call `output` from what
- * you already have — no new research, no other tool — so the extra turn costs
- * one completion, not another research loop.
+ * The only tools the corrective turn may use.
+ *
+ * `output` is the point of the turn. `read` is there because the findings may
+ * no longer be in context: this platform tells agents a deliverable belongs in
+ * the run's `outputs/` directory (`@appstrate/core/run-and-wait-client`), and
+ * Pi auto-compaction (on unless `MODEL_COMPACTION_ENABLED=false`, see
+ * {@link derivePiCompactionSettings}) can summarise the detailed history away
+ * before the loop settles — leaving a model whose report is on disk but not in
+ * context to fabricate the required fields. `read` recovers work already done
+ * and already paid for; it is not research.
+ *
+ * Everything else stays out: no `bash`, no `edit`/`write`, no
+ * `publish_document`, no memory write, no integration tool.
  */
+const OUTPUT_REPROMPT_TOOLS = [OUTPUT_TERMINAL_TOOL, "read"];
+
+/** Model-facing text for the corrective turn — must match {@link OUTPUT_REPROMPT_TOOLS}. */
 const OUTPUT_REPROMPT_INSTRUCTION =
   "You ended your turn without calling the `output` tool. This agent declares an " +
   "output schema, so the run cannot be delivered until `output` is called exactly " +
   "once with all required fields. Call `output` NOW, using only the work you have " +
-  "already done in this session. Do not run any further research, do not call any " +
-  "other tool, and do not reply with plain text.";
+  "already done in this session. You may use `read` to re-open files you wrote " +
+  "yourself (your `outputs/` directory) if their contents are no longer in " +
+  "context; do not call any other tool, do not research anything new, and do not " +
+  "reply with plain text.";
 
 /** Minimal Pi SDK session surface needed to issue the corrective turn. */
 export interface PromptableSession {
   prompt(message: string): Promise<unknown>;
+  /**
+   * Tools the agent could actually call on its last turn — the same registry
+   * lookup {@link PromptableSession.setActiveToolsByName} performs, so it is
+   * the honest probe for what a narrowing would resolve.
+   */
+  getActiveToolNames(): string[];
+  /**
+   * Narrow the tool set for the next turn. SDK contract (`pi-coding-agent`
+   * `core/agent-session.js:562-581`), stated once and relied on by every caller:
+   *  - unresolvable names are **silently dropped**, no throw — a list that
+   *    resolves to nothing yields a TOOL-LESS turn, so callers must probe with
+   *    {@link PromptableSession.getActiveToolNames} rather than trust their own
+   *    configuration.
+   *  - it also rebuilds `agent.state.systemPrompt` from the resource loader:
+   *    the agent's own instructions survive, only the tool section shrinks.
+   *  - cost: rewriting both blocks invalidates the Anthropic prompt-cache
+   *    prefix (prefix-based over tools → system → messages; breakpoints sit on
+   *    the system block and the LAST tool definition — `pi-ai`
+   *    `providers/anthropic.js:672,926`), so the next turn re-reads the whole
+   *    session at full input price. Accepted: a fabricated or absent `output`
+   *    fails the entire run.
+   */
+  setActiveToolsByName(toolNames: string[]): void;
 }
 
 /**
@@ -550,39 +654,43 @@ export interface PromptableSession {
  *
  * Why here and not at finalize: the platform only discovers the missing
  * `output` when it validates the terminal `RunResult`
- * (`services/run-event-ingestion.ts`), long after the container is gone and
- * the agent's context has been destroyed — the answer existed in the model's
- * head and was thrown away after being fully paid for. The runner is the only
- * place where the session is still alive. The platform-side validation stays
- * exactly as it is; it is now the safety net rather than the first line of
- * defence.
+ * (`services/run-event-ingestion.ts`) — container gone, context destroyed, run
+ * fully paid for. The runner is the only place where the session is still
+ * alive; the platform-side validation is unchanged and becomes the safety net.
  *
- * Exactly one attempt, never a loop: if the model ignores an explicit
- * instruction to call `output` from work it has already done, another turn is
- * spent without a hypothesis.
+ * Exactly one attempt, never a loop: a model that ignores an explicit
+ * instruction to call `output` from work it has already done gets no second
+ * hypothesis.
  *
- * Guards (all four must pass):
+ * The turn is narrowed to {@link OUTPUT_REPROMPT_TOOLS} — the prompt's "no
+ * other tool" clause is a request the model may ignore, the tool set is not.
+ * Intentional behaviour change: everything that constant excludes becomes
+ * uncallable for this turn.
+ *
+ * Guards (the first four decide the turn; the fifth only shapes the narrowing):
  *  1. `output` is wired as a terminal tool — mirrors `runtime-pi/entrypoint.ts`,
- *     which passes `terminalTools: ["output"]` only when the agent declared the
- *     `output` runtime tool. Without it there is no output contract to enforce.
+ *     which passes it only when the agent declared the `output` runtime tool.
+ *     Without it there is no output contract to enforce.
  *  2. no terminal tool completed — a successful `output` means the run is
  *     already semantically done (and the SDK loop was aborted early).
- *  3. the run was not cancelled / timed out — `signal` here is the runner's
- *     combined controller (user cancel + timeout watchdog). A dead run must not
- *     be resurrected for one more LLM call.
+ *  3. the run was not cancelled / timed out — `signal` is the runner's combined
+ *     controller (user cancel + watchdog); a dead run is not resurrected.
  *  4. the last assistant turn is not a terminal failure — a session that ended
- *     on a provider error or a provider-side abort cannot answer, so the extra
- *     round-trip would only add cost to an already-failed run.
+ *     on a provider error or abort cannot answer, so the round-trip would only
+ *     add cost to an already-failed run.
+ *  5. (narrowing only) request just the {@link OUTPUT_REPROMPT_TOOLS} the
+ *     registry resolves, per the silent-drop contract on
+ *     {@link PromptableSession.setActiveToolsByName}: no `output` → no
+ *     narrowing at all (unrestricted beats tool-less); no `read` → `output`
+ *     alone.
  *
- * Emits an `appstrate.progress` breadcrumb at `warn` level carrying
- * `data.event = "output_reprompt"` BEFORE the retry — the same event channel
- * every other runner-side lifecycle signal uses (see `runtime-ready.ts`), so
- * the drift is measurable in `run_logs` without a second reporting path. Sink
- * failures are swallowed: losing the breadcrumb must never cost the run its
- * corrective turn.
+ * Emits a warn-level `appstrate.progress` breadcrumb carrying
+ * `data.event = "output_reprompt"` BEFORE the retry — the channel every other
+ * runner-side lifecycle signal uses (`runtime-ready.ts`), so drift is
+ * measurable in `run_logs` without a second reporting path. Sink failures are
+ * swallowed: losing the breadcrumb must never cost the run its turn.
  *
- * Exported for unit testing — the production caller is
- * `PiRunner.executeSession`.
+ * Exported for unit testing; the production caller is `PiRunner.executeSession`.
  *
  * @returns `true` when the corrective turn was issued, `false` when a guard
  *   declined it.
@@ -618,9 +726,88 @@ export async function maybeRepromptForOutput(opts: {
     })
     .catch(() => {});
 
+  // Make the "call `output`, nothing else" contract mechanical — prompt text
+  // alone left the whole tool surface live. Filtered through the registry
+  // probe, never `terminalTools` (runner config, not SDK truth).
+  const resolvable = new Set(session.getActiveToolNames());
+  if (resolvable.has(OUTPUT_TERMINAL_TOOL)) {
+    session.setActiveToolsByName(OUTPUT_REPROMPT_TOOLS.filter((name) => resolvable.has(name)));
+  }
+
   const race = opts.race ?? (<T>(promise: Promise<T>): Promise<T> => promise);
   await race(session.prompt(OUTPUT_REPROMPT_INSTRUCTION));
   return true;
+}
+
+// ─── Search-tool widening ──────────────────────────────────────────
+
+/**
+ * Read-only search tools the Pi SDK ships but does not activate.
+ *
+ * The SDK registry knows seven built-ins (`core/tools/index.js` →
+ * `allToolNames = ["read","bash","edit","write","grep","find","ls"]`) but
+ * `createAgentSession` activates only the first four (`core/sdk.js` →
+ * `defaultActiveToolNames`). With no `grep`/`find`/`ls` on the surface the model
+ * reaches for `bash` for every lookup: in the run that motivated #1029, 101 of
+ * 135 tool calls were `bash`, overwhelmingly `grep -rn …` and `sed -n 'A,Bp'`.
+ * Each of those pays a shell round-trip and returns unstructured output the
+ * model then has to parse.
+ *
+ * Exported so a test can assert the list rather than restate it.
+ */
+export const SEARCH_TOOL_NAMES = ["grep", "find", "ls"] as const;
+
+/**
+ * Minimal session surface needed to widen the active tool set. Structural (not
+ * the SDK's `ToolInfo`) for the same reason {@link BridgeableSession} and
+ * {@link PromptableSession} are: the runner's own session contracts stay
+ * vendor-type-free, and `ToolInfo` is `Pick<ToolDefinition, "name" | …>` so a
+ * real session satisfies this by construction.
+ */
+export interface ToolWideningSession {
+  getActiveToolNames(): string[];
+  /** Everything the SDK tool registry resolves — built-ins, extensions, MCP tools. */
+  getAllTools(): Array<{ name: string }>;
+  setActiveToolsByName(toolNames: string[]): void;
+}
+
+/**
+ * Add {@link SEARCH_TOOL_NAMES} to the session's active tools, additively.
+ *
+ * NOT via `createAgentSession({ tools })`: that option is an ALLOWLIST
+ * (`core/sdk.js` → `allowedToolNames`) applied to extension and custom tools
+ * too, so passing the search-tool list there would silently strip every
+ * Appstrate MCP / integration tool off the surface. `setActiveToolsByName` is
+ * the additive door.
+ *
+ * Two consequences of the {@link PromptableSession.setActiveToolsByName}
+ * contract shape this function:
+ *  - it REPLACES the active set, so the currently-active names (where the
+ *    extension / MCP / runtime tools live) must be carried over verbatim. The
+ *    post-condition is a superset, never a smaller surface.
+ *  - unresolvable names are silently dropped, so each search tool is admitted
+ *    only if the registry actually exposes it (`getAllTools()`). A registry
+ *    without `find` yields `grep` + `ls` and no phantom name.
+ *
+ * Called BEFORE the first `session.prompt(...)`, where the rewrite is free: the
+ * Anthropic prompt-cache prefix is built by the first request, so there is no
+ * cached prefix yet to invalidate. This is the opposite situation to the
+ * mid-session narrowing {@link PromptableSession.setActiveToolsByName} warns
+ * about — do not read that cost note as applying here.
+ *
+ * Exported for unit testing; the production caller is `PiRunner.executeSession`.
+ *
+ * @internal
+ */
+export function enableSearchTools(session: ToolWideningSession): void {
+  const registered = new Set(session.getAllTools().map((tool) => tool.name));
+  const widened = new Set(session.getActiveToolNames());
+  const activeCount = widened.size;
+  for (const name of SEARCH_TOOL_NAMES) {
+    if (registered.has(name)) widened.add(name);
+  }
+  if (widened.size === activeCount) return; // nothing to add — skip the system-prompt rebuild
+  session.setActiveToolsByName([...widened]);
 }
 
 /**
@@ -749,10 +936,12 @@ export interface BridgeableSession {
  * canonical AFPS {@link RunEvent} emitted on the internal sink.
  *
  * Mapping:
+ *   - `message_start`  (assistant_message)     → (turn-start clock only, no event)
  *   - `message_end`    (assistant_message)     → `appstrate.progress`
+ *   - `message_end`    (turn usage deltas)     → `appstrate.progress` + data { event: "turn", … }
  *   - `message_end`    (stopReason=error)      → `appstrate.error`
  *   - `tool_execution_start`                   → `appstrate.progress` + data { tool, args }
- *   - `tool_execution_end`                     → `appstrate.progress` + data { tool, result, isError }
+ *   - `tool_execution_end`                     → `appstrate.progress` + data { tool, result, isError, durationMs? }
  *   - `agent_end` (last turn usage aggregate)  → `appstrate.metric`
  *
  * The bridge deliberately does NOT forward `message_update` / `text_delta`
@@ -784,6 +973,16 @@ interface PiAssistantMessage {
   stopReason?: string;
   errorMessage?: string;
   content?: Array<PiTextContent | { type: string }>;
+}
+interface PiMessageStartEvent {
+  type: "message_start";
+  /**
+   * The message the SDK is about to stream. `role` discriminates the
+   * assistant's own turn from the user / toolResult messages the agent loop
+   * also frames with `message_start` (verified in
+   * `@mariozechner/pi-agent-core/dist/agent-loop.js`).
+   */
+  message?: { role?: string };
 }
 interface PiToolExecutionStartEvent {
   type: "tool_execution_start";
@@ -842,6 +1041,14 @@ export interface SessionBridgeOptions {
    * error. The runner uses this to abort the SDK loop early.
    */
   onTerminalTool?: () => void;
+  /**
+   * Context window (tokens) the session actually runs against, straight off
+   * {@link derivePiCompactionSettings}, stamped on every turn breadcrumb so the
+   * gauge's denominator travels with its numerator. Omit it when it is not
+   * knowable — a caller that installs the bridge without an SDK session behind
+   * it.
+   */
+  contextWindow?: number;
 }
 
 export function installSessionBridge(
@@ -877,6 +1084,23 @@ export function installSessionBridge(
   // self-pruning: each promise removes itself on settle.
   const pendingFires = new Set<Promise<void>>();
 
+  // Start timestamps of in-flight tool calls, keyed by the SDK's `toolCallId`,
+  // so the result event can carry `durationMs` instead of making every operator
+  // self-join the start row to the result row. Bounded by concurrency, not by
+  // run length: each entry is deleted the moment its result lands. Keyed on
+  // `toolCallId` ONLY — a tool-name fallback would cross-attribute a parallel
+  // batch of two `bash` calls, which is worse than no timing at all.
+  const toolCallStarts = new Map<string, number>();
+
+  // Per-turn context-growth tracking. `settledTurnIndex` counts every settled
+  // assistant turn (1-based), so a gap in the emitted breadcrumbs is itself
+  // readable as "that turn reported no usage". `assistantTurnStartedAt` is the
+  // `message_start` timestamp of the turn currently streaming — consumed and
+  // cleared at `message_end` so a turn whose start we never saw cannot inherit
+  // the previous turn's clock.
+  let settledTurnIndex = 0;
+  let assistantTurnStartedAt: number | undefined;
+
   // Fire-and-forget emit. Rejections are swallowed so a transient sink
   // failure never propagates as an unhandled rejection out of the
   // synchronous Pi SDK callback. Authoritative data still reaches the
@@ -894,11 +1118,26 @@ export function installSessionBridge(
   session.subscribe((rawEvent) => {
     const event = rawEvent as PiSubscribedEvent;
     switch (event.type) {
+      case "message_start": {
+        // Pure bookkeeping — emits nothing. The SDK frames user and toolResult
+        // messages with `message_start` too, so `role` is the discriminator;
+        // without it the "turn latency" would start ticking at the previous
+        // tool result rather than at the model call.
+        const e = event as PiMessageStartEvent;
+        if (e.message?.role === "assistant") assistantTurnStartedAt = Date.now();
+        break;
+      }
+
       case "message_end": {
         const entries = session.state.messages;
         if (!entries.length) break;
         const last = entries[entries.length - 1] as PiAssistantMessage | undefined;
         if (last?.role !== "assistant") break;
+
+        const turnIndex = ++settledTurnIndex;
+        const latencyMs =
+          assistantTurnStartedAt !== undefined ? Date.now() - assistantTurnStartedAt : undefined;
+        assistantTurnStartedAt = undefined;
 
         // Record this assistant turn's terminal outcome. Overwritten each
         // turn → ends as the FINAL assistant turn's stopReason once the
@@ -933,6 +1172,33 @@ export function installSessionBridge(
           // a NOTIFY round-trip.
           if (inputDelta > 0 || outputDelta > 0) {
             fire(buildMetric({ runId, timestamp: Date.now() }, { ...totalUsage }, totalCost));
+
+            // Per-turn context-growth breadcrumb. Shares the metric's gate on
+            // purpose — a turn the SDK reported with no counters has nothing to
+            // plot, and two independently-drifting gates would make the
+            // breadcrumb trail disagree with the cost curve. Unlike the metric
+            // above (cumulative, and written to no `run_logs` row) this carries
+            // the turn's OWN deltas and IS persisted, which is the only way an
+            // author can see WHERE a run started re-reading 96k tokens a turn.
+            // Deliberately ONE row per settled turn — never per chunk: the
+            // bridge already refuses to forward `message_update` for exactly
+            // that reason (~108 rows on a heavy run, against ~135 tool rows).
+            fire(
+              buildTurnProgress(
+                { runId, timestamp: Date.now() },
+                {
+                  index: turnIndex,
+                  ...(latencyMs !== undefined ? { latencyMs } : {}),
+                  inputTokens: inputDelta,
+                  outputTokens: outputDelta,
+                  cacheReadTokens: u.cacheRead ?? 0,
+                  cacheWriteTokens: u.cacheWrite ?? 0,
+                  ...(options.contextWindow !== undefined
+                    ? { contextWindow: options.contextWindow }
+                    : {}),
+                },
+              ),
+            );
           }
         }
 
@@ -976,6 +1242,7 @@ export function installSessionBridge(
         // sinks correlate start/end events when multiple tools run concurrently
         // (the LLM can dispatch a parallel batch and the results land
         // out-of-order). Optional — omitted from `data` when the SDK gave none.
+        if (e.toolCallId !== undefined) toolCallStarts.set(e.toolCallId, Date.now());
         fire(
           buildToolStartProgress(
             { runId, timestamp: Date.now() },
@@ -999,6 +1266,12 @@ export function installSessionBridge(
         // marginal gain over the discriminator `data.result !== undefined`.
         const e = event as PiToolExecutionEndEvent;
         const tool = e.toolName ?? "unknown";
+        // Stamp the call's wall time when we saw its start. `delete` keeps the
+        // map bounded by in-flight calls; a result with no id, or one whose
+        // start we never observed, yields no `durationMs` at all — omission is
+        // honest, a zero would read as an instant call.
+        const startedAt = e.toolCallId !== undefined ? toolCallStarts.get(e.toolCallId) : undefined;
+        if (e.toolCallId !== undefined) toolCallStarts.delete(e.toolCallId);
         fire(
           buildToolResultProgress(
             { runId, timestamp: Date.now() },
@@ -1007,6 +1280,7 @@ export function installSessionBridge(
               result: truncateToolResult(e.result),
               isError: e.isError === true,
               ...(e.toolCallId !== undefined ? { toolCallId: e.toolCallId } : {}),
+              ...(startedAt !== undefined ? { durationMs: Date.now() - startedAt } : {}),
             },
           ),
         );

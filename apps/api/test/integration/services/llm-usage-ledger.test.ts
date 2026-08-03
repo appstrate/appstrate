@@ -23,6 +23,7 @@ import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedAgent, seedRun } from "../../helpers/seed.ts";
 import { recordLlmUsage } from "../../../src/services/llm-usage-ledger.ts";
+import type { TokenPricingStatus } from "@appstrate/afps-runtime/runner";
 import { llmUsage, chatSessions } from "@appstrate/db/schema";
 
 /** Row read-back helper: the full stored row for a ledger id. */
@@ -53,6 +54,7 @@ describe("recordLlmUsage — plain insert (proxy / chat)", () => {
       cacheReadTokens: 30,
       cacheWriteTokens: 7,
       costUsd: 0.00113,
+      pricingStatus: "priced" as const,
       durationMs: 850,
       requestId: "req_ledger_plain",
     });
@@ -72,6 +74,7 @@ describe("recordLlmUsage — plain insert (proxy / chat)", () => {
     expect(row!.cacheReadTokens).toBe(30);
     expect(row!.cacheWriteTokens).toBe(7);
     expect(row!.costUsd).toBeCloseTo(0.00113, 6);
+    expect(row!.pricingStatus).toBe("priced");
     expect(row!.durationMs).toBe(850);
     expect(row!.requestId).toBe("req_ledger_plain");
     // Plain insert never carries run/chat attribution unless asked.
@@ -94,6 +97,7 @@ describe("recordLlmUsage — plain insert (proxy / chat)", () => {
       inputTokens: 10,
       outputTokens: 5,
       costUsd: 0.0001,
+      pricingStatus: "priced" as const,
       requestId: "req_ledger_chat",
     });
     const row = await rowById(id!);
@@ -110,6 +114,7 @@ describe("recordLlmUsage — plain insert (proxy / chat)", () => {
       inputTokens: 12,
       outputTokens: 4,
       costUsd: 0.002,
+      pricingStatus: "priced" as const,
       requestId: "req_durable_retry",
     };
 
@@ -150,6 +155,7 @@ describe("recordLlmUsage — plain insert (proxy / chat)", () => {
       inputTokens: 1,
       outputTokens: 1,
       costUsd: 0.0001,
+      pricingStatus: "priced" as const,
       requestId: "req_ledger_run_only",
     });
     expect(typeof runOnly).toBe("number");
@@ -161,6 +167,7 @@ describe("recordLlmUsage — plain insert (proxy / chat)", () => {
       inputTokens: 1,
       outputTokens: 1,
       costUsd: 0.0001,
+      pricingStatus: "priced" as const,
       requestId: "req_ledger_chat_only",
     });
     expect(typeof chatOnly).toBe("number");
@@ -178,6 +185,7 @@ describe("recordLlmUsage — plain insert (proxy / chat)", () => {
         inputTokens: 1,
         outputTokens: 1,
         costUsd: 0.0001,
+        pricingStatus: "priced" as const,
         requestId: "req_ledger_both",
       });
     } catch (err) {
@@ -205,6 +213,7 @@ describe("recordLlmUsage — runner birth invariant", () => {
         inputTokens: 1,
         outputTokens: 1,
         costUsd: 0.01,
+        pricingStatus: "priced" as const,
       }),
     ).rejects.toThrow("a runner row must be born with a runId");
   });
@@ -227,7 +236,12 @@ describe("recordLlmUsage — runner monotonic upsert", () => {
     runId = run.id;
   });
 
-  function runnerEntry(costUsd: number, inputTokens: number, outputTokens: number) {
+  function runnerEntry(
+    costUsd: number,
+    inputTokens: number,
+    outputTokens: number,
+    pricingStatus: TokenPricingStatus | null = "priced",
+  ) {
     return {
       source: "runner" as const,
       orgId: ctx.orgId,
@@ -236,6 +250,7 @@ describe("recordLlmUsage — runner monotonic upsert", () => {
       inputTokens,
       outputTokens,
       costUsd,
+      pricingStatus,
     };
   }
 
@@ -317,5 +332,41 @@ describe("recordLlmUsage — runner monotonic upsert", () => {
     expect(row!.costUsd).toBeCloseTo(0.5, 10);
     expect(row!.inputTokens).toBe(200);
     expect(row!.outputTokens).toBe(100);
+  });
+
+  it("carries the WINNING snapshot's pricing status onto the row", async () => {
+    // The status describes the numbers now stored, so it travels with the
+    // snapshot that won — a row must never claim `priced` over token counts a
+    // differently-classified snapshot brought in.
+    const id1 = await recordLlmUsage(runnerEntry(0, 100, 50, "unpriced"), {
+      onConflict: "runner-monotonic",
+    });
+    expect((await rowById(id1!))!.pricingStatus).toBe("unpriced");
+
+    const id2 = await recordLlmUsage(runnerEntry(0.4, 200, 100, "priced"), {
+      onConflict: "runner-monotonic",
+    });
+    expect(id2).toBe(id1);
+    expect((await rowById(id1!))!.pricingStatus).toBe("priced");
+  });
+
+  it("a refused (regressing) snapshot cannot rewrite the stored pricing status", async () => {
+    const id1 = await recordLlmUsage(runnerEntry(0.5, 200, 100, "priced"), {
+      onConflict: "runner-monotonic",
+    });
+    const lost = await recordLlmUsage(runnerEntry(0.1, 1, 1, "unpriced"), {
+      onConflict: "runner-monotonic",
+    });
+    expect(lost).toBeNull();
+    expect((await rowById(id1!))!.pricingStatus).toBe("priced");
+  });
+
+  it("persists a null status verbatim — 'not this platform's fact to state' is not 'priced'", async () => {
+    // The remote-run shape: `runs.model_source` is NULL, so no platform-side
+    // pricing verdict exists for the row (see `writeRunnerLedgerRow`).
+    const id = await recordLlmUsage(runnerEntry(0.2, 10, 10, null), {
+      onConflict: "runner-monotonic",
+    });
+    expect((await rowById(id!))!.pricingStatus).toBeNull();
   });
 });

@@ -234,6 +234,7 @@ describe("run_and_wait client", () => {
               mime: "text/html",
               size: 2048,
               purpose: "agent_output",
+              run_id: "run_1",
             },
           ],
           hasMore: false,
@@ -294,6 +295,63 @@ describe("run_and_wait client", () => {
       steps.push(step.payload);
     }
     expect(steps[1]).not.toHaveProperty("documents");
+  });
+
+  it("fetchRunDocuments keeps only documents this run produced", async () => {
+    // The documents container of a run also holds the documents mounted as its
+    // INPUT — a chained `document://` from an earlier run carries
+    // `purpose: 'agent_output'` too, so only its `run_id` distinguishes it.
+    const fetchImpl = fakeFetch(async () =>
+      jsonResponse({
+        object: "list",
+        data: [
+          {
+            id: "doc_in",
+            uri: "document://doc_in",
+            name: "input.pdf",
+            mime: "application/pdf",
+            size: 10,
+            purpose: "agent_output",
+            run_id: "run_0",
+          },
+          {
+            id: "doc_out",
+            uri: "document://doc_out",
+            name: "report.html",
+            mime: "text/html",
+            size: 20,
+            purpose: "agent_output",
+            run_id: "run_1",
+          },
+          {
+            id: "doc_detached",
+            uri: "document://doc_detached",
+            name: "orphan.txt",
+            mime: "text/plain",
+            size: 30,
+            purpose: "agent_output",
+            run_id: null,
+          },
+        ],
+        hasMore: false,
+      }),
+    );
+
+    await expect(
+      fetchRunDocuments("run_1", {
+        origin: "https://test.local",
+        headers: {},
+        fetch: fetchImpl,
+      }),
+    ).resolves.toEqual([
+      {
+        id: "doc_out",
+        uri: "document://doc_out",
+        name: "report.html",
+        mime: "text/html",
+        size: 20,
+      },
+    ]);
   });
 
   it("fetchRunDocuments swallows a non-2xx response", async () => {
@@ -362,12 +420,33 @@ describe("launchRunAndWait launch body", () => {
       url: "https://test.local/api/runs/inline",
       method: "POST",
       body: {
-        manifest: { name: "tmp" },
-        prompt: "do it",
+        manifest: { name: "tmp", runtime_tools: ["publish_document"] },
+        prompt: expect.stringContaining("do it"),
         input: { screenshot: "document://doc_abc12345" },
         config: { model: "x" },
       },
     });
+  });
+
+  it("kind:inline equips publish_document without rewriting the agent prompt", async () => {
+    const { fetchImpl, captured } = captureLaunch();
+
+    const result = await launchRunAndWait(
+      {
+        kind: "inline",
+        manifest: { name: "tmp", runtime_tools: ["log", "output"] },
+        prompt: "Write the requested report to outputs/report.html.",
+      },
+      { origin: "https://test.local", headers: {}, fetch: fetchImpl },
+    );
+
+    expect(result.ok).toBe(true);
+    expect(captured()?.body).toMatchObject({
+      manifest: { runtime_tools: ["log", "output", "publish_document"] },
+    });
+    expect((captured()?.body as { prompt?: string } | undefined)?.prompt).toBe(
+      "Write the requested report to outputs/report.html.",
+    );
   });
 
   it("kind:inline omits input when none is provided", async () => {
@@ -378,7 +457,10 @@ describe("launchRunAndWait launch body", () => {
       { origin: "https://test.local", headers: {}, fetch: fetchImpl },
     );
 
-    expect(captured()?.body).toEqual({ manifest: { name: "tmp" }, prompt: "do it" });
+    expect(captured()?.body).toEqual({
+      manifest: { name: "tmp", runtime_tools: ["publish_document"] },
+      prompt: expect.stringContaining("do it"),
+    });
   });
 
   it("kind:agent forwards input in the launch body", async () => {
@@ -421,11 +503,19 @@ describe("launchRunAndWait launch body", () => {
     const { fetchImpl, captured } = captureLaunch();
 
     await launchRunAndWait(
-      { kind: "inline", manifest: { name: "tmp" }, prompt: "do it", context_documents: [] },
+      {
+        kind: "inline",
+        manifest: { name: "tmp" },
+        prompt: "do it",
+        context_documents: [],
+      },
       { origin: "https://test.local", headers: {}, fetch: fetchImpl },
     );
 
-    expect(captured()?.body).toEqual({ manifest: { name: "tmp" }, prompt: "do it" });
+    expect(captured()?.body).toEqual({
+      manifest: { name: "tmp", runtime_tools: ["publish_document"] },
+      prompt: expect.stringContaining("do it"),
+    });
   });
 
   it("kind:agent rejects context_documents before dispatch (never silently drops it)", async () => {
@@ -447,6 +537,170 @@ describe("launchRunAndWait launch body", () => {
     ).toMatch(/only supported for kind:'inline'/);
     // No run was launched.
     expect(captured()).toBeUndefined();
+  });
+
+  // `connection_overrides` is the documented retry for a 412
+  // `must_choose_connection`. Dropped anywhere along the way, every retry hits
+  // the same 412 with nothing saying why, and the model has no way out.
+  it("kind:inline forwards connection_overrides", async () => {
+    const { fetchImpl, captured } = captureLaunch();
+
+    await launchRunAndWait(
+      {
+        kind: "inline",
+        manifest: { name: "tmp" },
+        prompt: "do it",
+        connection_overrides: { "@appstrate/gmail": "conn_abc" },
+      },
+      { origin: "https://test.local", headers: {}, fetch: fetchImpl },
+    );
+
+    expect(captured()).toMatchObject({
+      url: "https://test.local/api/runs/inline",
+      method: "POST",
+      body: { connection_overrides: { "@appstrate/gmail": "conn_abc" } },
+    });
+  });
+
+  it("kind:agent forwards connection_overrides", async () => {
+    const { fetchImpl, captured } = captureLaunch();
+
+    await launchRunAndWait(
+      {
+        kind: "agent",
+        scope: "@acme",
+        name: "writer",
+        connection_overrides: { "@appstrate/gmail": "conn_abc" },
+      },
+      { origin: "https://test.local", headers: {}, fetch: fetchImpl },
+    );
+
+    expect(captured()).toMatchObject({
+      url: "https://test.local/api/agents/@acme/writer/run",
+      method: "POST",
+      body: { connection_overrides: { "@appstrate/gmail": "conn_abc" } },
+    });
+  });
+
+  // Absent and present-but-empty are different requests: an omitted argument
+  // leaves the launch body untouched, while `{}` is a well-shaped map and
+  // travels like any other rather than being folded back into "no argument".
+  it("omits connection_overrides when absent and forwards an empty map when present", async () => {
+    const absent = captureLaunch();
+    await launchRunAndWait(
+      { kind: "inline", manifest: { name: "tmp" }, prompt: "do it" },
+      { origin: "https://test.local", headers: {}, fetch: absent.fetchImpl },
+    );
+    expect(Object.keys(absent.captured()?.body as Record<string, unknown>)).not.toContain(
+      "connection_overrides",
+    );
+
+    const empty = captureLaunch();
+    const result = await launchRunAndWait(
+      {
+        kind: "inline",
+        manifest: { name: "tmp" },
+        prompt: "do it",
+        connection_overrides: {},
+      },
+      { origin: "https://test.local", headers: {}, fetch: empty.fetchImpl },
+    );
+    expect(result.ok).toBe(true);
+    expect(empty.captured()?.body).toMatchObject({ connection_overrides: {} });
+  });
+
+  it("rejects a JSON-encoded connection_overrides string before dispatch", async () => {
+    const { fetchImpl, captured } = captureLaunch();
+
+    const result = await launchRunAndWait(
+      {
+        kind: "inline",
+        manifest: { name: "tmp" },
+        prompt: "do it",
+        connection_overrides: JSON.stringify({ "@appstrate/gmail": "conn_abc" }),
+      },
+      { origin: "https://test.local", headers: {}, fetch: fetchImpl },
+    );
+
+    expect(result.ok).toBe(false);
+    expect(
+      String((result as { step: { payload: { error?: string } } }).step.payload.error),
+    ).toMatch(/must be a JSON object/);
+    expect(captured()).toBeUndefined();
+  });
+
+  // Presence is what is refused, not one enumerated mistake: every non-object
+  // shape reaches the same dead end as the JSON-encoded string above.
+  it.each([
+    ["an array", [{ "@appstrate/gmail": "conn_abc" }]],
+    ["a number", 42],
+    ["a boolean", true],
+    ["explicit null", null],
+  ])("rejects connection_overrides given as %s before dispatch", async (_label, value) => {
+    const { fetchImpl, captured } = captureLaunch();
+
+    const result = await launchRunAndWait(
+      {
+        kind: "inline",
+        manifest: { name: "tmp" },
+        prompt: "do it",
+        connection_overrides: value,
+      },
+      { origin: "https://test.local", headers: {}, fetch: fetchImpl },
+    );
+
+    expect(result.ok).toBe(false);
+    expect(
+      String((result as { step: { payload: { error?: string } } }).step.payload.error),
+    ).toMatch(/must be a JSON object/);
+    expect(captured()).toBeUndefined();
+  });
+
+  // The name inside `config` belongs to the AGENT, not to us: an agent whose own
+  // config schema declares a `connection_overrides` property must stay launchable
+  // and get that property through untouched, whatever the top-level argument says.
+  it("forwards the top-level connection_overrides and leaves config's own property alone", async () => {
+    const { fetchImpl, captured } = captureLaunch();
+
+    const result = await launchRunAndWait(
+      {
+        kind: "inline",
+        manifest: { name: "tmp" },
+        prompt: "do it",
+        connection_overrides: { "@appstrate/gmail": "conn_top" },
+        config: { connection_overrides: { "@appstrate/gmail": "conn_nested" } },
+      },
+      { origin: "https://test.local", headers: {}, fetch: fetchImpl },
+    );
+
+    expect(result.ok).toBe(true);
+    expect(captured()?.body).toMatchObject({
+      connection_overrides: { "@appstrate/gmail": "conn_top" },
+      config: { connection_overrides: { "@appstrate/gmail": "conn_nested" } },
+    });
+  });
+
+  it("launches an agent whose config declares its own connection_overrides property", async () => {
+    const { fetchImpl, captured } = captureLaunch();
+
+    const result = await launchRunAndWait(
+      {
+        kind: "agent",
+        scope: "@acme",
+        name: "writer",
+        config: { connection_overrides: { "@appstrate/gmail": "conn_abc" } },
+      },
+      { origin: "https://test.local", headers: {}, fetch: fetchImpl },
+    );
+
+    expect(result.ok).toBe(true);
+    // Verbatim, and nothing synthesised at top level from it.
+    expect(captured()?.body).toMatchObject({
+      config: { connection_overrides: { "@appstrate/gmail": "conn_abc" } },
+    });
+    expect(Object.keys(captured()?.body as Record<string, unknown>)).not.toContain(
+      "connection_overrides",
+    );
   });
 
   it("exposes the launch HTTP status on success", async () => {

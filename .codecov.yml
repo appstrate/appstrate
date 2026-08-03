@@ -10,9 +10,10 @@ coverage:
         # informational = report the status but never set a failing/blocking
         # check. Required during cold-start: `main` has NO integration
         # carryforward baseline yet, so on a normal PR only the `unit` job runs
-        # and the project total is computed from unit coverage alone (dominated
-        # by ~0%-unit-covered backend files) → a red project status nobody can
-        # fix. It also keeps the project gate non-blocking for FORK PRs, which
+        # and the project total is computed from the always-on unit + focused
+        # public-origin uploads (still dominated by ~0%-unit-covered backend
+        # files) → a red project status nobody can fix. It also keeps the
+        # project gate non-blocking for FORK PRs, which
         # cannot read CODECOV_TOKEN (uploads no-op) and otherwise could not
         # clear a required status. FLIP to blocking (remove this line) once
         # `main` has a post-merge `integration` upload, i.e. a real combined
@@ -28,16 +29,19 @@ coverage:
       default:
         target: 50%
 
-# Coverage arrives from two CI jobs (see .github/workflows/test.yml):
-#   - `unit`        → runs on every push + PR (fast, no integration seeding)
-#   - `integration` → runs on push to main + PRs labelled `integration`
+# Coverage arrives under three flags from two CI jobs (see test.yml):
+#   - `unit`          → runs on every push + PR (pure unit suites)
+#   - `public-origin` → fast proxy-boundary integration regression, always run
+#   - `integration`   → runs on push to main + PRs labelled `integration`
 # carryforward keeps a flag's last-known coverage when its job did not run for a
-# given commit. On a normal PR only the `unit` job runs, so the `integration`
-# flag is carried forward from the PR base — without it the project total would
-# falsely collapse on every PR and the 75% gate would be unusable pre-merge.
+# given commit. On a normal PR only the always-on job runs (publishing `unit`
+# and `public-origin`), so `integration` is carried forward from the PR base —
+# without it the project total would falsely collapse on every PR.
 flags:
   unit:
     carryforward: true
+  public-origin:
+    carryforward: false
   integration:
     carryforward: true
 

@@ -76,7 +76,7 @@ describe("auth-challenge responder", () => {
     registerAuthChallenge("/api/mcp", ({ origin, status }) => `Bearer o=${origin} s=${status}`);
     const res = await appWith(401).request("http://inst.test/api/mcp");
     expect(res.status).toBe(401);
-    expect(res.headers.get("WWW-Authenticate")).toBe("Bearer o=http://inst.test s=401");
+    expect(res.headers.get("WWW-Authenticate")).toBe("Bearer o=http://localhost:3000 s=401");
   });
 
   it("forwards the request path to the builder (per-resource challenge under a prefix)", async () => {

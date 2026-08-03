@@ -13,7 +13,7 @@ import {
   listGlobalRuns,
   listRunLogs,
   RUN_LOG_LEVELS,
-  type GlobalRunKind,
+  GLOBAL_RUN_KINDS,
 } from "../services/state/runs.ts";
 import { listUserRuns } from "../services/state/notifications.ts";
 import { resolveAgentRunVersion } from "../services/agent-version-resolver.ts";
@@ -48,7 +48,7 @@ import { runInlinePreflight } from "../services/inline-run-preflight.ts";
 import { synthesiseFinalize } from "../services/run-event-ingestion.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 import { currentTraceparent, telemetryTrustsIncomingTrace } from "@appstrate/core/telemetry";
-import { TERMINAL_RUN_STATUSES } from "@appstrate/db/schema";
+import { TERMINAL_RUN_STATUSES, runStatusValues } from "@appstrate/db/schema";
 import { parseWaitQuery, waitForRunTerminal } from "../services/run-wait.ts";
 import { SCOPED_PACKAGE_ROUTE } from "./scoped-package-route.ts";
 import { readJsonBody } from "../lib/request-body.ts";
@@ -75,6 +75,20 @@ const inlineRunBodySchema = z.object({
    * names the offending URI rather than a Zod path.
    */
   context_documents: z.array(z.unknown()).optional(),
+  /**
+   * Per-integration connection picks for this run (resolver mechanism #2).
+   * Declared here so the parse keeps the field for the preflight's readiness
+   * gate, which runs BEFORE `parseRequestInput` and would otherwise never see
+   * it.
+   *
+   * `.min(1)` is owned here rather than delegated to `parseRequestInput`: an
+   * empty-string id is falsy at the resolver's `resolveOne`, so readiness would
+   * answer 412 before the parser's field-precise 400 could fire — and
+   * `POST /runs/inline/validate` never calls the parser at all, so the guard
+   * would have no owner there and the validator would disagree with the launch
+   * on the same body.
+   */
+  connection_overrides: z.record(z.string(), z.string().min(1)).optional(),
 });
 
 /**
@@ -90,6 +104,40 @@ const inlineRunBodySchema = z.object({
  */
 export function runTraceparent(c: Context<AppEnv>): string | undefined {
   return telemetryTrustsIncomingTrace() ? c.get("traceparent") : currentTraceparent();
+}
+
+/** The closed set `GET /api/runs?user=` accepts. One member, for now. */
+const USER_FILTERS = ["me"] as const;
+
+/**
+ * Read a query parameter whose accepted values are a closed set.
+ *
+ * **An unrecognised value is a 400, never `undefined`.** Every user of this
+ * helper is a *filter*, and silently dropping a filter widens the result set:
+ * `?kind=inlinee` would return every kind, `?status=succes` every status, to a
+ * caller reading the response as narrowed. That is the failure mode worth
+ * spending a 400 on — the caller gets a list that looks right and is wrong.
+ *
+ * **Present-but-empty (`?kind=`) reads as absent.** An empty value is how a
+ * form, a URL builder, or a client that always emits its keys spells "no
+ * filter"; rejecting it would break those callers without protecting anyone.
+ * That is not the silent-widening case: nothing was requested, so nothing is
+ * dropped.
+ *
+ * The `allowed` tuple is also what the OpenAPI operation declares as the
+ * parameter's `enum`, so the spec and the runtime check state the same set.
+ */
+function closedSetQuery<T extends string>(
+  c: Context<AppEnv>,
+  name: string,
+  allowed: readonly T[],
+): T | undefined {
+  const raw = c.req.query(name);
+  if (raw === undefined || raw === "") return undefined;
+  if (!(allowed as readonly string[]).includes(raw)) {
+    throw invalidRequest(`${name} must be one of: ${allowed.join(", ")}`, name);
+  }
+  return raw as T;
 }
 
 // --- Router ---
@@ -298,7 +346,14 @@ export function createRunsRouter() {
 
   // GET /api/runs — global paginated run list across the application.
   // Supports filtering by ?user=me (self-owned runs), ?kind=inline|package|all
-  // for inline-run filtering, ?status, ?start_date/?end_date.
+  // for inline-run filtering, ?status, ?start_date/?end_date, and
+  // ?chat_session_id for the conversation context sidebar.
+  //
+  // `user`, `kind` and `status` are all closed sets and all go through
+  // `closedSetQuery`: an unrecognised value is a 400, not a dropped filter.
+  // `limit`/`offset` deliberately keep their `.catch()` defaults — a bad page
+  // size returns the first page, which narrows rather than widens, and callers
+  // paging by `Link` headers never construct them by hand.
   router.get("/runs", async (c) => {
     const actor = getActor(c);
     const scope = getAppScope(c);
@@ -315,7 +370,11 @@ export function createRunsRouter() {
       .min(0)
       .catch(0)
       .parse(c.req.query("offset") ?? 0);
-    const userFilter = c.req.query("user");
+    // `user` is a closed set of one: `me`. Validated BEFORE the end-user branch
+    // below so the param means the same thing for every caller, instead of a
+    // typo surviving in an end-user integration until it runs under an org
+    // session.
+    const userFilter = closedSetQuery(c, "user", USER_FILTERS);
     const endUser = c.get("endUser");
 
     // End-users always see only their own runs — same semantic as before.
@@ -325,14 +384,11 @@ export function createRunsRouter() {
       return c.json(result);
     }
 
-    const rawKind = c.req.query("kind");
-    const kind: GlobalRunKind | undefined =
-      rawKind === "inline" || rawKind === "package" || rawKind === "all"
-        ? (rawKind as GlobalRunKind)
-        : undefined;
-    const status = c.req.query("status");
+    const kind = closedSetQuery(c, "kind", GLOBAL_RUN_KINDS);
+    const status = closedSetQuery(c, "status", runStatusValues);
     const startDateRaw = c.req.query("start_date");
     const endDateRaw = c.req.query("end_date");
+    const chatSessionId = c.req.query("chat_session_id") || undefined;
     const startDate = startDateRaw ? new Date(startDateRaw) : undefined;
     const endDate = endDateRaw ? new Date(endDateRaw) : undefined;
     if (startDate && Number.isNaN(startDate.getTime())) {
@@ -349,6 +405,7 @@ export function createRunsRouter() {
       status,
       startDate,
       endDate,
+      chatSessionId,
       actor,
     });
     setOffsetLinkHeader({ c, limit, offset, total: result.total });

@@ -62,6 +62,7 @@ describe("listLlmUsage — private ledger never leaks the alias backing", () => 
         "credentialSource",
         "id",
         "orgId",
+        "pricingStatus",
         "settled",
         "source",
       ].sort(),

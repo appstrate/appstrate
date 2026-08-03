@@ -165,6 +165,7 @@ export const runsPaths = {
                 connections_used: null,
                 package_ephemeral: false,
                 document_counts: { input: 0, output: 0 },
+                primary_document_id: null,
               },
             },
           },
@@ -402,7 +403,11 @@ export const runsPaths = {
                 manifest: {
                   type: "object",
                   description:
-                    "Full AFPS manifest (agent type). All referenced skills/integrations must already exist in the org or system catalog — registry-only dependencies.",
+                    "Full AFPS manifest (agent type). Give each inline run a concise, " +
+                    "task-specific `display_name` in the user's language and a matching " +
+                    "descriptive `@inline/<kebab-case-slug>` name — never an id or a generic " +
+                    "label such as `one-shot`. All referenced skills/integrations must already " +
+                    "exist in the org or system catalog — registry-only dependencies.",
                 },
                 prompt: {
                   type: "string",
@@ -433,6 +438,12 @@ export const runsPaths = {
                     "the agent in its prompt. A manifest (or `input`) that already declares " +
                     "`_context_documents` is rejected with a `400` — the name is reserved.",
                 },
+                connection_overrides: {
+                  type: "object",
+                  description:
+                    'Per-integration connection picks for THIS run (flat-connections mechanism #2). Flat map: `{ "@scope/integration": "<connection_id>" }` — one connection per integration; the chosen connection carries its own authKey. Loses to admin pins (mechanism #1), beats the schedule-frozen layer (#3) and the actor-fallback (#4). Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same pick. Returns 412 `missing_integration_connection` if the chosen id is not accessible to the actor.',
+                  additionalProperties: { type: "string" },
+                },
                 modelId: { type: ["string", "null"] },
                 proxyId: { type: ["string", "null"] },
               },
@@ -440,8 +451,8 @@ export const runsPaths = {
             example: {
               manifest: {
                 $schema: "https://schemas.afps.dev/v0/agent.schema.json",
-                name: "@inline/one-shot",
-                display_name: "One-shot summary",
+                name: "@inline/summarize-attached-document",
+                display_name: "Summarize attached document",
                 version: "0.0.0",
                 type: "agent",
                 schema_version: "0.1",
@@ -504,7 +515,7 @@ export const runsPaths = {
                 runner_name: null,
                 runner_kind: null,
                 agent_scope: "@inline",
-                agent_name: "one-shot",
+                agent_name: "Summarize attached document",
                 runOrigin: "platform",
                 contextSnapshot: null,
                 modelCredentialId: "mpc_8h2k4m6n",
@@ -517,10 +528,11 @@ export const runsPaths = {
                 connections_used: null,
                 package_ephemeral: true,
                 document_counts: { input: 0, output: 0 },
+                primary_document_id: null,
                 inline_manifest: {
                   $schema: "https://schemas.afps.dev/v0/agent.schema.json",
-                  name: "@inline/one-shot",
-                  display_name: "One-shot summary",
+                  name: "@inline/summarize-attached-document",
+                  display_name: "Summarize attached document",
                   version: "0.0.0",
                   type: "agent",
                   schema_version: "0.1",
@@ -624,7 +636,13 @@ export const runsPaths = {
               type: "object",
               required: ["manifest", "prompt"],
               properties: {
-                manifest: { type: "object" },
+                manifest: {
+                  type: "object",
+                  description:
+                    "Full AFPS manifest, with the same task-specific `display_name` and " +
+                    "descriptive `@inline/<kebab-case-slug>` naming guidance as " +
+                    "`POST /api/runs/inline`.",
+                },
                 prompt: { type: "string" },
                 input: { type: "object" },
                 config: { type: "object" },
@@ -634,6 +652,14 @@ export const runsPaths = {
                   description:
                     "Same field as `POST /api/runs/inline` — validated here for shape and for the " +
                     "reserved `_context_documents` name collision, never mounted.",
+                },
+                connection_overrides: {
+                  type: "object",
+                  additionalProperties: { type: "string" },
+                  description:
+                    "Same field as `POST /api/runs/inline` — applied to the integration readiness " +
+                    "check so a pick that clears `must_choose_connection` here clears it on the " +
+                    "real launch too. Never persisted; no run is created.",
                 },
                 modelId: { type: ["string", "null"] },
                 proxyId: { type: ["string", "null"] },
@@ -690,7 +716,7 @@ export const runsPaths = {
       tags: ["Runs"],
       summary: "List runs across the application (global view)",
       description:
-        "Org + application scoped paginated list. Supports filtering by `user=me` (self-owned, also implicit for end-user impersonation), `kind` (all, package, inline), `status`, and a date range. Inline runs surface via `package_ephemeral: true` on each row. Note: `kind`, `status`, and date filters are ignored when `user=me` (self-view uses a simpler path).",
+        "Org + application scoped paginated list. Supports filtering by `user=me` (self-owned, also implicit for end-user impersonation), `kind` (all, package, inline), `status`, a date range, and the chat session that launched the run. Inline runs surface via `package_ephemeral: true` on each row. Note: global filters are ignored when `user=me` (self-view uses a simpler path).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
@@ -700,7 +726,7 @@ export const runsPaths = {
           in: "query",
           schema: { type: "string", enum: ["me"] },
           description:
-            "Filter runs by user. `me` returns only the current user's runs. Omit for all org runs.",
+            "Filter runs by user. `me` is the only accepted value and returns only the current user's runs. Omit (or send an empty value) for all org runs the caller may see. Any other value — an arbitrary user id, for instance — is rejected with `400`; it is never ignored, so a filtered response is never silently widened to the whole org.",
         },
         {
           name: "limit",
@@ -712,10 +738,27 @@ export const runsPaths = {
           name: "kind",
           in: "query",
           schema: { type: "string", enum: ["all", "package", "inline"] },
+          description:
+            "Filter runs by kind. Omit (or send an empty value) for every kind. Any value outside the enum is rejected with `400`; it is never ignored, so a filtered response is never silently widened.",
         },
-        { name: "status", in: "query", schema: { type: "string" } },
+        {
+          name: "status",
+          in: "query",
+          schema: {
+            type: "string",
+            enum: ["pending", "running", "success", "failed", "timeout", "cancelled"],
+          },
+          description:
+            "Filter runs by lifecycle status. Omit (or send an empty value) for every status. Any value outside the enum is rejected with `400`; it is never ignored, so a filtered response is never silently widened.",
+        },
         { name: "start_date", in: "query", schema: { type: "string", format: "date-time" } },
         { name: "end_date", in: "query", schema: { type: "string", format: "date-time" } },
+        {
+          name: "chat_session_id",
+          in: "query",
+          schema: { type: "string" },
+          description: "Return only runs launched from this chat session.",
+        },
       ],
       responses: {
         "200": {
@@ -744,7 +787,7 @@ export const runsPaths = {
           },
         },
         "400": {
-          description: "Invalid query parameter (e.g. malformed date)",
+          description: "Invalid query parameter (unknown `user` value, malformed date, …)",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -848,6 +891,7 @@ export const runsPaths = {
                 connections_used: null,
                 package_ephemeral: false,
                 document_counts: { input: 0, output: 0 },
+                primary_document_id: null,
               },
             },
           },
@@ -1016,6 +1060,7 @@ export const runsPaths = {
                 connections_used: null,
                 package_ephemeral: false,
                 document_counts: { input: 0, output: 0 },
+                primary_document_id: null,
               },
             },
           },
@@ -1289,6 +1334,12 @@ export const runsPaths = {
                 time: { type: "string", format: "date-time" },
                 datacontenttype: { const: "application/json" },
                 data: { type: "object" },
+                dataschema: {
+                  type: "string",
+                  format: "uri",
+                  description:
+                    "OPTIONAL CloudEvents attribute identifying the JSON Schema the `data` payload adheres to. Emitted for canonical event types (e.g. `https://schemas.afps.dev/v0/events/memory.added.schema.json`); absent for third-party `@scope/tool.verb` events.",
+                },
                 sequence: { type: "integer", minimum: 0 },
               },
             },
@@ -1563,7 +1614,7 @@ export const runsPaths = {
       tags: ["Runs"],
       summary: "Publish an agent-produced document (HMAC, streaming)",
       description:
-        "Posted by the agent runtime — via the `publish_document` runtime tool or the end-of-run `outputs/` sweep — to store a file the agent produced as a durable `agent_output` document attached to the run. The raw file bytes are the request body (streamed straight to storage, up to `DOCUMENT_MAX_FILE_BYTES`, 100 MiB by default); metadata is carried in the `X-Document-Name` and `Content-Type` headers. Same Standard Webhooks HMAC auth as the other run routes, verified over an EMPTY body (the bytes stream unbuffered; integrity is the returned sha256). Enforced synchronously: the per-file cap and per-run output budget cut the stream mid-flight (413, deleting any partial object); the org storage quota returns 403. Idempotent for sweep retries: an identical (run, sha256, name) upload returns the existing document with 200 instead of storing it twice. Requires the run to be `running` (409 `run_not_running` otherwise). Each `webhook-id` is single-use: because the signature covers an empty body, replaying a captured header set with different bytes is refused with 409 `message_replayed` (the runtime signs a fresh id per attempt, so retries are unaffected).",
+        "Posted by the agent runtime — via the `publish_document` runtime tool or the end-of-run `outputs/` sweep — to store a file the agent produced as a durable `agent_output` document attached to the run. The raw file bytes are the request body (streamed straight to storage, up to `DOCUMENT_MAX_FILE_BYTES`, 100 MiB by default); metadata is carried in the `X-Document-Name`, optional `X-Document-Presentation`, and `Content-Type` headers. `X-Document-Presentation: primary` atomically makes this the run's featured deliverable; the last successful primary publication wins, while an ordinary publication never changes the selection. Same Standard Webhooks HMAC auth as the other run routes, verified over an EMPTY body (the bytes stream unbuffered; integrity is the returned sha256). Enforced synchronously: the per-file cap and per-run output budget cut the stream mid-flight (413, deleting any partial object); the org storage quota returns 403. Idempotent for sweep retries: an identical (run, sha256, name) upload returns the existing document with 200 instead of storing it twice, and can still promote that existing document. Requires the run to be `running` (409 `run_not_running` otherwise). Each `webhook-id` is single-use: because the signature covers an empty body, replaying a captured header set with different bytes is refused with 409 `message_replayed` (the runtime signs a fresh id per attempt, so retries are unaffected).",
       parameters: [
         { name: "runId", in: "path", required: true, schema: { type: "string" } },
         {
@@ -1573,6 +1624,15 @@ export const runsPaths = {
           schema: { type: "string" },
           description:
             "Display name for the document, percent-encoded with `encodeURIComponent` (an HTTP header value cannot carry a raw non-ASCII filename). The server decodes it strictly and returns 400 on a malformed encoding, then sanitises the decoded name (path separators, control characters and `..` collapsed, 255 chars max).",
+        },
+        {
+          name: "X-Document-Presentation",
+          in: "header",
+          required: false,
+          schema: { type: "string", enum: ["primary"] },
+          description:
+            "Set to `primary` to feature this document on the run page. The last successful " +
+            "primary publication wins atomically. Omit for an ordinary output.",
         },
         {
           name: "Content-Type",
@@ -1601,7 +1661,7 @@ export const runsPaths = {
             "application/json": {
               schema: {
                 type: "object",
-                required: ["id", "uri", "name", "mime", "size", "sha256"],
+                required: ["id", "uri", "name", "mime", "size", "sha256", "presentation"],
                 properties: {
                   id: { type: "string" },
                   uri: { type: "string", description: "`document://<id>` durable URI." },
@@ -1609,6 +1669,7 @@ export const runsPaths = {
                   mime: { type: "string" },
                   size: { type: "integer" },
                   sha256: { type: "string" },
+                  presentation: { type: ["string", "null"], enum: ["primary", null] },
                 },
               },
             },
@@ -1621,7 +1682,7 @@ export const runsPaths = {
             "application/json": {
               schema: {
                 type: "object",
-                required: ["id", "uri", "name", "mime", "size", "sha256"],
+                required: ["id", "uri", "name", "mime", "size", "sha256", "presentation"],
                 properties: {
                   id: { type: "string" },
                   uri: { type: "string" },
@@ -1629,6 +1690,7 @@ export const runsPaths = {
                   mime: { type: "string" },
                   size: { type: "integer" },
                   sha256: { type: "string" },
+                  presentation: { type: ["string", "null"], enum: ["primary", null] },
                 },
               },
             },
@@ -1636,7 +1698,7 @@ export const runsPaths = {
         },
         "400": {
           description:
-            "X-Document-Name missing or not a valid percent-encoded filename / Content-Type header missing / empty body",
+            "X-Document-Name missing or not a valid percent-encoded filename / X-Document-Presentation has an unsupported value / Content-Type header missing / empty body",
         },
         "401": { description: "Signature verification failed" },
         "403": { description: "storage_limit_exceeded" },

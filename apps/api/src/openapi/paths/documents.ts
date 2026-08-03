@@ -12,6 +12,7 @@ const documentSchema = {
     "id",
     "uri",
     "purpose",
+    "presentation",
     "applicationId",
     "run_id",
     "chat_session_id",
@@ -34,6 +35,13 @@ const documentSchema = {
       description: "Stable `document://doc_…` reference — pass in a run's file input field.",
     },
     purpose: { type: "string", enum: ["user_upload", "agent_output"] },
+    presentation: {
+      type: ["string", "null"],
+      enum: ["primary", null],
+      description:
+        "User-facing presentation role selected by the producing agent. `primary` identifies " +
+        "the run's featured deliverable; null means the document remains a regular output.",
+    },
     applicationId: { type: "string" },
     run_id: { type: ["string", "null"], description: "Run container, or null." },
     chat_session_id: { type: ["string", "null"], description: "Chat-session container, or null." },
@@ -133,12 +141,13 @@ const documentWithPreviewSchema = {
         "Absolute URL of a hardened, cookie-less preview (short-lived signed token in the " +
         "query). Minted ONLY on this single-document GET — the list rows and the `keep` " +
         "response carry `previewable` instead. Non-null only for a previewable document. " +
-        'Load in a `sandbox="allow-scripts"` iframe: for an `html` document served ' +
-        "same-origin (no `USERCONTENT_URL`) that iframe is the ONLY context in which the " +
-        "markup is served as active HTML — a top-level navigation to the same URL is served " +
-        "as inert `text/plain` source so agent script can never run on the app origin. " +
-        "On the `USERCONTENT_URL` origin when the instance configures a separate preview " +
-        "domain, else same-origin.",
+        'Load in a `sandbox="allow-scripts"` iframe: for an `html` document that iframe is ' +
+        "the ONLY context in which the markup is served as active HTML, whether or not the " +
+        "instance configures a separate `USERCONTENT_URL` preview origin. Any other loading " +
+        "context — a top-level navigation to the same URL above all — is served as inert " +
+        "`text/plain` source, because a top-level agent document can navigate itself and so " +
+        "cannot be contained. Minted on the `USERCONTENT_URL` origin when the instance " +
+        "configures a separate preview domain, else same-origin.",
     },
   },
 } as const;
@@ -172,7 +181,8 @@ export const documentsPaths = {
         "`documents:read` permission (the family gate — mirrors `runs:read`); on top of it, " +
         "each row is filtered by its own container ACL, so members see their own documents " +
         "(and system-owned ones) and end-users see only their own. Filter by `purpose`, " +
-        "`run_id`, `packageId`, or `chat_session_id`; paginate with `startingAfter` + `limit`.",
+        "`run_id`, `packageId`, `chat_session_id`, or a chat session's complete context; " +
+        "paginate with `startingAfter` + `limit`.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
@@ -203,6 +213,14 @@ export const documentsPaths = {
           required: false,
           schema: { type: "string" },
           description: "Filter to documents anchored to this chat session.",
+        },
+        {
+          name: "context_chat_session_id",
+          in: "query",
+          required: false,
+          schema: { type: "string" },
+          description:
+            "Filter to the private conversation context: direct attachments plus documents produced or consumed by runs launched from the session.",
         },
         {
           name: "startingAfter",

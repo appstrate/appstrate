@@ -48,8 +48,9 @@ interface JsonRpcEnvelope {
 async function rpc(
   headers: Record<string, string>,
   message: Record<string, unknown>,
+  requestOrigin = "",
 ): Promise<{ status: number; envelope: JsonRpcEnvelope }> {
-  const res = await app.request(`/api/mcp/o/${headers["X-Org-Id"]}`, {
+  const res = await app.request(`${requestOrigin}/api/mcp/o/${headers["X-Org-Id"]}`, {
     method: "POST",
     headers: { ...headers, "content-type": "application/json", Accept: MCP_ACCEPT },
     body: JSON.stringify(message),
@@ -327,12 +328,16 @@ describe("mcp resources/read (document://)", () => {
     const big = "B".repeat(700 * 1024 + 16); // non-textual mime, over the blob ceiling
     const docId = await publishDoc(scope, runId, "big.bin", "application/octet-stream", big);
 
-    const { envelope } = await rpc(headers, {
-      jsonrpc: "2.0",
-      id: 1,
-      method: "resources/read",
-      params: { uri: `document://${docId}` },
-    });
+    const { envelope } = await rpc(
+      headers,
+      {
+        jsonrpc: "2.0",
+        id: 1,
+        method: "resources/read",
+        params: { uri: `document://${docId}` },
+      },
+      "http://api:3000",
+    );
     const contents = (envelope.result?.contents as Array<Record<string, unknown>>) ?? [];
     expect(contents).toHaveLength(1);
     expect(contents[0]!.mimeType).toBe("application/json");
@@ -340,7 +345,7 @@ describe("mcp resources/read (document://)", () => {
     expect(meta).toMatchObject({ id: docId, downloadable: true });
     // Metadata-only carries the capabilities and a content URL hint.
     expect((meta.capabilities as Record<string, unknown>).download).toBe(true);
-    expect(String(meta.content_url)).toContain(`/api/documents/${docId}/content`);
+    expect(meta.content_url).toBe(`http://localhost:3000/api/documents/${docId}/content`);
     expect(contents[0]!.blob).toBeUndefined();
   });
 

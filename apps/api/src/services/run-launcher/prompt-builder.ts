@@ -10,12 +10,15 @@
  *
  *   - `platformName`: `"Appstrate"`
  *   - `uploads`: DB-stored files with platform-sanitised paths
+ *   - `workspaceTmpfsSizeMb`: the operator's workspace cap, when the
+ *     backend actually mounts one (see `promptWorkspaceTmpfsSizeMb`)
+ *   - `workspaceTmpfsSizePercent`: a backend-declared writable-root cap
+ *   - `agentResources`: the effective allocation and semantics already
+ *     resolved onto the run plan
  *
  * Every other field flows straight from the bundle — the same code
- * path used by the `appstrate run` CLI. Divergence between platform
- * and CLI is now strictly the two overrides above. Outbound API access
- * is surfaced via integration MCP tools (`{ns}__api_call`), not the
- * prompt.
+ * path used by the `appstrate run` CLI. Outbound API access is surfaced
+ * via integration MCP tools (`{ns}__api_call`), not the prompt.
  *
  * Run history is NOT rendered in the prompt: the runtime wires a
  * typed `run_history` tool (see runtime-pi/entrypoint.ts Phase D) whose
@@ -30,12 +33,29 @@ import {
   renderPlatformPrompt,
   type PlatformPromptIntegration,
 } from "@appstrate/afps-runtime/bundle";
+import { getEnv } from "@appstrate/env";
+import { getExecutionMode, type ExecutionMode } from "../../infra/mode.ts";
 import { fetchIntegrationPromptDocs } from "../integration-service.ts";
+
+/**
+ * Workspace tmpfs cap (MB) to state in the prompt, or 0 to stay silent.
+ *
+ * `WORKSPACE_TMPFS_SIZE_MB` configures a real mount only on the docker
+ * backend (docker-orchestrator.ts, `createIsolationBoundary`). The
+ * process backend gives the run a plain directory under `os.tmpdir()`
+ * without applying this setting, and a module-contributed backend's
+ * workspace is opaque to core. Fail closed on anything but docker:
+ * stating a cap that the selected backend does not use would be misleading.
+ */
+function promptWorkspaceTmpfsSizeMb(executionMode: ExecutionMode): number {
+  return executionMode === "docker" ? getEnv().WORKSPACE_TMPFS_SIZE_MB : 0;
+}
 
 export async function buildPlatformSystemPrompt(
   context: ExecutionContext,
   plan: AppstrateRunPlan,
 ): Promise<string> {
+  const executionMode = getExecutionMode();
   const uploads = plan.files?.map((f) => ({
     name: f.name,
     path: `./documents/${f.workspaceName}`,
@@ -65,6 +85,18 @@ export async function buildPlatformSystemPrompt(
   const inputs = buildPlatformPromptInputs(plan.bundle, context, {
     platformName: "Appstrate",
     timeoutSeconds: plan.timeout,
+    // The runtime knows the workspace is capped; without this the agent
+    // does not, and a dependency install dies with ENOSPC mid-run (#1019).
+    workspaceTmpfsSizeMb: promptWorkspaceTmpfsSizeMb(executionMode),
+    workspaceTmpfsSizePercent: plan.resources.writableRootTmpfsPercent,
+    ...(plan.resources.semantics
+      ? {
+          agentResources: {
+            ...plan.resources.effective,
+            semantics: plan.resources.semantics,
+          },
+        }
+      : {}),
     // Deliverables convention (Phase 2): files the agent writes under
     // `./outputs/` are swept and published as durable run documents at
     // finalize. Rendered as a platform-managed section BEFORE the raw prompt

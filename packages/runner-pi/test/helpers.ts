@@ -6,7 +6,12 @@
  * test file reads the same way.
  */
 
-import type { BridgeableSession, InternalSink, PromptableSession } from "../src/pi-runner.ts";
+import type {
+  BridgeableSession,
+  InternalSink,
+  PromptableSession,
+  ToolWideningSession,
+} from "../src/pi-runner.ts";
 import { PiRunner } from "../src/pi-runner.ts";
 import type { EventSink } from "@appstrate/afps-runtime/interfaces";
 import type { RunEvent, ExecutionContext } from "@appstrate/afps-runtime/types";
@@ -23,7 +28,7 @@ import {
 } from "@appstrate/afps-runtime/bundle";
 
 /** Fake Pi SDK session with driver methods the tests can invoke directly. */
-export interface FakeSession extends BridgeableSession, PromptableSession {
+export interface FakeSession extends BridgeableSession, PromptableSession, ToolWideningSession {
   /** Drive a raw Pi SDK event onto the bridge. */
   emit(event: unknown): void;
   /** Append a message to `state.messages` (used by message_end handler). */
@@ -36,11 +41,37 @@ export interface FakeSession extends BridgeableSession, PromptableSession {
   aborts: number;
   /** Test hook: drives what the session does during a `prompt()` turn. */
   onPrompt?: (message: string) => void | Promise<void>;
+  /** Every `setActiveToolsByName()` argument, in order (raw, pre-resolution). */
+  setActiveToolsCalls: string[][];
+  /**
+   * Ordered trace of the two calls that must happen in sequence — a
+   * `"set_active_tools"` entry followed by `"prompt"` proves the tool set was
+   * narrowed BEFORE the corrective turn went out.
+   */
+  callLog: Array<"set_active_tools" | "prompt">;
+  /** Tools the agent may call on the next turn, after registry resolution. */
+  activeTools: string[];
+  /** Active tool names snapshotted at each `prompt()` call, in order. */
+  activeToolsAtPrompt: string[][];
 }
 
-export function createFakeSession(): FakeSession {
+/**
+ * @param opts.toolRegistry names the SDK tool registry resolves. Mirrors
+ *   production: the four Pi built-ins plus the `output` runtime tool that
+ *   `runtime-pi/mcp/direct.ts` registers verbatim under `tool.name`. Drop
+ *   `"output"` (or `"read"`) from it to reproduce the defended cases where a
+ *   name the corrective turn asks for is one the SDK never resolved.
+ * @param opts.activeTools names active BEFORE the test acts, defaulting to the
+ *   whole registry. Production is narrower — `createAgentSession` activates
+ *   four of the seven Pi built-ins — so pass this to reproduce a registry that
+ *   knows more tools than the session has switched on.
+ */
+export function createFakeSession(
+  opts: { toolRegistry?: string[]; activeTools?: string[] } = {},
+): FakeSession {
   const listeners: Array<(event: unknown) => void> = [];
   const messages: unknown[] = [];
+  const toolRegistry = new Set(opts.toolRegistry ?? ["read", "bash", "edit", "write", "output"]);
   const session: FakeSession = {
     subscribe(cb) {
       listeners.push(cb);
@@ -48,8 +79,28 @@ export function createFakeSession(): FakeSession {
     state: { messages },
     prompts: [],
     aborts: 0,
+    setActiveToolsCalls: [],
+    callLog: [],
+    activeTools: opts.activeTools ?? [...toolRegistry],
+    activeToolsAtPrompt: [],
+    getActiveToolNames() {
+      return [...session.activeTools];
+    },
+    getAllTools() {
+      return [...toolRegistry].map((name) => ({ name }));
+    },
+    setActiveToolsByName(toolNames: string[]) {
+      session.setActiveToolsCalls.push([...toolNames]);
+      session.callLog.push("set_active_tools");
+      // Silent-drop semantics, per the SDK contract documented on
+      // `PromptableSession.setActiveToolsByName`. A fake that accepted every
+      // name would make the narrowing tests vacuous.
+      session.activeTools = toolNames.filter((name) => toolRegistry.has(name));
+    },
     async prompt(message: string) {
       session.prompts.push(message);
+      session.callLog.push("prompt");
+      session.activeToolsAtPrompt.push([...session.activeTools]);
       await session.onPrompt?.(message);
     },
     emit(event) {

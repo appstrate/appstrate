@@ -3,5 +3,10 @@
   "compilerOptions": {
     "types": ["bun"]
   },
-  "include": ["verify-module-contract.ts", "verify-package-resolves.ts"]
+  "include": [
+    "verify-module-contract.ts",
+    "verify-package-resolves.ts",
+    "check-consumer-versions.ts",
+    "test/check-consumer-versions.test.ts"
+  ]
 }

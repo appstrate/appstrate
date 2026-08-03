@@ -138,6 +138,16 @@ describe("runner server auth", () => {
     });
     expect(res.status).toBe(200);
   });
+
+  // RFC 9110 §11.4: `auth-scheme` is a case-insensitive token followed by
+  // `1*SP`. The token compare stays byte-exact and constant-time.
+  it("accepts a non-canonical bearer scheme", async () => {
+    const { app } = makeApp();
+    for (const header of [`bearer ${TOKEN}`, `BEARER ${TOKEN}`, `Bearer   ${TOKEN}`]) {
+      const res = await app.request(RUNNER_ROUTES.health, { headers: { authorization: header } });
+      expect(res.status).toBe(200);
+    }
+  });
 });
 
 describe("runner server routes", () => {

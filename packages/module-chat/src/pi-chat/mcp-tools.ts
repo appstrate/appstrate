@@ -152,7 +152,12 @@ export interface BuildPlatformMcpToolsOptions {
  * synthetic message would move the breakpoint every step and never hit the cache
  * again. Written into a tool result the note is frozen into the transcript the
  * moment it is produced, so every later request keeps the exact same prefix and
- * the cache still hits. `details` (the UI channel) is left untouched.
+ * the cache still hits.
+ *
+ * The note lands in `content`, which the UI parses too (nothing reads `details`),
+ * so the payload stops being the only text part. `unwrapResult` on the UI side is
+ * deliberately tolerant of trailing non-payload text — do not append here without
+ * checking it still is.
  */
 export function withTurnBudgetNote(result: PiToolResult, budget: PiTurnBudget): PiToolResult {
   const now = (budget.now ?? Date.now)();
@@ -298,8 +303,8 @@ function makeRunAndWaitExtension(
         }
         // The final step is ALSO delivered as the tool result (tool_execution_end
         // re-emits it under the same id — an idempotent update to the same card).
-        // The budget note rides the MODEL channel only, so the UI card (fed from
-        // `details` by the live chunks above) is unchanged.
+        // That last write is the one the card keeps, and it carries the budget
+        // note appended to `content` — the very channel the card parses.
         return withTurnBudgetNote(toPiToolResult(finalPayload), ctx.turnBudget);
       },
     });

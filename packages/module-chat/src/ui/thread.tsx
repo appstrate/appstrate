@@ -16,8 +16,7 @@ import {
   AttachmentPrimitive,
   ActionBarPrimitive,
   AuiIf,
-  useMessage,
-  useAttachment,
+  useAuiState,
   getExternalStoreMessages,
 } from "@assistant-ui/react";
 import {
@@ -156,8 +155,8 @@ function ScrollToBottom() {
 
 /** A pending composer attachment chip: file icon, name, size, remove button. */
 function ComposerAttachmentChip() {
-  const name = useAttachment((a) => a.name);
-  const size = useAttachment((a) => a.file?.size ?? 0);
+  const name = useAuiState((s) => s.attachment.name);
+  const size = useAuiState((s) => s.attachment.file?.size ?? 0);
   return (
     <AttachmentPrimitive.Root className="bg-muted flex items-center gap-1.5 rounded-lg border px-2 py-1 text-xs">
       <FileIcon className="text-muted-foreground size-3.5 shrink-0" />
@@ -216,11 +215,11 @@ function InertAttachmentChip({ name }: { name: string }) {
  * only.
  */
 function SentAttachmentChip() {
-  const name = useAttachment((a) => a.name);
-  const contentType = useAttachment((a) => a.contentType);
+  const name = useAuiState((s) => s.attachment.name);
+  const contentType = useAuiState((s) => s.attachment.contentType);
   // The content array reference is stable for a settled attachment, so this
   // selector doesn't churn re-renders; memo keeps the resolved ref stable too.
-  const content = useAttachment((a) => a.content);
+  const content = useAuiState((s) => s.attachment.content);
   const resolved = React.useMemo(() => resolveAttachmentContent(content), [content]);
 
   if (resolved.kind !== "document") {
@@ -303,11 +302,11 @@ function UserMessage() {
   // instead. Reads the message's first text part (survives reload, since the
   // marker is persisted with the message).
   // Return a stable string from the selector (not a fresh object) and parse in
-  // render, so useMessage's reference-equality check doesn't churn re-renders.
-  const resumeText = useMessage((m) => {
-    const parts = (m.content ?? (m as { parts?: unknown[] }).parts ?? []) as unknown as Array<{
+  // render, so useAuiState's reference-equality check doesn't churn re-renders.
+  const resumeText = useAuiState(({ message: m }) => {
+    const parts = (m.content ?? (m as { parts?: readonly unknown[] }).parts ?? []) as readonly {
       text?: unknown;
-    }>;
+    }[];
     for (const p of parts) {
       if (typeof p?.text === "string" && p.text.startsWith(INTEGRATION_RESUME_MARKER))
         return p.text;
@@ -367,7 +366,7 @@ function UserMessage() {
  * must not animate "thinking" forever — that reads as a hung chat.
  */
 function ThinkingIndicator() {
-  const running = useMessage((m) => m.status?.type === "running");
+  const running = useAuiState((s) => s.message.status?.type === "running");
   if (!running) return null;
   return (
     <div className="flex h-6 items-center gap-1" role="status" aria-label="L'assistant réfléchit…">
@@ -390,7 +389,7 @@ function sourceMessage(m: unknown): unknown {
 }
 
 function TurnLimitNotice() {
-  const reached = useMessage((m) => turnLimitReached(sourceMessage(m)));
+  const reached = useAuiState((s) => turnLimitReached(sourceMessage(s.message)));
   if (!reached) return null;
   return (
     <div className="text-muted-foreground mt-3 flex items-center gap-2 text-xs" role="status">
@@ -410,7 +409,7 @@ const GENERIC_TURN_ERROR = "La génération a échoué.";
  * finish chunk (e.g. a hard ai-sdk stream error).
  */
 function MessageError() {
-  const errorText = useMessage((m) => {
+  const errorText = useAuiState(({ message: m }) => {
     const turn = turnMetadataFromMessage(sourceMessage(m));
     if (turn?.finishReason === "error") return turn.errorText ?? GENERIC_TURN_ERROR;
     if (m.status?.type === "incomplete" && m.status.reason === "error") {

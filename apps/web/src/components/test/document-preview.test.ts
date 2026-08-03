@@ -2,7 +2,7 @@
 
 /**
  * Security regression guard for the preview iframe sandbox — the one thing about
- * this component a test can meaningfully protect.
+ * the reusable viewer a test can meaningfully protect.
  *
  * The preview iframe renders UNTRUSTED agent HTML; its `sandbox` MUST stay
  * exactly `"allow-scripts"`. Widening it (notably adding `allow-same-origin`,
@@ -14,7 +14,7 @@
  * evaluate — and a scan is what checks the JSX attribute anyway.
  *
  * Everything else this file used to assert was a `toContain` scan of the
- * component's own source — proving nothing about behavior and breaking on any
+ * viewer's own source — proving nothing about behavior and breaking on any
  * rename. The one real behavior in there (markdown detection) moved to
  * `lib/test/documents.test.ts`, where the helper now lives.
  */
@@ -24,18 +24,18 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const source = readFileSync(
-  fileURLToPath(new URL("../document-preview.tsx", import.meta.url)),
+  fileURLToPath(new URL("../document-viewer.tsx", import.meta.url)),
   "utf-8",
 );
 
-/** The declared sandbox token set, read straight out of the component source. */
+/** The declared sandbox token set, read straight out of the viewer source. */
 function declaredSandbox(): string {
   const match = /export const PREVIEW_IFRAME_SANDBOX = "([^"]*)";/.exec(source);
   expect(match).not.toBeNull();
   return match![1]!;
 }
 
-describe("DocumentPreview iframe sandbox", () => {
+describe("DocumentViewer iframe sandbox", () => {
   it("declares the sandbox constant as exactly 'allow-scripts'", () => {
     expect(declaredSandbox()).toBe("allow-scripts");
   });

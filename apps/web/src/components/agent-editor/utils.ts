@@ -18,6 +18,7 @@ import {
 import { AFPS_SCHEMA_URLS, dropRetiredRuntimeTools } from "@appstrate/core/validation";
 import { isSelectableRuntimeTool } from "@appstrate/core/runtime-tools-catalog";
 import {
+  dropRetiredDependencyKeys,
   isToolsWildcard,
   parseManifestIntegrations,
   writeManifestIntegrations,
@@ -145,24 +146,36 @@ export function getRuntimeTools(m: Record<string, unknown>): string[] {
 }
 
 /**
- * Return the manifest with `runtime_tools` reduced to the ids the platform
- * still offers. Applied when an existing agent is loaded into the editor, so
- * a retired id persisted long ago (e.g. `report`) silently disappears on the
- * next save instead of round-tripping forever — the user is never shown an
- * error for a field the editor cannot even display.
+ * Return the manifest with every piece of vocabulary the platform retired
+ * removed, applied ONCE when an existing agent is loaded into the editor:
  *
- * Delegates to `dropRetiredRuntimeTools` from `@appstrate/core` — the SAME
- * function the publish path runs (`services/package-versions.ts`). The editor
- * used to reimplement it and the two drifted on the empty case, so an agent
- * whose only tool was retired serialised differently depending on which path
- * saved it. One implementation, one byte sequence. Core is type-gated
+ *   - `runtime_tools` reduced to the ids the platform still offers, so a
+ *     retired id persisted long ago (e.g. `report`) silently disappears on the
+ *     next save instead of round-tripping forever;
+ *   - the retired AFPS 1.x `dependencies` keys (`tools` → `mcp_servers`,
+ *     `providers` → `integrations`) dropped, for the same reason — a draft can
+ *     acquire one by importing a bundle assembled from a legacy published
+ *     version, and the author-direction save rejects it (#1021).
+ *
+ * In both cases the user would otherwise be shown an error for a field the
+ * editor cannot even display, with no way to clear it. Typing either into the
+ * raw-JSON tab still surfaces the rejection — this normalises on LOAD only.
+ *
+ * Both halves delegate to `@appstrate/core` — `dropRetiredRuntimeTools` is the
+ * SAME function the publish path runs (`services/package-versions.ts`). The
+ * editor used to reimplement it and the two drifted on the empty case, so an
+ * agent whose only tool was retired serialised differently depending on which
+ * path saved it. One implementation, one byte sequence. Core is type-gated
  * (`type: "agent"`), which is exactly this call site: `package-editor.tsx`
  * invokes it only in the agent branch.
  *
+ * One function rather than a chain the call site composes, so a future
+ * retirement is added here and cannot be forgotten at the call site.
+ *
  * Returns the same reference when there is nothing to drop.
  */
-export function withNormalizedRuntimeTools(m: Record<string, unknown>): Record<string, unknown> {
-  return dropRetiredRuntimeTools(m).manifest;
+export function withNormalizedManifest(m: Record<string, unknown>): Record<string, unknown> {
+  return dropRetiredDependencyKeys(dropRetiredRuntimeTools(m).manifest);
 }
 
 /**

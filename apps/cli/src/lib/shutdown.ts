@@ -74,6 +74,13 @@ export class ShutdownCoordinator {
   private readonly timeoutMs: number;
   /** Tracks the in-flight shutdown so a second signal can short-circuit. */
   private inFlight: Promise<void> | null = null;
+  /**
+   * Exit code the coordinator will use. Seeded with SIGINT's 130 so a
+   * caller reading it after an abort that did NOT come from a signal
+   * (none exist today — `trigger` is the only aborter — but the getter
+   * must answer something) gets the historical value.
+   */
+  private chosenExitCode: number = SIGNAL_EXIT_CODES.SIGINT;
 
   constructor(options: ShutdownOptions = {}) {
     this.exit = options.exit ?? ((code) => process.exit(code));
@@ -82,6 +89,17 @@ export class ShutdownCoordinator {
 
   get signal(): AbortSignal {
     return this.controller.signal;
+  }
+
+  /**
+   * Exit code chosen by the last `trigger()` — 130 (SIGINT), 143
+   * (SIGTERM) or 129 (SIGHUP). Subcommands that keep their own
+   * `process.exit` backstop on the signal path read it instead of
+   * hardcoding 130: a CLI killed by SIGTERM must report 143, and
+   * scripted callers (CI, supervisors) branch on those codes.
+   */
+  get exitCode(): number {
+    return this.chosenExitCode;
   }
 
   /** Returns an unregister function — symmetric with EventTarget's `addEventListener` API. */
@@ -97,6 +115,7 @@ export class ShutdownCoordinator {
    * call (typically a second Ctrl-C) bypasses cleanup and exits.
    */
   async trigger(reason: string, exitCode: number): Promise<void> {
+    this.chosenExitCode = exitCode;
     if (this.inFlight !== null) {
       this.exit(exitCode);
       return;
@@ -135,6 +154,12 @@ export const coordinator = new ShutdownCoordinator();
 
 export const shutdownSignal: AbortSignal = coordinator.signal;
 export const onShutdown = (hook: ShutdownHook): (() => void) => coordinator.onShutdown(hook);
+/**
+ * The exit code the singleton coordinator resolved for the current
+ * shutdown. Read by subcommand `process.exit` backstops so they report
+ * the code of the signal that actually arrived (130/143/129).
+ */
+export const shutdownExitCode = (): number => coordinator.exitCode;
 
 let signalHandlersInstalled = false;
 

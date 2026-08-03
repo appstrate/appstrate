@@ -32,25 +32,25 @@ See [`examples/self-hosting/README.md`](../../examples/self-hosting/README.md#ve
 
 ## Commands
 
-| Command               | Purpose                                                                         |
-| --------------------- | ------------------------------------------------------------------------------- |
-| `appstrate install`   | Install Appstrate locally (Tier 0) or bring up a Docker stack (Tiers 1/2/3).    |
-| `appstrate start`     | Start the installed Docker stack (`docker compose up -d`).                      |
-| `appstrate stop`      | Stop the stack — containers off, volumes preserved.                             |
-| `appstrate restart`   | Restart all containers.                                                         |
-| `appstrate logs`      | Stream Compose logs (with `-f` and an optional service-name positional).        |
-| `appstrate status`    | Show container status (`docker compose ps`).                                    |
-| `appstrate uninstall` | Tear down. Default keeps volumes; `--purge` wipes data + the install dir.       |
-| `appstrate login`     | Sign into an instance via RFC 8628 device-flow. Tokens land in the OS keyring.  |
-| `appstrate logout`    | Revoke the active session server-side and wipe local credentials.               |
-| `appstrate whoami`    | Print the identity attached to the active profile.                              |
-| `appstrate token`     | Print metadata about the stored access + refresh tokens (debug).                |
-| `appstrate org`       | List, switch, or create organizations pinned on the active profile.             |
-| `appstrate app`       | List, switch, or create applications pinned on the active profile.              |
-| `appstrate api`       | Authenticated HTTP passthrough to the Appstrate API.                            |
-| `appstrate openapi`   | Explore the active profile's OpenAPI schema without flooding stdout.            |
-| `appstrate run`       | Execute an agent locally — by package id or from a `.afps`/`.afps-bundle` path. |
-| `appstrate runner`    | Install and manage the Firecracker runner daemon on a KVM host.                 |
+| Command               | Purpose                                                                                                     |
+| --------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `appstrate install`   | Install Appstrate locally (Tier 0) or bring up a Docker stack (Tiers 1/2/3).                                |
+| `appstrate start`     | Start the installed Docker stack (`docker compose up -d`).                                                  |
+| `appstrate stop`      | Stop the stack — containers off, volumes preserved.                                                         |
+| `appstrate restart`   | Restart all containers.                                                                                     |
+| `appstrate logs`      | Stream Compose logs (with `-f` and an optional service-name positional).                                    |
+| `appstrate status`    | Show container status (`docker compose ps`).                                                                |
+| `appstrate uninstall` | Tear down. Default keeps volumes; `--purge` wipes data + the install dir.                                   |
+| `appstrate login`     | Sign into an instance via RFC 8628 device-flow. Tokens land in the OS keyring.                              |
+| `appstrate logout`    | Revoke the active session server-side and wipe local credentials.                                           |
+| `appstrate whoami`    | Print the identity attached to the active profile.                                                          |
+| `appstrate token`     | Print metadata about the stored access + refresh tokens (debug).                                            |
+| `appstrate org`       | List, switch, or create organizations pinned on the active profile.                                         |
+| `appstrate app`       | List, switch, or create applications pinned on the active profile.                                          |
+| `appstrate api`       | Authenticated HTTP passthrough to the Appstrate API.                                                        |
+| `appstrate openapi`   | Explore the active profile's OpenAPI schema without flooding stdout.                                        |
+| `appstrate run`       | Execute an agent — a package id runs on the pinned instance, a `.afps`/`.afps-bundle` path runs in-process. |
+| `appstrate runner`    | Install and manage the Firecracker runner daemon on a KVM host.                                             |
 
 All commands accept `--profile <name>` to target a specific profile (see [Profiles](#profiles)).
 
@@ -458,7 +458,7 @@ Every row below is a direct drop-in: an agent can replace `curl` with `appstrate
 | `curl -T file`                  | `appstrate api -T file /x`            | PUT by default; `-T -` for stdin                  |
 | `curl -i`                       | `appstrate api -i`                    | status line + headers on stdout                   |
 | `curl -I`                       | `appstrate api -I`                    | HEAD only                                         |
-| `curl -L`                       | `appstrate api -L`                    | cross-origin hops strip `Authorization`           |
+| `curl -L`                       | `appstrate api -L`                    | cross-origin: `Authorization` dropped, `-H` kept  |
 | `curl -k`                       | `appstrate api -k`                    | skip TLS verification (this request)              |
 | `curl -o out`                   | `appstrate api -o out`                | body → file                                       |
 | `curl -s` / `-sS`               | `appstrate api -s` / `-sS`            | silence / silence-but-errors                      |
@@ -474,6 +474,8 @@ Every row below is a direct drop-in: an agent can replace `curl` with `appstrate
 | `curl -A 'UA'`                  | `appstrate api -A 'UA'`               | shortcut; `-H` still wins                         |
 | `curl -e https://ref`           | `appstrate api -e https://ref`        | Referer shortcut                                  |
 | `curl -b 'k=v'`                 | `appstrate api -b 'k=v'`              | literal only; cookie-jar files rejected           |
+
+**About `-L`.** A `Location` is chosen by the server and is never re-validated against your profile origin, so following it is opt-in. On a cross-origin hop the runtime drops `Authorization` and `Cookie`, but every custom `-H` header you pass — plus `X-Org-Id` / `X-Application-Id` — is forwarded to that host. Don't pass a second credential via `-H` and assume `-L` is safe. Without `-L`, a 3xx is surfaced un-followed (usually an empty body, exit 0) and the CLI prints a hint on stderr naming the `Location`.
 
 #### Write-out variables (`-w`)
 
@@ -524,10 +526,12 @@ Subset of curl's format string. Unknown variables pass through verbatim; `\n \r 
 
 ### `appstrate run`
 
-Execute an agent locally via the same Pi runner the platform uses for cloud runs. Two argument forms:
+Execute an agent. The shape of the target picks the execution mode:
 
-- **By package id** — `@scope/agent[@spec]`. The CLI calls `GET /api/agents/{scope}/{name}/bundle` on the pinned instance to download a deterministic `.afps-bundle`, verifies its SRI integrity in memory, and runs it. The bytes are never written to disk — every invocation re-fetches.
-- **By file path** — a local `.afps` or `.afps-bundle` file. No network roundtrip.
+- **By package id** — `@scope/agent[@spec]`. Runs **remotely** by default: the CLI POSTs `/api/agents/{scope}/{name}/run` on the pinned instance (the same path as the dashboard "Run" button), then tails the run's logs and final status. Pass `--local` to run the agent in-process instead — the CLI then calls `GET /api/agents/{scope}/{name}/bundle` to download a deterministic `.afps-bundle`, verifies its SRI integrity in memory, and runs it via the Pi runner. The bytes are never written to disk — every invocation re-fetches.
+- **By file path** — a local `.afps` or `.afps-bundle` file. Runs **locally**, in-process via the Pi runner, with the caller's shell, FS, and env. No network roundtrip for the bundle. `--remote` is rejected on a path target: the CLI does not upload local bundles to the instance.
+
+`--local` and `--remote` are mutually exclusive.
 
 ```sh
 # Run the latest version of an installed agent
@@ -545,15 +549,34 @@ appstrate run ./out/triage-1.2.0.afps-bundle --integrations local --creds-file .
 
 Run-config inheritance (model, proxy, agent config, version pin) is fetched from `/api/applications/{applicationId}/packages/{scope}/{name}/run-config` and merged with flag/env overrides. Use `--no-inherit` to opt out (deterministic CI).
 
+**Remote runs and process lifetime**
+
+A remote run executes on the instance and outlives the CLI process by design — like closing a dashboard tab. What `SIGINT` / `SIGTERM` / `SIGHUP` does to that run depends on whether a human sent it:
+
+- **Interactive** (stdin is a TTY and `--json` is not set) — the signal **cancels** the run server-side (`POST /api/runs/{runId}/cancel`) and the CLI keeps polling until the run reaches a terminal status, so the final state still prints. Ctrl-C at a keyboard is a cancel intent.
+- **Non-interactive** (`--json`, or stdin is not a TTY: CI, a supervisor, a background shell) — the signal **detaches**. No cancel is sent, the CLI stops tailing, and the run keeps going:
+
+```
+detached — run run_9c1e4f2a is still running on https://app.example.com
+  follow it with: appstrate api GET /api/runs/run_9c1e4f2a
+```
+
+Under `--json` the detach is a single JSONL envelope on stdout instead: `{"type":"appstrate.remote.detached","runId":"…","instance":"…"}`. A detached run has no terminal status, so the CLI writes no `--output` file and prints no `[run complete]` / `[run failed]` line — a fabricated status would be worse than a missing one.
+
+`--cancel-on-exit` / `--no-cancel-on-exit` force either behaviour and take precedence over both auto-rules. They are remote-only: passing either one on a local run is an error, not a silent no-op — an in-process run dies with the CLI and there is nothing to detach from.
+
+Exit codes on the signal path are the conventional POSIX ones (128 + signal number), in both the cancel and the detach case: `130` for SIGINT, `143` for SIGTERM, `129` for SIGHUP.
+
 **Selected flags**
 
-| Flag            | Purpose                                                                                                                                                |
-| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `--proxy <id>`  | Proxy id to associate with the run (overrides the per-app inherited value).                                                                            |
-| `--no-inherit`  | Skip per-application run-config inheritance — flags + env vars + defaults only.                                                                        |
-| `--json`        | Emit canonical RunEvents as JSONL on stdout.                                                                                                           |
-| `-v, --verbose` | Verbose tool-call output: pretty-print args + reveal full results (~2 KB). Honoured only in human mode (without `--json`). Env: `APPSTRATE_VERBOSE=1`. |
-| `-q, --quiet`   | Suppress per-tool output lines (name, args, result). Errors and final summary still print. Mutually exclusive with `--verbose`.                        |
+| Flag                    | Purpose                                                                                                                                                                                                                                                      |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `--proxy <id>`          | Proxy id to associate with the run (overrides the per-app inherited value).                                                                                                                                                                                  |
+| `--[no-]cancel-on-exit` | Remote runs only: whether SIGINT/SIGTERM/SIGHUP cancels the platform-side run. Default: on when stdin is a TTY and `--json` is not set (interactive Ctrl-C cancels), off otherwise — the CLI detaches and the run keeps going, like closing a dashboard tab. |
+| `--no-inherit`          | Skip per-application run-config inheritance — flags + env vars + defaults only.                                                                                                                                                                              |
+| `--json`                | Emit canonical RunEvents as JSONL on stdout.                                                                                                                                                                                                                 |
+| `-v, --verbose`         | Verbose tool-call output: pretty-print args + reveal full results (~2 KB). Honoured only in human mode (without `--json`). Env: `APPSTRATE_VERBOSE=1`.                                                                                                       |
+| `-q, --quiet`           | Suppress per-tool output lines (name, args, result). Errors and final summary still print. Mutually exclusive with `--verbose`.                                                                                                                              |
 
 **Tool-call rendering**
 

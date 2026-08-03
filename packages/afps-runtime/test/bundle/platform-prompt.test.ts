@@ -36,6 +36,27 @@ describe("renderPlatformPrompt", () => {
     expect(out).toContain("The only way to communicate with the user is by calling a tool.");
   });
 
+  it("tells the agent to batch independent tool calls (#1029)", () => {
+    const out = renderPlatformPrompt({ template: "TEMPLATE", context: ctx() });
+    expect(out).toContain("**Batch independent tool calls.**");
+    expect(out).toContain("issue them together in the same turn");
+    expect(out).toContain("one turn per question, not one turn per file");
+  });
+
+  it("keeps the batching guidance tool-agnostic (#368 section contract)", () => {
+    // Same rule as the rest of the Communication section: the platform owns
+    // the invariant ("independent calls may share a turn"), each tool's MCP
+    // descriptor `description` owns its own usage prose.
+    const out = renderPlatformPrompt({ template: "T", context: ctx() });
+    const start = out.indexOf("**Batch independent tool calls.**");
+    expect(start).toBeGreaterThan(-1);
+    const end = out.indexOf("\n\n", start);
+    const paragraph = out.slice(start, end > -1 ? end : undefined);
+    for (const toolName of ["bash", "grep", "curl", "output", "log", "note", "pin", "python"]) {
+      expect(paragraph).not.toContain(toolName);
+    }
+  });
+
   it("renders the Communication section and no Tools section (tools come from tools/list)", () => {
     const out = renderPlatformPrompt({ template: "T", context: ctx() });
     expect(out.indexOf("### Communication")).toBeGreaterThan(-1);
@@ -73,6 +94,124 @@ describe("renderPlatformPrompt", () => {
   it("omits the timeout line when absent", () => {
     const out = renderPlatformPrompt({ template: "T", context: ctx() });
     expect(out).not.toContain("**Timeout**");
+  });
+
+  it("surfaces the workspace tmpfs cap and points bulky work at /tmp (#1019)", () => {
+    const out = renderPlatformPrompt({
+      template: "T",
+      context: ctx(),
+      workspaceTmpfsSizeMb: 512,
+    });
+    const diskLine = out.split("\n").find((line) => line.startsWith("- **Disk**"));
+    expect(diskLine).toBe(
+      "- **Disk**: the workspace is a RAM-backed tmpfs capped at 512 MB. " +
+        "Keep dependency installs, clones and other bulky scratch work under `/tmp`, " +
+        "outside this workspace cap. Write user deliverables under `./outputs/`.",
+    );
+  });
+
+  it("interpolates the operator's actual cap rather than a hardcoded default (#1019)", () => {
+    const out = renderPlatformPrompt({
+      template: "T",
+      context: ctx(),
+      workspaceTmpfsSizeMb: 2048,
+    });
+    expect(out).toContain("capped at 2048 MB");
+    expect(out).not.toContain("512 MB");
+  });
+
+  it("surfaces the Firecracker writable-root tmpfs budget without a false /tmp escape", () => {
+    const out = renderPlatformPrompt({
+      template: "T",
+      context: ctx(),
+      workspaceTmpfsSizePercent: 50,
+    });
+    const diskLine = out.split("\n").find((line) => line.startsWith("- **Disk**"));
+    expect(diskLine).toBe(
+      "- **Disk**: the writable root, including the workspace, is a RAM-backed tmpfs capped at 50% of guest RAM. " +
+        "All writes consume guest RAM shared with the agent, system, and sidecar. " +
+        "Keep installations, clones, and verification artifacts lean; " +
+        "write user deliverables under `./outputs/`.",
+    );
+    expect(diskLine).not.toContain("/tmp");
+  });
+
+  it("prefers the MB workspace cap when both tmpfs representations are supplied", () => {
+    const out = renderPlatformPrompt({
+      template: "T",
+      context: ctx(),
+      workspaceTmpfsSizeMb: 512,
+      workspaceTmpfsSizePercent: 50,
+    });
+    const diskLines = out.split("\n").filter((line) => line.startsWith("- **Disk**"));
+    expect(diskLines).toHaveLength(1);
+    expect(diskLines[0]).toContain("capped at 512 MB");
+    expect(diskLines[0]).not.toContain("guest RAM");
+  });
+
+  it("omits the disk line when the workspace is not tmpfs-backed (#1019)", () => {
+    // Absent option (unknown backing) and an explicit 0 (disk-backed volume)
+    // must both stay silent — a wrong cap is worse than no cap.
+    const withoutCap = renderPlatformPrompt({ template: "T", context: ctx() });
+    const withZeroCap = renderPlatformPrompt({
+      template: "T",
+      context: ctx(),
+      workspaceTmpfsSizeMb: 0,
+      workspaceTmpfsSizePercent: 0,
+    });
+    expect(withoutCap).not.toContain("**Disk**");
+    expect(withZeroCap).toBe(withoutCap);
+  });
+
+  it("renders hard container limits without claiming visible cores are reduced", () => {
+    const out = renderPlatformPrompt({
+      template: "T",
+      context: ctx(),
+      workspaceTmpfsSizeMb: 512,
+      agentResources: { memoryMb: 2048, cpu: 3, semantics: "limits" },
+    });
+    const computeLine = out.split("\n").find((line) => line.startsWith("- **Compute**"));
+    expect(computeLine).toBe(
+      "- **Compute**: hard container limits: 2048 MiB RAM and 3 vCPU quota. " +
+        "The RAM-backed workspace counts toward this container RAM limit. " +
+        "Exceeding the memory limit can kill a process (often exit 137); " +
+        "fit installations and verification work within this budget.",
+    );
+    expect(computeLine).not.toContain("visible cores");
+  });
+
+  it("does not attribute workspace RAM when no tmpfs cap is present", () => {
+    const out = renderPlatformPrompt({
+      template: "T",
+      context: ctx(),
+      agentResources: { memoryMb: 2048, cpu: 3, semantics: "limits" },
+    });
+    expect(out).toContain("hard container limits: 2048 MiB RAM and 3 vCPU quota");
+    expect(out).not.toContain("workspace counts toward this container RAM limit");
+  });
+
+  it("renders a distinct microVM agent sizing budget", () => {
+    const out = renderPlatformPrompt({
+      template: "T",
+      context: ctx(),
+      workspaceTmpfsSizePercent: 50,
+      agentResources: { memoryMb: 4096, cpu: 7, semantics: "sizing" },
+    });
+    const computeLine = out.split("\n").find((line) => line.startsWith("- **Compute**"));
+    expect(computeLine).toBe(
+      "- **Compute**: agent sizing budget: 4096 MiB RAM and 7 vCPU. " +
+        "The microVM adds or shares capacity for the system and sidecar, so the total visible " +
+        "capacity may be higher; keep agent work within this budget.",
+    );
+    expect(computeLine).not.toContain("hard");
+    expect(computeLine).not.toContain("workspace counts toward");
+  });
+
+  it("omits compute resources when backend semantics are absent", () => {
+    const out = renderPlatformPrompt({ template: "T", context: ctx() });
+    expect(out).not.toContain("**Compute**");
+    expect(out).not.toContain("sizing budget");
+    expect(out).not.toContain("hard container limits");
   });
 
   it("lists skills (tools come from MCP tools/list, never the prompt)", () => {
@@ -459,6 +598,10 @@ describe("renderPlatformPrompt", () => {
       expect(withIt).toContain("## Deliverables");
       expect(withIt).toContain("`./outputs/`");
       expect(withIt).toContain("published automatically as a downloadable");
+      expect(withIt).toContain("remain understandable outside this run");
+      expect(withIt).toContain("`./outputs/analyse-concurrents-restaurants-lyon.md`");
+      expect(withIt).toContain("Never use context-free names");
+      expect(withIt).not.toContain("`./outputs/report.md`");
 
       const without = renderPlatformPrompt({ template: "T", context: ctx() });
       expect(without).not.toContain("## Deliverables");

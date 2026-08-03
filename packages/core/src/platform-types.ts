@@ -240,6 +240,24 @@ export interface RunOrchestrator {
 }
 
 /**
+ * How an orchestrator applies the agent allocation carried by
+ * {@link WorkloadSpec.resources}. Absent capabilities mean the backend does
+ * not apply the allocation.
+ */
+export interface OrchestratorAgentResourceCapabilities {
+  /** Hard per-workload limits, or capacity used to size a wider boundary. */
+  readonly semantics: "limits" | "sizing";
+  /** Optional agent CPU ceiling imposed by the backend's own sizing model. */
+  readonly maxAgentCpu?: number;
+  /**
+   * Optional percentage of guest RAM used to cap a RAM-backed writable root
+   * that includes the agent workspace. Lets a backend surface its filesystem
+   * budget without core knowing the backend id or implementation.
+   */
+  readonly writableRootTmpfsPercent?: number;
+}
+
+/**
  * Registration entry for an execution backend, keyed by `RUN_ADAPTER` value
  * in the orchestrator registry. Core registers its own backends (docker,
  * process); modules contribute additional ones via
@@ -265,6 +283,8 @@ export interface OrchestratorRegistration {
    * instead.
    */
   readonly supportsSidecarOnly: boolean;
+  /** Resource semantics declared explicitly; absence fails closed. */
+  readonly agentResources?: OrchestratorAgentResourceCapabilities;
   /** Build a fresh orchestrator instance. Called once per process (singleton held by the registry consumer). */
   readonly create: () => RunOrchestrator;
 }
@@ -281,6 +301,18 @@ export interface InlineRunBody {
   config?: Record<string, unknown>;
   modelId?: string | null;
   proxyId?: string | null;
+  /**
+   * Per-integration connection picks for THIS run (flat map:
+   * `{ "@scope/integration": "<connection_id>" }`, resolver mechanism #2).
+   * Read by the preflight so a caller that disambiguates a
+   * `must_choose_connection` 412 by re-posting its pick gets past the readiness
+   * gate — the same recovery loop the cataloged run route supports.
+   *
+   * Optional but NOT nullable: both run routes reject an explicit `null` on the
+   * wire, so a published type promising `| null` would describe a body the
+   * server refuses. Omit the field to mean "no picks".
+   */
+  connection_overrides?: Record<string, string>;
 }
 
 // ---------------------------------------------------------------------------

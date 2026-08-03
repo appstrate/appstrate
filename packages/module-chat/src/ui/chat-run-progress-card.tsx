@@ -34,8 +34,10 @@ import { useLiveElapsedMs } from "./use-elapsed.ts";
 import { useChatHost } from "./runtime-context.ts";
 import {
   buildRunPageHref,
+  isPrimaryAutoPresentationEligible,
   isTerminalStatus,
   mergeRunDocuments,
+  primaryDocumentFromLogs,
   publishedDocumentsFromLogs,
   runStatusLineKey,
   visibleLogEntries,
@@ -120,17 +122,40 @@ export function ChatRunProgressCard({
   modalTitle: React.ReactNode;
   details: React.ReactNode;
 }) {
-  const { logs, status, packageId, startedAt, completedAt, duration } = useRunLogStream(
-    runId,
-    initialStatus,
-    initialPackageId,
-  );
+  const {
+    logs,
+    status,
+    packageId,
+    startedAt,
+    completedAt,
+    duration,
+    primaryDocumentId: authoritativePrimaryDocumentId,
+  } = useRunLogStream(runId, initialStatus, initialPackageId);
 
   // Documents: the persisted tool-result list (reload-safe) merged with any
   // that arrive live over the log stream (`document.published` frames).
   const documents = React.useMemo(
     () => mergeRunDocuments(initialDocuments ?? [], publishedDocumentsFromLogs(logs)),
     [initialDocuments, logs],
+  );
+  const loggedPrimaryDocument = React.useMemo(() => primaryDocumentFromLogs(logs), [logs]);
+  // `undefined` means the run resource has not answered yet, so the latest log
+  // is a useful fallback. `null` is authoritative and deliberately suppresses
+  // stale historical primary events (deleted/expired/detached output).
+  const primaryDocumentId =
+    authoritativePrimaryDocumentId === undefined
+      ? loggedPrimaryDocument?.id
+      : authoritativePrimaryDocumentId;
+  const primaryDocument = React.useMemo(
+    () =>
+      primaryDocumentId
+        ? (documents.find((doc) => doc.id === primaryDocumentId) ?? {
+            id: primaryDocumentId,
+            uri: `document://${primaryDocumentId}`,
+            name: "",
+          })
+        : undefined,
+    [documents, primaryDocumentId],
   );
   const effectiveStatus =
     status ?? (isTerminalStatus(initialStatus) ? (initialStatus as RunStatus) : undefined);
@@ -147,7 +172,27 @@ export function ChatRunProgressCard({
   // rather than flashing straight to the last one. `current` carries a stable
   // `id` so the line element remounts on change and re-runs its enter animation.
   const current = useLogTicker(visibleLogEntries(logs));
-  const { t } = useChatHost();
+  const { openDocument, t } = useChatHost();
+  // A card that mounted already complete belongs to history: never let N old
+  // runs fight over the panel. A card mounted for a live call may present every
+  // NEW primary id once through the exact same opener as a direct document click.
+  const [autoPresentationEligible] = React.useState(() =>
+    isPrimaryAutoPresentationEligible(phase, initialStatus),
+  );
+  const presentedPrimaryId = React.useRef<string | null>(null);
+  React.useEffect(() => {
+    if (
+      !autoPresentationEligible ||
+      !openDocument ||
+      !runId ||
+      !primaryDocument ||
+      presentedPrimaryId.current === primaryDocument.id
+    ) {
+      return;
+    }
+    presentedPrimaryId.current = primaryDocument.id;
+    openDocument({ id: primaryDocument.id, name: primaryDocument.name });
+  }, [autoPresentationEligible, openDocument, primaryDocument, runId]);
   // Before any log line: "starting" while the run is still coming up (no status
   // yet, or pending), then "running" once it is — up until the first log
   // replaces it.

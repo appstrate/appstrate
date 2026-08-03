@@ -26,7 +26,7 @@ import {
   orgInvitations,
   packageVersions,
 } from "@appstrate/db/schema";
-import type { InferInsertModel, InferSelectModel } from "drizzle-orm";
+import { eq, type InferInsertModel, type InferSelectModel } from "drizzle-orm";
 
 // ─── Packages / Agents ───────────────────────────────────
 
@@ -382,6 +382,29 @@ export async function seedOrgModelProviderOAuth(
     })
     .returning();
   return row!;
+}
+
+/**
+ * Make a seeded model-provider credential undecryptable the way production
+ * would: a key rotation retires a kid rows still reference, or the stored bytes
+ * are damaged. The envelope stays syntactically valid (`v1:<kid>:<base64>`,
+ * real kid) and only the ciphertext is flipped, so it fails GCM authentication
+ * exactly as a wrong key does — the read paths swallow that into `null` and
+ * must never throw.
+ */
+export async function corruptCredentialBlob(credentialId: string): Promise<void> {
+  const [row] = await db
+    .select({ credentialsEncrypted: modelProviderCredentials.credentialsEncrypted })
+    .from(modelProviderCredentials)
+    .where(eq(modelProviderCredentials.id, credentialId))
+    .limit(1);
+  const [version, kid, payload] = row!.credentialsEncrypted.split(":");
+  const packed = Buffer.from(payload!, "base64");
+  packed[packed.length - 1] = packed[packed.length - 1]! ^ 0xff;
+  await db
+    .update(modelProviderCredentials)
+    .set({ credentialsEncrypted: `${version}:${kid}:${packed.toString("base64")}` })
+    .where(eq(modelProviderCredentials.id, credentialId));
 }
 
 // ─── Org Models ───────────────────────────────────────────

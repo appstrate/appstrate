@@ -40,9 +40,6 @@ export const CHAT_TURN_SAFETY_MARGIN_MS = 45_000;
  */
 export const CHAT_MIN_RUN_BUDGET_MS = 90_000;
 
-/** Above the floor but tight enough that the launch deserves a `warn` trace. */
-export const CHAT_THIN_RUN_BUDGET_MS = 3 * 60_000;
-
 /**
  * Remaining turn time a launch actually requires — THE number every
  * model-facing message must quote.
@@ -64,8 +61,6 @@ export interface TurnRunBudget {
   maxMs: number;
   /** Whether a run may be launched at all (`maxMs >= CHAT_MIN_RUN_BUDGET_MS`). */
   launchable: boolean;
-  /** Launchable, but under {@link CHAT_THIN_RUN_BUDGET_MS} — worth a warn. */
-  thin: boolean;
 }
 
 /**
@@ -78,7 +73,7 @@ export function computeTurnRunBudget(turnDeadlineAt: number, now: number): TurnR
   const remainingMs = Math.max(0, turnDeadlineAt - now);
   const maxMs = Math.max(0, remainingMs - CHAT_TURN_SAFETY_MARGIN_MS);
   const launchable = maxMs >= CHAT_MIN_RUN_BUDGET_MS;
-  return { remainingMs, maxMs, launchable, thin: launchable && maxMs < CHAT_THIN_RUN_BUDGET_MS };
+  return { remainingMs, maxMs, launchable };
 }
 
 /** Compact human duration for model-facing budget text ("4m12s", "45s"). */
@@ -106,16 +101,11 @@ export function formatBudgetDuration(ms: number): string {
  * then refuse it. A model arbitrating on the wrong number is worse than one
  * shown no number at all — that is the whole point of A5.
  */
-export function formatTurnBudgetNote(input: {
-  remainingMs: number;
-  stepsUsed: number;
-  maxSteps?: number;
-}): string {
-  const maxSteps = input.maxSteps ?? CHAT_MAX_STEPS;
+export function formatTurnBudgetNote(input: { remainingMs: number; stepsUsed: number }): string {
   const launchThreshold = formatBudgetDuration(CHAT_LAUNCH_THRESHOLD_MS);
   return (
     `[turn budget] ${formatBudgetDuration(input.remainingMs)} left in this turn, ` +
-    `step ${input.stepsUsed}/${maxSteps}. ` +
+    `step ${input.stepsUsed}/${CHAT_MAX_STEPS}. ` +
     `A run_and_wait launch needs at least ${launchThreshold} left or it is refused; ` +
     `anything not written into your reply before the turn ends is lost.`
   );
@@ -164,8 +154,8 @@ export function mergeTurnMetadata(
   };
 }
 
-export function isFinalChatStep(stepNumber: number, maxSteps = CHAT_MAX_STEPS): boolean {
-  return stepNumber >= maxSteps - 1;
+export function isFinalChatStep(stepNumber: number): boolean {
+  return stepNumber >= CHAT_MAX_STEPS - 1;
 }
 
 export function turnMetadataFromMessage(message: unknown): AppstrateTurnMetadata | null {

@@ -16,6 +16,23 @@
  *   2. POST-SETTLEMENT IMMUTABILITY — a snapshot arriving after the run went
  *      terminal (a durable-retry replay, a losing concurrent finalize) is
  *      REFUSED, not silently applied to a row someone already billed;
+ *   2b. AND THE REFUSAL IS REPORTED WITH A SIGNAL-TO-NOISE RATIO OF 1 — a
+ *      refusal that loses something emits exactly one `logger.error`; a refusal
+ *      that loses NOTHING is silent. The distinction is the whole point:
+ *      `run-launcher/execute-background.ts` synthesises a finalize on EVERY
+ *      clean container exit, so every successful run replays its own last
+ *      snapshot at `costUsd: 0` after settling. A status-only test drowned the
+ *      real losses under one error per run (issue #997). Both halves are
+ *      asserted below — the noise floor as well as the alarm.
+ *      The report carries BOTH dimensions (stored / incoming / refused delta,
+ *      in USD *and* in total tokens) because a refusal can lose either one
+ *      alone: the advance rule is two-level, so a zero-cost model — free tier,
+ *      no catalog rate, cache-only turn — loses tokens while its cost delta
+ *      stays flat at 0. A one-dimensional payload would render exactly that
+ *      loss class indistinguishable from the #997 noise. And the reporting is
+ *      subordinate to the write: it may never cost a caller its transaction,
+ *      which is why the assessment's own failure is swallowed for exactly one
+ *      caller (the executor-less finalize barrier) and rethrown for every other;
  *   3. NO DURABLE QUEUE FOR RUNNER ROWS — a failed runner write propagates
  *      instead of being deferred, because a deferred replay could only land
  *      after settlement, where (2) refuses it.
@@ -25,7 +42,7 @@
  * cursor read, not merely documented for consumers.
  */
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach, spyOn } from "bun:test";
 import { eq, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { llmUsage, runs } from "@appstrate/db/schema";
@@ -34,15 +51,20 @@ import type { Db } from "@appstrate/db/client";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage } from "../../helpers/seed.ts";
-import { recordLlmUsage } from "../../../src/services/llm-usage-ledger.ts";
+import { logger } from "../../../src/lib/logger.ts";
+import { recordLlmUsage, type LlmUsageEntry } from "../../../src/services/llm-usage-ledger.ts";
 import {
   recordLlmUsageReliably,
   initLlmUsageRetryWorker,
   _resetLlmUsageRetryWorkerForTests,
 } from "../../../src/services/llm-usage-retry.ts";
-import { getRunSinkContext, finalizeRun } from "../../../src/services/run-event-ingestion.ts";
 import {
-  computeRunCost,
+  getRunSinkContext,
+  finalizeRun,
+  synthesiseFinalize,
+} from "../../../src/services/run-event-ingestion.ts";
+import {
+  computeRunSpend,
   listLlmUsage,
   getSettledFrontierId,
 } from "../../../src/services/state/runs.ts";
@@ -104,22 +126,96 @@ async function runnerRow(runId: string) {
   return row;
 }
 
-/** Terminal closure exactly as the platform synthesises it: no cost, no usage. */
+/**
+ * Terminal closure exactly as the platform synthesises it (stall watchdog, boot
+ * orphan sweep, container crash): a `RunResult` that carries no `cost`.
+ *
+ * Delegates to the REAL entry point rather than re-deriving one, so these tests
+ * break if the synthesis path stops going through finalize's terminal barrier.
+ * They do NOT pin its reconstruction of the usage from `runs.tokenUsage`:
+ * `finalizeRun` performs the identical reconstruction for every non-success
+ * terminal, so on this `failed` shape the two paths are indistinguishable.
+ */
 async function synthesisedFinalize(runId: string): Promise<void> {
-  const run = await getRunSinkContext(runId);
-  const result = emptyRunResult();
-  result.status = "failed";
-  result.error = { message: "Server restarted while run was in progress." };
-  await finalizeRun({ run: run!, result });
+  await synthesiseFinalize(runId, {
+    status: "failed",
+    error: { message: "Server restarted while run was in progress." },
+  });
+}
+
+/**
+ * The refusal alarm's exact message. Pinned as a constant because operators
+ * alert on the literal string — a reworded log is a broken alert, not a
+ * cosmetic change.
+ */
+const REFUSAL_MESSAGE = "llm_usage: refused a runner snapshot on an already-settled run";
+
+/**
+ * A settled run holding a $2 / 150-token cumulative snapshot, plus the late
+ * snapshot that would genuinely advance it ($9 / 600 tokens) — i.e. one the
+ * diagnostic is guaranteed to reach. Shared by the two diagnostic-failure tests,
+ * which are identical up to who supplies the executor.
+ */
+async function settledRunWithLateSnapshot(
+  ctx: TestContext,
+): Promise<{ runId: string; late: LlmUsageEntry }> {
+  const runId = await seedSinkRun(ctx, { tokenUsage: null });
+  const stored: LlmUsageEntry = {
+    source: "runner",
+    orgId: ctx.orgId,
+    runId,
+    credentialSource: "system",
+    inputTokens: 100,
+    outputTokens: 50,
+    costUsd: 2,
+    pricingStatus: "priced" as const,
+  };
+  await recordLlmUsage(stored, { onConflict: "runner-monotonic" });
+  await synthesisedFinalize(runId);
+  return { runId, late: { ...stored, inputTokens: 400, outputTokens: 200, costUsd: 9 } };
+}
+
+/**
+ * The one-sided report both diagnostic-failure paths emit before they diverge.
+ * One-sided by necessity: the DB read is what failed, so only the entry's own
+ * values survive — no stored total, hence neither delta. Derived from the
+ * refused entry rather than hardcoded, so retuning the fixture above cannot
+ * fail these tests with a diff pointing at the wrong place; the token total is
+ * summed here in TS, the single place that formula lives away from SQL.
+ */
+function expectUnassessedRefusal(call: unknown[] | undefined, late: LlmUsageEntry): void {
+  expect(call?.[0]).toBe("llm_usage: could not assess a refused runner snapshot");
+  expect(call?.[1]).toEqual({
+    runId: late.runId,
+    orgId: late.orgId,
+    incomingCostUsd: late.costUsd,
+    incomingTotalTokens:
+      late.inputTokens +
+      late.outputTokens +
+      (late.cacheReadTokens ?? 0) +
+      (late.cacheWriteTokens ?? 0),
+    error: "connection terminated unexpectedly",
+  });
 }
 
 describe("llm_usage settlement — terminal barrier and post-settlement immutability", () => {
   let ctx: TestContext;
+  // The refusal diagnostic is observable ONLY through the logger, and its value
+  // is as much in what it does NOT say as in what it does — so it is spied on
+  // for every test here, and installed LAST so the fixture's own writes never
+  // count towards an assertion.
+  let errorSpy: ReturnType<typeof spyOn<typeof logger, "error">>;
 
   beforeEach(async () => {
     await truncateAll();
     ctx = await createTestContext({ orgSlug: "settleorg" });
     await seedPackage({ id: AGENT, orgId: ctx.orgId, type: "agent" });
+    errorSpy = spyOn(logger, "error").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    // Restored per test so sibling files sharing this process keep a real logger.
+    errorSpy.mockRestore();
   });
 
   it("a runner snapshot arriving after the run settled is refused, leaving the billed total intact", async () => {
@@ -137,6 +233,7 @@ describe("llm_usage settlement — terminal barrier and post-settlement immutabi
         inputTokens: 100,
         outputTokens: 50,
         costUsd: 5,
+        pricingStatus: "priced" as const,
       },
       { onConflict: "runner-monotonic" },
     );
@@ -171,6 +268,7 @@ describe("llm_usage settlement — terminal barrier and post-settlement immutabi
         inputTokens: 400,
         outputTokens: 200,
         costUsd: 9,
+        pricingStatus: "priced" as const,
       },
       { onConflict: "runner-monotonic" },
     );
@@ -179,7 +277,231 @@ describe("llm_usage settlement — terminal barrier and post-settlement immutabi
     const row = await runnerRow(runId);
     expect(row!.costUsd).toBe(5);
     expect(row!.inputTokens).toBe(100);
-    expect(await computeRunCost(runId, ctx.orgId)).toBe(5);
+    expect((await computeRunSpend(runId, ctx.orgId)).costUsd).toBe(5);
+
+    // …and it is LOUD. This is money the platform consumed and will never
+    // invoice, so the only way an operator learns about it is this line. It
+    // fires exactly once (nothing before it in this test refused anything real)
+    // and carries the whole picture on BOTH dimensions: the two cumulative
+    // totals plus the refused delta, in USD ($4) and in tokens (600 − 150).
+    // Those two deltas are the figures a human acts on. Asserting the
+    // arithmetic, not just the presence of the fields, is what stops a future
+    // refactor from reporting an incoming total as the loss.
+    expect(errorSpy).toHaveBeenCalledTimes(1);
+    const [message, fields] = errorSpy.mock.calls[0]!;
+    expect(message).toBe(REFUSAL_MESSAGE);
+    expect(fields).toEqual({
+      runId,
+      orgId: ctx.orgId,
+      runStatus: "failed",
+      storedCostUsd: 5,
+      incomingCostUsd: 9,
+      refusedDeltaUsd: 4,
+      storedTotalTokens: 150,
+      incomingTotalTokens: 600,
+      refusedDeltaTokens: 450,
+    });
+  });
+
+  it("the platform's defensive second finalize of a settled run is refused SILENTLY (issue #997)", async () => {
+    // The whole production shape, end to end, on the real code path. A container
+    // exits 0 after POSTing its own finalize; `execute-background.ts` synthesises
+    // a success finalize anyway (it cannot know the container already did), and
+    // `synthesiseFinalize` carries no cost — so finalize's terminal barrier
+    // re-submits the run's OWN last snapshot at `costUsd: 0` onto a row that is
+    // already settled. The upsert refuses it, correctly: nothing is lost, the
+    // stored total already dominates. Reporting that as a billing loss produced
+    // ~25 bogus error lines per container lifetime in production (issue #997),
+    // every one of them with a refused amount of 0.
+    const runId = await seedSinkRun(ctx, { tokenUsage: { input_tokens: 100, output_tokens: 50 } });
+
+    // 1. The container's own finalize: cost + usage, barrier writes, CAS settles.
+    const run = await getRunSinkContext(runId);
+    const result = emptyRunResult();
+    result.status = "success";
+    result.cost = 5;
+    result.usage = { input_tokens: 100, output_tokens: 50 };
+    await finalizeRun({ run: run!, result });
+
+    const settled = await listLlmUsage({});
+    expect(settled).toHaveLength(1);
+    expect(settled[0]!.settled).toBe(true);
+    expect(settled[0]!.costUsd).toBe(5);
+
+    // 2. The defensive synthesis that follows every clean container exit.
+    await synthesiseFinalize(runId, { status: "success" });
+
+    // The row is untouched (post-settlement immutability holds) …
+    const row = await runnerRow(runId);
+    expect(row!.costUsd).toBe(5);
+    expect(row!.inputTokens).toBe(100);
+    expect(row!.outputTokens).toBe(50);
+    // … and the run keeps the terminal status its first finalize won.
+    const [runRow] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+    expect(runRow!.status).toBe("success");
+
+    // The assertion this test exists for: not one error line for the entire
+    // lifecycle. A benign trailing replay is not an incident.
+    expect(errorSpy).toHaveBeenCalledTimes(0);
+  });
+
+  it("an exact duplicate replay on a settled run is refused silently", async () => {
+    // Idempotence, seen from the diagnostic's side: the durable-retry replay of
+    // a snapshot that already landed loses nothing, so it must not page anyone.
+    // Both levels of the advance rule use STRICT inequalities precisely so this
+    // case is a no-op rather than a re-emitted row.
+    const runId = await seedSinkRun(ctx, { tokenUsage: null });
+    const entry = {
+      source: "runner" as const,
+      orgId: ctx.orgId,
+      runId,
+      credentialSource: "system" as const,
+      inputTokens: 100,
+      outputTokens: 50,
+      costUsd: 3,
+      pricingStatus: "priced" as const,
+    };
+    await recordLlmUsage(entry, { onConflict: "runner-monotonic" });
+    await synthesisedFinalize(runId);
+
+    expect(await recordLlmUsage(entry, { onConflict: "runner-monotonic" })).toBeNull();
+
+    expect((await runnerRow(runId))!.costUsd).toBe(3);
+    expect(errorSpy).toHaveBeenCalledTimes(0);
+  });
+
+  it("a late EQUAL-cost snapshot with more cached tokens is still reported — the zero-cost-model loss", async () => {
+    // A model with no catalog rate (or a cache-only turn) holds `cost_usd` at a
+    // constant while the token columns keep climbing. The refused COST delta is
+    // $0, yet the loss is real: those tokens will never reach the ledger. A
+    // cost-only advance test would have called this benign and stayed quiet, so
+    // the diagnostic reuses the upsert's OWN two-level predicate — and this test
+    // is what proves the COALESCE'd cache arms are actually wired into it, by
+    // moving nothing but `cacheWriteTokens`.
+    //
+    // This is also the test that pins `refusedDeltaTokens` as the sound alert
+    // predicate. On this loss class every cost field reads 0, exactly like the
+    // benign #997 replay; the token delta is the ONLY figure that separates
+    // them. An operator (or a downstream alert) keying on `refusedDeltaUsd > 0`
+    // would silently drop precisely the losses level 2 exists to catch.
+    const runId = await seedSinkRun(ctx, { tokenUsage: null });
+    await recordLlmUsage(
+      {
+        source: "runner",
+        orgId: ctx.orgId,
+        runId,
+        credentialSource: "system",
+        inputTokens: 100,
+        outputTokens: 50,
+        cacheWriteTokens: 10,
+        costUsd: 2,
+        pricingStatus: "priced" as const,
+      },
+      { onConflict: "runner-monotonic" },
+    );
+    await synthesisedFinalize(runId);
+
+    const late = await recordLlmUsage(
+      {
+        source: "runner",
+        orgId: ctx.orgId,
+        runId,
+        credentialSource: "system",
+        inputTokens: 100,
+        outputTokens: 50,
+        cacheWriteTokens: 30,
+        costUsd: 2,
+        pricingStatus: "priced" as const,
+      },
+      { onConflict: "runner-monotonic" },
+    );
+    expect(late).toBeNull();
+    expect((await runnerRow(runId))!.cacheWriteTokens).toBe(10);
+
+    expect(errorSpy).toHaveBeenCalledTimes(1);
+    const [message, fields] = errorSpy.mock.calls[0]!;
+    expect(message).toBe(REFUSAL_MESSAGE);
+    // Cost side: three zeroes' worth of signal. Token side: 160 → 180, a
+    // refused delta of 20 — the whole reason the payload carries both.
+    expect(fields).toEqual({
+      runId,
+      orgId: ctx.orgId,
+      runStatus: "failed",
+      storedCostUsd: 2,
+      incomingCostUsd: 2,
+      refusedDeltaUsd: 0,
+      storedTotalTokens: 160,
+      incomingTotalTokens: 180,
+      refusedDeltaTokens: 20,
+    });
+  });
+
+  // The next two tests are a PAIR. Both fault the diagnostic's SELECT on a
+  // settled run and both must produce the identical one-sided report; they
+  // differ only in who supplied the executor, which is what decides whether the
+  // error is then rethrown. Splitting hairs over one boolean is the point: it is
+  // the whole difference between "a finished run never settles" and "a 2xx
+  // response silently rolled back the caller's transaction".
+  it("a diagnostic failure inside a caller's transaction is reported AND rethrown", async () => {
+    // A caller-supplied executor means an OPEN transaction — the
+    // `appstrate.metric` ingestion path. Swallowing there is worse than a missing
+    // log line: the callback resolves, drizzle sends COMMIT, Postgres (measured
+    // on PGlite, which is what these tests run on) turns it into ROLLBACK, and
+    // the sink answers 2xx having lost the run_log row, the ledger write AND the
+    // sequence advance — with nobody informed. Rethrowing restores that path's
+    // documented recovery: the ingestion transaction aborts, the sequence does
+    // not advance, the runner re-POSTs, and its next cumulative snapshot
+    // supersedes.
+    //
+    // Faulted through the service's own DI seam (`opts.executor`): a real INSERT
+    // with a throwing SELECT isolates the diagnostic query as the single point
+    // of failure. No `mock.module()` (AGENTS.md).
+    const { runId, late } = await settledRunWithLateSnapshot(ctx);
+    const diagnosticBlindExecutor = {
+      insert: db.insert.bind(db),
+      select() {
+        throw new Error("connection terminated unexpectedly");
+      },
+    } as unknown as Db;
+
+    await expect(
+      recordLlmUsage(late, { onConflict: "runner-monotonic", executor: diagnosticBlindExecutor }),
+    ).rejects.toThrow("connection terminated unexpectedly");
+
+    // The settled row is untouched either way — the refusal happened, only its
+    // explanation failed.
+    expect((await runnerRow(runId))!.costUsd).toBe(2);
+    expect(errorSpy).toHaveBeenCalledTimes(1);
+    expectUnassessedRefusal(errorSpy.mock.calls[0], late);
+  });
+
+  it("the same failure on the finalize barrier's executor-less path is reported and SWALLOWED", async () => {
+    // No executor means no transaction: the terminal barrier calls the ledger
+    // with `required: true` outside one, so a throw would fail `finalizeRun`
+    // before its CAS and leave a finished run permanently unsettled — strictly
+    // worse than the log line it replaces. This is the one caller the swallow
+    // exists for, and the branch that carries the risk if the condition is ever
+    // simplified away.
+    //
+    // `executor === db` here by construction (`opts.executor ?? db`), so the
+    // fault has to be injected on `db` itself. Spying the method is narrower
+    // than the alternatives and is restored immediately — see the note in the
+    // comment below.
+    const { runId, late } = await settledRunWithLateSnapshot(ctx);
+    const selectSpy = spyOn(db, "select").mockImplementation(() => {
+      throw new Error("connection terminated unexpectedly");
+    });
+    // Restored on BOTH outcomes: a leaked `db.select` would break every sibling
+    // test in this process, including the `runnerRow` read two lines down.
+    const refused = await recordLlmUsage(late, { onConflict: "runner-monotonic" }).finally(() =>
+      selectSpy.mockRestore(),
+    );
+
+    // Resolves normally, reporting the no-op outcome the barrier expects.
+    expect(refused).toBeNull();
+    expect((await runnerRow(runId))!.costUsd).toBe(2);
+    expect(errorSpy).toHaveBeenCalledTimes(1);
+    expectUnassessedRefusal(errorSpy.mock.calls[0], late);
   });
 
   it("the same snapshot IS applied while the run is still open", async () => {
@@ -194,6 +516,7 @@ describe("llm_usage settlement — terminal barrier and post-settlement immutabi
         inputTokens: 100,
         outputTokens: 50,
         costUsd: 5,
+        pricingStatus: "priced" as const,
       },
       { onConflict: "runner-monotonic" },
     );
@@ -206,6 +529,7 @@ describe("llm_usage settlement — terminal barrier and post-settlement immutabi
         inputTokens: 400,
         outputTokens: 200,
         costUsd: 9,
+        pricingStatus: "priced" as const,
       },
       { onConflict: "runner-monotonic" },
     );
@@ -237,6 +561,46 @@ describe("llm_usage settlement — terminal barrier and post-settlement immutabi
     expect(rows[0]!.settled).toBe(true);
   });
 
+  it("the cursor projection carries each row's pricing provenance", async () => {
+    // A metering consumer sweeping the ledger must be able to tell "$0 because
+    // the call was free" from "$0 because nothing could price it" — otherwise
+    // it settles an unpriceable call as zero spend. The projection is the only
+    // place it can learn that (it never sees the table).
+    const runId = await seedSinkRun(ctx, { runOrigin: "remote", modelSource: null });
+    await db.insert(llmUsage).values([
+      {
+        source: "proxy",
+        orgId: ctx.orgId,
+        runId,
+        credentialSource: "system",
+        costUsd: 0,
+        pricingStatus: "unpriced" as const,
+        requestId: "req_provenance_1",
+      },
+      {
+        source: "proxy",
+        orgId: ctx.orgId,
+        runId,
+        credentialSource: "system",
+        costUsd: 0.5,
+        pricingStatus: "priced" as const,
+        requestId: "req_provenance_2",
+      },
+      // No verdict at all — a row written before the column existed.
+      {
+        source: "proxy",
+        orgId: ctx.orgId,
+        runId,
+        credentialSource: "system",
+        costUsd: 0.25,
+        requestId: "req_provenance_3",
+      },
+    ]);
+
+    const rows = await listLlmUsage({});
+    expect(rows.map((r) => r.pricingStatus)).toEqual(["unpriced", "priced", null]);
+  });
+
   it("a run that consumed nothing mints no ledger row", async () => {
     const runId = await seedSinkRun(ctx, { tokenUsage: null });
     await synthesisedFinalize(runId);
@@ -266,6 +630,7 @@ describe("llm_usage settlement — terminal barrier and post-settlement immutabi
         inputTokens: 100,
         outputTokens: 50,
         costUsd: 3,
+        pricingStatus: "priced" as const,
       },
       { onConflict: "runner-monotonic" },
     );
@@ -352,6 +717,7 @@ describe("llm_usage durable retry — runner rows are never deferred", () => {
           inputTokens: 10,
           outputTokens: 5,
           costUsd: 0.5,
+          pricingStatus: "priced" as const,
         },
         { executor: failingExecutor, onConflict: "runner-monotonic" },
       ),
@@ -380,6 +746,7 @@ describe("llm_usage durable retry — runner rows are never deferred", () => {
         inputTokens: 10,
         outputTokens: 5,
         costUsd: 0.5,
+        pricingStatus: "priced" as const,
         requestId,
       },
       { executor: failingExecutor, onConflict: "proxy-idempotent" },
@@ -428,7 +795,7 @@ describe("llm_usage cursor read — the runner mirror of a proxy-metered run is 
     await seedPackage({ id: AGENT, orgId: ctx.orgId, type: "agent" });
   });
 
-  it("excludes the mirror from list + frontier, matching computeRunCost exactly", async () => {
+  it("excludes the mirror from list + frontier, matching computeRunSpend exactly", async () => {
     // A remote run metered per call by the llm-proxy: N proxy rows PLUS the
     // runner's cumulative mirror (credential_source NULL, because a remote run
     // resolves no platform model). Both describe the same spend.
@@ -440,6 +807,7 @@ describe("llm_usage cursor read — the runner mirror of a proxy-metered run is 
         runId,
         credentialSource: "system",
         costUsd: 0.4,
+        pricingStatus: "priced" as const,
         requestId: "req_mirror_1",
       },
       {
@@ -448,6 +816,7 @@ describe("llm_usage cursor read — the runner mirror of a proxy-metered run is 
         runId,
         credentialSource: "system",
         costUsd: 0.6,
+        pricingStatus: "priced" as const,
         requestId: "req_mirror_2",
       },
       { source: "runner", orgId: ctx.orgId, runId, credentialSource: null, costUsd: 1.0 },
@@ -458,7 +827,7 @@ describe("llm_usage cursor read — the runner mirror of a proxy-metered run is 
     const swept = rows.reduce((sum, r) => sum + r.costUsd, 0);
     // A consumer that applies no filter of its own now sums exactly what the
     // canonical run-cost read reports — no double count.
-    expect(swept).toBeCloseTo(await computeRunCost(runId, ctx.orgId), 10);
+    expect(swept).toBeCloseTo((await computeRunSpend(runId, ctx.orgId)).costUsd, 10);
     expect(swept).toBeCloseTo(1.0, 10);
 
     // The frontier is computed over the same visible set: the in-flight run's
@@ -476,6 +845,6 @@ describe("llm_usage cursor read — the runner mirror of a proxy-metered run is 
     const rows = await listLlmUsage({});
     expect(rows).toHaveLength(1);
     expect(rows[0]!.source).toBe("runner");
-    expect(await computeRunCost(runId, ctx.orgId)).toBe(2.5);
+    expect((await computeRunSpend(runId, ctx.orgId)).costUsd).toBe(2.5);
   });
 });

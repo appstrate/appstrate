@@ -42,14 +42,6 @@ describe("computeTurnRunBudget", () => {
     expect(budget.remainingMs).toBe(CHAT_TURN_DEADLINE_MS);
     expect(budget.maxMs).toBe(CHAT_TURN_DEADLINE_MS - CHAT_TURN_SAFETY_MARGIN_MS);
     expect(budget.launchable).toBe(true);
-    expect(budget.thin).toBe(false);
-  });
-
-  it("flags a thin — but still launchable — budget", () => {
-    const budget = computeTurnRunBudget(NOW + 2 * 60_000 + CHAT_TURN_SAFETY_MARGIN_MS, NOW);
-    expect(budget.maxMs).toBe(2 * 60_000);
-    expect(budget.launchable).toBe(true);
-    expect(budget.thin).toBe(true);
   });
 
   it("refuses below the launch floor", () => {
@@ -68,7 +60,7 @@ describe("computeTurnRunBudget", () => {
 
   it("clamps a deadline already in the past (never negative)", () => {
     const budget = computeTurnRunBudget(NOW - 60_000, NOW);
-    expect(budget).toEqual({ remainingMs: 0, maxMs: 0, launchable: false, thin: false });
+    expect(budget).toEqual({ remainingMs: 0, maxMs: 0, launchable: false });
   });
 });
 
@@ -86,7 +78,9 @@ describe("decideRunAndWaitBudget", () => {
     expect(warnings).toEqual([]);
   });
 
-  it("warns when a run launches on a thin budget (the low remaining_ms trace)", () => {
+  it("grants a tight — but still launchable — budget just as silently", () => {
+    // Past the floor there is one outcome and no middle tier: only a REFUSAL
+    // warns. Two minutes of run budget used to trip a "thin budget" warn.
     const { log, warnings } = captureLogger();
     const decision = decideRunAndWaitBudget(
       {
@@ -98,13 +92,7 @@ describe("decideRunAndWaitBudget", () => {
       log,
     );
     expect(decision).toEqual({ launch: true, maxMs: 2 * 60_000 });
-    expect(warnings).toHaveLength(1);
-    expect(warnings[0]?.message).toContain("thin turn budget");
-    expect(warnings[0]?.fields).toMatchObject({
-      engine: "subscription",
-      chatSessionId: "chs_1",
-      runBudgetMs: 2 * 60_000,
-    });
+    expect(warnings).toEqual([]);
   });
 
   it("refuses below the floor with an actionable, non-error payload", () => {
@@ -246,7 +234,7 @@ describe("turn budget shown to the model (A5)", () => {
     expect(formatTurnBudgetNote({ remainingMs: 22_000, stepsUsed: 12 })).toContain("22s left");
   });
 
-  it("rides the Pi engine's tool results, leaving the UI channel untouched", () => {
+  it("appends to the model channel of a Pi tool result, leaving `details` as-is", () => {
     const result = withTurnBudgetNote(
       { content: [{ type: "text", text: '{"id":"run_1"}' }], details: { id: "run_1" } },
       { deadlineAt: NOW + 90_000, stepCount: () => 5, now: () => NOW },
@@ -257,7 +245,9 @@ describe("turn budget shown to the model (A5)", () => {
     expect(result.content[0]).toEqual({ type: "text", text: '{"id":"run_1"}' });
     expect(result.content[1]?.text).toContain("1m30s left");
     expect(result.content[1]?.text).toContain("step 5/16");
-    // `details` is the UI channel — it must not gain agent-facing chatter.
+    // `details` keeps the pre-note payload. That protects no UI: the UI parses
+    // `content` — the very channel the note is appended to — and nothing
+    // currently reads `details`.
     expect(result.details).toEqual({ id: "run_1" });
   });
 });

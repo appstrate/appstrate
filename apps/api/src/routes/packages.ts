@@ -68,6 +68,7 @@ import {
   collectConnectLoginWarnings,
   collectMetaWarnings,
 } from "../services/integration-install-warnings.ts";
+import { collectAgentInstallWarnings } from "../services/agent-install-warnings.ts";
 import {
   ApiError,
   invalidRequest,
@@ -95,12 +96,22 @@ function manifestErrorsToFieldErrors(errors: string[]): ValidationFieldError[] {
  * non-agent types, integrations with no configuration entry, and
  * integrations not visible to the org (the latter handled by run-time dep
  * validation).
+ *
+ * `requireCallableTools` adds the declared-but-empty gate on top. It belongs
+ * to the paths that FREEZE an artifact (publish, import), never to a draft
+ * write: the editor's own add-integration → tick-a-tool flow autosaves
+ * through the empty state.
  */
 async function assertAgentIntegrationScopesValid(
   manifest: Record<string, unknown>,
   orgId: string,
+  requireCallableTools = false,
 ): Promise<void> {
-  const scopeErrors = await validateAgentIntegrationSelections({ manifest, orgId });
+  const scopeErrors = await validateAgentIntegrationSelections({
+    manifest,
+    orgId,
+    requireCallableTools,
+  });
   if (scopeErrors.length > 0) {
     throw validationFailed(scopeErrors);
   }
@@ -126,12 +137,18 @@ async function assertAgentIntegrationScopesValid(
  *   artifacts are tolerated on read (#983), and gating here would make a
  *   legacy drifted draft permanently un-publishable. Retired ids drop so such
  *   a draft stays editable and publishable.
+ *
+ * `direction` is orthogonal to `opts.requireCallableTools`: it says where the
+ * bytes came from, not whether they are being frozen. Publishing a draft is
+ * `"stored"` yet must run the declared-but-empty gate; a PUT carrying a
+ * manifest is `"author"` yet must not.
  */
 async function validateManifestForRoute(
   manifest: unknown,
   expectedType: PackageType,
   orgId: string,
   direction: "author" | "stored",
+  opts: { requireCallableTools?: boolean } = {},
 ): Promise<Record<string, unknown> & { name: string }> {
   const result = validateManifest(
     manifest,
@@ -157,7 +174,7 @@ async function validateManifestForRoute(
     ]);
   }
 
-  await assertAgentIntegrationScopesValid(validated, orgId);
+  await assertAgentIntegrationScopesValid(validated, orgId, opts.requireCallableTools);
   return validated;
 }
 
@@ -344,7 +361,19 @@ async function parsePackageUpload(
 }
 
 /** Create a version snapshot from files + manifest (non-fatal on error).
- *  All package types are zipped as-is. */
+ *  All package types are zipped as-is.
+ *
+ *  SNAPSHOT ONLY WHAT WOULD SURVIVE A PUBLISH. Both create routes call this
+ *  right after `createOrgItem`, and a version is immutable — so without the
+ *  `requireCallableTools` gate here, `POST /api/packages/agents` froze exactly
+ *  the artifact the publish route refuses. The create routes themselves must
+ *  stay ungated (they validate `direction: "author"`, and the editor's flow
+ *  legitimately passes through the empty state), which is why the gate belongs
+ *  on the snapshot rather than on the request.
+ *
+ *  Skipping is an already-supported outcome, not a new one: the missing/invalid
+ *  `version` branch below has always returned without a snapshot. The draft is
+ *  created either way and the author fixes it, then publishes. */
 async function createVersionSafe(params: {
   packageId: string;
   orgId: string;
@@ -356,6 +385,18 @@ async function createVersionSafe(params: {
   if (!version || !isValidVersion(version)) {
     logger.warn("Skipping version creation: missing or invalid version in manifest", {
       packageId: params.packageId,
+    });
+    return;
+  }
+  const gateErrors = await validateAgentIntegrationSelections({
+    manifest: params.manifest,
+    orgId: params.orgId,
+    requireCallableTools: true,
+  });
+  if (gateErrors.length > 0) {
+    logger.warn("Skipping version creation: manifest would be refused at publish", {
+      packageId: params.packageId,
+      codes: gateErrors.map((e) => e.code),
     });
     return;
   }
@@ -1178,7 +1219,13 @@ function makeCreateVersionHandler(rcfg: PackageRouteConfig) {
     // integration-scope subset gate the create/update paths apply comes along
     // with it — a draft must not be frozen into an immutable version with an
     // `integrations_configuration` selection outside the integration catalog.
-    await validateManifestForRoute(item.manifest, rcfg.cfg.type, orgId, "stored");
+    //
+    // `requireCallableTools` is ON here and NOT on the draft writes: this is
+    // where the artifact stops being editable, and freezing an empty tool
+    // selection produces a version that can only fail at boot.
+    await validateManifestForRoute(item.manifest, rcfg.cfg.type, orgId, "stored", {
+      requireCallableTools: true,
+    });
 
     // Parse optional version override from request body. The body itself is
     // optional (OpenAPI `requestBody.required: false` — the SPA omits it
@@ -1498,9 +1545,29 @@ export function createPackagesRouter() {
 
   // --- Shared import logic (used by /import and /import-github) ---
 
+  /** A parsed package plus the exact bytes that must be published for it. */
+  interface ParsedImport {
+    parsed: ReturnType<typeof parsePackageZip>;
+    /**
+     * Bytes to store as the version's content — NOT necessarily the upload.
+     * INVARIANT: this buffer and `parsed.files` declare the same
+     * `manifest.json`. Readers of a published artifact take the manifest from
+     * the archive (`extractRootFromAfps`), so a disagreement publishes a
+     * version that cannot be assembled.
+     */
+    artifact: Buffer;
+  }
+
   /**
    * Shared ZIP parse for `POST /import` (operator uploads a file) and
    * `POST /import-github` (fetch a repo directory).
+   *
+   * Returns the artifact with the parse because only this function knows
+   * whether they are the same bytes: an ordinary AFPS parse publishes the
+   * upload verbatim (re-zipping would drop whatever the parser doesn't model —
+   * a detached signature above all — and invalidate any signature over the
+   * original bytes), while the skill-only fallback must rebuild the archive
+   * because it synthesizes the `manifest.json` the upload lacks.
    *
    * WRITE direction — retired/unknown `runtime_tools` ids REJECT. Both routes
    * are author input, not content the platform already holds:
@@ -1525,17 +1592,22 @@ export function createPackagesRouter() {
    * Passed explicitly rather than left to the default so the choice reads as
    * deliberate at the call site.
    */
-  async function parseZipWithSkillFallback(
-    zipBytes: Uint8Array,
-    orgSlug: string,
-  ): Promise<ReturnType<typeof parsePackageZip>> {
+  async function parseZipWithSkillFallback(upload: Buffer, orgSlug: string): Promise<ParsedImport> {
+    const zipBytes = new Uint8Array(upload);
     try {
-      return parsePackageZip(zipBytes, { retiredRuntimeTools: "reject" });
+      const parsed = parsePackageZip(zipBytes, { retiredRuntimeTools: "reject" });
+      return { parsed, artifact: upload };
     } catch (err) {
       if (err instanceof PackageZipError && err.code === "MISSING_MANIFEST") {
         const result = await tryParseSkillOnlyZip(zipBytes, orgSlug);
         if (result.ok) {
-          return result.parsed;
+          // `result.parsed.files` is the upload's entries (wrapper prefix
+          // stripped) plus the synthesized `manifest.json`. `zipArtifact` is
+          // deterministic, so identical content still yields identical bytes.
+          return {
+            parsed: result.parsed,
+            artifact: Buffer.from(zipArtifact(result.parsed.files)),
+          };
         }
         if (result.reason === "unchanged") {
           throw conflict("skill_unchanged", "This skill already exists with the same content");
@@ -1559,10 +1631,16 @@ export function createPackagesRouter() {
     }
   }
 
+  /**
+   * Persist a parsed import. `artifact` is the {@link ParsedImport} buffer, not
+   * the raw upload: it is both what gets stored and what every integrity
+   * comparison below is made against, so the two cannot disagree about which
+   * bytes this version is.
+   */
   async function handleImport(
     c: Context<AppEnv>,
     parsed: ReturnType<typeof parsePackageZip>,
-    buffer: Buffer,
+    artifact: Buffer,
     force: boolean,
     source: "zip" | "github",
   ) {
@@ -1583,7 +1661,11 @@ export function createPackagesRouter() {
     // Phase 1 — for agent imports, cross-check integrations_configuration
     // selections against the referenced integration catalogs. `parsePackageZip`
     // already ran `validateManifest`; this is the niveau 2 follow-up.
-    await assertAgentIntegrationScopesValid(manifest as Record<string, unknown>, orgId);
+    //
+    // An import is a FINAL artifact, not an editing step — `postInstallPackage`
+    // below cuts a version from it — so the declared-but-empty gate applies
+    // here too.
+    await assertAgentIntegrationScopesValid(manifest as Record<string, unknown>, orgId, true);
 
     // Check for existing user package
     const existing = await getPackageById(packageId);
@@ -1631,7 +1713,7 @@ export function createPackagesRouter() {
       if (!force && importedVersion) {
         const existingVer = await getVersionForDownload(packageId, importedVersion);
         if (existingVer) {
-          const importedIntegrity = computeIntegrity(new Uint8Array(buffer));
+          const importedIntegrity = computeIntegrity(new Uint8Array(artifact));
           if (existingVer.integrity !== importedIntegrity) {
             throw conflict(
               "integrity_mismatch",
@@ -1676,7 +1758,7 @@ export function createPackagesRouter() {
         userId: user.id,
         content,
         files,
-        zipBuffer: buffer,
+        zipBuffer: artifact,
       });
     } catch (err) {
       const message = getErrorMessage(err);
@@ -1714,12 +1796,12 @@ export function createPackagesRouter() {
     if (existing && force && importedVersionForReplace) {
       const existingVer = await getVersionForDownload(packageId, importedVersionForReplace);
       if (existingVer) {
-        const importedIntegrity = computeIntegrity(new Uint8Array(buffer));
+        const importedIntegrity = computeIntegrity(new Uint8Array(artifact));
         if (existingVer.integrity !== importedIntegrity) {
           await replaceVersionContent({
             packageId,
             version: importedVersionForReplace,
-            zipBuffer: buffer,
+            zipBuffer: artifact,
             manifest: manifest as Record<string, unknown>,
           });
         }
@@ -1744,10 +1826,16 @@ export function createPackagesRouter() {
     // about unsupported `connect.login` selectors / criteria at install
     // time rather than chasing the runtime LoginError later. Also lift the
     // validator's `_meta` Appendix B regex soft-fail warnings to the same
-    // channel so publishers see them on import.
+    // channel so publishers see them on import. Same channel again for an
+    // agent values narrowed by deployment policy — the run applies the
+    // effective values regardless, and import is the first author-visible seam.
+    // No retired-dependency-key warning here, unlike the bundle path: this
+    // route parses through `parseZipWithSkillFallback`, which rejects them
+    // outright, so such a manifest is a 400 long before this line.
     const installWarnings = [
       ...collectConnectLoginWarnings(manifest),
       ...collectMetaWarnings(manifest),
+      ...collectAgentInstallWarnings(manifest),
     ];
     return c.json(
       {
@@ -1836,12 +1924,11 @@ export function createPackagesRouter() {
       throw invalidRequest("Only .afps and .zip files are accepted");
     }
 
-    const buffer = Buffer.from(await file.arrayBuffer());
-    const zipBytes = new Uint8Array(buffer);
+    const upload = Buffer.from(await file.arrayBuffer());
 
-    const parsed = await parseZipWithSkillFallback(zipBytes, c.get("orgSlug"));
+    const { parsed, artifact } = await parseZipWithSkillFallback(upload, c.get("orgSlug"));
 
-    return handleImport(c, parsed, buffer, c.req.query("force") === "true", "zip");
+    return handleImport(c, parsed, artifact, c.req.query("force") === "true", "zip");
   });
 
   // POST /api/packages/import-github — import a package from a GitHub URL
@@ -1863,11 +1950,12 @@ export function createPackagesRouter() {
       throw err;
     }
 
-    const buffer = Buffer.from(zipBytes);
+    const { parsed, artifact } = await parseZipWithSkillFallback(
+      Buffer.from(zipBytes),
+      c.get("orgSlug"),
+    );
 
-    const parsed = await parseZipWithSkillFallback(zipBytes, c.get("orgSlug"));
-
-    return handleImport(c, parsed, buffer, false, "github");
+    return handleImport(c, parsed, artifact, false, "github");
   });
 
   // GET /api/packages/:scope/:name/:version/download — download a versioned package ZIP

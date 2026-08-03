@@ -58,6 +58,28 @@ const FAKE_RUN_TOKEN = "smoke-fake-secret-DEADBEEFCAFE";
  */
 const FAKE_MODEL_KEY = "sk-smoke-fake-model-key-0DEFACED";
 
+const VM_EXIT_TIMEOUT_MS = 90_000;
+
+/**
+ * Bound a VM exit wait without leaving the losing timeout alive. Bun keeps
+ * referenced timers on its event loop, so a bare Promise.race made every
+ * successful smoke wait ~90 seconds after `SMOKE PASS` before the process
+ * could exit. Clearing in `finally` also covers early waitForExit failures.
+ */
+async function withExitTimeout<T>(promise: Promise<T>, message: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(message)), VM_EXIT_TIMEOUT_MS);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 function fail(msg: string): never {
   console.error(`SMOKE FAIL: ${msg}`);
   process.exit(1);
@@ -112,6 +134,10 @@ async function assertJailedVmm(runDir: string): Promise<string> {
     "dev",
     "run",
   ]);
+  // Upstream's aarch64 jailer copies the host CPU cache/register identity
+  // files under sys/devices/system/cpu/cpu0 so Firecracker can construct the
+  // guest CPU topology. The x86_64 jailer does not create this directory.
+  if (process.arch === "arm64") allowed.add("sys");
   const entries = await readdir(state.chrootPath);
   const unexpected = entries.filter((e) => !allowed.has(e));
   if (unexpected.length > 0) {
@@ -275,12 +301,7 @@ try {
     await assertConfigDriveOmitsSecret(imagePath, FAKE_MODEL_KEY);
   }
 
-  const exitCode = await Promise.race([
-    orch.waitForExit(agent),
-    new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error("VM did not exit within 90s")), 90_000),
-    ),
-  ]);
+  const exitCode = await withExitTimeout(orch.waitForExit(agent), "VM did not exit within 90s");
   console.log(`==> guest exit marker: ${exitCode} (${Date.now() - bootStart} ms boot→exit)`);
 
   // Console diagnostics for the assertion below + human debugging.
@@ -345,12 +366,10 @@ try {
       boundary2,
     );
     await orch.startWorkload(agent2);
-    const exitCode2 = await Promise.race([
+    const exitCode2 = await withExitTimeout(
       orch.waitForExit(agent2),
-      new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error("second VM did not exit within 90s")), 90_000),
-      ),
-    ]);
+      "second VM did not exit within 90s",
+    );
     console.log(`==> second guest exit marker: ${exitCode2}`);
     await dumpConsole(boundary2.id, "vm2");
     if (exitCode2 !== 42) {
@@ -392,12 +411,7 @@ try {
       boundary3,
     );
     await orch.startWorkload(agent3);
-    await Promise.race([
-      orch.waitForExit(agent3),
-      new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error("third VM did not exit within 90s")), 90_000),
-      ),
-    ]);
+    await withExitTimeout(orch.waitForExit(agent3), "third VM did not exit within 90s");
     const console3 = await Bun.file(`${boundary3.id}/console.log`)
       .text()
       .catch(() => "");

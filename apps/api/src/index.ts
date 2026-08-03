@@ -6,7 +6,7 @@ import { serveStatic } from "hono/bun";
 import { getEnv } from "@appstrate/env";
 import { recordProcessAnomaly } from "@appstrate/core/telemetry";
 import { logger } from "./lib/logger.ts";
-import { bootCritical, bootBackground } from "./lib/boot.ts";
+import { bootCritical, bootBackground, probeUsercontentReachability } from "./lib/boot.ts";
 import { createShutdownHandler } from "./lib/shutdown.ts";
 import { requireAppContext } from "./middleware/app-context.ts";
 import { requestId } from "./middleware/request-id.ts";
@@ -34,6 +34,7 @@ import { createEndUsersRouter } from "./routes/end-users.ts";
 import { createUploadsRouter, createUploadContentRouter } from "./routes/uploads.ts";
 import { createDocumentsRouter, createDocumentPreviewRouter } from "./routes/documents.ts";
 import { createAdminStorageDeletionRouter } from "./routes/admin-storage-deletion.ts";
+import { createSpaFallbackHandler } from "./routes/spa.ts";
 import healthRouter, { bootGate, markServerReady } from "./routes/health.ts";
 import { createIntegrationsRouter } from "./routes/integrations.ts";
 import { createCredentialProxyRouter } from "./routes/credential-proxy.ts";
@@ -58,6 +59,7 @@ import {
 } from "./lib/modules/module-loader.ts";
 import { ApiError, notFound } from "./lib/errors.ts";
 import { apiVersion } from "./middleware/api-version.ts";
+import { idempotencyGuard } from "./middleware/idempotency-guard.ts";
 import { getOrgSettings } from "./services/organizations.ts";
 import { getAppConfig, initAppConfig } from "./lib/app-config.ts";
 import { applyAuthPipeline, skipAuth } from "./lib/auth-pipeline.ts";
@@ -245,6 +247,12 @@ app.use("*", async (c, next) => {
   return apiVersionMiddleware(c, next);
 });
 
+// `Idempotency-Key` honesty guard — refuse the header on mutating routes that
+// do not honour it, rather than ignoring it. Mounted last in the pipeline so
+// auth/org/app failures still answer 401/403 first, and before every router
+// below so it covers all of `routes/` and the module routers.
+app.use("*", idempotencyGuard());
+
 // Boot phase 1 — migrations, modules, auth, fail-fast config validation.
 // Everything the route table's shape depends on. Phase 2 is kicked off after
 // the export below, so the port binds without waiting for it.
@@ -399,12 +407,11 @@ app.use(
   }),
 );
 
-// SPA fallback — serve index.html with injected app config for all non-asset routes.
-// Read fresh each time: Vite build --watch rewrites index.html with new asset hashes.
-app.get("/*", async (c) => {
-  const raw = await Bun.file("./apps/web/dist/index.html").text();
-  return c.html(raw.replace("</head>", `${buildAppConfigScript()}\n</head>`));
-});
+// SPA fallback — serve index.html with injected app config for all non-asset
+// routes. This is the ONLY response that carries the SPA document, and so the
+// only place the parent-side `frame-src` containment of agent-HTML previews can
+// be attached. Definition + rationale: `routes/spa.ts`.
+app.get("/*", createSpaFallbackHandler(buildAppConfigScript));
 
 // Start server — bind 0.0.0.0 so both IPv4 and IPv6 clients can connect
 export default {
@@ -431,6 +438,10 @@ void bootBackground()
   .then(() => {
     markServerReady();
     logger.info("Server ready", { port: env.PORT, startupMs: Date.now() - bootStartedAt });
+    // Fire-and-forget reachability probe for USERCONTENT_URL (issue #1001).
+    // Never awaited, never fatal; runs after readiness so it can't race the
+    // boot gate's 503-until-ready window against a hairpin route.
+    void probeUsercontentReachability();
   })
   .catch((err: unknown) => {
     logger.error("Boot failed — exiting", {

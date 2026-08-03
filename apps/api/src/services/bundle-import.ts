@@ -43,7 +43,12 @@ import { parsePackageZip } from "@appstrate/core/zip";
 import { db } from "@appstrate/db/client";
 import { packages, packageVersions } from "@appstrate/db/schema";
 import { and, eq, notExists, sql } from "drizzle-orm";
-import { conflict, invalidRequest } from "../lib/errors.ts";
+import { conflict, invalidRequest, validationFailed } from "../lib/errors.ts";
+import type { ValidationFieldError } from "../lib/errors.ts";
+import {
+  validateAgentIntegrationSelections,
+  type CarriedVersion,
+} from "./integration-scope-validation.ts";
 import { isSystemPackage } from "./system-packages.ts";
 import { postInstallPackage } from "./post-install-package.ts";
 import { buildBundleFromUploadedAfps, type BundleAssemblyScope } from "./bundle-assembly.ts";
@@ -53,7 +58,9 @@ import { logger } from "../lib/logger.ts";
 import {
   collectConnectLoginWarnings,
   collectMetaWarnings,
+  collectRetiredDependencyKeyWarnings,
 } from "./integration-install-warnings.ts";
+import { collectAgentInstallWarnings } from "./agent-install-warnings.ts";
 
 // Pinned mtime — must match the bundle writer exactly for cross-format
 // integrity parity. Anchored at 1980-01-02T12:00Z so fflate's local-TZ
@@ -217,8 +224,7 @@ export interface ImportedPackageResult {
   version_id: number | null;
   /**
    * Package type, present on `inserted` entries only (the reuse paths
-   * never parse the ZIP, so the type is not known there without an
-   * extra read). Consumed by the route's audit events.
+   * do not need it). Consumed by the route's audit events.
    */
   type?: string;
 }
@@ -266,6 +272,41 @@ export async function importBundle(
       continue;
     }
 
+    let reconstructed: Uint8Array | undefined;
+    let parsedZip: ReturnType<typeof parsePackageZip> | undefined;
+    const getReconstructedPackage = (): Uint8Array => {
+      reconstructed ??= reconstructPackageZip(pkg);
+      return reconstructed;
+    };
+    const parseIncomingPackage = (): ReturnType<typeof parsePackageZip> => {
+      try {
+        // READ direction. A bundle is assembled by the platform from its OWN
+        // published versions (`GET /api/agents/:scope/:name/bundle`), and a
+        // published artifact is immutable by construction. A `runtime_tools`
+        // id retired after publication therefore cannot be repaired at the
+        // source — rejecting here would abort the ENTIRE bundle (every
+        // co-packaged skill and integration with it) on a legacy agent, with no
+        // recourse for the operator. Drop the retired ids and surface them as
+        // install warnings below.
+        return parsePackageZip(getReconstructedPackage(), { retiredRuntimeTools: "drop" });
+      } catch (err) {
+        throw invalidRequest(`Invalid package '${identity}' in bundle: ${getErrorMessage(err)}`);
+      }
+    };
+
+    // BundlePackage only guarantees a JSON-object manifest, not Appstrate's
+    // per-type contract. Agent warnings can throw on malformed resource data,
+    // so agent-shaped packages cross the authoritative parser before either
+    // insertion or reuse. Other package types retain the reuse fast path.
+    if (pkg.manifest.type === "agent") {
+      parsedZip = parseIncomingPackage();
+      // Deployment policy can change after a version was first imported.
+      // Re-evaluate warnings on every import, including equivalent reuse.
+      for (const w of collectAgentInstallWarnings(parsedZip.manifest)) {
+        warnings.push(`${identity}: ${w}`);
+      }
+    }
+
     // Reuse path — version already present. The preflight
     // (`detectBundleConflicts`) verified content equivalence (RECORD
     // integrity match). Skip the upload to avoid clobbering the storage ZIP
@@ -292,26 +333,9 @@ export async function importBundle(
       continue;
     }
 
-    const reconstructed = reconstructPackageZip(pkg);
-
-    // Parse the reconstructed ZIP through the shared platform primitive
-    // so we get the same manifest/content/files/type shape used by
-    // /packages/import — keeps the skill content extraction, file tree
-    // separation, and per-type validation in one place.
-    let parsedZip: ReturnType<typeof parsePackageZip>;
-    try {
-      // READ direction. A bundle is assembled by the platform from its OWN
-      // published versions (`GET /api/agents/:scope/:name/bundle`), and a
-      // published artifact is immutable by construction. A `runtime_tools` id
-      // retired after publication therefore cannot be repaired at the source —
-      // rejecting here would abort the ENTIRE bundle (every co-packaged skill
-      // and integration with it) on a legacy agent, with no recourse for the
-      // operator. Drop the retired ids and surface them as install warnings
-      // below.
-      parsedZip = parsePackageZip(reconstructed, { retiredRuntimeTools: "drop" });
-    } catch (err) {
-      throw invalidRequest(`Invalid package '${identity}' in bundle: ${getErrorMessage(err)}`);
-    }
+    // Insertions of every type need the fully parsed content. Agent packages
+    // reuse the parse above; other types are parsed only after the reuse check.
+    parsedZip ??= parseIncomingPackage();
 
     // A drop keeps the import alive but is a silent capability loss — lift it
     // into the same non-blocking warning channel the AFPS §7.7 / §10.1
@@ -335,6 +359,16 @@ export async function importBundle(
     // "consumers MUST NOT reject unknown `_meta` keys"). Lift them to the
     // install-warning channel so publishers see them.
     for (const w of collectMetaWarnings(parsedZip.manifest)) {
+      warnings.push(`${identity}: ${w}`);
+    }
+
+    // Same READ-direction rationale as the runtime-tools drop above: this
+    // manifest was validated with `retiredRuntimeTools: "drop"`, so a retired
+    // AFPS 1.x `dependencies` key (`tools` / `providers`) is tolerated instead
+    // of rejected. It is inert — nothing reads it — so the import succeeds; the
+    // warning is how the operator learns the dependencies declared under it
+    // were never honoured and that a republish removes the key.
+    for (const w of collectRetiredDependencyKeyWarnings(parsedZip.manifest)) {
       warnings.push(`${identity}: ${w}`);
     }
 
@@ -405,7 +439,7 @@ export async function importBundle(
         userId,
         content: parsedZip.content,
         files: parsedZip.files,
-        zipBuffer: Buffer.from(reconstructed),
+        zipBuffer: Buffer.from(getReconstructedPackage()),
         version,
       });
     } catch (err) {
@@ -472,8 +506,72 @@ export async function importBundle(
 }
 
 /**
+ * Refuse a bundle carrying an agent whose declared integration selects no
+ * callable tool — the SAME gate `/import` and the publish route apply
+ * (`requireCallableTools`). Without it `/import-bundle` was a verbatim bypass,
+ * and `postInstallPackage` froze the broken selection into an immutable
+ * version.
+ *
+ * ALL-OR-NOTHING, and preflight. One invalid agent aborts the WHOLE bundle —
+ * "the bundle minus its root" is not a smaller success, it is a half-installed
+ * set. Running it here (pure reads, before `detectBundleConflicts` and before
+ * the first write) means the refusal costs no rollback.
+ *
+ * A SELF-CONTAINED bundle is judged too. Its integrations are not in the
+ * registry yet, so a DB-only validator hit "integration not installed → skip
+ * silently" and waved the agent straight into an immutable version. The catalog
+ * handed to the validator is therefore the post-import
+ * `incoming ∪ already-installed` catalog: every manifest the bundle carries,
+ * keyed by package id, is resolved together with existing versions and
+ * dist-tags. Same map covers the mcp-servers a local integration references.
+ */
+async function assertBundleAgentsExposeCallableTools(bundle: Bundle, orgId: string): Promise<void> {
+  // Built once for the whole bundle: an agent may reference an integration that
+  // appears anywhere in the package set, not only before it in iteration order.
+  //
+  // Grouped by package id but keeping EVERY version, because a bundle may carry
+  // several versions of one package and the agent's range picks one. Flattening
+  // to one manifest per id let an agent pinning `^1` be judged against a carried
+  // `2.0.0` — a verdict about a version the run would never resolve.
+  const carried = new Map<string, CarriedVersion[]>();
+  for (const [identity, pkg] of bundle.packages) {
+    const parsed = parsePackageIdentity(identity);
+    // System packages are authoritative platform inputs. The importer ignores
+    // carried copies below, so letting one participate in validation would
+    // judge a manifest the runtime will never install.
+    if (!parsed || isSystemPackage(parsed.packageId)) continue;
+    const versions = carried.get(parsed.packageId) ?? [];
+    versions.push({
+      version: parsed.version,
+      manifest: pkg.manifest as unknown as Record<string, unknown>,
+    });
+    carried.set(parsed.packageId, versions);
+  }
+
+  const errors: ValidationFieldError[] = [];
+  for (const [identity, pkg] of bundle.packages) {
+    const parsed = parsePackageIdentity(identity);
+    // System packages are reused verbatim, never written — same skip as the
+    // import loop.
+    if (parsed && isSystemPackage(parsed.packageId)) continue;
+    const packageErrors = await validateAgentIntegrationSelections({
+      manifest: pkg.manifest as unknown as Record<string, unknown>,
+      orgId,
+      requireCallableTools: true,
+      extraManifests: carried,
+    });
+    // `field` stays the agent-manifest key; a bundle carries MANY manifests,
+    // so the offending identity is prefixed onto the message instead.
+    for (const e of packageErrors) {
+      errors.push({ ...e, message: `${identity}: ${e.message}` });
+    }
+  }
+  if (errors.length > 0) throw validationFailed(errors);
+}
+
+/**
  * End-to-end import entry point used by the `POST /api/packages/import-bundle`
- * route. Composes read → detect conflicts → import.
+ * route. Composes read → gate → detect conflicts → import.
  */
 export async function handleImportBundle(
   bytes: Uint8Array,
@@ -481,6 +579,7 @@ export async function handleImportBundle(
   userId: string,
 ): Promise<ImportBundleResult> {
   const bundle = await readOrBuildBundle(bytes, scope);
+  await assertBundleAgentsExposeCallableTools(bundle, scope.orgId);
   const conflicts = await detectBundleConflicts(bundle, scope);
   if (conflicts.length > 0) {
     const summary = conflicts

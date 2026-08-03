@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, it, expect, beforeEach, afterAll } from "bun:test";
+import { describe, it, expect, beforeEach, afterAll, spyOn } from "bun:test";
 import type { ModelProviderDefinition } from "@appstrate/core/module";
+import { logger } from "../../src/lib/logger.ts";
 import {
   getModelProvider,
   isOAuthModelProvider,
@@ -10,6 +11,7 @@ import {
   registerModelProviders,
   resetModelProviders,
 } from "../../src/services/model-providers/registry.ts";
+import { registerCatalog } from "../../src/services/pricing-catalog.ts";
 import { seedTestModelProviders } from "../helpers/model-providers.ts";
 
 function fakeDef(
@@ -126,6 +128,99 @@ describe("model-providers runtime registry", () => {
     it("flags api-key / unknown providers as non-oauth", () => {
       expect(isOAuthModelProvider("openai")).toBe(false);
       expect(isOAuthModelProvider("not-here")).toBe(false);
+    });
+  });
+
+  /**
+   * The boot check (`validateCatalogReferences`) is the only thing standing
+   * between a mistyped model list and a model picker that silently shows
+   * nothing. It resolves the selection first, which means "resolved to
+   * nothing" needs one arm per selection shape — and the two selector arms
+   * carry DIFFERENT severities on purpose, pinned below: a missing catalog is
+   * a source-code declaration error (throws, and registration runs inside
+   * `bootCritical()` so that is a process exit), while a selector matching
+   * nothing in an EXISTING catalog is reachable from the weekly bot refresh of
+   * `src/data/pricing/*.json` and must never be able to take the API down.
+   */
+  describe("catalog reference validation", () => {
+    const CATALOG = "test-registry-catalog";
+    registerCatalog(CATALOG, {
+      "claude-opus-5": {
+        label: "synthetic",
+        contextWindow: 1000,
+        maxTokens: 100,
+        capabilities: ["text"],
+        cost: { input: 0, output: 0 },
+      },
+    });
+
+    it("accepts a selector that resolves against a real catalog", () => {
+      registerModelProvider(
+        fakeDef("selector-ok", {
+          catalogProviderId: CATALOG,
+          featuredModels: { catalogFamilies: ["claude-opus"], generations: 1 },
+        }),
+      );
+      expect(getModelProvider("selector-ok")).not.toBeNull();
+    });
+
+    it("throws when a selector points at a catalog that does not exist", () => {
+      expect(() =>
+        registerModelProvider(
+          fakeDef("selector-no-catalog", {
+            catalogProviderId: "does-not-exist",
+            featuredModels: { catalogFamilies: ["claude-opus"], generations: 1 },
+          }),
+        ),
+      ).toThrow(/no such catalog is registered.*"does-not-exist"/s);
+    });
+
+    it("registers and logs, never throws, on a family that matches nothing", () => {
+      // One extra `s` — but the same shape occurs when the vendor renames a
+      // family under the weekly catalog refresh. Throwing would crash-loop the
+      // whole API on a third party's release notes, so this arm is an alarm,
+      // not a gate. The log must name the provider and the families so the
+      // cause is readable without a repro.
+      const errorSpy = spyOn(logger, "error").mockImplementation(() => {});
+      try {
+        registerModelProvider(
+          fakeDef("selector-typo", {
+            catalogProviderId: CATALOG,
+            featuredModels: { catalogFamilies: ["claude-opuss"], generations: 1 },
+          }),
+        );
+        expect(getModelProvider("selector-typo")).not.toBeNull();
+        const logged = errorSpy.mock.calls.some(
+          ([msg, fields]) =>
+            String(msg).includes("catalog selector matched nothing") &&
+            (fields as { providerId?: string })?.providerId === "selector-typo" &&
+            (fields as { catalogProviderId?: string })?.catalogProviderId === CATALOG &&
+            (fields as { catalogFamilies?: string[] })?.catalogFamilies?.includes(
+              "claude-opuss",
+            ) === true,
+        );
+        expect(logged).toBe(true);
+      } finally {
+        errorSpy.mockRestore();
+      }
+    });
+
+    it("still accepts a deliberately empty array with no catalog", () => {
+      // openrouter (live search) and openai-compatible (Custom only) declare
+      // exactly this — the arm the selector check must not swallow.
+      registerModelProvider(fakeDef("no-featured", { featuredModels: [] }));
+      expect(getModelProvider("no-featured")).not.toBeNull();
+    });
+
+    it("still rejects an array id that is absent from the catalog", () => {
+      expect(() =>
+        registerModelProvider(
+          fakeDef("array-bad-id", {
+            catalogProviderId: CATALOG,
+            featuredModels: ["claude-opus-99"],
+          }),
+        ),
+      ).toThrow(/is not in the test-registry-catalog catalog/);
     });
   });
 

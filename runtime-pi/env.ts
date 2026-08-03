@@ -83,6 +83,18 @@ export interface RuntimeEnv {
    * `undefined` → SDK default.
    */
   mcpToolTimeoutMs?: number;
+  /**
+   * NON-FATAL boot diagnostics — the counterpart of {@link RuntimeEnvError}'s
+   * fatal `issues`. A value that is present but malformed is a contract
+   * violation and must stop the run; a value whose ABSENCE silently degrades
+   * accounting must only be reported. Empty on a fully specified environment.
+   *
+   * Kept as a separate channel rather than folded into `issues` on purpose:
+   * `issues` is thrown (`entrypoint.ts` → `process.exit(1)`), so pushing an
+   * absent `MODEL_COST` there would turn every unpriced model into a crashed
+   * run — a pricing gap must not become an outage.
+   */
+  warnings: string[];
 }
 
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 30_000;
@@ -163,9 +175,24 @@ function parseModelInput(
 function parseModelCost(
   raw: string | undefined,
   issues: string[],
+  warnings: string[],
 ): { input: number; output: number; cacheRead: number; cacheWrite: number } {
   const fallback = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
-  if (!raw) return fallback;
+  if (!raw) {
+    // The platform only sets MODEL_COST when the resolved model carries rates
+    // (`buildRuntimePiEnv`), so an absent var means the model could not be
+    // priced. The all-zero fallback below is arithmetically fine but silent:
+    // every metric event this run emits will report cost 0, indistinguishable
+    // from a genuinely free model. Report it — non-fatally, see
+    // {@link RuntimeEnv.warnings}. (Server-side, the same run's ledger row is
+    // stamped `pricing_status='unpriced'` from `runs.model_cost`; this line is
+    // the in-container half of the same fact, for operators reading logs.)
+    warnings.push(
+      "MODEL_COST: absent — no per-token pricing was resolved for this model; " +
+        "this run's reported cost will be 0 regardless of tokens consumed",
+    );
+    return fallback;
+  }
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
@@ -234,6 +261,9 @@ function parsePositiveNumber(
  */
 export function parseRuntimeEnv(source: NodeJS.ProcessEnv = process.env): RuntimeEnv {
   const issues: string[] = [];
+  // Non-fatal siblings of `issues` — collected the same way, surfaced by the
+  // caller as `warn` log lines instead of a throw. See {@link RuntimeEnv.warnings}.
+  const warnings: string[] = [];
 
   const runId = source.AGENT_RUN_ID;
   if (!runId) issues.push("AGENT_RUN_ID: required");
@@ -280,7 +310,7 @@ export function parseRuntimeEnv(source: NodeJS.ProcessEnv = process.env): Runtim
     : {};
 
   const modelInput = parseModelInput(source.MODEL_INPUT, issues);
-  const modelCost = parseModelCost(source.MODEL_COST, issues);
+  const modelCost = parseModelCost(source.MODEL_COST, issues, warnings);
   const modelContextWindow = parsePositiveInt(
     "MODEL_CONTEXT_WINDOW",
     source.MODEL_CONTEXT_WINDOW,
@@ -346,6 +376,7 @@ export function parseRuntimeEnv(source: NodeJS.ProcessEnv = process.env): Runtim
     mcpConnectDeadlineMs,
     ...(mcpToolTimeoutMs > 0 ? { mcpToolTimeoutMs } : {}),
     traceparent: source.TRACEPARENT || undefined,
+    warnings,
   };
 }
 

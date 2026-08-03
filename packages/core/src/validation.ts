@@ -15,6 +15,7 @@ import {
 import { integrationManifestSchema, type IntegrationManifest } from "./integration.ts";
 import { mcpServerManifestSchema, type McpServerManifest } from "./mcp-server.ts";
 import { SELECTABLE_RUNTIME_TOOLS, isSelectableRuntimeTool } from "./runtime-tools-catalog.ts";
+import { findRetiredDependencyKeys } from "./dependencies.ts";
 
 export { integrationManifestSchema, type IntegrationManifest };
 export { mcpServerManifestSchema, type McpServerManifest };
@@ -201,6 +202,61 @@ export type Manifest = z.infer<typeof manifestSchema>;
 // Agent manifest schema — extends AFPS with core enhancements
 // ─────────────────────────────────────────────
 
+/** Appstrate vendor-extension key for optional agent resource hints. */
+export const AGENT_RESOURCES_META_KEY = "dev.appstrate/resources";
+
+/**
+ * Agent-authored resource hints read from `_meta["dev.appstrate/resources"]`.
+ *
+ * These values are requests, not entitlements. The platform resolves them
+ * against deployment policy before launching a run.
+ */
+export interface AgentResourceHints {
+  readonly memoryMb?: number;
+  readonly cpu?: number;
+}
+
+const agentResourceHintsMetaSchema = z
+  .strictObject({
+    memory_mb: z
+      .number({ error: "memory_mb must be a number" })
+      .int({ error: "memory_mb must be a positive safe integer" })
+      .positive({ error: "memory_mb must be a positive safe integer" })
+      .optional(),
+    cpu: z
+      .number({ error: "cpu must be a number" })
+      .int({ error: "cpu must be a positive safe integer" })
+      .positive({ error: "cpu must be a positive safe integer" })
+      .optional(),
+  })
+  .refine((hints) => hints.memory_mb !== undefined || hints.cpu !== undefined, {
+    error: "At least one of memory_mb or cpu must be declared",
+  });
+
+function refineAgentResourceHints(metaValue: unknown, ctx: z.RefinementCtx): void {
+  const result = agentResourceHintsMetaSchema.safeParse(metaValue);
+  if (result.success) return;
+
+  const basePath = ["_meta", AGENT_RESOURCES_META_KEY];
+  for (const issue of result.error.issues) {
+    if (issue.code === "unrecognized_keys") {
+      for (const key of issue.keys) {
+        ctx.addIssue({
+          code: "custom",
+          path: [...basePath, key],
+          message: `Unknown agent resource hint "${key}"`,
+        });
+      }
+      continue;
+    }
+    ctx.addIssue({
+      code: "custom",
+      path: [...basePath, ...issue.path],
+      message: issue.message,
+    });
+  }
+}
+
 /**
  * Zod schema for agent manifests — extends AFPS with relaxed optional metadata for local drafts
  * AND the Phase 1.0 `dependencies.integrations` map (proposal §4.2.3).
@@ -254,6 +310,13 @@ export const agentManifestSchema = agentManifestObjectSchema.superRefine((m, ctx
   // shared `refineIntegrationsConfiguration` to avoid drift).
   refineIntegrationsConfiguration(m, ctx);
 
+  const resourceHints = (m as { _meta?: Record<string, unknown> })._meta?.[
+    AGENT_RESOURCES_META_KEY
+  ];
+  if (resourceHints !== undefined) {
+    refineAgentResourceHints(resourceHints, ctx);
+  }
+
   const outputSchema = (m as { output?: { schema?: unknown } }).output?.schema;
   const hasOutputSchema =
     outputSchema != null &&
@@ -276,6 +339,26 @@ export const agentManifestSchema = agentManifestObjectSchema.superRefine((m, ctx
 
 /** Inferred type from the agent manifest schema. */
 export type AgentManifest = z.infer<typeof agentManifestSchema>;
+
+/**
+ * Read the validated Appstrate resource-hint extension from an agent manifest.
+ *
+ * Returns `undefined` when the extension is absent. Malformed values throw:
+ * callers should pass a manifest accepted by {@link agentManifestSchema}, so a
+ * throw signals that validation was bypassed or stored data is corrupt.
+ */
+export function getAgentResourceHints(
+  manifest: { readonly _meta?: Readonly<Record<string, unknown>> } | null | undefined,
+): AgentResourceHints | undefined {
+  const raw = manifest?._meta?.[AGENT_RESOURCES_META_KEY];
+  if (raw === undefined) return undefined;
+
+  const parsed = agentResourceHintsMetaSchema.parse(raw);
+  return {
+    ...(parsed.memory_mb !== undefined ? { memoryMb: parsed.memory_mb } : {}),
+    ...(parsed.cpu !== undefined ? { cpu: parsed.cpu } : {}),
+  };
+}
 
 // ─────────────────────────────────────────────
 // Skill manifest schema — extends AFPS with core enhancements
@@ -418,25 +501,50 @@ export function dropRetiredRuntimeTools(manifest: Record<string, unknown>): {
 }
 
 /**
- * How {@link validateManifest} treats `runtime_tools` ids the platform retired
- * (or an author simply mistyped) — the one behaviour that MUST differ by
- * direction:
+ * How {@link validateManifest} treats the manifest vocabulary the platform
+ * retired — the one behaviour that MUST differ by direction. It governs BOTH
+ * retired kinds, because they are two expressions of a single question ("is
+ * this manifest author input, or something already persisted?") and splitting
+ * them into two flags would let a future call site set one and forget the
+ * other, which is precisely how the author-input rejection was lost once
+ * already (#1021):
+ *
+ *   1. `runtime_tools` ids the platform retired (or an author mistyped).
+ *   2. `dependencies` keys AFPS 2.0 retired — `tools` (now `mcp_servers`) and
+ *      `providers` (now `integrations`).
+ *
+ * The two policy values:
  *
  *   - `"reject"` (default) — the manifest is AUTHOR INPUT (create, update,
  *     import, an inline manifest from an API client, a repo-authored system
  *     package). A retired or misspelled id is a mistake the author must see;
- *     silently dropping it ships an agent missing a tool with no signal.
+ *     silently dropping it ships an agent missing a tool with no signal, and a
+ *     retired dependency key declares a dependency no reader will ever honour.
  *   - `"drop"` — the manifest was ALREADY PERSISTED (a stored draft, a
  *     published version snapshot). Those cannot be fixed in place — a
- *     published artifact is immutable by construction — so the retired ids are
- *     stripped and the manifest stays valid and runnable. Read
- *     {@link ValidateManifestResult.droppedRuntimeTools} to log what went.
+ *     published artifact is immutable by construction — so:
+ *       - retired `runtime_tools` ids are stripped and the manifest stays valid
+ *         and runnable (read {@link ValidateManifestResult.droppedRuntimeTools}
+ *         to log what went), and
+ *       - a retired `dependencies` key is TOLERATED, left exactly where it is.
+ *         It is inert (no reader has ever read it) so there is nothing to strip,
+ *         and rewriting a stored manifest's bytes here would change its
+ *         integrity hash. Surfacing it belongs to the install-warning channel,
+ *         not to this validator.
+ *
+ * The name is historical — the flag predates the dependency-key rule and is
+ * part of the published `@appstrate/core` surface, so it is kept rather than
+ * renamed for a nicety.
  */
 export type RetiredRuntimeToolsPolicy = "reject" | "drop";
 
 /** Options for {@link validateManifest}. */
 export interface ValidateManifestOptions {
-  /** Direction-dependent handling of retired `runtime_tools` ids. Default `"reject"`. */
+  /**
+   * Direction-dependent handling of retired manifest vocabulary — retired
+   * `runtime_tools` ids AND retired AFPS 1.x `dependencies` keys. Default
+   * `"reject"` (author input). See {@link RetiredRuntimeToolsPolicy}.
+   */
   retiredRuntimeTools?: RetiredRuntimeToolsPolicy;
 }
 
@@ -468,6 +576,23 @@ export function validateManifest(
   }
   const obj = raw as Record<string, unknown>;
   const type = obj.type;
+
+  // AFPS 1.x retired dependency vocabulary: on the author direction, reject
+  // and name the replacement key (#1021). See {@link RetiredRuntimeToolsPolicy}
+  // for why the keys still parse. Checked before the type dispatch because
+  // every package type may declare `dependencies`.
+  if (options?.retiredRuntimeTools !== "drop") {
+    const retiredDeps = findRetiredDependencyKeys(obj);
+    if (retiredDeps.length > 0) {
+      return {
+        valid: false,
+        errors: retiredDeps.map(
+          ({ key, replacement }) =>
+            `dependencies.${key}: \`dependencies.${key}\` is a retired AFPS 1.x key — rename it to \`dependencies.${replacement}\`. No consumer reads it, so the dependencies declared under it are silently ignored.`,
+        ),
+      };
+    }
+  }
 
   // AFPS (§3.4): mcp-server identity lives at the manifest root —
   // `type: "mcp-server"`, `name`, `schema_version`, and `dependencies` are
