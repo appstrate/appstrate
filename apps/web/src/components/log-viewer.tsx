@@ -12,7 +12,6 @@ import {
   Info,
   AlertTriangle,
   XCircle,
-  Wrench,
   Loader2,
   CircleSlash2,
   CircleHelp,
@@ -304,7 +303,7 @@ export function LogViewer({ entries }: LogViewerProps) {
                   className={cn(
                     "text-muted-foreground hover:bg-muted/50 flex min-h-7 px-3 font-mono text-sm leading-7 select-none",
                     entry.kind === "tool"
-                      ? "items-center truncate"
+                      ? "items-center gap-1.5 truncate"
                       : "items-start gap-1.5 break-words whitespace-normal",
                     entry.level && levelColors[entry.level],
                     hasToolDetails && "cursor-pointer",
@@ -324,21 +323,20 @@ export function LogViewer({ entries }: LogViewerProps) {
                 >
                   {entry.kind === "tool" ? (
                     <>
+                      <ToolStatus status={entry.status} />
                       {showTimestamps && (
-                        <span className="text-muted-foreground/60 mr-2 flex h-7 shrink-0 items-center font-mono text-xs">
+                        <span className="text-muted-foreground/60 flex h-7 shrink-0 items-center font-mono text-xs">
                           {formatTimestamp(entry.createdAt, i18n.language)}
                         </span>
                       )}
-                      <ToolStatus status={entry.status} />
-                      <Wrench className="text-muted-foreground/60 ml-1.5 size-3.5 shrink-0" />
-                      <span className="text-foreground ml-1.5 font-medium">{entry.tool}</span>
+                      <span className="text-foreground font-medium">{entry.tool}</span>
                       {entry.detail && (
-                        <span className="text-muted-foreground ml-2 truncate text-xs">
+                        <span className="text-muted-foreground truncate text-xs">
                           {entry.detail}
                         </span>
                       )}
                       {entry.durationMs !== undefined && (
-                        <span className="text-muted-foreground/70 ml-2 shrink-0 text-xs tabular-nums">
+                        <span className="text-muted-foreground/70 shrink-0 text-xs tabular-nums">
                           {formatDuration(entry.durationMs)}
                         </span>
                       )}
