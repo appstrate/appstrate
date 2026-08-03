@@ -95,7 +95,7 @@
           "format": "date-time"
         },
         "generator": {
-          "description": "Qui a produit la carte. `kind: human` protège une carte écrite à la main d'une régénération par le balayage nocturne.",
+          "description": "Qui a produit la carte. `kind: human` PROTÈGE la carte d'une régénération par le balayage nocturne ; `agent` l'y expose. Attention, le champ mélange deux questions et son nom trompe : il ne dit pas l'espèce de l'auteur mais le régime de mise à jour. Les dix-huit cartes de référence portent `human` alors qu'elles ont été écrites par un modèle en session interactive supervisée, ce que leur `author` énonce désormais. La distinction qui compte n'est pas humain contre machine — les deux côtés de la comparaison sont des modèles — mais le RÉGIME de production : session longue, supervisée, avec accès direct aux fichiers et vue sur les autres agents du corpus d'un côté ; run autonome unique, borné en temps et en budget, sans mémoire des autres agents de l'autre. Séparer les deux champs (qui a écrit, faut-il régénérer) reste à faire.",
           "type": "object",
           "required": ["kind"],
           "additionalProperties": false,

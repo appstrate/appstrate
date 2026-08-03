@@ -202,23 +202,61 @@ les skills). Nous **lisons** ce qui est écrit. Le pont est direct : un
 `capability_without_rule` ou une `contradiction`, c'est exactement ce qu'il faut résoudre
 avant de pouvoir écrire une règle exécutable.
 
+## Un mot sur « humain » : personne ne l'est ici
+
+Ce document a longtemps opposé « humain » et « machine ». C'était faux et il faut le dire
+net : **les deux côtés de toutes les mesures sont des modèles**.
+
+| Ce que j'appelais             | Ce que c'est vraiment                        |
+| ----------------------------- | -------------------------------------------- |
+| la carte « écrite à la main » | un modèle, en session interactive supervisée |
+| la carte « de la machine »    | un modèle, en run autonome dans un conteneur |
+| les « annotateurs »           | trois modèles, en tâche courte isolée        |
+
+Les dix-huit cartes de référence portent `generator.kind: "human"`, mais cette valeur ne
+dit pas l'espèce de l'auteur : elle protège la carte d'une régénération automatique. Leur
+`author` énonce désormais la vérité.
+
+**Ce qui diffère réellement, c'est le RÉGIME de production**, et l'écart est net :
+
+|                           | corpus de référence                 | run du cartographe                      |
+| ------------------------- | ----------------------------------- | --------------------------------------- |
+| durée                     | plusieurs sessions                  | un passage, quelques minutes            |
+| coût                      | non borné                           | environ 1 $                             |
+| accès aux fichiers        | direct                              | par l'API, ce que le manifeste autorise |
+| vue sur les autres agents | les dix-huit                        | l'agent lu, et lui seul                 |
+| supervision               | relu et corrigé par le propriétaire | aucune                                  |
+| droit à l'erreur          | plusieurs passes                    | une seule                               |
+
+Cela change l'interprétation de tout ce qui suit. Le « 87 % d'accord avec la référence » ne
+mesure pas un accord avec un jugement humain : il mesure **l'accord entre un modèle bridé
+et un modèle qui ne l'était pas**. Et surtout, la conséquence la plus inconfortable :
+**personne d'humain n'a validé les 138 trous du corpus**. Quelques-uns ont été relus et ont
+donné lieu à des corrections d'agents réels, mais l'essentiel repose sur une écriture
+supervisée, pas sur une vérification.
+
+Les différences de régime expliquent d'ailleurs la plupart des défauts que le run autonome
+rate : ceux qui demandent de connaître un AUTRE agent (« `compta-inbox` interdit ce que
+`compta-trimestrielle` prescrit ») lui sont structurellement inaccessibles, puisqu'il n'en
+lit qu'un.
+
 ## La mesure que les chercheurs font, désormais faite
 
 MAST valide sa taxonomie par un **κ de Cohen à 0,88** entre trois annotateurs indépendants
 avant de l'automatiser. Nous n'avions mesuré que l'accord de la machine avec elle-même. Deux mesures ont suivi :
-d'abord une comparaison humain contre machine sur les quatre agents dont nous avons les
-deux cartes, puis le vrai test inter-annotateurs, plus bas.
+d'abord une comparaison entre les deux RÉGIMES de production sur les quatre agents dont
+nous avons les deux cartes, puis le test inter-annotateurs, plus bas.
 
 Elle répond à deux questions distinctes, et la première tue la seconde.
 
 |                                  | résultat |
 | -------------------------------- | -------- |
-| trous écrits à la main           | 28       |
-| trous produits par la machine    | 14       |
+| trous du corpus de référence     | 28       |
+| trous d’un run autonome unique   | 14       |
 | défauts trouvés **par les deux** | **4**    |
 | accord de famille sur ces quatre | 2 sur 4  |
 
-**Le problème n'est pas le vocabulaire, c'est la couverture.** Humain et machine ne
+**Le problème n'est pas le vocabulaire, c'est la couverture.** Les deux régimes ne
 regardent presque pas les mêmes choses : quatre défauts communs seulement. Un κ sur quatre
 observations n'a aucune valeur statistique, il n'est donc pas calculé, et prétendre le
 contraire serait de l'habillage.
