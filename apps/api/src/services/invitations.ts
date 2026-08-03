@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { db } from "@appstrate/db/client";
-import { orgInvitations, organizations, user, profiles, orgRoleEnum } from "@appstrate/db/schema";
+import { orgInvitations, organizations, user, profiles } from "@appstrate/db/schema";
+import type { AssignableOrgRole } from "@appstrate/shared-types";
 import { eq, and, lt, gt, desc } from "drizzle-orm";
 import { getEnv } from "@appstrate/env";
 import { getAppConfig } from "../lib/app-config.ts";
@@ -10,20 +11,6 @@ import { scopedWhere } from "../lib/db-helpers.ts";
 
 /** Accepts either the base client or an open transaction handle. */
 type DbOrTx = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
-
-/** Roles assignable via invitation (excludes owner — transferred, not invited). */
-export const ASSIGNABLE_ROLES = ["viewer", "member", "admin"] as const;
-export type AssignableRole = (typeof ASSIGNABLE_ROLES)[number];
-
-// Compile-time exhaustiveness check: if `orgRoleEnum` gains a new value, this
-// line fails to type-check until it is added to `ASSIGNABLE_ROLES` above (or
-// explicitly excluded like `owner`).
-type _MissingAssignableRoles = Exclude<
-  Exclude<(typeof orgRoleEnum.enumValues)[number], "owner">,
-  AssignableRole
->;
-const _assertAssignableRolesExhaustive: _MissingAssignableRoles extends never ? true : never = true;
-void _assertAssignableRolesExhaustive;
 
 function generateToken(): string {
   return crypto.randomUUID().replace(/-/g, "") + crypto.randomUUID().replace(/-/g, "");
@@ -37,7 +24,7 @@ export async function createInvitation({
 }: {
   email: string;
   orgId: string;
-  role: AssignableRole;
+  role: AssignableOrgRole;
   invitedBy: string;
 }) {
   const normalizedEmail = email.toLowerCase().trim();
@@ -150,7 +137,7 @@ export async function cancelInvitation(invitationId: string, orgId: string) {
 export async function updateInvitationRole(
   invitationId: string,
   orgId: string,
-  role: AssignableRole,
+  role: AssignableOrgRole,
 ) {
   const [updated] = await db
     .update(orgInvitations)

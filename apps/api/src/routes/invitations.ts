@@ -11,9 +11,9 @@ import {
   markInvitationAccepted,
   getInviterName,
   getOrgName,
-  type AssignableRole,
 } from "../services/invitations.ts";
 import { addMember, getOrgById } from "../services/organizations.ts";
+import type { AssignableOrgRole } from "@appstrate/shared-types";
 
 const router = new Hono();
 
@@ -127,7 +127,7 @@ router.post("/:token/accept", async (c) => {
   const claimed = await db.transaction(async (tx) => {
     const won = await markInvitationAccepted(invitation.id, session.user.id, tx);
     if (!won) return false;
-    await addMember(invitation.orgId, session.user.id, invitation.role as AssignableRole, tx);
+    await addMember(invitation.orgId, session.user.id, invitation.role as AssignableOrgRole, tx);
     return true;
   });
 

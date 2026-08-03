@@ -16,10 +16,10 @@ describe("resolvePermissions", () => {
     expect(perms.has("agents:write")).toBe(true);
   });
 
-  it("admin has all except org:delete and members:change-role", () => {
+  it("admin can change member roles but cannot delete the organization", () => {
     const perms = resolvePermissions("admin");
     expect(perms.has("org:delete")).toBe(false);
-    expect(perms.has("members:change-role")).toBe(false);
+    expect(perms.has("members:change-role")).toBe(true);
     expect(perms.has("org:update")).toBe(true);
     expect(perms.has("agents:write")).toBe(true);
     expect(perms.has("members:invite")).toBe(true);

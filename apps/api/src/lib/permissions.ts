@@ -148,9 +148,9 @@ const OWNER_PERMISSIONS: ReadonlySet<Permission> = new Set<Permission>([
   "integrations:disconnect",
 ]);
 
-/** Admin: everything except org:delete and members:change-role. */
+/** Admin: everything except deleting the organization. */
 const ADMIN_PERMISSIONS: ReadonlySet<Permission> = new Set<Permission>(
-  [...OWNER_PERMISSIONS].filter((p) => p !== "org:delete" && p !== "members:change-role"),
+  [...OWNER_PERMISSIONS].filter((p) => p !== "org:delete"),
 );
 
 /** Member: use the platform — run agents, manage own connections, schedules. */
