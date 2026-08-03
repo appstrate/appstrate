@@ -5,11 +5,14 @@ name: Firecracker smoke
 # boots a REAL microVM through the orchestrator (apps/api/src/modules/firecracker/scripts/dev/).
 # GitHub's Linux runners expose KVM, so this runs on ubuntu-latest.
 #
-# This list mirrors the source closure copied by runtime-pi/Dockerfile,
-# runtime-pi/sidecar/Dockerfile, and Dockerfile.rootfs, plus the two shared
-# orchestrator helpers imported by the Firecracker engine. Keep it aligned with
-# those build inputs: unrelated platform/test changes belong to the generic
-# check/test workflows and must not pay for a microVM boot.
+# This list tracks the runtime-relevant source and manifest inputs consumed by
+# runtime-pi/Dockerfile, runtime-pi/sidecar/Dockerfile, and Dockerfile.rootfs,
+# plus the two shared orchestrator helpers imported by the Firecracker engine.
+# The runtime Dockerfiles copy every workspace manifest so Bun can walk the
+# lockfile, but their filtered build graphs depend on the manifests listed
+# below; dependency-resolution changes are covered by bun.lock. Unrelated
+# platform/test changes belong to the generic check/test workflows and must not
+# pay for a microVM boot.
 
 on:
   push:
