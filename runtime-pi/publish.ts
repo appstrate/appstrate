@@ -169,6 +169,12 @@ export interface RunDocumentUploaderDeps {
    * itself before reserving its key.
    */
   publishedKeys: Set<string>;
+  /**
+   * Last successfully published sha256 for each canonical workspace file.
+   * Shared with the outputs sweep so an unchanged file published explicitly
+   * under a display-name override is not published again under its basename.
+   */
+  publishedSourceHashes: Map<string, string>;
   /** Injected for tests; defaults to the global `fetch`. */
   fetchFn?: typeof fetch;
   /** Injected for tests to skip real backoff waits; defaults to `setTimeout`. */
@@ -179,8 +185,8 @@ export interface RunDocumentUploaderDeps {
  * Build the `uploadRunDocument(path, name?, presentation?)` function the `publish_document`
  * tool and the outputs sweep both call. It streams the file straight to
  * `POST /api/runs/:id/documents` (never buffering it), records the returned
- * `${sha256}:${name}` identity in {@link RunDocumentUploaderDeps.publishedKeys},
- * and returns the durable document metadata. Retryable failures (network error,
+ * `${sha256}:${name}` identity and the canonical source's published digest, then
+ * returns the durable document metadata. Retryable failures (network error,
  * per-attempt timeout, 5xx, 429 — honouring `Retry-After`) are retried up to
  * {@link MAX_UPLOAD_ATTEMPTS} times with jittered backoff; a definitive 4xx
  * (413/409/401/403) fails fast. Throws a typed {@link UploadError} (with a
@@ -275,8 +281,12 @@ export function createRunDocumentUploader(deps: RunDocumentUploaderDeps): Docume
           presentation: rawDoc.presentation === "primary" ? "primary" : null,
         };
         // Record the server-authoritative identity (its sanitized name +
-        // sha256), matching the server dedup index exactly.
+        // sha256), matching the server dedup index exactly. Also remember the
+        // canonical source file's returned digest: the outputs sweep must not
+        // republish this unchanged file merely because the tool selected a
+        // friendlier display name.
         deps.publishedKeys.add(`${doc.sha256}:${doc.name}`);
+        deps.publishedSourceHashes.set(absPath, doc.sha256);
         return doc;
       }
 
@@ -328,6 +338,8 @@ export interface SweepOutputsDeps {
   workspace: string;
   /** Shared dedup set (same instance handed to the uploader). */
   publishedKeys: Set<string>;
+  /** Shared canonical source → last published sha256 map. */
+  publishedSourceHashes: Map<string, string>;
   /** Per-file ceiling; files above it are skipped with a warning (server also caps). */
   maxFileBytes: number;
   /** Emits the canonical `document.published` event for each swept file. */
@@ -338,7 +350,7 @@ export interface SweepOutputsDeps {
 
 /**
  * Why the sweep did NOT publish a scanned entry. All are NON-fatal:
- *   - `already_published` — its `${sha}:${name}` key was already stored.
+ *   - `already_published` — its source+sha or `${sha}:${name}` was already stored.
  *   - `hidden`            — a dotfile / file under a hidden dir (never swept).
  *   - `symlink`           — a symlink (never followed).
  *   - `oversized`         — over the per-file cap. A LOST deliverable — the
@@ -372,11 +384,11 @@ const SWEEP_CONCURRENCY = 3;
  * BEFORE the finalize event, so the published documents surface as run events.
  *
  * Bounded: a file larger than `maxFileBytes` is recorded as `oversized`
- * (a LOST deliverable — see {@link summarizeArtifacts}); a file whose
- * `${sha}:${name}` key is already in `publishedKeys` (the `publish_document`
- * tool already stored it) is `already_published`. Per-file upload errors are
- * COLLECTED into {@link SweepResult.failed} — never swallowed — so the caller
- * can report which deliverables were dropped, yet a single failure still never
+ * (a LOST deliverable — see {@link summarizeArtifacts}); an unchanged canonical
+ * source recorded by `publish_document`, or a file whose `${sha}:${name}` key is
+ * already in `publishedKeys`, is `already_published`. Per-file upload errors are
+ * COLLECTED into {@link SweepResult.failed} — never swallowed — so the caller can
+ * report which deliverables were dropped, yet a single failure still never
  * blocks or fails the run's finalize.
  *
  * Naming: the published document `name` is `path.basename(rel)` — the sweep
@@ -450,8 +462,16 @@ export async function sweepOutputs(deps: SweepOutputsDeps): Promise<SweepResult>
       return;
     }
 
-    const sha = await fileSha256(abs);
+    const canonicalAbs = await fs.realpath(abs);
+    const sha = await fileSha256(canonicalAbs);
     const documentName = path.basename(rel);
+    if (deps.publishedSourceHashes.get(canonicalAbs) === sha) {
+      // This exact, unchanged workspace file was already published explicitly.
+      // Its display name may differ from the basename the sweep would choose;
+      // source identity prevents that presentation choice creating a duplicate.
+      result.skipped.push({ name: rel, reason: "already_published" });
+      return;
+    }
     // Key on the SANITIZED name. The server stores `sanitizeFilename(name)` in
     // `documents.name`, and that is both what its `(run_id, sha256, name)` dedup
     // index matches on and what the uploader records back from the response.
