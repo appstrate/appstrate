@@ -1158,11 +1158,9 @@ async function mintAccessJwt(claims: {
   cliFamilyId: string;
 }): Promise<string> {
   const env = getEnv();
-  // Strip any trailing slash from APP_URL before composing iss/aud so
-  // a misconfigured `APP_URL=https://app.example.com/` doesn't yield a
-  // double-slash issuer (`https://app.example.com//api/auth`) that
-  // fails the strict JOSE equality check downstream consumers apply.
-  const baseUrl = env.APP_URL.replace(/\/+$/, "");
+  // APP_URL is normalized to an origin by @appstrate/env before consumers
+  // compose any issuer/audience paths.
+  const baseUrl = env.APP_URL;
   const iss = `${baseUrl}/api/auth`;
   // Match `enduser-token.ts::verifyEndUserAccessToken` audience list —
   // it accepts either `APP_URL` or `${APP_URL}/api/auth`. Emit the more

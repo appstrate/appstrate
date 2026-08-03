@@ -49,8 +49,8 @@ jobs:
       # apps/api/test/integration/ and apps/api/src/modules/oidc/test/integration/
       # remain in the heavier `integration` job below — they need DB seeding and
       # are slower to run, so they stay opt-in via the `integration` label or
-      # post-merge on main. The public-origin regression is the deliberate fast
-      # exception: it protects a production-only proxy boundary on every PR.
+      # post-merge on main. The fast public-origin regression has its own
+      # mandatory step and coverage flag immediately below.
       # Anything pure-unit must run on every PR.
       # --coverage on the always-on unit job is what gives every PR a coverage
       # signal (Codecov patch coverage + the `unit` flag) without paying for the
@@ -64,7 +64,6 @@ jobs:
             apps/api/src/modules/firecracker/test/unit/ \
             apps/api/src/modules/mcp/test/unit/ \
             apps/api/src/modules/oidc/test/unit/ \
-            apps/api/src/modules/oidc/test/integration/routes/oauth-public-origin.test.ts \
             apps/api/src/modules/webhooks/test/unit/ \
             apps/web/src/ \
             packages/module-chat/ \
@@ -77,6 +76,12 @@ jobs:
             packages/emails/ \
             packages/env/ \
             packages/ui/
+
+      - name: Run public-origin regression
+        run: |
+          bun test --coverage --coverage-reporter=lcov \
+            --coverage-dir=coverage-public-origin \
+            apps/api/src/modules/oidc/test/integration/routes/oauth-public-origin.test.ts
 
       # Surface the figure in the job summary so humans see it without opening
       # Codecov. Sums LF/LH across the lcov report; informational only (the gate
@@ -109,6 +114,15 @@ jobs:
         with:
           files: coverage/lcov.info
           flags: unit
+          fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}
+
+      - name: Upload public-origin coverage to Codecov
+        if: always()
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
+        with:
+          files: coverage-public-origin/lcov.info
+          flags: public-origin
           fail_ci_if_error: false
           token: ${{ secrets.CODECOV_TOKEN }}
 

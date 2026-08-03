@@ -34,6 +34,7 @@ import { enforceResourceAudience } from "./protected-resources.ts";
 import { resolvePermissions, resolveApiKeyPermissions } from "./permissions.ts";
 import { getClientIp, propagateRequestClientIp } from "./client-ip.ts";
 import { logger } from "./logger.ts";
+import { withPublicAppOrigin } from "./public-url.ts";
 import type { AppEnv } from "../types/index.ts";
 
 export interface AuthPipelineOptions {
@@ -107,7 +108,7 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
   // endpoints (issue #165). Tracked in
   // https://github.com/appstrate/appstrate/issues/166.
   app.on(["POST", "GET"], "/api/auth/*", async (c) => {
-    const req = await maybeTransformDeviceFlowFormBody(c.req.raw);
+    const req = withPublicAppOrigin(await maybeTransformDeviceFlowFormBody(c.req.raw));
     return getAuth().handler(req);
   });
 

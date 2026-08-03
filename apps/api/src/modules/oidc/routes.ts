@@ -27,6 +27,7 @@ import { readJsonBody } from "../../lib/request-body.ts";
 import { listResponse } from "../../lib/list-response.ts";
 import { logger } from "../../lib/logger.ts";
 import { getClientIp } from "../../lib/client-ip.ts";
+import { getPublicAppOrigin } from "../../lib/public-url.ts";
 import { db } from "@appstrate/db/client";
 import { user, applications } from "@appstrate/db/schema";
 import { getOrgSettings, getOrgMember } from "../../services/organizations.ts";
@@ -128,11 +129,6 @@ export function isLoginLinkExpired(expParam: string | null): boolean {
   const exp = Number(expParam);
   if (!Number.isFinite(exp)) return true;
   return exp < Date.now() / 1000;
-}
-
-/** Canonical public base for URLs that leave the process. */
-function getPublicAppBaseUrl(): string {
-  return getEnv().APP_URL.replace(/\/+$/, "");
 }
 
 // ─── Zod schemas ──────────────────────────────────────────────────────────────
@@ -1543,7 +1539,7 @@ export function createOidcRouter() {
     // comparison branch instead and bypass the regex entirely.
     // The request URL can carry the proxy-to-app HTTP scheme after TLS is
     // terminated upstream. APP_URL is the canonical browser-facing origin.
-    const appBaseUrl = getPublicAppBaseUrl();
+    const appBaseUrl = getPublicAppOrigin();
     const callbackURL = `${appBaseUrl}/api/auth/oauth2/authorize${url.search}`;
     const errorCallbackURL = `${appBaseUrl}/api/oauth/login${url.search}`;
 
@@ -1699,12 +1695,18 @@ export function createOidcRouter() {
     // Hand off to Better Auth's verify endpoint in the USER's browser — BA
     // consumes the single-use token, sets the session cookie on their origin,
     // and 302s to callbackURL (the authorize endpoint).
-    const verifyUrl = new URL("/api/auth/magic-link/verify", getPublicAppBaseUrl());
+    const verifyUrl = new URL("/api/auth/magic-link/verify", getPublicAppOrigin());
     verifyUrl.searchParams.set("token", token);
     const callbackURL = url.searchParams.get("callbackURL");
     const errorCallbackURL = url.searchParams.get("errorCallbackURL");
-    if (callbackURL) verifyUrl.searchParams.set("callbackURL", callbackURL);
-    if (errorCallbackURL) verifyUrl.searchParams.set("errorCallbackURL", errorCallbackURL);
+    // better-auth@1.7's magic-link verify endpoint calls decodeURIComponent()
+    // after its query parser has already decoded the parameter once. Shield the
+    // nested URL for that second pass so `%2B` in OAuth signatures remains `+`
+    // instead of becoming a space (`URLSearchParams` form semantics).
+    if (callbackURL) verifyUrl.searchParams.set("callbackURL", encodeURIComponent(callbackURL));
+    if (errorCallbackURL) {
+      verifyUrl.searchParams.set("errorCallbackURL", encodeURIComponent(errorCallbackURL));
+    }
     return c.redirect(verifyUrl.toString(), 302);
   });
 
@@ -1776,7 +1778,7 @@ export function createOidcRouter() {
     // Absolute URL so Better Auth's origin-check accepts it — see the
     // magic-link route above for the full rationale (BA's relative-path
     // regex rejects spaces in the query string).
-    const appBaseUrl = getPublicAppBaseUrl();
+    const appBaseUrl = getPublicAppOrigin();
     const redirectTo = `${appBaseUrl}/api/oauth/reset-password${url.search}`;
 
     const authApi = getOidcAuthApi();

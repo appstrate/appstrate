@@ -35,6 +35,7 @@ import { getActor, actorFromIds } from "../lib/actor.ts";
 import { getAppScope } from "../lib/scope.ts";
 import { forbidden, notFound, payloadTooLarge, unauthorized } from "../lib/errors.ts";
 import { reprDigestSha256 } from "../lib/digest.ts";
+import { getPublicAppOrigin } from "../lib/public-url.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 import { createDownloadUrl } from "@appstrate/db/storage";
 import { attachmentDisposition } from "@appstrate/core/naming";
@@ -322,7 +323,7 @@ export function createDocumentPreviewRouter() {
     const stream = await streamDocumentContent(row.storageKey);
     if (!stream) throw notFound("Preview not available");
 
-    const appOrigin = new URL(env.APP_URL).origin;
+    const appOrigin = getPublicAppOrigin();
     // When the preview is served from a SEPARATE origin (USERCONTENT_URL), the
     // app (APP_URL) embeds it cross-origin, so CORP must allow cross-origin
     // embedding; same-origin serving stays locked to same-origin.

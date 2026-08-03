@@ -34,7 +34,6 @@ import type { Context } from "hono";
 import { z } from "zod";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { createMcpServer } from "@appstrate/mcp-transport";
-import { getEnv } from "@appstrate/env";
 import { OPERATION_INDEX_HEADING } from "@appstrate/core/chat-contract";
 import { requireModulePermission } from "@appstrate/core/permissions";
 import { forbidden, invalidRequest, methodNotAllowed, notFound } from "../../lib/errors.ts";
@@ -43,6 +42,7 @@ import type { AppScope } from "../../lib/scope.ts";
 import { defaultAppForOrg, validateApplicationInOrg } from "../../middleware/app-context.ts";
 import { rateLimitMcp } from "../../middleware/rate-limit.ts";
 import { logger } from "../../lib/logger.ts";
+import { getPublicAppOrigin } from "../../lib/public-url.ts";
 import { registerAuthChallenge } from "../../lib/auth-challenges.ts";
 import { registerProtectedResourceFamily } from "../../lib/protected-resources.ts";
 import { recordAuditFromContext } from "../../services/audit.ts";
@@ -256,7 +256,7 @@ export function createMcpRouter(): Hono<AppEnv> {
     // param as optional — guard so the resource URI is never built from a
     // non-canonical id (and a malformed segment never resolves to a resource).
     if (!isCanonicalOrgId(org)) throw notFound("Organization not found");
-    const appBase = getEnv().APP_URL.replace(/\/+$/, "");
+    const appBase = getPublicAppOrigin();
     return c.json({
       resource: getMcpOrgResourceUri(org),
       authorization_servers: [`${appBase}/api/auth`],
@@ -274,10 +274,10 @@ export function createMcpRouter(): Hono<AppEnv> {
   // at the requested org's well-known (the challenge builder receives the
   // request origin, but the per-org PRM path is recovered from `c.req.path` via
   // the registry's path-prefix match — we rebuild it from the request path
-  // captured by the responder). Anchored on the canonical APP_URL base for the
+  // captured by the responder. Anchored on the canonical APP_URL base for the
   // same proxy-safety reason as the PRM `resource` above.
   registerAuthChallenge(MCP_PREFIX, ({ status, path }) => {
-    const appBase = getEnv().APP_URL.replace(/\/+$/, "");
+    const appBase = getPublicAppOrigin();
     // `path` is the requested resource path (e.g. `/api/mcp/o/<orgId>`); the
     // per-org PRM lives at the path-insertion well-known for THAT path, so the
     // tokenless client discovers the right org's metadata and requests a token
@@ -313,7 +313,7 @@ export function createMcpRouter(): Hono<AppEnv> {
     }
 
     const reqUrl = new URL(c.req.url);
-    const origin = reqUrl.origin;
+    const origin = getPublicAppOrigin();
     // A consumer that injects the get_me payload (`/api/me/context`) into its
     // own system prompt tags the session `?context=injected` so the redundant
     // get_me tool — and its "call get_me first" instruction — are dropped. Only
