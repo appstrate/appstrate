@@ -17,7 +17,15 @@
  *    `GET /api/chat/sessions/:id/stream`.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import {
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { AssistantRuntimeProvider, type AttachmentAdapter } from "@assistant-ui/react";
 import { useAISDKRuntime } from "@assistant-ui/react-ai-sdk";
 import { useChat } from "@ai-sdk/react";
@@ -96,6 +104,8 @@ export interface ChatPageProps {
    * tool UIs via context, not props.
    */
   onOpenDocument?: OpenDocument;
+  /** Optional host-owned actions displayed beside the conversation title. */
+  headerActions?: ReactNode;
   /**
    * REQUIRED host services — the chat implements none of them itself (see
    * `runtime-context.ts`): the authenticated download, the authenticated image
@@ -113,6 +123,7 @@ export function ChatPage({
   newChatKey,
   onConversationChange,
   onOpenDocument,
+  headerActions,
   downloadDocument,
   useDocumentImageSrc,
   uploadFile,
@@ -256,6 +267,7 @@ export function ChatPage({
                 <div className="min-w-0 flex-1">
                   <ActiveConversationTitle activeId={conversationId ?? null} />
                 </div>
+                {headerActions ? <div className="shrink-0">{headerActions}</div> : null}
               </div>
               <main className="min-h-0 min-w-0 flex-1 overflow-hidden">
                 <Conversation

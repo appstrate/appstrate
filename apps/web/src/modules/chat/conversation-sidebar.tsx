@@ -3,7 +3,6 @@
 import type { Dispatch, ReactNode } from "react";
 import {
   ActivityIcon,
-  ChevronLeftIcon,
   ChevronRightIcon,
   DownloadIcon,
   ExternalLinkIcon,
@@ -17,7 +16,12 @@ import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Button } from "@appstrate/ui/components/button";
 import { Tabs, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
-import { cn } from "@appstrate/ui/cn";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@appstrate/ui/components/tooltip";
 import { $api } from "../../api/client";
 import { Badge } from "../../components/status-badge";
 import { DocumentPreview } from "../../components/document-preview";
@@ -32,12 +36,62 @@ import type {
   SidebarDocument,
 } from "./conversation-sidebar-state";
 
-const TAB_ICONS = {
-  preview: EyeIcon,
-  runs: ActivityIcon,
-  documents: FilesIcon,
-  info: InfoIcon,
-} satisfies Record<ConversationSidebarTab, typeof EyeIcon>;
+const CONVERSATION_CONTEXT_PANEL_ID = "conversation-context-panel";
+
+function useConversationTabs() {
+  const { t } = useTranslation("chat");
+  return [
+    { id: "preview", Icon: EyeIcon, label: t("context.tabs.preview") },
+    { id: "runs", Icon: ActivityIcon, label: t("context.tabs.runs") },
+    { id: "documents", Icon: FilesIcon, label: t("context.tabs.documents") },
+    { id: "info", Icon: InfoIcon, label: t("context.tabs.info") },
+  ] as const satisfies readonly {
+    id: ConversationSidebarTab;
+    Icon: typeof EyeIcon;
+    label: string;
+  }[];
+}
+
+export function ConversationContextActions({
+  state,
+  dispatch,
+}: {
+  state: ConversationSidebarState;
+  dispatch: Dispatch<ConversationSidebarAction>;
+}) {
+  const { t } = useTranslation("chat");
+  const tabs = useConversationTabs();
+
+  return (
+    <TooltipProvider delayDuration={300}>
+      <Tabs
+        value={state.expanded ? state.activeTab : ""}
+        onValueChange={(tab) =>
+          dispatch({ type: "select-tab", tab: tab as ConversationSidebarTab })
+        }
+      >
+        <TabsList className="h-8" aria-label={t("context.label")}>
+          {tabs.map(({ id, Icon, label }) => (
+            <Tooltip key={id}>
+              <TooltipTrigger asChild>
+                <TabsTrigger
+                  id={`conversation-context-${id}-tab`}
+                  value={id}
+                  className="aria-selected:bg-background aria-selected:text-foreground size-7 p-0 aria-selected:shadow"
+                  aria-label={label}
+                  aria-controls={CONVERSATION_CONTEXT_PANEL_ID}
+                >
+                  <Icon className="size-4" />
+                </TabsTrigger>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">{label}</TooltipContent>
+            </Tooltip>
+          ))}
+        </TabsList>
+      </Tabs>
+    </TooltipProvider>
+  );
+}
 
 function PanelState({ children }: { children: ReactNode }) {
   return (
@@ -272,17 +326,9 @@ export function ConversationSidebar({
   dispatch: Dispatch<ConversationSidebarAction>;
 }) {
   const { t } = useTranslation("chat");
-  const tabLabels = {
-    preview: t("context.tabs.preview"),
-    runs: t("context.tabs.runs"),
-    documents: t("context.tabs.documents"),
-    info: t("context.tabs.info"),
-  } satisfies Record<ConversationSidebarTab, string>;
-  const tabs = (Object.keys(TAB_ICONS) as ConversationSidebarTab[]).map((id) => ({
-    id,
-    Icon: TAB_ICONS[id],
-    label: tabLabels[id],
-  }));
+  const tabs = useConversationTabs();
+  const activeTab = tabs.find(({ id }) => id === state.activeTab) ?? tabs[0];
+  const ActiveTabIcon = activeTab.Icon;
   const showDocument = (document: SidebarDocument) => dispatch({ type: "show-document", document });
 
   return (
@@ -295,93 +341,52 @@ export function ConversationSidebar({
           onClick={() => dispatch({ type: "toggle" })}
         />
       ) : null}
-      <aside
-        aria-label={t("context.label")}
-        className={cn(
-          "bg-background flex h-full shrink-0 border-l",
-          state.expanded
-            ? "absolute inset-y-0 right-0 z-30 w-[min(92vw,36rem)] flex-col shadow-xl lg:static lg:w-[42vw] lg:max-w-[42rem] lg:min-w-[28rem] lg:shadow-none"
-            : "w-12 flex-col",
-        )}
-      >
-        {state.expanded ? (
-          <>
-            <div className="flex h-12 shrink-0 items-center gap-2 border-b px-2">
-              <Tabs
-                value={state.activeTab}
-                onValueChange={(tab) =>
-                  dispatch({ type: "select-tab", tab: tab as ConversationSidebarTab })
-                }
-                className="min-w-0 flex-1"
-              >
-                <TabsList className="grid w-full grid-cols-4">
-                  {tabs.map(({ id, Icon, label }) => (
-                    <TabsTrigger key={id} value={id} className="gap-1.5 px-2" aria-label={label}>
-                      <Icon className="size-3.5" />
-                      <span className="hidden xl:inline">{label}</span>
-                    </TabsTrigger>
-                  ))}
-                </TabsList>
-              </Tabs>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="size-8 shrink-0"
-                aria-label={t("context.collapse")}
-                onClick={() => dispatch({ type: "toggle" })}
-              >
-                <ChevronRightIcon className="size-4" />
-              </Button>
+      {state.expanded ? (
+        <aside
+          id={CONVERSATION_CONTEXT_PANEL_ID}
+          role="tabpanel"
+          aria-labelledby={`conversation-context-${state.activeTab}-tab`}
+          aria-label={t("context.label")}
+          className="bg-background absolute inset-y-0 right-0 z-30 flex h-full w-[min(92vw,36rem)] shrink-0 flex-col border-l shadow-xl lg:static lg:w-[42vw] lg:max-w-[42rem] lg:min-w-[28rem] lg:shadow-none"
+        >
+          <div className="flex h-12 shrink-0 items-center gap-2 border-b px-2">
+            <div className="flex min-w-0 flex-1 items-center gap-2 px-1 text-sm font-medium">
+              <ActiveTabIcon className="text-muted-foreground size-4 shrink-0" />
+              <span className="truncate">{activeTab.label}</span>
             </div>
-            <div className="min-h-0 flex-1 overflow-auto">
-              {state.activeTab === "preview" ? (
-                <PreviewTab
-                  document={state.selectedDocument}
-                  onOpenModal={() => dispatch({ type: "open-modal" })}
-                />
-              ) : null}
-              {state.activeTab === "runs" ? (
-                <ConversationRuns conversationId={conversationId} active />
-              ) : null}
-              {state.activeTab === "documents" ? (
-                <ConversationDocuments
-                  conversationId={conversationId}
-                  active
-                  onSelect={showDocument}
-                />
-              ) : null}
-              {state.activeTab === "info" ? (
-                <ConversationInfo conversationId={conversationId} active />
-              ) : null}
-            </div>
-          </>
-        ) : (
-          <div className="flex h-full flex-col items-center gap-1 py-2">
             <Button
               variant="ghost"
               size="icon"
-              className="mb-2 size-8"
-              aria-label={t("context.expand")}
+              className="size-8 shrink-0"
+              aria-label={t("context.collapse")}
               onClick={() => dispatch({ type: "toggle" })}
             >
-              <ChevronLeftIcon className="size-4" />
+              <ChevronRightIcon className="size-4" />
             </Button>
-            {tabs.map(({ id, Icon, label }) => (
-              <Button
-                key={id}
-                variant={state.activeTab === id ? "secondary" : "ghost"}
-                size="icon"
-                className="size-8"
-                aria-label={label}
-                title={label}
-                onClick={() => dispatch({ type: "select-tab", tab: id })}
-              >
-                <Icon className="size-4" />
-              </Button>
-            ))}
           </div>
-        )}
-      </aside>
+          <div className="min-h-0 flex-1 overflow-auto">
+            {state.activeTab === "preview" ? (
+              <PreviewTab
+                document={state.selectedDocument}
+                onOpenModal={() => dispatch({ type: "open-modal" })}
+              />
+            ) : null}
+            {state.activeTab === "runs" ? (
+              <ConversationRuns conversationId={conversationId} active />
+            ) : null}
+            {state.activeTab === "documents" ? (
+              <ConversationDocuments
+                conversationId={conversationId}
+                active
+                onSelect={showDocument}
+              />
+            ) : null}
+            {state.activeTab === "info" ? (
+              <ConversationInfo conversationId={conversationId} active />
+            ) : null}
+          </div>
+        </aside>
+      ) : null}
       {state.modalDocument ? (
         <DocumentPreview
           doc={state.modalDocument}

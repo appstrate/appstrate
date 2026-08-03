@@ -3,7 +3,6 @@
   "doc.previewOf": "Preview {{name}}",
   "doc.downloadOf": "Download {{name}}",
   "context.label": "Conversation context",
-  "context.expand": "Expand conversation context",
   "context.collapse": "Collapse conversation context",
   "context.loading": "Loading context…",
   "context.error": "The conversation context could not be loaded.",

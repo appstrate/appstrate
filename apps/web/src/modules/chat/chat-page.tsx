@@ -19,7 +19,7 @@ import {
   INITIAL_CONVERSATION_SIDEBAR_STATE,
   conversationSidebarReducer,
 } from "./conversation-sidebar-state";
-import { ConversationSidebar } from "./conversation-sidebar";
+import { ConversationContextActions, ConversationSidebar } from "./conversation-sidebar";
 
 const DESKTOP_CONTEXT_QUERY = "(min-width: 1024px)";
 
@@ -123,6 +123,9 @@ export function ChatModulePage() {
           newChatKey={location.key}
           onConversationChange={onConversationChange}
           onOpenDocument={presentDocument}
+          headerActions={
+            <ConversationContextActions state={sidebarState} dispatch={dispatchSidebar} />
+          }
           downloadDocument={onDownloadDocument}
           useDocumentImageSrc={useDocumentImageSrc}
           uploadFile={uploadFile}

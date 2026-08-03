@@ -3,7 +3,6 @@
   "doc.previewOf": "Aperçu de {{name}}",
   "doc.downloadOf": "Télécharger {{name}}",
   "context.label": "Contexte de la conversation",
-  "context.expand": "Déplier le contexte de la conversation",
   "context.collapse": "Replier le contexte de la conversation",
   "context.loading": "Chargement du contexte…",
   "context.error": "Le contexte de la conversation n’a pas pu être chargé.",

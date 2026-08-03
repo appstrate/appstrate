@@ -38,6 +38,21 @@ describe("conversation sidebar state", () => {
     expect(collapsed.selectedDocument).toEqual(doc("doc_a"));
   });
 
+  it("reopens the panel when a header tab is selected", () => {
+    const collapsed: ConversationSidebarState = {
+      ...INITIAL_CONVERSATION_SIDEBAR_STATE,
+      expanded: false,
+      activeTab: "preview",
+    };
+
+    expect(
+      conversationSidebarReducer(collapsed, { type: "select-tab", tab: "preview" }),
+    ).toMatchObject({
+      expanded: true,
+      activeTab: "preview",
+    });
+  });
+
   it("opens the modal only as an explicit second action", () => {
     const selected = conversationSidebarReducer(INITIAL_CONVERSATION_SIDEBAR_STATE, {
       type: "show-document",
