@@ -176,7 +176,7 @@ export function ModelGenerationControls({
             variant="outline"
             aria-labelledby={`${id}-reasoning-label`}
             aria-describedby={compact ? undefined : `${id}-reasoning-description`}
-            className="grid w-full grid-cols-7 gap-0"
+            className="grid w-full grid-cols-8 gap-0"
             onValueChange={(next) => {
               if (!next) return;
               onChange(

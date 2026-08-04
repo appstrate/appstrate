@@ -5112,7 +5112,7 @@ export interface components {
                 levels: {
                     [key: string]: "supported" | "unsupported" | "unknown";
                 };
-                /** @description Optional provider-native values for portable levels (for example xhigh to max). */
+                /** @description Optional provider-native values for portable levels (for example off to none). */
                 nativeLevels?: {
                     [key: string]: "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
                 };
@@ -5126,7 +5126,7 @@ export interface components {
              * @description Portable reasoning effort normalized across providers.
              * @enum {string|null}
              */
-            reasoningLevel?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | null;
+            reasoningLevel?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" | null;
         };
         ModelProviderCredential: {
             id: string;

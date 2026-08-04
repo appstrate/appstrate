@@ -9,6 +9,7 @@
     ],
     "generation": {
       "temperature": "supported",
+      "temperatureWithReasoning": "unknown",
       "reasoning": {
         "supported": "unknown",
         "adaptive": null,
@@ -18,7 +19,8 @@
           "low": "unknown",
           "medium": "unknown",
           "high": "unknown",
-          "xhigh": "unknown"
+          "xhigh": "unknown",
+          "max": "unknown"
         }
       }
     },
@@ -36,6 +38,7 @@
     ],
     "generation": {
       "temperature": "supported",
+      "temperatureWithReasoning": "unknown",
       "reasoning": {
         "supported": "unknown",
         "adaptive": null,
@@ -45,7 +48,8 @@
           "low": "unknown",
           "medium": "unknown",
           "high": "unknown",
-          "xhigh": "unknown"
+          "xhigh": "unknown",
+          "max": "unknown"
         }
       }
     },
@@ -63,6 +67,7 @@
     ],
     "generation": {
       "temperature": "supported",
+      "temperatureWithReasoning": "unknown",
       "reasoning": {
         "supported": "unknown",
         "adaptive": null,
@@ -72,7 +77,8 @@
           "low": "unknown",
           "medium": "unknown",
           "high": "unknown",
-          "xhigh": "unknown"
+          "xhigh": "unknown",
+          "max": "unknown"
         }
       }
     },
@@ -90,6 +96,7 @@
     ],
     "generation": {
       "temperature": "supported",
+      "temperatureWithReasoning": "unknown",
       "reasoning": {
         "supported": "unknown",
         "adaptive": null,
@@ -99,7 +106,8 @@
           "low": "unknown",
           "medium": "unknown",
           "high": "unknown",
-          "xhigh": "unknown"
+          "xhigh": "unknown",
+          "max": "unknown"
         }
       }
     },
@@ -117,6 +125,7 @@
     ],
     "generation": {
       "temperature": "supported",
+      "temperatureWithReasoning": "unknown",
       "reasoning": {
         "supported": "unknown",
         "adaptive": null,
@@ -126,7 +135,8 @@
           "low": "unknown",
           "medium": "unknown",
           "high": "unknown",
-          "xhigh": "unknown"
+          "xhigh": "unknown",
+          "max": "unknown"
         }
       }
     },
@@ -144,6 +154,7 @@
     ],
     "generation": {
       "temperature": "supported",
+      "temperatureWithReasoning": "unknown",
       "reasoning": {
         "supported": "unknown",
         "adaptive": null,
@@ -153,7 +164,8 @@
           "low": "unknown",
           "medium": "unknown",
           "high": "unknown",
-          "xhigh": "unknown"
+          "xhigh": "unknown",
+          "max": "unknown"
         }
       }
     },
@@ -171,6 +183,7 @@
     ],
     "generation": {
       "temperature": "supported",
+      "temperatureWithReasoning": "unknown",
       "reasoning": {
         "supported": "unknown",
         "adaptive": null,
@@ -180,7 +193,8 @@
           "low": "unknown",
           "medium": "unknown",
           "high": "unknown",
-          "xhigh": "unknown"
+          "xhigh": "unknown",
+          "max": "unknown"
         }
       }
     },
@@ -199,6 +213,7 @@
     ],
     "generation": {
       "temperature": "supported",
+      "temperatureWithReasoning": "unknown",
       "reasoning": {
         "supported": "unknown",
         "adaptive": null,
@@ -208,7 +223,8 @@
           "low": "unknown",
           "medium": "unknown",
           "high": "unknown",
-          "xhigh": "unknown"
+          "xhigh": "unknown",
+          "max": "unknown"
         }
       }
     },
@@ -227,6 +243,7 @@
     ],
     "generation": {
       "temperature": "supported",
+      "temperatureWithReasoning": "unknown",
       "reasoning": {
         "supported": "unknown",
         "adaptive": null,
@@ -236,7 +253,8 @@
           "low": "unknown",
           "medium": "unknown",
           "high": "unknown",
-          "xhigh": "unknown"
+          "xhigh": "unknown",
+          "max": "unknown"
         }
       }
     },
@@ -256,6 +274,7 @@
     ],
     "generation": {
       "temperature": "supported",
+      "temperatureWithReasoning": "unknown",
       "reasoning": {
         "supported": "unknown",
         "adaptive": null,
@@ -265,7 +284,8 @@
           "low": "unknown",
           "medium": "unknown",
           "high": "unknown",
-          "xhigh": "unknown"
+          "xhigh": "unknown",
+          "max": "unknown"
         }
       }
     },
@@ -284,6 +304,7 @@
     ],
     "generation": {
       "temperature": "supported",
+      "temperatureWithReasoning": "unknown",
       "reasoning": {
         "supported": "unknown",
         "adaptive": null,
@@ -293,7 +314,8 @@
           "low": "unknown",
           "medium": "unknown",
           "high": "unknown",
-          "xhigh": "unknown"
+          "xhigh": "unknown",
+          "max": "unknown"
         }
       }
     },
@@ -312,6 +334,7 @@
     ],
     "generation": {
       "temperature": "supported",
+      "temperatureWithReasoning": "unknown",
       "reasoning": {
         "supported": "unknown",
         "adaptive": null,
@@ -321,7 +344,8 @@
           "low": "unknown",
           "medium": "unknown",
           "high": "unknown",
-          "xhigh": "unknown"
+          "xhigh": "unknown",
+          "max": "unknown"
         }
       }
     },
@@ -341,16 +365,18 @@
     ],
     "generation": {
       "temperature": "supported",
+      "temperatureWithReasoning": "unknown",
       "reasoning": {
         "supported": "supported",
         "adaptive": null,
         "levels": {
-          "off": "unknown",
-          "minimal": "unknown",
-          "low": "unknown",
-          "medium": "unknown",
-          "high": "unknown",
-          "xhigh": "unknown"
+          "off": "unsupported",
+          "minimal": "unsupported",
+          "low": "unsupported",
+          "medium": "unsupported",
+          "high": "unsupported",
+          "xhigh": "unsupported",
+          "max": "unsupported"
         }
       }
     },
@@ -369,6 +395,7 @@
     ],
     "generation": {
       "temperature": "supported",
+      "temperatureWithReasoning": "unknown",
       "reasoning": {
         "supported": "unknown",
         "adaptive": null,
@@ -378,7 +405,8 @@
           "low": "unknown",
           "medium": "unknown",
           "high": "unknown",
-          "xhigh": "unknown"
+          "xhigh": "unknown",
+          "max": "unknown"
         }
       }
     },
@@ -396,6 +424,7 @@
     ],
     "generation": {
       "temperature": "supported",
+      "temperatureWithReasoning": "unknown",
       "reasoning": {
         "supported": "unknown",
         "adaptive": null,
@@ -405,7 +434,8 @@
           "low": "unknown",
           "medium": "unknown",
           "high": "unknown",
-          "xhigh": "unknown"
+          "xhigh": "unknown",
+          "max": "unknown"
         }
       }
     },
@@ -423,6 +453,7 @@
     ],
     "generation": {
       "temperature": "supported",
+      "temperatureWithReasoning": "unknown",
       "reasoning": {
         "supported": "unknown",
         "adaptive": null,
@@ -432,7 +463,8 @@
           "low": "unknown",
           "medium": "unknown",
           "high": "unknown",
-          "xhigh": "unknown"
+          "xhigh": "unknown",
+          "max": "unknown"
         }
       }
     },
@@ -450,6 +482,7 @@
     ],
     "generation": {
       "temperature": "supported",
+      "temperatureWithReasoning": "unknown",
       "reasoning": {
         "supported": "unknown",
         "adaptive": null,
@@ -459,7 +492,8 @@
           "low": "unknown",
           "medium": "unknown",
           "high": "unknown",
-          "xhigh": "unknown"
+          "xhigh": "unknown",
+          "max": "unknown"
         }
       }
     },
@@ -477,6 +511,7 @@
     ],
     "generation": {
       "temperature": "supported",
+      "temperatureWithReasoning": "unknown",
       "reasoning": {
         "supported": "unknown",
         "adaptive": null,
@@ -486,7 +521,8 @@
           "low": "unknown",
           "medium": "unknown",
           "high": "unknown",
-          "xhigh": "unknown"
+          "xhigh": "unknown",
+          "max": "unknown"
         }
       }
     },
@@ -504,6 +540,7 @@
     ],
     "generation": {
       "temperature": "supported",
+      "temperatureWithReasoning": "unknown",
       "reasoning": {
         "supported": "unknown",
         "adaptive": null,
@@ -513,7 +550,8 @@
           "low": "unknown",
           "medium": "unknown",
           "high": "unknown",
-          "xhigh": "unknown"
+          "xhigh": "unknown",
+          "max": "unknown"
         }
       }
     },
@@ -531,6 +569,7 @@
     ],
     "generation": {
       "temperature": "supported",
+      "temperatureWithReasoning": "unknown",
       "reasoning": {
         "supported": "unknown",
         "adaptive": null,
@@ -540,7 +579,8 @@
           "low": "unknown",
           "medium": "unknown",
           "high": "unknown",
-          "xhigh": "unknown"
+          "xhigh": "unknown",
+          "max": "unknown"
         }
       }
     },
@@ -558,6 +598,7 @@
     ],
     "generation": {
       "temperature": "supported",
+      "temperatureWithReasoning": "unknown",
       "reasoning": {
         "supported": "unknown",
         "adaptive": null,
@@ -567,7 +608,8 @@
           "low": "unknown",
           "medium": "unknown",
           "high": "unknown",
-          "xhigh": "unknown"
+          "xhigh": "unknown",
+          "max": "unknown"
         }
       }
     },
@@ -585,6 +627,7 @@
     ],
     "generation": {
       "temperature": "supported",
+      "temperatureWithReasoning": "unknown",
       "reasoning": {
         "supported": "unknown",
         "adaptive": null,
@@ -594,7 +637,8 @@
           "low": "unknown",
           "medium": "unknown",
           "high": "unknown",
-          "xhigh": "unknown"
+          "xhigh": "unknown",
+          "max": "unknown"
         }
       }
     },
@@ -613,6 +657,7 @@
     ],
     "generation": {
       "temperature": "supported",
+      "temperatureWithReasoning": "unknown",
       "reasoning": {
         "supported": "unknown",
         "adaptive": null,
@@ -622,7 +667,8 @@
           "low": "unknown",
           "medium": "unknown",
           "high": "unknown",
-          "xhigh": "unknown"
+          "xhigh": "unknown",
+          "max": "unknown"
         }
       }
     },
@@ -641,6 +687,7 @@
     ],
     "generation": {
       "temperature": "supported",
+      "temperatureWithReasoning": "unknown",
       "reasoning": {
         "supported": "unknown",
         "adaptive": null,
@@ -650,7 +697,8 @@
           "low": "unknown",
           "medium": "unknown",
           "high": "unknown",
-          "xhigh": "unknown"
+          "xhigh": "unknown",
+          "max": "unknown"
         }
       }
     },
@@ -668,6 +716,7 @@
     ],
     "generation": {
       "temperature": "supported",
+      "temperatureWithReasoning": "unknown",
       "reasoning": {
         "supported": "unknown",
         "adaptive": null,
@@ -677,7 +726,8 @@
           "low": "unknown",
           "medium": "unknown",
           "high": "unknown",
-          "xhigh": "unknown"
+          "xhigh": "unknown",
+          "max": "unknown"
         }
       }
     },
@@ -696,6 +746,7 @@
     ],
     "generation": {
       "temperature": "supported",
+      "temperatureWithReasoning": "unknown",
       "reasoning": {
         "supported": "unknown",
         "adaptive": null,
@@ -705,7 +756,8 @@
           "low": "unknown",
           "medium": "unknown",
           "high": "unknown",
-          "xhigh": "unknown"
+          "xhigh": "unknown",
+          "max": "unknown"
         }
       }
     },
@@ -725,6 +777,7 @@
     ],
     "generation": {
       "temperature": "supported",
+      "temperatureWithReasoning": "unknown",
       "reasoning": {
         "supported": "unknown",
         "adaptive": null,
@@ -734,7 +787,8 @@
           "low": "unknown",
           "medium": "unknown",
           "high": "unknown",
-          "xhigh": "unknown"
+          "xhigh": "unknown",
+          "max": "unknown"
         }
       }
     },
@@ -754,6 +808,7 @@
     ],
     "generation": {
       "temperature": "supported",
+      "temperatureWithReasoning": "unknown",
       "reasoning": {
         "supported": "unknown",
         "adaptive": null,
@@ -763,7 +818,8 @@
           "low": "unknown",
           "medium": "unknown",
           "high": "unknown",
-          "xhigh": "unknown"
+          "xhigh": "unknown",
+          "max": "unknown"
         }
       }
     },
@@ -783,6 +839,7 @@
     ],
     "generation": {
       "temperature": "supported",
+      "temperatureWithReasoning": "unknown",
       "reasoning": {
         "supported": "unknown",
         "adaptive": null,
@@ -792,7 +849,8 @@
           "low": "unknown",
           "medium": "unknown",
           "high": "unknown",
-          "xhigh": "unknown"
+          "xhigh": "unknown",
+          "max": "unknown"
         }
       }
     },
@@ -812,6 +870,7 @@
     ],
     "generation": {
       "temperature": "supported",
+      "temperatureWithReasoning": "unknown",
       "reasoning": {
         "supported": "unknown",
         "adaptive": null,
@@ -821,7 +880,8 @@
           "low": "unknown",
           "medium": "unknown",
           "high": "unknown",
-          "xhigh": "unknown"
+          "xhigh": "unknown",
+          "max": "unknown"
         }
       }
     },
@@ -841,6 +901,7 @@
     ],
     "generation": {
       "temperature": "supported",
+      "temperatureWithReasoning": "unknown",
       "reasoning": {
         "supported": "unknown",
         "adaptive": null,
@@ -850,7 +911,8 @@
           "low": "unknown",
           "medium": "unknown",
           "high": "unknown",
-          "xhigh": "unknown"
+          "xhigh": "unknown",
+          "max": "unknown"
         }
       }
     },
@@ -870,6 +932,7 @@
     ],
     "generation": {
       "temperature": "supported",
+      "temperatureWithReasoning": "unknown",
       "reasoning": {
         "supported": "unknown",
         "adaptive": null,
@@ -879,7 +942,8 @@
           "low": "unknown",
           "medium": "unknown",
           "high": "unknown",
-          "xhigh": "unknown"
+          "xhigh": "unknown",
+          "max": "unknown"
         }
       }
     },
@@ -899,6 +963,7 @@
     ],
     "generation": {
       "temperature": "supported",
+      "temperatureWithReasoning": "unknown",
       "reasoning": {
         "supported": "unknown",
         "adaptive": null,
@@ -908,7 +973,8 @@
           "low": "unknown",
           "medium": "unknown",
           "high": "unknown",
-          "xhigh": "unknown"
+          "xhigh": "unknown",
+          "max": "unknown"
         }
       }
     },
@@ -927,6 +993,7 @@
     ],
     "generation": {
       "temperature": "supported",
+      "temperatureWithReasoning": "unknown",
       "reasoning": {
         "supported": "unknown",
         "adaptive": null,
@@ -936,7 +1003,8 @@
           "low": "unknown",
           "medium": "unknown",
           "high": "unknown",
-          "xhigh": "unknown"
+          "xhigh": "unknown",
+          "max": "unknown"
         }
       }
     },
@@ -956,6 +1024,7 @@
     ],
     "generation": {
       "temperature": "supported",
+      "temperatureWithReasoning": "unknown",
       "reasoning": {
         "supported": "unknown",
         "adaptive": null,
@@ -965,7 +1034,8 @@
           "low": "unknown",
           "medium": "unknown",
           "high": "unknown",
-          "xhigh": "unknown"
+          "xhigh": "unknown",
+          "max": "unknown"
         }
       }
     },
@@ -984,6 +1054,7 @@
     ],
     "generation": {
       "temperature": "supported",
+      "temperatureWithReasoning": "unknown",
       "reasoning": {
         "supported": "unknown",
         "adaptive": null,
@@ -993,7 +1064,8 @@
           "low": "unknown",
           "medium": "unknown",
           "high": "unknown",
-          "xhigh": "unknown"
+          "xhigh": "unknown",
+          "max": "unknown"
         }
       }
     },
@@ -1011,6 +1083,7 @@
     ],
     "generation": {
       "temperature": "supported",
+      "temperatureWithReasoning": "unknown",
       "reasoning": {
         "supported": "unknown",
         "adaptive": null,
@@ -1020,7 +1093,8 @@
           "low": "unknown",
           "medium": "unknown",
           "high": "unknown",
-          "xhigh": "unknown"
+          "xhigh": "unknown",
+          "max": "unknown"
         }
       }
     },
@@ -1038,6 +1112,7 @@
     ],
     "generation": {
       "temperature": "supported",
+      "temperatureWithReasoning": "unknown",
       "reasoning": {
         "supported": "unknown",
         "adaptive": null,
@@ -1047,7 +1122,8 @@
           "low": "unknown",
           "medium": "unknown",
           "high": "unknown",
-          "xhigh": "unknown"
+          "xhigh": "unknown",
+          "max": "unknown"
         }
       }
     },
@@ -1066,6 +1142,7 @@
     ],
     "generation": {
       "temperature": "supported",
+      "temperatureWithReasoning": "unknown",
       "reasoning": {
         "supported": "unknown",
         "adaptive": null,
@@ -1075,7 +1152,8 @@
           "low": "unknown",
           "medium": "unknown",
           "high": "unknown",
-          "xhigh": "unknown"
+          "xhigh": "unknown",
+          "max": "unknown"
         }
       }
     },
@@ -1095,6 +1173,7 @@
     ],
     "generation": {
       "temperature": "supported",
+      "temperatureWithReasoning": "unknown",
       "reasoning": {
         "supported": "unknown",
         "adaptive": null,
@@ -1104,7 +1183,8 @@
           "low": "unknown",
           "medium": "unknown",
           "high": "unknown",
-          "xhigh": "unknown"
+          "xhigh": "unknown",
+          "max": "unknown"
         }
       }
     },
@@ -1123,6 +1203,7 @@
     ],
     "generation": {
       "temperature": "supported",
+      "temperatureWithReasoning": "unknown",
       "reasoning": {
         "supported": "unknown",
         "adaptive": null,
@@ -1132,7 +1213,8 @@
           "low": "unknown",
           "medium": "unknown",
           "high": "unknown",
-          "xhigh": "unknown"
+          "xhigh": "unknown",
+          "max": "unknown"
         }
       }
     },
@@ -1150,6 +1232,7 @@
     ],
     "generation": {
       "temperature": "supported",
+      "temperatureWithReasoning": "unknown",
       "reasoning": {
         "supported": "unknown",
         "adaptive": null,
@@ -1159,7 +1242,8 @@
           "low": "unknown",
           "medium": "unknown",
           "high": "unknown",
-          "xhigh": "unknown"
+          "xhigh": "unknown",
+          "max": "unknown"
         }
       }
     },
@@ -1178,6 +1262,7 @@
     ],
     "generation": {
       "temperature": "supported",
+      "temperatureWithReasoning": "unknown",
       "reasoning": {
         "supported": "unknown",
         "adaptive": null,
@@ -1187,7 +1272,8 @@
           "low": "unknown",
           "medium": "unknown",
           "high": "unknown",
-          "xhigh": "unknown"
+          "xhigh": "unknown",
+          "max": "unknown"
         }
       }
     },
@@ -1207,6 +1293,7 @@
     ],
     "generation": {
       "temperature": "supported",
+      "temperatureWithReasoning": "unknown",
       "reasoning": {
         "supported": "unknown",
         "adaptive": null,
@@ -1216,7 +1303,8 @@
           "low": "unknown",
           "medium": "unknown",
           "high": "unknown",
-          "xhigh": "unknown"
+          "xhigh": "unknown",
+          "max": "unknown"
         }
       }
     },
@@ -1236,6 +1324,7 @@
     ],
     "generation": {
       "temperature": "supported",
+      "temperatureWithReasoning": "unknown",
       "reasoning": {
         "supported": "unknown",
         "adaptive": null,
@@ -1245,7 +1334,8 @@
           "low": "unknown",
           "medium": "unknown",
           "high": "unknown",
-          "xhigh": "unknown"
+          "xhigh": "unknown",
+          "max": "unknown"
         }
       }
     },
@@ -1265,6 +1355,7 @@
     ],
     "generation": {
       "temperature": "supported",
+      "temperatureWithReasoning": "unknown",
       "reasoning": {
         "supported": "unknown",
         "adaptive": null,
@@ -1274,7 +1365,8 @@
           "low": "unknown",
           "medium": "unknown",
           "high": "unknown",
-          "xhigh": "unknown"
+          "xhigh": "unknown",
+          "max": "unknown"
         }
       }
     },
@@ -1294,17 +1386,19 @@
       "reasoning"
     ],
     "generation": {
-      "temperature": "supported",
+      "temperature": "unsupported",
+      "temperatureWithReasoning": "unsupported",
       "reasoning": {
         "supported": "supported",
         "adaptive": null,
         "levels": {
-          "off": "unsupported",
+          "off": "supported",
           "minimal": "supported",
-          "low": "unknown",
-          "medium": "unknown",
-          "high": "unknown",
-          "xhigh": "unsupported"
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "unsupported",
+          "max": "supported"
         }
       }
     },
@@ -1324,17 +1418,19 @@
       "reasoning"
     ],
     "generation": {
-      "temperature": "supported",
+      "temperature": "unsupported",
+      "temperatureWithReasoning": "unsupported",
       "reasoning": {
         "supported": "supported",
         "adaptive": null,
         "levels": {
-          "off": "unsupported",
+          "off": "supported",
           "minimal": "supported",
-          "low": "unknown",
-          "medium": "unknown",
-          "high": "unknown",
-          "xhigh": "unsupported"
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "unsupported",
+          "max": "supported"
         }
       }
     },
@@ -1355,16 +1451,18 @@
     ],
     "generation": {
       "temperature": "supported",
+      "temperatureWithReasoning": "unknown",
       "reasoning": {
         "supported": "supported",
         "adaptive": null,
         "levels": {
           "off": "unsupported",
-          "minimal": "supported",
-          "low": "unknown",
-          "medium": "unknown",
-          "high": "unknown",
-          "xhigh": "unsupported"
+          "minimal": "unsupported",
+          "low": "unsupported",
+          "medium": "unsupported",
+          "high": "unsupported",
+          "xhigh": "unsupported",
+          "max": "unsupported"
         }
       }
     },
@@ -1385,16 +1483,18 @@
     ],
     "generation": {
       "temperature": "supported",
+      "temperatureWithReasoning": "unknown",
       "reasoning": {
         "supported": "supported",
         "adaptive": null,
         "levels": {
           "off": "unsupported",
-          "minimal": "supported",
-          "low": "unknown",
-          "medium": "unknown",
-          "high": "unknown",
-          "xhigh": "unsupported"
+          "minimal": "unsupported",
+          "low": "unsupported",
+          "medium": "unsupported",
+          "high": "unsupported",
+          "xhigh": "unsupported",
+          "max": "unsupported"
         }
       }
     },
@@ -1414,17 +1514,19 @@
       "reasoning"
     ],
     "generation": {
-      "temperature": "supported",
+      "temperature": "unsupported",
+      "temperatureWithReasoning": "unsupported",
       "reasoning": {
         "supported": "supported",
         "adaptive": null,
         "levels": {
-          "off": "unsupported",
+          "off": "supported",
           "minimal": "supported",
-          "low": "unknown",
-          "medium": "unknown",
-          "high": "unknown",
-          "xhigh": "unsupported"
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "unsupported",
+          "max": "supported"
         }
       }
     },
@@ -1444,17 +1546,19 @@
       "reasoning"
     ],
     "generation": {
-      "temperature": "supported",
+      "temperature": "unsupported",
+      "temperatureWithReasoning": "unsupported",
       "reasoning": {
         "supported": "supported",
         "adaptive": null,
         "levels": {
-          "off": "unsupported",
+          "off": "supported",
           "minimal": "supported",
-          "low": "unknown",
-          "medium": "unknown",
-          "high": "unknown",
-          "xhigh": "unsupported"
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "unsupported",
+          "max": "supported"
         }
       }
     },
@@ -1474,17 +1578,19 @@
       "reasoning"
     ],
     "generation": {
-      "temperature": "supported",
+      "temperature": "unsupported",
+      "temperatureWithReasoning": "unsupported",
       "reasoning": {
         "supported": "supported",
         "adaptive": null,
         "levels": {
-          "off": "unsupported",
+          "off": "supported",
           "minimal": "supported",
-          "low": "unknown",
-          "medium": "unknown",
-          "high": "unknown",
-          "xhigh": "unsupported"
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "unsupported",
+          "max": "supported"
         }
       }
     },
@@ -1504,17 +1610,19 @@
       "reasoning"
     ],
     "generation": {
-      "temperature": "supported",
+      "temperature": "unsupported",
+      "temperatureWithReasoning": "unsupported",
       "reasoning": {
         "supported": "supported",
         "adaptive": null,
         "levels": {
-          "off": "unsupported",
+          "off": "supported",
           "minimal": "supported",
-          "low": "unknown",
-          "medium": "unknown",
-          "high": "unknown",
-          "xhigh": "unsupported"
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "unsupported",
+          "max": "supported"
         }
       }
     },
@@ -1535,16 +1643,18 @@
     ],
     "generation": {
       "temperature": "unsupported",
+      "temperatureWithReasoning": "unsupported",
       "reasoning": {
         "supported": "supported",
         "adaptive": null,
         "levels": {
           "off": "unsupported",
-          "minimal": "supported",
-          "low": "unknown",
-          "medium": "unknown",
-          "high": "unknown",
-          "xhigh": "unsupported"
+          "minimal": "unsupported",
+          "low": "unsupported",
+          "medium": "unsupported",
+          "high": "unsupported",
+          "xhigh": "unsupported",
+          "max": "unsupported"
         }
       }
     },
@@ -1564,16 +1674,18 @@
     ],
     "generation": {
       "temperature": "unsupported",
+      "temperatureWithReasoning": "unsupported",
       "reasoning": {
         "supported": "unknown",
         "adaptive": null,
         "levels": {
-          "off": "unsupported",
+          "off": "unknown",
           "minimal": "unknown",
           "low": "unknown",
           "medium": "unknown",
           "high": "unknown",
-          "xhigh": "unsupported"
+          "xhigh": "unknown",
+          "max": "unknown"
         }
       }
     },
@@ -1594,16 +1706,18 @@
     ],
     "generation": {
       "temperature": "supported",
+      "temperatureWithReasoning": "unsupported",
       "reasoning": {
         "supported": "supported",
         "adaptive": null,
         "levels": {
           "off": "supported",
           "minimal": "supported",
-          "low": "unknown",
-          "medium": "unknown",
-          "high": "unknown",
-          "xhigh": "unsupported"
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "unsupported",
+          "max": "supported"
         }
       }
     },
@@ -1624,16 +1738,18 @@
     ],
     "generation": {
       "temperature": "supported",
+      "temperatureWithReasoning": "unsupported",
       "reasoning": {
         "supported": "supported",
         "adaptive": null,
         "levels": {
           "off": "supported",
           "minimal": "supported",
-          "low": "unknown",
-          "medium": "unknown",
-          "high": "unknown",
-          "xhigh": "unsupported"
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "unsupported",
+          "max": "supported"
         }
       }
     },
@@ -1654,16 +1770,18 @@
     ],
     "generation": {
       "temperature": "supported",
+      "temperatureWithReasoning": "unsupported",
       "reasoning": {
         "supported": "supported",
         "adaptive": null,
         "levels": {
           "off": "supported",
           "minimal": "supported",
-          "low": "unknown",
-          "medium": "unknown",
-          "high": "unknown",
-          "xhigh": "unsupported"
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "unsupported",
+          "max": "supported"
         }
       }
     },
@@ -1684,19 +1802,18 @@
     ],
     "generation": {
       "temperature": "supported",
+      "temperatureWithReasoning": "unsupported",
       "reasoning": {
         "supported": "supported",
         "adaptive": null,
         "levels": {
           "off": "supported",
           "minimal": "supported",
-          "low": "unknown",
-          "medium": "unknown",
-          "high": "unknown",
-          "xhigh": "supported"
-        },
-        "nativeLevels": {
-          "xhigh": "xhigh"
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "supported",
+          "max": "supported"
         }
       }
     },
@@ -1717,19 +1834,18 @@
     ],
     "generation": {
       "temperature": "supported",
+      "temperatureWithReasoning": "unsupported",
       "reasoning": {
         "supported": "supported",
         "adaptive": null,
         "levels": {
           "off": "supported",
           "minimal": "supported",
-          "low": "unknown",
-          "medium": "unknown",
-          "high": "unknown",
-          "xhigh": "supported"
-        },
-        "nativeLevels": {
-          "xhigh": "xhigh"
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "supported",
+          "max": "supported"
         }
       }
     },
@@ -1749,17 +1865,19 @@
       "reasoning"
     ],
     "generation": {
-      "temperature": "supported",
+      "temperature": "unsupported",
+      "temperatureWithReasoning": "unsupported",
       "reasoning": {
         "supported": "supported",
         "adaptive": null,
         "levels": {
-          "off": "unsupported",
+          "off": "supported",
           "minimal": "supported",
-          "low": "unknown",
-          "medium": "unknown",
-          "high": "unknown",
-          "xhigh": "unsupported"
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "unsupported",
+          "max": "supported"
         }
       }
     },
@@ -1779,17 +1897,19 @@
       "reasoning"
     ],
     "generation": {
-      "temperature": "supported",
+      "temperature": "unsupported",
+      "temperatureWithReasoning": "unsupported",
       "reasoning": {
         "supported": "supported",
         "adaptive": null,
         "levels": {
-          "off": "unsupported",
+          "off": "supported",
           "minimal": "supported",
-          "low": "unknown",
-          "medium": "unknown",
-          "high": "unknown",
-          "xhigh": "unsupported"
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "unsupported",
+          "max": "supported"
         }
       }
     },
@@ -1810,19 +1930,18 @@
     ],
     "generation": {
       "temperature": "supported",
+      "temperatureWithReasoning": "unsupported",
       "reasoning": {
         "supported": "supported",
         "adaptive": null,
         "levels": {
           "off": "supported",
           "minimal": "supported",
-          "low": "unknown",
-          "medium": "unknown",
-          "high": "unknown",
-          "xhigh": "supported"
-        },
-        "nativeLevels": {
-          "xhigh": "xhigh"
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "supported",
+          "max": "supported"
         }
       }
     },
@@ -1842,17 +1961,19 @@
       "reasoning"
     ],
     "generation": {
-      "temperature": "supported",
+      "temperature": "unsupported",
+      "temperatureWithReasoning": "unsupported",
       "reasoning": {
         "supported": "supported",
         "adaptive": null,
         "levels": {
-          "off": "unknown",
-          "minimal": "unknown",
-          "low": "unknown",
-          "medium": "unknown",
-          "high": "unknown",
-          "xhigh": "unknown"
+          "off": "supported",
+          "minimal": "supported",
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "unsupported",
+          "max": "supported"
         }
       }
     },
@@ -1873,19 +1994,18 @@
     ],
     "generation": {
       "temperature": "supported",
+      "temperatureWithReasoning": "unsupported",
       "reasoning": {
         "supported": "supported",
         "adaptive": null,
         "levels": {
           "off": "supported",
           "minimal": "unsupported",
-          "low": "unknown",
-          "medium": "unknown",
-          "high": "unknown",
-          "xhigh": "supported"
-        },
-        "nativeLevels": {
-          "xhigh": "xhigh"
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "supported",
+          "max": "supported"
         }
       }
     },
@@ -1906,19 +2026,18 @@
     ],
     "generation": {
       "temperature": "supported",
+      "temperatureWithReasoning": "unsupported",
       "reasoning": {
         "supported": "supported",
         "adaptive": null,
         "levels": {
           "off": "supported",
           "minimal": "unsupported",
-          "low": "unknown",
-          "medium": "unknown",
-          "high": "unknown",
-          "xhigh": "supported"
-        },
-        "nativeLevels": {
-          "xhigh": "xhigh"
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "supported",
+          "max": "supported"
         }
       }
     },
@@ -1939,19 +2058,18 @@
     ],
     "generation": {
       "temperature": "supported",
+      "temperatureWithReasoning": "unsupported",
       "reasoning": {
         "supported": "supported",
         "adaptive": null,
         "levels": {
           "off": "supported",
           "minimal": "unsupported",
-          "low": "unknown",
-          "medium": "unknown",
-          "high": "unknown",
-          "xhigh": "supported"
-        },
-        "nativeLevels": {
-          "xhigh": "xhigh"
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "supported",
+          "max": "supported"
         }
       }
     },
@@ -1972,19 +2090,18 @@
     ],
     "generation": {
       "temperature": "supported",
+      "temperatureWithReasoning": "unsupported",
       "reasoning": {
         "supported": "supported",
         "adaptive": null,
         "levels": {
           "off": "supported",
           "minimal": "unsupported",
-          "low": "unknown",
-          "medium": "unknown",
-          "high": "unknown",
-          "xhigh": "supported"
-        },
-        "nativeLevels": {
-          "xhigh": "xhigh"
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "supported",
+          "max": "supported"
         }
       }
     },
@@ -2005,19 +2122,18 @@
     ],
     "generation": {
       "temperature": "supported",
+      "temperatureWithReasoning": "unsupported",
       "reasoning": {
         "supported": "supported",
         "adaptive": null,
         "levels": {
           "off": "supported",
           "minimal": "unsupported",
-          "low": "unknown",
-          "medium": "unknown",
-          "high": "unknown",
-          "xhigh": "supported"
-        },
-        "nativeLevels": {
-          "xhigh": "xhigh"
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "supported",
+          "max": "supported"
         }
       }
     },
@@ -2038,19 +2154,18 @@
     ],
     "generation": {
       "temperature": "supported",
+      "temperatureWithReasoning": "unsupported",
       "reasoning": {
         "supported": "supported",
         "adaptive": null,
         "levels": {
           "off": "supported",
           "minimal": "unsupported",
-          "low": "unknown",
-          "medium": "unknown",
-          "high": "unknown",
-          "xhigh": "supported"
-        },
-        "nativeLevels": {
-          "xhigh": "xhigh"
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "supported",
+          "max": "supported"
         }
       }
     },
@@ -2071,19 +2186,18 @@
     ],
     "generation": {
       "temperature": "supported",
+      "temperatureWithReasoning": "unsupported",
       "reasoning": {
         "supported": "supported",
         "adaptive": null,
         "levels": {
           "off": "supported",
           "minimal": "unsupported",
-          "low": "unknown",
-          "medium": "unknown",
-          "high": "unknown",
-          "xhigh": "supported"
-        },
-        "nativeLevels": {
-          "xhigh": "xhigh"
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "supported",
+          "max": "supported"
         }
       }
     },
@@ -2105,19 +2219,18 @@
     ],
     "generation": {
       "temperature": "supported",
+      "temperatureWithReasoning": "unsupported",
       "reasoning": {
         "supported": "supported",
         "adaptive": null,
         "levels": {
           "off": "supported",
           "minimal": "unsupported",
-          "low": "unknown",
-          "medium": "unknown",
-          "high": "unknown",
-          "xhigh": "supported"
-        },
-        "nativeLevels": {
-          "xhigh": "xhigh"
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "supported",
+          "max": "supported"
         }
       }
     },
@@ -2139,19 +2252,18 @@
     ],
     "generation": {
       "temperature": "supported",
+      "temperatureWithReasoning": "unsupported",
       "reasoning": {
         "supported": "supported",
         "adaptive": null,
         "levels": {
           "off": "supported",
           "minimal": "unsupported",
-          "low": "unknown",
-          "medium": "unknown",
-          "high": "unknown",
-          "xhigh": "supported"
-        },
-        "nativeLevels": {
-          "xhigh": "xhigh"
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "supported",
+          "max": "supported"
         }
       }
     },
@@ -2173,19 +2285,18 @@
     ],
     "generation": {
       "temperature": "supported",
+      "temperatureWithReasoning": "unsupported",
       "reasoning": {
         "supported": "supported",
         "adaptive": null,
         "levels": {
           "off": "supported",
           "minimal": "unsupported",
-          "low": "unknown",
-          "medium": "unknown",
-          "high": "unknown",
-          "xhigh": "supported"
-        },
-        "nativeLevels": {
-          "xhigh": "xhigh"
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "supported",
+          "max": "supported"
         }
       }
     },
@@ -2205,16 +2316,18 @@
     ],
     "generation": {
       "temperature": "supported",
+      "temperatureWithReasoning": "unsupported",
       "reasoning": {
         "supported": "unsupported",
         "adaptive": null,
         "levels": {
-          "off": "unknown",
-          "minimal": "unknown",
-          "low": "unknown",
-          "medium": "unknown",
-          "high": "unknown",
-          "xhigh": "unknown"
+          "off": "unsupported",
+          "minimal": "unsupported",
+          "low": "unsupported",
+          "medium": "unsupported",
+          "high": "unsupported",
+          "xhigh": "unsupported",
+          "max": "unsupported"
         }
       }
     },
@@ -2232,16 +2345,18 @@
     ],
     "generation": {
       "temperature": "supported",
+      "temperatureWithReasoning": "unsupported",
       "reasoning": {
         "supported": "unsupported",
         "adaptive": null,
         "levels": {
-          "off": "unknown",
-          "minimal": "unknown",
-          "low": "unknown",
-          "medium": "unknown",
-          "high": "unknown",
-          "xhigh": "unknown"
+          "off": "unsupported",
+          "minimal": "unsupported",
+          "low": "unsupported",
+          "medium": "unsupported",
+          "high": "unsupported",
+          "xhigh": "unsupported",
+          "max": "unsupported"
         }
       }
     },
@@ -2259,16 +2374,18 @@
     ],
     "generation": {
       "temperature": "supported",
+      "temperatureWithReasoning": "unsupported",
       "reasoning": {
         "supported": "unsupported",
         "adaptive": null,
         "levels": {
-          "off": "unknown",
-          "minimal": "unknown",
-          "low": "unknown",
-          "medium": "unknown",
-          "high": "unknown",
-          "xhigh": "unknown"
+          "off": "unsupported",
+          "minimal": "unsupported",
+          "low": "unsupported",
+          "medium": "unsupported",
+          "high": "unsupported",
+          "xhigh": "unsupported",
+          "max": "unsupported"
         }
       }
     },
@@ -2286,16 +2403,18 @@
     ],
     "generation": {
       "temperature": "supported",
+      "temperatureWithReasoning": "unsupported",
       "reasoning": {
         "supported": "unsupported",
         "adaptive": null,
         "levels": {
-          "off": "unknown",
-          "minimal": "unknown",
-          "low": "unknown",
-          "medium": "unknown",
-          "high": "unknown",
-          "xhigh": "unknown"
+          "off": "unsupported",
+          "minimal": "unsupported",
+          "low": "unsupported",
+          "medium": "unsupported",
+          "high": "unsupported",
+          "xhigh": "unsupported",
+          "max": "unsupported"
         }
       }
     },
@@ -2313,16 +2432,18 @@
     ],
     "generation": {
       "temperature": "supported",
+      "temperatureWithReasoning": "unsupported",
       "reasoning": {
         "supported": "unsupported",
         "adaptive": null,
         "levels": {
-          "off": "unknown",
-          "minimal": "unknown",
-          "low": "unknown",
-          "medium": "unknown",
-          "high": "unknown",
-          "xhigh": "unknown"
+          "off": "unsupported",
+          "minimal": "unsupported",
+          "low": "unsupported",
+          "medium": "unsupported",
+          "high": "unsupported",
+          "xhigh": "unsupported",
+          "max": "unsupported"
         }
       }
     },
@@ -2340,16 +2461,18 @@
     ],
     "generation": {
       "temperature": "supported",
+      "temperatureWithReasoning": "unsupported",
       "reasoning": {
         "supported": "unsupported",
         "adaptive": null,
         "levels": {
-          "off": "unknown",
-          "minimal": "unknown",
-          "low": "unknown",
-          "medium": "unknown",
-          "high": "unknown",
-          "xhigh": "unknown"
+          "off": "unsupported",
+          "minimal": "unsupported",
+          "low": "unsupported",
+          "medium": "unsupported",
+          "high": "unsupported",
+          "xhigh": "unsupported",
+          "max": "unsupported"
         }
       }
     },
@@ -2368,17 +2491,19 @@
       "reasoning"
     ],
     "generation": {
-      "temperature": "supported",
+      "temperature": "unsupported",
+      "temperatureWithReasoning": "unsupported",
       "reasoning": {
         "supported": "supported",
         "adaptive": null,
         "levels": {
-          "off": "unknown",
-          "minimal": "unknown",
-          "low": "unknown",
-          "medium": "unknown",
-          "high": "unknown",
-          "xhigh": "unknown"
+          "off": "supported",
+          "minimal": "supported",
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "supported",
+          "max": "supported"
         }
       }
     },
@@ -2398,17 +2523,19 @@
       "reasoning"
     ],
     "generation": {
-      "temperature": "supported",
+      "temperature": "unsupported",
+      "temperatureWithReasoning": "unsupported",
       "reasoning": {
         "supported": "supported",
         "adaptive": null,
         "levels": {
-          "off": "unknown",
-          "minimal": "unknown",
-          "low": "unknown",
-          "medium": "unknown",
-          "high": "unknown",
-          "xhigh": "unknown"
+          "off": "supported",
+          "minimal": "supported",
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "supported",
+          "max": "supported"
         }
       }
     },
@@ -2428,17 +2555,19 @@
       "reasoning"
     ],
     "generation": {
-      "temperature": "supported",
+      "temperature": "unsupported",
+      "temperatureWithReasoning": "unsupported",
       "reasoning": {
         "supported": "supported",
         "adaptive": null,
         "levels": {
-          "off": "unknown",
-          "minimal": "unknown",
-          "low": "unknown",
-          "medium": "unknown",
-          "high": "unknown",
-          "xhigh": "unknown"
+          "off": "supported",
+          "minimal": "supported",
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "supported",
+          "max": "supported"
         }
       }
     },
@@ -2458,17 +2587,19 @@
       "reasoning"
     ],
     "generation": {
-      "temperature": "supported",
+      "temperature": "unsupported",
+      "temperatureWithReasoning": "unsupported",
       "reasoning": {
         "supported": "supported",
         "adaptive": null,
         "levels": {
-          "off": "unknown",
-          "minimal": "unknown",
-          "low": "unknown",
-          "medium": "unknown",
-          "high": "unknown",
-          "xhigh": "unknown"
+          "off": "supported",
+          "minimal": "supported",
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "supported",
+          "max": "supported"
         }
       }
     },
@@ -2487,17 +2618,19 @@
       "reasoning"
     ],
     "generation": {
-      "temperature": "supported",
+      "temperature": "unsupported",
+      "temperatureWithReasoning": "unsupported",
       "reasoning": {
         "supported": "supported",
         "adaptive": null,
         "levels": {
-          "off": "unknown",
-          "minimal": "unknown",
-          "low": "unknown",
-          "medium": "unknown",
-          "high": "unknown",
-          "xhigh": "unknown"
+          "off": "supported",
+          "minimal": "supported",
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "supported",
+          "max": "supported"
         }
       }
     },
@@ -2516,17 +2649,19 @@
       "reasoning"
     ],
     "generation": {
-      "temperature": "supported",
+      "temperature": "unsupported",
+      "temperatureWithReasoning": "unsupported",
       "reasoning": {
         "supported": "supported",
         "adaptive": null,
         "levels": {
-          "off": "unknown",
-          "minimal": "unknown",
-          "low": "unknown",
-          "medium": "unknown",
-          "high": "unknown",
-          "xhigh": "unknown"
+          "off": "supported",
+          "minimal": "supported",
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "supported",
+          "max": "supported"
         }
       }
     },
@@ -2546,17 +2681,19 @@
       "reasoning"
     ],
     "generation": {
-      "temperature": "supported",
+      "temperature": "unsupported",
+      "temperatureWithReasoning": "unsupported",
       "reasoning": {
         "supported": "supported",
         "adaptive": null,
         "levels": {
-          "off": "unknown",
-          "minimal": "unknown",
-          "low": "unknown",
-          "medium": "unknown",
-          "high": "unknown",
-          "xhigh": "unknown"
+          "off": "supported",
+          "minimal": "supported",
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "supported",
+          "max": "supported"
         }
       }
     },
@@ -2576,17 +2713,19 @@
       "reasoning"
     ],
     "generation": {
-      "temperature": "supported",
+      "temperature": "unsupported",
+      "temperatureWithReasoning": "unsupported",
       "reasoning": {
         "supported": "supported",
         "adaptive": null,
         "levels": {
-          "off": "unknown",
-          "minimal": "unknown",
-          "low": "unknown",
-          "medium": "unknown",
-          "high": "unknown",
-          "xhigh": "unknown"
+          "off": "supported",
+          "minimal": "supported",
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "supported",
+          "max": "supported"
         }
       }
     },

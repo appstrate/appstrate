@@ -118,7 +118,14 @@ export function applyGenerationToProxyBody(
       model.generation,
     );
     if (model.apiShape === "anthropic-messages") {
-      const budgets = { minimal: 1024, low: 2048, medium: 4096, high: 8192, xhigh: 16384 };
+      const budgets = {
+        minimal: 1024,
+        low: 2048,
+        medium: 4096,
+        high: 8192,
+        xhigh: 16384,
+        max: 32768,
+      };
       if (generation.reasoningLevel === "off") {
         delete payload.thinking;
         delete payload.output_config;

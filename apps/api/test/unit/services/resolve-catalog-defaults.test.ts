@@ -86,6 +86,32 @@ describe("resolveCatalogDefaults", () => {
       ).toThrow(ModelGenerationError);
     });
 
+    it("exposes LiteLLM's complete Luna reasoning contract through Codex", () => {
+      const codex = resolveCatalogDefaults("codex", "gpt-5.6-luna");
+
+      expect(codex.generation?.reasoning.levels).toEqual({
+        off: "supported",
+        minimal: "unsupported",
+        low: "supported",
+        medium: "supported",
+        high: "supported",
+        xhigh: "supported",
+        max: "supported",
+      });
+      expect(
+        resolveModelGenerationSettings({
+          capabilities: codex.generation,
+          override: { reasoningLevel: "low" },
+        }),
+      ).toEqual({ reasoningLevel: "low" });
+      expect(
+        resolveModelGenerationSettings({
+          capabilities: codex.generation,
+          override: { reasoningLevel: "max" },
+        }),
+      ).toEqual({ reasoningLevel: "max" });
+    });
+
     it("keeps provider transport restrictions on a catalog miss", () => {
       expect(resolveCatalogDefaults("codex", "future-codex-model").generation).toMatchObject({
         temperature: "unsupported",

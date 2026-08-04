@@ -70,10 +70,12 @@
   "generation.level.medium": "Moyen",
   "generation.level.high": "Élevé",
   "generation.level.xhigh": "Très élevé",
+  "generation.level.max": "Maximum",
   "generation.levelShort.off": "Off",
   "generation.levelShort.minimal": "Min.",
   "generation.levelShort.low": "Bas",
   "generation.levelShort.medium": "Moy.",
   "generation.levelShort.high": "Haut",
-  "generation.levelShort.xhigh": "Max"
+  "generation.levelShort.xhigh": "XHigh",
+  "generation.levelShort.max": "Max"
 }

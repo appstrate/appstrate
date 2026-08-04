@@ -47,6 +47,15 @@ describe("applyGenerationToProxyBody", () => {
     expect(parse(body).reasoning_effort).toBe("xhigh");
   });
 
+  it("keeps max distinct in OpenAI-compatible request bodies", () => {
+    const body = applyGenerationToProxyBody(
+      "{}",
+      { apiShape: "openai-completions", generation: null },
+      { reasoningLevel: "max" },
+    );
+    expect(parse(body).reasoning_effort).toBe("max");
+  });
+
   it("removes Anthropic thinking fields for off", () => {
     const body = applyGenerationToProxyBody(
       JSON.stringify({ thinking: { type: "adaptive" }, output_config: { effort: "high" } }),

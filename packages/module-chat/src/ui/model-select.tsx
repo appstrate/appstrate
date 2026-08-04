@@ -189,6 +189,7 @@ export function ModelSelect({
                         medium: t("generation.level.medium"),
                         high: t("generation.level.high"),
                         xhigh: t("generation.level.xhigh"),
+                        max: t("generation.level.max"),
                       },
                       shortLevels: {
                         off: t("generation.levelShort.off"),
@@ -197,6 +198,7 @@ export function ModelSelect({
                         medium: t("generation.levelShort.medium"),
                         high: t("generation.levelShort.high"),
                         xhigh: t("generation.levelShort.xhigh"),
+                        max: t("generation.levelShort.max"),
                       },
                     }}
                   />

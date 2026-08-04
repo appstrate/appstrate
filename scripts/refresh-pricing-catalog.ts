@@ -15,6 +15,7 @@
  *     "contextWindow": 200000,
  *     "maxTokens": 64000,
  *     "capabilities": ["text","image","reasoning"],
+ *     "generation": { "temperature": "supported", "reasoning": { … } },
  *     "cost": { "input": 1.0, "output": 5.0, "cacheRead": 0.1, "cacheWrite": 1.25 }
  *   }
  *
@@ -27,11 +28,12 @@
  * Two modes:
  *   - **dry run** (default): downloads, diffs against the local files,
  *     prints a summary, exits 1 on drift. CI weekly workflow consumes this.
- *   - **apply** (`--apply`): writes the new content.
+ *   - **apply** (`--apply`): writes the new content from a normalized exporter artifact.
  *
  * Usage:
  *   bun scripts/refresh-pricing-catalog.ts          # dry run
- *   bun scripts/refresh-pricing-catalog.ts --apply  # write to disk
+ *   LITELLM_CATALOG_PATH=/path/to/export.json \
+ *     bun scripts/refresh-pricing-catalog.ts --apply
  */
 
 import { resolve } from "node:path";
@@ -39,6 +41,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import type {
   ModelCapabilitySupport,
   ModelGenerationCapabilities,
+  ModelNativeReasoningLevel,
   ModelReasoningLevel,
 } from "@appstrate/core/model-generation";
 
@@ -175,6 +178,16 @@ interface LiteLLMEntry {
   supports_adaptive_thinking?: boolean;
   /** Added by the isolated pinned-LiteLLM exporter, never by the raw fallback. */
   _appstrate_supported_openai_params?: string[];
+  /** Effective value-level contract computed by the pinned LiteLLM adapters. */
+  _appstrate_generation?: {
+    temperature: ModelCapabilitySupport;
+    temperatureWithReasoning: ModelCapabilitySupport;
+    reasoning: {
+      supported: ModelCapabilitySupport;
+      adaptive: boolean | null;
+      levels: Partial<Record<ModelNativeReasoningLevel, ModelCapabilitySupport>>;
+    };
+  };
 }
 
 interface Summary {
@@ -333,13 +346,28 @@ function support(value: boolean | undefined): ModelCapabilitySupport {
   return value === true ? "supported" : value === false ? "unsupported" : "unknown";
 }
 
-function supportEither(a: boolean | undefined, b: boolean | undefined): ModelCapabilitySupport {
-  if (a === true || b === true) return "supported";
-  if (a === false || b === false) return "unsupported";
-  return "unknown";
-}
-
 function deriveGenerationCapabilities(entry: LiteLLMEntry): ModelGenerationCapabilities {
+  const exported = entry._appstrate_generation;
+  if (exported) {
+    return {
+      temperature: exported.temperature,
+      temperatureWithReasoning: exported.temperatureWithReasoning,
+      reasoning: {
+        supported: exported.reasoning.supported,
+        adaptive: exported.reasoning.adaptive,
+        levels: {
+          off: exported.reasoning.levels.none ?? "unknown",
+          minimal: exported.reasoning.levels.minimal ?? "unknown",
+          low: exported.reasoning.levels.low ?? "unknown",
+          medium: exported.reasoning.levels.medium ?? "unknown",
+          high: exported.reasoning.levels.high ?? "unknown",
+          xhigh: exported.reasoning.levels.xhigh ?? "unknown",
+          max: exported.reasoning.levels.max ?? "unknown",
+        },
+      },
+    };
+  }
+
   const supportedParams = entry._appstrate_supported_openai_params;
   const hasSupportedReasoningLevel = [
     entry.supports_none_reasoning_effort,
@@ -374,24 +402,9 @@ function deriveGenerationCapabilities(entry: LiteLLMEntry): ModelGenerationCapab
     low: support(entry.supports_low_reasoning_effort),
     medium: "unknown",
     high: "unknown",
-    // Pi exposes one portable top level (`xhigh`). LiteLLM calls that level
-    // either xhigh or max depending on the provider adapter.
-    xhigh: supportEither(
-      entry.supports_xhigh_reasoning_effort,
-      entry.supports_max_reasoning_effort,
-    ),
+    xhigh: support(entry.supports_xhigh_reasoning_effort),
+    max: support(entry.supports_max_reasoning_effort),
   };
-  const nativeLevels =
-    levels.xhigh === "supported"
-      ? {
-          xhigh:
-            entry.litellm_provider === "anthropic" && entry.supports_max_reasoning_effort === true
-              ? ("max" as const)
-              : entry.supports_xhigh_reasoning_effort === true
-                ? ("xhigh" as const)
-                : ("max" as const),
-        }
-      : undefined;
 
   return {
     temperature,
@@ -402,7 +415,6 @@ function deriveGenerationCapabilities(entry: LiteLLMEntry): ModelGenerationCapab
           ? entry.supports_adaptive_thinking
           : null,
       levels,
-      ...(nativeLevels ? { nativeLevels } : {}),
     },
   };
 }
@@ -660,6 +672,13 @@ async function main(): Promise<void> {
   const apply =
     (globalThis as { process?: { argv?: string[] } }).process?.argv?.includes("--apply") ?? false;
   console.log(`Refreshing pricing catalog from LiteLLM (apply=${apply})\n`);
+
+  if (apply && !process.env.LITELLM_CATALOG_PATH) {
+    throw new Error(
+      "--apply requires LITELLM_CATALOG_PATH from the pinned LiteLLM exporter; " +
+        "the raw fallback does not contain value-level generation capabilities",
+    );
+  }
 
   if (apply && !existsSync(DATA_DIR)) {
     mkdirSync(DATA_DIR, { recursive: true });

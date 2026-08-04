@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "bun:test";
-import { preserveRequestedThinkingLevel, type PiModelConfig } from "../src/pi-runner.ts";
+import {
+  prepareRequestedThinkingLevel,
+  preserveRequestedThinkingLevel,
+  type PiModelConfig,
+} from "../src/pi-runner.ts";
 
 const model = (over: Partial<PiModelConfig> = {}): PiModelConfig =>
   ({
@@ -33,5 +37,22 @@ describe("preserveRequestedThinkingLevel", () => {
   it("does not mutate other reasoning levels", () => {
     const original = model();
     expect(preserveRequestedThinkingLevel(original, "high")).toBe(original);
+  });
+});
+
+describe("prepareRequestedThinkingLevel", () => {
+  it("routes portable max through Pi's xhigh slot without collapsing its native value", () => {
+    const prepared = prepareRequestedThinkingLevel(model(), "max");
+    expect(prepared.thinkingLevel).toBe("xhigh");
+    expect(prepared.model.thinkingLevelMap?.xhigh).toBe("max");
+  });
+
+  it("keeps xhigh distinct when the same model also supports max", () => {
+    const prepared = prepareRequestedThinkingLevel(
+      model({ thinkingLevelMap: { xhigh: "xhigh", max: "max" } } as Partial<PiModelConfig>),
+      "xhigh",
+    );
+    expect(prepared.thinkingLevel).toBe("xhigh");
+    expect(prepared.model.thinkingLevelMap?.xhigh).toBe("xhigh");
   });
 });

@@ -42,6 +42,7 @@ export function ModelGenerationFields({
           medium: t("models.generation.levels.medium"),
           high: t("models.generation.levels.high"),
           xhigh: t("models.generation.levels.xhigh"),
+          max: t("models.generation.levels.max"),
         },
         shortLevels: {
           off: t("models.generation.levelsShort.off"),
@@ -50,6 +51,7 @@ export function ModelGenerationFields({
           medium: t("models.generation.levelsShort.medium"),
           high: t("models.generation.levelsShort.high"),
           xhigh: t("models.generation.levelsShort.xhigh"),
+          max: t("models.generation.levelsShort.max"),
         },
       }}
     />

@@ -33,7 +33,6 @@ import { getModelProvider } from "./model-providers/registry.ts";
 import { resolveOAuthTokenForSidecar } from "./model-providers/token-resolver.ts";
 import {
   applyModelGenerationCapabilitiesOverride,
-  INHERITED_MODEL_GENERATION_CAPABILITIES,
   UNKNOWN_MODEL_GENERATION_CAPABILITIES,
   type ModelGenerationCapabilities,
 } from "@appstrate/core/model-generation";
@@ -94,9 +93,10 @@ const defaultModel = createDefaultPointer({
  * endpoint (`baseUrl`), upstream id (`modelId`), credential, and every
  * capability/cost field — is nulled. Backing-derived capability/cost fields are
  * dropped too (not just the ids): a distinctive context window or price could
- * identify the real model. Generation uses one constant alias contract instead:
- * controls stay inherited, so clients can hide them and clear stale overrides
- * without learning anything about the backing. Non-aliased models pass through.
+ * identify the real model. The exception is the normalized, portable generation
+ * contract required to render safe temperature/reasoning controls. Provider-
+ * native mappings and adaptive transport details remain private. Non-aliased
+ * models pass through.
  *
  * Applied at the user-facing read boundary (`GET /api/models`, the effective-
  * default response) — NOT inside {@link listOrgModels}, so the operator
@@ -104,6 +104,27 @@ const defaultModel = createDefaultPointer({
  * the full resource they just configured. Resolution (`resolveModel` /
  * `loadModel`) is unaffected — the run executor always gets the real binding.
  */
+function projectAliasedGenerationCapabilities(
+  capabilities: ModelGenerationCapabilities | null,
+): ModelGenerationCapabilities {
+  const levels = capabilities?.reasoning.levels ?? {};
+  const reasoningSupported = capabilities?.reasoning.supported === "supported";
+
+  // Alias callers cannot inspect the backing model to compensate for an
+  // unknown capability. Expose only catalog-confirmed support and fail closed
+  // for unknowns. The runtime still resolves the full, unprojected contract.
+  return {
+    temperature: capabilities?.temperature === "supported" ? "supported" : "unsupported",
+    temperatureWithReasoning:
+      capabilities?.temperatureWithReasoning === "supported" ? "supported" : "unsupported",
+    reasoning: {
+      supported: reasoningSupported ? "supported" : "unsupported",
+      adaptive: null,
+      levels: reasoningSupported ? { ...levels } : {},
+    },
+  };
+}
+
 export function projectAliasedModel(model: OrgModelInfo): OrgModelInfo {
   if (!model.aliased) return model;
   // Allowlist, NOT a denylist (`{ ...model, field: null }`): build the public
@@ -142,15 +163,15 @@ export function projectAliasedModel(model: OrgModelInfo): OrgModelInfo {
     baseUrl: null,
     modelId: null,
     credentialId: null,
-    // Capability/cost — catalog-derived from the REAL model, so they
-    // fingerprint it; drop them too. Generation gets the same fixed contract
-    // for every alias, independent of its backing.
+    // Capability/cost — identifying catalog metadata stays private. Generation
+    // exposes only the portable support vector needed by the controls; native
+    // mappings and adaptive transport semantics stay on the resolved model.
     contextWindow: null,
     maxTokens: null,
     input: null,
     reasoning: null,
     cost: null,
-    generation: INHERITED_MODEL_GENERATION_CAPABILITIES,
+    generation: projectAliasedGenerationCapabilities(model.generation),
   };
 }
 

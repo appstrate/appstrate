@@ -96,7 +96,14 @@ jobs:
             --volume "$catalog_input:/catalog.json:ro" \
             "$image" /exporter.py /catalog.json > "$output"
 
-          jq --exit-status 'type == "object" and length > 0' "$output" >/dev/null
+          jq --exit-status '
+            type == "object" and length > 0 and
+            all(to_entries[];
+              (.value._appstrate_supported_openai_params == null) or
+              ((.value._appstrate_generation.reasoning.levels | keys) ==
+                ["high", "low", "max", "medium", "minimal", "none", "xhigh"])
+            )
+          ' "$output" >/dev/null
 
           echo "Exported LiteLLM ${version} (${digest}) catalog ${catalog_commit} (${catalog_digest})"
 
@@ -196,7 +203,8 @@ jobs:
           latest stable GitHub release. The exact catalog commit, file digest,
           release tag and immutable OCI image digest are recorded in
           `scripts/litellm-catalog.lock.json`; the isolated exporter asks LiteLLM
-          which OpenAI-compatible request parameters each model supports.
+          to normalize request-parameter support, reasoning-effort values and
+          temperature/reasoning combinations for each model.
 
           Two generated trees, two different consequences:
           - `apps/api/src/data/pricing/*.json` — prices + model metadata, read at

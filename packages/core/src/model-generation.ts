@@ -3,8 +3,16 @@
 
 import { z } from "zod";
 
-/** Portable reasoning vocabulary understood by the Appstrate Pi runtime. */
-export const MODEL_REASONING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
+/** Portable reasoning vocabulary exposed by LiteLLM and accepted by Appstrate. */
+export const MODEL_REASONING_LEVELS = [
+  "off",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+] as const;
 
 export const modelReasoningLevelSchema = z.enum(MODEL_REASONING_LEVELS);
 

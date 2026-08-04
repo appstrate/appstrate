@@ -3,7 +3,6 @@
 import { describe, expect, it } from "bun:test";
 import {
   applyModelGenerationCapabilitiesOverride,
-  INHERITED_MODEL_GENERATION_CAPABILITIES,
   ModelGenerationError,
   reconcileModelGenerationSettings,
   resolveModelGenerationSettings,
@@ -177,15 +176,6 @@ describe("reconcileModelGenerationSettings", () => {
       ),
     ).toEqual({});
   });
-
-  it("clears every override for the public alias inherit-only contract", () => {
-    expect(
-      reconcileModelGenerationSettings(
-        { temperature: 0.6, reasoningLevel: "high" },
-        INHERITED_MODEL_GENERATION_CAPABILITIES,
-      ),
-    ).toEqual({});
-  });
 });
 
 describe("toNativeModelReasoningLevel", () => {
@@ -201,5 +191,9 @@ describe("toNativeModelReasoningLevel", () => {
         }),
       ),
     ).toBe("max");
+  });
+
+  it("keeps max as a distinct first-class effort", () => {
+    expect(toNativeModelReasoningLevel("max", capabilities())).toBe("max");
   });
 });

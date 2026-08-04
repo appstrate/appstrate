@@ -103,7 +103,7 @@ export const schemas = {
       },
       reasoningLevel: {
         type: ["string", "null"],
-        enum: ["off", "minimal", "low", "medium", "high", "xhigh", null],
+        enum: ["off", "minimal", "low", "medium", "high", "xhigh", "max", null],
         description: "Portable reasoning effort normalized across providers.",
       },
     },
@@ -130,19 +130,19 @@ export const schemas = {
               enum: ["supported", "unsupported", "unknown"],
             },
             propertyNames: {
-              enum: ["off", "minimal", "low", "medium", "high", "xhigh"],
+              enum: ["off", "minimal", "low", "medium", "high", "xhigh", "max"],
             },
           },
           nativeLevels: {
             type: "object",
             description:
-              "Optional provider-native values for portable levels (for example xhigh to max).",
+              "Optional provider-native values for portable levels (for example off to none).",
             additionalProperties: {
               type: "string",
               enum: ["none", "minimal", "low", "medium", "high", "xhigh", "max"],
             },
             propertyNames: {
-              enum: ["off", "minimal", "low", "medium", "high", "xhigh"],
+              enum: ["off", "minimal", "low", "medium", "high", "xhigh", "max"],
             },
           },
         },

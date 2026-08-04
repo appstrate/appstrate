@@ -258,6 +258,47 @@ describe("generation capabilities", () => {
           medium: "unknown",
           high: "unknown",
           xhigh: "unsupported",
+          max: "unknown",
+        },
+      },
+    });
+  });
+
+  it("projects LiteLLM's effective value-level contract without re-deriving it", () => {
+    expect(
+      deriveGenerationCapabilities({
+        _appstrate_generation: {
+          temperature: "supported",
+          temperatureWithReasoning: "unsupported",
+          reasoning: {
+            supported: "supported",
+            adaptive: null,
+            levels: {
+              none: "supported",
+              minimal: "unsupported",
+              low: "supported",
+              medium: "supported",
+              high: "supported",
+              xhigh: "supported",
+              max: "supported",
+            },
+          },
+        },
+      }),
+    ).toEqual({
+      temperature: "supported",
+      temperatureWithReasoning: "unsupported",
+      reasoning: {
+        supported: "supported",
+        adaptive: null,
+        levels: {
+          off: "supported",
+          minimal: "unsupported",
+          low: "supported",
+          medium: "supported",
+          high: "supported",
+          xhigh: "supported",
+          max: "supported",
         },
       },
     });
@@ -276,6 +317,7 @@ describe("generation capabilities", () => {
           medium: "unknown",
           high: "unknown",
           xhigh: "unknown",
+          max: "unknown",
         },
       },
     });
@@ -300,14 +342,14 @@ describe("generation capabilities", () => {
     expect(capabilities.reasoning.levels.high).toBe("unknown");
   });
 
-  it("maps LiteLLM's max effort to Appstrate's portable xhigh level", () => {
+  it("keeps LiteLLM's max effort distinct from xhigh", () => {
     const capabilities = deriveGenerationCapabilities({
       litellm_provider: "anthropic",
       supports_reasoning: true,
       supports_max_reasoning_effort: true,
     });
-    expect(capabilities.reasoning.levels.xhigh).toBe("supported");
-    expect(capabilities.reasoning.nativeLevels?.xhigh).toBe("max");
+    expect(capabilities.reasoning.levels.xhigh).toBe("unknown");
+    expect(capabilities.reasoning.levels.max).toBe("supported");
   });
 
   it("vendors the normalized generation block with pricing", () => {

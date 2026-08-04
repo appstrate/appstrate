@@ -28,7 +28,7 @@ import {
   loadPiCodingAgentSdk,
   derivePiCompactionSettings,
   deriveProviderFromApi,
-  preserveRequestedThinkingLevel,
+  prepareRequestedThinkingLevel,
   type Api,
   type Model,
 } from "@appstrate/runner-pi";
@@ -177,9 +177,10 @@ export function runPiSubscriptionChat(input: PiSubscriptionChatInput): Response 
           contextWindow: model.contextWindow ?? undefined,
           maxTokens: model.maxTokens ?? undefined,
         } as Model<Api>;
-        const sessionModel = preserveRequestedThinkingLevel(
+        const requestedThinkingLevel = input.generation.reasoningLevel ?? "medium";
+        const { model: sessionModel, thinkingLevel } = prepareRequestedThinkingLevel(
           piModel,
-          input.generation.reasoningLevel ?? "medium",
+          requestedThinkingLevel,
         );
 
         // Real subscription token in-memory only — pi-ai emits the OAuth request
@@ -223,7 +224,7 @@ export function runPiSubscriptionChat(input: PiSubscriptionChatInput): Response 
           cwd: "/tmp",
           agentDir: "/tmp/pi-chat",
           model: sessionModel,
-          thinkingLevel: input.generation.reasoningLevel ?? "medium",
+          thinkingLevel,
           authStorage,
           modelRegistry,
           resourceLoader,

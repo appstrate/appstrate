@@ -39,7 +39,7 @@ export interface RuntimePiEnvOptions {
   /** Effective model-generation controls resolved by the platform. */
   generation?: {
     temperature?: number | null;
-    reasoningLevel?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | null;
+    reasoningLevel?: ModelReasoningLevel | null;
   };
   /** Full enriched system prompt fed to the Pi SDK. */
   agentPrompt: string;

@@ -4,9 +4,9 @@
  * Phase 2 (model alias) — `projectAliasedModel` is the user-facing read
  * boundary that strips a model alias's real binding. A non-aliased model must
  * pass through byte-for-byte; an aliased one must keep only the public surface
- * (id/label/flags/timestamps) and null EVERYTHING that could identify the
- * backing — ids, endpoint, AND catalog-derived capability/cost (a distinctive
- * window or price would itself fingerprint the real model).
+ * (id/label/flags/timestamps) and the portable generation contract required by
+ * the client. Provider-native mappings and every other catalog-derived field
+ * stay private.
  */
 
 import { describe, it, expect } from "bun:test";
@@ -21,7 +21,24 @@ const base: OrgModelInfo = {
   providerName: "OpenAI-compatible (custom)",
   baseUrl: "https://api.deepseek.com/v1",
   modelId: "deepseek-chat",
-  generation: null,
+  generation: {
+    temperature: "unsupported",
+    temperatureWithReasoning: "unsupported",
+    reasoning: {
+      supported: "supported",
+      adaptive: true,
+      levels: {
+        off: "supported",
+        minimal: "unsupported",
+        low: "supported",
+        medium: "supported",
+        high: "supported",
+        xhigh: "supported",
+        max: "supported",
+      },
+      nativeLevels: { off: "none", max: "max" },
+    },
+  },
   input: ["text"],
   contextWindow: 64000,
   maxTokens: 8192,
@@ -44,7 +61,7 @@ describe("projectAliasedModel", () => {
     expect(projectAliasedModel(base)).toEqual(base);
   });
 
-  it("strips the entire backing for an aliased model", () => {
+  it("strips the backing but keeps portable generation capabilities for an alias", () => {
     const out = projectAliasedModel({ ...base, aliased: true });
 
     // Public surface survives.
@@ -54,7 +71,7 @@ describe("projectAliasedModel", () => {
     expect(out.enabled).toBe(true);
     expect(out.source).toBe("built-in");
 
-    // Binding + catalog-derived metadata are all nulled.
+    // Binding + identifying catalog metadata are all nulled.
     // (iconUrl is a deliberate public choice, decoupled from the backing — see
     // the dedicated case below; it must survive the projection.)
     expect(out.apiShape).toBeNull();
@@ -70,7 +87,19 @@ describe("projectAliasedModel", () => {
     expect(out.cost).toBeNull();
     expect(out.generation).toEqual({
       temperature: "unsupported",
-      reasoning: { supported: "unsupported", adaptive: null, levels: {} },
+      reasoning: {
+        supported: "supported",
+        adaptive: null,
+        levels: {
+          off: "supported",
+          minimal: "unsupported",
+          low: "supported",
+          medium: "supported",
+          high: "supported",
+          xhigh: "supported",
+          max: "supported",
+        },
+      },
     });
 
     // Hard guarantee: nothing identifying the backing survives serialization.
@@ -78,6 +107,25 @@ describe("projectAliasedModel", () => {
     expect(json).not.toContain("deepseek");
     expect(json).not.toContain("deepseek-chat");
     expect(json).not.toContain("api.deepseek.com");
+    expect(json).not.toContain("nativeLevels");
+  });
+
+  it("keeps alias controls fail-closed without catalog-confirmed support", () => {
+    const out = projectAliasedModel({
+      ...base,
+      aliased: true,
+      generation: {
+        temperature: "unknown",
+        temperatureWithReasoning: "unknown",
+        reasoning: { supported: "unknown", adaptive: null, levels: {} },
+      },
+    });
+
+    expect(out.generation).toEqual({
+      temperature: "unsupported",
+      temperatureWithReasoning: "unsupported",
+      reasoning: { supported: "unsupported", adaptive: null, levels: {} },
+    });
   });
 
   it("preserves needs_reconnection on an aliased model", () => {
