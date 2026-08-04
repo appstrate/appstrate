@@ -9,7 +9,6 @@
  */
 
 import { describe, it, expect, afterEach } from "bun:test";
-import { createHash } from "node:crypto";
 import {
   aliasedBackings,
   assertNormalizedGenerationCatalog,
@@ -442,7 +441,7 @@ describe("generation capabilities", () => {
 
 describe("normalized artifact provenance", () => {
   const artifact = '{"model":{"mode":"chat"}}\n';
-  const digest = `sha256:${createHash("sha256").update(artifact).digest("hex")}`;
+  const digest = "sha256:780b6be6695be8ea016ce4e2b957c03570cddef06e87a64b7695e2b248e09e08";
 
   it("accepts the exact normalized output recorded in the lock", () => {
     expect(() => assertNormalizedCatalogDigest(artifact, digest)).not.toThrow();

@@ -38,7 +38,6 @@
 
 import { resolve } from "node:path";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { createHash } from "node:crypto";
 import type {
   ModelCapabilitySupport,
   ModelGenerationCapabilities,
@@ -250,7 +249,9 @@ function assertNormalizedCatalogDigest(serialized: string, expectedDigest: unkno
   if (typeof expectedDigest !== "string" || !/^sha256:[0-9a-f]{64}$/.test(expectedDigest)) {
     throw new Error("LiteLLM lock is missing a valid normalizedDigest");
   }
-  const actualDigest = `sha256:${createHash("sha256").update(serialized).digest("hex")}`;
+  const hasher = new Bun.CryptoHasher("sha256");
+  hasher.update(serialized);
+  const actualDigest = `sha256:${hasher.digest("hex")}`;
   if (actualDigest !== expectedDigest) {
     throw new Error(
       `LiteLLM normalized artifact digest mismatch: expected ${expectedDigest}, got ${actualDigest}`,
