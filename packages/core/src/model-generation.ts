@@ -101,6 +101,16 @@ export interface ModelGenerationCapabilitiesOverride {
   };
 }
 
+/**
+ * Anthropic's adaptive transport has no native `minimal` effort. LiteLLM stays
+ * authoritative for whether a model supports the portable level; this adapter
+ * only translates that supported value to Anthropic's lowest wire value.
+ */
+export const ANTHROPIC_GENERATION_CAPABILITIES_OVERRIDE = {
+  temperatureWithReasoning: "unsupported",
+  reasoning: { nativeLevels: { minimal: "low" } },
+} satisfies ModelGenerationCapabilitiesOverride;
+
 export const UNKNOWN_MODEL_GENERATION_CAPABILITIES: ModelGenerationCapabilities = {
   temperature: "unknown",
   reasoning: { supported: "unknown", adaptive: null, levels: {} },

@@ -96,6 +96,25 @@ describe("swapRequestModel (alias→real)", () => {
     });
     expect(out).not.toContain("budget_tokens");
   });
+
+  it("forwards portable minimal as Anthropic's native low effort for an alias", () => {
+    const out = swapRequestModel(
+      JSON.stringify({
+        model: "appstrate-medium",
+        thinking: { type: "enabled", budget_tokens: 1024 },
+      }),
+      {
+        ...swap,
+        anthropicAdaptiveReasoning: { effort: "low" },
+      },
+    );
+
+    expect(JSON.parse(out)).toMatchObject({
+      model: "deepseek-chat",
+      thinking: { type: "adaptive" },
+      output_config: { effort: "low" },
+    });
+  });
 });
 
 describe("swapResponseModelJson (real→alias)", () => {

@@ -29,6 +29,30 @@ describe("applyGenerationToProxyBody", () => {
     });
   });
 
+  it("translates portable minimal to Anthropic's native low effort", () => {
+    const body = applyGenerationToProxyBody(
+      JSON.stringify({ model: "preset" }),
+      {
+        apiShape: "anthropic-messages",
+        generation: {
+          temperature: "unsupported",
+          temperatureWithReasoning: "unsupported",
+          reasoning: {
+            supported: "supported",
+            adaptive: true,
+            levels: { minimal: "supported" },
+            nativeLevels: { minimal: "low" },
+          },
+        },
+      },
+      { reasoningLevel: "minimal" },
+    );
+    expect(parse(body)).toMatchObject({
+      thinking: { type: "adaptive" },
+      output_config: { effort: "low" },
+    });
+  });
+
   it("maps classic Anthropic levels to deterministic token budgets", () => {
     const body = applyGenerationToProxyBody(
       "{}",

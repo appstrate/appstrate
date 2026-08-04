@@ -123,6 +123,7 @@ describe("resolveCatalogDefaults", () => {
         const defaults = resolveCatalogDefaults(providerId, "claude-3-7-sonnet-20250219");
 
         expect(defaults.generation?.temperatureWithReasoning).toBe("unsupported");
+        expect(defaults.generation?.reasoning.nativeLevels?.minimal).toBe("low");
         expect(() =>
           resolveModelGenerationSettings({
             capabilities: defaults.generation,
