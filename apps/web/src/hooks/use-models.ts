@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { $api, client, type components } from "../api/client";
 import { splitPackageRef } from "../lib/package-paths";
 import { useCurrentOrgId } from "./use-org";
@@ -35,6 +35,14 @@ function useInvalidateModels() {
   };
 }
 
+/** A saved OAuth model test may rotate or terminally flag its backing credential. */
+export async function invalidateModelConnectionTestQueries(qc: QueryClient): Promise<void> {
+  await Promise.all([
+    qc.invalidateQueries({ queryKey: ["get", "/api/models"] }),
+    qc.invalidateQueries({ queryKey: ["get", "/api/model-provider-credentials"] }),
+  ]);
+}
+
 function useCreateModel() {
   const invalidate = useInvalidateModels();
   return $api.useMutation("post", "/api/models", { onSuccess: invalidate });
@@ -56,7 +64,10 @@ export function useSetDefaultModel() {
 }
 
 export function useTestModel() {
-  return $api.useMutation("post", "/api/models/{id}/test");
+  const qc = useQueryClient();
+  return $api.useMutation("post", "/api/models/{id}/test", {
+    onSuccess: () => invalidateModelConnectionTestQueries(qc),
+  });
 }
 
 export interface OpenRouterModel {
