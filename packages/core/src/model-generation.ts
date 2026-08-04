@@ -18,6 +18,20 @@ export const modelReasoningLevelSchema = z.enum(MODEL_REASONING_LEVELS);
 
 export type ModelReasoningLevel = z.infer<typeof modelReasoningLevelSchema>;
 
+const ANTHROPIC_REASONING_BUDGET_TOKENS = {
+  minimal: 1024,
+  low: 2048,
+  medium: 4096,
+  high: 8192,
+  xhigh: 16384,
+  max: 32768,
+} satisfies Record<Exclude<ModelReasoningLevel, "off">, number>;
+
+/** Translate portable effort to Anthropic's classic token-budget transport. */
+export function anthropicReasoningBudgetTokens(level: Exclude<ModelReasoningLevel, "off">): number {
+  return ANTHROPIC_REASONING_BUDGET_TOKENS[level];
+}
+
 /** Map every portable reasoning level without duplicating the vocabulary. */
 export function mapModelReasoningLevels<T>(
   map: (level: ModelReasoningLevel) => T,

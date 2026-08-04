@@ -19,6 +19,7 @@ import { CHAT_USABLE_FAMILIES } from "./chat-families.ts";
 import { isModelLive } from "./model-liveness.ts";
 import { logger } from "./logger.ts";
 import {
+  anthropicReasoningBudgetTokens,
   toNativeModelReasoningLevel,
   type ModelGenerationCapabilities,
   type ModelGenerationSettings,
@@ -118,14 +119,6 @@ export function applyGenerationToProxyBody(
       model.generation,
     );
     if (model.apiShape === "anthropic-messages") {
-      const budgets = {
-        minimal: 1024,
-        low: 2048,
-        medium: 4096,
-        high: 8192,
-        xhigh: 16384,
-        max: 32768,
-      };
       if (generation.reasoningLevel === "off") {
         delete payload.thinking;
         delete payload.output_config;
@@ -135,7 +128,7 @@ export function applyGenerationToProxyBody(
       } else {
         payload.thinking = {
           type: "enabled",
-          budget_tokens: budgets[generation.reasoningLevel],
+          budget_tokens: anthropicReasoningBudgetTokens(generation.reasoningLevel),
         };
       }
     } else {

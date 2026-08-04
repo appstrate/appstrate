@@ -6,6 +6,7 @@ import {
   preserveRequestedThinkingLevel,
   type PiModelConfig,
 } from "../src/pi-runner.ts";
+import { streamSimple } from "../src/pi-sdk.ts";
 
 const model = (over: Partial<PiModelConfig> = {}): PiModelConfig =>
   ({
@@ -54,5 +55,32 @@ describe("prepareRequestedThinkingLevel", () => {
     );
     expect(prepared.thinkingLevel).toBe("xhigh");
     expect(prepared.model.thinkingLevelMap?.xhigh).toBe("xhigh");
+  });
+
+  it("emits a distinct classic Anthropic payload for max", async () => {
+    const prepared = prepareRequestedThinkingLevel(
+      model({ api: "anthropic-messages", provider: "anthropic", maxTokens: 65_536 }),
+      "max",
+    );
+    let payload: unknown;
+    const result = await streamSimple(
+      prepared.model,
+      { messages: [] },
+      {
+        apiKey: "test-key",
+        reasoning: prepared.thinkingLevel === "off" ? undefined : prepared.thinkingLevel,
+        thinkingBudgets: prepared.thinkingBudgets,
+        onPayload: (nextPayload) => {
+          payload = nextPayload;
+          throw new Error("payload captured");
+        },
+      },
+    ).result();
+
+    expect(result.errorMessage).toBe("payload captured");
+    expect(payload).toMatchObject({
+      max_tokens: 64_768,
+      thinking: { type: "enabled", budget_tokens: 32_768 },
+    });
   });
 });

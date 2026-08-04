@@ -38,9 +38,10 @@ import {
 } from "./pi-sdk.ts";
 import { scheduleDeadlineNudges } from "./deadline-nudges.ts";
 import type { ModelApiShape } from "@appstrate/core/sidecar-types";
-import type {
-  ModelNativeReasoningLevel,
-  ModelReasoningLevel,
+import {
+  anthropicReasoningBudgetTokens,
+  type ModelNativeReasoningLevel,
+  type ModelReasoningLevel,
 } from "@appstrate/core/model-generation";
 import { deriveResponseReserveTokens } from "@appstrate/core/token-budget";
 import type { RunEvent, ExecutionContext } from "@appstrate/afps-runtime/types";
@@ -93,21 +94,39 @@ export function preserveRequestedThinkingLevel(
 }
 
 type PiThinkingLevel = Exclude<ModelReasoningLevel, "max">;
+type PiThinkingBudgetLevel = Exclude<PiThinkingLevel, "off" | "xhigh">;
+type PiThinkingBudgets = Partial<Record<PiThinkingBudgetLevel, number>>;
+
+function prepareAnthropicThinkingBudgets(
+  model: PiModelConfig,
+  level: ModelReasoningLevel,
+): PiThinkingBudgets | undefined {
+  if (model.api !== "anthropic-messages" || level === "off") return undefined;
+  const piLevel: PiThinkingBudgetLevel = level === "xhigh" || level === "max" ? "high" : level;
+  return { [piLevel]: anthropicReasoningBudgetTokens(level) };
+}
 
 /**
  * Adapt Appstrate's complete LiteLLM vocabulary to Pi's six-level selector.
  * Pi has no first-class `max` selector, but its `xhigh` slot can map to the
- * provider-native `max` value. The mapping is request-scoped so models that
- * support both values preserve the distinction.
+ * provider-native `max` value. Classic Anthropic requests also receive a
+ * request-scoped token budget because Pi otherwise clamps both levels to its
+ * `high` budget. Models that support both values therefore stay distinct.
  */
 export function prepareRequestedThinkingLevel(
   model: PiModelConfig,
   level: ModelReasoningLevel,
-): { model: PiModelConfig; thinkingLevel: PiThinkingLevel } {
+): {
+  model: PiModelConfig;
+  thinkingLevel: PiThinkingLevel;
+  thinkingBudgets?: PiThinkingBudgets;
+} {
+  const thinkingBudgets = prepareAnthropicThinkingBudgets(model, level);
   if (level !== "max") {
     return {
       model: preserveRequestedThinkingLevel(model, level),
       thinkingLevel: level,
+      ...(thinkingBudgets ? { thinkingBudgets } : {}),
     };
   }
 
@@ -123,6 +142,7 @@ export function prepareRequestedThinkingLevel(
       } as PiModelConfig["thinkingLevelMap"],
     },
     thinkingLevel: "xhigh",
+    ...(thinkingBudgets ? { thinkingBudgets } : {}),
   };
 }
 
@@ -466,10 +486,11 @@ export class PiRunner implements Runner {
     const cwd = this.opts.cwd ?? process.cwd();
     const agentDir = this.opts.agentDir ?? "/tmp/pi-agent";
     const requestedThinkingLevel = this.opts.thinkingLevel ?? "medium";
-    const { model: sessionModel, thinkingLevel } = prepareRequestedThinkingLevel(
-      model,
-      requestedThinkingLevel,
-    );
+    const {
+      model: sessionModel,
+      thinkingLevel,
+      thinkingBudgets,
+    } = prepareRequestedThinkingLevel(model, requestedThinkingLevel);
 
     // Load the heavy Pi SDK value surface here (not at module top) so the
     // ~200ms `@mariozechner/pi-coding-agent` eval stays off the runtime's
@@ -548,6 +569,7 @@ export class PiRunner implements Runner {
       sessionManager: SessionManager.inMemory(),
       settingsManager: SettingsManager.inMemory({
         compaction: budget.compaction,
+        thinkingBudgets,
         transport: this.opts.transport ?? "auto",
         // Pi SDK's built-in retry (Retry-After honoring + jitter) covers
         // transient 429/5xx upstream — including OpenAI's mid-stream 5xx
