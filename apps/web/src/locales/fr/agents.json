@@ -19,6 +19,7 @@
   "detail.titleEmptyPrompt": "Le prompt de l'agent est vide",
   "detail.titleMissingSkill": "Un skill requis n'est pas installé",
   "detail.tabRuns": "Runs",
+  "detail.tabMap": "Carte",
   "detail.tabSchedules": "Planifications",
   "detail.clearRuns": "Supprimer les runs",
   "detail.clearRunsConfirm": "Supprimer tous les runs de cet agent ? Cette action est irréversible.",

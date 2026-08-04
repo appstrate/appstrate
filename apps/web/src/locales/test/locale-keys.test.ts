@@ -159,6 +159,7 @@ describe("t() keys", () => {
  * failure is how a dead-key guard becomes decorative.
  */
 const DYNAMIC_KEY_PREFIXES = [
+  "concept.", // modules/agent-map/map-nodes.tsx — t(`agent-map:concept.${concept}.{title,body}`)
   "filter.", // components/document-list-panel.tsx — t(`filter.${p}`)
   "integration.auth.type.", // components/integration-connect/{inline-connect-button,integration-connection-picker}.tsx
   "integration.connect.fields.", // components/integration-connect/credential-fields.tsx
@@ -170,6 +171,7 @@ const DYNAMIC_KEY_PREFIXES = [
   "run.connSource.", // components/run-info-tab.tsx — t(`run.connSource.${c.source}`)
   "run.status.", // packages/module-chat/src/ui/run-events.ts — runStatusLineKey()
   "status.", // components/status-badge.tsx — t(`status.${status}`)
+  "systemTool.", // modules/agent-map/map-nodes.tsx — t(`agent-map:systemTool.${item.id}`)
 ];
 
 /**

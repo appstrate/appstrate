@@ -19,6 +19,7 @@
   "detail.titleEmptyPrompt": "Agent prompt is empty",
   "detail.titleMissingSkill": "A required skill is not installed",
   "detail.tabRuns": "Runs",
+  "detail.tabMap": "Map",
   "detail.tabSchedules": "Schedules",
   "detail.clearRuns": "Clear runs",
   "detail.clearRunsConfirm": "Delete all runs for this agent? This action is irreversible.",

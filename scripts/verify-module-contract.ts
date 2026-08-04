@@ -123,6 +123,7 @@ const MODULE_TENANT: Record<string, Tenant> = {
   mcp: "oss",
   "core-providers": "oss",
   firecracker: "oss",
+  "agent-map": "oss",
   "module-codex": "oss",
   "module-claude-code": "oss",
   "module-chat": "oss",
@@ -143,6 +144,7 @@ const DECLARER_ROOTS: Record<string, string> = {
   mcp: "appstrate/apps/api/src/modules/mcp",
   "core-providers": "appstrate/apps/api/src/modules/core-providers",
   firecracker: "appstrate/apps/api/src/modules/firecracker",
+  "agent-map": "appstrate/apps/api/src/modules/agent-map",
   "module-codex": "appstrate/packages/module-codex/src",
   "module-claude-code": "appstrate/packages/module-claude-code/src",
   "module-chat": "appstrate/packages/module-chat/src",
@@ -155,7 +157,10 @@ const LEDGER: Record<ContractMember, LedgerEntry> = {
   shutdown: { kind: "lifecycle", owners: [] },
 
   // ── extension — generic, must have >= 2 owners ──────────────────────────
-  createRouter: { kind: "extension", owners: ["oidc", "webhooks", "cloud", "module-chat"] },
+  createRouter: {
+    kind: "extension",
+    owners: ["oidc", "webhooks", "cloud", "module-chat", "agent-map"],
+  },
   publicPaths: { kind: "extension", owners: ["oidc", "cloud"] },
   permissionsContribution: {
     kind: "extension",
@@ -167,17 +172,29 @@ const LEDGER: Record<ContractMember, LedgerEntry> = {
     owners: ["oidc", "cloud", "module-codex", "module-claude-code"],
   },
   events: { kind: "extension", owners: ["webhooks", "cloud"] },
-  features: { kind: "extension", owners: ["oidc", "webhooks", "cloud", "module-chat"] },
+  features: {
+    kind: "extension",
+    owners: ["oidc", "webhooks", "cloud", "module-chat", "agent-map"],
+  },
   modelProviders: {
     kind: "extension",
     owners: ["core-providers", "module-codex", "module-claude-code"],
     justification:
       "Provider registry stays module-owned: subscription providers live outside core while core-providers holds the built-in API-key catalog.",
   },
-  openApiPaths: { kind: "extension", owners: ["oidc", "webhooks", "cloud", "module-chat"] },
+  openApiPaths: {
+    kind: "extension",
+    owners: ["oidc", "webhooks", "cloud", "module-chat", "agent-map"],
+  },
   openApiComponentSchemas: {
     kind: "extension",
-    owners: ["oidc", "webhooks", "cloud", "module-chat"],
+    owners: ["oidc", "webhooks", "cloud", "module-chat", "agent-map"],
+  },
+  openApiExemptSchemas: {
+    kind: "extension",
+    owners: ["oidc", "agent-map"],
+    justification:
+      "verify-openapi step 7b is fail-closed on every component schema. Without this member a module-owned wire schema can only be exempted from the CORE response-type registry, so shipping a module route means editing a core file — the coupling the contract exists to remove.",
   },
   openApiTags: { kind: "extension", owners: ["oidc", "webhooks", "cloud", "module-chat"] },
   openApiSchemas: {

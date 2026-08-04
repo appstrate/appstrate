@@ -1,0 +1,9 @@
+{
+  "$schema": "https://schemas.afps.dev/v0/agent.schema.json",
+  "name": "@mapdemo/agent-nu",
+  "version": "1.0.0",
+  "type": "agent",
+  "schema_version": "0.2",
+  "display_name": "Agent nu",
+  "description": "Aucune dépendance déclarée, pour voir les boîtes vides."
+}

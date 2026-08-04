@@ -189,6 +189,13 @@ const oidcModule: AppstrateModule = {
     return oidcSchemas;
   },
 
+  openApiExemptSchemas() {
+    return {
+      OAuthClientObject: "OIDC oauth-admin wire; no shared-type (SPA uses the generated spec type)",
+      OAuthClientWithSecret: "OIDC client-create wire; no shared-type",
+    };
+  },
+
   openApiTags() {
     return [
       { name: "OAuth Clients", description: "OAuth 2.1 client registry for end-user auth" },
