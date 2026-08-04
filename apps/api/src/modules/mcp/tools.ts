@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The MCP tool surface: three progressive-disclosure tools.
+ * The MCP tool surface: a compact progressive-disclosure and workflow layer.
  *
  * The platform exposes ~250 operations. Surfacing them as 250 individual
  * MCP tools would blow past every client's tool-definition budget (50 tools
@@ -42,6 +42,10 @@ import {
   type RunAndWaitDocument,
 } from "@appstrate/core/run-and-wait-client";
 import { parseDocumentUri, documentUri } from "@appstrate/core/document-uri";
+import { getErrorMessage } from "@appstrate/core/errors";
+import { MCP_SERVER_RUNTIME_CAPABILITIES, MCP_SERVER_RUNTIMES } from "@appstrate/core/mcp-server";
+import { parsePackageIdentity } from "@appstrate/afps-runtime/bundle";
+import { PACKAGE_ZIP_MAX_COMPRESSED_BYTES } from "@appstrate/core/zip";
 import type { Actor } from "@appstrate/connect";
 import { getCatalog, collectReferencedSchemas, type CatalogOperation } from "./catalog.ts";
 import { internalDispatchHeader } from "../../lib/internal-dispatch.ts";
@@ -53,6 +57,8 @@ import {
   type DocumentCapabilities,
 } from "../../services/documents.ts";
 import { isTextShapedMime, normalizeMime } from "../../services/mime-policy.ts";
+import { handleImportBundle, preflightBundleImport } from "../../services/bundle-import.ts";
+import { recordAudit } from "../../services/audit.ts";
 
 /** Issue an in-process request back through the platform app. */
 export type Dispatch = (req: Request) => Promise<Response>;
@@ -64,6 +70,10 @@ export type McpToolName =
   | "invoke_operation"
   | "run_and_wait"
   | "list_documents"
+  | "read_document"
+  | "validate_package_document"
+  | "import_package_document"
+  | "get_runtime_capabilities"
   | "get_me";
 
 /** Outcome of an `invoke_operation` call, for audit + telemetry. */
@@ -235,7 +245,7 @@ function documentResourceLink(doc: RunAndWaitDocument): {
     name: doc.name,
     mimeType: doc.mime,
     size: doc.size,
-    description: `Document published by this run — read it with resources/read or pass its URI to a follow-up run_and_wait input file field.`,
+    description: `Document published by this run — read it with read_document or pass its URI to a follow-up run_and_wait input file field.`,
   };
 }
 
@@ -782,7 +792,8 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
       "waits. For an inline run, `manifest` is a PARTIAL canonical AFPS manifest: normally set " +
       "only a concise task-specific `display_name` plus task dependencies/configuration. The " +
       "platform derives `name` and fills omitted AFPS boilerplate, `runtime_tools` (log, output, " +
-      "publish_document), and an open object output schema. Defaults apply only to fields you omit; " +
+      "publish_document, publish_archive), and an open object output schema. Defaults apply only " +
+      "to fields you omit; " +
       "every field you provide replaces its default exactly, with no array or nested-object merge. " +
       "That includes `runtime_tools: []`, which stays empty and disables every default runtime tool. " +
       "A complete deterministic manifest may override every field, including a strict " +
@@ -796,6 +807,8 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
       "outside this run; never use context-free names such as `report.md`, `summary.md`, or " +
       "`output.md`. When selected (by default, or explicitly), `publish_document`'s own " +
       "description defines when and how the run should select a primary deliverable. " +
+      "For several files or an executable package, instruct the run to call `publish_archive` " +
+      "with an explicit file list and use the returned archive document. " +
       "Content merely returned in the output payload never becomes a document. " +
       "Chaining runs (kind:inline): feed earlier runs' deliverables to a later one by passing " +
       "their `document://` URIs in `context_documents` — never by copying their content into " +
@@ -871,7 +884,8 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
             runtime_tools: {
               type: "array",
               description:
-                "Exact runtime-tool selection. Omit for log/output/publish_document defaults; " +
+                "Exact runtime-tool selection. Omit for " +
+                "log/output/publish_document/publish_archive defaults; " +
                 "an explicit [] disables them all.",
               items: { type: "string" },
             },
@@ -1102,7 +1116,7 @@ function buildListDocumentsTool(ctx: McpToolContext): AppstrateToolDefinition {
       "(`user_upload`) and deliverables agents published from runs (`agent_output`). Filter by " +
       "`run_id`, `chat_session_id`, or `purpose`. Each row carries a `document://` URI you can " +
       "pass verbatim into a run_and_wait input file field (to feed a document to another agent) " +
-      "or read with resources/read. Returns `{ documents: [...], has_more }`.",
+      "or read with read_document. Returns `{ documents: [...], has_more }`.",
     annotations: {
       title: "List documents",
       readOnlyHint: true,
@@ -1170,6 +1184,249 @@ function buildListDocumentsTool(ctx: McpToolContext): AppstrateToolDefinition {
     });
     return textResult({ documents, has_more: body?.hasMore === true });
   };
+
+  return { descriptor, handler };
+}
+
+// --- document-backed package workflow --------------------------------------
+
+/** Read downloadable document bytes through the canonical document ACL. */
+async function readPackageDocumentBytes(
+  ctx: McpToolContext,
+  uri: string,
+): Promise<{ bytes: Uint8Array; documentId: string; name: string; mime: string }> {
+  const documentId = parseDocumentUri(uri);
+  if (!documentId) {
+    throw new McpError(ErrorCode.InvalidParams, `Not a document URI: ${uri}`);
+  }
+  const resolved = await getDocumentForActor(ctx.scope, ctx.actor, documentId, ctx.permissions);
+  if (!resolved) {
+    throw new McpError(ErrorCode.InvalidParams, `Document not found: ${uri}`);
+  }
+  if (!resolved.capabilities.download) {
+    throw new McpError(ErrorCode.InvalidParams, `Document is not downloadable: ${uri}`);
+  }
+  if (resolved.row.size > PACKAGE_ZIP_MAX_COMPRESSED_BYTES) {
+    throw new McpError(
+      ErrorCode.InvalidParams,
+      `Document exceeds the package import limit of ${PACKAGE_ZIP_MAX_COMPRESSED_BYTES} bytes.`,
+    );
+  }
+  const stream = await streamDocumentContent(resolved.row.storageKey);
+  if (!stream) {
+    throw new McpError(ErrorCode.InvalidParams, `Document content is missing: ${uri}`);
+  }
+  const bytes = new Uint8Array(await new Response(stream).arrayBuffer());
+  if (bytes.byteLength > PACKAGE_ZIP_MAX_COMPRESSED_BYTES) {
+    throw new McpError(
+      ErrorCode.InvalidParams,
+      `Document exceeds the package import limit of ${PACKAGE_ZIP_MAX_COMPRESSED_BYTES} bytes.`,
+    );
+  }
+  return {
+    bytes,
+    documentId,
+    name: resolved.row.name,
+    mime: resolved.row.mime,
+  };
+}
+
+function buildReadDocumentTool(ctx: McpToolContext): AppstrateToolDefinition {
+  const descriptor: Tool = {
+    name: "read_document",
+    description:
+      "Read a document:// URI through the same document ACL and storage path as resources/read. " +
+      "Small text and binary documents are returned as embedded MCP resources; oversized or " +
+      "non-downloadable documents return capability-aware metadata.",
+    annotations: {
+      title: "Read document",
+      readOnlyHint: true,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["uri"],
+      properties: {
+        uri: { type: "string", description: "A document:// URI returned by list_documents." },
+      },
+    },
+  };
+
+  const provider = buildDocumentResourceProvider(ctx);
+  const handler = async (args: Record<string, unknown>): Promise<CallToolResult> => {
+    const uri = asString(args.uri);
+    if (!uri) throw new McpError(ErrorCode.InvalidParams, "uri is required.");
+    const result = await provider.read(uri);
+    return {
+      content: result.contents.map((resource) => ({ type: "resource", resource })),
+      isError: false,
+    } as CallToolResult;
+  };
+  return { descriptor, handler };
+}
+
+function packageDocumentInputSchema(): Tool["inputSchema"] {
+  return {
+    type: "object",
+    additionalProperties: false,
+    required: ["document_uri"],
+    properties: {
+      document_uri: {
+        type: "string",
+        description: "Downloadable document:// URI containing .afps, .zip, or .afps-bundle bytes.",
+      },
+    },
+  };
+}
+
+function buildValidatePackageDocumentTool(ctx: McpToolContext): AppstrateToolDefinition {
+  const descriptor: Tool = {
+    name: "validate_package_document",
+    description:
+      "Validate a document-backed .afps/.zip/.afps-bundle using the exact import preflight. " +
+      "Performs no mutation. Returns package identities, root, integrity and conflicts.",
+    annotations: {
+      title: "Validate package document",
+      readOnlyHint: true,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+    inputSchema: packageDocumentInputSchema(),
+  };
+
+  const handler = async (args: Record<string, unknown>): Promise<CallToolResult> => {
+    const uri = asString(args.document_uri);
+    if (!uri) throw new McpError(ErrorCode.InvalidParams, "document_uri is required.");
+    try {
+      const document = await readPackageDocumentBytes(ctx, uri);
+      const { bundle, conflicts } = await preflightBundleImport(document.bytes, ctx.scope);
+      return textResult({
+        valid: true,
+        importable: conflicts.length === 0,
+        document: {
+          id: document.documentId,
+          uri: documentUri(document.documentId),
+          name: document.name,
+          mime: document.mime,
+          size: document.bytes.byteLength,
+        },
+        root: bundle.root,
+        integrity: bundle.integrity,
+        packages: [...bundle.packages].map(([identity, pkg]) => ({
+          identity,
+          type: pkg.manifest.type ?? null,
+          integrity: pkg.integrity,
+        })),
+        conflicts: conflicts.map(({ identity, reason }) => ({ identity, reason })),
+      });
+    } catch (err) {
+      if (err instanceof McpError) throw err;
+      return textResult({ valid: false, importable: false, error: getErrorMessage(err) }, true);
+    }
+  };
+  return { descriptor, handler };
+}
+
+function buildImportPackageDocumentTool(ctx: McpToolContext): AppstrateToolDefinition {
+  const descriptor: Tool = {
+    name: "import_package_document",
+    description:
+      "Import and install a package or bundle directly from a document:// URI. Bytes stay " +
+      "server-side and pass through the exact same preflight, conflict, version and install " +
+      "contracts as multipart bundle import. Call validate_package_document first.",
+    annotations: {
+      title: "Import package document",
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+    inputSchema: packageDocumentInputSchema(),
+  };
+
+  const handler = async (args: Record<string, unknown>): Promise<CallToolResult> => {
+    if (!ctx.permissions.has("mcp:invoke") || !ctx.permissions.has("agents:write")) {
+      return textResult(
+        { error: "Permissions 'mcp:invoke' and 'agents:write' are required to import packages." },
+        true,
+      );
+    }
+    if (ctx.actor.type !== "user") {
+      return textResult({ error: "Only organization users can import packages." }, true);
+    }
+    const uri = asString(args.document_uri);
+    if (!uri) throw new McpError(ErrorCode.InvalidParams, "document_uri is required.");
+    try {
+      const document = await readPackageDocumentBytes(ctx, uri);
+      const result = await handleImportBundle(document.bytes, ctx.scope, ctx.actor.id);
+      for (const entry of result.imported) {
+        if (entry.status !== "inserted") continue;
+        const identity = parsePackageIdentity(entry.identity);
+        await recordAudit({
+          orgId: ctx.scope.orgId,
+          applicationId: ctx.scope.applicationId,
+          actorType: "user",
+          actorId: ctx.actor.id,
+          action: "package.version_created",
+          resourceType: "package",
+          resourceId: identity?.packageId ?? entry.identity,
+          after: {
+            type: entry.type ?? null,
+            version: identity?.version ?? null,
+            via: "import:document",
+            document_id: document.documentId,
+            root: entry.identity === `${result.root_package_id}@${result.root_version}`,
+          },
+        });
+      }
+      return textResult({
+        ...result,
+        document_uri: documentUri(document.documentId),
+      });
+    } catch (err) {
+      if (err instanceof McpError) throw err;
+      return textResult({ error: getErrorMessage(err) }, true);
+    }
+  };
+  return { descriptor, handler };
+}
+
+// --- get_runtime_capabilities ----------------------------------------------
+
+function buildRuntimeCapabilitiesTool(): AppstrateToolDefinition {
+  const descriptor: Tool = {
+    name: "get_runtime_capabilities",
+    description:
+      "Return the executable MCP-server runtimes this Appstrate build supports and the exact " +
+      "manifest/entry-point contract for each. Call this before authoring a local MCP package; " +
+      "do not infer runtime support from an earlier tool failure.",
+    annotations: {
+      title: "Get MCP runtime capabilities",
+      readOnlyHint: true,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+    inputSchema: { type: "object", additionalProperties: false, properties: {} },
+  };
+
+  const handler = async (): Promise<CallToolResult> =>
+    textResult({
+      archive_required: true,
+      package_archive_max_bytes: PACKAGE_ZIP_MAX_COMPRESSED_BYTES,
+      schema_version: "0.1",
+      entry_point_must_exist: true,
+      runtimes: MCP_SERVER_RUNTIMES.map((runtime) => ({
+        runtime,
+        manifest_version: MCP_SERVER_RUNTIME_CAPABILITIES[runtime].manifestVersion,
+        server_type: MCP_SERVER_RUNTIME_CAPABILITIES[runtime].manifestServerType,
+        entry_point: MCP_SERVER_RUNTIME_CAPABILITIES[runtime].entryPoint,
+        ...(runtime === "bun"
+          ? { runtime_override: MCP_SERVER_RUNTIME_CAPABILITIES.bun.runtimeOverride }
+          : {}),
+      })),
+    });
 
   return { descriptor, handler };
 }
@@ -1345,6 +1602,10 @@ export function buildMcpTools(ctx: McpToolContext): AppstrateToolDefinition[] {
     buildInvokeTool(ctx),
     buildRunAndWaitTool(ctx),
     buildListDocumentsTool(ctx),
+    buildReadDocumentTool(ctx),
+    buildValidatePackageDocumentTool(ctx),
+    buildImportPackageDocumentTool(ctx),
+    buildRuntimeCapabilitiesTool(),
   ];
   // get_me dispatches to GET /api/me/context. A consumer that already injects
   // that payload into its own system prompt (the chat module) drops the tool —

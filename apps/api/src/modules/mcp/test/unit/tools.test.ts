@@ -476,10 +476,36 @@ describe("buildMcpTools contextInjected", () => {
     // (its best_match schema is not covered by the injected operation index).
     expect(names).toEqual([
       "describe_operation",
+      "get_runtime_capabilities",
+      "import_package_document",
       "invoke_operation",
       "list_documents",
+      "read_document",
       "run_and_wait",
       "search_operations",
+      "validate_package_document",
     ]);
+  });
+
+  it("exposes the runtime registry used by package authoring and adapters", async () => {
+    const { byName } = makeTools(["mcp:read"], true);
+    const result = await byName.get("get_runtime_capabilities")!.handler({}, noExtra);
+    expect(parseResult(result)).toMatchObject({
+      archive_required: true,
+      entry_point_must_exist: true,
+      package_archive_max_bytes: 10 * 1024 * 1024,
+      runtimes: [
+        { runtime: "node", manifest_version: "0.3", server_type: "node" },
+        {
+          runtime: "bun",
+          manifest_version: "0.3",
+          server_type: "node",
+          runtime_override: "bun",
+        },
+        { runtime: "python", manifest_version: "0.3", server_type: "python" },
+        { runtime: "uv", manifest_version: "0.4", server_type: "uv" },
+        { runtime: "binary", manifest_version: "0.3", server_type: "binary" },
+      ],
+    });
   });
 });

@@ -235,4 +235,20 @@ describe("getMcpServerRuntime", () => {
       getMcpServerRuntime(manifest({ "dev.appstrate/mcp-server": { runtime: 42 } })),
     ).toBeUndefined();
   });
+
+  it("rejects an unknown runtime override during manifest validation", () => {
+    const r = mcpServerManifestSchema.safeParse(
+      manifest({ "dev.appstrate/mcp-server": { runtime: "deno" } }),
+    );
+    expect(r.success).toBe(false);
+    if (!r.success) {
+      expect(
+        r.error.issues.some(
+          (i) =>
+            i.path.join(".") === "_meta.dev.appstrate/mcp-server.runtime" &&
+            i.message.includes("node, bun, python, uv, binary"),
+        ),
+      ).toBe(true);
+    }
+  });
 });

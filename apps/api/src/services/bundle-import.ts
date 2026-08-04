@@ -243,6 +243,11 @@ export interface ImportBundleResult {
   warnings: string[];
 }
 
+export interface BundleImportPreflight {
+  bundle: Bundle;
+  conflicts: BundleConflict[];
+}
+
 /**
  * Import every package in {@link bundle} into the org registry, then
  * install the root in the calling application. Callers SHOULD run
@@ -570,6 +575,21 @@ async function assertBundleAgentsExposeCallableTools(bundle: Bundle, orgId: stri
 }
 
 /**
+ * Pure-read import preflight shared by HTTP upload and document-backed MCP
+ * tools. It performs the exact parse, callable-tool and conflict checks the
+ * mutation will use, but writes nothing.
+ */
+export async function preflightBundleImport(
+  bytes: Uint8Array,
+  scope: BundleAssemblyScope,
+): Promise<BundleImportPreflight> {
+  const bundle = await readOrBuildBundle(bytes, scope);
+  await assertBundleAgentsExposeCallableTools(bundle, scope.orgId);
+  const conflicts = await detectBundleConflicts(bundle, scope);
+  return { bundle, conflicts };
+}
+
+/**
  * End-to-end import entry point used by the `POST /api/packages/import-bundle`
  * route. Composes read → gate → detect conflicts → import.
  */
@@ -578,9 +598,7 @@ export async function handleImportBundle(
   scope: BundleAssemblyScope,
   userId: string,
 ): Promise<ImportBundleResult> {
-  const bundle = await readOrBuildBundle(bytes, scope);
-  await assertBundleAgentsExposeCallableTools(bundle, scope.orgId);
-  const conflicts = await detectBundleConflicts(bundle, scope);
+  const { bundle, conflicts } = await preflightBundleImport(bytes, scope);
   if (conflicts.length > 0) {
     const summary = conflicts
       .map((c) =>

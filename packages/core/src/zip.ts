@@ -248,7 +248,8 @@ export class PackageZipError extends Error {
   }
 }
 
-const DEFAULT_MAX_SIZE = 10 * 1024 * 1024; // 10 MB
+/** Canonical compressed-size ceiling for one author-supplied package archive. */
+export const PACKAGE_ZIP_MAX_COMPRESSED_BYTES = 10 * 1024 * 1024; // 10 MB
 
 /** Options for {@link parsePackageZip}. */
 export interface ParsePackageZipOptions {
@@ -293,7 +294,7 @@ export function parsePackageZip(
     typeof options === "number"
       ? { maxSize: options } // canonical-casing-exempt
       : (options ?? {});
-  const limit = opts.maxSize ?? DEFAULT_MAX_SIZE;
+  const limit = opts.maxSize ?? PACKAGE_ZIP_MAX_COMPRESSED_BYTES;
   if (zipBuffer.length > limit) {
     throw new PackageZipError(
       "FILE_TOO_LARGE",

@@ -16,6 +16,7 @@ import { tmpdir, hostname } from "node:os";
 import { posix, join } from "node:path";
 
 import { SubprocessTransport } from "@appstrate/mcp-transport";
+import { isMcpServerRuntime, type McpServerRuntime } from "@appstrate/core/mcp-server";
 
 import { logger } from "./logger.ts";
 import type { IntegrationSpawnSpec } from "./integrations-boot.ts";
@@ -45,7 +46,7 @@ import {
  * each entry with a versioned GHCR ref via the `RUNNER_IMAGE_*` env vars
  * below — see `resolveRunnerImage`.
  */
-const DEFAULT_RUNNER_IMAGE_BY_TYPE: Record<string, string> = {
+const DEFAULT_RUNNER_IMAGE_BY_TYPE: Record<McpServerRuntime, string> = {
   node: "appstrate-mcp-runner-node:latest",
   // In process mode `bun` runs as a host subprocess; in docker mode it gets
   // its own container here, like every other runtime — keeps tier-3's
@@ -73,7 +74,7 @@ const DEFAULT_RUNNER_IMAGE_BY_TYPE: Record<string, string> = {
  * inside the sidecar — so they ride the operator-env forwarding channel
  * rather than the API's own `getEnv()`.
  */
-const RUNNER_IMAGE_ENV_BY_TYPE: Record<string, string> = {
+const RUNNER_IMAGE_ENV_BY_TYPE: Record<McpServerRuntime, string> = {
   node: "RUNNER_IMAGE_NODE",
   bun: "RUNNER_IMAGE_BUN",
   python: "RUNNER_IMAGE_PYTHON",
@@ -88,6 +89,7 @@ const RUNNER_IMAGE_ENV_BY_TYPE: Record<string, string> = {
  * supported-types error.
  */
 function resolveRunnerImage(type: string): string | undefined {
+  if (!isMcpServerRuntime(type)) return undefined;
   const envKey = RUNNER_IMAGE_ENV_BY_TYPE[type];
   const override = envKey ? process.env[envKey] : undefined;
   if (override !== undefined && override !== "") return override;

@@ -27,7 +27,7 @@ const defaultInlineManifest = (overrides: Record<string, unknown>) => ({
   type: "agent",
   version: "1.0.0",
   dependencies: {},
-  runtime_tools: ["log", "output", "publish_document"],
+  runtime_tools: ["log", "output", "publish_document", "publish_archive"],
   output: { schema: { type: "object", properties: {}, additionalProperties: true } },
   ...overrides,
 });

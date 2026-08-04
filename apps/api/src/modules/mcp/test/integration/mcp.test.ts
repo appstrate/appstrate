@@ -254,10 +254,14 @@ describe("mcp tool round-trip", () => {
     expect(names.sort()).toEqual([
       "describe_operation",
       "get_me",
+      "get_runtime_capabilities",
+      "import_package_document",
       "invoke_operation",
       "list_documents",
+      "read_document",
       "run_and_wait",
       "search_operations",
+      "validate_package_document",
     ]);
     const runAndWait = tools.find((t) => t.name === "run_and_wait")!;
     expect((runAndWait.annotations as Record<string, unknown>).destructiveHint).toBe(true);

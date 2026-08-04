@@ -25,8 +25,10 @@
 import { Type, type ExtensionAPI, type ExtensionFactory } from "../pi-sdk.ts";
 import {
   buildRuntimeToolDefs,
+  buildPublishArchiveDef,
   buildPublishDocumentDef,
   reEmitRuntimeToolEvents,
+  type ArchivePublisher,
   type DocumentUploader,
   type RuntimeToolDef,
   type RuntimeToolEvent,
@@ -113,4 +115,19 @@ export function buildPublishDocumentExtension(
 ): ExtensionFactory {
   const emit = opts.emit ?? defaultStdoutEmit;
   return runtimeToolExtension(buildPublishDocumentDef(opts.uploader), emit);
+}
+
+export interface BuildPublishArchiveExtensionOptions {
+  /** Builds and uploads an archive from explicit workspace-relative files. */
+  publisher: ArchivePublisher;
+  /** Sink for the `document.published` event the tool emits (defaults to stdout-JSONL). */
+  emit?: (event: RuntimeToolEvent) => void;
+}
+
+/** Build the `publish_archive` Pi extension around an injected publisher. */
+export function buildPublishArchiveExtension(
+  opts: BuildPublishArchiveExtensionOptions,
+): ExtensionFactory {
+  const emit = opts.emit ?? defaultStdoutEmit;
+  return runtimeToolExtension(buildPublishArchiveDef(opts.publisher), emit);
 }
