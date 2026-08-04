@@ -31,6 +31,15 @@ describe("buildRuntimePiEnv", () => {
     expect(env.MODEL_REASONING_LEVEL).toBe("xhigh");
   });
 
+  it("forwards provider-native reasoning level mappings", () => {
+    const env = buildRuntimePiEnv({
+      model: { ...model, reasoningLevelMap: { xhigh: "max" } },
+      agentPrompt: "p",
+      ...sidecar,
+    });
+    expect(env.MODEL_REASONING_LEVEL_MAP).toBe('{"xhigh":"max"}');
+  });
+
   it("omits generation controls to preserve Pi/provider defaults", () => {
     const env = buildRuntimePiEnv({ model, agentPrompt: "p", ...sidecar });
     expect(env.MODEL_TEMPERATURE).toBeUndefined();

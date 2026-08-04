@@ -256,8 +256,8 @@ describe("generation capabilities", () => {
           off: "supported",
           minimal: "unsupported",
           low: "supported",
-          medium: "supported",
-          high: "supported",
+          medium: "unknown",
+          high: "unknown",
           xhigh: "unsupported",
         },
       },
@@ -288,17 +288,19 @@ describe("generation capabilities", () => {
       _appstrate_supported_openai_params: ["reasoning_effort"],
     });
     expect(capabilities.reasoning.supported).toBe("supported");
-    expect(capabilities.reasoning.levels.low).toBe("supported");
-    expect(capabilities.reasoning.levels.medium).toBe("supported");
-    expect(capabilities.reasoning.levels.high).toBe("supported");
+    expect(capabilities.reasoning.levels.low).toBe("unknown");
+    expect(capabilities.reasoning.levels.medium).toBe("unknown");
+    expect(capabilities.reasoning.levels.high).toBe("unknown");
   });
 
   it("maps LiteLLM's max effort to Appstrate's portable xhigh level", () => {
     const capabilities = deriveGenerationCapabilities({
+      litellm_provider: "anthropic",
       supports_reasoning: true,
       supports_max_reasoning_effort: true,
     });
     expect(capabilities.reasoning.levels.xhigh).toBe("supported");
+    expect(capabilities.reasoning.nativeLevels?.xhigh).toBe("max");
   });
 
   it("vendors the normalized generation block with pricing", () => {

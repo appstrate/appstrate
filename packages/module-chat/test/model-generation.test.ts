@@ -14,14 +14,19 @@ describe("applyGenerationToProxyBody", () => {
         generation: {
           temperature: "supported",
           temperatureWithReasoning: "unknown",
-          reasoning: { supported: "supported", adaptive: true, levels: {} },
+          reasoning: {
+            supported: "supported",
+            adaptive: true,
+            levels: { xhigh: "supported" },
+            nativeLevels: { xhigh: "max" },
+          },
         },
       },
-      { reasoningLevel: "high" },
+      { reasoningLevel: "xhigh" },
     );
     expect(parse(body)).toMatchObject({
       thinking: { type: "adaptive" },
-      output_config: { effort: "high" },
+      output_config: { effort: "max" },
     });
   });
 

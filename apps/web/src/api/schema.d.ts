@@ -5114,6 +5114,10 @@ export interface components {
                 levels: {
                     [key: string]: "supported" | "unsupported" | "unknown";
                 };
+                /** @description Optional provider-native values for portable levels (for example xhigh to max). */
+                nativeLevels?: {
+                    [key: string]: "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+                };
             };
         };
         /** @description Optional model sampling and reasoning controls. Omitted properties inherit the next lower-precedence layer. */

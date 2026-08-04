@@ -33,6 +33,7 @@ import { getModelProvider } from "./model-providers/registry.ts";
 import { resolveOAuthTokenForSidecar } from "./model-providers/token-resolver.ts";
 import {
   applyModelGenerationCapabilitiesOverride,
+  INHERITED_MODEL_GENERATION_CAPABILITIES,
   UNKNOWN_MODEL_GENERATION_CAPABILITIES,
   type ModelGenerationCapabilities,
 } from "@appstrate/core/model-generation";
@@ -91,10 +92,11 @@ const defaultModel = createDefaultPointer({
  * surface. For `aliased` entries the public `id`/`label` survive (the user
  * selected the alias) but the backing — provider/protocol (`apiShape`),
  * endpoint (`baseUrl`), upstream id (`modelId`), credential, and every
- * capability/cost field — is nulled. Capability/cost are dropped too (not just
- * the ids): the unstripped values are catalog-derived from the *real* model and
- * would themselves identify it (a distinctive context window or price reveals
- * the backing). Non-aliased models pass through untouched.
+ * capability/cost field — is nulled. Backing-derived capability/cost fields are
+ * dropped too (not just the ids): a distinctive context window or price could
+ * identify the real model. Generation uses one constant alias contract instead:
+ * controls stay inherited, so clients can hide them and clear stale overrides
+ * without learning anything about the backing. Non-aliased models pass through.
  *
  * Applied at the user-facing read boundary (`GET /api/models`, the effective-
  * default response) — NOT inside {@link listOrgModels}, so the operator
@@ -141,13 +143,14 @@ export function projectAliasedModel(model: OrgModelInfo): OrgModelInfo {
     modelId: null,
     credentialId: null,
     // Capability/cost — catalog-derived from the REAL model, so they
-    // fingerprint it; drop them too.
+    // fingerprint it; drop them too. Generation gets the same fixed contract
+    // for every alias, independent of its backing.
     contextWindow: null,
     maxTokens: null,
     input: null,
     reasoning: null,
     cost: null,
-    generation: null,
+    generation: INHERITED_MODEL_GENERATION_CAPABILITIES,
   };
 }
 

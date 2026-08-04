@@ -76,7 +76,12 @@ export function ModelGenerationControls({
 }: ModelGenerationControlsProps) {
   const id = useId();
   const temperatureUnsupported = capabilities?.temperature === "unsupported";
-  const reasoningUnsupported = capabilities?.reasoning.supported === "unsupported";
+  const reasoningUnsupported =
+    capabilities?.reasoning.supported === "unsupported" ||
+    (capabilities?.reasoning.supported === "supported" &&
+      !MODEL_REASONING_LEVELS.some(
+        (level) => capabilities.reasoning.levels[level] === "supported",
+      ));
   const temperatureDisabled = disabled || temperatureUnsupported;
   const reasoningDisabled = disabled || reasoningUnsupported;
   const selectedTemperature =
@@ -196,7 +201,11 @@ export function ModelGenerationControls({
               <ToggleGroupItem
                 key={level}
                 value={level}
-                disabled={capabilities?.reasoning.levels[level] === "unsupported"}
+                disabled={
+                  capabilities?.reasoning.levels[level] === "unsupported" ||
+                  (capabilities?.reasoning.supported === "supported" &&
+                    capabilities.reasoning.levels[level] !== "supported")
+                }
                 aria-label={labels.levels[level]}
                 title={labels.levels[level]}
                 className={cn(

@@ -360,9 +360,9 @@
         "levels": {
           "off": "unknown",
           "minimal": "unknown",
-          "low": "supported",
-          "medium": "supported",
-          "high": "supported",
+          "low": "unknown",
+          "medium": "unknown",
+          "high": "unknown",
           "xhigh": "unknown"
         }
       }
@@ -1348,9 +1348,9 @@
         "levels": {
           "off": "unsupported",
           "minimal": "supported",
-          "low": "supported",
-          "medium": "supported",
-          "high": "supported",
+          "low": "unknown",
+          "medium": "unknown",
+          "high": "unknown",
           "xhigh": "unsupported"
         }
       }
@@ -1379,9 +1379,9 @@
         "levels": {
           "off": "unsupported",
           "minimal": "supported",
-          "low": "supported",
-          "medium": "supported",
-          "high": "supported",
+          "low": "unknown",
+          "medium": "unknown",
+          "high": "unknown",
           "xhigh": "unsupported"
         }
       }
@@ -1410,9 +1410,9 @@
         "levels": {
           "off": "unsupported",
           "minimal": "supported",
-          "low": "supported",
-          "medium": "supported",
-          "high": "supported",
+          "low": "unknown",
+          "medium": "unknown",
+          "high": "unknown",
           "xhigh": "unsupported"
         }
       }
@@ -1441,9 +1441,9 @@
         "levels": {
           "off": "unsupported",
           "minimal": "supported",
-          "low": "supported",
-          "medium": "supported",
-          "high": "supported",
+          "low": "unknown",
+          "medium": "unknown",
+          "high": "unknown",
           "xhigh": "unsupported"
         }
       }
@@ -1472,9 +1472,9 @@
         "levels": {
           "off": "unsupported",
           "minimal": "supported",
-          "low": "supported",
-          "medium": "supported",
-          "high": "supported",
+          "low": "unknown",
+          "medium": "unknown",
+          "high": "unknown",
           "xhigh": "unsupported"
         }
       }
@@ -1503,9 +1503,9 @@
         "levels": {
           "off": "unsupported",
           "minimal": "supported",
-          "low": "supported",
-          "medium": "supported",
-          "high": "supported",
+          "low": "unknown",
+          "medium": "unknown",
+          "high": "unknown",
           "xhigh": "unsupported"
         }
       }
@@ -1534,9 +1534,9 @@
         "levels": {
           "off": "unsupported",
           "minimal": "supported",
-          "low": "supported",
-          "medium": "supported",
-          "high": "supported",
+          "low": "unknown",
+          "medium": "unknown",
+          "high": "unknown",
           "xhigh": "unsupported"
         }
       }
@@ -1565,9 +1565,9 @@
         "levels": {
           "off": "unsupported",
           "minimal": "supported",
-          "low": "supported",
-          "medium": "supported",
-          "high": "supported",
+          "low": "unknown",
+          "medium": "unknown",
+          "high": "unknown",
           "xhigh": "unsupported"
         }
       }
@@ -1656,9 +1656,9 @@
         "levels": {
           "off": "supported",
           "minimal": "supported",
-          "low": "supported",
-          "medium": "supported",
-          "high": "supported",
+          "low": "unknown",
+          "medium": "unknown",
+          "high": "unknown",
           "xhigh": "unsupported"
         }
       }
@@ -1687,9 +1687,9 @@
         "levels": {
           "off": "supported",
           "minimal": "supported",
-          "low": "supported",
-          "medium": "supported",
-          "high": "supported",
+          "low": "unknown",
+          "medium": "unknown",
+          "high": "unknown",
           "xhigh": "unsupported"
         }
       }
@@ -1718,9 +1718,9 @@
         "levels": {
           "off": "supported",
           "minimal": "supported",
-          "low": "supported",
-          "medium": "supported",
-          "high": "supported",
+          "low": "unknown",
+          "medium": "unknown",
+          "high": "unknown",
           "xhigh": "unsupported"
         }
       }
@@ -1749,10 +1749,13 @@
         "levels": {
           "off": "supported",
           "minimal": "supported",
-          "low": "supported",
-          "medium": "supported",
-          "high": "supported",
+          "low": "unknown",
+          "medium": "unknown",
+          "high": "unknown",
           "xhigh": "supported"
+        },
+        "nativeLevels": {
+          "xhigh": "xhigh"
         }
       }
     },
@@ -1780,10 +1783,13 @@
         "levels": {
           "off": "supported",
           "minimal": "supported",
-          "low": "supported",
-          "medium": "supported",
-          "high": "supported",
+          "low": "unknown",
+          "medium": "unknown",
+          "high": "unknown",
           "xhigh": "supported"
+        },
+        "nativeLevels": {
+          "xhigh": "xhigh"
         }
       }
     },
@@ -1811,9 +1817,9 @@
         "levels": {
           "off": "unsupported",
           "minimal": "supported",
-          "low": "supported",
-          "medium": "supported",
-          "high": "supported",
+          "low": "unknown",
+          "medium": "unknown",
+          "high": "unknown",
           "xhigh": "unsupported"
         }
       }
@@ -1842,9 +1848,9 @@
         "levels": {
           "off": "unsupported",
           "minimal": "supported",
-          "low": "supported",
-          "medium": "supported",
-          "high": "supported",
+          "low": "unknown",
+          "medium": "unknown",
+          "high": "unknown",
           "xhigh": "unsupported"
         }
       }
@@ -1873,10 +1879,13 @@
         "levels": {
           "off": "supported",
           "minimal": "supported",
-          "low": "supported",
-          "medium": "supported",
-          "high": "supported",
+          "low": "unknown",
+          "medium": "unknown",
+          "high": "unknown",
           "xhigh": "supported"
+        },
+        "nativeLevels": {
+          "xhigh": "xhigh"
         }
       }
     },
@@ -1904,9 +1913,9 @@
         "levels": {
           "off": "unknown",
           "minimal": "unknown",
-          "low": "supported",
-          "medium": "supported",
-          "high": "supported",
+          "low": "unknown",
+          "medium": "unknown",
+          "high": "unknown",
           "xhigh": "unknown"
         }
       }
@@ -1935,10 +1944,13 @@
         "levels": {
           "off": "supported",
           "minimal": "unsupported",
-          "low": "supported",
-          "medium": "supported",
-          "high": "supported",
+          "low": "unknown",
+          "medium": "unknown",
+          "high": "unknown",
           "xhigh": "supported"
+        },
+        "nativeLevels": {
+          "xhigh": "xhigh"
         }
       }
     },
@@ -1966,10 +1978,13 @@
         "levels": {
           "off": "supported",
           "minimal": "unsupported",
-          "low": "supported",
-          "medium": "supported",
-          "high": "supported",
+          "low": "unknown",
+          "medium": "unknown",
+          "high": "unknown",
           "xhigh": "supported"
+        },
+        "nativeLevels": {
+          "xhigh": "xhigh"
         }
       }
     },
@@ -1997,10 +2012,13 @@
         "levels": {
           "off": "supported",
           "minimal": "unsupported",
-          "low": "supported",
-          "medium": "supported",
-          "high": "supported",
+          "low": "unknown",
+          "medium": "unknown",
+          "high": "unknown",
           "xhigh": "supported"
+        },
+        "nativeLevels": {
+          "xhigh": "xhigh"
         }
       }
     },
@@ -2028,10 +2046,13 @@
         "levels": {
           "off": "supported",
           "minimal": "unsupported",
-          "low": "supported",
-          "medium": "supported",
-          "high": "supported",
+          "low": "unknown",
+          "medium": "unknown",
+          "high": "unknown",
           "xhigh": "supported"
+        },
+        "nativeLevels": {
+          "xhigh": "xhigh"
         }
       }
     },
@@ -2059,10 +2080,13 @@
         "levels": {
           "off": "supported",
           "minimal": "unsupported",
-          "low": "supported",
-          "medium": "supported",
-          "high": "supported",
+          "low": "unknown",
+          "medium": "unknown",
+          "high": "unknown",
           "xhigh": "supported"
+        },
+        "nativeLevels": {
+          "xhigh": "xhigh"
         }
       }
     },
@@ -2090,10 +2114,13 @@
         "levels": {
           "off": "supported",
           "minimal": "unsupported",
-          "low": "supported",
-          "medium": "supported",
-          "high": "supported",
+          "low": "unknown",
+          "medium": "unknown",
+          "high": "unknown",
           "xhigh": "supported"
+        },
+        "nativeLevels": {
+          "xhigh": "xhigh"
         }
       }
     },
@@ -2121,10 +2148,13 @@
         "levels": {
           "off": "supported",
           "minimal": "unsupported",
-          "low": "supported",
-          "medium": "supported",
-          "high": "supported",
+          "low": "unknown",
+          "medium": "unknown",
+          "high": "unknown",
           "xhigh": "supported"
+        },
+        "nativeLevels": {
+          "xhigh": "xhigh"
         }
       }
     },
@@ -2153,10 +2183,13 @@
         "levels": {
           "off": "supported",
           "minimal": "unsupported",
-          "low": "supported",
-          "medium": "supported",
-          "high": "supported",
+          "low": "unknown",
+          "medium": "unknown",
+          "high": "unknown",
           "xhigh": "supported"
+        },
+        "nativeLevels": {
+          "xhigh": "xhigh"
         }
       }
     },
@@ -2185,10 +2218,13 @@
         "levels": {
           "off": "supported",
           "minimal": "unsupported",
-          "low": "supported",
-          "medium": "supported",
-          "high": "supported",
+          "low": "unknown",
+          "medium": "unknown",
+          "high": "unknown",
           "xhigh": "supported"
+        },
+        "nativeLevels": {
+          "xhigh": "xhigh"
         }
       }
     },
@@ -2217,10 +2253,13 @@
         "levels": {
           "off": "supported",
           "minimal": "unsupported",
-          "low": "supported",
-          "medium": "supported",
-          "high": "supported",
+          "low": "unknown",
+          "medium": "unknown",
+          "high": "unknown",
           "xhigh": "supported"
+        },
+        "nativeLevels": {
+          "xhigh": "xhigh"
         }
       }
     },
@@ -2247,9 +2286,9 @@
         "levels": {
           "off": "unknown",
           "minimal": "unknown",
-          "low": "unsupported",
-          "medium": "unsupported",
-          "high": "unsupported",
+          "low": "unknown",
+          "medium": "unknown",
+          "high": "unknown",
           "xhigh": "unknown"
         }
       }
@@ -2275,9 +2314,9 @@
         "levels": {
           "off": "unknown",
           "minimal": "unknown",
-          "low": "unsupported",
-          "medium": "unsupported",
-          "high": "unsupported",
+          "low": "unknown",
+          "medium": "unknown",
+          "high": "unknown",
           "xhigh": "unknown"
         }
       }
@@ -2303,9 +2342,9 @@
         "levels": {
           "off": "unknown",
           "minimal": "unknown",
-          "low": "unsupported",
-          "medium": "unsupported",
-          "high": "unsupported",
+          "low": "unknown",
+          "medium": "unknown",
+          "high": "unknown",
           "xhigh": "unknown"
         }
       }
@@ -2331,9 +2370,9 @@
         "levels": {
           "off": "unknown",
           "minimal": "unknown",
-          "low": "unsupported",
-          "medium": "unsupported",
-          "high": "unsupported",
+          "low": "unknown",
+          "medium": "unknown",
+          "high": "unknown",
           "xhigh": "unknown"
         }
       }
@@ -2359,9 +2398,9 @@
         "levels": {
           "off": "unknown",
           "minimal": "unknown",
-          "low": "unsupported",
-          "medium": "unsupported",
-          "high": "unsupported",
+          "low": "unknown",
+          "medium": "unknown",
+          "high": "unknown",
           "xhigh": "unknown"
         }
       }
@@ -2387,9 +2426,9 @@
         "levels": {
           "off": "unknown",
           "minimal": "unknown",
-          "low": "unsupported",
-          "medium": "unsupported",
-          "high": "unsupported",
+          "low": "unknown",
+          "medium": "unknown",
+          "high": "unknown",
           "xhigh": "unknown"
         }
       }
@@ -2417,9 +2456,9 @@
         "levels": {
           "off": "unknown",
           "minimal": "unknown",
-          "low": "supported",
-          "medium": "supported",
-          "high": "supported",
+          "low": "unknown",
+          "medium": "unknown",
+          "high": "unknown",
           "xhigh": "unknown"
         }
       }
@@ -2448,9 +2487,9 @@
         "levels": {
           "off": "unknown",
           "minimal": "unknown",
-          "low": "supported",
-          "medium": "supported",
-          "high": "supported",
+          "low": "unknown",
+          "medium": "unknown",
+          "high": "unknown",
           "xhigh": "unknown"
         }
       }
@@ -2479,9 +2518,9 @@
         "levels": {
           "off": "unknown",
           "minimal": "unknown",
-          "low": "supported",
-          "medium": "supported",
-          "high": "supported",
+          "low": "unknown",
+          "medium": "unknown",
+          "high": "unknown",
           "xhigh": "unknown"
         }
       }
@@ -2510,9 +2549,9 @@
         "levels": {
           "off": "unknown",
           "minimal": "unknown",
-          "low": "supported",
-          "medium": "supported",
-          "high": "supported",
+          "low": "unknown",
+          "medium": "unknown",
+          "high": "unknown",
           "xhigh": "unknown"
         }
       }
@@ -2540,9 +2579,9 @@
         "levels": {
           "off": "unknown",
           "minimal": "unknown",
-          "low": "supported",
-          "medium": "supported",
-          "high": "supported",
+          "low": "unknown",
+          "medium": "unknown",
+          "high": "unknown",
           "xhigh": "unknown"
         }
       }
@@ -2570,9 +2609,9 @@
         "levels": {
           "off": "unknown",
           "minimal": "unknown",
-          "low": "supported",
-          "medium": "supported",
-          "high": "supported",
+          "low": "unknown",
+          "medium": "unknown",
+          "high": "unknown",
           "xhigh": "unknown"
         }
       }
@@ -2601,9 +2640,9 @@
         "levels": {
           "off": "unknown",
           "minimal": "unknown",
-          "low": "supported",
-          "medium": "supported",
-          "high": "supported",
+          "low": "unknown",
+          "medium": "unknown",
+          "high": "unknown",
           "xhigh": "unknown"
         }
       }
@@ -2632,9 +2671,9 @@
         "levels": {
           "off": "unknown",
           "minimal": "unknown",
-          "low": "supported",
-          "medium": "supported",
-          "high": "supported",
+          "low": "unknown",
+          "medium": "unknown",
+          "high": "unknown",
           "xhigh": "unknown"
         }
       }

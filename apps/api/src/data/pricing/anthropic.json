@@ -17,9 +17,9 @@
         "levels": {
           "off": "unknown",
           "minimal": "unknown",
-          "low": "supported",
-          "medium": "supported",
-          "high": "supported",
+          "low": "unknown",
+          "medium": "unknown",
+          "high": "unknown",
           "xhigh": "unknown"
         }
       }
@@ -111,9 +111,9 @@
         "levels": {
           "off": "unknown",
           "minimal": "unknown",
-          "low": "supported",
-          "medium": "supported",
-          "high": "supported",
+          "low": "unknown",
+          "medium": "unknown",
+          "high": "unknown",
           "xhigh": "unknown"
         }
       }
@@ -143,9 +143,9 @@
         "levels": {
           "off": "unknown",
           "minimal": "unknown",
-          "low": "supported",
-          "medium": "supported",
-          "high": "supported",
+          "low": "unknown",
+          "medium": "unknown",
+          "high": "unknown",
           "xhigh": "unknown"
         }
       }
@@ -175,10 +175,13 @@
         "levels": {
           "off": "unknown",
           "minimal": "unknown",
-          "low": "supported",
-          "medium": "supported",
-          "high": "supported",
+          "low": "unknown",
+          "medium": "unknown",
+          "high": "unknown",
           "xhigh": "supported"
+        },
+        "nativeLevels": {
+          "xhigh": "max"
         }
       }
     },
@@ -207,9 +210,9 @@
         "levels": {
           "off": "unknown",
           "minimal": "unknown",
-          "low": "supported",
-          "medium": "supported",
-          "high": "supported",
+          "low": "unknown",
+          "medium": "unknown",
+          "high": "unknown",
           "xhigh": "unknown"
         }
       }
@@ -239,9 +242,9 @@
         "levels": {
           "off": "unknown",
           "minimal": "unknown",
-          "low": "supported",
-          "medium": "supported",
-          "high": "supported",
+          "low": "unknown",
+          "medium": "unknown",
+          "high": "unknown",
           "xhigh": "unknown"
         }
       }
@@ -271,9 +274,9 @@
         "levels": {
           "off": "unknown",
           "minimal": "unknown",
-          "low": "supported",
-          "medium": "supported",
-          "high": "supported",
+          "low": "unknown",
+          "medium": "unknown",
+          "high": "unknown",
           "xhigh": "unknown"
         }
       }
@@ -303,9 +306,9 @@
         "levels": {
           "off": "unknown",
           "minimal": "unknown",
-          "low": "supported",
-          "medium": "supported",
-          "high": "supported",
+          "low": "unknown",
+          "medium": "unknown",
+          "high": "unknown",
           "xhigh": "unknown"
         }
       }
@@ -335,9 +338,9 @@
         "levels": {
           "off": "unknown",
           "minimal": "unknown",
-          "low": "supported",
-          "medium": "supported",
-          "high": "supported",
+          "low": "unknown",
+          "medium": "unknown",
+          "high": "unknown",
           "xhigh": "unknown"
         }
       }
@@ -367,9 +370,9 @@
         "levels": {
           "off": "unknown",
           "minimal": "unknown",
-          "low": "supported",
-          "medium": "supported",
-          "high": "supported",
+          "low": "unknown",
+          "medium": "unknown",
+          "high": "unknown",
           "xhigh": "unknown"
         }
       }
@@ -399,9 +402,9 @@
         "levels": {
           "off": "unknown",
           "minimal": "unknown",
-          "low": "supported",
-          "medium": "supported",
-          "high": "supported",
+          "low": "unknown",
+          "medium": "unknown",
+          "high": "unknown",
           "xhigh": "unknown"
         }
       }
@@ -431,10 +434,13 @@
         "levels": {
           "off": "unknown",
           "minimal": "unknown",
-          "low": "supported",
-          "medium": "supported",
-          "high": "supported",
-          "xhigh": "unknown"
+          "low": "unknown",
+          "medium": "unknown",
+          "high": "unknown",
+          "xhigh": "supported"
+        },
+        "nativeLevels": {
+          "xhigh": "max"
         }
       }
     },
@@ -463,10 +469,13 @@
         "levels": {
           "off": "unknown",
           "minimal": "unknown",
-          "low": "supported",
-          "medium": "supported",
-          "high": "supported",
-          "xhigh": "unknown"
+          "low": "unknown",
+          "medium": "unknown",
+          "high": "unknown",
+          "xhigh": "supported"
+        },
+        "nativeLevels": {
+          "xhigh": "max"
         }
       }
     },
@@ -495,10 +504,13 @@
         "levels": {
           "off": "unknown",
           "minimal": "unknown",
-          "low": "supported",
-          "medium": "supported",
-          "high": "supported",
+          "low": "unknown",
+          "medium": "unknown",
+          "high": "unknown",
           "xhigh": "supported"
+        },
+        "nativeLevels": {
+          "xhigh": "max"
         }
       }
     },
@@ -527,10 +539,13 @@
         "levels": {
           "off": "unknown",
           "minimal": "unknown",
-          "low": "supported",
-          "medium": "supported",
-          "high": "supported",
+          "low": "unknown",
+          "medium": "unknown",
+          "high": "unknown",
           "xhigh": "supported"
+        },
+        "nativeLevels": {
+          "xhigh": "max"
         }
       }
     },
@@ -559,10 +574,13 @@
         "levels": {
           "off": "unknown",
           "minimal": "unknown",
-          "low": "supported",
-          "medium": "supported",
-          "high": "supported",
+          "low": "unknown",
+          "medium": "unknown",
+          "high": "unknown",
           "xhigh": "supported"
+        },
+        "nativeLevels": {
+          "xhigh": "max"
         }
       }
     },
@@ -591,10 +609,13 @@
         "levels": {
           "off": "unknown",
           "minimal": "unknown",
-          "low": "supported",
-          "medium": "supported",
-          "high": "supported",
+          "low": "unknown",
+          "medium": "unknown",
+          "high": "unknown",
           "xhigh": "supported"
+        },
+        "nativeLevels": {
+          "xhigh": "max"
         }
       }
     },
@@ -623,9 +644,9 @@
         "levels": {
           "off": "unknown",
           "minimal": "unknown",
-          "low": "supported",
-          "medium": "supported",
-          "high": "supported",
+          "low": "unknown",
+          "medium": "unknown",
+          "high": "unknown",
           "xhigh": "unknown"
         }
       }
@@ -655,9 +676,9 @@
         "levels": {
           "off": "unknown",
           "minimal": "unknown",
-          "low": "supported",
-          "medium": "supported",
-          "high": "supported",
+          "low": "unknown",
+          "medium": "unknown",
+          "high": "unknown",
           "xhigh": "unknown"
         }
       }
@@ -687,9 +708,9 @@
         "levels": {
           "off": "unknown",
           "minimal": "unknown",
-          "low": "supported",
-          "medium": "supported",
-          "high": "supported",
+          "low": "unknown",
+          "medium": "unknown",
+          "high": "unknown",
           "xhigh": "unknown"
         }
       }
@@ -719,10 +740,13 @@
         "levels": {
           "off": "unknown",
           "minimal": "unknown",
-          "low": "supported",
-          "medium": "supported",
-          "high": "supported",
-          "xhigh": "unknown"
+          "low": "unknown",
+          "medium": "unknown",
+          "high": "unknown",
+          "xhigh": "supported"
+        },
+        "nativeLevels": {
+          "xhigh": "max"
         }
       }
     },
@@ -751,10 +775,13 @@
         "levels": {
           "off": "unknown",
           "minimal": "unknown",
-          "low": "supported",
-          "medium": "supported",
-          "high": "supported",
+          "low": "unknown",
+          "medium": "unknown",
+          "high": "unknown",
           "xhigh": "supported"
+        },
+        "nativeLevels": {
+          "xhigh": "max"
         }
       }
     },

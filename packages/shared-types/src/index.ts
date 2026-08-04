@@ -680,7 +680,7 @@ export interface ModelMetadata {
 
 export interface OrgModelInfo extends ModelMetadata {
   id: string;
-  /** Normalized request controls for the backing catalog model; null for aliases. */
+  /** Normalized request controls; aliases expose a fixed inherit-only contract. */
   generation: ModelGenerationCapabilities | null;
   /** Always set — resolvers fall back to catalog label then modelId. */
   label: string;

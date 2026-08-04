@@ -16,9 +16,9 @@
         "levels": {
           "off": "unknown",
           "minimal": "unknown",
-          "low": "supported",
-          "medium": "supported",
-          "high": "supported",
+          "low": "unknown",
+          "medium": "unknown",
+          "high": "unknown",
           "xhigh": "unknown"
         }
       }
@@ -129,9 +129,9 @@
         "levels": {
           "off": "unknown",
           "minimal": "unknown",
-          "low": "supported",
-          "medium": "supported",
-          "high": "supported",
+          "low": "unknown",
+          "medium": "unknown",
+          "high": "unknown",
           "xhigh": "unknown"
         }
       }
@@ -158,9 +158,9 @@
         "levels": {
           "off": "unknown",
           "minimal": "unknown",
-          "low": "supported",
-          "medium": "supported",
-          "high": "supported",
+          "low": "unknown",
+          "medium": "unknown",
+          "high": "unknown",
           "xhigh": "unknown"
         }
       }
@@ -187,9 +187,9 @@
         "levels": {
           "off": "unknown",
           "minimal": "unknown",
-          "low": "supported",
-          "medium": "supported",
-          "high": "supported",
+          "low": "unknown",
+          "medium": "unknown",
+          "high": "unknown",
           "xhigh": "unknown"
         }
       }

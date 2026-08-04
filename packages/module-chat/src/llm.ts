@@ -18,8 +18,11 @@ import { badGateway, invalidRequest } from "@appstrate/core/api-errors";
 import { CHAT_USABLE_FAMILIES } from "./chat-families.ts";
 import { isModelLive } from "./model-liveness.ts";
 import { logger } from "./logger.ts";
-import type { ModelGenerationCapabilities } from "@appstrate/core/model-generation";
-import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
+import {
+  toNativeModelReasoningLevel,
+  type ModelGenerationCapabilities,
+  type ModelGenerationSettings,
+} from "@appstrate/core/model-generation";
 
 const LLM_PROXY_PATH = "/api/llm-proxy";
 
@@ -110,6 +113,10 @@ export function applyGenerationToProxyBody(
   if (generation.reasoningLevel == null || typeof body !== "string") return body;
   try {
     const payload = JSON.parse(body) as Record<string, unknown>;
+    const nativeReasoningLevel = toNativeModelReasoningLevel(
+      generation.reasoningLevel,
+      model.generation,
+    );
     if (model.apiShape === "anthropic-messages") {
       const budgets = { minimal: 1024, low: 2048, medium: 4096, high: 8192, xhigh: 16384 };
       if (generation.reasoningLevel === "off") {
@@ -117,7 +124,7 @@ export function applyGenerationToProxyBody(
         delete payload.output_config;
       } else if (model.generation?.reasoning.adaptive) {
         payload.thinking = { type: "adaptive" };
-        payload.output_config = { effort: generation.reasoningLevel };
+        payload.output_config = { effort: nativeReasoningLevel };
       } else {
         payload.thinking = {
           type: "enabled",
@@ -125,8 +132,7 @@ export function applyGenerationToProxyBody(
         };
       }
     } else {
-      payload.reasoning_effort =
-        generation.reasoningLevel === "off" ? "none" : generation.reasoningLevel;
+      payload.reasoning_effort = nativeReasoningLevel;
     }
     return JSON.stringify(payload);
   } catch {

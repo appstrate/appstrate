@@ -68,6 +68,11 @@ describe("projectAliasedModel", () => {
     expect(out.maxTokens).toBeNull();
     expect(out.reasoning).toBeNull();
     expect(out.cost).toBeNull();
+    expect(out.generation).toEqual({
+      temperature: "unsupported",
+      temperatureWithReasoning: "unsupported",
+      reasoning: { supported: "unsupported", adaptive: null, levels: {} },
+    });
 
     // Hard guarantee: nothing identifying the backing survives serialization.
     const json = JSON.stringify(out);

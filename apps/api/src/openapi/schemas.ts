@@ -137,6 +137,18 @@ export const schemas = {
               enum: ["off", "minimal", "low", "medium", "high", "xhigh"],
             },
           },
+          nativeLevels: {
+            type: "object",
+            description:
+              "Optional provider-native values for portable levels (for example xhigh to max).",
+            additionalProperties: {
+              type: "string",
+              enum: ["none", "minimal", "low", "medium", "high", "xhigh", "max"],
+            },
+            propertyNames: {
+              enum: ["off", "minimal", "low", "medium", "high", "xhigh"],
+            },
+          },
         },
       },
     },

@@ -10,6 +10,18 @@ export const modelReasoningLevelSchema = z.enum(MODEL_REASONING_LEVELS);
 
 export type ModelReasoningLevel = z.infer<typeof modelReasoningLevelSchema>;
 
+export const modelNativeReasoningLevelSchema = z.enum([
+  "none",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+]);
+
+export type ModelNativeReasoningLevel = z.infer<typeof modelNativeReasoningLevelSchema>;
+
 /**
  * Persisted/requested generation settings. Null and omission both mean
  * "inherit"; zero is a meaningful temperature and must never be collapsed.
@@ -37,6 +49,9 @@ export const modelGenerationCapabilitiesSchema = z
         levels: z
           .partialRecord(modelReasoningLevelSchema, modelCapabilitySupportSchema)
           .default({}),
+        nativeLevels: z
+          .partialRecord(modelReasoningLevelSchema, modelNativeReasoningLevelSchema)
+          .optional(),
       })
       .default({ supported: "unknown", adaptive: null, levels: {} }),
   })
@@ -52,6 +67,7 @@ export interface ModelGenerationCapabilitiesOverride {
     supported?: ModelCapabilitySupport;
     adaptive?: boolean | null;
     levels?: Partial<Record<ModelReasoningLevel, ModelCapabilitySupport>>;
+    nativeLevels?: Partial<Record<ModelReasoningLevel, ModelNativeReasoningLevel>>;
   };
 }
 
@@ -61,23 +77,38 @@ export const UNKNOWN_MODEL_GENERATION_CAPABILITIES: ModelGenerationCapabilities 
   reasoning: { supported: "unknown", adaptive: null, levels: {} },
 };
 
+/** Public alias contract: provider-specific generation controls stay inherited. */
+export const INHERITED_MODEL_GENERATION_CAPABILITIES: ModelGenerationCapabilities = {
+  temperature: "unsupported",
+  temperatureWithReasoning: "unsupported",
+  reasoning: { supported: "unsupported", adaptive: null, levels: {} },
+};
+
 /** Merge a provider adapter's stricter transport facts over catalog metadata. */
 export function applyModelGenerationCapabilitiesOverride(
   capabilities: ModelGenerationCapabilities,
   override?: ModelGenerationCapabilitiesOverride | null,
 ): ModelGenerationCapabilities {
   if (!override) return capabilities;
+  const nativeLevels = {
+    ...capabilities.reasoning.nativeLevels,
+    ...override.reasoning?.nativeLevels,
+  };
   return {
     temperature: override.temperature ?? capabilities.temperature,
     temperatureWithReasoning:
       override.temperatureWithReasoning ?? capabilities.temperatureWithReasoning,
     reasoning: {
       supported: override.reasoning?.supported ?? capabilities.reasoning.supported,
-      adaptive: override.reasoning?.adaptive ?? capabilities.reasoning.adaptive,
+      adaptive:
+        override.reasoning?.adaptive !== undefined
+          ? override.reasoning.adaptive
+          : capabilities.reasoning.adaptive,
       levels: {
         ...capabilities.reasoning.levels,
         ...override.reasoning?.levels,
       },
+      ...(Object.keys(nativeLevels).length > 0 ? { nativeLevels } : {}),
     },
   };
 }
@@ -99,7 +130,8 @@ export function reconcileModelGenerationSettings(
   if (
     reasoningLevel != null &&
     (capabilities?.reasoning.supported === "unsupported" ||
-      capabilities?.reasoning.levels[reasoningLevel] === "unsupported")
+      (capabilities?.reasoning.supported === "supported" &&
+        capabilities.reasoning.levels[reasoningLevel] !== "supported"))
   ) {
     const { reasoningLevel: _reasoningLevel, ...rest } = next;
     void _reasoningLevel;
@@ -143,9 +175,9 @@ export interface ResolveModelGenerationOptions {
 }
 
 /**
- * Merge the agent and invocation layers, then validate only explicit upstream
- * refusals. Unknown catalog facts remain forward-compatible: the runtime
- * adapter/provider remains the final authority and can surface its own error.
+ * Merge the agent and invocation layers, then validate catalog/provider facts.
+ * A wholly unknown custom model remains forward-compatible. Once reasoning is
+ * known to be configurable, however, only explicitly confirmed levels pass.
  */
 export function resolveModelGenerationSettings({
   capabilities = UNKNOWN_MODEL_GENERATION_CAPABILITIES,
@@ -182,7 +214,9 @@ export function resolveModelGenerationSettings({
 
   if (
     reasoningLevel !== undefined &&
-    parsedCapabilities.reasoning.levels[reasoningLevel] === "unsupported"
+    (parsedCapabilities.reasoning.levels[reasoningLevel] === "unsupported" ||
+      (parsedCapabilities.reasoning.supported === "supported" &&
+        parsedCapabilities.reasoning.levels[reasoningLevel] !== "supported"))
   ) {
     throw new ModelGenerationError(
       "reasoning_level_unsupported",
@@ -206,4 +240,13 @@ export function resolveModelGenerationSettings({
     ...(temperature !== undefined ? { temperature } : {}),
     ...(reasoningLevel !== undefined ? { reasoningLevel } : {}),
   };
+}
+
+/** Translate Appstrate's portable effort to the provider's catalogued value. */
+export function toNativeModelReasoningLevel(
+  level: ModelReasoningLevel,
+  capabilities?: ModelGenerationCapabilities | null,
+): ModelNativeReasoningLevel {
+  if (level === "off") return capabilities?.reasoning.nativeLevels?.off ?? "none";
+  return capabilities?.reasoning.nativeLevels?.[level] ?? level;
 }

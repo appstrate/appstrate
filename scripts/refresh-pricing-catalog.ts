@@ -333,6 +333,12 @@ function support(value: boolean | undefined): ModelCapabilitySupport {
   return value === true ? "supported" : value === false ? "unsupported" : "unknown";
 }
 
+function supportEither(a: boolean | undefined, b: boolean | undefined): ModelCapabilitySupport {
+  if (a === true || b === true) return "supported";
+  if (a === false || b === false) return "unsupported";
+  return "unknown";
+}
+
 function deriveGenerationCapabilities(entry: LiteLLMEntry): ModelGenerationCapabilities {
   const supportedParams = entry._appstrate_supported_openai_params;
   const temperature =
@@ -354,18 +360,30 @@ function deriveGenerationCapabilities(entry: LiteLLMEntry): ModelGenerationCapab
   const levels: Partial<Record<ModelReasoningLevel, ModelCapabilitySupport>> = {
     off: support(entry.supports_none_reasoning_effort),
     minimal: support(entry.supports_minimal_reasoning_effort),
-    // low/medium/high are Pi's portable baseline for a reasoning-capable
-    // model. An explicit LiteLLM false still wins for exceptional models.
-    low:
-      entry.supports_low_reasoning_effort === undefined
-        ? reasoning
-        : support(entry.supports_low_reasoning_effort),
-    medium: reasoning,
-    high: reasoning,
+    // A general `supports_reasoning` fact confirms the control, not each
+    // individual effort value. Keep unreported levels unknown rather than
+    // inventing provider support that can turn into a 400 at inference time.
+    low: support(entry.supports_low_reasoning_effort),
+    medium: "unknown",
+    high: "unknown",
     // Pi exposes one portable top level (`xhigh`). LiteLLM calls that level
     // either xhigh or max depending on the provider adapter.
-    xhigh: support(entry.supports_xhigh_reasoning_effort ?? entry.supports_max_reasoning_effort),
+    xhigh: supportEither(
+      entry.supports_xhigh_reasoning_effort,
+      entry.supports_max_reasoning_effort,
+    ),
   };
+  const nativeLevels =
+    levels.xhigh === "supported"
+      ? {
+          xhigh:
+            entry.litellm_provider === "anthropic" && entry.supports_max_reasoning_effort === true
+              ? ("max" as const)
+              : entry.supports_xhigh_reasoning_effort === true
+                ? ("xhigh" as const)
+                : ("max" as const),
+        }
+      : undefined;
 
   return {
     temperature,
@@ -379,6 +397,7 @@ function deriveGenerationCapabilities(entry: LiteLLMEntry): ModelGenerationCapab
           ? entry.supports_adaptive_thinking
           : null,
       levels,
+      ...(nativeLevels ? { nativeLevels } : {}),
     },
   };
 }

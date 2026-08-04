@@ -33,6 +33,7 @@ describe("parseRuntimeEnv — happy path", () => {
     expect(env.modelReasoning).toBe(false);
     expect(env.modelTemperature).toBeUndefined();
     expect(env.modelReasoningLevel).toBeUndefined();
+    expect(env.modelReasoningLevelMap).toBeUndefined();
     expect(env.agentInput).toEqual({});
     expect(env.sidecarUrl).toBeUndefined();
     expect(env.modelApiKey).toBeUndefined();
@@ -59,6 +60,7 @@ describe("parseRuntimeEnv — happy path", () => {
       MODEL_REASONING: "true",
       MODEL_TEMPERATURE: "0",
       MODEL_REASONING_LEVEL: "xhigh",
+      MODEL_REASONING_LEVEL_MAP: '{"xhigh":"max"}',
       MODEL_INPUT: '["text","image"]',
       MODEL_COST: '{"input":1.5,"output":2.5,"cacheRead":0.5,"cacheWrite":0.7}',
       MODEL_CONTEXT_WINDOW: "200000",
@@ -75,6 +77,7 @@ describe("parseRuntimeEnv — happy path", () => {
     expect(env.modelReasoning).toBe(true);
     expect(env.modelTemperature).toBe(0);
     expect(env.modelReasoningLevel).toBe("xhigh");
+    expect(env.modelReasoningLevelMap).toEqual({ xhigh: "max" });
     expect(env.modelInput).toEqual(["text", "image"]);
     expect(env.modelCost).toEqual({ input: 1.5, output: 2.5, cacheRead: 0.5, cacheWrite: 0.7 });
     expect(env.modelContextWindow).toBe(200_000);
@@ -130,6 +133,9 @@ describe("parseRuntimeEnv — fail-fast errors", () => {
     expect(() => parseRuntimeEnv({ ...VALID, MODEL_REASONING_LEVEL: "maximum" })).toThrow(
       /MODEL_REASONING_LEVEL/,
     );
+    expect(() =>
+      parseRuntimeEnv({ ...VALID, MODEL_REASONING_LEVEL_MAP: '{"xhigh":"maximum"}' }),
+    ).toThrow(/MODEL_REASONING_LEVEL_MAP/);
   });
 
   it("collects every missing required field in one shot", () => {

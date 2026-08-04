@@ -69,6 +69,7 @@ import {
 import {
   ModelGenerationError,
   modelGenerationSettingsSchema,
+  reconcileModelGenerationSettings,
   resolveModelGenerationSettings,
 } from "@appstrate/core/model-generation";
 
@@ -491,9 +492,13 @@ export async function handleChatStream(
   const chosen = pickModel(models, modelId);
   let generationSettings;
   try {
+    const compatibleGeneration = reconcileModelGenerationSettings(
+      body.generation ?? {},
+      chosen.generation,
+    );
     generationSettings = resolveModelGenerationSettings({
       capabilities: chosen.generation,
-      override: body.generation,
+      override: compatibleGeneration,
     });
   } catch (error) {
     if (error instanceof ModelGenerationError) throw invalidRequest(error.message);

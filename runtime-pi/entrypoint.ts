@@ -729,6 +729,7 @@ const model: Model<Api> = {
   provider: deriveProviderFromApi(api),
   baseUrl: env.modelBaseUrl ?? "",
   reasoning: env.modelReasoning,
+  ...(env.modelReasoningLevelMap ? { thinkingLevelMap: env.modelReasoningLevelMap } : {}),
   input: [...env.modelInput],
   cost: env.modelCost,
   contextWindow: env.modelContextWindow,
