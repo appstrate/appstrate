@@ -44,6 +44,13 @@ the alias never reaches upstream. Two layers hide the backing from users:
    - the platform **LLM gateway** `/api/llm-proxy/*` (direct API/dashboard
      calls).
 
+For an adaptive Anthropic backing, an agent-side Pi session cannot infer the
+transport from the public alias id. The run launcher therefore adds only the
+catalogued native effort to the sidecar's private swap descriptor; the sidecar
+restores `thinking.type: "adaptive"` and `output_config.effort` while swapping
+the request model. Neither the backing id nor the adaptive flag enters the
+agent container.
+
 The usage ledger (`llm_usage`) keeps the real id privately in `real_model` for
 billing/audit; the module-facing service accessor (`listLlmUsage`, exposed as
 `PlatformServices.usage.list`) never projects `real_model`/`api`.

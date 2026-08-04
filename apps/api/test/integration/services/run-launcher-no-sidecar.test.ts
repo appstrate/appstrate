@@ -239,6 +239,59 @@ describe("run-launcher — sidecar skip decision", () => {
     expect(JSON.stringify(env)).not.toContain("api.deepseek.com");
   });
 
+  it("keeps adaptive Anthropic reasoning private and restores it in the sidecar", async () => {
+    const { orchestrator, counts } = createCountingFake();
+
+    await runPlatformContainer({
+      runId: "run_adaptive_alias",
+      context: buildContext("run_adaptive_alias"),
+      plan: buildRunPlan({
+        generationConfig: { reasoningLevel: "max" },
+        llmConfig: {
+          providerId: "anthropic",
+          apiShape: "anthropic-messages",
+          baseUrl: "https://api.anthropic.com",
+          modelId: "claude-sonnet-4-6",
+          apiKey: "sk-real-secret",
+          label: "Appstrate Adaptive",
+          isSystemModel: true,
+          aliased: true,
+          aliasId: "appstrate-adaptive",
+          reasoning: true,
+          generation: {
+            temperature: "supported",
+            temperatureWithReasoning: "unsupported",
+            reasoning: {
+              supported: "supported",
+              adaptive: true,
+              levels: { max: "supported" },
+              nativeLevels: { max: "max" },
+            },
+          },
+        },
+      }),
+      sinkCredentials: mintSinkCredentials({
+        runId: "run_adaptive_alias",
+        appUrl: "http://platform:3000",
+        ttlSeconds: 60,
+      }),
+      orchestrator,
+    });
+
+    const llm = counts.capturedSidecarSpec?.llm;
+    if (llm?.authMode !== "api_key") throw new Error(`expected api_key llm, got ${llm?.authMode}`);
+    expect(llm.modelSwap).toEqual({
+      alias: "appstrate-adaptive",
+      real: "claude-sonnet-4-6",
+      anthropicAdaptiveReasoning: { effort: "max" },
+    });
+
+    const env = counts.capturedAgentEnv ?? {};
+    expect(env.MODEL_ID).toBe("appstrate-adaptive");
+    expect(JSON.stringify(env)).not.toContain("claude-sonnet-4-6");
+    expect(env).not.toHaveProperty("MODEL_REASONING_ADAPTIVE");
+  });
+
   it("creates the sidecar when the plan declares at least one integration", async () => {
     const { orchestrator, counts } = createCountingFake();
 
