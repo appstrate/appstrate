@@ -163,6 +163,7 @@ function RunWithOptionsForm({
           configSchema={deps.configSchema}
           persistedConfig={deps.persistedConfig}
           persistedModelId={deps.persistedModelId}
+          persistedGenerationConfig={deps.persistedGenerationConfig}
           persistedProxyId={deps.persistedProxyId}
           agentIntegrations={deps.agentIntegrations}
           value={overrides}

@@ -272,6 +272,7 @@ export const chatPaths = {
                   minItems: 1,
                 },
                 modelId: { type: "string" },
+                generation: { $ref: "#/components/schemas/ModelGenerationSettings" },
                 id: { type: "string", description: "Session id (the assistant-ui thread id)" },
               },
             },

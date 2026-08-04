@@ -21,6 +21,7 @@
 import { CLI_USER_AGENT } from "../../lib/version.ts";
 import { normalizeInstance } from "../../lib/instance-url.ts";
 import type { ResolvedRunConfig } from "@appstrate/shared-types";
+import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 import { deepMergeConfig } from "@appstrate/core/schema-validation";
 
 export { deepMergeConfig };
@@ -37,6 +38,8 @@ export interface InheritedRunConfig {
   config: Record<string, unknown>;
   /** Model id to pass to the run pipeline, or null when nothing is set. */
   modelId: string | null;
+  /** Persisted generation defaults for local parity with platform runs. */
+  generation: ModelGenerationSettings | null;
   /** Proxy id to pass to the run pipeline, or null when nothing is set. */
   proxyId: string | null;
   /** Pinned version label, when the user did not provide an explicit @spec. */
@@ -153,6 +156,7 @@ export function mergeRunConfig(inputs: MergeRunConfigInputs): InheritedRunConfig
   return {
     config,
     modelId,
+    generation: inherited?.generation ?? null,
     proxyId,
     versionPin,
     inherited: inherited !== null,

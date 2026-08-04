@@ -197,6 +197,10 @@ export const EXEMPT_SCHEMAS: Record<string, string> = {
   // Error + auth/credential wire with no SPA shared-type consumer.
   ProblemDetail: "RFC 9457 error envelope; never read through a shared-type",
   ResolutionFieldError: "ProblemDetail.errors[] item; never read through a shared-type",
+  ModelGenerationSettings:
+    "embedded request/response value object; canonical runtime type lives in @appstrate/core",
+  ModelGenerationCapabilities:
+    "embedded model-catalog value object; canonical runtime type lives in @appstrate/core",
   AgentConnectionReadiness:
     "bulk agent connection-readiness envelope; SPA uses the generated spec type (integrations[].resolution is the registered IntegrationAgentResolution)",
   OAuthClientObject: "OIDC oauth-admin wire; no shared-type (SPA uses the generated spec type)",

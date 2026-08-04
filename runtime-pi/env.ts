@@ -17,6 +17,12 @@
 
 import { getErrorMessage } from "@appstrate/core/errors";
 import type { ModelApiShape } from "@appstrate/core/sidecar-types";
+import {
+  modelNativeReasoningLevelSchema,
+  modelReasoningLevelSchema,
+  type ModelNativeReasoningLevel,
+  type ModelReasoningLevel,
+} from "@appstrate/core/model-generation";
 
 export interface RuntimeEnv {
   /** Run identifier injected by the platform on container create. */
@@ -33,6 +39,10 @@ export interface RuntimeEnv {
   modelApiKey?: string;
   /** Whether the model emits reasoning tokens. */
   modelReasoning: boolean;
+  /** Explicit generation controls; absent preserves Pi's historical defaults. */
+  modelTemperature?: number;
+  modelReasoningLevel?: ModelReasoningLevel;
+  modelReasoningLevelMap?: Partial<Record<ModelReasoningLevel, ModelNativeReasoningLevel>>;
   /** Pi SDK input modalities. */
   modelInput: ReadonlyArray<"text" | "image">;
   /** Per-token cost (input/output/cacheRead/cacheWrite USD). */
@@ -170,6 +180,25 @@ function parseModelInput(
     else issues.push(`MODEL_INPUT: invalid modality "${String(v)}" (allowed: "text", "image")`);
   }
   return out.length > 0 ? out : ["text"];
+}
+
+function parseReasoningLevelMap(
+  raw: string | undefined,
+  issues: string[],
+): Partial<Record<ModelReasoningLevel, ModelNativeReasoningLevel>> | undefined {
+  if (!raw) return undefined;
+  const parsed = parseJsonRecord("MODEL_REASONING_LEVEL_MAP", raw, issues);
+  const out: Partial<Record<ModelReasoningLevel, ModelNativeReasoningLevel>> = {};
+  for (const [key, value] of Object.entries(parsed)) {
+    const portable = modelReasoningLevelSchema.safeParse(key);
+    const native = modelNativeReasoningLevelSchema.safeParse(value);
+    if (!portable.success || !native.success) {
+      issues.push(`MODEL_REASONING_LEVEL_MAP: invalid mapping "${key}" → "${String(value)}"`);
+      continue;
+    }
+    out[portable.data] = native.data;
+  }
+  return out;
 }
 
 function parseModelCost(
@@ -323,6 +352,26 @@ export function parseRuntimeEnv(source: NodeJS.ProcessEnv = process.env): Runtim
     DEFAULT_MAX_TOKENS,
     issues,
   );
+  const modelTemperature =
+    source.MODEL_TEMPERATURE === undefined ? undefined : Number(source.MODEL_TEMPERATURE);
+  if (
+    modelTemperature !== undefined &&
+    (!Number.isFinite(modelTemperature) || modelTemperature < 0 || modelTemperature > 1)
+  ) {
+    issues.push(
+      `MODEL_TEMPERATURE: must be a finite number between 0 and 1 (got "${source.MODEL_TEMPERATURE}")`,
+    );
+  }
+  const modelReasoningLevel =
+    source.MODEL_REASONING_LEVEL === undefined
+      ? undefined
+      : modelReasoningLevelSchema.safeParse(source.MODEL_REASONING_LEVEL);
+  if (modelReasoningLevel && !modelReasoningLevel.success) {
+    issues.push(
+      `MODEL_REASONING_LEVEL: invalid value "${source.MODEL_REASONING_LEVEL}" (allowed: ${modelReasoningLevelSchema.options.join(", ")})`,
+    );
+  }
+  const modelReasoningLevelMap = parseReasoningLevelMap(source.MODEL_REASONING_LEVEL_MAP, issues);
   const heartbeatIntervalMs = parsePositiveInt(
     "APPSTRATE_HEARTBEAT_INTERVAL_MS",
     source.APPSTRATE_HEARTBEAT_INTERVAL_MS,
@@ -363,6 +412,11 @@ export function parseRuntimeEnv(source: NodeJS.ProcessEnv = process.env): Runtim
     modelBaseUrl: modelBaseUrl || undefined,
     modelApiKey: source.MODEL_API_KEY || undefined,
     modelReasoning: source.MODEL_REASONING === "true",
+    ...(modelTemperature !== undefined ? { modelTemperature } : {}),
+    ...(modelReasoningLevel?.success
+      ? { modelReasoningLevel: modelReasoningLevel.data as ModelReasoningLevel }
+      : {}),
+    ...(modelReasoningLevelMap ? { modelReasoningLevelMap } : {}),
     modelInput,
     modelCost,
     modelContextWindow,

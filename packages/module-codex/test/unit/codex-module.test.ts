@@ -14,10 +14,10 @@ describe("codex module", () => {
     const codex = codexModule.modelProviders?.()[0] as Record<string, unknown>;
     expect(codex.apiShape).toBe("openai-codex-responses");
     expect(codex.defaultBaseUrl).toBe("https://chatgpt.com/backend-api");
-    // Forging is removed: the provider no longer carries a sidecar/chat
-    // wire-format forge. Codex stays connectable (its self-contained probe) but
-    // is non-executable (no run/chat engine) until it migrates to its own SDK.
+    // Pi emits the Codex request shape natively; Appstrate only swaps the
+    // server-side bearer and declares stricter transport capabilities.
     expect(codex.oauthWireFormat).toBeUndefined();
+    expect(codex.generationOverride).toEqual({ temperature: "unsupported" });
   });
 
   it("OAuth metadata points at the openai authorization server", () => {

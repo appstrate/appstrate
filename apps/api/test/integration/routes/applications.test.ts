@@ -10,6 +10,8 @@ import {
   seedApplication,
   seedPackage,
   seedInstalledPackage,
+  seedOrgModel,
+  seedOrgModelProviderOAuth,
 } from "../../helpers/seed.ts";
 import { assertDbMissing } from "../../helpers/assertions.ts";
 import { applications, applicationPackages } from "@appstrate/db/schema";
@@ -281,6 +283,63 @@ describe("Applications API", () => {
         .from(applicationPackages)
         .where(installedRowWhere("@testorg/installed-pkg"));
       expect(row?.config).toEqual({ hello: "world" });
+    });
+
+    it("rejects unsupported generation settings instead of persisting them", async () => {
+      const packageId = "@testorg/generation-agent";
+      await seedPackage({ id: packageId, orgId: ctx.orgId });
+      await seedInstalledPackage(ctx.defaultAppId, packageId);
+      const credential = await seedOrgModelProviderOAuth({
+        orgId: ctx.orgId,
+        providerId: "codex",
+      });
+      const model = await seedOrgModel({
+        orgId: ctx.orgId,
+        credentialId: credential.id,
+        modelId: "gpt-5.6-luna",
+      });
+
+      const res = await putPackage(packageId, {
+        modelId: model.id,
+        generationConfig: { temperature: 0.4 },
+      });
+
+      expect(res.status).toBe(400);
+      expect(await res.json()).toMatchObject({
+        code: "invalid_request",
+        param: "generationConfig",
+      });
+      const [row] = await db
+        .select({ modelId: applicationPackages.modelId })
+        .from(applicationPackages)
+        .where(installedRowWhere(packageId));
+      expect(row?.modelId).toBeNull();
+    });
+
+    it("reconciles persisted generation defaults when the model changes", async () => {
+      const packageId = "@testorg/reconciled-agent";
+      await seedPackage({ id: packageId, orgId: ctx.orgId });
+      await seedInstalledPackage(ctx.defaultAppId, packageId, {
+        generationConfig: { temperature: 0.7 },
+      });
+      const credential = await seedOrgModelProviderOAuth({
+        orgId: ctx.orgId,
+        providerId: "codex",
+      });
+      const model = await seedOrgModel({
+        orgId: ctx.orgId,
+        credentialId: credential.id,
+        modelId: "gpt-5.6-luna",
+      });
+
+      const res = await putPackage(packageId, { modelId: model.id });
+
+      expect(res.status).toBe(200);
+      const [row] = await db
+        .select({ generation: applicationPackages.generationConfig })
+        .from(applicationPackages)
+        .where(installedRowWhere(packageId));
+      expect(row?.generation).toEqual({});
     });
 
     it("404s for a package owned by ANOTHER org, and creates no association row", async () => {

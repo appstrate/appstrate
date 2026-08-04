@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 2,
+  "version": "v1.95.0",
+  "image": "ghcr.io/berriai/litellm",
+  "digest": "sha256:af806882b7a6ced41658db5b6a7e98ed7b9b51d03b935e0417bf1c8552d688af",
+  "catalog": {
+    "repository": "BerriAI/litellm",
+    "commit": "a79f598f692e66ce49790bfda699b7f4dccb3ca0",
+    "path": "litellm/model_prices_and_context_window_backup.json",
+    "digest": "sha256:54f7c04dda28383a81bd44c433a9bd6f3ec2a06fa6fbef35db45b2e9b04d39d4"
+  }
+}

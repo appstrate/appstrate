@@ -13,6 +13,7 @@ import {
   useModelProviderCredentials,
 } from "./use-model-provider-credentials";
 import { agentModelKeys, packageKeys } from "../lib/query-keys";
+import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 
 /** Wire shape from the OpenAPI spec (components.schemas.OrgModel). */
 export type OrgModelInfo = components["schemas"]["OrgModel"];
@@ -133,10 +134,14 @@ export function useAgentModel(packageId: string | undefined) {
 export function useSetAgentModel(packageId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (modelId: string | null) => {
+    mutationFn: async (
+      input:
+        string | null | { modelId: string | null; generation?: ModelGenerationSettings | null },
+    ) => {
+      const body = typeof input === "object" && input !== null ? input : { modelId: input };
       const { data } = await client.PUT("/api/agents/{scope}/{name}/model", {
         params: { path: splitPackageRef(packageId) },
-        body: { modelId },
+        body,
       });
       return data;
     },

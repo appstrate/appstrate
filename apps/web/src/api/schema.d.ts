@@ -288,12 +288,12 @@ export interface paths {
         };
         /**
          * Get agent model configuration
-         * @description Returns the LLM model override for an agent (null if using org default).
+         * @description Returns the LLM model override and persisted generation defaults for an agent (null values inherit organization/runtime defaults).
          */
         get: operations["getAgentModel"];
         /**
          * Set agent model override
-         * @description Set a model override for this agent. Pass a model ID or null to revert to org default. The model ID must name a system model preset or an org model owned by the organization — unknown or cross-org IDs are rejected with 404.
+         * @description Set a model override and optional generation defaults for this agent. Pass a model ID or null to revert to org default; null generation settings inherit runtime defaults. The model ID must name a system model preset or an org model owned by the organization — unknown or cross-org IDs are rejected with 404.
          */
         put: operations["setAgentModel"];
         post?: never;
@@ -4940,6 +4940,7 @@ export interface components {
             packageId: string;
             /** @description Application-specific configuration */
             config: Record<string, never>;
+            generationConfig: components["schemas"]["ModelGenerationSettings"] | null;
             /** @description Model override for this app */
             modelId: string | null;
             /** @description Proxy override for this app */
@@ -5100,6 +5101,35 @@ export interface components {
             /** @description Application ids (`app_…`) belonging to the caller's org where this package is installed. */
             installed_in: string[];
         }[];
+        /** @description Normalized support facts from Appstrate's pinned LiteLLM catalog snapshot, refined by stricter provider transport declarations. `unknown` is forward-compatible and differs from an explicit upstream refusal. */
+        ModelGenerationCapabilities: {
+            /** @enum {string} */
+            temperature: "supported" | "unsupported" | "unknown";
+            /** @enum {string} */
+            temperatureWithReasoning: "supported" | "unsupported" | "unknown";
+            reasoning: {
+                /** @enum {string} */
+                supported: "supported" | "unsupported" | "unknown";
+                adaptive: boolean | null;
+                levels: {
+                    [key: string]: "supported" | "unsupported" | "unknown";
+                };
+                /** @description Optional provider-native values for portable levels (for example xhigh to max). */
+                nativeLevels?: {
+                    [key: string]: "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+                };
+            };
+        };
+        /** @description Optional model sampling and reasoning controls. Omitted properties inherit the next lower-precedence layer. */
+        ModelGenerationSettings: {
+            /** @description Provider sampling temperature; null or omission inherits the runtime default. */
+            temperature?: number | null;
+            /**
+             * @description Portable reasoning effort normalized across providers.
+             * @enum {string|null}
+             */
+            reasoningLevel?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | null;
+        };
         ModelProviderCredential: {
             id: string;
             label: string;
@@ -5221,6 +5251,8 @@ export interface components {
             baseUrl: string | null;
             /** @description Upstream model id. `null` for managed models — not exposed. */
             modelId: string | null;
+            /** @description Generation controls supported by the backing model. Null for managed aliases whose binding is hidden. */
+            generation: components["schemas"]["ModelGenerationCapabilities"] | null;
             input?: string[] | null;
             contextWindow?: number | null;
             maxTokens?: number | null;
@@ -5511,6 +5543,10 @@ export interface components {
             config_override: {
                 [key: string]: unknown;
             } | null;
+            /** @description Effective generation controls resolved and frozen when the run was created. */
+            generation: components["schemas"]["ModelGenerationSettings"] | null;
+            /** @description Raw per-invocation generation layer, before agent defaults are applied. */
+            generation_override: components["schemas"]["ModelGenerationSettings"] | null;
             /** @description Display name of the dashboard user who triggered the run (from profiles table) */
             user_name: string | null;
             /** @description Display name of the end-user (name or externalId fallback) */
@@ -5611,6 +5647,7 @@ export interface components {
             config_override: {
                 [key: string]: unknown;
             } | null;
+            generation_config_override: components["schemas"]["ModelGenerationSettings"] | null;
             model_id_override: string | null;
             proxy_id_override: string | null;
             version_override: string | null;
@@ -6535,7 +6572,8 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        modelId?: string | null;
+                        modelId: string | null;
+                        generation: components["schemas"]["ModelGenerationSettings"] | null;
                     };
                 };
             };
@@ -6565,6 +6603,7 @@ export interface operations {
                 "application/json": {
                     /** @description Model ID or null to use org default */
                     modelId: string | null;
+                    generation?: components["schemas"]["ModelGenerationSettings"] | null;
                 };
             };
         };
@@ -6579,6 +6618,7 @@ export interface operations {
                 content: {
                     "application/json": {
                         modelId: string | null;
+                        generation: components["schemas"]["ModelGenerationSettings"] | null;
                     };
                 };
             };
@@ -6900,6 +6940,8 @@ export interface operations {
                     rerun_from?: string;
                     /** @description Model ID override for this run — a system model key or an org-model UUID. Pins THIS run to that model, taking priority over the full resolution cascade (request `modelId` > agent model setting > org default model > system default). Without it, the org default is resolved at run creation — not ahead of time — so changing the org default between triggers silently changes the model used by subsequent runs. Returns 404 when the referenced model does not exist. The response echoes the resolved `model_label` + `model_source` so callers can verify which model the run actually uses. */
                     modelId?: string;
+                    /** @description Per-run temperature/reasoning override. Explicitly unsupported values are rejected before a run row is created; omitted properties inherit the agent defaults. */
+                    generation?: components["schemas"]["ModelGenerationSettings"];
                     /** @description Proxy ID override for this run, or "none" to disable proxying. Takes priority over agent and org defaults. */
                     proxyId?: string;
                     /** @description Per-run config override. Deep-merged with the per-application persisted config (`application_packages.config`): override leaves replace, plain-object children merge recursively, arrays are replaced wholesale, `null` at a leaf sets the value to null (validated as missing for required string fields), missing keys fall through. Re-validated against the manifest config schema after the merge — a 400 `invalid_config` is returned if the merged result violates the schema. Top-level `null` is rejected (returns 400) — omit the field to inherit persisted defaults, send `{}` for an explicit empty override. Mirrors the OpenAPI Assistants `runs.create { instructions, model, tools }` and Argo Workflows `submitOptions.parameters` SOTA — every client (UI, CLI, SDK) reaches the same resolved config for the same `(persisted, override)` pair. */
@@ -6954,10 +6996,19 @@ export interface operations {
                      *       "config_override": {
                      *         "dryRun": true
                      *       },
+                     *       "generation": {
+                     *         "temperature": 0.2,
+                     *         "reasoningLevel": "high"
+                     *       },
+                     *       "generation_override": {
+                     *         "temperature": 0.2,
+                     *         "reasoningLevel": "high"
+                     *       },
                      *       "started_at": "2026-01-15T10:30:00Z",
                      *       "completed_at": null,
                      *       "duration": null,
                      *       "cost": null,
+                     *       "cost_pricing_status": null,
                      *       "unread": false,
                      *       "runNumber": 17,
                      *       "token_usage": null,
@@ -7240,6 +7291,8 @@ export interface operations {
                     input?: Record<string, never>;
                     /** @description Per-schedule config delta. Deep-merged with the application's persisted `config` every time the schedule fires. */
                     config_override?: Record<string, never>;
+                    /** @description Temperature/reasoning overrides applied to every run fired by this schedule. */
+                    generation_config_override?: components["schemas"]["ModelGenerationSettings"];
                     /** @description Override the persisted model on every run triggered by this schedule. */
                     model_id_override?: string;
                     /** @description Override the persisted proxy on every run triggered by this schedule. */
@@ -7288,6 +7341,7 @@ export interface operations {
                      *         "maxEmails": 50
                      *       },
                      *       "config_override": null,
+                     *       "generation_config_override": null,
                      *       "model_id_override": null,
                      *       "proxy_id_override": null,
                      *       "version_override": null,
@@ -7832,6 +7886,7 @@ export interface operations {
             content: {
                 "application/json": {
                     config?: Record<string, never>;
+                    generationConfig?: components["schemas"]["ModelGenerationSettings"] | null;
                     modelId?: string | null;
                     proxyId?: string | null;
                     version_id?: number | null;
@@ -7916,6 +7971,10 @@ export interface operations {
                      *       "config": {
                      *         "dryRun": true
                      *       },
+                     *       "generation": {
+                     *         "temperature": 0.2,
+                     *         "reasoningLevel": "high"
+                     *       },
                      *       "modelId": "claude-sonnet-4-6",
                      *       "proxyId": null,
                      *       "version_pin": "1.2.3"
@@ -7923,6 +7982,7 @@ export interface operations {
                      */
                     "application/json": {
                         config: Record<string, never>;
+                        generation: components["schemas"]["ModelGenerationSettings"] | null;
                         modelId: string | null;
                         proxyId: string | null;
                         version_pin: string | null;
@@ -9044,6 +9104,7 @@ export interface operations {
                 "application/json": {
                     messages: Record<string, never>[];
                     modelId?: string;
+                    generation?: components["schemas"]["ModelGenerationSettings"];
                     /** @description Session id (the assistant-ui thread id) */
                     id?: string;
                 };
@@ -12895,6 +12956,7 @@ export interface operations {
                                 contextWindow: number;
                                 maxTokens?: number | null;
                                 capabilities: string[];
+                                generation?: components["schemas"]["ModelGenerationCapabilities"];
                                 /** @description Per-1M-token cost (USD). */
                                 cost: {
                                     input?: number;
@@ -13340,6 +13402,15 @@ export interface operations {
                      *           "apiShape": "openai-responses",
                      *           "baseUrl": "https://api.openai.com/v1",
                      *           "modelId": "gpt-4o",
+                     *           "generation": {
+                     *             "temperature": "supported",
+                     *             "temperatureWithReasoning": "unknown",
+                     *             "reasoning": {
+                     *               "supported": "unsupported",
+                     *               "adaptive": null,
+                     *               "levels": {}
+                     *             }
+                     *           },
                      *           "iconUrl": "openai",
                      *           "source": "built-in",
                      *           "enabled": true,
@@ -18289,10 +18360,13 @@ export interface operations {
                      *       "metadata": null,
                      *       "config": null,
                      *       "config_override": null,
+                     *       "generation": null,
+                     *       "generation_override": null,
                      *       "started_at": "2026-01-15T10:30:00Z",
                      *       "completed_at": null,
                      *       "duration": null,
                      *       "cost": null,
+                     *       "cost_pricing_status": null,
                      *       "unread": false,
                      *       "runNumber": 1,
                      *       "token_usage": null,
@@ -18656,10 +18730,15 @@ export interface operations {
                      *         "folder": "inbox"
                      *       },
                      *       "config_override": null,
+                     *       "generation": {
+                     *         "reasoningLevel": "medium"
+                     *       },
+                     *       "generation_override": null,
                      *       "started_at": "2026-01-15T10:30:00Z",
                      *       "completed_at": "2026-01-15T10:31:12Z",
                      *       "duration": 72000,
                      *       "cost": 0.0034,
+                     *       "cost_pricing_status": "priced",
                      *       "unread": true,
                      *       "runNumber": 17,
                      *       "token_usage": {
@@ -18767,10 +18846,13 @@ export interface operations {
                      *       "metadata": null,
                      *       "config": null,
                      *       "config_override": null,
+                     *       "generation": null,
+                     *       "generation_override": null,
                      *       "started_at": "2026-01-15T10:30:00Z",
                      *       "completed_at": "2026-01-15T10:30:45Z",
                      *       "duration": 45000,
                      *       "cost": 0.0012,
+                     *       "cost_pricing_status": "priced",
                      *       "unread": false,
                      *       "runNumber": 18,
                      *       "token_usage": null,
@@ -19486,6 +19568,7 @@ export interface operations {
                      *         "maxEmails": 50
                      *       },
                      *       "config_override": null,
+                     *       "generation_config_override": null,
                      *       "model_id_override": null,
                      *       "proxy_id_override": null,
                      *       "version_override": "1.2.0",
@@ -19530,6 +19613,8 @@ export interface operations {
                     input?: Record<string, never>;
                     /** @description Per-schedule config delta. Pass `null` to clear the override. */
                     config_override?: Record<string, never> | null;
+                    /** @description Temperature/reasoning overrides for scheduled runs. Pass null to clear. */
+                    generation_config_override?: components["schemas"]["ModelGenerationSettings"] | null;
                     model_id_override?: string | null;
                     proxy_id_override?: string | null;
                     /** @description Version selector (`draft` | `published` | version spec). Pass `null` to clear (falls back to the default `published` — latest published version; the working copy is opt-in via `draft` only). */

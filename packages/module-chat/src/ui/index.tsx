@@ -61,7 +61,16 @@ import {
   type SessionSummary,
 } from "./sessions.ts";
 import { useSessions } from "./use-sessions.ts";
-import { subscribeModel, getSelectedModel, setSelectedModel } from "./model-store.ts";
+import {
+  subscribeGeneration,
+  subscribeModel,
+  getCompatibleGenerationSettings,
+  getGenerationSettings,
+  getSelectedModel,
+  setGenerationSettings,
+  setModelGenerationCapabilities,
+  setSelectedModel,
+} from "./model-store.ts";
 import { createChatAttachmentAdapter } from "./attachment-adapter.ts";
 
 // Tab visibility as an external store — the mark-read effect must not fire
@@ -152,10 +161,16 @@ export function ChatPage({
   // function (see ConversationInner), so a switch applies to the very next send
   // without remounting the conversation. This hook only mirrors it for the picker.
   const selectedModel = useSyncExternalStore(subscribeModel, getSelectedModel, getSelectedModel);
+  const generation = useSyncExternalStore(
+    subscribeGeneration,
+    getGenerationSettings,
+    getGenerationSettings,
+  );
 
   useEffect(() => {
     void fetchModels(getHeaders).then((list) => {
       setModels(list);
+      setModelGenerationCapabilities(list);
       // Reconcile a stale/absent stored selection to the org default. A model
       // whose credential went dead is listed (the picker marks it, unpickable)
       // but must not be kept as the stored selection nor adopted as the
@@ -280,11 +295,15 @@ export function ChatPage({
                   onConversationChange={onConversationChange}
                   attachments={attachments}
                   composerSlot={
-                    <ModelSelect
-                      models={models}
-                      selectedId={selectedModel}
-                      onSelect={setSelectedModel}
-                    />
+                    <div className="flex items-center gap-2">
+                      <ModelSelect
+                        models={models}
+                        selectedId={selectedModel}
+                        onSelect={setSelectedModel}
+                        generation={generation}
+                        onGenerationChange={setGenerationSettings}
+                      />
+                    </div>
                   }
                 />
               </main>
@@ -379,6 +398,14 @@ function ConversationInner({
         api: "/api/chat",
         credentials: "include",
         headers: buildHeaders,
+        prepareSendMessagesRequest: ({ id: chatId, messages, body }) => ({
+          body: {
+            ...body,
+            id: chatId,
+            messages,
+            generation: getCompatibleGenerationSettings(),
+          },
+        }),
         // Native resume targets our per-session stream endpoint (the chat id is
         // the conversation id = the URL).
         prepareReconnectToStreamRequest: ({ id: chatId }) => ({

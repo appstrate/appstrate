@@ -87,6 +87,25 @@ describe("resolveSubscriptionChatModel", () => {
     }
   });
 
+  it("carries provider-native reasoning levels into the Pi chat binding", async () => {
+    const credentialId = await seedOauthCredential();
+    const presetId = await createOrgModel(
+      ctx.orgId,
+      "Subscribed Reasoning",
+      "test-reasoning-model",
+      ctx.user.id,
+      credentialId,
+    );
+
+    const resolution = await resolveSubscriptionChatModel(ctx.orgId, presetId);
+    expect(resolution.subscription).toBe(true);
+    if (resolution.subscription && "model" in resolution) {
+      expect(resolution.model.reasoningLevelMap).toEqual({ xhigh: "max" });
+    } else {
+      throw new Error(`expected a model resolution, got ${JSON.stringify(resolution)}`);
+    }
+  });
+
   it("returns { subscription: false } for an unknown preset", async () => {
     const resolution = await resolveSubscriptionChatModel(ctx.orgId, "no-such-preset");
     expect(resolution).toEqual({ subscription: false });

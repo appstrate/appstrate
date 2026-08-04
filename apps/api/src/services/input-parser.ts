@@ -74,12 +74,18 @@ import {
 } from "./run-workspace-storage.ts";
 import { assignWorkspaceNames } from "./run-document-naming.ts";
 import { getEnv } from "@appstrate/env";
+import {
+  modelGenerationSettingsSchema,
+  type ModelGenerationSettings,
+} from "@appstrate/core/model-generation";
 
 export interface ParsedInput {
   input?: Record<string, unknown>;
   uploadedFiles?: FileReference[];
   /** Per-run model override (wire field `modelId` on the request body). */
   modelIdOverride?: string;
+  /** Per-run sampling/reasoning override. */
+  generationConfigOverride?: ModelGenerationSettings;
   /** Per-run proxy override (wire field `proxyId` on the request body). */
   proxyIdOverride?: string;
   /**
@@ -143,6 +149,7 @@ interface RunRequestBody {
    */
   rerun_from?: string;
   modelId?: string;
+  generation?: ModelGenerationSettings;
   proxyId?: string;
   config?: Record<string, unknown>;
   connection_overrides?: Record<string, string>;
@@ -1015,6 +1022,18 @@ export async function parseRequestInput(
       ? body.dependency_overrides
       : undefined;
 
+  const generationResult = modelGenerationSettingsSchema.safeParse(body.generation ?? {});
+  if (!generationResult.success) {
+    throw invalidRequest(
+      `Invalid generation settings: ${generationResult.error.issues[0]?.message ?? "validation failed"}`,
+      "generation",
+    );
+  }
+  const generationConfigOverride =
+    body.generation !== undefined && Object.keys(generationResult.data).length > 0
+      ? generationResult.data
+      : undefined;
+
   // An effectively-empty input (no fields, no files) carries no information —
   // collapse it to `undefined` so it persists as SQL NULL on `runs.input`,
   // keeping every trigger origin (agent route, inline run, schedule) on one
@@ -1032,6 +1051,7 @@ export async function parseRequestInput(
     pendingDocuments: pendingDocuments.length > 0 ? pendingDocuments : undefined,
     consumedDocumentIds: consumedDocumentIds.length > 0 ? consumedDocumentIds : undefined,
     modelIdOverride: body.modelId,
+    generationConfigOverride,
     proxyIdOverride: body.proxyId,
     configOverride: body.config,
     connectionOverrides: body.connection_overrides,

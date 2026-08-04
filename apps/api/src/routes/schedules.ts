@@ -2,6 +2,14 @@
 
 import { Hono } from "hono";
 import { z } from "zod";
+import {
+  ModelGenerationError,
+  modelGenerationSettingsSchema,
+  reconcileModelGenerationSettings,
+  resolveModelGenerationSettings,
+  type ModelGenerationCapabilities,
+  type ModelGenerationSettings,
+} from "@appstrate/core/model-generation";
 import type { AppEnv } from "../types/index.ts";
 import {
   getSchedule,
@@ -22,7 +30,8 @@ import { getActor, actorFromIds, type Actor } from "../lib/actor.ts";
 import { getAppScope, type AppScope } from "../lib/scope.ts";
 import { getOrgMember } from "../services/organizations.ts";
 import { getEndUser } from "../services/end-users.ts";
-import { assertExplicitModelExists } from "../services/org-models.ts";
+import { assertExplicitModelExists, resolveModel } from "../services/org-models.ts";
+import { getPackageConfig } from "../services/application-packages.ts";
 import { asJSONSchemaObject, schemaHasFileFields } from "@appstrate/core/form";
 import { listScheduleRuns } from "../services/state/runs.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
@@ -106,6 +115,7 @@ const createScheduleSchema = z.object({
   // schedule is "a recurring run with frozen overrides".
   config_override: runConfigOverrideSchema.optional(),
   model_id_override: z.string().optional(),
+  generation_config_override: modelGenerationSettingsSchema.optional(),
   proxy_id_override: z.string().optional(),
   version_override: z.string().optional(),
   connection_overrides: connectionOverridesSchema.optional(),
@@ -122,6 +132,7 @@ const updateScheduleSchema = z.object({
   // `null` clears the override; omitted leaves it untouched.
   config_override: runConfigOverrideSchema.nullable().optional(),
   model_id_override: z.string().nullable().optional(),
+  generation_config_override: modelGenerationSettingsSchema.nullable().optional(),
   proxy_id_override: z.string().nullable().optional(),
   version_override: z.string().nullable().optional(),
   connection_overrides: connectionOverridesSchema.nullable().optional(),
@@ -129,6 +140,20 @@ const updateScheduleSchema = z.object({
   // No `.nullable()` — the actor can be re-pointed but never cleared (#735).
   actor: actorSchema.optional(),
 });
+
+function validateGenerationOverride(
+  generation: ModelGenerationSettings,
+  capabilities?: ModelGenerationCapabilities | null,
+): ModelGenerationSettings {
+  try {
+    return resolveModelGenerationSettings({ capabilities, override: generation });
+  } catch (error) {
+    if (error instanceof ModelGenerationError) {
+      throw invalidRequest(error.message, "generation_config_override");
+    }
+    throw error;
+  }
+}
 
 export function createSchedulesRouter() {
   const router = new Hono<AppEnv>();
@@ -193,7 +218,23 @@ export function createSchedulesRouter() {
 
       // Reject a `model_id_override` that references no real model up front, so
       // a bad id fails at schedule-create time instead of silently each tick.
-      await assertExplicitModelExists(scope.orgId, data.model_id_override);
+      const explicitModel = await assertExplicitModelExists(scope.orgId, data.model_id_override);
+      let generationConfigOverride = data.generation_config_override;
+      if (generationConfigOverride && Object.keys(generationConfigOverride).length > 0) {
+        const config = await getPackageConfig(scope.applicationId, agent.id);
+        const selectedModel =
+          explicitModel ??
+          (await resolveModel(scope.orgId, agent.id, data.model_id_override ?? config.modelId));
+        if (!selectedModel) {
+          throw invalidRequest(
+            "A model must be configured before generation settings can be saved",
+          );
+        }
+        generationConfigOverride = validateGenerationOverride(
+          generationConfigOverride,
+          selectedModel.generation,
+        );
+      }
 
       const schedule = await createSchedule(scope, agent.id, actor, {
         name: data.name,
@@ -202,6 +243,7 @@ export function createSchedulesRouter() {
         input: data.input,
         configOverride: data.config_override ?? null,
         modelIdOverride: data.model_id_override ?? null,
+        generationConfigOverride: generationConfigOverride ?? null,
         proxyIdOverride: data.proxy_id_override ?? null,
         versionOverride: data.version_override ?? null,
         connectionOverrides: data.connection_overrides ?? null,
@@ -251,7 +293,42 @@ export function createSchedulesRouter() {
 
     // Reject a `model_id_override` that references no real model (no-op when
     // the field isn't part of this patch).
-    await assertExplicitModelExists(scope.orgId, data.model_id_override);
+    const explicitModel = await assertExplicitModelExists(scope.orgId, data.model_id_override);
+    let generationConfigOverride = data.generation_config_override;
+    if (
+      (generationConfigOverride && Object.keys(generationConfigOverride).length > 0) ||
+      (generationConfigOverride === undefined &&
+        data.model_id_override !== undefined &&
+        existing.generation_config_override)
+    ) {
+      const config = await getPackageConfig(scope.applicationId, existing.packageId);
+      const effectiveModelOverride =
+        data.model_id_override !== undefined ? data.model_id_override : existing.model_id_override;
+      const selectedModel =
+        explicitModel ??
+        (await resolveModel(
+          scope.orgId,
+          existing.packageId,
+          effectiveModelOverride ?? config.modelId,
+        ));
+
+      if (generationConfigOverride && Object.keys(generationConfigOverride).length > 0) {
+        if (!selectedModel) {
+          throw invalidRequest(
+            "A model must be configured before generation settings can be saved",
+          );
+        }
+        generationConfigOverride = validateGenerationOverride(
+          generationConfigOverride,
+          selectedModel.generation,
+        );
+      } else if (existing.generation_config_override) {
+        generationConfigOverride = reconcileModelGenerationSettings(
+          existing.generation_config_override,
+          selectedModel?.generation,
+        );
+      }
+    }
 
     // #738: re-point the actor when the caller selected one (validated against
     // this org/app scope). `undefined` leaves the existing actor untouched.
@@ -279,6 +356,7 @@ export function createSchedulesRouter() {
       enabled: data.enabled,
       configOverride: data.config_override,
       modelIdOverride: data.model_id_override,
+      generationConfigOverride,
       proxyIdOverride: data.proxy_id_override,
       versionOverride: data.version_override,
       connectionOverrides,
@@ -297,6 +375,8 @@ export function createSchedulesRouter() {
     if (data.enabled !== undefined) auditAfter.enabled = data.enabled;
     if (data.config_override !== undefined) auditAfter.configOverride = data.config_override;
     if (data.model_id_override !== undefined) auditAfter.modelIdOverride = data.model_id_override;
+    if (generationConfigOverride !== undefined)
+      auditAfter.generationConfigOverride = generationConfigOverride;
     if (data.proxy_id_override !== undefined) auditAfter.proxyIdOverride = data.proxy_id_override;
     if (data.version_override !== undefined) auditAfter.versionOverride = data.version_override;
     if (data.connection_overrides !== undefined)

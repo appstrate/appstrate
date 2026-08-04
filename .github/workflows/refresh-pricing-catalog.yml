@@ -8,13 +8,113 @@ on:
   workflow_dispatch: {}
 
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
 
 jobs:
-  refresh:
+  export-litellm:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Discover and export latest stable LiteLLM catalog
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          repository="$(jq -r '.image' scripts/litellm-catalog.lock.json)"
+          catalog_repository="$(jq -r '.catalog.repository' scripts/litellm-catalog.lock.json)"
+          catalog_path="$(jq -r '.catalog.path' scripts/litellm-catalog.lock.json)"
+          version="$(gh api "repos/${catalog_repository}/releases/latest" --jq '.tag_name')"
+          if [[ ! "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Latest LiteLLM release is not a stable SemVer tag: $version" >&2
+            exit 1
+          fi
+
+          digest="sha256:$(docker buildx imagetools inspect --raw "${repository}:${version}" | sha256sum | cut -d ' ' -f 1)"
+          if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "Invalid OCI digest resolved for ${repository}:${version}: $digest" >&2
+            exit 1
+          fi
+
+          image="${repository}@${digest}"
+          output_dir="${RUNNER_TEMP}/litellm-source"
+          output="${output_dir}/litellm-catalog.json"
+          catalog_input="${output_dir}/litellm-model-catalog.json"
+          mkdir -p "$output_dir"
+
+          # Model metadata changes between package releases. Resolve LiteLLM's
+          # own catalog to an exact commit so newly added models are not hidden
+          # by the stable image's bundled fallback.
+          catalog_commit="$(gh api "repos/${catalog_repository}/commits/main" --jq '.sha')"
+          if [[ ! "$catalog_commit" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "Invalid LiteLLM catalog commit: $catalog_commit" >&2
+            exit 1
+          fi
+          curl \
+            --fail \
+            --silent \
+            --show-error \
+            --location \
+            --retry 3 \
+            --output "$catalog_input" \
+            "https://raw.githubusercontent.com/${catalog_repository}/${catalog_commit}/${catalog_path}"
+          jq --exit-status 'type == "object" and length > 0' "$catalog_input" >/dev/null
+          catalog_digest="sha256:$(sha256sum "$catalog_input" | cut -d ' ' -f 1)"
+
+          # LiteLLM does not currently publish a Cosign signature for this OCI
+          # index. Resolve the official latest stable release to immutable bytes,
+          # execute only that digest, and persist both upstream inputs for review.
+          jq \
+            --arg version "$version" \
+            --arg digest "$digest" \
+            --arg catalog_commit "$catalog_commit" \
+            --arg catalog_digest "$catalog_digest" \
+            '.version = $version
+              | .digest = $digest
+              | .catalog.commit = $catalog_commit
+              | .catalog.digest = $catalog_digest' \
+            scripts/litellm-catalog.lock.json \
+            > "${output_dir}/litellm-catalog.lock.json"
+
+          # The exporter gets no network, no capabilities and no writable root.
+          # Its sole output is a JSON artifact consumed by the separate write job.
+          docker run --rm \
+            --network none \
+            --read-only \
+            --cap-drop ALL \
+            --security-opt no-new-privileges \
+            --tmpfs /tmp:rw,noexec,nosuid,size=64m \
+            --entrypoint python \
+            --env PYTHONDONTWRITEBYTECODE=1 \
+            --volume "$GITHUB_WORKSPACE/scripts/export-litellm-catalog.py:/exporter.py:ro" \
+            --volume "$catalog_input:/catalog.json:ro" \
+            "$image" /exporter.py /catalog.json > "$output"
+
+          jq --exit-status 'type == "object" and length > 0' "$output" >/dev/null
+
+          echo "Exported LiteLLM ${version} (${digest}) catalog ${catalog_commit} (${catalog_digest})"
+
+      - name: Upload normalized LiteLLM source
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: litellm-catalog
+          path: ${{ runner.temp }}/litellm-source/
+          if-no-files-found: error
+          retention-days: 1
+
+  refresh:
+    needs: export-litellm
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
 
     # `bun install` below runs the root `prepare` script (`husky`), which points
     # git's `core.hooksPath` at `.husky/`. The `pre-push` hook there runs
@@ -35,13 +135,24 @@ jobs:
       - name: Setup Bun
         uses: ./.github/actions/bun-setup
 
+      - name: Download normalized LiteLLM source
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: litellm-catalog
+          path: ${{ runner.temp }}/litellm-source
+
       - name: Refresh catalog (apply)
         env:
+          LITELLM_CATALOG_PATH: ${{ runner.temp }}/litellm-source/litellm-catalog.json
           # Per-provider cache-rate coverage + delta, for the PR body assembled
           # below. Written to the runner temp dir, NEVER the worktree — see the
           # body-path rationale in the drift step.
           PRICING_COVERAGE_SUMMARY_PATH: ${{ runner.temp }}/pricing-coverage.md
-        run: bun scripts/refresh-pricing-catalog.ts --apply
+        run: |
+          cp \
+            "${RUNNER_TEMP}/litellm-source/litellm-catalog.lock.json" \
+            scripts/litellm-catalog.lock.json
+          bun scripts/refresh-pricing-catalog.ts --apply
 
       # rationale: see .github/actions/bun-setup/action.yml
       - name: Install dependencies
@@ -61,17 +172,18 @@ jobs:
       - name: Check for drift
         id: drift
         run: |
+          git diff --quiet scripts/litellm-catalog.lock.json && source_lock=false || source_lock=true
           git diff --quiet apps/api/src/data/pricing && pricing=false || pricing=true
           git diff --quiet apps/api/src/data/subscription-watch && watch=false || watch=true
 
-          if [ "$pricing" = false ] && [ "$watch" = false ]; then
+          if [ "$source_lock" = false ] && [ "$pricing" = false ] && [ "$watch" = false ]; then
             echo "drift=false" >> "$GITHUB_OUTPUT"
             echo "No upstream changes — nothing to commit."
             exit 0
           fi
 
           echo "drift=true" >> "$GITHUB_OUTPUT"
-          git diff --stat apps/api/src/data
+          git diff --stat scripts/litellm-catalog.lock.json apps/api/src/data
 
           # The PR body is assembled here rather than inlined on the PR step so
           # it can name WHICH tree moved. Written to the runner temp dir, never
@@ -80,8 +192,11 @@ jobs:
           body="${RUNNER_TEMP}/pr-body.md"
           {
           cat <<'EOF'
-          Automated weekly refresh of the vendored LiteLLM catalog. Upstream source:
-          https://github.com/BerriAI/litellm/blob/main/litellm/model_prices_and_context_window_backup.json
+          Automated weekly refresh from LiteLLM's latest model catalog plus its
+          latest stable GitHub release. The exact catalog commit, file digest,
+          release tag and immutable OCI image digest are recorded in
+          `scripts/litellm-catalog.lock.json`; the isolated exporter asks LiteLLM
+          which OpenAI-compatible request parameters each model supports.
 
           Two generated trees, two different consequences:
           - `apps/api/src/data/pricing/*.json` — prices + model metadata, read at
@@ -96,6 +211,8 @@ jobs:
             not a flake.
 
           Reviewer checklist:
+          - Confirm the LiteLLM catalog commit, release and digest changes in
+            `scripts/litellm-catalog.lock.json` are expected.
           EOF
 
           if [ "$pricing" = true ]; then
@@ -149,7 +266,8 @@ jobs:
           commit-message: |
             chore(pricing): refresh LiteLLM pricing catalog
 
-            Weekly refresh of `apps/api/src/data/pricing/*.json` and
+            Weekly refresh of `scripts/litellm-catalog.lock.json`,
+            `apps/api/src/data/pricing/*.json` and
             `apps/api/src/data/subscription-watch/*.json` from
             BerriAI/litellm (MIT).
           title: "chore(pricing): refresh LiteLLM pricing catalog"

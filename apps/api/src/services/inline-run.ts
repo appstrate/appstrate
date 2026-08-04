@@ -431,6 +431,7 @@ export async function triggerInlineRun(params: {
       consumedDocumentIds: parsed.consumedDocumentIds,
       config: effectiveConfig,
       modelId: modelIdOverride,
+      generationConfigOverride: parsed.generationConfigOverride ?? null,
       proxyId: proxyIdOverride,
       applicationId,
       apiKeyId,

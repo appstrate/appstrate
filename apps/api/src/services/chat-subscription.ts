@@ -109,6 +109,7 @@ export async function resolveSubscriptionChatModel(
       contextWindow: resolved.contextWindow ?? null,
       maxTokens: resolved.maxTokens ?? null,
       reasoning: resolved.reasoning ?? false,
+      reasoningLevelMap: resolved.generation?.reasoning.nativeLevels,
       input: resolved.input ?? null,
       accessToken: token.accessToken,
     },

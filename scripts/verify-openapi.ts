@@ -687,18 +687,23 @@ function normalizeType(schema: Record<string, unknown>): {
   baseTypes: string[];
   nullable: boolean;
 } {
-  if (schema.anyOf && Array.isArray(schema.anyOf)) {
-    // Zod emits anyOf for nullable: [{ type: "string", ... }, { type: "null" }]
-    const types: string[] = [];
-    let nullable = false;
-    for (const variant of schema.anyOf as Record<string, unknown>[]) {
-      if (variant.type === "null") {
-        nullable = true;
-      } else if (typeof variant.type === "string") {
-        types.push(variant.type);
-      }
-    }
-    return { baseTypes: types.sort(), nullable };
+  if (typeof schema.$ref === "string") {
+    const resolved = resolveRef(schema.$ref);
+    return resolved ? normalizeType(resolved) : { baseTypes: [], nullable: false };
+  }
+
+  const variants = Array.isArray(schema.anyOf)
+    ? schema.anyOf
+    : Array.isArray(schema.oneOf)
+      ? schema.oneOf
+      : null;
+  if (variants) {
+    // Zod and hand-authored OpenAPI use unions for nullable refs and scalars.
+    const normalized = (variants as Record<string, unknown>[]).map(normalizeType);
+    return {
+      baseTypes: [...new Set(normalized.flatMap((variant) => variant.baseTypes))].sort(),
+      nullable: normalized.some((variant) => variant.nullable),
+    };
   }
 
   if (Array.isArray(schema.type)) {
@@ -709,7 +714,9 @@ function normalizeType(schema: Record<string, unknown>): {
   }
 
   if (typeof schema.type === "string") {
-    return { baseTypes: [schema.type], nullable: false };
+    return schema.type === "null"
+      ? { baseTypes: [], nullable: true }
+      : { baseTypes: [schema.type], nullable: false };
   }
 
   return { baseTypes: [], nullable: false };

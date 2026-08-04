@@ -30,6 +30,7 @@ import { computeNextRun } from "../lib/cron.ts";
 import type { Actor } from "../lib/actor.ts";
 import type { AppScope } from "../lib/scope.ts";
 import { setQueueDepthSource } from "@appstrate/core/telemetry";
+import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -49,6 +50,7 @@ interface ScheduleJobData {
   // body) so a schedule is "a recurring run with frozen overrides".
   configOverride?: Record<string, unknown>;
   modelIdOverride?: string;
+  generationConfigOverride?: ModelGenerationSettings;
   proxyIdOverride?: string;
   versionOverride?: string;
   /**
@@ -90,6 +92,7 @@ function toSchedule(row: typeof schedules.$inferSelect): ScheduleWireDto {
     timezone: row.timezone,
     input: asRecordOrNull(row.input),
     config_override: asRecordOrNull(row.configOverride),
+    generation_config_override: row.generationConfigOverride ?? null,
     model_id_override: row.modelIdOverride,
     proxy_id_override: row.proxyIdOverride,
     version_override: row.versionOverride,
@@ -137,6 +140,7 @@ async function upsertScheduleJob(row: typeof schedules.$inferSelect): Promise<vo
     input: asRecordOrNull(row.input) ?? undefined,
     configOverride: asRecordOrNull(row.configOverride) ?? undefined,
     modelIdOverride: row.modelIdOverride ?? undefined,
+    generationConfigOverride: row.generationConfigOverride ?? undefined,
     proxyIdOverride: row.proxyIdOverride ?? undefined,
     versionOverride: row.versionOverride ?? undefined,
     connectionOverrides: (row.connectionOverrides as Record<string, string> | null) ?? undefined,
@@ -276,6 +280,7 @@ async function handleScheduleJob(job: QueueJob<ScheduleJobData>): Promise<void> 
     input,
     configOverride,
     modelIdOverride,
+    generationConfigOverride,
     proxyIdOverride,
     versionOverride,
     connectionOverrides,
@@ -312,6 +317,7 @@ async function handleScheduleJob(job: QueueJob<ScheduleJobData>): Promise<void> 
     await triggerScheduledRun(scheduleId, packageId, actor, orgId, applicationId, input, {
       configOverride,
       modelIdOverride,
+      generationConfigOverride,
       proxyIdOverride,
       versionOverride,
       connectionOverrides,
@@ -434,6 +440,7 @@ export async function triggerScheduledRun(
   overrides: {
     configOverride?: Record<string, unknown>;
     modelIdOverride?: string;
+    generationConfigOverride?: ModelGenerationSettings;
     proxyIdOverride?: string;
     versionOverride?: string;
     connectionOverrides?: Record<string, string>;
@@ -541,6 +548,7 @@ export async function triggerScheduledRun(
     // Shared preflight: resolve config, validate readiness
     let config: Record<string, unknown>;
     let preflightModelId: string | null;
+    let preflightGenerationConfig: ModelGenerationSettings | null;
     let preflightProxyId: string | null;
     try {
       const preflight = await resolveRunPreflight({
@@ -557,6 +565,7 @@ export async function triggerScheduledRun(
 
       config = preflight.config;
       preflightModelId = preflight.modelId;
+      preflightGenerationConfig = preflight.generationConfig;
       preflightProxyId = preflight.proxyId;
     } catch (err) {
       if (err instanceof ApiError) {
@@ -632,6 +641,8 @@ export async function triggerScheduledRun(
         config: mergedConfig,
         configOverride: overrides.configOverride,
         modelId: finalModelId,
+        generationConfig: preflightGenerationConfig,
+        generationConfigOverride: overrides.generationConfigOverride ?? null,
         proxyId: finalProxyId,
         overrideVersionLabel,
         scheduleId,
@@ -772,6 +783,7 @@ export async function createSchedule(
     input?: Record<string, unknown>;
     configOverride?: Record<string, unknown> | null;
     modelIdOverride?: string | null;
+    generationConfigOverride?: ModelGenerationSettings | null;
     proxyIdOverride?: string | null;
     versionOverride?: string | null;
     connectionOverrides?: Record<string, string> | null;
@@ -800,6 +812,7 @@ export async function createSchedule(
       input: data.input ?? null,
       configOverride: data.configOverride ?? null,
       modelIdOverride: data.modelIdOverride ?? null,
+      generationConfigOverride: data.generationConfigOverride ?? null,
       proxyIdOverride: data.proxyIdOverride ?? null,
       versionOverride: data.versionOverride ?? null,
       connectionOverrides: data.connectionOverrides ?? null,
@@ -832,6 +845,7 @@ export async function updateSchedule(
     enabled?: boolean;
     configOverride?: Record<string, unknown> | null;
     modelIdOverride?: string | null;
+    generationConfigOverride?: ModelGenerationSettings | null;
     proxyIdOverride?: string | null;
     versionOverride?: string | null;
     connectionOverrides?: Record<string, string> | null;
@@ -865,6 +879,8 @@ export async function updateSchedule(
   // Explicit `null` clears the override; `undefined` leaves it untouched.
   if (data.configOverride !== undefined) payload.configOverride = data.configOverride;
   if (data.modelIdOverride !== undefined) payload.modelIdOverride = data.modelIdOverride;
+  if (data.generationConfigOverride !== undefined)
+    payload.generationConfigOverride = data.generationConfigOverride;
   if (data.proxyIdOverride !== undefined) payload.proxyIdOverride = data.proxyIdOverride;
   if (data.versionOverride !== undefined) payload.versionOverride = data.versionOverride;
   if (data.connectionOverrides !== undefined)

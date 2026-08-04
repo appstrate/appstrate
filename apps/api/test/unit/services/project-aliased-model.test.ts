@@ -21,6 +21,7 @@ const base: OrgModelInfo = {
   providerName: "OpenAI-compatible (custom)",
   baseUrl: "https://api.deepseek.com/v1",
   modelId: "deepseek-chat",
+  generation: null,
   input: ["text"],
   contextWindow: 64000,
   maxTokens: 8192,
@@ -67,6 +68,11 @@ describe("projectAliasedModel", () => {
     expect(out.maxTokens).toBeNull();
     expect(out.reasoning).toBeNull();
     expect(out.cost).toBeNull();
+    expect(out.generation).toEqual({
+      temperature: "unsupported",
+      temperatureWithReasoning: "unsupported",
+      reasoning: { supported: "unsupported", adaptive: null, levels: {} },
+    });
 
     // Hard guarantee: nothing identifying the backing survives serialization.
     const json = JSON.stringify(out);

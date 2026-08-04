@@ -15,13 +15,23 @@ import { useSchemaFormLabels } from "../../hooks/use-schema-form-labels";
 import { useUploadClient } from "../../hooks/use-upload";
 import { getModelIcon } from "../icons";
 import { useProvidersRegistry } from "../../hooks/use-model-provider-credentials";
-import { useModels, useAgentModel, useSetAgentModel } from "../../hooks/use-models";
+import {
+  useModels,
+  useAgentModel,
+  useSetAgentModel,
+  type OrgModelInfo,
+} from "../../hooks/use-models";
 import { isModelSelectable } from "../../lib/model-selectability";
 import { ModelUnselectableNote } from "../model-availability-badge";
 import { useProxies, useAgentProxy, useSetAgentProxy } from "../../hooks/use-proxies";
 import { usePackageDetail } from "../../hooks/use-packages";
 import { useSaveConfig } from "../../hooks/use-mutations";
 import type { JSONSchemaObject, SchemaWrapper } from "@appstrate/core/form";
+import {
+  reconcileModelGenerationSettings,
+  type ModelGenerationSettings,
+} from "@appstrate/core/model-generation";
+import { ModelGenerationFields } from "../model-generation-fields";
 
 // ─── Config Section ─────────────────────────────────────────────────
 
@@ -73,24 +83,65 @@ function ConfigSection({
 // ─── Model Section ──────────────────────────────────────────────────
 
 function ModelSection({ packageId }: { packageId: string }) {
-  const { t } = useTranslation(["settings"]);
   const { data: orgModels } = useModels();
   const { data: agentModel } = useAgentModel(packageId);
+  if (!orgModels || orgModels.length === 0 || !agentModel) return null;
+
+  const generation = agentModel.generation ?? {};
+  const editorKey = [
+    agentModel.modelId ?? "inherit",
+    generation.temperature ?? "inherit",
+    generation.reasoningLevel ?? "inherit",
+  ].join(":");
+
+  return (
+    <ModelSectionEditor
+      key={editorKey}
+      packageId={packageId}
+      orgModels={orgModels}
+      initialModelId={agentModel.modelId}
+      initialGeneration={generation}
+    />
+  );
+}
+
+function ModelSectionEditor({
+  packageId,
+  orgModels,
+  initialModelId,
+  initialGeneration,
+}: {
+  packageId: string;
+  orgModels: OrgModelInfo[];
+  initialModelId: string | null;
+  initialGeneration: ModelGenerationSettings;
+}) {
+  const { t } = useTranslation(["settings"]);
   const { data: registry } = useProvidersRegistry();
   const setAgentModel = useSetAgentModel(packageId);
-  if (!orgModels || orgModels.length === 0) return null;
+  const [modelId, setModelId] = useState<string | null>(initialModelId);
+  const [generation, setGeneration] = useState<ModelGenerationSettings>(initialGeneration);
 
-  const agentModelId = agentModel?.modelId;
   // Unfiltered on purpose — see the same call in `run-overrides-panel.tsx`:
   // the inherited default must be named even when it is unusable.
   const orgDefaultModel = orgModels.find((m) => m.is_default);
+  const resolvedModel = modelId ? orgModels.find((m) => m.id === modelId) : orgDefaultModel;
 
   return (
     <div className="border-border bg-card space-y-3 rounded-lg border p-4">
       <h3 className="text-sm font-medium">{t("models.tabTitle", { ns: "settings" })}</h3>
       <Select
-        value={agentModelId ?? "__inherit__"}
-        onValueChange={(v) => setAgentModel.mutate(v === "__inherit__" ? null : v)}
+        value={modelId ?? "__inherit__"}
+        onValueChange={(value) => {
+          const nextModelId = value === "__inherit__" ? null : value;
+          const nextModel = nextModelId
+            ? orgModels.find((model) => model.id === nextModelId)
+            : orgDefaultModel;
+          setModelId(nextModelId);
+          setGeneration((current) =>
+            reconcileModelGenerationSettings(current, nextModel?.generation),
+          );
+        }}
         disabled={setAgentModel.isPending}
       >
         <SelectTrigger>
@@ -119,6 +170,26 @@ function ModelSection({ packageId }: { packageId: string }) {
           })}
         </SelectContent>
       </Select>
+      <ModelGenerationFields
+        value={generation}
+        capabilities={resolvedModel?.generation}
+        onChange={setGeneration}
+        disabled={setAgentModel.isPending}
+      />
+      <div className="flex justify-end">
+        <Button
+          size="sm"
+          disabled={setAgentModel.isPending}
+          onClick={() =>
+            setAgentModel.mutate({
+              modelId,
+              generation: Object.keys(generation).length > 0 ? generation : null,
+            })
+          }
+        >
+          {t("models.generation.save")}
+        </Button>
+      </div>
     </div>
   );
 }

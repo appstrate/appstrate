@@ -47,6 +47,7 @@ export function ScheduleCreatePage() {
         configSchema={deps?.configSchema}
         persistedConfig={deps?.persistedConfig ?? {}}
         persistedModelId={deps?.persistedModelId ?? null}
+        persistedGenerationConfig={deps?.persistedGenerationConfig ?? null}
         persistedProxyId={deps?.persistedProxyId ?? null}
         persistedVersion={deps?.persistedVersion ?? null}
         packageId={effectiveAgentId || undefined}
