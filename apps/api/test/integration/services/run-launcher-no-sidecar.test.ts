@@ -234,6 +234,7 @@ describe("run-launcher — sidecar skip decision", () => {
     // the real endpoint never enter the agent env.
     const env = counts.capturedAgentEnv ?? {};
     expect(env.MODEL_ID).toBe("appstrate-medium");
+    expect(env.MODEL_PROVIDER).toBe("deepseek");
     expect(env.MODEL_BASE_URL).toBe("http://fake-sidecar.test:19080/llm");
     expect(JSON.stringify(env)).not.toContain("deepseek-chat");
     expect(JSON.stringify(env)).not.toContain("api.deepseek.com");

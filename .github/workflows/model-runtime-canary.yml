@@ -1,0 +1,90 @@
+name: Model runtime canary
+
+on:
+  schedule:
+    # Nightly, outside the weekly catalog refresh window. Every model listed in
+    # the canary config gets a fresh provider call through Pi + the real sidecar.
+    - cron: "30 4 * * *"
+  workflow_dispatch: {}
+  # Deployment systems may dispatch this event after promotion. It deliberately
+  # runs the same all-model probe as the nightly monitor rather than trusting a
+  # liveness endpoint or a cached result.
+  repository_dispatch:
+    types: [model-runtime-deployed]
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: model-runtime-canary
+  cancel-in-progress: false
+
+jobs:
+  canary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      # Harness-only values required while importing the production registry.
+      # No platform data is read; live provider keys remain in the secret below.
+      BETTER_AUTH_SECRET: model-canary-unused-better-auth-secret
+      UPLOAD_SIGNING_SECRET: model-canary-unused-upload-secret
+      CONNECT_SESSION_SECRET: model-canary-unused-connect-secret
+      RUN_TOKEN_SECRET: model-canary-unused-run-token-secret
+      CONNECTION_ENCRYPTION_KEY: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Bun
+        uses: ./.github/actions/bun-setup
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Probe every configured model
+        id: probe
+        env:
+          # Same schema as SYSTEM_PROVIDER_KEYS. Use dedicated low-quota keys;
+          # enumerate system aliases plus any featured models that must remain
+          # deployable. Never expose this secret to pull_request workflows.
+          MODEL_RUNTIME_CANARY_CONFIG: ${{ secrets.MODEL_RUNTIME_CANARY_CONFIG }}
+        run: |
+          set +e
+          {
+            echo "## Model runtime canary"
+            echo
+            echo "Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            echo
+          } > model-runtime-canary-report.md
+          bun run canary:models 2>&1 | tee -a model-runtime-canary-report.md
+          code=${PIPESTATUS[0]}
+          echo "code=${code}" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Upload canary report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: model-runtime-canary-report
+          path: model-runtime-canary-report.md
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Open or update tracking issue
+        if: steps.probe.outputs.code != '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh label create model-runtime-canary \
+            --color B60205 \
+            --description "Live Pi + sidecar model conformance" 2>/dev/null || true
+          title="Model runtime canary failed"
+          existing=$(gh issue list --state open --label model-runtime-canary --json number --jq '.[0].number')
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body-file model-runtime-canary-report.md
+          else
+            gh issue create --title "$title" --label model-runtime-canary --body-file model-runtime-canary-report.md
+          fi
+          exit 1

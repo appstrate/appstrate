@@ -13,6 +13,12 @@
 export interface RuntimePiModelConfig {
   /** Pi SDK `api` slug — e.g. `"anthropic-messages"`, `"openai-completions"`. */
   api: string;
+  /**
+   * Upstream provider identity used by Pi's compatibility resolver. This must
+   * survive sidecar routing: once `baseUrl` points at `/llm`, URL-based
+   * detection can no longer distinguish DeepSeek, xAI, Cerebras, etc.
+   */
+  provider?: string;
   /** Model identifier passed to the SDK. */
   modelId: string;
   /** Upstream base URL (routed through the sidecar proxy when `apiKey` is set). */
@@ -138,6 +144,8 @@ export function buildRuntimePiEnv(opts: RuntimePiEnvOptions): Record<string, str
     MODEL_API: model.api,
     MODEL_ID: model.modelId,
   };
+
+  if (model.provider) env.MODEL_PROVIDER = model.provider;
 
   if (!opts.noSidecar) {
     // No fallback: a Docker-shaped magic default here would silently

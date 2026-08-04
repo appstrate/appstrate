@@ -25,6 +25,11 @@ export interface RuntimeEnv {
   workspaceDir: string;
   /** Pi SDK API slug — e.g. `"anthropic-messages"`, `"openai-completions"`. */
   modelApi: string;
+  /**
+   * Upstream provider identity for Pi compatibility detection. Optional for
+   * backward compatibility with launchers that only supplied MODEL_API.
+   */
+  modelProvider?: string;
   /** Model identifier passed to the SDK. */
   modelId: string;
   /** Optional baseUrl override (sidecar proxy or compatible endpoint). */
@@ -359,6 +364,7 @@ export function parseRuntimeEnv(source: NodeJS.ProcessEnv = process.env): Runtim
     runId: runId!,
     workspaceDir: source.WORKSPACE_DIR || "/workspace",
     modelApi: modelApi!,
+    modelProvider: source.MODEL_PROVIDER || undefined,
     modelId: modelId!,
     modelBaseUrl: modelBaseUrl || undefined,
     modelApiKey: source.MODEL_API_KEY || undefined,

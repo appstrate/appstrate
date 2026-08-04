@@ -19,11 +19,11 @@
  *     Discovery is then a truthful no-op: it reports the current list.
  *
  *   - probe (default, when `modelDiscovery` is omitted — API-key providers) —
- *     empirical: a 1-token inference request per candidate, persisting the ids
- *     that answered 2xx. Candidates come from `modelDiscoveryCandidates`
- *     (falling back to `featuredModels`); the platform stays provider-agnostic
- *     and just sends whatever `testModelConfig` builds (generic `/models` wire
- *     format).
+ *     a credential/model-list request per candidate, persisting the candidate
+ *     ids when the provider's `/models`-style endpoint answers 2xx. Candidates
+ *     come from `modelDiscoveryCandidates` (falling back to `featuredModels`).
+ *     This is availability discovery, NOT inference conformance: the separate
+ *     runtime model canary exercises Pi + sidecar + the actual model request.
  *
  * The classification below applies only to the probe path:
  *
