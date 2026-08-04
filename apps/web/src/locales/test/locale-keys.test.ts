@@ -160,11 +160,9 @@ describe("t() keys", () => {
  */
 const DYNAMIC_KEY_PREFIXES = [
   "filter.", // components/document-list-panel.tsx — t(`filter.${p}`)
-  "generation.level.", // packages/module-chat/src/ui/model-select.tsx — t(`generation.level.${level}`)
   "integration.auth.type.", // components/integration-connect/{inline-connect-button,integration-connection-picker}.tsx
   "integration.connect.fields.", // components/integration-connect/credential-fields.tsx
   "library.tab.", // pages/library-page.tsx — t(`library.tab.${tab}`)
-  "models.generation.levels.", // components/model-generation-fields.tsx — t(`models.generation.levels.${level}`)
   "oauthClients.scopeLabels.", // modules/oidc/components/oauth-client-form-modal.tsx
   "oauthClients.signupRoleOption.", // modules/oidc/components/oauth-client-form-modal.tsx
   "packages.type.", // components/package-detail/shared-header.tsx, pages/unified-package-detail.tsx

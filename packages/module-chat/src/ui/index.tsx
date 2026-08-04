@@ -50,7 +50,7 @@ import type {
 } from "./runtime-context.ts";
 export type { OpenDocument } from "./runtime-context.ts";
 import { ThreadList, ActiveConversationTitle } from "./thread-list.tsx";
-import { GenerationSelect, ModelSelect } from "./model-select.tsx";
+import { ModelSelect } from "./model-select.tsx";
 import { fetchModels, type OrgModelOption } from "./models-data.ts";
 import { isModelLive } from "../model-liveness.ts";
 import {
@@ -64,9 +64,11 @@ import { useSessions } from "./use-sessions.ts";
 import {
   subscribeGeneration,
   subscribeModel,
+  getCompatibleGenerationSettings,
   getGenerationSettings,
   getSelectedModel,
   setGenerationSettings,
+  setModelGenerationCapabilities,
   setSelectedModel,
 } from "./model-store.ts";
 import { createChatAttachmentAdapter } from "./attachment-adapter.ts";
@@ -168,6 +170,7 @@ export function ChatPage({
   useEffect(() => {
     void fetchModels(getHeaders).then((list) => {
       setModels(list);
+      setModelGenerationCapabilities(list);
       // Reconcile a stale/absent stored selection to the org default. A model
       // whose credential went dead is listed (the picker marks it, unpickable)
       // but must not be kept as the stored selection nor adopted as the
@@ -297,11 +300,8 @@ export function ChatPage({
                         models={models}
                         selectedId={selectedModel}
                         onSelect={setSelectedModel}
-                      />
-                      <GenerationSelect
-                        model={models.find((model) => model.id === selectedModel)}
-                        value={generation}
-                        onChange={setGenerationSettings}
+                        generation={generation}
+                        onGenerationChange={setGenerationSettings}
                       />
                     </div>
                   }
@@ -399,7 +399,12 @@ function ConversationInner({
         credentials: "include",
         headers: buildHeaders,
         prepareSendMessagesRequest: ({ id: chatId, messages, body }) => ({
-          body: { ...body, id: chatId, messages, generation: getGenerationSettings() },
+          body: {
+            ...body,
+            id: chatId,
+            messages,
+            generation: getCompatibleGenerationSettings(),
+          },
         }),
         // Native resume targets our per-session stream endpoint (the chat id is
         // the conversation id = the URL).

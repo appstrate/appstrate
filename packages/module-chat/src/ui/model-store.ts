@@ -13,8 +13,10 @@
 
 import {
   modelGenerationSettingsSchema,
+  type ModelGenerationCapabilities,
   type ModelGenerationSettings,
 } from "@appstrate/core/model-generation";
+import { reconcileGenerationSettings } from "./model-generation-settings.ts";
 
 const KEY = "appstrate.chat.model";
 const GENERATION_KEY = "appstrate.chat.generation";
@@ -22,6 +24,7 @@ const GENERATION_KEY = "appstrate.chat.generation";
 let cache: string | null = typeof localStorage === "undefined" ? null : localStorage.getItem(KEY);
 const listeners = new Set<() => void>();
 const generationListeners = new Set<() => void>();
+let generationCapabilities = new Map<string, ModelGenerationCapabilities>();
 let generationCache: ModelGenerationSettings = (() => {
   if (typeof localStorage === "undefined") return {};
   try {
@@ -44,6 +47,11 @@ export function getSelectedModel(): string | null {
 }
 
 export function setSelectedModel(id: string | null): void {
+  const reconciled = reconcileGenerationSettings(
+    generationCache,
+    id === null ? undefined : generationCapabilities.get(id),
+  );
+  if (reconciled !== generationCache) setGenerationSettings(reconciled);
   if (cache === id) return;
   cache = id;
   try {
@@ -62,6 +70,26 @@ export function subscribeGeneration(listener: () => void): () => void {
 
 export function getGenerationSettings(): ModelGenerationSettings {
   return generationCache;
+}
+
+export function getCompatibleGenerationSettings(): ModelGenerationSettings {
+  return reconcileGenerationSettings(
+    generationCache,
+    cache === null ? undefined : generationCapabilities.get(cache),
+  );
+}
+
+export function setModelGenerationCapabilities(
+  models: ReadonlyArray<{
+    id: string;
+    generation?: ModelGenerationCapabilities | null;
+  }>,
+): void {
+  generationCapabilities = new Map(
+    models.flatMap((model) => (model.generation ? [[model.id, model.generation] as const] : [])),
+  );
+  const reconciled = getCompatibleGenerationSettings();
+  if (reconciled !== generationCache) setGenerationSettings(reconciled);
 }
 
 export function setGenerationSettings(value: ModelGenerationSettings): void {
