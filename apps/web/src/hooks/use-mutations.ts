@@ -326,12 +326,11 @@ export function useCreatePackage(type: PackageType) {
           return { id: data!.id };
         }
         case "mcp-server": {
-          const { data } = await client.POST("/api/packages/mcp-servers", {
-            // The JSON create variant requires an explicit kebab-case id —
-            // the editor always supplies one for MCP-server packages.
-            body: { ...body, id: body.id! },
-          });
-          return { id: data!.id };
+          // Executable MCP servers cannot be created from this text-editor
+          // mutation: the API requires an archive carrying the declared entry
+          // point. The MCP-server catalog is read-only in the web UI; imports
+          // go through the archive workflow instead.
+          throw new Error("MCP-server packages must be imported from an executable archive.");
         }
       }
     },
