@@ -138,5 +138,11 @@ if (alreadyScheduled) {
   );
 }
 
-console.log(`\nDone. Sign in at ${BASE} with ${EMAIL} / ${PASSWORD}`);
+// The password is deliberately NOT echoed. It is a credential in every sense
+// the tooling can see, and a script that prints one teaches the pattern even
+// when the value is a local throwaway — CodeQL flags it as clear-text logging
+// of sensitive information, and it is right to. Point at where it is declared
+// instead; the README states the default.
+console.log(`\nDone. Sign in at ${BASE} as ${EMAIL}`);
+console.log(`Password: $DEMO_PASSWORD if you set it, otherwise the default in this script.`);
 console.log(`Then open @${ORG_SLUG}/rapport-hebdo → Carte tab.`);
