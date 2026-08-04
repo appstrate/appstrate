@@ -273,32 +273,6 @@
       "output": 0.15
     }
   },
-  "ministral-8b-2512": {
-    "label": "Ministral 8b 2512",
-    "contextWindow": 262144,
-    "maxTokens": null,
-    "capabilities": [
-      "text",
-      "image"
-    ],
-    "cost": {
-      "input": 0.15,
-      "output": 0.15
-    }
-  },
-  "ministral-8b-latest": {
-    "label": "Ministral 8b Latest",
-    "contextWindow": 262144,
-    "maxTokens": null,
-    "capabilities": [
-      "text",
-      "image"
-    ],
-    "cost": {
-      "input": 0.15,
-      "output": 0.15
-    }
-  },
   "mistral-large-2402": {
     "label": "Mistral Large 2402",
     "contextWindow": 32000,
@@ -410,33 +384,6 @@
       "output": 2
     }
   },
-  "mistral-medium-2508": {
-    "label": "Mistral Medium 2508",
-    "contextWindow": 131072,
-    "maxTokens": null,
-    "capabilities": [
-      "text",
-      "image"
-    ],
-    "cost": {
-      "input": 0.4,
-      "output": 2
-    }
-  },
-  "mistral-medium-2604": {
-    "label": "Mistral Medium 2604",
-    "contextWindow": 262144,
-    "maxTokens": null,
-    "capabilities": [
-      "text",
-      "image",
-      "reasoning"
-    ],
-    "cost": {
-      "input": 1.5,
-      "output": 7.5
-    }
-  },
   "mistral-medium-3-1-2508": {
     "label": "Mistral Medium 3 1 2508",
     "contextWindow": 131072,
@@ -450,32 +397,33 @@
       "output": 2
     }
   },
-  "mistral-medium-3-5": {
-    "label": "Mistral Medium 3 5",
-    "contextWindow": 262144,
-    "maxTokens": null,
-    "capabilities": [
-      "text",
-      "image",
-      "reasoning"
-    ],
-    "cost": {
-      "input": 1.5,
-      "output": 7.5
-    }
-  },
   "mistral-medium-latest": {
     "label": "Mistral Medium Latest",
-    "contextWindow": 262144,
+    "contextWindow": 131072,
     "maxTokens": null,
     "capabilities": [
       "text",
-      "image",
-      "reasoning"
+      "image"
     ],
+    "generation": {
+      "temperature": "supported",
+      "temperatureWithReasoning": "unknown",
+      "reasoning": {
+        "supported": "unknown",
+        "adaptive": null,
+        "levels": {
+          "off": "unknown",
+          "minimal": "unknown",
+          "low": "unknown",
+          "medium": "unknown",
+          "high": "unknown",
+          "xhigh": "unknown"
+        }
+      }
+    },
     "cost": {
-      "input": 1.5,
-      "output": 7.5
+      "input": 0.4,
+      "output": 2
     }
   },
   "mistral-small": {

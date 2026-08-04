@@ -77,22 +77,6 @@
       "cacheWrite": 3.75
     }
   },
-  "claude-fable-5": {
-    "label": "Claude Fable 5",
-    "contextWindow": 1000000,
-    "maxTokens": 128000,
-    "capabilities": [
-      "text",
-      "image",
-      "reasoning"
-    ],
-    "cost": {
-      "input": 10,
-      "output": 50,
-      "cacheRead": 1,
-      "cacheWrite": 12.5
-    }
-  },
   "claude-haiku-4-5": {
     "label": "Claude Haiku 4 5",
     "contextWindow": 200000,
@@ -182,6 +166,22 @@
       "image",
       "reasoning"
     ],
+    "generation": {
+      "temperature": "supported",
+      "temperatureWithReasoning": "unknown",
+      "reasoning": {
+        "supported": "supported",
+        "adaptive": null,
+        "levels": {
+          "off": "unknown",
+          "minimal": "supported",
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "unknown"
+        }
+      }
+    },
     "cost": {
       "input": 5,
       "output": 25,
@@ -198,6 +198,22 @@
       "image",
       "reasoning"
     ],
+    "generation": {
+      "temperature": "supported",
+      "temperatureWithReasoning": "unknown",
+      "reasoning": {
+        "supported": "supported",
+        "adaptive": null,
+        "levels": {
+          "off": "unknown",
+          "minimal": "supported",
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "unknown"
+        }
+      }
+    },
     "cost": {
       "input": 5,
       "output": 25,
@@ -214,6 +230,22 @@
       "image",
       "reasoning"
     ],
+    "generation": {
+      "temperature": "supported",
+      "temperatureWithReasoning": "unknown",
+      "reasoning": {
+        "supported": "supported",
+        "adaptive": null,
+        "levels": {
+          "off": "unknown",
+          "minimal": "supported",
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "unknown"
+        }
+      }
+    },
     "cost": {
       "input": 5,
       "output": 25,
@@ -230,6 +262,22 @@
       "image",
       "reasoning"
     ],
+    "generation": {
+      "temperature": "supported",
+      "temperatureWithReasoning": "unknown",
+      "reasoning": {
+        "supported": "supported",
+        "adaptive": null,
+        "levels": {
+          "off": "unknown",
+          "minimal": "supported",
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "unknown"
+        }
+      }
+    },
     "cost": {
       "input": 5,
       "output": 25,
@@ -246,6 +294,22 @@
       "image",
       "reasoning"
     ],
+    "generation": {
+      "temperature": "supported",
+      "temperatureWithReasoning": "unknown",
+      "reasoning": {
+        "supported": "supported",
+        "adaptive": null,
+        "levels": {
+          "off": "unknown",
+          "minimal": "supported",
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "supported"
+        }
+      }
+    },
     "cost": {
       "input": 5,
       "output": 25,
@@ -262,38 +326,22 @@
       "image",
       "reasoning"
     ],
-    "cost": {
-      "input": 5,
-      "output": 25,
-      "cacheRead": 0.5,
-      "cacheWrite": 6.25
-    }
-  },
-  "claude-opus-4-8": {
-    "label": "Claude Opus 4 8",
-    "contextWindow": 1000000,
-    "maxTokens": 128000,
-    "capabilities": [
-      "text",
-      "image",
-      "reasoning"
-    ],
-    "cost": {
-      "input": 5,
-      "output": 25,
-      "cacheRead": 0.5,
-      "cacheWrite": 6.25
-    }
-  },
-  "claude-opus-5": {
-    "label": "Claude Opus 5",
-    "contextWindow": 1000000,
-    "maxTokens": 128000,
-    "capabilities": [
-      "text",
-      "image",
-      "reasoning"
-    ],
+    "generation": {
+      "temperature": "supported",
+      "temperatureWithReasoning": "unknown",
+      "reasoning": {
+        "supported": "supported",
+        "adaptive": null,
+        "levels": {
+          "off": "unknown",
+          "minimal": "supported",
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "supported"
+        }
+      }
+    },
     "cost": {
       "input": 5,
       "output": 25,
@@ -358,27 +406,27 @@
       "image",
       "reasoning"
     ],
+    "generation": {
+      "temperature": "supported",
+      "temperatureWithReasoning": "unknown",
+      "reasoning": {
+        "supported": "supported",
+        "adaptive": null,
+        "levels": {
+          "off": "unknown",
+          "minimal": "supported",
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "unknown"
+        }
+      }
+    },
     "cost": {
       "input": 3,
       "output": 15,
       "cacheRead": 0.3,
       "cacheWrite": 3.75
-    }
-  },
-  "claude-sonnet-5": {
-    "label": "Claude Sonnet 5",
-    "contextWindow": 1000000,
-    "maxTokens": 128000,
-    "capabilities": [
-      "text",
-      "image",
-      "reasoning"
-    ],
-    "cost": {
-      "input": 2,
-      "output": 10,
-      "cacheRead": 0.2,
-      "cacheWrite": 2.5
     }
   }
 }
