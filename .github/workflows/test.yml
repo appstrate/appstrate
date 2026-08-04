@@ -75,7 +75,8 @@ jobs:
             packages/runner-pi/ \
             packages/emails/ \
             packages/env/ \
-            packages/ui/
+            packages/ui/ \
+            scripts/test/model-runtime-canary.test.ts
 
       - name: Run public-origin regression
         run: |

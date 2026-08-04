@@ -118,6 +118,10 @@ export interface PiRunnerOptions {
    * Providers that do not support this option ignore it. Defaults to `"auto"`.
    */
   transport?: Transport;
+  /** Disable the SDK retry loop for conformance probes that must expose the target response verbatim. */
+  disableModelRetry?: boolean;
+  /** Disable Pi's built-in filesystem/shell tools for a minimal connectivity probe. */
+  disableTools?: boolean;
   /**
    * Tool names whose first successful execution ends the run. When one of
    * these tools completes without error the runner aborts the Pi session
@@ -483,10 +487,11 @@ export class PiRunner implements Runner {
         // `MODEL_RETRY_ENABLED=false` on the runtime env when stacking
         // external retry middleware.
         retry:
-          process.env.MODEL_RETRY_ENABLED === "false"
+          this.opts.disableModelRetry || process.env.MODEL_RETRY_ENABLED === "false"
             ? { enabled: false }
             : { enabled: true, maxRetries: 4 },
       }),
+      ...(this.opts.disableTools ? { noTools: "all" as const } : {}),
     });
 
     // Widen the tool set BEFORE the first prompt — see {@link enableSearchTools}

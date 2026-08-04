@@ -27,6 +27,15 @@ jobs:
     # the same gate on the PR this job opens.
     env:
       HUSKY: "0"
+      # The canary reuses the production model registry, whose logger validates
+      # the complete app env at import time. These values are harness-only and
+      # never leave the Actions runner; provider credentials come exclusively
+      # from MODEL_RUNTIME_CANARY_CONFIG below.
+      BETTER_AUTH_SECRET: model-canary-unused-better-auth-secret
+      UPLOAD_SIGNING_SECRET: model-canary-unused-upload-secret
+      CONNECT_SESSION_SECRET: model-canary-unused-connect-secret
+      RUN_TOKEN_SECRET: model-canary-unused-run-token-secret
+      CONNECTION_ENCRYPTION_KEY: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
 
     steps:
       - name: Checkout repository
@@ -66,11 +75,15 @@ jobs:
 
           if [ "$pricing" = false ] && [ "$watch" = false ]; then
             echo "drift=false" >> "$GITHUB_OUTPUT"
+            echo "pricing=false" >> "$GITHUB_OUTPUT"
+            echo "watch=false" >> "$GITHUB_OUTPUT"
             echo "No upstream changes — nothing to commit."
             exit 0
           fi
 
           echo "drift=true" >> "$GITHUB_OUTPUT"
+          echo "pricing=$pricing" >> "$GITHUB_OUTPUT"
+          echo "watch=$watch" >> "$GITHUB_OUTPUT"
           git diff --stat apps/api/src/data
 
           # The PR body is assembled here rather than inlined on the PR step so
@@ -138,6 +151,17 @@ jobs:
 
           echo "body-path=$body" >> "$GITHUB_OUTPUT"
           cat "$body"
+
+      # Trusted workflow only: the bot-generated catalog is uncommitted data on
+      # top of main, never contributor code. Probe every configured runtime
+      # model whose wire-affecting metadata changed before a PR can be opened.
+      # The secret uses the SYSTEM_PROVIDER_KEYS JSON shape with dedicated,
+      # low-quota credentials. Missing configuration fails closed.
+      - name: Probe changed models through Pi + sidecar
+        if: steps.drift.outputs.pricing == 'true'
+        env:
+          MODEL_RUNTIME_CANARY_CONFIG: ${{ secrets.MODEL_RUNTIME_CANARY_CONFIG }}
+        run: bun run canary:models:changed
 
       - name: Open PR
         if: steps.drift.outputs.drift == 'true'

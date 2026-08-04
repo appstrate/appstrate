@@ -28,6 +28,21 @@ describe("buildRuntimePiEnv", () => {
     expect(env.SIDECAR_URL).toBe("http://sidecar:8080");
   });
 
+  it("preserves the upstream provider identity behind the sidecar", () => {
+    const env = buildRuntimePiEnv({
+      model: {
+        api: "openai-completions",
+        provider: "deepseek",
+        modelId: "deepseek-v4-flash",
+        baseUrl: "https://api.deepseek.com/v1",
+      },
+      agentPrompt: "do thing",
+      ...sidecar,
+    });
+
+    expect(env.MODEL_PROVIDER).toBe("deepseek");
+  });
+
   it("throws when a sidecar-backed run omits sidecarUrl", () => {
     expect(() => buildRuntimePiEnv({ model, agentPrompt: "p" })).toThrow(/sidecarUrl is required/);
   });

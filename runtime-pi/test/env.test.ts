@@ -53,6 +53,7 @@ describe("parseRuntimeEnv — happy path", () => {
       ...VALID,
       WORKSPACE_DIR: "/agent",
       MODEL_BASE_URL: "https://proxy.example.com/v1",
+      MODEL_PROVIDER: "deepseek",
       MODEL_API_KEY: "sk-test",
       MODEL_REASONING: "true",
       MODEL_INPUT: '["text","image"]',
@@ -67,6 +68,7 @@ describe("parseRuntimeEnv — happy path", () => {
     });
     expect(env.workspaceDir).toBe("/agent");
     expect(env.modelBaseUrl).toBe("https://proxy.example.com/v1");
+    expect(env.modelProvider).toBe("deepseek");
     expect(env.modelApiKey).toBe("sk-test");
     expect(env.modelReasoning).toBe(true);
     expect(env.modelInput).toEqual(["text", "image"]);

@@ -310,6 +310,11 @@ async function runPlatformContainerImpl(
     const containerEnv = buildRuntimePiEnv({
       model: {
         api: llmConfig.apiShape,
+        // Preserve upstream identity even though MODEL_BASE_URL points at the
+        // sidecar. Pi's OpenAI-compatible adapter uses provider/baseUrl to
+        // select protocol quirks (DeepSeek rejects the OpenAI `developer`
+        // role); without this, every proxied provider looks like OpenAI.
+        provider: llmConfig.providerId,
         modelId,
         baseUrl: llmConfig.baseUrl,
         apiKey: llmApiKey,

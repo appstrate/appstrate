@@ -35,12 +35,11 @@
 import * as fs from "node:fs/promises";
 import { writeSync } from "node:fs";
 import * as path from "node:path";
-import type { ExtensionFactory, Api, Model } from "./pi-sdk.ts";
+import type { ExtensionFactory } from "./pi-sdk.ts";
 import {
   prepareBundleForPi,
   buildRuntimeToolExtensions,
   buildPublishDocumentExtension,
-  deriveProviderFromApi,
   emitRuntimeReady,
   emitBootProgress,
   startSinkHeartbeat,
@@ -66,6 +65,7 @@ import { emptyRunResult } from "@appstrate/afps-runtime/runner";
 import { createMcpHttpClient, type AppstrateMcpClient } from "@appstrate/mcp-transport";
 import { parseRuntimeEnv, RuntimeEnvError, scrubSinkEnv } from "./env.ts";
 import { createRuntimePiRunner } from "./pi-runner.ts";
+import { buildRuntimeModel } from "./model.ts";
 import { buildMcpDirectFactories } from "./mcp/direct.ts";
 import {
   createRuntimeEventDrainer,
@@ -716,24 +716,8 @@ if (declaredRuntimeTools.includes("publish_document")) {
 
 // --- 3. Model + system prompt from env ---
 
-const api = env.modelApi;
-const modelId = env.modelId;
 const systemPrompt = env.agentPrompt;
-
-const model: Model<Api> = {
-  id: modelId,
-  name: modelId,
-  api: api as Api,
-  // Pi SDK AuthStorage key, derived from the api shape. The runner reads
-  // this field directly to register + resolve the API key.
-  provider: deriveProviderFromApi(api),
-  baseUrl: env.modelBaseUrl ?? "",
-  reasoning: env.modelReasoning,
-  input: [...env.modelInput],
-  cost: env.modelCost,
-  contextWindow: env.modelContextWindow,
-  maxTokens: env.modelMaxTokens,
-};
+const model = buildRuntimeModel(env);
 
 // --- 4. Build ExecutionContext from env ---
 

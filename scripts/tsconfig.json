@@ -5,6 +5,7 @@
   },
   "include": [
     "verify-module-contract.ts",
+    "model-runtime-canary.ts",
     "verify-package-resolves.ts",
     "check-consumer-versions.ts",
     "test/check-consumer-versions.test.ts"

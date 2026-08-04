@@ -836,10 +836,10 @@ export interface ModelProviderDefinition {
   /**
    * Candidate model ids for discovery — the source list for whichever
    * {@link modelDiscovery} strategy applies. For the default (probe) strategy
-   * the platform probes each one against the connected credential (1-token
-   * inference request) and persists the ids that respond 2xx; for the static
-   * strategy it serves these directly (∩ catalog), resolved on read and never
-   * persisted. Unlike
+   * the platform checks the provider's model-list/credential endpoint and
+   * persists the ids selected from candidates when it responds 2xx; for the
+   * static strategy it serves these directly (∩ catalog), resolved on read
+   * and never persisted. Unlike
    * {@link featuredModels}, ids here do NOT have to exist in the resolved
    * catalog. When omitted, the platform uses `featuredModels`. Irrelevant for
    * api_key providers whose full catalog is exposed.
@@ -852,9 +852,11 @@ export interface ModelProviderDefinition {
   modelDiscoveryCandidates?: ModelIdSelection;
 
   /**
-   * Model-discovery strategy. When omitted, discovery is **empirical** (probe):
-   * the platform issues a 1-token inference request per candidate and persists
-   * the ids that respond 2xx as the credential's `availableModelIds`.
+   * Model-discovery strategy. When omitted, discovery uses a live credential /
+   * model-list probe and persists the candidate ids when the provider answers
+   * 2xx as the credential's `availableModelIds`. This establishes credential
+   * availability, not per-model inference conformance; the runtime model canary
+   * covers the latter through Pi and the sidecar.
    *
    * `{ mode: "static" }` declares that the platform must issue ZERO API calls to
    * discover models: the served set is {@link modelDiscoveryCandidates}

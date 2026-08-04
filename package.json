@@ -61,6 +61,8 @@
     "test:e2e": "cd e2e && npx playwright test",
     "test:e2e:api": "cd e2e && npx playwright test --project=api",
     "test:e2e:ui": "cd e2e && npx playwright test --project=ui",
+    "canary:models": "bun scripts/model-runtime-canary.ts --all --require-targets",
+    "canary:models:changed": "bun scripts/model-runtime-canary.ts --changed --require-targets",
     "lint": "eslint . --cache --cache-strategy content",
     "lint:fix": "eslint . --fix && prettier --write \"apps/*/src/**\" \"packages/*/src/**\"",
     "format": "prettier --write \"apps/*/src/**\" \"packages/*/src/**\"",
