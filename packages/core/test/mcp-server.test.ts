@@ -237,9 +237,14 @@ describe("getMcpServerRuntime", () => {
   });
 
   it("rejects an unknown runtime override during manifest validation", () => {
-    const r = mcpServerManifestSchema.safeParse(
-      manifest({ "dev.appstrate/mcp-server": { runtime: "deno" } }),
-    );
+    const r = mcpServerManifestSchema.safeParse({
+      ...manifest({ "dev.appstrate/mcp-server": { runtime: "deno" } }),
+      server: {
+        type: "node",
+        entry_point: "./server.ts",
+        mcp_config: { command: "node", args: ["./server.ts"] },
+      },
+    });
     expect(r.success).toBe(false);
     if (!r.success) {
       expect(

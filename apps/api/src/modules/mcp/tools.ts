@@ -1255,10 +1255,13 @@ function buildReadDocumentTool(ctx: McpToolContext): AppstrateToolDefinition {
   };
 
   const provider = buildDocumentResourceProvider(ctx);
-  const handler = async (args: Record<string, unknown>): Promise<CallToolResult> => {
+  const handler = async (
+    args: Record<string, unknown>,
+    extra: AppstrateRequestExtra,
+  ): Promise<CallToolResult> => {
     const uri = asString(args.uri);
     if (!uri) throw new McpError(ErrorCode.InvalidParams, "uri is required.");
-    const result = await provider.read(uri);
+    const result = await provider.read(uri, extra);
     return {
       content: result.contents.map((resource) => ({ type: "resource", resource })),
       isError: false,
