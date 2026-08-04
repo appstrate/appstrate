@@ -11,12 +11,14 @@ describe("GET /health", () => {
     await truncateAll();
   });
 
-  it("returns 200 with healthy or degraded status", async () => {
+  it("returns degraded when the test app bypasses boot", async () => {
     const res = await app.request("/health");
     expect(res.status).toBe(200);
     const body = (await res.json()) as any;
-    // Without boot(), system packages aren't loaded → "degraded" is expected
-    expect(body.status).toBe("degraded"); // Without boot(), no system packages → degraded
+    // getTestApp() deliberately skips boot, so the agents orchestrator was
+    // never initialized and the real handler must report that degradation.
+    expect(body.status).toBe("degraded");
+    expect(body.checks.agents.status).toBe("degraded");
     expect(body.checks.database.status).toBe("healthy");
     expect(body.uptime_ms).toBeGreaterThanOrEqual(0);
   });

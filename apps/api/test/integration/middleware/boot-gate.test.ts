@@ -110,7 +110,7 @@ describe("boot gate", () => {
     // registered after the bind.
     expect((await app.request("/api/agents")).status).toBe(503);
 
-    markServerReady();
+    markServerReady({ agentsHealthy: true });
 
     const res = await app.request("/api/agents");
     expect(res.status).toBe(200);
@@ -121,21 +121,35 @@ describe("boot gate", () => {
     expect(await spa.text()).toContain("<html>");
   });
 
-  it("hands /health back to the real handler once ready", async () => {
+  it("reports healthy once boot and the agents orchestrator are ready", async () => {
     const app = buildGatedApp();
-    markServerReady();
+    markServerReady({ agentsHealthy: true });
 
     const res = await app.request("/health");
 
-    // The real handler ran: it reports uptime + per-dependency checks, and no
-    // longer carries the `starting` marker.
     const body = (await res.json()) as {
       status: string;
       uptime_ms?: number;
-      checks?: Record<string, unknown>;
+      checks?: { agents?: { status?: string } };
     };
-    expect(body.status).not.toBe("starting");
-    expect(body.checks).toBeDefined();
+    expect(res.status).toBe(200);
+    expect(body.status).toBe("healthy");
+    expect(body.checks?.agents?.status).toBe("healthy");
     expect(typeof body.uptime_ms).toBe("number");
+  });
+
+  it("reports degraded when boot completes without the agents orchestrator", async () => {
+    const app = buildGatedApp();
+    markServerReady({ agentsHealthy: false });
+
+    const res = await app.request("/health");
+    const body = (await res.json()) as {
+      status: string;
+      checks?: { agents?: { status?: string } };
+    };
+
+    expect(res.status).toBe(200);
+    expect(body.status).toBe("degraded");
+    expect(body.checks?.agents?.status).toBe("degraded");
   });
 });

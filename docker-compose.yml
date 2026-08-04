@@ -400,12 +400,8 @@ services:
       # because the switch requires a platform build whose Docker client can
       # target a TCP `DOCKER_HOST` (see residual note on the proxy service).
       - /var/run/docker.sock:/var/run/docker.sock:ro
-    healthcheck:
-      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3000/ || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 15s
+    # Intentionally inherit the image's /health readiness probe. A Compose-level
+    # probe on `/` would mask a degraded agent runtime as container-healthy.
     depends_on:
       appstrate-postgres:
         condition: service_healthy

@@ -20421,6 +20421,7 @@ export interface operations {
                                 status?: "healthy" | "unhealthy";
                                 latency_ms?: number;
                             };
+                            /** @description Agent runtime readiness established during platform boot. */
                             agents?: {
                                 /** @enum {string} */
                                 status?: "healthy" | "degraded";
