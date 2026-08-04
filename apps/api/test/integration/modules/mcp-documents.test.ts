@@ -18,24 +18,24 @@ import { db } from "@appstrate/db/client";
 import { applicationPackages, packages, runs, uploads, chatSessions } from "@appstrate/db/schema";
 import { uploadStream } from "@appstrate/db/storage";
 import type { Actor } from "@appstrate/connect";
-import { getTestApp } from "../../../../../test/helpers/app.ts";
-import { truncateAll } from "../../../../../test/helpers/db.ts";
+import { getTestApp } from "../../helpers/app.ts";
+import { truncateAll } from "../../helpers/db.ts";
 import {
   createTestContext,
   createTestUser,
   addOrgMember,
   type TestContext,
-} from "../../../../../test/helpers/auth.ts";
-import { seedApiKey } from "../../../../../test/helpers/seed.ts";
-import { setPlatformApp } from "../../../../lib/platform-app.ts";
-import { resetCatalog } from "../../catalog.ts";
-import { createUpload } from "../../../../services/uploads.ts";
+} from "../../helpers/auth.ts";
+import { seedApiKey } from "../../helpers/seed.ts";
+import { setPlatformApp } from "../../../src/lib/platform-app.ts";
+import { resetCatalog } from "../../../src/modules/mcp/catalog.ts";
+import { createUpload } from "../../../src/services/uploads.ts";
 import {
   createDocumentFromStream,
   createDocumentFromUpload,
-} from "../../../../services/documents.ts";
+} from "../../../src/services/documents.ts";
 import { zipSync } from "fflate";
-import { mcpServerManifest } from "../../../../../test/helpers/integration-manifests.ts";
+import { mcpServerManifest } from "../../helpers/integration-manifests.ts";
 
 const app = getTestApp();
 setPlatformApp(app);
@@ -272,7 +272,7 @@ describe("mcp resources/read (document://)", () => {
     headers = await apiKeyHeaders(ctx);
   });
 
-  it("advertises the resources capability at initialize", async () => {
+  it("advertises resources without naming an import tool the caller cannot use", async () => {
     const { envelope } = await rpc(headers, {
       jsonrpc: "2.0",
       id: 1,
@@ -285,6 +285,40 @@ describe("mcp resources/read (document://)", () => {
     });
     const caps = envelope.result?.capabilities as Record<string, unknown>;
     expect(caps.resources).toBeDefined();
+    expect(String(envelope.result?.instructions)).not.toContain("import_package_document");
+
+    const listed = await rpc(headers, {
+      jsonrpc: "2.0",
+      id: 2,
+      method: "tools/list",
+      params: {},
+    });
+    const tools = (listed.envelope.result?.tools as Array<{ name: string }>) ?? [];
+    expect(tools.map((tool) => tool.name)).not.toContain("import_package_document");
+  });
+
+  it("advertises package import only when the matching tool is available", async () => {
+    const importHeaders = await apiKeyHeaders(ctx, ["agents:write"]);
+    const initialized = await rpc(importHeaders, {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "initialize",
+      params: {
+        protocolVersion: "2025-06-18",
+        capabilities: {},
+        clientInfo: { name: "t", version: "1" },
+      },
+    });
+    expect(String(initialized.envelope.result?.instructions)).toContain("import_package_document");
+
+    const listed = await rpc(importHeaders, {
+      jsonrpc: "2.0",
+      id: 2,
+      method: "tools/list",
+      params: {},
+    });
+    const tools = (listed.envelope.result?.tools as Array<{ name: string }>) ?? [];
+    expect(tools.map((tool) => tool.name)).toContain("import_package_document");
   });
 
   it("inlines the bytes of a small textual document", async () => {
