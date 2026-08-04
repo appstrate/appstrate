@@ -30,6 +30,7 @@ import {
 } from "../lib/db-helpers.ts";
 import { mapFetchErrorToTestResult } from "../lib/network-error.ts";
 import { getModelProvider } from "./model-providers/registry.ts";
+import { resolveOAuthTokenForSidecar } from "./model-providers/token-resolver.ts";
 
 // --- Metadata projection ---
 
@@ -1038,6 +1039,16 @@ export async function testModelConfig(config: {
 }
 
 /** Test a saved model by ID (loads from DB/system registry then delegates to testModelConfig). */
+function needsReconnectionTestResult(): TestResult {
+  return {
+    ok: false,
+    latency: 0,
+    error: "NEEDS_RECONNECTION",
+    message:
+      "This model's provider credential must be reconnected before it can be tested. Reconnect it in the Model Provider Keys tab.",
+  };
+}
+
 export async function testModelConnection(orgId: string, modelDbId: string): Promise<TestResult> {
   const model = await loadModel(orgId, modelDbId);
   if (!model) {
@@ -1048,15 +1059,33 @@ export async function testModelConnection(orgId: string, modelDbId: string): Pro
     // `MODEL_NOT_FOUND` into a 404, and "Model not found" is the one thing
     // that is demonstrably untrue here.
     if (await modelNeedsReconnection(orgId, modelDbId)) {
-      return {
-        ok: false,
-        latency: 0,
-        error: "NEEDS_RECONNECTION",
-        message:
-          "This model's provider credential must be reconnected before it can be tested. Reconnect it in the Model Provider Keys tab.",
-      };
+      return needsReconnectionTestResult();
     }
     return { ok: false, latency: 0, error: "MODEL_NOT_FOUND", message: "Model not found" };
+  }
+
+  // An expired OAuth access token is not terminal while its refresh token may
+  // still work. Saved models carry a credential id, so use the canonical
+  // resolver before the provider's offline validation; it rotates recoverable
+  // tokens and persists needsReconnection on missing/revoked refresh tokens.
+  if (model.credentialId && getModelProvider(model.providerId)?.authMode === "oauth2") {
+    try {
+      const token = await resolveOAuthTokenForSidecar(model.credentialId, orgId);
+      return testModelConfig({
+        ...model,
+        apiKey: token.accessToken,
+        accountId: token.accountId ?? model.accountId,
+        expiresAt: token.expiresAt,
+      });
+    } catch (err) {
+      // The resolver owns the terminal/non-terminal policy. Read its persisted
+      // verdict instead of coupling this surface to every terminal error code;
+      // this also catches a transient-failure streak that just escalated.
+      if (await modelNeedsReconnection(orgId, modelDbId)) {
+        return needsReconnectionTestResult();
+      }
+      throw err;
+    }
   }
 
   return testModelConfig(model);

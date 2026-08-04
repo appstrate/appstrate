@@ -957,6 +957,62 @@ describe("Models API", () => {
     });
   });
 
+  describe("OAuth Test action", () => {
+    afterEach(() => restoreFetch());
+
+    it("flags an expired saved credential when its refresh token is revoked", async () => {
+      const credential = await seedOrgModelProviderOAuth({
+        orgId: ctx.orgId,
+        providerId: TEST_OAUTH_PROVIDER_ID,
+        accessToken: "expired-access-token",
+        refreshToken: "revoked-refresh-token",
+        expiresAt: Date.now() - 60_000,
+      });
+      const model = await seedOrgModel({
+        orgId: ctx.orgId,
+        credentialId: credential.id,
+        label: "Gpt (codex)",
+        modelId: "test-model",
+      });
+
+      globalThis.fetch = (async () =>
+        new Response(
+          JSON.stringify({
+            error: "invalid_grant",
+            error_description: "refresh token revoked",
+          }),
+          { status: 400, headers: { "Content-Type": "application/json" } },
+        )) as unknown as typeof fetch;
+
+      const tested = await app.request(`/api/models/${model.id}/test`, {
+        method: "POST",
+        headers: authHeaders(ctx),
+      });
+
+      expect(tested.status).toBe(200);
+      expect(await tested.json()).toMatchObject({
+        ok: false,
+        error: "NEEDS_RECONNECTION",
+      });
+
+      const credentialsResponse = await app.request("/api/model-provider-credentials", {
+        headers: authHeaders(ctx),
+      });
+      const credentials = (await credentialsResponse.json()) as {
+        data: Array<{ id: string; needs_reconnection: boolean }>;
+      };
+      expect(credentials.data.find((row) => row.id === credential.id)?.needs_reconnection).toBe(
+        true,
+      );
+
+      const modelsResponse = await app.request("/api/models", { headers: authHeaders(ctx) });
+      const models = (await modelsResponse.json()) as {
+        data: Array<{ id: string; needs_reconnection: boolean }>;
+      };
+      expect(models.data.find((row) => row.id === model.id)?.needs_reconnection).toBe(true);
+    });
+  });
+
   /**
    * The production deadlock, walked end to end over HTTP.
    *
