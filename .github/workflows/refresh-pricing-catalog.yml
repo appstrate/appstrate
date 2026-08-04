@@ -28,7 +28,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          image="$(jq -r '.image + "@" + .digest' scripts/litellm-catalog.lock.json)"
+          digest="$(jq -r '.digest' scripts/litellm-catalog.lock.json)"
+          if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "Invalid OCI digest in scripts/litellm-catalog.lock.json: $digest" >&2
+            exit 1
+          fi
+          image="$(jq -r '.image' scripts/litellm-catalog.lock.json)@${digest}"
           key="${RUNNER_TEMP}/litellm-cosign.pub"
           output="${RUNNER_TEMP}/litellm-catalog.json"
 
