@@ -58,6 +58,14 @@ describe("SYSTEM_PROMPT invariants", () => {
     expect(SYSTEM_PROMPT).toMatch(/retyped by a model/);
   });
 
+  it("reads document content directly before considering a run", () => {
+    expect(SYSTEM_PROMPT).toMatch(/call `read_document` first/);
+    expect(SYSTEM_PROMPT).toMatch(/answer directly from that content/);
+    expect(SYSTEM_PROMPT).toMatch(/do NOT launch a run merely to read or analyse it/);
+    expect(SYSTEM_PROMPT).toMatch(/metadata only or binary\/blob data/);
+    expect(SYSTEM_PROMPT).toMatch(/When a run is justified.*`context_documents`/s);
+  });
+
   it("keeps the fan-out deliverable contract (file in outputs/ AND a short output)", () => {
     expect(SYSTEM_PROMPT).toContain("outputs/<topic>.md");
     expect(SYSTEM_PROMPT).toMatch(/short summary naming that file/);
