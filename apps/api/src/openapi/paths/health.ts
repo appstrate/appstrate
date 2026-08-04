@@ -16,7 +16,7 @@ export const healthPaths = {
               schema: {
                 type: "object",
                 properties: {
-                  status: { type: "string", enum: ["healthy", "degraded"] },
+                  status: { type: "string", enum: ["healthy", "degraded", "unhealthy"] },
                   version: {
                     type: "object",
                     properties: {

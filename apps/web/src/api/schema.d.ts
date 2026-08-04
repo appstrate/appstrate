@@ -20328,7 +20328,7 @@ export interface operations {
                      */
                     "application/json": {
                         /** @enum {string} */
-                        status?: "healthy" | "degraded";
+                        status?: "healthy" | "degraded" | "unhealthy";
                         version?: {
                             app: string;
                             commit?: string;
