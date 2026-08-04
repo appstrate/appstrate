@@ -2,6 +2,7 @@
 
 import { hostname } from "node:os";
 import { logger } from "../lib/logger.ts";
+import { removeTerminalManagedContainers } from "./docker-cleanup.ts";
 import { getEnv } from "@appstrate/env";
 import { classifyDockerNetworkError, createContainerWithImagePull } from "./docker-errors.ts";
 
@@ -750,16 +751,7 @@ export async function cleanupOrphanedContainers(): Promise<{
   // Its managed containers are not orphans, even though this process did not
   // create them. The stale-run sweep stops genuine orphans before reaching this
   // generic cleanup, so only terminal containers are safe to reap here.
-  const terminalContainers = containers.filter(
-    (container) => container.State === "exited" || container.State === "dead",
-  );
-  let containerCount = 0;
-  if (terminalContainers.length > 0) {
-    const results = await Promise.allSettled(
-      terminalContainers.map((container) => removeContainer(container.Id)),
-    );
-    containerCount = results.filter((result) => result.status === "fulfilled").length;
-  }
+  const containerCount = await removeTerminalManagedContainers(containers, removeContainer);
 
   // Clean up orphaned networks by listing Docker networks directly.
   // This catches networks that leaked when containers were already removed
