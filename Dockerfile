@@ -159,7 +159,7 @@ ENV APP_VERSION=${APP_VERSION}
 ENV GIT_SHA=${GIT_SHA}
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
-  CMD wget -q -O /dev/null http://127.0.0.1:3000/ || exit 1
+  CMD bun -e "const r=await fetch('http://127.0.0.1:3000/health');const b=await r.json();process.exit(r.ok&&b.status==='healthy'?0:1)"
 
 ENTRYPOINT ["docker-entrypoint.sh"]
 CMD ["bun", "apps/api/src/index.ts"]

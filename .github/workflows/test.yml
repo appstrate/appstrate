@@ -83,6 +83,12 @@ jobs:
             --coverage-dir=coverage-public-origin \
             apps/api/src/modules/oidc/test/integration/routes/oauth-public-origin.test.ts
 
+      # The full integration suite is opt-in on PRs, but readiness is a release
+      # invariant: a booted platform must not silently ship as degraded. Keep
+      # this public-endpoint regression mandatory and fast on every PR.
+      - name: Run health readiness regression
+        run: bun test apps/api/test/integration/middleware/boot-gate.test.ts
+
       # Surface the figure in the job summary so humans see it without opening
       # Codecov. Sums LF/LH across the lcov report; informational only (the gate
       # is Codecov). Flagged as partial because it omits the integration suite.
@@ -181,6 +187,24 @@ jobs:
           flags: integration
           fail_ci_if_error: false
           token: ${{ secrets.CODECOV_TOKEN }}
+
+  platform-container-e2e:
+    name: Platform container health e2e
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Bun
+        uses: ./.github/actions/bun-setup
+
+      # Build the production Dockerfile, boot the production compose topology,
+      # and verify both sides of the public readiness contract. This stays
+      # mandatory on every PR: the fast route regression above cannot prove
+      # that Compose still inherits the image's semantic HEALTHCHECK.
+      - name: Run platform container health e2e
+        run: bash scripts/health-container-e2e.sh
 
   runtime-e2e:
     name: Runtime container e2e

@@ -1,0 +1,26 @@
+services:
+  # Reuse the platform image as a local, already-present stand-in for the two
+  # images the Docker orchestrator verifies at boot. These one-shot services
+  # inherit `entrypoint: ["true"]` from the production compose file.
+  appstrate-pi:
+    image: "${HEALTH_E2E_IMAGE:-appstrate-health-e2e:local}"
+
+  appstrate-sidecar:
+    image: "${HEALTH_E2E_IMAGE:-appstrate-health-e2e:local}"
+
+  appstrate:
+    image: "${HEALTH_E2E_IMAGE:-appstrate-health-e2e:local}"
+    environment:
+      DOCKER_SOCKET: "${HEALTH_E2E_DOCKER_SOCKET:-/var/run/docker.sock}"
+      PI_IMAGE: "${HEALTH_E2E_IMAGE:-appstrate-health-e2e:local}"
+      SIDECAR_IMAGE: "${HEALTH_E2E_IMAGE:-appstrate-health-e2e:local}"
+      MODULES: oidc,webhooks,mcp,core-providers,@appstrate/module-chat
+      S3_BUCKET: appstrate
+      S3_REGION: us-east-1
+      S3_ENDPOINT: http://appstrate-minio:9000
+      AWS_ACCESS_KEY_ID: e2e-minio
+      AWS_SECRET_ACCESS_KEY: e2e-minio-password
+      SYSTEM_PROVIDER_KEYS: "[]"
+      SYSTEM_PROXIES: "[]"
+      SYSTEM_INTEGRATIONS: "[]"
+      LOG_LEVEL: warn

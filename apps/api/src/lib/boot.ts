@@ -235,7 +235,7 @@ export async function bootCritical(): Promise<void> {
  * A rejection here is fatal exactly as it was when this code lived in a
  * blocking `await boot()`: the caller in `index.ts` exits the process.
  */
-export async function bootBackground(): Promise<void> {
+export async function bootBackground(): Promise<{ agentsHealthy: boolean }> {
   const env = (await import("@appstrate/env")).getEnv();
 
   // Reconcile the loaded system packages into the DB + S3.
@@ -344,17 +344,23 @@ export async function bootBackground(): Promise<void> {
   await initCancelSubscriber();
 
   // Parallel init: orchestrator, scheduler, and DB cleanups are all independent
+  let agentsHealthy = false;
   const parallelInits: Promise<void>[] = [
     // Billing correctness barrier: unlike ancillary workers, this init is not
     // caught/degraded. Boot must fail if the durable metering recovery channel
     // is unavailable; otherwise a transient ledger write failure after
     // provider spend could be lost permanently.
     initLlmUsageRetryWorker(),
-    orchestrator.initialize().catch((err) => {
-      logger.warn("Could not initialize container orchestrator", {
-        error: getErrorMessage(err),
-      });
-    }),
+    orchestrator
+      .initialize()
+      .then(() => {
+        agentsHealthy = true;
+      })
+      .catch((err) => {
+        logger.warn("Could not initialize container orchestrator", {
+          error: getErrorMessage(err),
+        });
+      }),
     initScheduleWorker().catch((err) => {
       logger.warn("Could not initialize schedule worker", {
         error: getErrorMessage(err),
@@ -442,6 +448,8 @@ export async function bootBackground(): Promise<void> {
   // immediately, then polls for due jobs. Purges S3/FS objects whose DB rows
   // were deleted (documents, uploads, run workspaces, org/app/end-user cascades).
   startStorageDeletionWorker();
+
+  return { agentsHealthy };
 }
 
 /**

@@ -440,8 +440,8 @@ logger.info("Server listening (starting up)", { port: env.PORT });
 // missing durable recovery channel can lose billable spend permanently.
 const bootStartedAt = Date.now();
 void bootBackground()
-  .then(() => {
-    markServerReady();
+  .then(({ agentsHealthy }) => {
+    markServerReady({ agentsHealthy });
     logger.info("Server ready", { port: env.PORT, startupMs: Date.now() - bootStartedAt });
     // Fire-and-forget reachability probe for USERCONTENT_URL (issue #1001).
     // Never awaited, never fatal; runs after readiness so it can't race the

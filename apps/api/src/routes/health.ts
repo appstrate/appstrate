@@ -3,7 +3,6 @@
 import { Hono, type MiddlewareHandler } from "hono";
 import { sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { getSystemPackagesByType } from "../services/system-packages.ts";
 import { getVersionInfo } from "../lib/version.ts";
 import { ApiError } from "../lib/errors.ts";
 
@@ -14,14 +13,18 @@ const startedAt = Date.now();
 type ServerReadiness = "starting" | "ready" | "draining";
 
 let serverReadiness: ServerReadiness = "starting";
+let agentsHealthy = false;
 
 /**
  * Flip the process to "ready". Called once from `index.ts` when
  * `bootBackground()` resolves — i.e. when orphan cleanup, the system-package
- * DB sync and every worker are done. The port is already bound well before
+ * DB sync and every worker are done. Recoverable boot failures are carried in
+ * `readiness` so `/health` can report a degraded component without keeping the
+ * whole API behind the starting gate. The port is already bound well before
  * this; see {@link bootGate}.
  */
-export function markServerReady(): void {
+export function markServerReady(readiness: { agentsHealthy: boolean }): void {
+  agentsHealthy = readiness.agentsHealthy;
   if (serverReadiness === "starting") serverReadiness = "ready";
 }
 
@@ -42,6 +45,7 @@ export function markServerDraining(): void {
 /** Test-only reset of the module-level readiness flag. */
 export function _resetServerReadyForTesting(): void {
   serverReadiness = "starting";
+  agentsHealthy = false;
 }
 
 /**
@@ -95,10 +99,11 @@ healthRouter.get("/health", async (c) => {
     checks.database = { status: "unhealthy", latency_ms: Date.now() - dbStart };
   }
 
-  // System packages check
-  const systemAgentCount = getSystemPackagesByType("agent").length;
+  // Agent execution readiness comes from the orchestrator's boot handshake.
+  // System packages are optional catalogue entries and say nothing about
+  // whether the platform can launch a run.
   checks.agents = {
-    status: systemAgentCount > 0 ? "healthy" : "degraded",
+    status: agentsHealthy ? "healthy" : "degraded",
   };
 
   const hasUnhealthy = Object.values(checks).some((c) => c.status === "unhealthy");
