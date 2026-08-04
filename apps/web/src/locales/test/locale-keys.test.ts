@@ -160,12 +160,16 @@ describe("t() keys", () => {
  */
 const DYNAMIC_KEY_PREFIXES = [
   "filter.", // components/document-list-panel.tsx — t(`filter.${p}`)
+  "generation.level.", // packages/module-chat/src/ui/model-select.tsx
+  "generation.levelShort.", // packages/module-chat/src/ui/model-select.tsx
   "integration.auth.type.", // components/integration-connect/{inline-connect-button,integration-connection-picker}.tsx
   "integration.connect.fields.", // components/integration-connect/credential-fields.tsx
   "library.tab.", // pages/library-page.tsx — t(`library.tab.${tab}`)
   "oauthClients.scopeLabels.", // modules/oidc/components/oauth-client-form-modal.tsx
   "oauthClients.signupRoleOption.", // modules/oidc/components/oauth-client-form-modal.tsx
   "packages.type.", // components/package-detail/shared-header.tsx, pages/unified-package-detail.tsx
+  "models.generation.levels.", // components/model-generation-fields.tsx
+  "models.generation.levelsShort.", // components/model-generation-fields.tsx
   "run.artifacts.code.", // components/run-artifacts.ts — artifactFailureCodeKey()
   "run.connSource.", // components/run-info-tab.tsx — t(`run.connSource.${c.source}`)
   "run.status.", // packages/module-chat/src/ui/run-events.ts — runStatusLineKey()
