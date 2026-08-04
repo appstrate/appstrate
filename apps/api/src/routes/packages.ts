@@ -11,8 +11,7 @@ import { packages, profiles } from "@appstrate/db/schema";
 import { db } from "@appstrate/db/client";
 import { listResponse } from "../lib/list-response.ts";
 import { postInstallPackage } from "../services/post-install-package.ts";
-import { handleImportBundle } from "../services/bundle-import.ts";
-import { parsePackageIdentity } from "@appstrate/afps-runtime/bundle";
+import { bundleImportAuditRecords, handleImportBundle } from "../services/bundle-import.ts";
 import { installPackage, hasPackageAccess } from "../services/application-packages.ts";
 import { resolveIntegrationActivations } from "../services/integration-connections.ts";
 import { parseManifestFromFiles } from "../lib/manifest-parser.ts";
@@ -240,16 +239,9 @@ interface ParsedUpload {
   normalizedFiles?: Record<string, Uint8Array>;
   /** Full parsed manifest.json from the ZIP — stored as-is (like the registry). */
   manifest: Record<string, unknown>;
+  /** Original archive bytes, retained for the canonical AFPS preflight. */
+  archive: Uint8Array;
 }
-
-/** JSON body shape for the non-multipart package upload branch. */
-const jsonUploadSchema = z.object({
-  id: z.string().min(1),
-  content: z.string().min(1),
-  manifest: z.record(z.string(), z.unknown()),
-  name: z.string().optional(),
-  description: z.string().optional(),
-});
 
 /**
  * Parse a package item upload from a Hono context (multipart ZIP or JSON body).
@@ -282,9 +274,10 @@ async function parsePackageUpload(
       throw invalidRequest("Invalid file name (kebab-case slug required)", "file");
     }
 
+    const archive = new Uint8Array(await file.arrayBuffer());
     let normalizedFiles: Record<string, Uint8Array>;
     try {
-      normalizedFiles = unzipAndNormalize(Buffer.from(await file.arrayBuffer()));
+      normalizedFiles = unzipAndNormalize(Buffer.from(archive));
     } catch {
       throw invalidRequest("Invalid ZIP file", "file");
     }
@@ -332,32 +325,19 @@ async function parsePackageUpload(
     if (formName) name = formName;
     if (formDesc) description = formDesc;
 
-    return { id, name, description, content, normalizedFiles, manifest };
+    return { id, name, description, content, normalizedFiles, manifest, archive };
   }
 
-  // JSON body
-  const body = await readJsonBody(c, jsonUploadSchema);
-
-  if (!SLUG_REGEX.test(body.id)) {
-    throw invalidRequest("Invalid id (kebab-case slug required)", "id");
-  }
-
-  const { name, description } = body;
-
-  // Synthesize normalizedFiles so the ZIP is uploaded to storage (same as multipart path)
-  const encoded = new TextEncoder().encode(body.content);
-  const fileName =
-    opts.requiredFile ?? (opts.contentFileExt ? `${body.id}${opts.contentFileExt}` : "content");
-  const normalizedFiles: Record<string, Uint8Array> = { [fileName]: encoded };
-
-  return {
-    id: body.id,
-    name,
-    description,
-    content: body.content,
-    normalizedFiles,
-    manifest: body.manifest,
-  };
+  // Executable MCP packages are self-contained archives. A JSON manifest can
+  // describe an entry point but cannot carry it; synthesising a fake `content`
+  // file here created packages that validated, versioned and auto-installed,
+  // then failed only when the sidecar tried to boot the missing entry point.
+  throw new ApiError({
+    status: 415,
+    code: "archive_required",
+    title: "Archive Required",
+    detail: "MCP-server packages must be uploaded as a multipart .afps or .zip archive.",
+  });
 }
 
 /** Create a version snapshot from files + manifest (non-fatal on error).
@@ -380,13 +360,13 @@ async function createVersionSafe(params: {
   userId: string;
   manifest: Record<string, unknown>;
   normalizedFiles: Record<string, Uint8Array>;
-}): Promise<void> {
+}): Promise<boolean> {
   const version = params.manifest.version as string | undefined;
   if (!version || !isValidVersion(version)) {
     logger.warn("Skipping version creation: missing or invalid version in manifest", {
       packageId: params.packageId,
     });
-    return;
+    return false;
   }
   const gateErrors = await validateAgentIntegrationSelections({
     manifest: params.manifest,
@@ -398,7 +378,7 @@ async function createVersionSafe(params: {
       packageId: params.packageId,
       codes: gateErrors.map((e) => e.code),
     });
-    return;
+    return false;
   }
   try {
     const manifestToStore = params.manifest;
@@ -413,8 +393,10 @@ async function createVersionSafe(params: {
       zipBuffer,
       manifest: manifestToStore,
     });
+    return true;
   } catch (error) {
     logger.warn("Version upload failed (non-fatal)", { packageId: params.packageId, error });
+    return false;
   }
 }
 
@@ -674,7 +656,7 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
       // never match a later rebuild from the draft. That byte drift defeated
       // the publish dedup and, before #896, made every create-then-republish
       // silently overwrite the artifact while keeping the stale integrity row.
-      await createVersionSafe({
+      const versionCreated = await createVersionSafe({
         packageId,
         orgId,
         userId: user.id,
@@ -684,7 +666,7 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
 
       // Auto-install in the current application (non-fatal)
       const applicationId = c.get("applicationId");
-      if (applicationId) {
+      if (applicationId && versionCreated) {
         await installPackage({ orgId, applicationId }, packageId).catch((e: unknown) =>
           logger.debug("auto-install skipped", { packageId, applicationId, err: String(e) }),
         );
@@ -708,7 +690,7 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
       return c.json(detail, 201);
     }
 
-    // Import-only create (mcp-server) — uses parsePackageUpload (ZIP or JSON body)
+    // Import-only create (mcp-server) — archive-only by construction.
     const parsed = await parsePackageUpload(c, rcfg.parseOpts);
 
     if (isSystemPackage(parsed.id)) {
@@ -718,6 +700,27 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
     }
 
     await validateManifestForRoute(parsed.manifest, rcfg.cfg.type, orgId, "author");
+
+    // Run the canonical AFPS archive parser before the first write. It shares
+    // companion-file enforcement with the runtime bundle loader, so a missing
+    // `server.entry_point` payload is rejected here rather than at sidecar boot.
+    let canonical;
+    try {
+      canonical = parsePackageZip(parsed.archive);
+    } catch (err) {
+      if (err instanceof PackageZipError) throw invalidRequest(err.message, "file");
+      throw err;
+    }
+    const expectedPackageId = `@${orgSlug}/${parsed.id}`;
+    if (canonical.packageId !== expectedPackageId) {
+      throw invalidRequest(
+        `Archive manifest name '${canonical.packageId}' must match upload package id '${expectedPackageId}'.`,
+        "manifest.name",
+      );
+    }
+    parsed.manifest = canonical.manifest as Record<string, unknown>;
+    parsed.content = canonical.content;
+    parsed.normalizedFiles = canonical.files;
 
     if (rcfg.validateContent) {
       const validation = rcfg.validateContent(parsed.content);
@@ -771,7 +774,7 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
 
     // Create initial version (non-fatal)
     const finalManifest = asRecord(item.draftManifest);
-    await createVersionSafe({
+    const versionCreated = await createVersionSafe({
       packageId: item.id,
       orgId,
       userId: user.id,
@@ -781,7 +784,7 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
 
     // Auto-install in the current application (non-fatal)
     const applicationId = c.get("applicationId");
-    if (applicationId) {
+    if (applicationId && versionCreated) {
       await installPackage({ orgId, applicationId }, item.id).catch((e: unknown) =>
         logger.debug("auto-install skipped", { packageId: item.id, applicationId, err: String(e) }),
       );
@@ -1252,6 +1255,12 @@ function makeCreateVersionHandler(rcfg: PackageRouteConfig) {
         throw conflict(
           "version_exists",
           "This version is already published and immutable — bump the version to publish the changed content",
+        );
+      }
+      if (result.error === "invalid_bundle") {
+        throw invalidRequest(
+          result.detail ?? "MCP-server package archive is not executable",
+          "manifest.server.entry_point",
         );
       }
       throw invalidRequest("Failed to create version (invalid or duplicate)");
@@ -1890,19 +1899,12 @@ export function createPackagesRouter() {
     }
     // One audit event per package version actually written — "reused"
     // entries changed no state. `recordAudit*` never throws.
-    for (const entry of result.imported) {
-      if (entry.status !== "inserted") continue;
-      const identity = parsePackageIdentity(entry.identity);
+    for (const audit of bundleImportAuditRecords(result, { via: "import:bundle" })) {
       await recordAuditFromContext(c, {
         action: "package.version_created",
         resourceType: "package",
-        resourceId: identity?.packageId ?? entry.identity,
-        after: {
-          type: entry.type ?? null,
-          version: identity?.version ?? null,
-          via: "import:bundle",
-          root: entry.identity === `${result.root_package_id}@${result.root_version}`,
-        },
+        resourceId: audit.resourceId,
+        after: audit.after,
       });
     }
     return c.json(result, 201);

@@ -16572,8 +16572,8 @@
       "post": {
         "operationId": "createMcpServerPackage",
         "tags": ["Packages"],
-        "summary": "Create an MCP-server package",
-        "description": "Create a new MCP-server package in the organization packages.",
+        "summary": "Create a local MCP-server executable package",
+        "description": "Create a local executable MCP-server package referenced by an integration with `source.kind: \"local\"`. For an upstream-hosted MCP endpoint, create an integration package with `source.kind: \"remote\"` instead.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -16584,7 +16584,7 @@
         ],
         "requestBody": {
           "required": true,
-          "description": "Upload a package ZIP (`multipart/form-data` with a `.afps`/`.zip` file — the package ID is derived from the file name, and the archive must contain a valid `manifest.json`), or post a JSON body carrying the manifest. Parsed by `parsePackageUpload`.",
+          "description": "Upload a self-contained package archive (`multipart/form-data` with a `.afps`/`.zip` file). The package ID is derived from the file name. The archive must contain a valid `manifest.json` and the file referenced by `server.entry_point`; JSON manifest-only creation is refused with `415 archive_required`.",
           "content": {
             "multipart/form-data": {
               "schema": {
@@ -16595,35 +16595,6 @@
                     "type": "string",
                     "format": "binary",
                     "description": "Package archive (`.afps` or `.zip`) containing a valid `manifest.json`. File name (sans extension) is the kebab-case package id."
-                  }
-                }
-              }
-            },
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "required": ["id", "content", "manifest"],
-                "properties": {
-                  "id": {
-                    "type": "string",
-                    "description": "Kebab-case package id."
-                  },
-                  "content": {
-                    "type": "string",
-                    "description": "Primary package file content."
-                  },
-                  "name": {
-                    "type": "string",
-                    "description": "Display name. Auto-extracted from the manifest if omitted."
-                  },
-                  "description": {
-                    "type": "string",
-                    "description": "Package description. Auto-extracted from the manifest if omitted."
-                  },
-                  "manifest": {
-                    "type": "object",
-                    "additionalProperties": true,
-                    "description": "Manifest object, validated against the AFPS mcp-server schema and stored as-is."
                   }
                 }
               }
@@ -16658,6 +16629,9 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
           }
         }
       }
@@ -23686,7 +23660,7 @@
                 "type": "array",
                 "items": {
                   "type": "string",
-                  "enum": ["output", "log", "note", "pin", "publish_document"]
+                  "enum": ["output", "log", "note", "pin", "publish_document", "publish_archive"]
                 },
                 "description": "Appstrate top-level extension: runtime tools the agent may use. Optional."
               }
@@ -23870,6 +23844,24 @@
                   "requestId": "req_abc123"
                 }
               }
+            }
+          }
+        }
+      },
+      "UnsupportedMediaType": {
+        "description": "The endpoint requires a different request media type",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetail"
+            },
+            "example": {
+              "type": "https://docs.appstrate.dev/errors/archive-required",
+              "title": "Archive Required",
+              "status": 415,
+              "detail": "MCP-server packages must be uploaded as a multipart .afps or .zip archive.",
+              "code": "archive_required",
+              "requestId": "req_abc123"
             }
           }
         }

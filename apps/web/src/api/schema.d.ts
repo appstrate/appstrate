@@ -4866,7 +4866,7 @@ export interface components {
             [key: string]: unknown;
         }) & {
             /** @description Appstrate top-level extension: runtime tools the agent may use. Optional. */
-            runtime_tools?: ("output" | "log" | "note" | "pin" | "publish_document")[];
+            runtime_tools?: ("output" | "log" | "note" | "pin" | "publish_document" | "publish_archive")[];
         };
         AgentSkillRef: {
             id: string;
@@ -5824,6 +5824,25 @@ export interface components {
                 [name: string]: unknown;
             };
             content: {
+                "application/problem+json": components["schemas"]["ProblemDetail"];
+            };
+        };
+        /** @description The endpoint requires a different request media type */
+        UnsupportedMediaType: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                /**
+                 * @example {
+                 *       "type": "https://docs.appstrate.dev/errors/archive-required",
+                 *       "title": "Archive Required",
+                 *       "status": 415,
+                 *       "detail": "MCP-server packages must be uploaded as a multipart .afps or .zip archive.",
+                 *       "code": "archive_required",
+                 *       "requestId": "req_abc123"
+                 *     }
+                 */
                 "application/problem+json": components["schemas"]["ProblemDetail"];
             };
         };
@@ -16437,7 +16456,7 @@ export interface operations {
             path?: never;
             cookie?: never;
         };
-        /** @description Upload a package ZIP (`multipart/form-data` with a `.afps`/`.zip` file — the package ID is derived from the file name, and the archive must contain a valid `manifest.json`), or post a JSON body carrying the manifest. Parsed by `parsePackageUpload`. */
+        /** @description Upload a self-contained package archive (`multipart/form-data` with a `.afps`/`.zip` file). The package ID is derived from the file name. The archive must contain a valid `manifest.json` and the file referenced by `server.entry_point`; JSON manifest-only creation is refused with `415 archive_required`. */
         requestBody: {
             content: {
                 "multipart/form-data": {
@@ -16446,20 +16465,6 @@ export interface operations {
                      * @description Package archive (`.afps` or `.zip`) containing a valid `manifest.json`. File name (sans extension) is the kebab-case package id.
                      */
                     file: Blob;
-                };
-                "application/json": {
-                    /** @description Kebab-case package id. */
-                    id: string;
-                    /** @description Primary package file content. */
-                    content: string;
-                    /** @description Display name. Auto-extracted from the manifest if omitted. */
-                    name?: string;
-                    /** @description Package description. Auto-extracted from the manifest if omitted. */
-                    description?: string;
-                    /** @description Manifest object, validated against the AFPS mcp-server schema and stored as-is. */
-                    manifest: {
-                        [key: string]: unknown;
-                    };
                 };
             };
         };
@@ -16478,6 +16483,7 @@ export interface operations {
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            415: components["responses"]["UnsupportedMediaType"];
         };
     };
     getMcpServerPackageById: {

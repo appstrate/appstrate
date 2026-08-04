@@ -157,7 +157,7 @@ For `kind:"inline"`, `manifest` is a partial canonical AFPS manifest. A normal
 call can provide only a task-specific `display_name` plus its dependencies and
 integration configuration; `run_and_wait` derives `name` and defaults the
 omitted AFPS boilerplate, `runtime_tools` (`log`, `output`,
-`publish_document`), and an open object output schema. Defaults fill absent
+`publish_document`, `publish_archive`), and an open object output schema. Defaults fill absent
 top-level fields only. Every supplied field is preserved as an exact
 replacement—arrays and nested objects are not merged, and
 `runtime_tools: []` remains empty. Clients can therefore provide a complete

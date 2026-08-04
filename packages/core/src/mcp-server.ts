@@ -27,6 +27,69 @@ import {
 
 export type { McpServerManifest };
 
+/** The `_meta` key carrying Appstrate-specific mcp-server runtime hints. */
+export const MCP_SERVER_APPSTRATE_META_KEY = "dev.appstrate/mcp-server";
+
+/** The `_meta` key carrying the shared-workspace opt-in declaration. */
+export const MCP_SERVER_WORKSPACE_META_KEY = "dev.appstrate/workspace";
+
+/**
+ * Runtime identifiers accepted by both integration runtime adapters. This is
+ * the public capability registry used by package authoring/discovery; adapter
+ * implementation details (image refs and host commands) remain private.
+ */
+export const MCP_SERVER_RUNTIME_CAPABILITIES = {
+  node: {
+    manifestVersion: "0.3",
+    manifestServerType: "node",
+    manifestCommand: "node",
+    manifestArgsBeforeEntryPoint: [],
+    entryPoint: "JavaScript entry point present in the archive",
+  },
+  bun: {
+    manifestVersion: "0.3",
+    manifestServerType: "node",
+    manifestCommand: "bun",
+    manifestArgsBeforeEntryPoint: [],
+    entryPoint: "JavaScript or TypeScript entry point present in the archive",
+    runtimeOverride: "bun",
+  },
+  python: {
+    manifestVersion: "0.3",
+    manifestServerType: "python",
+    manifestCommand: "python3",
+    manifestArgsBeforeEntryPoint: [],
+    entryPoint: "Python entry point present in the archive",
+  },
+  uv: {
+    manifestVersion: "0.4",
+    manifestServerType: "uv",
+    manifestCommand: "uv",
+    manifestArgsBeforeEntryPoint: ["run"],
+    entryPoint: "Python entry point present in the archive; uv resolves project dependencies",
+  },
+  binary: {
+    manifestVersion: "0.3",
+    manifestServerType: "binary",
+    manifestCommand: null,
+    manifestArgsBeforeEntryPoint: [],
+    entryPoint: "Executable entry point present in the archive",
+  },
+} as const;
+
+export type McpServerRuntime = keyof typeof MCP_SERVER_RUNTIME_CAPABILITIES;
+
+export const MCP_SERVER_RUNTIMES = Object.freeze(
+  Object.keys(MCP_SERVER_RUNTIME_CAPABILITIES) as McpServerRuntime[],
+);
+
+export function isMcpServerRuntime(value: unknown): value is McpServerRuntime {
+  return (
+    typeof value === "string" &&
+    Object.prototype.hasOwnProperty.call(MCP_SERVER_RUNTIME_CAPABILITIES, value)
+  );
+}
+
 /**
  * MCPB `user_config` entry shape (Appendix C / MCPB spec). Upstream
  * `@afps-spec/schema` types `user_config` as
@@ -85,13 +148,31 @@ export const mcpServerManifestSchema = afpsMcpServerManifestSchema.superRefine((
       message: err instanceof Error ? err.message : String(err),
     });
   }
+
+  const meta = (m as { _meta?: Record<string, unknown> })._meta;
+  const appstrateRuntime = meta?.[MCP_SERVER_APPSTRATE_META_KEY] as
+    { runtime?: unknown } | undefined;
+  if (appstrateRuntime?.runtime !== undefined && !isMcpServerRuntime(appstrateRuntime.runtime)) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["_meta", MCP_SERVER_APPSTRATE_META_KEY, "runtime"],
+      message:
+        `Unsupported MCP server runtime ${JSON.stringify(appstrateRuntime.runtime)}. ` +
+        `Expected one of: ${MCP_SERVER_RUNTIMES.join(", ")}.`,
+    });
+  } else if (appstrateRuntime?.runtime !== undefined) {
+    const serverType = (m as { server?: { type?: unknown } }).server?.type;
+    const compatibleType =
+      MCP_SERVER_RUNTIME_CAPABILITIES[appstrateRuntime.runtime].manifestServerType;
+    if (serverType !== compatibleType) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["_meta", MCP_SERVER_APPSTRATE_META_KEY, "runtime"],
+        message: `Runtime '${appstrateRuntime.runtime}' requires server.type '${compatibleType}'.`,
+      });
+    }
+  }
 });
-
-/** The `_meta` key carrying Appstrate-specific mcp-server runtime hints. */
-export const MCP_SERVER_APPSTRATE_META_KEY = "dev.appstrate/mcp-server";
-
-/** The `_meta` key carrying the shared-workspace opt-in declaration. */
-export const MCP_SERVER_WORKSPACE_META_KEY = "dev.appstrate/workspace";
 
 /**
  * Per-run shared workspace declaration parsed from an mcp-server
@@ -236,10 +317,10 @@ export function getMcpServerWorkspaceMount(
  * here so the platform's runner picks the bun interpreter/image. Returns
  * `undefined` when absent, in which case callers fall back to `server.type`.
  */
-export function getMcpServerRuntime(manifest: McpServerManifest): string | undefined {
+export function getMcpServerRuntime(manifest: McpServerManifest): McpServerRuntime | undefined {
   const meta = (manifest as { _meta?: Record<string, unknown> })._meta;
   const appstrate = meta?.[MCP_SERVER_APPSTRATE_META_KEY] as { runtime?: unknown } | undefined;
-  return typeof appstrate?.runtime === "string" ? appstrate.runtime : undefined;
+  return isMcpServerRuntime(appstrate?.runtime) ? appstrate.runtime : undefined;
 }
 
 /**

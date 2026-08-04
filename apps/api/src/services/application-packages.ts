@@ -20,6 +20,11 @@ import type { PackageType } from "@appstrate/core/validation";
 import type { ResolvedRunConfig } from "@appstrate/shared-types";
 import type { AppScope } from "../lib/scope.ts";
 import { assertApplicationInScope } from "./applications.ts";
+import { ApiError } from "../lib/errors.ts";
+import { getErrorMessage } from "@appstrate/core/errors";
+import { parsePackageZip } from "@appstrate/core/zip";
+import { getVersionForDownload } from "./package-versions.ts";
+import { downloadVersionZip } from "./package-storage.ts";
 
 export type { ResolvedRunConfig };
 
@@ -27,12 +32,56 @@ export type { ResolvedRunConfig };
 // Install / Uninstall
 // ---------------------------------------------------------------------------
 
+/**
+ * Historical mcp-server drafts may predate companion-file validation. Refuse
+ * to install one unless the exact `latest` archive is present and passes the
+ * same parser used at authoring/import and runtime boot. System packages are
+ * boot-registry artifacts and do not have a package_versions row here.
+ */
+async function assertMcpServerInstallable(scope: AppScope, packageId: string): Promise<void> {
+  const [pkg] = await db
+    .select({ type: packages.type, source: packages.source })
+    .from(packages)
+    .where(and(eq(packages.id, packageId), orgOrSystemFilter(scope.orgId), notEphemeralFilter()))
+    .limit(1);
+  if (!pkg || pkg.type !== "mcp-server" || pkg.source === "system") return;
+
+  const version = await getVersionForDownload(packageId, "latest");
+  if (!version) {
+    throw new ApiError({
+      status: 422,
+      code: "bundle_invalid",
+      title: "Invalid MCP Server Bundle",
+      detail: `MCP-server package '${packageId}' has no installable published version.`,
+    });
+  }
+
+  try {
+    const bytes = await downloadVersionZip(packageId, version.version, version.integrity);
+    if (!bytes) throw new Error(`archive for ${packageId}@${version.version} is missing`);
+    const parsed = parsePackageZip(new Uint8Array(bytes), { retiredRuntimeTools: "drop" });
+    if (parsed.type !== "mcp-server" || parsed.packageId !== packageId) {
+      throw new Error(
+        `archive identity is ${parsed.packageId} (${parsed.type}), expected ${packageId} (mcp-server)`,
+      );
+    }
+  } catch (err) {
+    throw new ApiError({
+      status: 422,
+      code: "bundle_invalid",
+      title: "Invalid MCP Server Bundle",
+      detail: `MCP-server package '${packageId}@${version.version}' is not executable: ${getErrorMessage(err)}`,
+    });
+  }
+}
+
 export async function installPackage(
   scope: AppScope,
   packageId: string,
   config?: Record<string, unknown>,
 ) {
   await assertApplicationInScope(scope);
+  await assertMcpServerInstallable(scope, packageId);
 
   // The org-visibility check and the insert run in ONE transaction so the
   // tenant boundary is atomic with the write — a separate preflight would

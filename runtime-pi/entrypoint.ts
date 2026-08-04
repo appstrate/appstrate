@@ -39,6 +39,7 @@ import type { ExtensionFactory, Api, Model } from "./pi-sdk.ts";
 import {
   prepareBundleForPi,
   buildRuntimeToolExtensions,
+  buildPublishArchiveExtension,
   buildPublishDocumentExtension,
   deriveProviderFromApi,
   emitRuntimeReady,
@@ -73,7 +74,12 @@ import {
   type RuntimeEventDrainer,
 } from "@appstrate/core/runtime-event-drain";
 import { provisionWorkspace, provisionDocuments, type ProvisionDeps } from "./provision.ts";
-import { createRunDocumentUploader, sweepOutputs, summarizeArtifacts } from "./publish.ts";
+import {
+  createRunArchivePublisher,
+  createRunDocumentUploader,
+  sweepOutputs,
+  summarizeArtifacts,
+} from "./publish.ts";
 import type { SweepResult } from "./publish.ts";
 
 /**
@@ -245,6 +251,11 @@ const uploadRunDocument = createRunDocumentUploader({
   workspace: env.workspaceDir,
   publishedKeys: publishedDocumentKeys,
   publishedSourceHashes: publishedDocumentSourceHashes,
+});
+const publishRunArchive = createRunArchivePublisher({
+  workspace: env.workspaceDir,
+  uploader: uploadRunDocument,
+  maxArchiveBytes: resolveDocumentMaxFileBytes(),
 });
 
 /**
@@ -714,6 +725,20 @@ if (declaredRuntimeTools.includes("publish_document")) {
   );
 }
 
+// --- 2f. publish_archive runtime tool (opt-in via manifest.runtime_tools) ---
+// Archive construction needs direct, confined workspace access and the same
+// signed document uploader as `publish_document`, so it also stays in-process.
+if (declaredRuntimeTools.includes("publish_archive")) {
+  extensionFactories.push(
+    buildPublishArchiveExtension({
+      publisher: publishRunArchive,
+      emit: (event) => {
+        void bridgedSink.handle(event as RunEvent);
+      },
+    }),
+  );
+}
+
 // --- 3. Model + system prompt from env ---
 
 const api = env.modelApi;
@@ -861,14 +886,16 @@ const DEFAULT_DOCUMENT_MAX_FILE_BYTES = 100 * 1024 * 1024;
  * keeps the two in lockstep — an operator who raises the platform cap no longer
  * sees large deliverables silently skipped here.
  */
-const OUTPUTS_SWEEP_MAX_FILE_BYTES = ((): number => {
+function resolveDocumentMaxFileBytes(): number {
   const raw = process.env.DOCUMENT_MAX_FILE_BYTES;
   if (raw !== undefined && raw !== "") {
     const parsed = Number(raw);
     if (Number.isFinite(parsed) && parsed > 0) return parsed;
   }
   return DEFAULT_DOCUMENT_MAX_FILE_BYTES;
-})();
+}
+
+const OUTPUTS_SWEEP_MAX_FILE_BYTES = resolveDocumentMaxFileBytes();
 
 /**
  * Auto-publish everything under `workspace/outputs/` that was not already

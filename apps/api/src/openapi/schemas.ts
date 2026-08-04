@@ -1651,7 +1651,7 @@ export const schemas = {
             type: "array",
             items: {
               type: "string",
-              enum: ["output", "log", "note", "pin", "publish_document"],
+              enum: ["output", "log", "note", "pin", "publish_document", "publish_archive"],
             },
             description:
               "Appstrate top-level extension: runtime tools the agent may use. Optional.",

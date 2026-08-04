@@ -37,15 +37,16 @@ export type EventEmitterRuntimeTool = (typeof EVENT_EMITTER_RUNTIME_TOOLS)[numbe
  * leads the list (it materialises the run result) but is not auto-injected;
  * validation requires it only when an output schema is declared.
  *
- * `publish_document` is the odd one out: unlike the pure event emitters it
- * performs an HTTP upload of a workspace file to the platform, so it is built
- * with an injected uploader in the runtime entrypoint (not by
- * {@link buildRuntimeToolDefs}) — it is selectable (validation + editor) but
- * never appears in the standalone def builder.
+ * `publish_document` and `publish_archive` are the odd ones out: unlike the
+ * pure event emitters they perform an HTTP upload to the platform, so they are
+ * built with injected publishers in the runtime entrypoint (not by
+ * {@link buildRuntimeToolDefs}) — they are selectable (validation + editor)
+ * but never appear in the standalone def builder.
  */
 export const SELECTABLE_RUNTIME_TOOLS = [
   ...EVENT_EMITTER_RUNTIME_TOOLS,
   "publish_document",
+  "publish_archive",
 ] as const;
 
 /** A tool the agent author may enable/disable. */
@@ -88,6 +89,11 @@ export const RUNTIME_TOOL_CATALOG: readonly RuntimeToolCatalogEntry[] = [
     displayName: "Publish document",
     description:
       "Publish a file the agent created (e.g. an HTML report) as a durable run document.",
+  },
+  {
+    id: "publish_archive",
+    displayName: "Publish archive",
+    description: "Package explicit workspace files into a ZIP and publish it as a run document.",
   },
 ];
 

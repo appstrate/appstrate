@@ -15,7 +15,7 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { runs, uploads, chatSessions } from "@appstrate/db/schema";
+import { applicationPackages, packages, runs, uploads, chatSessions } from "@appstrate/db/schema";
 import { uploadStream } from "@appstrate/db/storage";
 import type { Actor } from "@appstrate/connect";
 import { getTestApp } from "../../../../../test/helpers/app.ts";
@@ -34,6 +34,8 @@ import {
   createDocumentFromStream,
   createDocumentFromUpload,
 } from "../../../../services/documents.ts";
+import { zipSync } from "fflate";
+import { mcpServerManifest } from "../../../../../test/helpers/integration-manifests.ts";
 
 const app = getTestApp();
 setPlatformApp(app);
@@ -69,7 +71,10 @@ function toolData(envelope: JsonRpcEnvelope): { isError: boolean; data: Record<s
   };
 }
 
-async function apiKeyHeaders(ctx: TestContext): Promise<Record<string, string>> {
+async function apiKeyHeaders(
+  ctx: TestContext,
+  extraScopes: string[] = [],
+): Promise<Record<string, string>> {
   const key = await seedApiKey({
     orgId: ctx.orgId,
     applicationId: ctx.defaultAppId,
@@ -77,7 +82,7 @@ async function apiKeyHeaders(ctx: TestContext): Promise<Record<string, string>> 
     // `list_documents` / `resources/read` re-dispatch in-process to
     // `GET /api/documents*`, which is gated on `documents:read` like every
     // other caller — an MCP grant is not a document grant.
-    scopes: ["mcp:read", "mcp:invoke", "documents:read"],
+    scopes: ["mcp:read", "mcp:invoke", "documents:read", ...extraScopes],
   });
   return { Authorization: `Bearer ${key.rawKey}`, "X-Org-Id": ctx.orgId };
 }
@@ -99,9 +104,9 @@ async function publishDoc(
   runId: string,
   name: string,
   mime: string,
-  content: string,
+  content: string | Uint8Array,
 ): Promise<string> {
-  const bytes = new TextEncoder().encode(content);
+  const bytes = typeof content === "string" ? new TextEncoder().encode(content) : content;
   const { row } = await createDocumentFromStream(
     scope,
     runId,
@@ -301,6 +306,28 @@ describe("mcp resources/read (document://)", () => {
     });
   });
 
+  it("exposes the same document through the chat-callable read_document tool", async () => {
+    const runId = await seedRun(scope);
+    const docId = await publishDoc(scope, runId, "report.txt", "text/plain", "hello tool reader");
+
+    const { envelope } = await rpc(headers, {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: { name: "read_document", arguments: { uri: `document://${docId}` } },
+    });
+    const content = (envelope.result?.content as Array<Record<string, unknown>>) ?? [];
+    expect(content).toHaveLength(1);
+    expect(content[0]).toMatchObject({
+      type: "resource",
+      resource: {
+        uri: `document://${docId}`,
+        mimeType: "text/plain",
+        text: "hello tool reader",
+      },
+    });
+  });
+
   it("inlines a small non-textual (binary) document as a base64 blob", async () => {
     const runId = await seedRun(scope);
     const raw = "\x00\x01\x02rawbytes";
@@ -437,5 +464,132 @@ describe("mcp resources/read (document://)", () => {
     expect(String(meta.note)).toContain("1 MiB");
     // The oversized body is not inlined.
     expect(contents[0]!.text).not.toContain("AAAA");
+  });
+});
+
+describe("mcp document-backed package workflow", () => {
+  let ctx: TestContext;
+  let scope: { orgId: string; applicationId: string };
+  let headers: Record<string, string>;
+
+  beforeEach(async () => {
+    await truncateAll();
+    resetCatalog();
+    ctx = await createTestContext({ orgSlug: "mcppkgdoc" });
+    scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
+    headers = await apiKeyHeaders(ctx, ["agents:write"]);
+  });
+
+  function packageArchive(includeEntryPoint: boolean, source = "// server\n"): Uint8Array {
+    const packageId = "@mcppkgdoc/document-server";
+    const manifest = mcpServerManifest({
+      name: packageId,
+      version: "1.0.0",
+      entryPoint: "main.js",
+    });
+    const entries: Record<string, Uint8Array> = {
+      "manifest.json": new TextEncoder().encode(JSON.stringify(manifest)),
+    };
+    if (includeEntryPoint) entries["main.js"] = new TextEncoder().encode(source);
+    return zipSync(entries as unknown as Parameters<typeof zipSync>[0]);
+  }
+
+  it("validates without writing and reports a missing entry point", async () => {
+    const runId = await seedRun(scope);
+    const docId = await publishDoc(
+      scope,
+      runId,
+      "invalid.afps",
+      "application/zip",
+      packageArchive(false),
+    );
+
+    const { envelope } = await rpc(headers, {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: {
+        name: "validate_package_document",
+        arguments: { document_uri: `document://${docId}` },
+      },
+    });
+    const result = toolData(envelope);
+    expect(result.isError).toBe(true);
+    expect(result.data).toMatchObject({ valid: false, importable: false });
+    expect(String(result.data.error)).toContain("main.js");
+    expect(await db.select({ id: packages.id }).from(packages)).toEqual([]);
+  });
+
+  it("validates then imports and installs a package without exposing its bytes to the model", async () => {
+    const packageId = "@mcppkgdoc/document-server";
+    const runId = await seedRun(scope);
+    const docId = await publishDoc(
+      scope,
+      runId,
+      "server.afps",
+      "application/zip",
+      packageArchive(true),
+    );
+
+    const validated = await rpc(headers, {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: {
+        name: "validate_package_document",
+        arguments: { document_uri: `document://${docId}` },
+      },
+    });
+    expect(toolData(validated.envelope).data).toMatchObject({
+      valid: true,
+      importable: true,
+      root: `${packageId}@1.0.0`,
+    });
+
+    const imported = await rpc(headers, {
+      jsonrpc: "2.0",
+      id: 2,
+      method: "tools/call",
+      params: {
+        name: "import_package_document",
+        arguments: { document_uri: `document://${docId}` },
+      },
+    });
+    const result = toolData(imported.envelope);
+    expect(result.isError).toBe(false);
+    expect(result.data).toMatchObject({ root_package_id: packageId, root_version: "1.0.0" });
+
+    const [stored] = await db
+      .select({ id: packages.id })
+      .from(packages)
+      .where(eq(packages.id, packageId));
+    expect(stored?.id).toBe(packageId);
+    const [installed] = await db
+      .select({ packageId: applicationPackages.packageId })
+      .from(applicationPackages)
+      .where(eq(applicationPackages.packageId, packageId));
+    expect(installed?.packageId).toBe(packageId);
+
+    const conflictDocId = await publishDoc(
+      scope,
+      runId,
+      "conflict.afps",
+      "application/zip",
+      packageArchive(true, "// different server bytes\n"),
+    );
+    const conflicted = await rpc(headers, {
+      jsonrpc: "2.0",
+      id: 3,
+      method: "tools/call",
+      params: {
+        name: "validate_package_document",
+        arguments: { document_uri: `document://${conflictDocId}` },
+      },
+    });
+    expect(toolData(conflicted.envelope).data).toMatchObject({
+      valid: true,
+      importable: false,
+      conflicts: [{ identity: `${packageId}@1.0.0` }],
+    });
   });
 });

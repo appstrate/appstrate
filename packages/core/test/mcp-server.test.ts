@@ -235,4 +235,42 @@ describe("getMcpServerRuntime", () => {
       getMcpServerRuntime(manifest({ "dev.appstrate/mcp-server": { runtime: 42 } })),
     ).toBeUndefined();
   });
+
+  it("rejects an unknown runtime override during manifest validation", () => {
+    const r = mcpServerManifestSchema.safeParse({
+      ...manifest({ "dev.appstrate/mcp-server": { runtime: "deno" } }),
+      server: {
+        type: "node",
+        entry_point: "./server.ts",
+        mcp_config: { command: "node", args: ["./server.ts"] },
+      },
+    });
+    expect(r.success).toBe(false);
+    if (!r.success) {
+      expect(
+        r.error.issues.some(
+          (i) =>
+            i.path.join(".") === "_meta.dev.appstrate/mcp-server.runtime" &&
+            i.message.includes("node, bun, python, uv, binary"),
+        ),
+      ).toBe(true);
+    }
+  });
+
+  it("rejects a runtime override incompatible with server.type", () => {
+    const r = mcpServerManifestSchema.safeParse({
+      ...manifest({ "dev.appstrate/mcp-server": { runtime: "bun" } }),
+      server: {
+        type: "python",
+        entry_point: "./server.py",
+        mcp_config: { command: "python3", args: ["./server.py"] },
+      },
+    });
+    expect(r.success).toBe(false);
+    if (!r.success) {
+      expect(r.error.issues.map((issue) => issue.message)).toContain(
+        "Runtime 'bun' requires server.type 'node'.",
+      );
+    }
+  });
 });

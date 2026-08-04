@@ -52,6 +52,7 @@ import {
   turnDeadlineNoticeText,
   turnNoticeChunks,
 } from "../turn-closure.ts";
+import { classifyClientTurnError, clientTurnErrorMarker } from "../turn-error.ts";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 
 /**
@@ -281,23 +282,14 @@ export function runPiSubscriptionChat(input: PiSubscriptionChatInput): Response 
           if (!turnAbort.signal.aborted) throw err;
         }
 
-        // Invariant: an errored turn ALWAYS surfaces a visible error. The
-        // `error` chunk covers the live client; `errorText` in the persisted
-        // turn metadata covers reloads (error chunks are transient — they never
-        // become message parts). The fallback text guards any capture gap in
-        // the mapper — a silent empty turn is the one unacceptable outcome.
+        // Invariant: an errored turn ALWAYS surfaces a visible error. Raw Pi /
+        // provider text is classified before it crosses the stream or
+        // persistence boundary; the client localizes the stable category.
         const meta = mapper.result();
         const rawError =
-          meta.errorText ??
-          (meta.finishReason === "error"
-            ? "La génération a échoué (erreur du modèle)."
-            : undefined);
-        // Cap the surfaced text: provider errors can be a full response dump
-        // (headers included) — the useful part is the head, the rest belongs
-        // in server logs, not the chat bubble.
-        const errorText =
-          rawError && rawError.length > 300 ? `${rawError.slice(0, 300)}…` : rawError;
-        if (errorText) write({ type: "error", errorText });
+          meta.errorText ?? (meta.finishReason === "error" ? "unknown model error" : undefined);
+        const clientError = rawError ? classifyClientTurnError(rawError) : undefined;
+        if (clientError) write({ type: "error", errorText: clientTurnErrorMarker(clientError) });
 
         const stepCount = mapper.stepCount();
         const closure = resolveTurnClosure({
@@ -306,9 +298,8 @@ export function runPiSubscriptionChat(input: PiSubscriptionChatInput): Response 
           finishReason: meta.finishReason,
         });
         // Same invariant, second failure mode: a turn killed by the deadline
-        // used to end in complete silence (the abort was swallowed and no
-        // `errorText` existed). It gets a REAL text part — an `error` chunk is
-        // transient and never becomes a persisted message part.
+        // used to end in complete silence. It gets a REAL text part — an
+        // `error` chunk is transient and never becomes a persisted message part.
         if (closure.deadlineReached) {
           logger.warn("chat turn deadline reached", {
             chatSessionId: input.chatSessionId,
@@ -327,7 +318,13 @@ export function runPiSubscriptionChat(input: PiSubscriptionChatInput): Response 
           messageMetadata: mergeTurnMetadata(undefined, {
             engine: "subscription",
             finishReason: closure.finishReason,
-            ...(errorText ? { errorText } : {}),
+            ...(clientError
+              ? {
+                  errorCategory: clientError.category,
+                  errorRetryable: clientError.retryable,
+                  ...(clientError.requestId ? { requestId: clientError.requestId } : {}),
+                }
+              : {}),
             stepCount,
             maxSteps: CHAT_MAX_STEPS,
             toolStepBudget: CHAT_TOOL_STEP_BUDGET,

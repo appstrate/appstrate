@@ -8,6 +8,7 @@ import type { DepEntry } from "@appstrate/core/dependencies";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestUser } from "../../helpers/auth.ts";
 import { createTestOrg } from "../../helpers/auth.ts";
+import { mcpServerManifest } from "../../helpers/integration-manifests.ts";
 import { seedPackage } from "../../helpers/seed.ts";
 import {
   createPackageVersion,
@@ -515,7 +516,7 @@ describe("package-versions service", () => {
         orgId,
         id,
         type: "mcp-server",
-        draftManifest: { name: id, version: "1.0.0", type: "mcp-server" },
+        draftManifest: mcpServerManifest({ name: id, entryPoint: "server.js" }),
         draftContent: "",
       });
 

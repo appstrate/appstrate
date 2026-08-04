@@ -7,9 +7,9 @@
  *
  * Two groups, both defined here: the four pure event emitters
  * (`output` / `log` / `note` / `pin`), assembled together by
- * {@link buildRuntimeToolDefs}; and `publish_document`, built on its own by
- * {@link buildPublishDocumentDef} because it needs an injected HTTP uploader
- * only the runtime entrypoint can supply.
+ * {@link buildRuntimeToolDefs}; and the publishing tools, built on their own by
+ * {@link buildPublishDocumentDef} / {@link buildPublishArchiveDef} because they
+ * need injected runtime dependencies only the entrypoint can supply.
  *
  * These were previously Pi-SDK extension factories baked into the runtime
  * image (`@appstrate/runner-pi/runtime-tools/builtin/*`). They are now plain
@@ -326,8 +326,8 @@ const RUNTIME_TOOL_BUILDERS: Record<
 
 /**
  * Build the {@link RuntimeToolDef}s for an agent's selected runtime tools.
- * Only the pure event-emitter tools are built here — `publish_document` is
- * excluded (it needs an injected uploader; the entrypoint builds it). Unknown
+ * Only the pure event-emitter tools are built here — the publishing tools are
+ * excluded (they need injected dependencies; the entrypoint builds them). Unknown
  * entries are ignored — that is the contract that keeps a manifest naming a
  * retired tool (e.g. the removed `report`) runnable; `validateManifest` drops
  * the same ids rather than rejecting the manifest. Order follows the agent's
@@ -409,6 +409,20 @@ export type DocumentUploader = (
 ) => Promise<PublishedDocument>;
 
 /**
+ * Packages explicit workspace files into a ZIP and publishes it as a durable
+ * run document. The runtime owns path confinement and archive construction;
+ * this shared definition owns the model-facing schema and result event.
+ */
+export type ArchivePublisher = (
+  paths: readonly string[],
+  name?: string,
+  presentation?: "primary",
+) => Promise<PublishedDocument>;
+
+/** Shared model/runtime ceiling for one explicit archive publication. */
+export const PUBLISH_ARCHIVE_MAX_FILES = 1_000;
+
+/**
  * Build the `publish_document` runtime tool def around an injected
  * {@link DocumentUploader}. Unlike the pure event emitters this tool performs
  * the upload itself (via `uploader`), then surfaces the canonical
@@ -481,6 +495,92 @@ export function buildPublishDocumentDef(uploader: DocumentUploader): RuntimeTool
         return toolError(`Failed to publish '${path}': ${message}`);
       }
       return withEvents(`Published ${doc.name} → ${doc.uri}`, [documentPublishedEvent(doc)]);
+    },
+  };
+}
+
+/**
+ * Build the `publish_archive` runtime tool around an injected archive
+ * publisher. Files are opt-in and explicit: the tool never sweeps a directory,
+ * so the caller controls exactly what crosses the run boundary.
+ */
+export function buildPublishArchiveDef(publisher: ArchivePublisher): RuntimeToolDef {
+  return {
+    descriptor: {
+      name: "publish_archive",
+      description:
+        "Create a ZIP from an explicit list of workspace files and publish it as a durable " +
+        "run document. Use this when the user needs several files together, or when a package " +
+        "archive must be handed to another tool through its returned `document://` URI. Pass " +
+        "only regular files, with paths relative to the workspace; directories, absolute paths, " +
+        "duplicates, and paths outside the workspace are refused. The source files are not " +
+        "modified. Primary selection follows the same explicit rule as `publish_document`: use " +
+        '`presentation: "primary"` only when this archive is the clearly main user-facing ' +
+        "deliverable, after every source file is final.",
+      inputSchema: {
+        type: "object",
+        additionalProperties: false,
+        required: ["paths"],
+        properties: {
+          paths: {
+            type: "array",
+            minItems: 1,
+            maxItems: PUBLISH_ARCHIVE_MAX_FILES,
+            uniqueItems: true,
+            items: { type: "string", minLength: 1 },
+            description:
+              "Explicit workspace-relative file paths to include. Their normalized relative paths are preserved in the ZIP.",
+          },
+          name: {
+            type: "string",
+            description:
+              "Optional archive document name (for example `deliverables.zip` or `package.afps`); defaults to `archive.zip`.",
+          },
+          presentation: {
+            type: "string",
+            enum: ["primary"],
+            description:
+              "Set to `primary` only when this archive is the run's main deliverable, after all source files are final.",
+          },
+        },
+      },
+    },
+    handler: async (rawArgs) => {
+      const { paths, name, presentation } = (rawArgs ?? {}) as {
+        paths?: unknown;
+        name?: unknown;
+        presentation?: unknown;
+      };
+      if (
+        !Array.isArray(paths) ||
+        paths.length === 0 ||
+        paths.length > PUBLISH_ARCHIVE_MAX_FILES ||
+        paths.some((entry) => typeof entry !== "string" || entry.length === 0)
+      ) {
+        return toolError(
+          `publish_archive requires between 1 and ${PUBLISH_ARCHIVE_MAX_FILES} non-empty workspace-relative \`paths\`.`,
+        );
+      }
+      if (new Set(paths).size !== paths.length) {
+        return toolError("publish_archive `paths` must not contain duplicates.");
+      }
+      if (presentation !== undefined && presentation !== "primary") {
+        return toolError("publish_archive `presentation` must be `primary` when provided.");
+      }
+      let doc: PublishedDocument;
+      try {
+        doc = await publisher(
+          paths as string[],
+          typeof name === "string" && name.length > 0 ? name : undefined,
+          presentation === "primary" ? presentation : undefined,
+        );
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return toolError(`Failed to publish archive: ${message}`);
+      }
+      return withEvents(`Published archive ${doc.name} → ${doc.uri}`, [
+        documentPublishedEvent(doc),
+      ]);
     },
   };
 }

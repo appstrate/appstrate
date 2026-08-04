@@ -61,6 +61,13 @@ import {
   type ChatTurnFinishReason,
 } from "@appstrate/core/chat-turn-metadata";
 import {
+  classifyClientTurnError,
+  clientTurnErrorForCategory,
+  clientTurnErrorFromMarker,
+  clientTurnErrorMarker,
+  type ClientTurnError,
+} from "./turn-error.ts";
+import {
   ChatTurnDeadlineError,
   resolveTurnClosure,
   turnDeadlineNoticeText,
@@ -253,17 +260,8 @@ function preview(value: unknown): string {
   return s.length > 300 ? `${s.slice(0, 300)}…` : s;
 }
 
-/**
- * Message surfaced to the user when a turn fails (the AI SDK masks errors by
- * default). We pass the provider's own error through — typically the real
- * cause (e.g. a provider key misconfigured in the org's models).
- */
 function clientErrorMessage(error: unknown): string {
-  const msg = error instanceof Error ? error.message : typeof error === "string" ? error : "";
-  const trimmed = msg.trim();
-  if (!trimmed)
-    return "Le modèle a échoué (erreur inconnue). Vérifiez la configuration des modèles de l'organisation.";
-  return `Le modèle a échoué : ${trimmed.length > 400 ? `${trimmed.slice(0, 400)}…` : trimmed}`;
+  return clientTurnErrorMarker(classifyClientTurnError(error));
 }
 
 /** An armed turn ceiling: how the turn aborted, and how to cancel the timer. */
@@ -350,7 +348,7 @@ export function createTurnClosureStream(options: {
    */
   abortReason?: () => unknown;
   /** Turn metadata for the synthesized `finish` chunk (same builder as the nominal path). */
-  buildMetadata: (finishReason: ChatTurnFinishReason) => ChatMessageMetadata;
+  buildMetadata: (finishReason: ChatTurnFinishReason, errorText?: string) => ChatMessageMetadata;
   /** Notice part id (tests pin it). */
   newId?: () => string;
   /** Observability seam — called once when the deadline actually closed the turn. */
@@ -362,13 +360,41 @@ export function createTurnClosureStream(options: {
   // notice for work that in fact completed.
   let sawFinish = false;
   let sawError = false;
+  let sawStart = false;
+  let streamedErrorText: string | undefined;
   return new TransformStream<UIMessageChunk, UIMessageChunk>({
     transform(chunk, controller) {
-      if (chunk.type === "finish") sawFinish = true;
-      if (chunk.type === "error") sawError = true;
+      if (chunk.type === "start") sawStart = true;
+      if (chunk.type === "error") {
+        sawError = true;
+        streamedErrorText = chunk.errorText;
+      }
+      if (chunk.type === "finish") {
+        sawFinish = true;
+        // ai@7 may emit a finish after its transient error chunk. Replace the
+        // finish metadata in-band so the safe error survives persistence and
+        // reload instead of existing only in assistant-ui's live status.
+        if (sawError) {
+          controller.enqueue({
+            ...chunk,
+            messageMetadata: options.buildMetadata("error", streamedErrorText),
+          });
+          return;
+        }
+      }
       controller.enqueue(chunk);
     },
     flush(controller) {
+      // Some providers close immediately after the error chunk and publish no
+      // finish at all. Ensure a real message boundary + persisted metadata.
+      if (sawError && !sawFinish) {
+        if (!sawStart) controller.enqueue({ type: "start", messageId: newId() });
+        controller.enqueue({
+          type: "finish",
+          messageMetadata: options.buildMetadata("error", streamedErrorText),
+        });
+        return;
+      }
       const closure = resolveTurnClosure({
         aborted: !sawFinish && options.signal.aborted,
         abortReason: options.abortReason ? options.abortReason() : options.signal.reason,
@@ -450,6 +476,7 @@ export async function handleChatStream(
   let lastToolName: string | undefined;
   let toolStepBudgetReached = false;
   let aiSdkFinishReason: FinishReason | "unknown" = "unknown";
+  let aiSdkError: ClientTurnError | undefined;
 
   // The proxy surfaces are bearer-only (cookies refused — CSRF model):
   // inference loopback calls carry a short-lived token only this process
@@ -886,7 +913,12 @@ export async function handleChatStream(
       onError: ({ error }) => {
         // MCP teardown is owned by `finalize` (its persist `finally`), which runs
         // to completion regardless of the client — so it is not closed here.
-        logger.error("chat stream error", { err: String(error) });
+        aiSdkError = classifyClientTurnError(error);
+        logger.error("chat stream error", {
+          err: String(error),
+          category: aiSdkError.category,
+          requestId: aiSdkError.requestId,
+        });
       },
       onEnd: ({ usage, finishReason }) => {
         aiSdkFinishReason = finishReason ?? "unknown";
@@ -905,10 +937,26 @@ export async function handleChatStream(
     // closure stream synthesizes when the deadline fired (ai@7 publishes no
     // `finish` on an abort) — so a deadline-killed turn reports the same step
     // counters as any other, with `finishReason: "deadline"`.
-    const buildTurnMetadata = (finishReason: ChatTurnFinishReason): ChatMessageMetadata =>
-      mergeTurnMetadata(undefined, {
+    const buildTurnMetadata = (
+      finishReason: ChatTurnFinishReason,
+      streamedErrorText?: string,
+    ): ChatMessageMetadata => {
+      const classifiedError =
+        finishReason === "error"
+          ? (aiSdkError ??
+            clientTurnErrorFromMarker(streamedErrorText) ??
+            clientTurnErrorForCategory("unknown"))
+          : undefined;
+      return mergeTurnMetadata(undefined, {
         engine: "ai-sdk",
         finishReason,
+        ...(classifiedError
+          ? {
+              errorCategory: classifiedError.category,
+              errorRetryable: classifiedError.retryable,
+              ...(classifiedError.requestId ? { requestId: classifiedError.requestId } : {}),
+            }
+          : {}),
         stepCount: completedSteps,
         maxSteps: CHAT_MAX_STEPS,
         toolStepBudget: CHAT_TOOL_STEP_BUDGET,
@@ -916,6 +964,7 @@ export async function handleChatStream(
         maxStepsReached: completedSteps >= CHAT_MAX_STEPS,
         ...(lastToolName ? { lastToolName } : {}),
       });
+    };
 
     // NOTE: no client-disconnect → closeMcp listener. Generation now outlives the
     // connection (resumable producer), so MCP must stay open until the stream

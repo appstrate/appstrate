@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The MCP tool surface: three progressive-disclosure tools.
+ * The MCP tool surface: a compact progressive-disclosure and workflow layer.
  *
  * The platform exposes ~250 operations. Surfacing them as 250 individual
  * MCP tools would blow past every client's tool-definition budget (50 tools
@@ -53,6 +53,8 @@ import {
   type DocumentCapabilities,
 } from "../../services/documents.ts";
 import { isTextShapedMime, normalizeMime } from "../../services/mime-policy.ts";
+import { asString, textResult } from "./tool-results.ts";
+import { buildPackageDocumentTools } from "./package-document-tools.ts";
 
 /** Issue an in-process request back through the platform app. */
 export type Dispatch = (req: Request) => Promise<Response>;
@@ -64,6 +66,10 @@ export type McpToolName =
   | "invoke_operation"
   | "run_and_wait"
   | "list_documents"
+  | "read_document"
+  | "validate_package_document"
+  | "import_package_document"
+  | "get_runtime_capabilities"
   | "get_me";
 
 /** Outcome of an `invoke_operation` call, for audit + telemetry. */
@@ -185,14 +191,6 @@ const PROTECTED_HEADERS = new Set<string>([
 // unbounded text into the model context. Truncation is flagged in the result.
 const MAX_RESPONSE_CHARS = 100_000;
 
-function textResult(payload: unknown, isError = false): CallToolResult {
-  return { content: [{ type: "text", text: JSON.stringify(payload, null, 2) }], isError };
-}
-
-function asString(value: unknown): string | undefined {
-  return typeof value === "string" ? value : undefined;
-}
-
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   return typeof value === "object" && value !== null && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -235,7 +233,7 @@ function documentResourceLink(doc: RunAndWaitDocument): {
     name: doc.name,
     mimeType: doc.mime,
     size: doc.size,
-    description: `Document published by this run — read it with resources/read or pass its URI to a follow-up run_and_wait input file field.`,
+    description: `Document published by this run — read it with read_document or pass its URI to a follow-up run_and_wait input file field.`,
   };
 }
 
@@ -782,7 +780,8 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
       "waits. For an inline run, `manifest` is a PARTIAL canonical AFPS manifest: normally set " +
       "only a concise task-specific `display_name` plus task dependencies/configuration. The " +
       "platform derives `name` and fills omitted AFPS boilerplate, `runtime_tools` (log, output, " +
-      "publish_document), and an open object output schema. Defaults apply only to fields you omit; " +
+      "publish_document, publish_archive), and an open object output schema. Defaults apply only " +
+      "to fields you omit; " +
       "every field you provide replaces its default exactly, with no array or nested-object merge. " +
       "That includes `runtime_tools: []`, which stays empty and disables every default runtime tool. " +
       "A complete deterministic manifest may override every field, including a strict " +
@@ -796,6 +795,8 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
       "outside this run; never use context-free names such as `report.md`, `summary.md`, or " +
       "`output.md`. When selected (by default, or explicitly), `publish_document`'s own " +
       "description defines when and how the run should select a primary deliverable. " +
+      "For several files or an executable package, instruct the run to call `publish_archive` " +
+      "with an explicit file list and use the returned archive document. " +
       "Content merely returned in the output payload never becomes a document. " +
       "Chaining runs (kind:inline): feed earlier runs' deliverables to a later one by passing " +
       "their `document://` URIs in `context_documents` — never by copying their content into " +
@@ -871,7 +872,8 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
             runtime_tools: {
               type: "array",
               description:
-                "Exact runtime-tool selection. Omit for log/output/publish_document defaults; " +
+                "Exact runtime-tool selection. Omit for " +
+                "log/output/publish_document/publish_archive defaults; " +
                 "an explicit [] disables them all.",
               items: { type: "string" },
             },
@@ -1102,7 +1104,7 @@ function buildListDocumentsTool(ctx: McpToolContext): AppstrateToolDefinition {
       "(`user_upload`) and deliverables agents published from runs (`agent_output`). Filter by " +
       "`run_id`, `chat_session_id`, or `purpose`. Each row carries a `document://` URI you can " +
       "pass verbatim into a run_and_wait input file field (to feed a document to another agent) " +
-      "or read with resources/read. Returns `{ documents: [...], has_more }`.",
+      "or read with read_document. Returns `{ documents: [...], has_more }`.",
     annotations: {
       title: "List documents",
       readOnlyHint: true,
@@ -1171,6 +1173,45 @@ function buildListDocumentsTool(ctx: McpToolContext): AppstrateToolDefinition {
     return textResult({ documents, has_more: body?.hasMore === true });
   };
 
+  return { descriptor, handler };
+}
+
+function buildReadDocumentTool(ctx: McpToolContext): AppstrateToolDefinition {
+  const descriptor: Tool = {
+    name: "read_document",
+    description:
+      "Read a document:// URI through the same document ACL and storage path as resources/read. " +
+      "Small text and binary documents are returned as embedded MCP resources; oversized or " +
+      "non-downloadable documents return capability-aware metadata.",
+    annotations: {
+      title: "Read document",
+      readOnlyHint: true,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["uri"],
+      properties: {
+        uri: { type: "string", description: "A document:// URI returned by list_documents." },
+      },
+    },
+  };
+
+  const provider = buildDocumentResourceProvider(ctx);
+  const handler = async (
+    args: Record<string, unknown>,
+    extra: AppstrateRequestExtra,
+  ): Promise<CallToolResult> => {
+    const uri = asString(args.uri);
+    if (!uri) throw new McpError(ErrorCode.InvalidParams, "uri is required.");
+    const result = await provider.read(uri, extra);
+    return {
+      content: result.contents.map((resource) => ({ type: "resource", resource })),
+      isError: false,
+    } as CallToolResult;
+  };
   return { descriptor, handler };
 }
 
@@ -1345,6 +1386,8 @@ export function buildMcpTools(ctx: McpToolContext): AppstrateToolDefinition[] {
     buildInvokeTool(ctx),
     buildRunAndWaitTool(ctx),
     buildListDocumentsTool(ctx),
+    buildReadDocumentTool(ctx),
+    ...buildPackageDocumentTools(ctx),
   ];
   // get_me dispatches to GET /api/me/context. A consumer that already injects
   // that payload into its own system prompt (the chat module) drops the tool —
