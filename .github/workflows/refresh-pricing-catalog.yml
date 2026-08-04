@@ -21,28 +21,28 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Install Cosign
-        uses: sigstore/cosign-installer@d7543c93d881b35a8faa02e8e3605f69b7a1ce62 # v3.10.0
-
-      - name: Verify and export pinned LiteLLM catalog
+      - name: Validate and export pinned LiteLLM catalog
         shell: bash
         run: |
           set -euo pipefail
+          repository="$(jq -r '.image' scripts/litellm-catalog.lock.json)"
+          version="$(jq -r '.version' scripts/litellm-catalog.lock.json)"
           digest="$(jq -r '.digest' scripts/litellm-catalog.lock.json)"
           if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
             echo "Invalid OCI digest in scripts/litellm-catalog.lock.json: $digest" >&2
             exit 1
           fi
-          image="$(jq -r '.image' scripts/litellm-catalog.lock.json)@${digest}"
-          key="${RUNNER_TEMP}/litellm-cosign.pub"
+          image="${repository}@${digest}"
           output="${RUNNER_TEMP}/litellm-catalog.json"
 
-          # LiteLLM publishes signed images. Pin both its immutable OCI digest
-          # and the public-key source commit before executing third-party code.
-          curl --fail --silent --show-error --location \
-            https://raw.githubusercontent.com/BerriAI/litellm/0112e53046018d726492c814b3644b7d376029d0/cosign.pub \
-            --output "$key"
-          cosign verify --key "$key" "$image"
+          # LiteLLM does not currently publish a Cosign signature for this OCI
+          # index. Keep the executable input immutable by digest, and fail if
+          # the recorded release tag is ever repointed to different bytes.
+          resolved="sha256:$(docker buildx imagetools inspect --raw "${repository}:${version}" | sha256sum | cut -d ' ' -f 1)"
+          if [[ "$resolved" != "$digest" ]]; then
+            echo "LiteLLM tag/digest mismatch: ${repository}:${version} resolved to $resolved, expected $digest" >&2
+            exit 1
+          fi
 
           # The exporter gets no network, no capabilities and no writable root.
           # Its sole output is a JSON artifact consumed by the separate write job.
