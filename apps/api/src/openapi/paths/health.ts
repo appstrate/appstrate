@@ -38,6 +38,7 @@ export const healthPaths = {
                       },
                       agents: {
                         type: "object",
+                        description: "Agent runtime readiness established during platform boot.",
                         properties: {
                           status: { type: "string", enum: ["healthy", "degraded"] },
                         },
