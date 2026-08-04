@@ -58,9 +58,15 @@ import {
   isFinalChatStep,
   mergeTurnMetadata,
   type ChatMessageMetadata,
-  type ChatTurnErrorCategory,
   type ChatTurnFinishReason,
 } from "@appstrate/core/chat-turn-metadata";
+import {
+  classifyClientTurnError,
+  clientTurnErrorForCategory,
+  clientTurnErrorFromMarker,
+  clientTurnErrorMarker,
+  type ClientTurnError,
+} from "./turn-error.ts";
 import {
   ChatTurnDeadlineError,
   resolveTurnClosure,
@@ -247,84 +253,8 @@ function preview(value: unknown): string {
   return s.length > 300 ? `${s.slice(0, 300)}…` : s;
 }
 
-/**
- * Message surfaced to the user when a turn fails (the AI SDK masks errors by
- * default). Provider details are classified into a stable, actionable message
- * before crossing the client or persistence boundary.
- */
-export interface ClientTurnError {
-  text: string;
-  category: ChatTurnErrorCategory;
-  retryable: boolean;
-  requestId?: string;
-}
-
-/** Provider-neutral error classification used by persisted metadata and UI copy. */
-export function classifyClientTurnError(error: unknown): ClientTurnError {
-  const msg = error instanceof Error ? error.message : typeof error === "string" ? error : "";
-  const trimmed = msg.trim();
-  const requestId = /\b(req_[A-Za-z0-9_-]+)\b/.exec(trimmed)?.[1];
-  const normalized = trimmed.toLowerCase();
-
-  if (
-    /\b(401|402|403)\b/.test(normalized) ||
-    normalized.includes("insufficient balance") ||
-    normalized.includes("insufficient credit") ||
-    normalized.includes("billing") ||
-    normalized.includes("api key") ||
-    normalized.includes("authentication") ||
-    normalized.includes("unauthorized") ||
-    normalized.includes("forbidden") ||
-    normalized.includes("credential")
-  ) {
-    return {
-      text: "Le modèle sélectionné est indisponible à cause de sa configuration d’accès ou de facturation. Choisissez un autre modèle ou corrigez sa connexion, puis réessayez.",
-      category: "credential_unavailable",
-      retryable: false,
-      ...(requestId ? { requestId } : {}),
-    };
-  }
-  if (/\b429\b/.test(normalized) || normalized.includes("rate limit")) {
-    return {
-      text: "Le modèle a atteint sa limite de débit. Réessayez dans quelques instants.",
-      category: "rate_limited",
-      retryable: true,
-      ...(requestId ? { requestId } : {}),
-    };
-  }
-  if (/\b5\d\d\b/.test(normalized) || normalized.includes("upstream model error")) {
-    return {
-      text: "Le service du modèle est temporairement indisponible. Réessayez dans quelques instants.",
-      category: "upstream_unavailable",
-      retryable: true,
-      ...(requestId ? { requestId } : {}),
-    };
-  }
-  if (/\b400\b/.test(normalized) || normalized.includes("invalid request")) {
-    return {
-      text: `Le modèle a refusé la demande : ${trimmed.length > 320 ? `${trimmed.slice(0, 320)}…` : trimmed}`,
-      category: "invalid_request",
-      retryable: false,
-      ...(requestId ? { requestId } : {}),
-    };
-  }
-  if (!trimmed) {
-    return {
-      text: "Le modèle a échoué (erreur inconnue). Vérifiez la configuration des modèles de l'organisation.",
-      category: "unknown",
-      retryable: true,
-    };
-  }
-  return {
-    text: `Le modèle a échoué : ${trimmed.length > 400 ? `${trimmed.slice(0, 400)}…` : trimmed}`,
-    category: "unknown",
-    retryable: true,
-    ...(requestId ? { requestId } : {}),
-  };
-}
-
 function clientErrorMessage(error: unknown): string {
-  return classifyClientTurnError(error).text;
+  return clientTurnErrorMarker(classifyClientTurnError(error));
 }
 
 /** An armed turn ceiling: how the turn aborted, and how to cancel the timer. */
@@ -978,16 +908,21 @@ export async function handleChatStream(
     const buildTurnMetadata = (
       finishReason: ChatTurnFinishReason,
       streamedErrorText?: string,
-    ): ChatMessageMetadata =>
-      mergeTurnMetadata(undefined, {
+    ): ChatMessageMetadata => {
+      const classifiedError =
+        finishReason === "error"
+          ? (aiSdkError ??
+            clientTurnErrorFromMarker(streamedErrorText) ??
+            clientTurnErrorForCategory("unknown"))
+          : undefined;
+      return mergeTurnMetadata(undefined, {
         engine: "ai-sdk",
         finishReason,
-        ...(finishReason === "error"
+        ...(classifiedError
           ? {
-              errorText: streamedErrorText ?? aiSdkError?.text ?? clientErrorMessage(undefined),
-              errorCategory: aiSdkError?.category ?? "unknown",
-              errorRetryable: aiSdkError?.retryable ?? true,
-              ...(aiSdkError?.requestId ? { requestId: aiSdkError.requestId } : {}),
+              errorCategory: classifiedError.category,
+              errorRetryable: classifiedError.retryable,
+              ...(classifiedError.requestId ? { requestId: classifiedError.requestId } : {}),
             }
           : {}),
         stepCount: completedSteps,
@@ -997,6 +932,7 @@ export async function handleChatStream(
         maxStepsReached: completedSteps >= CHAT_MAX_STEPS,
         ...(lastToolName ? { lastToolName } : {}),
       });
+    };
 
     // NOTE: no client-disconnect → closeMcp listener. Generation now outlives the
     // connection (resumable producer), so MCP must stay open until the stream

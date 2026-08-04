@@ -480,7 +480,7 @@ describe("mcp document-backed package workflow", () => {
     headers = await apiKeyHeaders(ctx, ["agents:write"]);
   });
 
-  function packageArchive(includeEntryPoint: boolean): Uint8Array {
+  function packageArchive(includeEntryPoint: boolean, source = "// server\n"): Uint8Array {
     const packageId = "@mcppkgdoc/document-server";
     const manifest = mcpServerManifest({
       name: packageId,
@@ -490,7 +490,7 @@ describe("mcp document-backed package workflow", () => {
     const entries: Record<string, Uint8Array> = {
       "manifest.json": new TextEncoder().encode(JSON.stringify(manifest)),
     };
-    if (includeEntryPoint) entries["main.js"] = new TextEncoder().encode("// server\n");
+    if (includeEntryPoint) entries["main.js"] = new TextEncoder().encode(source);
     return zipSync(entries as unknown as Parameters<typeof zipSync>[0]);
   }
 
@@ -569,5 +569,27 @@ describe("mcp document-backed package workflow", () => {
       .from(applicationPackages)
       .where(eq(applicationPackages.packageId, packageId));
     expect(installed?.packageId).toBe(packageId);
+
+    const conflictDocId = await publishDoc(
+      scope,
+      runId,
+      "conflict.afps",
+      "application/zip",
+      packageArchive(true, "// different server bytes\n"),
+    );
+    const conflicted = await rpc(headers, {
+      jsonrpc: "2.0",
+      id: 3,
+      method: "tools/call",
+      params: {
+        name: "validate_package_document",
+        arguments: { document_uri: `document://${conflictDocId}` },
+      },
+    });
+    expect(toolData(conflicted.envelope).data).toMatchObject({
+      valid: true,
+      importable: false,
+      conflicts: [{ identity: `${packageId}@1.0.0` }],
+    });
   });
 });

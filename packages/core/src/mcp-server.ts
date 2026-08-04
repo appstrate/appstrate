@@ -42,27 +42,37 @@ export const MCP_SERVER_RUNTIME_CAPABILITIES = {
   node: {
     manifestVersion: "0.3",
     manifestServerType: "node",
+    manifestCommand: "node",
+    manifestArgsBeforeEntryPoint: [],
     entryPoint: "JavaScript entry point present in the archive",
   },
   bun: {
     manifestVersion: "0.3",
     manifestServerType: "node",
+    manifestCommand: "bun",
+    manifestArgsBeforeEntryPoint: [],
     entryPoint: "JavaScript or TypeScript entry point present in the archive",
     runtimeOverride: "bun",
   },
   python: {
     manifestVersion: "0.3",
     manifestServerType: "python",
+    manifestCommand: "python3",
+    manifestArgsBeforeEntryPoint: [],
     entryPoint: "Python entry point present in the archive",
   },
   uv: {
     manifestVersion: "0.4",
     manifestServerType: "uv",
+    manifestCommand: "uv",
+    manifestArgsBeforeEntryPoint: ["run"],
     entryPoint: "Python entry point present in the archive; uv resolves project dependencies",
   },
   binary: {
     manifestVersion: "0.3",
     manifestServerType: "binary",
+    manifestCommand: null,
+    manifestArgsBeforeEntryPoint: [],
     entryPoint: "Executable entry point present in the archive",
   },
 } as const;
@@ -150,6 +160,17 @@ export const mcpServerManifestSchema = afpsMcpServerManifestSchema.superRefine((
         `Unsupported MCP server runtime ${JSON.stringify(appstrateRuntime.runtime)}. ` +
         `Expected one of: ${MCP_SERVER_RUNTIMES.join(", ")}.`,
     });
+  } else if (appstrateRuntime?.runtime !== undefined) {
+    const serverType = (m as { server?: { type?: unknown } }).server?.type;
+    const compatibleType =
+      MCP_SERVER_RUNTIME_CAPABILITIES[appstrateRuntime.runtime].manifestServerType;
+    if (serverType !== compatibleType) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["_meta", MCP_SERVER_APPSTRATE_META_KEY, "runtime"],
+        message: `Runtime '${appstrateRuntime.runtime}' requires server.type '${compatibleType}'.`,
+      });
+    }
   }
 });
 

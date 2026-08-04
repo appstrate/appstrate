@@ -241,6 +241,45 @@ describe("mcp-server package routes", () => {
         installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, SERVER_ID),
       ).rejects.toMatchObject({ status: 422, code: "bundle_invalid" });
     });
+
+    it("refuses to publish a draft whose new entry point is absent from stored files", async () => {
+      await importExecutableServer();
+      const [row] = await db
+        .select({ lockVersion: packages.lockVersion })
+        .from(packages)
+        .where(eq(packages.id, SERVER_ID))
+        .limit(1);
+      const manifest = mcpServerManifest({
+        name: SERVER_ID,
+        version: "1.1.0",
+        entryPoint: "missing.js",
+      });
+      const update = await app.request(`/api/packages/mcp-servers/${SERVER_ID}`, {
+        method: "PUT",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ manifest, lock_version: row!.lockVersion }),
+      });
+      expect(update.status).toBe(200);
+
+      const publish = await app.request(`/api/packages/mcp-servers/${SERVER_ID}/versions`, {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({}),
+      });
+      expect(publish.status).toBe(400);
+      const body = (await publish.json()) as { code: string; detail: string; param?: string };
+      expect(body).toMatchObject({
+        code: "invalid_request",
+        param: "manifest.server.entry_point",
+      });
+      expect(body.detail).toContain("missing.js");
+
+      const versions = await db
+        .select({ version: packageVersions.version })
+        .from(packageVersions)
+        .where(eq(packageVersions.packageId, SERVER_ID));
+      expect(versions.map((version) => version.version)).toEqual(["1.0.0"]);
+    });
   });
 
   // ═══════════════════════════════════════════════

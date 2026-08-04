@@ -243,6 +243,40 @@ export interface ImportBundleResult {
   warnings: string[];
 }
 
+export interface BundleImportAuditRecord {
+  resourceId: string;
+  after: {
+    type: string | null;
+    version: string | null;
+    via: "import:bundle" | "import:document";
+    root: boolean;
+    document_id?: string;
+  };
+}
+
+/** Pure audit projection shared by HTTP and MCP document import callers. */
+export function bundleImportAuditRecords(
+  result: ImportBundleResult,
+  source: { via: "import:bundle" } | { via: "import:document"; documentId: string },
+): BundleImportAuditRecord[] {
+  return result.imported.flatMap((entry) => {
+    if (entry.status !== "inserted") return [];
+    const identity = parsePackageIdentity(entry.identity);
+    return [
+      {
+        resourceId: identity?.packageId ?? entry.identity,
+        after: {
+          type: entry.type ?? null,
+          version: identity?.version ?? null,
+          via: source.via,
+          root: entry.identity === `${result.root_package_id}@${result.root_version}`,
+          ...(source.via === "import:document" ? { document_id: source.documentId } : {}),
+        },
+      },
+    ];
+  });
+}
+
 export interface BundleImportPreflight {
   bundle: Bundle;
   conflicts: BundleConflict[];

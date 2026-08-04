@@ -42,5 +42,13 @@
   "run.status.timeout": "Timed out",
   "run.status.cancelled": "Cancelled",
   "run.status.done": "Finished",
-  "model.needsReconnection": "Reconnection required"
+  "model.needsReconnection": "Reconnection required",
+  "turn.error.credentialUnavailable": "The selected model is unavailable because of its access or billing configuration. Choose another model or fix its connection, then try again.",
+  "turn.error.rateLimited": "The model reached its rate limit. Try again in a few moments.",
+  "turn.error.upstreamUnavailable": "The model service is temporarily unavailable. Try again in a few moments.",
+  "turn.error.invalidRequest": "The model rejected the request. Change it before trying again.",
+  "turn.error.unknown": "Generation failed. Try again or check the model configuration.",
+  "turn.error.requestId": "Request ID: {{id}}",
+  "turn.retry": "Retry",
+  "turn.retryPrompt": "Retry my last request. Check the current state first before repeating an action that may already have succeeded."
 }

@@ -45,6 +45,12 @@ import {
 } from "@appstrate/core/chat-turn-metadata";
 import { armTurnDeadline, createTurnClosureStream } from "../src/chat-stream.ts";
 import { ChatTurnDeadlineError, turnDeadlineNoticeText } from "../src/turn-closure.ts";
+import {
+  classifyClientTurnError,
+  clientTurnErrorForCategory,
+  clientTurnErrorFromMarker,
+  clientTurnErrorMarker,
+} from "../src/turn-error.ts";
 
 const ZERO_USAGE: LanguageModelV3Usage = {
   inputTokens: { total: 0, noCache: 0, cacheRead: 0, cacheWrite: 0 },
@@ -56,10 +62,16 @@ function buildMetadata(
   finishReason: ChatTurnFinishReason,
   errorText?: string,
 ): ChatMessageMetadata {
+  const classified =
+    finishReason === "error"
+      ? (clientTurnErrorFromMarker(errorText) ?? clientTurnErrorForCategory("unknown"))
+      : undefined;
   return mergeTurnMetadata(undefined, {
     engine: "ai-sdk",
     finishReason,
-    ...(errorText ? { errorText } : {}),
+    ...(classified
+      ? { errorCategory: classified.category, errorRetryable: classified.retryable }
+      : {}),
     stepCount: 1,
     maxSteps: CHAT_MAX_STEPS,
     maxStepsReached: false,
@@ -163,7 +175,7 @@ async function runTurn(options: {
   try {
     const stream = result
       .toUIMessageStream({
-        onError: (err) => String(err),
+        onError: (err) => clientTurnErrorMarker(classifyClientTurnError(err)),
         generateMessageId: () => "assistant-1",
         messageMetadata: ({ part }) =>
           part.type === "finish" ? buildMetadata(part.finishReason ?? "unknown") : undefined,
@@ -247,8 +259,10 @@ describe("ai-sdk turn deadline", () => {
     expect(turnMetadataFromMessage(message)?.finishReason).not.toBe("deadline");
     expect(turnMetadataFromMessage(message)).toMatchObject({
       finishReason: "error",
-      errorText: "Error: upstream exploded",
+      errorCategory: "unknown",
+      errorRetryable: true,
     });
+    expect(turnMetadataFromMessage(message)?.errorText).toBeUndefined();
   });
 
   it("does not mistake an explicit user stop for a deadline", async () => {
@@ -311,7 +325,10 @@ describe("createTurnClosureStream", () => {
     const out = await through(
       [
         { type: "start", messageId: "a1" },
-        { type: "error", errorText: "safe upstream failure" },
+        {
+          type: "error",
+          errorText: clientTurnErrorMarker(clientTurnErrorForCategory("upstream_unavailable")),
+        },
       ],
       controller.signal,
     );
@@ -321,7 +338,8 @@ describe("createTurnClosureStream", () => {
     expect(message?.id).toBe("a1");
     expect(turnMetadataFromMessage(message)).toMatchObject({
       finishReason: "error",
-      errorText: "safe upstream failure",
+      errorCategory: "upstream_unavailable",
+      errorRetryable: true,
     });
   });
 });

@@ -47,6 +47,8 @@ import { parseResume, INTEGRATION_RESUME_MARKER } from "./auth-offer.ts";
 import { IntegrationIcon } from "./integration-icon.tsx";
 import { resolveAttachmentContent } from "./run-events.ts";
 import { stagedImagePreviewUrl } from "./upload.ts";
+import { useChatHost } from "./runtime-context.ts";
+import { clientTurnErrorFromMarker } from "../turn-error.ts";
 import {
   DocumentAttachment,
   isImageMime,
@@ -400,29 +402,41 @@ function TurnLimitNotice() {
   );
 }
 
-const GENERIC_TURN_ERROR = "La génération a échoué.";
+const TURN_ERROR_KEY = {
+  credential_unavailable: "turn.error.credentialUnavailable",
+  rate_limited: "turn.error.rateLimited",
+  upstream_unavailable: "turn.error.upstreamUnavailable",
+  invalid_request: "turn.error.invalidRequest",
+  unknown: "turn.error.unknown",
+} as const;
 
 /**
  * THE failure display for a turn — one component, one visual, live or
- * reloaded. The persisted turn metadata (`finishReason: "error"` + client-safe
- * `errorText`) is the preferred source since it survives reload; the transient
- * assistant-ui error status is the fallback for failures that never reached a
- * finish chunk (e.g. a hard ai-sdk stream error).
+ * reloaded. The persisted provider-neutral category is localized here and
+ * survives reload; the transient assistant-ui marker covers failures that have
+ * not reached a finish chunk yet. `errorText` is legacy-message fallback only.
  */
 function MessageError() {
+  const { t } = useChatHost();
   const errorState = useAuiState(({ message: m }) => {
     const turn = turnMetadataFromMessage(sourceMessage(m));
     if (turn?.finishReason === "error") {
+      const category = turn.errorCategory ?? "unknown";
       return {
-        text: turn.errorText ?? GENERIC_TURN_ERROR,
+        text: turn.errorCategory
+          ? t(TURN_ERROR_KEY[category])
+          : (turn.errorText ?? t("turn.error.unknown")),
         retryable: turn.errorRetryable !== false,
+        requestId: turn.requestId,
       };
     }
     if (m.status?.type === "incomplete" && m.status.reason === "error") {
       const err = m.status.error;
+      const classified = clientTurnErrorFromMarker(err);
       return {
-        text: typeof err === "string" && err ? err : GENERIC_TURN_ERROR,
-        retryable: true,
+        text: classified ? t(TURN_ERROR_KEY[classified.category]) : t("turn.error.unknown"),
+        retryable: classified?.retryable ?? true,
+        requestId: undefined,
       };
     }
     return null;
@@ -433,18 +447,25 @@ function MessageError() {
       role="alert"
       className="border-destructive/40 bg-destructive/10 text-destructive mt-2 flex flex-wrap items-center justify-between gap-2 rounded-md border px-3 py-2 text-sm break-words"
     >
-      <span>{errorState.text}</span>
+      <span>
+        {errorState.text}
+        {errorState.requestId ? (
+          <span className="mt-1 block text-xs opacity-80">
+            {t("turn.error.requestId", { id: errorState.requestId })}
+          </span>
+        ) : null}
+      </span>
       {errorState.retryable ? (
         <ThreadPrimitive.If running={false}>
           <ThreadPrimitive.Suggestion
-            prompt="Réessaie ma dernière demande. Vérifie d'abord l'état actuel avant de répéter une action qui aurait peut-être déjà réussi."
+            prompt={t("turn.retryPrompt")}
             method="replace"
             autoSend
             asChild
           >
             <Button variant="outline" size="sm" className="shrink-0">
               <RotateCcwIcon className="size-3.5" />
-              Réessayer
+              {t("turn.retry")}
             </Button>
           </ThreadPrimitive.Suggestion>
         </ThreadPrimitive.If>

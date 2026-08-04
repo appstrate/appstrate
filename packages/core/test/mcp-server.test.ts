@@ -256,4 +256,21 @@ describe("getMcpServerRuntime", () => {
       ).toBe(true);
     }
   });
+
+  it("rejects a runtime override incompatible with server.type", () => {
+    const r = mcpServerManifestSchema.safeParse({
+      ...manifest({ "dev.appstrate/mcp-server": { runtime: "bun" } }),
+      server: {
+        type: "python",
+        entry_point: "./server.py",
+        mcp_config: { command: "python3", args: ["./server.py"] },
+      },
+    });
+    expect(r.success).toBe(false);
+    if (!r.success) {
+      expect(r.error.issues.map((issue) => issue.message)).toContain(
+        "Runtime 'bun' requires server.type 'node'.",
+      );
+    }
+  });
 });

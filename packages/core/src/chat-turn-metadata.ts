@@ -121,11 +121,7 @@ export function formatTurnBudgetNote(input: { remainingMs: number; stepsUsed: nu
 export interface AppstrateTurnMetadata {
   engine: ChatTurnEngine;
   finishReason?: ChatTurnFinishReason;
-  /**
-   * Client-safe failure message when `finishReason` is "error". Persisted with
-   * the turn (unlike the transient UI-stream `error` chunk) so a reloaded
-   * conversation can still show why the turn failed.
-   */
+  /** Legacy client-safe failure copy; new turns persist a category for localization. */
   errorText?: string;
   /** Stable, provider-neutral class for retry UI + telemetry. */
   errorCategory?: ChatTurnErrorCategory;

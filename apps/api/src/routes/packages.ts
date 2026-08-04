@@ -11,8 +11,7 @@ import { packages, profiles } from "@appstrate/db/schema";
 import { db } from "@appstrate/db/client";
 import { listResponse } from "../lib/list-response.ts";
 import { postInstallPackage } from "../services/post-install-package.ts";
-import { handleImportBundle } from "../services/bundle-import.ts";
-import { parsePackageIdentity } from "@appstrate/afps-runtime/bundle";
+import { bundleImportAuditRecords, handleImportBundle } from "../services/bundle-import.ts";
 import { installPackage, hasPackageAccess } from "../services/application-packages.ts";
 import { resolveIntegrationActivations } from "../services/integration-connections.ts";
 import { parseManifestFromFiles } from "../lib/manifest-parser.ts";
@@ -1258,6 +1257,12 @@ function makeCreateVersionHandler(rcfg: PackageRouteConfig) {
           "This version is already published and immutable — bump the version to publish the changed content",
         );
       }
+      if (result.error === "invalid_bundle") {
+        throw invalidRequest(
+          result.detail ?? "MCP-server package archive is not executable",
+          "manifest.server.entry_point",
+        );
+      }
       throw invalidRequest("Failed to create version (invalid or duplicate)");
     }
 
@@ -1894,19 +1899,12 @@ export function createPackagesRouter() {
     }
     // One audit event per package version actually written — "reused"
     // entries changed no state. `recordAudit*` never throws.
-    for (const entry of result.imported) {
-      if (entry.status !== "inserted") continue;
-      const identity = parsePackageIdentity(entry.identity);
+    for (const audit of bundleImportAuditRecords(result, { via: "import:bundle" })) {
       await recordAuditFromContext(c, {
         action: "package.version_created",
         resourceType: "package",
-        resourceId: identity?.packageId ?? entry.identity,
-        after: {
-          type: entry.type ?? null,
-          version: identity?.version ?? null,
-          via: "import:bundle",
-          root: entry.identity === `${result.root_package_id}@${result.root_version}`,
-        },
+        resourceId: audit.resourceId,
+        after: audit.after,
       });
     }
     return c.json(result, 201);

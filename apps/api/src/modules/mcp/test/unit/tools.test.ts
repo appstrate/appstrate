@@ -18,6 +18,7 @@ import {
 } from "../../catalog.ts";
 import { buildMcpTools, type Dispatch } from "../../tools.ts";
 import { internalDispatchHeader } from "../../../../lib/internal-dispatch.ts";
+import { validateManifest } from "@appstrate/core/validation";
 
 // The handlers ignore `extra`; supply a typed placeholder.
 const noExtra = {} as unknown as AppstrateRequestExtra;
@@ -490,7 +491,8 @@ describe("buildMcpTools contextInjected", () => {
   it("exposes the runtime registry used by package authoring and adapters", async () => {
     const { byName } = makeTools(["mcp:read"], true);
     const result = await byName.get("get_runtime_capabilities")!.handler({}, noExtra);
-    expect(parseResult(result)).toMatchObject({
+    const payload = parseResult(result);
+    expect(payload).toMatchObject({
       archive_required: true,
       entry_point_must_exist: true,
       package_archive_max_bytes: 10 * 1024 * 1024,
@@ -500,12 +502,52 @@ describe("buildMcpTools contextInjected", () => {
           runtime: "bun",
           manifest_version: "0.3",
           server_type: "node",
-          runtime_override: "bun",
+          manifest_template: {
+            manifest_version: "0.3",
+            schema_version: "0.1",
+            type: "mcp-server",
+            server: {
+              type: "node",
+              entry_point: "<archive-relative-entry-point>",
+              mcp_config: {
+                command: "bun",
+                args: ["<archive-relative-entry-point>"],
+              },
+            },
+            _meta: { "dev.appstrate/mcp-server": { runtime: "bun" } },
+          },
         },
         { runtime: "python", manifest_version: "0.3", server_type: "python" },
         { runtime: "uv", manifest_version: "0.4", server_type: "uv" },
         { runtime: "binary", manifest_version: "0.3", server_type: "binary" },
       ],
     });
+
+    const runtimes = payload.runtimes as Array<Record<string, unknown>>;
+    expect(runtimes.map((entry) => entry.runtime)).toEqual([
+      "node",
+      "bun",
+      "python",
+      "uv",
+      "binary",
+    ]);
+    for (const runtime of runtimes) {
+      const entryPoint = runtime.runtime === "bun" ? "server.ts" : "server.js";
+      const template = structuredClone(runtime.manifest_template) as Record<string, unknown>;
+      template.name = "@test/authored-server";
+      template.display_name = "Authored server";
+      const server = template.server as {
+        entry_point: string;
+        mcp_config: { command: string; args: string[] };
+      };
+      server.entry_point = entryPoint;
+      if (server.mcp_config.command === "<archive-relative-entry-point>") {
+        server.mcp_config.command = entryPoint;
+      }
+      server.mcp_config.args = server.mcp_config.args.map((arg) =>
+        arg === "<archive-relative-entry-point>" ? entryPoint : arg,
+      );
+      expect(validateManifest(template)).toMatchObject({ valid: true, errors: [] });
+    }
   });
 });

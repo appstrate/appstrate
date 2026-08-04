@@ -27,7 +27,10 @@ import { randomUUID } from "node:crypto";
 import { sign } from "@appstrate/afps-runtime/events";
 import { resolveWorkspaceFile } from "@appstrate/afps-runtime/resolvers";
 import { getErrorMessage } from "@appstrate/core/errors";
-import { documentPublishedEvent } from "@appstrate/core/runtime-tool-defs";
+import {
+  documentPublishedEvent,
+  PUBLISH_ARCHIVE_MAX_FILES,
+} from "@appstrate/core/runtime-tool-defs";
 import { encodeFilenameHeader, sanitizeFilename } from "@appstrate/core/naming";
 import { zipArtifact } from "@appstrate/core/zip";
 import type {
@@ -339,7 +342,6 @@ export interface RunArchivePublisherDeps {
   maxArchiveBytes?: number;
 }
 
-const MAX_ARCHIVE_FILES = 1_000;
 const DEFAULT_MAX_ARCHIVE_BYTES = 100 * 1024 * 1024;
 
 /**
@@ -352,8 +354,8 @@ export function createRunArchivePublisher(deps: RunArchivePublisherDeps): Archiv
   const maxArchiveBytes = deps.maxArchiveBytes ?? DEFAULT_MAX_ARCHIVE_BYTES;
 
   return async (paths, name, presentation) => {
-    if (paths.length === 0 || paths.length > MAX_ARCHIVE_FILES) {
-      throw new Error(`archive must contain between 1 and ${MAX_ARCHIVE_FILES} files`);
+    if (paths.length === 0 || paths.length > PUBLISH_ARCHIVE_MAX_FILES) {
+      throw new Error(`archive must contain between 1 and ${PUBLISH_ARCHIVE_MAX_FILES} files`);
     }
 
     const workspaceRoot = await fs.realpath(deps.workspace);
@@ -364,6 +366,12 @@ export function createRunArchivePublisher(deps: RunArchivePublisherDeps): Archiv
       const { absPath, stat } = await resolveWorkspaceFile(workspaceRoot, relPath);
       if (!stat.isFile()) {
         throw new Error(`'${relPath}' is not a regular file`);
+      }
+
+      // Reject from metadata before allocating the file. Keep the post-read
+      // accounting below as a race guard if the file grows between stat/read.
+      if (sourceBytes + stat.size > maxArchiveBytes) {
+        throw new Error(`archive sources exceed the ${maxArchiveBytes}-byte limit`);
       }
 
       const archivePath = path.relative(workspaceRoot, absPath).split(path.sep).join("/");

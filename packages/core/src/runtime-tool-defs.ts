@@ -419,6 +419,9 @@ export type ArchivePublisher = (
   presentation?: "primary",
 ) => Promise<PublishedDocument>;
 
+/** Shared model/runtime ceiling for one explicit archive publication. */
+export const PUBLISH_ARCHIVE_MAX_FILES = 1_000;
+
 /**
  * Build the `publish_document` runtime tool def around an injected
  * {@link DocumentUploader}. Unlike the pure event emitters this tool performs
@@ -522,7 +525,7 @@ export function buildPublishArchiveDef(publisher: ArchivePublisher): RuntimeTool
           paths: {
             type: "array",
             minItems: 1,
-            maxItems: 1_000,
+            maxItems: PUBLISH_ARCHIVE_MAX_FILES,
             uniqueItems: true,
             items: { type: "string", minLength: 1 },
             description:
@@ -551,11 +554,11 @@ export function buildPublishArchiveDef(publisher: ArchivePublisher): RuntimeTool
       if (
         !Array.isArray(paths) ||
         paths.length === 0 ||
-        paths.length > 1_000 ||
+        paths.length > PUBLISH_ARCHIVE_MAX_FILES ||
         paths.some((entry) => typeof entry !== "string" || entry.length === 0)
       ) {
         return toolError(
-          "publish_archive requires between 1 and 1000 non-empty workspace-relative `paths`.",
+          `publish_archive requires between 1 and ${PUBLISH_ARCHIVE_MAX_FILES} non-empty workspace-relative \`paths\`.`,
         );
       }
       if (new Set(paths).size !== paths.length) {
