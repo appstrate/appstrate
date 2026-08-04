@@ -17,6 +17,8 @@
  *     handler — routes must never run before their dependencies exist.
  *   - Once `markServerReady()` fires, the gate is transparent: requests reach
  *     the real handlers, `/health` runs its real checks.
+ *   - Once `markServerDraining()` fires, `/health` returns 503 while normal
+ *     requests keep flowing until the process receives its shutdown signal.
  *
  * The gate is mounted before EVERY other middleware except request-id /
  * telemetry / client-ip / CORS / body-limit, so this test mounts it the same
@@ -27,6 +29,7 @@ import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { Hono } from "hono";
 import healthRouter, {
   bootGate,
+  markServerDraining,
   markServerReady,
   _resetServerReadyForTesting,
 } from "../../../src/routes/health.ts";
@@ -137,5 +140,34 @@ describe("boot gate", () => {
     expect(body.status).not.toBe("starting");
     expect(body.checks).toBeDefined();
     expect(typeof body.uptime_ms).toBe("number");
+  });
+
+  // ─── During a rolling-deploy drain ─────────────────────────────
+
+  it("withdraws readiness without rejecting normal requests", async () => {
+    const app = buildGatedApp();
+    markServerReady();
+    markServerDraining();
+
+    const health = await app.request("/health");
+    expect(health.status).toBe(503);
+    expect(health.headers.get("Retry-After")).toBe("1");
+    expect(await health.json()).toMatchObject({ status: "draining" });
+
+    // The load balancer may need one health-check interval to observe the
+    // transition. Requests routed during that window must still complete.
+    const request = await app.request("/api/agents");
+    expect(request.status).toBe(200);
+    expect(await request.json()).toEqual({ data: [] });
+  });
+
+  it("does not become ready again if boot finishes after draining starts", async () => {
+    const app = buildGatedApp();
+    markServerDraining();
+    markServerReady();
+
+    const health = await app.request("/health");
+    expect(health.status).toBe(503);
+    expect(await health.json()).toMatchObject({ status: "draining" });
   });
 });

@@ -35,7 +35,7 @@ import { createUploadsRouter, createUploadContentRouter } from "./routes/uploads
 import { createDocumentsRouter, createDocumentPreviewRouter } from "./routes/documents.ts";
 import { createAdminStorageDeletionRouter } from "./routes/admin-storage-deletion.ts";
 import { createSpaFallbackHandler } from "./routes/spa.ts";
-import healthRouter, { bootGate, markServerReady } from "./routes/health.ts";
+import healthRouter, { bootGate, markServerDraining, markServerReady } from "./routes/health.ts";
 import { createIntegrationsRouter } from "./routes/integrations.ts";
 import { createCredentialProxyRouter } from "./routes/credential-proxy.ts";
 import { createLlmProxyRouter } from "./routes/llm-proxy.ts";
@@ -279,7 +279,12 @@ function buildAppConfigScript(): string {
 
 // Graceful shutdown
 const shutdown = createShutdownHandler(() => {
+  markServerDraining();
   shuttingDown = true;
+});
+process.on("SIGURG", () => {
+  markServerDraining();
+  logger.info("Server draining: readiness disabled");
 });
 process.on("SIGINT", () => void shutdown());
 process.on("SIGTERM", () => void shutdown());

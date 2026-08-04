@@ -11,7 +11,9 @@ const startedAt = Date.now();
 
 // ─── Readiness ───
 
-let serverReady = false;
+type ServerReadiness = "starting" | "ready" | "draining";
+
+let serverReadiness: ServerReadiness = "starting";
 
 /**
  * Flip the process to "ready". Called once from `index.ts` when
@@ -20,12 +22,26 @@ let serverReady = false;
  * this; see {@link bootGate}.
  */
 export function markServerReady(): void {
-  serverReady = true;
+  if (serverReadiness === "starting") serverReadiness = "ready";
+}
+
+/**
+ * Stop advertising this process as ready before its graceful shutdown starts.
+ *
+ * Rolling deploys trigger this with SIGURG, wait for load balancers to evict
+ * the replica, then send SIGTERM. SIGURG is deliberately used because its
+ * default action is to be ignored: the same hook is therefore safe during the
+ * first rollout from an older image which has no drain-signal handler. Normal
+ * application requests keep flowing during that propagation window so a proxy
+ * which still has the old backend cached does not receive an avoidable 503.
+ */
+export function markServerDraining(): void {
+  serverReadiness = "draining";
 }
 
 /** Test-only reset of the module-level readiness flag. */
 export function _resetServerReadyForTesting(): void {
-  serverReady = false;
+  serverReadiness = "starting";
 }
 
 /**
@@ -46,12 +62,13 @@ export function _resetServerReadyForTesting(): void {
  */
 export function bootGate(): MiddlewareHandler {
   return async (c, next) => {
-    if (serverReady) return next();
+    if (serverReadiness === "ready") return next();
     if (c.req.path === "/health") {
-      return c.json({ status: "starting", version: getVersionInfo() }, 503, {
+      return c.json({ status: serverReadiness, version: getVersionInfo() }, 503, {
         "Retry-After": "1",
       });
     }
+    if (serverReadiness === "draining") return next();
     throw new ApiError({
       status: 503,
       code: "starting",
