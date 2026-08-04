@@ -58,6 +58,10 @@ import { detachOrDeleteContainedDocuments } from "../documents.ts";
 import { normalizeScope } from "@appstrate/core/naming";
 import type { LlmUsageLedgerRow, ModelCost } from "@appstrate/core/module";
 import type { AppScope, OrgScope } from "../../lib/scope.ts";
+import {
+  modelGenerationSettingsSchema,
+  type ModelGenerationSettings,
+} from "@appstrate/core/model-generation";
 import type {
   RunWireDto,
   EnrichedRun,
@@ -257,6 +261,8 @@ function runRowToWireDto(row: typeof runs.$inferSelect): RunWireDto {
     proxy_label: row.proxyLabel,
     model_label: row.modelLabel,
     model_source: row.modelSource,
+    generation: row.generationConfig,
+    generation_override: row.generationConfigOverride,
     runner_name: row.runnerName,
     runner_kind: row.runnerKind,
     // Stored bare on historical rows; emitted with the `@` sigil so every
@@ -428,6 +434,9 @@ interface CreateRunParams {
    * container's word. Absent/null = the model resolved no pricing.
    */
   modelCost?: ModelCost | null;
+  /** Effective generation controls and the raw invocation layer. */
+  generationConfig?: ModelGenerationSettings | null;
+  generationConfigOverride?: ModelGenerationSettings | null;
   apiKeyId?: string;
   /** Snapshot of the agent's @scope (e.g. "@acme") at run creation. */
   agentScope?: string | null;
@@ -560,6 +569,14 @@ export async function createRun(scope: AppScope, params: CreateRunParams): Promi
       modelLabel: params.modelLabel,
       modelSource: params.modelSource,
       modelCost: params.modelCost ?? null,
+      generationConfig:
+        params.generationConfig == null
+          ? null
+          : modelGenerationSettingsSchema.parse(params.generationConfig),
+      generationConfigOverride:
+        params.generationConfigOverride == null
+          ? null
+          : modelGenerationSettingsSchema.parse(params.generationConfigOverride),
       applicationId: scope.applicationId,
       apiKeyId: params.apiKeyId,
       runNumber,

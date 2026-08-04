@@ -4,6 +4,8 @@ import type { z } from "zod";
 import type { ModelCost } from "@appstrate/core/module";
 import type { TokenUsage } from "@appstrate/core/token-usage";
 import type { ModelApiShape } from "@appstrate/core/sidecar-types";
+import type { ModelGenerationCapabilities } from "@appstrate/core/model-generation";
+import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 
 export {
   ASSIGNABLE_ORG_ROLES,
@@ -119,6 +121,9 @@ export interface RunWireDto {
   proxy_label: string | null;
   model_label: string | null;
   model_source: string | null;
+  /** Effective generation controls frozen at kickoff and raw override layer. */
+  generation: ModelGenerationSettings | null;
+  generation_override: ModelGenerationSettings | null;
   runner_name: string | null;
   runner_kind: string | null;
   agent_scope: string | null;
@@ -332,6 +337,7 @@ export interface ScheduleWireDto {
   timezone: string | null;
   input: Record<string, unknown> | null;
   config_override: Record<string, unknown> | null;
+  generation_config_override: ModelGenerationSettings | null;
   model_id_override: string | null;
   proxy_id_override: string | null;
   version_override: string | null;
@@ -674,6 +680,8 @@ export interface ModelMetadata {
 
 export interface OrgModelInfo extends ModelMetadata {
   id: string;
+  /** Normalized request controls for the backing catalog model; null for aliases. */
+  generation: ModelGenerationCapabilities | null;
   /** Always set — resolvers fall back to catalog label then modelId. */
   label: string;
   /**
@@ -822,6 +830,8 @@ export interface CatalogModelEntry {
   /** Provider-defined ceiling for the response. Null when unpublished. */
   maxTokens: number | null;
   capabilities: readonly string[];
+  /** Normalized generation controls derived from the pinned LiteLLM snapshot. */
+  generation?: ModelGenerationCapabilities;
   /** Per-1M-token pricing in USD. */
   cost: ModelCost;
 }
@@ -885,6 +895,7 @@ export interface ApplicationInfo {
 export interface InstalledPackage {
   packageId: string;
   config: Record<string, unknown>;
+  generationConfig: ModelGenerationSettings | null;
   modelId: string | null;
   proxyId: string | null;
   version_id: number | null;
@@ -905,6 +916,8 @@ export interface InstalledPackage {
  */
 export interface ResolvedRunConfig {
   config: Record<string, unknown>;
+  /** Optional for compatibility with older servers; current API always emits it. */
+  generation?: ModelGenerationSettings | null;
   modelId: string | null;
   proxyId: string | null;
   /** Pinned semver label (`1.2.3`), or null when the app uses the floating dist-tag. */

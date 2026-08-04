@@ -21,6 +21,7 @@ const base: OrgModelInfo = {
   providerName: "OpenAI-compatible (custom)",
   baseUrl: "https://api.deepseek.com/v1",
   modelId: "deepseek-chat",
+  generation: null,
   input: ["text"],
   contextWindow: 64000,
   maxTokens: 8192,

@@ -42,5 +42,15 @@
   "run.status.timeout": "Expiré",
   "run.status.cancelled": "Annulé",
   "run.status.done": "Terminé",
-  "model.needsReconnection": "Reconnexion requise"
+  "model.needsReconnection": "Reconnexion requise",
+  "generation.title": "Génération",
+  "generation.temperature": "Température",
+  "generation.reasoning": "Raisonnement",
+  "generation.inherit": "Valeur du fournisseur",
+  "generation.level.off": "Désactivé",
+  "generation.level.minimal": "Minimal",
+  "generation.level.low": "Faible",
+  "generation.level.medium": "Moyen",
+  "generation.level.high": "Élevé",
+  "generation.level.xhigh": "Très élevé"
 }

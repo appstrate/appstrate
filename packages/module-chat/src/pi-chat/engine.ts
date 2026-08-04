@@ -28,6 +28,7 @@ import {
   loadPiCodingAgentSdk,
   derivePiCompactionSettings,
   deriveProviderFromApi,
+  preserveRequestedThinkingLevel,
   type Api,
   type Model,
 } from "@appstrate/runner-pi";
@@ -51,6 +52,7 @@ import {
   turnDeadlineNoticeText,
   turnNoticeChunks,
 } from "../turn-closure.ts";
+import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 
 /**
  * Wall-clock ceiling for a single chat turn. A turn fans out into up to
@@ -76,6 +78,7 @@ export interface PiSubscriptionChatInput {
   prompt: string;
   /** Base system persona (+ caller context) — MCP instructions are appended here. */
   system: string;
+  generation: ModelGenerationSettings;
   /** Platform HTTP MCP server (meta-tools) — the engine opens its own client. */
   platformMcp: { url: string; headers: Record<string, string> };
   /** Aborts when the turn is explicitly stopped (decoupled from client disconnect). */
@@ -166,6 +169,10 @@ export function runPiSubscriptionChat(input: PiSubscriptionChatInput): Response 
           contextWindow: model.contextWindow ?? undefined,
           maxTokens: model.maxTokens ?? undefined,
         } as Model<Api>;
+        const sessionModel = preserveRequestedThinkingLevel(
+          piModel,
+          input.generation.reasoningLevel ?? "medium",
+        );
 
         // Real subscription token in-memory only — pi-ai emits the OAuth request
         // shape from it natively (never persisted, never sent to the client).
@@ -181,11 +188,22 @@ export function runPiSubscriptionChat(input: PiSubscriptionChatInput): Response 
           : input.system;
         system = applyOperationIndexPolicy(system, model.apiShape);
 
+        const generationExtensions =
+          input.generation.temperature === undefined
+            ? []
+            : [
+                (pi: import("@appstrate/runner-pi").ExtensionAPI) => {
+                  pi.on("before_provider_request", (event) => {
+                    if (!event.payload || typeof event.payload !== "object") return undefined;
+                    return { ...event.payload, temperature: input.generation.temperature };
+                  });
+                },
+              ];
         const resourceLoader = new DefaultResourceLoader({
           cwd: "/tmp",
           agentDir: "/tmp/pi-chat",
           settingsManager: SettingsManager.inMemory(),
-          extensionFactories: mcpTools.extensionFactories,
+          extensionFactories: [...mcpTools.extensionFactories, ...generationExtensions],
           noExtensions: false,
           noPromptTemplates: true,
           noThemes: true,
@@ -196,8 +214,8 @@ export function runPiSubscriptionChat(input: PiSubscriptionChatInput): Response 
         const { session } = await createAgentSession({
           cwd: "/tmp",
           agentDir: "/tmp/pi-chat",
-          model: piModel,
-          thinkingLevel: "medium",
+          model: sessionModel,
+          thinkingLevel: input.generation.reasoningLevel ?? "medium",
           authStorage,
           modelRegistry,
           resourceLoader,

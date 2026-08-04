@@ -4,8 +4,25 @@
     "contextWindow": 131072,
     "maxTokens": 8192,
     "capabilities": [
-      "text"
+      "text",
+      "reasoning"
     ],
+    "generation": {
+      "temperature": "supported",
+      "temperatureWithReasoning": "unknown",
+      "reasoning": {
+        "supported": "supported",
+        "adaptive": null,
+        "levels": {
+          "off": "unknown",
+          "minimal": "unknown",
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "unknown"
+        }
+      }
+    },
     "cost": {
       "input": 0.28,
       "output": 0.42,
@@ -17,8 +34,25 @@
     "contextWindow": 128000,
     "maxTokens": 4096,
     "capabilities": [
-      "text"
+      "text",
+      "reasoning"
     ],
+    "generation": {
+      "temperature": "supported",
+      "temperatureWithReasoning": "unknown",
+      "reasoning": {
+        "supported": "supported",
+        "adaptive": null,
+        "levels": {
+          "off": "unknown",
+          "minimal": "unknown",
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "unknown"
+        }
+      }
+    },
     "cost": {
       "input": 0.14,
       "output": 0.28
@@ -32,6 +66,22 @@
       "text",
       "reasoning"
     ],
+    "generation": {
+      "temperature": "supported",
+      "temperatureWithReasoning": "unknown",
+      "reasoning": {
+        "supported": "supported",
+        "adaptive": null,
+        "levels": {
+          "off": "unknown",
+          "minimal": "unknown",
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "unknown"
+        }
+      }
+    },
     "cost": {
       "input": 0.55,
       "output": 2.19
@@ -45,6 +95,22 @@
       "text",
       "reasoning"
     ],
+    "generation": {
+      "temperature": "supported",
+      "temperatureWithReasoning": "unknown",
+      "reasoning": {
+        "supported": "supported",
+        "adaptive": null,
+        "levels": {
+          "off": "unknown",
+          "minimal": "unknown",
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "unknown"
+        }
+      }
+    },
     "cost": {
       "input": 0.28,
       "output": 0.42,
@@ -56,8 +122,25 @@
     "contextWindow": 65536,
     "maxTokens": 8192,
     "capabilities": [
-      "text"
+      "text",
+      "reasoning"
     ],
+    "generation": {
+      "temperature": "supported",
+      "temperatureWithReasoning": "unknown",
+      "reasoning": {
+        "supported": "supported",
+        "adaptive": null,
+        "levels": {
+          "off": "unknown",
+          "minimal": "unknown",
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "unknown"
+        }
+      }
+    },
     "cost": {
       "input": 0.27,
       "output": 1.1,
@@ -73,6 +156,22 @@
       "text",
       "reasoning"
     ],
+    "generation": {
+      "temperature": "supported",
+      "temperatureWithReasoning": "unknown",
+      "reasoning": {
+        "supported": "supported",
+        "adaptive": null,
+        "levels": {
+          "off": "unknown",
+          "minimal": "unknown",
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "unknown"
+        }
+      }
+    },
     "cost": {
       "input": 0.28,
       "output": 0.4
@@ -86,6 +185,22 @@
       "text",
       "reasoning"
     ],
+    "generation": {
+      "temperature": "supported",
+      "temperatureWithReasoning": "unknown",
+      "reasoning": {
+        "supported": "supported",
+        "adaptive": null,
+        "levels": {
+          "off": "unknown",
+          "minimal": "unknown",
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "unknown"
+        }
+      }
+    },
     "cost": {
       "input": 0.14,
       "output": 0.28,
@@ -101,6 +216,22 @@
       "text",
       "reasoning"
     ],
+    "generation": {
+      "temperature": "supported",
+      "temperatureWithReasoning": "unknown",
+      "reasoning": {
+        "supported": "supported",
+        "adaptive": null,
+        "levels": {
+          "off": "unknown",
+          "minimal": "unknown",
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "unknown"
+        }
+      }
+    },
     "cost": {
       "input": 0.435,
       "output": 0.87,

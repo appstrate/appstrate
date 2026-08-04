@@ -42,5 +42,15 @@
   "run.status.timeout": "Timed out",
   "run.status.cancelled": "Cancelled",
   "run.status.done": "Finished",
-  "model.needsReconnection": "Reconnection required"
+  "model.needsReconnection": "Reconnection required",
+  "generation.title": "Generation",
+  "generation.temperature": "Temperature",
+  "generation.reasoning": "Reasoning",
+  "generation.inherit": "Provider default",
+  "generation.level.off": "Off",
+  "generation.level.minimal": "Minimal",
+  "generation.level.low": "Low",
+  "generation.level.medium": "Medium",
+  "generation.level.high": "High",
+  "generation.level.xhigh": "Extra high"
 }

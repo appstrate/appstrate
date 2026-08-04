@@ -8,13 +8,67 @@ on:
   workflow_dispatch: {}
 
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
 
 jobs:
-  refresh:
+  export-litellm:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@d7543c93d881b35a8faa02e8e3605f69b7a1ce62 # v3.10.0
+
+      - name: Verify and export pinned LiteLLM catalog
+        shell: bash
+        run: |
+          set -euo pipefail
+          image="$(jq -r '.image + "@" + .digest' scripts/litellm-catalog.lock.json)"
+          key="${RUNNER_TEMP}/litellm-cosign.pub"
+          output="${RUNNER_TEMP}/litellm-catalog.json"
+
+          # LiteLLM publishes signed images. Pin both its immutable OCI digest
+          # and the public-key source commit before executing third-party code.
+          curl --fail --silent --show-error --location \
+            https://raw.githubusercontent.com/BerriAI/litellm/0112e53046018d726492c814b3644b7d376029d0/cosign.pub \
+            --output "$key"
+          cosign verify --key "$key" "$image"
+
+          # The exporter gets no network, no capabilities and no writable root.
+          # Its sole output is a JSON artifact consumed by the separate write job.
+          docker run --rm \
+            --network none \
+            --read-only \
+            --cap-drop ALL \
+            --security-opt no-new-privileges \
+            --tmpfs /tmp:rw,noexec,nosuid,size=64m \
+            --entrypoint python \
+            --env PYTHONDONTWRITEBYTECODE=1 \
+            --volume "$GITHUB_WORKSPACE/scripts/export-litellm-catalog.py:/exporter.py:ro" \
+            "$image" /exporter.py > "$output"
+
+          jq --exit-status 'type == "object" and length > 0' "$output" >/dev/null
+
+      - name: Upload normalized LiteLLM source
+        uses: actions/upload-artifact@043fb46d4c86f4f0ec3ed3d6efcb4b508e8fc184 # v7.0.1
+        with:
+          name: litellm-catalog
+          path: ${{ runner.temp }}/litellm-catalog.json
+          if-no-files-found: error
+          retention-days: 1
+
+  refresh:
+    needs: export-litellm
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
 
     # `bun install` below runs the root `prepare` script (`husky`), which points
     # git's `core.hooksPath` at `.husky/`. The `pre-push` hook there runs
@@ -35,8 +89,15 @@ jobs:
       - name: Setup Bun
         uses: ./.github/actions/bun-setup
 
+      - name: Download normalized LiteLLM source
+        uses: actions/download-artifact@3e5f45b5010adf62e4ce8e6bc9f5764b20ee9038 # v8.0.1
+        with:
+          name: litellm-catalog
+          path: ${{ runner.temp }}/litellm-source
+
       - name: Refresh catalog (apply)
         env:
+          LITELLM_CATALOG_PATH: ${{ runner.temp }}/litellm-source/litellm-catalog.json
           # Per-provider cache-rate coverage + delta, for the PR body assembled
           # below. Written to the runner temp dir, NEVER the worktree — see the
           # body-path rationale in the drift step.
@@ -80,8 +141,10 @@ jobs:
           body="${RUNNER_TEMP}/pr-body.md"
           {
           cat <<'EOF'
-          Automated weekly refresh of the vendored LiteLLM catalog. Upstream source:
-          https://github.com/BerriAI/litellm/blob/main/litellm/model_prices_and_context_window_backup.json
+          Automated weekly refresh of the vendored LiteLLM catalog. The source
+          package and immutable image digest are recorded in
+          `scripts/litellm-catalog.lock.json`; the isolated exporter also asks
+          LiteLLM which OpenAI-compatible request parameters each model supports.
 
           Two generated trees, two different consequences:
           - `apps/api/src/data/pricing/*.json` — prices + model metadata, read at

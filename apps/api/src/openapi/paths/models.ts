@@ -41,6 +41,11 @@ export const modelsPaths = {
                     apiShape: "openai-responses",
                     baseUrl: "https://api.openai.com/v1",
                     modelId: "gpt-4o",
+                    generation: {
+                      temperature: "supported",
+                      temperatureWithReasoning: "unknown",
+                      reasoning: { supported: "unsupported", adaptive: null, levels: {} },
+                    },
                     iconUrl: "openai",
                     source: "built-in",
                     enabled: true,

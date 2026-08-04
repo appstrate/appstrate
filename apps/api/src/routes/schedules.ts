@@ -2,6 +2,7 @@
 
 import { Hono } from "hono";
 import { z } from "zod";
+import { modelGenerationSettingsSchema } from "@appstrate/core/model-generation";
 import type { AppEnv } from "../types/index.ts";
 import {
   getSchedule,
@@ -106,6 +107,7 @@ const createScheduleSchema = z.object({
   // schedule is "a recurring run with frozen overrides".
   config_override: runConfigOverrideSchema.optional(),
   model_id_override: z.string().optional(),
+  generation_config_override: modelGenerationSettingsSchema.optional(),
   proxy_id_override: z.string().optional(),
   version_override: z.string().optional(),
   connection_overrides: connectionOverridesSchema.optional(),
@@ -122,6 +124,7 @@ const updateScheduleSchema = z.object({
   // `null` clears the override; omitted leaves it untouched.
   config_override: runConfigOverrideSchema.nullable().optional(),
   model_id_override: z.string().nullable().optional(),
+  generation_config_override: modelGenerationSettingsSchema.nullable().optional(),
   proxy_id_override: z.string().nullable().optional(),
   version_override: z.string().nullable().optional(),
   connection_overrides: connectionOverridesSchema.nullable().optional(),
@@ -202,6 +205,7 @@ export function createSchedulesRouter() {
         input: data.input,
         configOverride: data.config_override ?? null,
         modelIdOverride: data.model_id_override ?? null,
+        generationConfigOverride: data.generation_config_override ?? null,
         proxyIdOverride: data.proxy_id_override ?? null,
         versionOverride: data.version_override ?? null,
         connectionOverrides: data.connection_overrides ?? null,
@@ -279,6 +283,7 @@ export function createSchedulesRouter() {
       enabled: data.enabled,
       configOverride: data.config_override,
       modelIdOverride: data.model_id_override,
+      generationConfigOverride: data.generation_config_override,
       proxyIdOverride: data.proxy_id_override,
       versionOverride: data.version_override,
       connectionOverrides,
@@ -297,6 +302,8 @@ export function createSchedulesRouter() {
     if (data.enabled !== undefined) auditAfter.enabled = data.enabled;
     if (data.config_override !== undefined) auditAfter.configOverride = data.config_override;
     if (data.model_id_override !== undefined) auditAfter.modelIdOverride = data.model_id_override;
+    if (data.generation_config_override !== undefined)
+      auditAfter.generationConfigOverride = data.generation_config_override;
     if (data.proxy_id_override !== undefined) auditAfter.proxyIdOverride = data.proxy_id_override;
     if (data.version_override !== undefined) auditAfter.versionOverride = data.version_override;
     if (data.connection_overrides !== undefined)

@@ -2,6 +2,7 @@
 
 import { Hono } from "hono";
 import { z } from "zod";
+import { modelGenerationSettingsSchema } from "@appstrate/core/model-generation";
 import type { AppEnv } from "../types/index.ts";
 import { logger } from "../lib/logger.ts";
 import { apiKeyAppScopeGuard } from "../middleware/guards.ts";
@@ -64,6 +65,7 @@ export const installPackageSchema = z.object({
 
 export const updatePackageSchema = z.object({
   config: z.record(z.string(), z.unknown()).optional(),
+  generationConfig: modelGenerationSettingsSchema.nullable().optional(),
   modelId: z.string().nullable().optional(),
   proxyId: z.string().nullable().optional(),
   version_id: z.number().int().nullable().optional(),

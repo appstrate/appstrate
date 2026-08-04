@@ -8,6 +8,10 @@
 
 import { z } from "zod";
 import { CHAT_USABLE_FAMILIES } from "../chat-families.ts";
+import {
+  modelGenerationCapabilitiesSchema,
+  type ModelGenerationCapabilities,
+} from "@appstrate/core/model-generation";
 
 /**
  * Runtime shape of a single `/api/models` row we depend on. The endpoint
@@ -27,6 +31,7 @@ const orgModelOptionSchema = z.object({
   needs_reconnection: z.boolean().optional(),
   enabled: z.boolean().optional(),
   aliased: z.boolean().optional(),
+  generation: modelGenerationCapabilitiesSchema.nullable().optional(),
 });
 
 export interface OrgModelOption {
@@ -55,6 +60,7 @@ export interface OrgModelOption {
   enabled?: boolean;
   /** Model-alias flag — selectable in chat without exposing the backing model. */
   aliased?: boolean;
+  generation?: ModelGenerationCapabilities | null;
 }
 
 export async function fetchModels(

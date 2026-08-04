@@ -30,6 +30,11 @@ export interface RuntimePiModelConfig {
 
 export interface RuntimePiEnvOptions {
   model: RuntimePiModelConfig;
+  /** Effective model-generation controls resolved by the platform. */
+  generation?: {
+    temperature?: number | null;
+    reasoningLevel?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | null;
+  };
   /** Full enriched system prompt fed to the Pi SDK. */
   agentPrompt: string;
   /** Run identifier. Bundled tools + the entrypoint surface it in every emitted {@link RunEvent}. */
@@ -205,6 +210,12 @@ export function buildRuntimePiEnv(opts: RuntimePiEnvOptions): Record<string, str
   if (model.contextWindow != null) env.MODEL_CONTEXT_WINDOW = String(model.contextWindow);
   if (model.maxTokens != null) env.MODEL_MAX_TOKENS = String(model.maxTokens);
   if (model.reasoning != null) env.MODEL_REASONING = model.reasoning ? "true" : "false";
+  if (opts.generation?.temperature != null) {
+    env.MODEL_TEMPERATURE = String(opts.generation.temperature);
+  }
+  if (opts.generation?.reasoningLevel != null) {
+    env.MODEL_REASONING_LEVEL = opts.generation.reasoningLevel;
+  }
   if (model.cost !== undefined && model.cost !== null) {
     env.MODEL_COST = JSON.stringify(model.cost);
   }

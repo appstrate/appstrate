@@ -838,6 +838,8 @@ function buildPiRunner(): PiRunner {
     model,
     apiKey: env.modelApiKey,
     systemPrompt,
+    ...(env.modelTemperature !== undefined ? { temperature: env.modelTemperature } : {}),
+    ...(env.modelReasoningLevel !== undefined ? { thinkingLevel: env.modelReasoningLevel } : {}),
     cwd: WORKSPACE,
     agentDir: "/tmp/pi-agent",
     extensionFactories,

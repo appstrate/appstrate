@@ -9,10 +9,14 @@
  */
 
 import { useEffect, useRef, useState } from "react";
-import { CheckIcon, ChevronDownIcon } from "lucide-react";
+import { CheckIcon, ChevronDownIcon, SlidersHorizontalIcon } from "lucide-react";
 import type { OrgModelOption } from "./models-data.ts";
 import { isModelLive } from "../model-liveness.ts";
 import { useChatHost } from "./runtime-context.ts";
+import type {
+  ModelGenerationSettings,
+  ModelReasoningLevel,
+} from "@appstrate/core/model-generation";
 
 /** Group/button label for a managed model — provider-neutral, binding not exposed. */
 const MANAGED_LABEL = "Géré";
@@ -135,6 +139,110 @@ export function ModelSelect({ models, selectedId, onSelect }: Props) {
           <span className="font-medium">Modèle</span>
         )}
         <ChevronDownIcon className="text-muted-foreground size-3.5 shrink-0" />
+      </button>
+    </div>
+  );
+}
+
+const CHAT_REASONING_LEVELS: ModelReasoningLevel[] = [
+  "off",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+];
+
+export function GenerationSelect({
+  model,
+  value,
+  onChange,
+}: {
+  model?: OrgModelOption;
+  value: ModelGenerationSettings;
+  onChange: (value: ModelGenerationSettings) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const { t } = useChatHost();
+  const capabilities = model?.generation;
+
+  useEffect(() => {
+    if (!open) return;
+    const close = (event: MouseEvent) => {
+      if (ref.current && !ref.current.contains(event.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, [open]);
+
+  return (
+    <div className="relative" ref={ref}>
+      {open && (
+        <div className="bg-popover text-popover-foreground absolute bottom-[calc(100%+0.4rem)] left-0 z-10 w-72 space-y-3 rounded-lg border p-3 shadow-xl">
+          <label className="block space-y-1 text-xs">
+            <span className="font-medium">{t("generation.temperature")}</span>
+            <input
+              className="border-input bg-background w-full rounded-md border px-2 py-1.5"
+              type="number"
+              min={0}
+              max={1}
+              step={0.1}
+              value={value.temperature ?? ""}
+              placeholder={t("generation.inherit")}
+              disabled={capabilities?.temperature === "unsupported"}
+              onChange={(event) => {
+                const { temperature: _temperature, ...rest } = value;
+                void _temperature;
+                onChange(
+                  event.target.value === ""
+                    ? rest
+                    : { ...rest, temperature: Number(event.target.value) },
+                );
+              }}
+            />
+          </label>
+          <label className="block space-y-1 text-xs">
+            <span className="font-medium">{t("generation.reasoning")}</span>
+            <select
+              className="border-input bg-background w-full rounded-md border px-2 py-1.5"
+              value={value.reasoningLevel ?? ""}
+              disabled={capabilities?.reasoning.supported === "unsupported"}
+              onChange={(event) => {
+                const { reasoningLevel: _reasoningLevel, ...rest } = value;
+                void _reasoningLevel;
+                onChange(
+                  event.target.value === ""
+                    ? rest
+                    : {
+                        ...rest,
+                        reasoningLevel: event.target.value as ModelReasoningLevel,
+                      },
+                );
+              }}
+            >
+              <option value="">{t("generation.inherit")}</option>
+              {CHAT_REASONING_LEVELS.map((level) => (
+                <option
+                  key={level}
+                  value={level}
+                  disabled={capabilities?.reasoning.levels[level] === "unsupported"}
+                >
+                  {t(`generation.level.${level}`)}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+      )}
+      <button
+        type="button"
+        onClick={() => setOpen((current) => !current)}
+        className="border-input bg-background hover:bg-accent text-foreground inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs"
+        title={t("generation.title")}
+      >
+        <SlidersHorizontalIcon className="size-3.5" />
+        {t("generation.title")}
       </button>
     </div>
   );

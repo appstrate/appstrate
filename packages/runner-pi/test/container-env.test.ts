@@ -20,6 +20,23 @@ const model = {
 const sidecar = { sidecarUrl: "http://sidecar:8080" };
 
 describe("buildRuntimePiEnv", () => {
+  it("forwards explicit generation controls, including temperature zero", () => {
+    const env = buildRuntimePiEnv({
+      model,
+      agentPrompt: "p",
+      ...sidecar,
+      generation: { temperature: 0, reasoningLevel: "xhigh" },
+    });
+    expect(env.MODEL_TEMPERATURE).toBe("0");
+    expect(env.MODEL_REASONING_LEVEL).toBe("xhigh");
+  });
+
+  it("omits generation controls to preserve Pi/provider defaults", () => {
+    const env = buildRuntimePiEnv({ model, agentPrompt: "p", ...sidecar });
+    expect(env.MODEL_TEMPERATURE).toBeUndefined();
+    expect(env.MODEL_REASONING_LEVEL).toBeUndefined();
+  });
+
   it("emits the minimal required set", () => {
     const env = buildRuntimePiEnv({ model, agentPrompt: "do thing", ...sidecar });
     expect(env.AGENT_PROMPT).toBe("do thing");

@@ -78,6 +78,7 @@
     "./token-budget": "./src/token-budget.ts",
     "./sidecar-types": "./src/sidecar-types.ts",
     "./model-swap": "./src/model-swap.ts",
+    "./model-generation": "./src/model-generation.ts",
     "./pairing-token": "./src/pairing-token.ts",
     "./jwt": "./src/jwt.ts",
     "./dedupe-label": "./src/dedupe-label.ts",

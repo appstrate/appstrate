@@ -17,6 +17,7 @@
 
 import { getErrorMessage } from "@appstrate/core/errors";
 import type { ModelApiShape } from "@appstrate/core/sidecar-types";
+import type { ModelReasoningLevel } from "@appstrate/core/model-generation";
 
 export interface RuntimeEnv {
   /** Run identifier injected by the platform on container create. */
@@ -33,6 +34,9 @@ export interface RuntimeEnv {
   modelApiKey?: string;
   /** Whether the model emits reasoning tokens. */
   modelReasoning: boolean;
+  /** Explicit generation controls; absent preserves Pi's historical defaults. */
+  modelTemperature?: number;
+  modelReasoningLevel?: ModelReasoningLevel;
   /** Pi SDK input modalities. */
   modelInput: ReadonlyArray<"text" | "image">;
   /** Per-token cost (input/output/cacheRead/cacheWrite USD). */
@@ -323,6 +327,23 @@ export function parseRuntimeEnv(source: NodeJS.ProcessEnv = process.env): Runtim
     DEFAULT_MAX_TOKENS,
     issues,
   );
+  const modelTemperature =
+    source.MODEL_TEMPERATURE === undefined ? undefined : Number(source.MODEL_TEMPERATURE);
+  if (
+    modelTemperature !== undefined &&
+    (!Number.isFinite(modelTemperature) || modelTemperature < 0 || modelTemperature > 1)
+  ) {
+    issues.push(
+      `MODEL_TEMPERATURE: must be a finite number between 0 and 1 (got "${source.MODEL_TEMPERATURE}")`,
+    );
+  }
+  const reasoningLevels = new Set(["off", "minimal", "low", "medium", "high", "xhigh"]);
+  const modelReasoningLevel = source.MODEL_REASONING_LEVEL;
+  if (modelReasoningLevel !== undefined && !reasoningLevels.has(modelReasoningLevel)) {
+    issues.push(
+      `MODEL_REASONING_LEVEL: invalid value "${modelReasoningLevel}" (allowed: ${[...reasoningLevels].join(", ")})`,
+    );
+  }
   const heartbeatIntervalMs = parsePositiveInt(
     "APPSTRATE_HEARTBEAT_INTERVAL_MS",
     source.APPSTRATE_HEARTBEAT_INTERVAL_MS,
@@ -363,6 +384,10 @@ export function parseRuntimeEnv(source: NodeJS.ProcessEnv = process.env): Runtim
     modelBaseUrl: modelBaseUrl || undefined,
     modelApiKey: source.MODEL_API_KEY || undefined,
     modelReasoning: source.MODEL_REASONING === "true",
+    ...(modelTemperature !== undefined ? { modelTemperature } : {}),
+    ...(modelReasoningLevel !== undefined
+      ? { modelReasoningLevel: modelReasoningLevel as ModelReasoningLevel }
+      : {}),
     modelInput,
     modelCost,
     modelContextWindow,

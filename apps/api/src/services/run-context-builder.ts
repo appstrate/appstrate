@@ -29,6 +29,10 @@ import type { ModelCost } from "@appstrate/core/module";
 import { getAgentResourceHints } from "@appstrate/core/validation";
 import { getExecutionMode } from "../infra/mode.ts";
 import { orchestratorAgentResources } from "./orchestrator/registry.ts";
+import {
+  resolveModelGenerationSettings,
+  type ModelGenerationSettings,
+} from "@appstrate/core/model-generation";
 
 export class ModelNotConfiguredError extends Error {
   constructor() {
@@ -84,6 +88,10 @@ export async function buildRunContext(params: {
   files?: FileReference[];
   config?: Record<string, unknown>;
   modelId?: string | null;
+  /** Persisted agent defaults; undefined asks this service to load them. */
+  generationConfig?: ModelGenerationSettings | null;
+  /** Invocation layer; null/omitted fields inherit the agent defaults. */
+  generationConfigOverride?: ModelGenerationSettings | null;
   proxyId?: string | null;
   overrideVersionLabel?: string;
   /**
@@ -123,12 +131,16 @@ export async function buildRunContext(params: {
   modelLabel: string | null;
   modelSource: string | null;
   modelCost: ModelCost | null;
+  generationConfig: ModelGenerationSettings;
 }> {
   const { runId, agent, orgId, applicationId, actor, input, files } = params;
 
   // Skip getPackageConfig when all values are already provided by the caller (from preflight)
   const skipConfigFetch =
-    params.config !== undefined && params.modelId !== undefined && params.proxyId !== undefined;
+    params.config !== undefined &&
+    params.modelId !== undefined &&
+    params.proxyId !== undefined &&
+    params.generationConfig !== undefined;
 
   // Phase 1.4 — resolve any declared `dependencies.integrations` into
   // ready-to-spawn specs (manifest + bundle bytes + delivery env with
@@ -211,6 +223,11 @@ export async function buildRunContext(params: {
   // `org_models.cost` override) — which is exactly the run whose `$0.00` would
   // otherwise read as "free".
   const modelCost = modelResult.cost ?? null;
+  const generationConfig = resolveModelGenerationSettings({
+    capabilities: modelResult.generation,
+    defaults: params.generationConfig ?? configFull?.generationConfig ?? null,
+    override: params.generationConfigOverride,
+  });
 
   // Step 3: resolve the persisted version display fields.
   let versionLabel: string | null = params.overrideVersionLabel ?? null;
@@ -269,6 +286,7 @@ export async function buildRunContext(params: {
     outputSchema: extractManifestSchemas(agent.manifest).output,
     ...(runtimeTools && runtimeTools.length > 0 ? { runtimeTools } : {}),
     llmConfig: modelResult,
+    generationConfig,
     runToken: signRunToken(runId),
     proxyUrl,
     // The manifest reaching here is already ceiling-clamped by
@@ -289,5 +307,6 @@ export async function buildRunContext(params: {
     modelLabel,
     modelSource,
     modelCost,
+    generationConfig,
   };
 }

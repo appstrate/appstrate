@@ -50,7 +50,7 @@ import type {
 } from "./runtime-context.ts";
 export type { OpenDocument } from "./runtime-context.ts";
 import { ThreadList, ActiveConversationTitle } from "./thread-list.tsx";
-import { ModelSelect } from "./model-select.tsx";
+import { GenerationSelect, ModelSelect } from "./model-select.tsx";
 import { fetchModels, type OrgModelOption } from "./models-data.ts";
 import { isModelLive } from "../model-liveness.ts";
 import {
@@ -61,7 +61,14 @@ import {
   type SessionSummary,
 } from "./sessions.ts";
 import { useSessions } from "./use-sessions.ts";
-import { subscribeModel, getSelectedModel, setSelectedModel } from "./model-store.ts";
+import {
+  subscribeGeneration,
+  subscribeModel,
+  getGenerationSettings,
+  getSelectedModel,
+  setGenerationSettings,
+  setSelectedModel,
+} from "./model-store.ts";
 import { createChatAttachmentAdapter } from "./attachment-adapter.ts";
 
 // Tab visibility as an external store — the mark-read effect must not fire
@@ -152,6 +159,11 @@ export function ChatPage({
   // function (see ConversationInner), so a switch applies to the very next send
   // without remounting the conversation. This hook only mirrors it for the picker.
   const selectedModel = useSyncExternalStore(subscribeModel, getSelectedModel, getSelectedModel);
+  const generation = useSyncExternalStore(
+    subscribeGeneration,
+    getGenerationSettings,
+    getGenerationSettings,
+  );
 
   useEffect(() => {
     void fetchModels(getHeaders).then((list) => {
@@ -280,11 +292,18 @@ export function ChatPage({
                   onConversationChange={onConversationChange}
                   attachments={attachments}
                   composerSlot={
-                    <ModelSelect
-                      models={models}
-                      selectedId={selectedModel}
-                      onSelect={setSelectedModel}
-                    />
+                    <div className="flex items-center gap-2">
+                      <ModelSelect
+                        models={models}
+                        selectedId={selectedModel}
+                        onSelect={setSelectedModel}
+                      />
+                      <GenerationSelect
+                        model={models.find((model) => model.id === selectedModel)}
+                        value={generation}
+                        onChange={setGenerationSettings}
+                      />
+                    </div>
                   }
                 />
               </main>
@@ -379,6 +398,9 @@ function ConversationInner({
         api: "/api/chat",
         credentials: "include",
         headers: buildHeaders,
+        prepareSendMessagesRequest: ({ id: chatId, messages, body }) => ({
+          body: { ...body, id: chatId, messages, generation: getGenerationSettings() },
+        }),
         // Native resume targets our per-session stream endpoint (the chat id is
         // the conversation id = the URL).
         prepareReconnectToStreamRequest: ({ id: chatId }) => ({

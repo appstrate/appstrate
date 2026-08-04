@@ -46,8 +46,12 @@ import { toBundleApiError } from "../services/run-launcher/bundle-error-mapping.
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 import { SCOPED_PACKAGE_ROUTE } from "./scoped-package-route.ts";
+import { modelGenerationSettingsSchema } from "@appstrate/core/model-generation";
 export const proxyIdSchema = z.object({ proxyId: z.string().nullable() });
-export const modelIdSchema = z.object({ modelId: z.string().nullable() });
+export const modelIdSchema = z.object({
+  modelId: z.string().nullable(),
+  generation: modelGenerationSettingsSchema.nullable().optional(),
+});
 
 /**
  * Parse the `actor_type` / `actor_id` query-param pair shared by the
@@ -211,9 +215,9 @@ export function createAgentsRouter() {
   router.get(`/${SCOPED_PACKAGE_ROUTE}/model`, requireAgent(), async (c) => {
     const agent = c.get("package");
     const applicationId = c.get("applicationId");
-    const { modelId } = await getPackageConfig(applicationId, agent.id);
+    const { modelId, generationConfig } = await getPackageConfig(applicationId, agent.id);
 
-    return c.json({ modelId });
+    return c.json({ modelId, generation: generationConfig });
   });
 
   // PUT /api/agents/:scope/:name/model — set agent model override (admin-only)
@@ -229,19 +233,22 @@ export function createAgentsRouter() {
       // Reject unknown/cross-org ids like run and schedule overrides do (#960); null clears.
       await assertExplicitModelExists(scope.orgId, data.modelId);
 
-      await updateInstalledPackage(scope, agent.id, { modelId: data.modelId });
+      await updateInstalledPackage(scope, agent.id, {
+        modelId: data.modelId,
+        ...(data.generation !== undefined ? { generationConfig: data.generation } : {}),
+      });
 
       await recordAuditFromContext(c, {
         action: "agent.model_updated",
         resourceType: "agent",
         resourceId: agent.id,
-        after: { modelId: data.modelId },
+        after: { modelId: data.modelId, generation: data.generation },
       });
 
       // Return the bare model-setting resource — same shape and read path
       // (`getPackageConfig`) as GET /agents/:scope/:name/model (#657).
-      const { modelId } = await getPackageConfig(scope.applicationId, agent.id);
-      return c.json({ modelId });
+      const { modelId, generationConfig } = await getPackageConfig(scope.applicationId, agent.id);
+      return c.json({ modelId, generation: generationConfig });
     },
   );
 

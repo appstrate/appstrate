@@ -31,6 +31,10 @@ import {
 import { mapFetchErrorToTestResult } from "../lib/network-error.ts";
 import { getModelProvider } from "./model-providers/registry.ts";
 import { resolveOAuthTokenForSidecar } from "./model-providers/token-resolver.ts";
+import {
+  UNKNOWN_MODEL_GENERATION_CAPABILITIES,
+  type ModelGenerationCapabilities,
+} from "@appstrate/core/model-generation";
 
 // --- Metadata projection ---
 
@@ -142,6 +146,7 @@ export function projectAliasedModel(model: OrgModelInfo): OrgModelInfo {
     input: null,
     reasoning: null,
     cost: null,
+    generation: null,
   };
 }
 
@@ -215,6 +220,9 @@ export async function listOrgModels(orgId: string): Promise<OrgModelInfo[]> {
         def.modelId,
         resolveCatalogDefaults(def.providerId, def.modelId),
       ),
+      generation:
+        resolveCatalogDefaults(def.providerId, def.modelId).generation ??
+        UNKNOWN_MODEL_GENERATION_CAPABILITIES,
       apiShape: def.apiShape,
       providerId: def.providerId,
       providerName: getModelProvider(def.providerId)?.displayName ?? null,
@@ -242,6 +250,9 @@ export async function listOrgModels(orgId: string): Promise<OrgModelInfo[]> {
           row.modelId,
           resolveCatalogDefaults(creds.providerId, row.modelId),
         ),
+        generation:
+          resolveCatalogDefaults(creds.providerId, row.modelId).generation ??
+          UNKNOWN_MODEL_GENERATION_CAPABILITIES,
         apiShape: creds.apiShape,
         providerId: creds.providerId,
         providerName: getModelProvider(creds.providerId)?.displayName ?? null,
@@ -577,6 +588,8 @@ export interface ResolvedModel extends Pick<
   | "reasoning"
   | "cost"
 > {
+  /** Request controls supported by the backing model in the vendored catalog. */
+  generation?: ModelGenerationCapabilities;
   /**
    * Always set — the builders fall back to the catalog and finally `modelId`
    * so callers can read it as a plain string even when the env entry or DB
@@ -652,6 +665,7 @@ export interface CatalogDefaults {
   maxTokens?: number | null;
   reasoning?: boolean;
   cost?: ModelCost;
+  generation?: ModelGenerationCapabilities;
 }
 
 export function resolveCatalogDefaults(providerId: string, modelId: string): CatalogDefaults {
@@ -666,18 +680,21 @@ export function resolveCatalogDefaults(providerId: string, modelId: string): Cat
     maxTokens: entry.maxTokens,
     reasoning: entry.capabilities.includes("reasoning"),
     cost: entry.cost,
+    generation: entry.generation,
   };
 }
 
 /** Build a `ResolvedModel` from a system `ModelDefinition` (env-driven). */
 function buildSystemResolvedModel(def: ModelDefinition): ResolvedModel {
+  const defaults = resolveCatalogDefaults(def.providerId, def.modelId);
   return {
     providerId: def.providerId,
     apiShape: def.apiShape,
     baseUrl: def.baseUrl,
     modelId: def.modelId,
     apiKey: def.apiKey,
-    ...resolveModelMetadata(def, def.modelId, resolveCatalogDefaults(def.providerId, def.modelId)),
+    ...resolveModelMetadata(def, def.modelId, defaults),
+    generation: defaults.generation ?? UNKNOWN_MODEL_GENERATION_CAPABILITIES,
     isSystemModel: true,
     aliased: def.aliased === true,
     aliasId: def.id,
@@ -694,6 +711,7 @@ function buildSystemResolvedModel(def: ModelDefinition): ResolvedModel {
  * rows.
  */
 function buildDbResolvedModel(row: DbOrgModelRow, creds: DbModelCredentials): ResolvedModel {
+  const defaults = resolveCatalogDefaults(creds.providerId, row.modelId);
   return {
     providerId: creds.providerId,
     apiShape: creds.apiShape,
@@ -703,8 +721,9 @@ function buildDbResolvedModel(row: DbOrgModelRow, creds: DbModelCredentials): Re
     ...resolveModelMetadata(
       { ...row, input: row.input as string[] | null, cost: row.cost as ModelCost | null },
       row.modelId,
-      resolveCatalogDefaults(creds.providerId, row.modelId),
+      defaults,
     ),
+    generation: defaults.generation ?? UNKNOWN_MODEL_GENERATION_CAPABILITIES,
     isSystemModel: false,
     aliased: row.aliased,
     aliasId: row.id,

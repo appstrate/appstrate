@@ -36,6 +36,11 @@
 
 import { resolve } from "node:path";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import type {
+  ModelCapabilitySupport,
+  ModelGenerationCapabilities,
+  ModelReasoningLevel,
+} from "@appstrate/core/model-generation";
 
 const UPSTREAM_URL =
   "https://raw.githubusercontent.com/BerriAI/litellm/main/litellm/model_prices_and_context_window_backup.json";
@@ -140,6 +145,7 @@ interface CompactEntry {
   contextWindow: number;
   maxTokens: number | null;
   capabilities: string[];
+  generation: ModelGenerationCapabilities;
   cost: {
     input: number;
     output: number;
@@ -160,6 +166,15 @@ interface LiteLLMEntry {
   cache_creation_input_token_cost?: number;
   supports_vision?: boolean;
   supports_reasoning?: boolean;
+  supports_sampling_params?: boolean;
+  supports_none_reasoning_effort?: boolean;
+  supports_minimal_reasoning_effort?: boolean;
+  supports_low_reasoning_effort?: boolean;
+  supports_xhigh_reasoning_effort?: boolean;
+  supports_max_reasoning_effort?: boolean;
+  supports_adaptive_thinking?: boolean;
+  /** Added by the isolated pinned-LiteLLM exporter, never by the raw fallback. */
+  _appstrate_supported_openai_params?: string[];
 }
 
 interface Summary {
@@ -314,6 +329,58 @@ function deriveLabel(id: string): string {
     .join(" ");
 }
 
+function support(value: boolean | undefined): ModelCapabilitySupport {
+  return value === true ? "supported" : value === false ? "unsupported" : "unknown";
+}
+
+function deriveGenerationCapabilities(entry: LiteLLMEntry): ModelGenerationCapabilities {
+  const supportedParams = entry._appstrate_supported_openai_params;
+  const temperature =
+    entry.supports_sampling_params === false
+      ? "unsupported"
+      : supportedParams
+        ? supportedParams.includes("temperature")
+          ? "supported"
+          : "unsupported"
+        : "unknown";
+  const reasoning: ModelCapabilitySupport =
+    entry.supports_reasoning === false
+      ? "unsupported"
+      : entry.supports_reasoning === true ||
+          supportedParams?.includes("reasoning_effort") === true ||
+          supportedParams?.includes("thinking") === true
+        ? "supported"
+        : "unknown";
+  const levels: Partial<Record<ModelReasoningLevel, ModelCapabilitySupport>> = {
+    off: support(entry.supports_none_reasoning_effort),
+    minimal: support(entry.supports_minimal_reasoning_effort),
+    // low/medium/high are Pi's portable baseline for a reasoning-capable
+    // model. An explicit LiteLLM false still wins for exceptional models.
+    low:
+      entry.supports_low_reasoning_effort === undefined
+        ? reasoning
+        : support(entry.supports_low_reasoning_effort),
+    medium: reasoning,
+    high: reasoning,
+    xhigh: support(entry.supports_xhigh_reasoning_effort),
+  };
+
+  return {
+    temperature,
+    // LiteLLM exposes the individual controls but not this combined constraint.
+    // Keep it unknown so providers remain the final authority.
+    temperatureWithReasoning: "unknown",
+    reasoning: {
+      supported: reasoning,
+      adaptive:
+        typeof entry.supports_adaptive_thinking === "boolean"
+          ? entry.supports_adaptive_thinking
+          : null,
+      levels,
+    },
+  };
+}
+
 /**
  * Convert one LiteLLM entry to our compact shape. Returns null when the
  * entry has no usable pricing (e.g. embeddings, deprecated entries) —
@@ -327,9 +394,10 @@ function projectEntry(id: string, entry: LiteLLMEntry): CompactEntry | null {
   ) {
     return null;
   }
+  const generation = deriveGenerationCapabilities(entry);
   const caps: string[] = ["text"];
   if (entry.supports_vision) caps.push("image");
-  if (entry.supports_reasoning) caps.push("reasoning");
+  if (generation.reasoning.supported === "supported") caps.push("reasoning");
 
   // LiteLLM stores USD/token; our `ModelCost` is USD per 1M tokens.
   // Round to 6 decimals (parts-per-million precision = $1 per trillion
@@ -366,6 +434,7 @@ function projectEntry(id: string, entry: LiteLLMEntry): CompactEntry | null {
     contextWindow,
     maxTokens,
     capabilities: caps,
+    generation,
     cost,
   };
 }
@@ -489,9 +558,17 @@ function buildFeatured(
 }
 
 async function fetchUpstream(): Promise<Record<string, LiteLLMEntry>> {
-  const res = await fetch(UPSTREAM_URL);
-  if (!res.ok) throw new Error(`fetch ${UPSTREAM_URL} → HTTP ${res.status}`);
-  const data = (await res.json()) as Record<string, LiteLLMEntry>;
+  const artifactPath = process.env.LITELLM_CATALOG_PATH;
+  const data = artifactPath
+    ? (JSON.parse(readFileSync(artifactPath, "utf8")) as Record<string, LiteLLMEntry>)
+    : await (async () => {
+        const res = await fetch(UPSTREAM_URL);
+        if (!res.ok) throw new Error(`fetch ${UPSTREAM_URL} → HTTP ${res.status}`);
+        console.warn(
+          "WARNING: using the unpinned raw LiteLLM fallback; CI uses the pinned exporter artifact",
+        );
+        return (await res.json()) as Record<string, LiteLLMEntry>;
+      })();
   // Remove LiteLLM's `sample_spec` synthetic top-level entry — it documents
   // the schema, not a real model.
   delete data.sample_spec;
@@ -717,5 +794,13 @@ if (import.meta.main) {
   await main();
 }
 
-export { aliasedBackings, buildFeatured, countCacheRates, coverageRow, formatCoverageSummary };
+export {
+  aliasedBackings,
+  buildFeatured,
+  countCacheRates,
+  coverageRow,
+  deriveGenerationCapabilities,
+  formatCoverageSummary,
+  projectEntry,
+};
 export type { CoverageRow };

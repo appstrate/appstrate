@@ -12,6 +12,7 @@ import { useCurrentOrgId } from "./use-org";
 import { useCurrentApplicationId } from "./use-current-application";
 import { usePackageDetail } from "./use-packages";
 import { useAgentModel } from "./use-models";
+import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 import { useAgentProxy } from "./use-proxies";
 import { onMutationError } from "./use-mutations";
 import { scheduleKeys } from "../lib/query-keys";
@@ -105,6 +106,7 @@ export function useCreateSchedule(packageId: string) {
       input?: Record<string, unknown>;
       config_override?: Record<string, unknown> | null;
       model_id_override?: string | null;
+      generation_config_override?: ModelGenerationSettings | null;
       proxy_id_override?: string | null;
       version_override?: string | null;
       connection_overrides?: Record<string, string> | null;
@@ -138,6 +140,7 @@ export function useUpdateSchedule() {
       enabled?: boolean;
       config_override?: Record<string, unknown> | null;
       model_id_override?: string | null;
+      generation_config_override?: ModelGenerationSettings | null;
       proxy_id_override?: string | null;
       version_override?: string | null;
       connection_overrides?: Record<string, string> | null;
@@ -177,6 +180,7 @@ export interface ScheduleFormDeps {
   configSchema: JSONSchemaObject | undefined;
   persistedConfig: Record<string, unknown>;
   persistedModelId: string | null;
+  persistedGenerationConfig: ModelGenerationSettings | null;
   persistedProxyId: string | null;
   persistedVersion: string | null;
   hasFileInputs: boolean;
@@ -228,6 +232,7 @@ export function useScheduleFormDeps(
     configSchema: agentDetail?.config?.schema ?? undefined,
     persistedConfig: agentDetail?.config?.current ?? {},
     persistedModelId: agentModel?.modelId ?? null,
+    persistedGenerationConfig: agentModel?.generation ?? null,
     persistedProxyId: agentProxy?.proxyId ?? null,
     persistedVersion: agentDetail?.version ?? null,
     hasFileInputs: schemaHasFileFields(inputSchema),

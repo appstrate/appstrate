@@ -490,7 +490,8 @@ export const agentsPaths = {
       operationId: "getAgentModel",
       tags: ["Agents"],
       summary: "Get agent model configuration",
-      description: "Returns the LLM model override for an agent (null if using org default).",
+      description:
+        "Returns the LLM model override and persisted generation defaults for an agent (null values inherit organization/runtime defaults).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
@@ -508,8 +509,15 @@ export const agentsPaths = {
             "application/json": {
               schema: {
                 type: "object",
+                required: ["modelId", "generation"],
                 properties: {
                   modelId: { type: ["string", "null"] },
+                  generation: {
+                    oneOf: [
+                      { $ref: "#/components/schemas/ModelGenerationSettings" },
+                      { type: "null" },
+                    ],
+                  },
                 },
               },
             },
@@ -524,7 +532,7 @@ export const agentsPaths = {
       tags: ["Agents"],
       summary: "Set agent model override",
       description:
-        "Set a model override for this agent. Pass a model ID or null to revert to org default. The model ID must name a system model preset or an org model owned by the organization — unknown or cross-org IDs are rejected with 404.",
+        "Set a model override and optional generation defaults for this agent. Pass a model ID or null to revert to org default; null generation settings inherit runtime defaults. The model ID must name a system model preset or an org model owned by the organization — unknown or cross-org IDs are rejected with 404.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
@@ -542,6 +550,17 @@ export const agentsPaths = {
                 modelId: {
                   type: ["string", "null"],
                   description: "Model ID or null to use org default",
+                },
+                generation: {
+                  type: ["object", "null"],
+                  additionalProperties: false,
+                  properties: {
+                    temperature: { type: ["number", "null"], minimum: 0, maximum: 1 },
+                    reasoningLevel: {
+                      type: ["string", "null"],
+                      enum: ["off", "minimal", "low", "medium", "high", "xhigh", null],
+                    },
+                  },
                 },
               },
             },
@@ -561,9 +580,15 @@ export const agentsPaths = {
               // no `success` scrap (#657).
               schema: {
                 type: "object",
-                required: ["modelId"],
+                required: ["modelId", "generation"],
                 properties: {
                   modelId: { type: ["string", "null"] },
+                  generation: {
+                    oneOf: [
+                      { $ref: "#/components/schemas/ModelGenerationSettings" },
+                      { type: "null" },
+                    ],
+                  },
                 },
               },
             },

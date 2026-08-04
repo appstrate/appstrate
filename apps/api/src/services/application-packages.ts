@@ -106,6 +106,7 @@ export async function uninstallPackage(scope: AppScope, packageId: string): Prom
 const installedPackageSelect = {
   packageId: applicationPackages.packageId,
   config: applicationPackages.config,
+  generationConfig: applicationPackages.generationConfig,
   modelId: applicationPackages.modelId,
   proxyId: applicationPackages.proxyId,
   version_id: applicationPackages.versionId,
@@ -386,11 +387,13 @@ export async function getPackageConfig(
 ): Promise<{
   config: Record<string, unknown>;
   modelId: string | null;
+  generationConfig: import("@appstrate/core/model-generation").ModelGenerationSettings | null;
   proxyId: string | null;
 }> {
   const [row] = await db
     .select({
       config: applicationPackages.config,
+      generationConfig: applicationPackages.generationConfig,
       modelId: applicationPackages.modelId,
       proxyId: applicationPackages.proxyId,
     })
@@ -405,6 +408,7 @@ export async function getPackageConfig(
   return {
     config: asRecord(row?.config),
     modelId: row?.modelId ?? null,
+    generationConfig: row?.generationConfig ?? null,
     proxyId: row?.proxyId ?? null,
   };
 }
@@ -441,6 +445,7 @@ export async function getResolvedRunConfig(
   const [row] = await db
     .select({
       config: applicationPackages.config,
+      generationConfig: applicationPackages.generationConfig,
       modelId: applicationPackages.modelId,
       proxyId: applicationPackages.proxyId,
       versionId: applicationPackages.versionId,
@@ -474,6 +479,7 @@ export async function getResolvedRunConfig(
 
   return {
     config: asRecord(row.config),
+    generation: row.generationConfig ?? null,
     modelId: row.modelId ?? null,
     proxyId: row.proxyId ?? null,
     version_pin: versionPin,
@@ -506,6 +512,7 @@ export async function updateInstalledPackage(
   updates: {
     config?: Record<string, unknown>;
     modelId?: string | null;
+    generationConfig?: import("@appstrate/core/model-generation").ModelGenerationSettings | null;
     proxyId?: string | null;
     versionId?: number | null;
     enabled?: boolean;
@@ -516,12 +523,14 @@ export async function updateInstalledPackage(
     updatedAt: Date;
     config: Record<string, unknown>;
     modelId: string | null;
+    generationConfig: import("@appstrate/core/model-generation").ModelGenerationSettings | null;
     proxyId: string | null;
     versionId: number | null;
     enabled: boolean;
   }> = { updatedAt: new Date() };
   if (updates.config !== undefined) set.config = updates.config;
   if (updates.modelId !== undefined) set.modelId = updates.modelId;
+  if (updates.generationConfig !== undefined) set.generationConfig = updates.generationConfig;
   if (updates.proxyId !== undefined) set.proxyId = updates.proxyId;
   if (updates.versionId !== undefined) set.versionId = updates.versionId;
   if (updates.enabled !== undefined) set.enabled = updates.enabled;
@@ -562,6 +571,9 @@ export async function updateInstalledPackage(
         packageId,
         config: updates.config ?? {},
         ...(updates.modelId !== undefined ? { modelId: updates.modelId } : {}),
+        ...(updates.generationConfig !== undefined
+          ? { generationConfig: updates.generationConfig }
+          : {}),
         ...(updates.proxyId !== undefined ? { proxyId: updates.proxyId } : {}),
         ...(updates.versionId !== undefined ? { versionId: updates.versionId } : {}),
         ...(updates.enabled !== undefined ? { enabled: updates.enabled } : {}),

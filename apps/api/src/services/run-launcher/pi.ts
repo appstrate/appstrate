@@ -323,6 +323,7 @@ async function runPlatformContainerImpl(
         reasoning: llmConfig.reasoning,
         cost: llmConfig.cost,
       },
+      generation: plan.generationConfig,
       agentPrompt: prompt,
       runId,
       // Forward the execution budget so the runner enforces it itself, from the

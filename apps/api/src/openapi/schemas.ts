@@ -88,6 +88,59 @@ export const schemas = {
       },
     },
   },
+  ModelGenerationSettings: {
+    type: "object",
+    additionalProperties: false,
+    description:
+      "Optional model sampling and reasoning controls. Omitted properties inherit the next lower-precedence layer.",
+    properties: {
+      temperature: {
+        type: ["number", "null"],
+        minimum: 0,
+        maximum: 1,
+        description:
+          "Provider sampling temperature; null or omission inherits the runtime default.",
+      },
+      reasoningLevel: {
+        type: ["string", "null"],
+        enum: ["off", "minimal", "low", "medium", "high", "xhigh", null],
+        description: "Portable reasoning effort normalized across providers.",
+      },
+    },
+  },
+  ModelGenerationCapabilities: {
+    type: "object",
+    additionalProperties: false,
+    required: ["temperature", "temperatureWithReasoning", "reasoning"],
+    description:
+      "Normalized support facts from Appstrate's pinned LiteLLM catalog snapshot. `unknown` is forward-compatible and differs from an explicit upstream refusal.",
+    properties: {
+      temperature: { type: "string", enum: ["supported", "unsupported", "unknown"] },
+      temperatureWithReasoning: {
+        type: "string",
+        enum: ["supported", "unsupported", "unknown"],
+      },
+      reasoning: {
+        type: "object",
+        additionalProperties: false,
+        required: ["supported", "adaptive", "levels"],
+        properties: {
+          supported: { type: "string", enum: ["supported", "unsupported", "unknown"] },
+          adaptive: { type: ["boolean", "null"] },
+          levels: {
+            type: "object",
+            additionalProperties: {
+              type: "string",
+              enum: ["supported", "unsupported", "unknown"],
+            },
+            propertyNames: {
+              enum: ["off", "minimal", "low", "medium", "high", "xhigh"],
+            },
+          },
+        },
+      },
+    },
+  },
   User: {
     type: "object",
     // Better-Auth-owned shape: the platform documents the three fields it
@@ -127,6 +180,7 @@ export const schemas = {
     required: [
       "packageId",
       "config",
+      "generationConfig",
       "modelId",
       "proxyId",
       "version_id",
@@ -141,6 +195,9 @@ export const schemas = {
       object: { type: "string", enum: ["application_package"] },
       packageId: { type: "string", description: "Package ID from org catalog" },
       config: { type: "object", description: "Application-specific configuration" },
+      generationConfig: {
+        oneOf: [{ $ref: "#/components/schemas/ModelGenerationSettings" }, { type: "null" }],
+      },
       modelId: { type: ["string", "null"], description: "Model override for this app" },
       proxyId: { type: ["string", "null"], description: "Proxy override for this app" },
       version_id: { type: ["integer", "null"], description: "Pinned version (null = latest)" },
@@ -567,6 +624,8 @@ export const schemas = {
       "metadata",
       "config",
       "config_override",
+      "generation",
+      "generation_override",
       "started_at",
       "completed_at",
       "duration",
@@ -749,6 +808,14 @@ export const schemas = {
           "Per-run config delta — the raw object the caller sent in the request body. `config` is the resolved (deep-merged) snapshot; `config_override` is the raw delta that the dashboard uses to badge 'default vs override'. Null when the run used persisted defaults verbatim.",
         additionalProperties: true,
       },
+      generation: {
+        oneOf: [{ $ref: "#/components/schemas/ModelGenerationSettings" }, { type: "null" }],
+        description: "Effective generation controls resolved and frozen when the run was created.",
+      },
+      generation_override: {
+        oneOf: [{ $ref: "#/components/schemas/ModelGenerationSettings" }, { type: "null" }],
+        description: "Raw per-invocation generation layer, before agent defaults are applied.",
+      },
       user_name: {
         type: ["string", "null"],
         description:
@@ -929,6 +996,7 @@ export const schemas = {
       "timezone",
       "input",
       "config_override",
+      "generation_config_override",
       "model_id_override",
       "proxy_id_override",
       "version_override",
@@ -957,6 +1025,9 @@ export const schemas = {
       timezone: { type: ["string", "null"] },
       input: { type: ["object", "null"], additionalProperties: true },
       config_override: { type: ["object", "null"], additionalProperties: true },
+      generation_config_override: {
+        oneOf: [{ $ref: "#/components/schemas/ModelGenerationSettings" }, { type: "null" }],
+      },
       model_id_override: { type: ["string", "null"] },
       proxy_id_override: { type: ["string", "null"] },
       version_override: { type: ["string", "null"] },
@@ -1173,6 +1244,7 @@ export const schemas = {
       "providerName",
       "baseUrl",
       "modelId",
+      "generation",
       "enabled",
       "is_default",
       "needs_reconnection",
@@ -1209,6 +1281,11 @@ export const schemas = {
       modelId: {
         type: ["string", "null"],
         description: "Upstream model id. `null` for managed models — not exposed.",
+      },
+      generation: {
+        oneOf: [{ $ref: "#/components/schemas/ModelGenerationCapabilities" }, { type: "null" }],
+        description:
+          "Generation controls supported by the backing model. Null for managed aliases whose binding is hidden.",
       },
       input: { type: ["array", "null"], items: { type: "string" } },
       contextWindow: { type: ["integer", "null"] },
