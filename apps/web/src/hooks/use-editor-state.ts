@@ -23,7 +23,7 @@ export interface EditorStateBase {
 
 export interface UseEditorStateOptions<S extends EditorStateBase> {
   initialState: S;
-  packageType: PackageType;
+  packageType: Exclude<PackageType, "mcp-server">;
   packageId: string | undefined;
   isEdit: boolean;
   /**

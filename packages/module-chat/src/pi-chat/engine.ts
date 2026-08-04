@@ -54,6 +54,7 @@ import {
 } from "../turn-closure.ts";
 import { classifyClientTurnError, clientTurnErrorMarker } from "../turn-error.ts";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
+import { subscriptionFailureChunks } from "./failure-closure.ts";
 
 /**
  * Wall-clock ceiling for a single chat turn. A turn fans out into up to
@@ -105,7 +106,13 @@ export function runPiSubscriptionChat(input: PiSubscriptionChatInput): Response 
   const stream = createUIMessageStream({
     onError,
     execute: async ({ writer }) => {
-      const write = (chunk: UIMessageChunk): void => writer.write(chunk);
+      let streamStarted = false;
+      let streamFinished = false;
+      const write = (chunk: UIMessageChunk): void => {
+        writer.write(chunk);
+        if (chunk.type === "start") streamStarted = true;
+        if (chunk.type === "finish") streamFinished = true;
+      };
 
       // Deadline + explicit-stop → one combined abort threaded into the prompt.
       // The two causes are NOT interchangeable at the finish line (an explicit
@@ -129,6 +136,7 @@ export function runPiSubscriptionChat(input: PiSubscriptionChatInput): Response 
       // down even when construction fails (they'd otherwise survive until the
       // 10-minute deadline).
       let mcpTools: Awaited<ReturnType<typeof buildPlatformMcpTools>> | undefined;
+      let stepCap: ReturnType<typeof createStepCapController> | undefined;
       try {
         // Platform meta-tools (search/describe/invoke_operation + run_and_wait).
         // A failure here is a genuine misconfiguration (the chat's value IS the
@@ -243,7 +251,7 @@ export function runPiSubscriptionChat(input: PiSubscriptionChatInput): Response 
         // Enforce CHAT_MAX_STEPS on this engine too (it used to be reported and
         // never applied). The cap cuts the TOOL loop one step early and the
         // closing tool-less call below spends the last step on an answer.
-        const stepCap = createStepCapController({
+        stepCap = createStepCapController({
           modelCallCount: () => mapper.stepCount(),
         });
         stepCap.attach(typedSession);
@@ -355,6 +363,29 @@ export function runPiSubscriptionChat(input: PiSubscriptionChatInput): Response 
           cost: model.cost,
           durationMs: Date.now() - startedAt,
         });
+      } catch (err) {
+        // `createUIMessageStream` turns an escaped exception into a transient
+        // error chunk. Without a start + finish boundary there is no assistant
+        // message for the persistence drain to reconstruct after a reload.
+        if (streamFinished) {
+          logger.error("subscription chat failed after its finish chunk", { err: String(err) });
+        } else {
+          logger.error("subscription chat turn failed", {
+            err: String(err),
+            chatSessionId: input.chatSessionId,
+          });
+          for (const chunk of subscriptionFailureChunks({
+            error: err,
+            streamStarted,
+            aborted: turnAbort.signal.aborted,
+            abortReason: turnAbort.signal.reason,
+            stepCount: mapper.stepCount(),
+            stepCapReached: stepCap?.fired() ?? false,
+            ...(mapper.lastToolName() ? { lastToolName: mapper.lastToolName() } : {}),
+          })) {
+            write(chunk);
+          }
+        }
       } finally {
         clearTimeout(deadline);
         abortSignal.removeEventListener("abort", forwardAbort);

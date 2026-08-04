@@ -33,12 +33,19 @@ interface PackageDocumentBytes {
   mime: string;
 }
 
-function packageDocumentImportAccessError(ctx: PackageDocumentToolContext): string | undefined {
+type PackageDocumentImportContext = Pick<PackageDocumentToolContext, "permissions" | "actor">;
+
+function packageDocumentImportAccessError(ctx: PackageDocumentImportContext): string | undefined {
   if (!ctx.permissions.has("mcp:invoke") || !ctx.permissions.has("agents:write")) {
     return "Permissions 'mcp:invoke' and 'agents:write' are required to import packages.";
   }
   if (ctx.actor.type !== "user") return "Only organization users can import packages.";
   return undefined;
+}
+
+/** Keep tool disclosure and server guidance on the same import eligibility rule. */
+export function canImportPackageDocuments(ctx: PackageDocumentImportContext): boolean {
+  return packageDocumentImportAccessError(ctx) === undefined;
 }
 
 function packageSizeError(): McpError {
@@ -281,7 +288,7 @@ export function buildPackageDocumentTools(
 ): AppstrateToolDefinition[] {
   return [
     buildValidatePackageDocumentTool(ctx),
-    ...(packageDocumentImportAccessError(ctx) ? [] : [buildImportPackageDocumentTool(ctx)]),
+    ...(canImportPackageDocuments(ctx) ? [buildImportPackageDocumentTool(ctx)] : []),
     buildRuntimeCapabilitiesTool(),
   ];
 }
