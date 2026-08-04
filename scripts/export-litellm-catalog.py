@@ -1,8 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Export deterministic model metadata from the pinned LiteLLM package.
+"""Enrich deterministic model metadata with the pinned LiteLLM package.
 
 This script is executed only inside the digest-pinned LiteLLM image in the
-weekly workflow. Appstrate never imports LiteLLM at runtime.
+weekly workflow. The optional input is LiteLLM's model catalog downloaded at
+an exact upstream commit; the package supplies its supported-parameter API.
+Appstrate never imports LiteLLM at runtime.
 """
 
 import json
@@ -49,8 +51,19 @@ def supported_params(model: str, provider: str | None) -> list[str] | None:
         return None
 
 
+if len(sys.argv) > 2:
+    raise SystemExit("usage: export-litellm-catalog.py [catalog.json]")
+
+if len(sys.argv) == 2:
+    with open(sys.argv[1], encoding="utf-8") as source_file:
+        source_catalog = json.load(source_file)
+    if not isinstance(source_catalog, dict) or not source_catalog:
+        raise SystemExit("catalog input must be a non-empty JSON object")
+else:
+    source_catalog = litellm.model_cost
+
 catalog: dict[str, object] = {}
-for model, raw_entry in sorted(litellm.model_cost.items()):
+for model, raw_entry in sorted(source_catalog.items()):
     entry = dict(raw_entry)
     params = supported_params(
         model,

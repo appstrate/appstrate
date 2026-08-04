@@ -258,37 +258,6 @@
       "cacheWrite": 0
     }
   },
-  "glm-4.7-flash": {
-    "label": "Glm 4.7 Flash",
-    "contextWindow": 200000,
-    "maxTokens": 128000,
-    "capabilities": [
-      "text",
-      "reasoning"
-    ],
-    "generation": {
-      "temperature": "supported",
-      "temperatureWithReasoning": "unknown",
-      "reasoning": {
-        "supported": "supported",
-        "adaptive": null,
-        "levels": {
-          "off": "unknown",
-          "minimal": "unknown",
-          "low": "supported",
-          "medium": "supported",
-          "high": "supported",
-          "xhigh": "unknown"
-        }
-      }
-    },
-    "cost": {
-      "input": 0,
-      "output": 0,
-      "cacheRead": 0,
-      "cacheWrite": 0
-    }
-  },
   "glm-5": {
     "label": "Glm 5",
     "contextWindow": 200000,
@@ -348,37 +317,6 @@
       "input": 1.2,
       "output": 5,
       "cacheRead": 0.3,
-      "cacheWrite": 0
-    }
-  },
-  "glm-5.1": {
-    "label": "Glm 5.1",
-    "contextWindow": 200000,
-    "maxTokens": 128000,
-    "capabilities": [
-      "text",
-      "reasoning"
-    ],
-    "generation": {
-      "temperature": "supported",
-      "temperatureWithReasoning": "unknown",
-      "reasoning": {
-        "supported": "supported",
-        "adaptive": null,
-        "levels": {
-          "off": "unknown",
-          "minimal": "unknown",
-          "low": "supported",
-          "medium": "supported",
-          "high": "supported",
-          "xhigh": "unknown"
-        }
-      }
-    },
-    "cost": {
-      "input": 1.4,
-      "output": 4.4,
-      "cacheRead": 0.26,
       "cacheWrite": 0
     }
   }
