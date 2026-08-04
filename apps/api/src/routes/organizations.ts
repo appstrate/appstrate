@@ -37,7 +37,6 @@ import {
   getOrgInvitations,
   cancelInvitation,
   updateInvitationRole,
-  ASSIGNABLE_ROLES,
 } from "../services/invitations.ts";
 import { provisionDefaultAgentForOrg } from "../services/default-agent.ts";
 import { effectiveOrgStorageLimit } from "../services/documents.ts";
@@ -47,6 +46,11 @@ import { createDefaultApplication } from "../services/applications.ts";
 import { emitEvent } from "../lib/modules/module-loader.ts";
 import { logger } from "../lib/logger.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
+import {
+  ASSIGNABLE_ORG_ROLES,
+  assignableRolesForMember,
+  canRemoveMember,
+} from "@appstrate/shared-types";
 
 export const createOrgSchema = z.object({
   name: z.string().min(1, "Name is required"),
@@ -60,11 +64,11 @@ export const updateOrgSchema = z.object({
 
 export const addMemberSchema = z.object({
   email: z.email("Email is required"),
-  role: z.enum(ASSIGNABLE_ROLES).default("member"),
+  role: z.enum(ASSIGNABLE_ORG_ROLES).default("member"),
 });
 
 export const updateRoleSchema = z.object({
-  role: z.enum(ASSIGNABLE_ROLES),
+  role: z.enum(ASSIGNABLE_ORG_ROLES),
 });
 
 /**
@@ -80,12 +84,7 @@ export const updateRoleSchema = z.object({
  * computed by the auth pipeline. Cookie sessions (and any other
  * human-session auth method) keep the plain membership-role check.
  */
-async function requireOrgRole(
-  c: Context<AppEnv>,
-  orgId: string,
-  roles: string[],
-  message: string,
-): Promise<void> {
+async function requireOrgRole(c: Context<AppEnv>, orgId: string, roles: string[], message: string) {
   if (c.get("authMethod") === "api_key") {
     throw forbidden("API keys cannot perform organization administration");
   }
@@ -93,6 +92,7 @@ async function requireOrgRole(
   if (!member || !roles.includes(member.role)) {
     throw forbidden(message);
   }
+  return member;
 }
 
 const router = new Hono<AppEnv>();
@@ -409,12 +409,12 @@ router.delete("/:orgId/invitations/:invitationId", async (c) => {
   return c.body(null, 204);
 });
 
-// PUT /api/orgs/:orgId/invitations/:invitationId — change invitation role (owner only)
+// PUT /api/orgs/:orgId/invitations/:invitationId — change invitation role (admin+)
 router.put("/:orgId/invitations/:invitationId", async (c) => {
   const orgId = c.req.param("orgId");
   const invitationId = c.req.param("invitationId");
 
-  await requireOrgRole(c, orgId, ["owner"], "Only the owner can change roles");
+  await requireOrgRole(c, orgId, ["owner", "admin"], "Admin access required to change roles");
 
   const data = await readJsonBody(c, updateRoleSchema);
 
@@ -432,8 +432,7 @@ router.put("/:orgId/invitations/:invitationId", async (c) => {
   });
 
   // Bare updated resource — same serializer as the invitations list in
-  // GET /orgs/:orgId (issue #657). `token` is included because the
-  // endpoint is owner-gated, consistent with the list.
+  // GET /orgs/:orgId (issue #657).
   return c.json({
     id: updated.id,
     email: updated.email,
@@ -446,17 +445,29 @@ router.put("/:orgId/invitations/:invitationId", async (c) => {
 
 // DELETE /api/orgs/:orgId/members/:userId — remove a member (admin+)
 router.delete("/:orgId/members/:userId", async (c) => {
+  const user = c.get("user");
   const orgId = c.req.param("orgId");
   const targetUserId = c.req.param("userId");
 
-  await requireOrgRole(c, orgId, ["owner", "admin"], "Admin access required to remove members");
+  const actor = await requireOrgRole(
+    c,
+    orgId,
+    ["owner", "admin"],
+    "Admin access required to remove members",
+  );
 
   const target = await getOrgMember(orgId, targetUserId);
   if (!target) {
     throw notFound("Member not found");
   }
-  if (target.role === "owner") {
-    throw forbidden("Cannot remove the owner");
+  if (
+    !canRemoveMember({
+      actorRole: actor.role,
+      targetRole: target.role,
+      isSelf: targetUserId === user.id,
+    })
+  ) {
+    throw forbidden("You cannot remove this member");
   }
 
   await removeMember(orgId, targetUserId);
@@ -469,24 +480,33 @@ router.delete("/:orgId/members/:userId", async (c) => {
   return c.body(null, 204);
 });
 
-// PUT /api/orgs/:orgId/members/:userId — change role (owner only)
+// PUT /api/orgs/:orgId/members/:userId — change role (owner/admin hierarchy)
 router.put("/:orgId/members/:userId", async (c) => {
   const user = c.get("user");
   const orgId = c.req.param("orgId");
   const targetUserId = c.req.param("userId");
 
-  await requireOrgRole(c, orgId, ["owner"], "Only the owner can change roles");
+  const actor = await requireOrgRole(
+    c,
+    orgId,
+    ["owner", "admin"],
+    "Admin access required to change roles",
+  );
 
   const data = await readJsonBody(c, updateRoleSchema);
-
-  // Cannot change own role
-  if (targetUserId === user.id) {
-    throw forbidden("Cannot change your own role");
-  }
 
   const target = await getOrgMember(orgId, targetUserId);
   if (!target) {
     throw notFound("Member not found");
+  }
+
+  const assignableRoles = assignableRolesForMember({
+    actorRole: actor.role,
+    targetRole: target.role,
+    isSelf: targetUserId === user.id,
+  });
+  if (!assignableRoles.includes(data.role)) {
+    throw forbidden("You cannot assign this role to this member");
   }
 
   await updateMemberRole(orgId, targetUserId, data.role);

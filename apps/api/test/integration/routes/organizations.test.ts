@@ -601,6 +601,46 @@ describe("Organizations API", () => {
 
   // Issue #657 — mutations return the bare full resource, not a stub.
   describe("PUT /api/orgs/:orgId/members/:userId", () => {
+    it("lets an admin promote a member to admin", async () => {
+      const ctx = await createTestContext({ orgSlug: "admin-role-org" });
+      const admin = await createTestUser({ email: "admin-role@test.com" });
+      const member = await createTestUser({ email: "member-role@test.com" });
+      await addOrgMember(ctx.orgId, admin.id, "admin");
+      await addOrgMember(ctx.orgId, member.id, "member");
+
+      const res = await app.request(`/api/orgs/${ctx.orgId}/members/${member.id}`, {
+        method: "PUT",
+        headers: { Cookie: admin.cookie, "Content-Type": "application/json" },
+        body: JSON.stringify({ role: "admin" }),
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { role: string };
+      expect(body.role).toBe("admin");
+    });
+
+    it("does not let an admin change a peer admin's role", async () => {
+      const ctx = await createTestContext({ orgSlug: "peer-admin-role-org" });
+      const actor = await createTestUser({ email: "actor-admin@test.com" });
+      const target = await createTestUser({ email: "target-admin@test.com" });
+      await addOrgMember(ctx.orgId, actor.id, "admin");
+      await addOrgMember(ctx.orgId, target.id, "admin");
+
+      const res = await app.request(`/api/orgs/${ctx.orgId}/members/${target.id}`, {
+        method: "PUT",
+        headers: { Cookie: actor.cookie, "Content-Type": "application/json" },
+        body: JSON.stringify({ role: "member" }),
+      });
+
+      expect(res.status).toBe(403);
+
+      const detailRes = await app.request(`/api/orgs/${ctx.orgId}`, {
+        headers: { Cookie: ctx.cookie },
+      });
+      const detail = (await detailRes.json()) as { members: { userId: string; role: string }[] };
+      expect(detail.members.find((member) => member.userId === target.id)?.role).toBe("admin");
+    });
+
     it("returns the bare member DTO (same shape as the members list)", async () => {
       const ctx = await createTestContext({ orgSlug: "roleorg" });
       const member = await createTestUser({ email: "promote@test.com" });
@@ -636,6 +676,28 @@ describe("Organizations API", () => {
   });
 
   describe("PUT /api/orgs/:orgId/invitations/:invitationId", () => {
+    it("lets an admin change a pending invitation's role", async () => {
+      const ctx = await createTestContext({ orgSlug: "admin-invitation-role-org" });
+      const admin = await createTestUser({ email: "invitation-admin@test.com" });
+      await addOrgMember(ctx.orgId, admin.id, "admin");
+      const invitation = await createInvitation({
+        email: "admin-invitee@test.com",
+        orgId: ctx.orgId,
+        role: "member",
+        invitedBy: ctx.user.id,
+      });
+
+      const res = await app.request(`/api/orgs/${ctx.orgId}/invitations/${invitation.id}`, {
+        method: "PUT",
+        headers: { Cookie: admin.cookie, "Content-Type": "application/json" },
+        body: JSON.stringify({ role: "admin" }),
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { role: string };
+      expect(body.role).toBe("admin");
+    });
+
     it("returns the bare invitation DTO (same shape as the invitations list)", async () => {
       const ctx = await createTestContext({ orgSlug: "invorg" });
       const invitation = await createInvitation({
@@ -654,7 +716,7 @@ describe("Organizations API", () => {
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
       // Bare invitation DTO — same shape as the invitations list in
-      // GET /api/orgs/:orgId (token kept: endpoint is owner-gated)
+      // GET /api/orgs/:orgId (token kept in the full invitation DTO)
       expect(body.id).toBe(invitation.id);
       expect(body.role).toBe("admin");
       expect(body.email).toBe("invitee@test.com");
@@ -677,6 +739,42 @@ describe("Organizations API", () => {
   });
 
   describe("DELETE /api/orgs/:orgId/members/:userId", () => {
+    it("lets an admin remove a regular member", async () => {
+      const ctx = await createTestContext({ orgSlug: "admin-remove-member-org" });
+      const admin = await createTestUser({ email: "remove-member-admin@test.com" });
+      const member = await createTestUser({ email: "remove-member@test.com" });
+      await addOrgMember(ctx.orgId, admin.id, "admin");
+      await addOrgMember(ctx.orgId, member.id, "member");
+
+      const res = await app.request(`/api/orgs/${ctx.orgId}/members/${member.id}`, {
+        method: "DELETE",
+        headers: { Cookie: admin.cookie },
+      });
+
+      expect(res.status).toBe(204);
+    });
+
+    it("does not let an admin remove a peer admin", async () => {
+      const ctx = await createTestContext({ orgSlug: "remove-peer-admin-org" });
+      const actor = await createTestUser({ email: "remove-actor@test.com" });
+      const target = await createTestUser({ email: "remove-target@test.com" });
+      await addOrgMember(ctx.orgId, actor.id, "admin");
+      await addOrgMember(ctx.orgId, target.id, "admin");
+
+      const res = await app.request(`/api/orgs/${ctx.orgId}/members/${target.id}`, {
+        method: "DELETE",
+        headers: { Cookie: actor.cookie },
+      });
+
+      expect(res.status).toBe(403);
+
+      const detailRes = await app.request(`/api/orgs/${ctx.orgId}`, {
+        headers: { Cookie: ctx.cookie },
+      });
+      const detail = (await detailRes.json()) as { members: { userId: string }[] };
+      expect(detail.members.some((member) => member.userId === target.id)).toBe(true);
+    });
+
     it("removes the member and returns 204 with an empty body", async () => {
       const ctx = await createTestContext({ orgSlug: "delmemorg" });
       const member = await createTestUser({ email: "leaver@test.com" });

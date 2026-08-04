@@ -49,6 +49,10 @@ import type {
   IntegrationCredentialsPayload,
   ResolvedAuthCredentials,
 } from "./integration-credentials.ts";
+import {
+  planHttpDeliveryInjection,
+  type HttpDeliveryInjectionDecision,
+} from "@appstrate/afps-runtime/resolvers";
 import { matchesAuthorizedUriSpec } from "./proxy-primitives.ts";
 
 // ─────────────────────────────────────────────
@@ -155,7 +159,7 @@ export function planMitmAction(
   const stripped: string[] = [...universalStrip];
 
   if (plan) {
-    // By default the proxy strips a server-supplied header matching the
+    // By default the proxy strips a caller-supplied header matching the
     // injection target (confused-deputy boundary — integration code must not
     // pre-empt the injected credential). The ONE exception is an explicit
     // `allowServerOverride` on an Authorization-typed auth: the manifest author
@@ -171,7 +175,7 @@ export function planMitmAction(
       !plan.allowServerOverride &&
       !looseEquals(plan.headerName, "Authorization")
     ) {
-      // Protect the injected credential header from server override — but ONLY
+      // Protect the injected credential header from caller override — but ONLY
       // when we actually have a credential to inject. An empty delivery value
       // means "no credential yet": e.g. a `connect.tool` session still being
       // acquired at run-start, where the placeholder plan is `value: ""`.
@@ -184,9 +188,10 @@ export function planMitmAction(
     }
   }
 
-  const injectedHeader = plan
-    ? renderInjection(plan, ctx.headerNames, plan.allowServerOverride)
-    : null;
+  const injection: HttpDeliveryInjectionDecision = plan
+    ? planHttpDeliveryInjection(plan, ctx.headerNames)
+    : { kind: "none" };
+  const injectedHeader = injection.kind === "inject" ? injection.header : null;
 
   return {
     matchedAuth: matched,
@@ -198,30 +203,6 @@ export function planMitmAction(
 // ─────────────────────────────────────────────
 // Internals
 // ─────────────────────────────────────────────
-
-/**
- * Render the `{name, value}` pair the listener writes onto the upstream
- * request. Returns `null` when:
- *   - the delivery plan's value is empty (the credential resolver
- *     surfaced an empty field; injecting "Bearer " with no token is a
- *     guaranteed 401 and wastes the round-trip), OR
- *   - `allowServerOverride: true` AND the caller already set the same
- *     header (the manifest opt-in says respect the caller's value).
- */
-function renderInjection(
-  plan: HttpDeliveryPlan,
-  callerHeaderNames: readonly string[],
-  allowServerOverride: boolean,
-): { name: string; value: string } | null {
-  if (plan.value.length === 0) return null;
-  if (allowServerOverride) {
-    const callerSetIt = callerHeaderNames.some((h) => looseEquals(h, plan.headerName));
-    if (callerSetIt) return null;
-  }
-  const prefix = plan.headerPrefix.trim();
-  const value = prefix ? `${prefix} ${plan.value}` : plan.value;
-  return { name: plan.headerName, value };
-}
 
 function looseEquals(a: string, b: string): boolean {
   return a.toLowerCase() === b.toLowerCase();

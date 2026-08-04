@@ -78,7 +78,13 @@ function makeCtx(): { ctx: ToolContext; events: RunEvent[] } {
 /** apiCall integration manifest helper (api_key auth with delivery.http). */
 function apiKeyIntegrationManifest(
   _name: `@${string}/${string}`,
-  opts: { authorizedUris?: string[]; allowAllUris?: boolean; headerName?: string } = {},
+  opts: {
+    authorizedUris?: string[];
+    allowAllUris?: boolean;
+    headerName?: string;
+    headerPrefix?: string;
+    allowServerOverride?: boolean;
+  } = {},
 ) {
   return {
     integration: {
@@ -96,7 +102,9 @@ function apiKeyIntegrationManifest(
             http: {
               in: "header",
               name: opts.headerName ?? "X-Api-Key",
+              ...(opts.headerPrefix !== undefined ? { prefix: opts.headerPrefix } : {}),
               value: "{$credential.api_key}",
+              ...(opts.allowServerOverride ? { allow_server_override: true } : {}),
             },
           },
         },
@@ -539,7 +547,11 @@ describe("LocalIntegrationResolver", () => {
     const tools = await resolver.resolve([{ name: "@acme/api", version: "^1" }], bundle);
     const { ctx } = makeCtx();
     await tools[0]!.execute(
-      { method: "GET", target: "https://api.acme.com/v1/me", headers: { "x-api-key": "forged" } },
+      {
+        method: "GET",
+        target: "https://api.acme.com/v1/me",
+        headers: { "x-api-key": "forged", authorization: "Bearer unrelated" },
+      },
       ctx,
     );
     const h = calls[0]!.init.headers as Record<string, string>;
@@ -547,6 +559,43 @@ describe("LocalIntegrationResolver", () => {
     const apiKeyHeaders = Object.entries(h).filter(([k]) => k.toLowerCase() === "x-api-key");
     expect(apiKeyHeaders).toHaveLength(1);
     expect(apiKeyHeaders[0]![1]).toBe("real");
+    expect(Object.keys(h).some((key) => key.toLowerCase() === "authorization")).toBe(false);
+  });
+
+  it("preserves a case-insensitive caller header only when allowServerOverride is true", async () => {
+    const calls: { url: string; init: RequestInit }[] = [];
+    const root = makePackage("@acme/agent", "1.0.0", "agent", {});
+    const integ = makePackage("@acme/api", "1.0.0", "integration", {
+      "integration.json": JSON.stringify(
+        apiKeyIntegrationManifest("@acme/api", {
+          headerName: "Authorization",
+          headerPrefix: "Bearer",
+          allowServerOverride: true,
+        }).integration,
+      ),
+    });
+    const resolver = new LocalIntegrationResolver({
+      resolveHost: async () => ["203.0.113.7"],
+      creds: { version: 1, integrations: { "@acme/api": { fields: { api_key: "server" } } } },
+      fetch: ((url: string, init: RequestInit) => {
+        calls.push({ url, init });
+        return Promise.resolve(new Response("{}", { status: 200 }));
+      }) as typeof fetch,
+    });
+    const tools = await resolver.resolve(
+      [{ name: "@acme/api", version: "^1" }],
+      makeBundle(root, [integ]),
+    );
+    const { ctx } = makeCtx();
+    await tools[0]!.execute(
+      {
+        method: "GET",
+        target: "https://api.acme.com/v1/me",
+        headers: { authorization: "Bearer caller" },
+      },
+      ctx,
+    );
+    expect(calls[0]!.init.headers).toEqual({ authorization: "Bearer caller" });
   });
 
   it("honours an explicit injection override from the creds file", async () => {

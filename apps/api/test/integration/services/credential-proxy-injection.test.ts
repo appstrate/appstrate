@@ -22,6 +22,7 @@ import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage } from "../../helpers/seed.ts";
 import { applicationPackages, integrationConnections } from "@appstrate/db/schema";
+import { eq } from "drizzle-orm";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
 import type { IntegrationManifest } from "@appstrate/core/integration";
 import { proxyCall, ProxySubstitutionError } from "../../../src/services/credential-proxy/core.ts";
@@ -208,7 +209,7 @@ describe("proxyCall — server-side credential injection (integration-backed)", 
     expect(captured?.authorization).toBeUndefined();
   });
 
-  it("respects a caller-supplied non-Authorization header override", async () => {
+  it("replaces a caller-supplied non-Authorization header by default", async () => {
     const packageId = "@cpinjectorg/dual";
     await seedIntegration(
       ctx.orgId,
@@ -246,7 +247,68 @@ describe("proxyCall — server-side credential injection (integration-backed)", 
       fetch: fakeFetch,
     });
 
-    expect(captured?.["x-api-key"]).toBe("caller-override-key");
+    expect(captured?.["x-api-key"]).toBe("platform-pinned-key");
+  });
+
+  it("strips an allowed caller override on redirect even when the platform value is empty", async () => {
+    const packageId = "@cpinjectorg/override";
+    await seedIntegration(
+      ctx.orgId,
+      localIntegrationManifest({
+        name: packageId,
+        displayName: "Override",
+        description: "Override integration",
+        auths: {
+          api: {
+            type: "api_key",
+            authorizedUris: ["https://1.1.1.1/**"],
+            allowAllUris: true,
+            delivery: httpHeaderDelivery({
+              name: "X-Api-Key",
+              field: "api_key",
+              allowServerOverride: true,
+            }),
+          },
+        },
+      }),
+    );
+    await installAndConnect(ctx, packageId, "api", { api_key: "" });
+
+    const captured: Array<Record<string, string>> = [];
+    const fakeFetch = ((url: string | URL, init: RequestInit) => {
+      const headers: Record<string, string> = {};
+      new Headers(init.headers).forEach((v, k) => {
+        headers[k] = v;
+      });
+      captured.push(headers);
+      if (url.toString().startsWith("https://1.1.1.1")) {
+        return Promise.resolve(
+          new Response(null, {
+            status: 302,
+            headers: { location: "https://8.8.8.8/redirected" },
+          }),
+        );
+      }
+      return Promise.resolve(new Response("{}", { status: 401 }));
+    }) as unknown as typeof fetch;
+
+    await proxyCall({
+      applicationId: ctx.defaultAppId,
+      actor: { type: "user", id: ctx.user.id },
+      integrationId: packageId,
+      method: "GET",
+      target: "https://1.1.1.1/thing",
+      headers: { "x-api-key": "caller-override-key" },
+      fetch: fakeFetch,
+    });
+
+    expect(captured[0]?.["x-api-key"]).toBe("caller-override-key");
+    expect(captured[1]?.["x-api-key"]).toBeUndefined();
+    const [connection] = await db
+      .select({ needsReconnection: integrationConnections.needsReconnection })
+      .from(integrationConnections)
+      .where(eq(integrationConnections.integrationId, packageId));
+    expect(connection?.needsReconnection).toBe(false);
   });
 
   it("throws ProxySubstitutionError (fail-closed) when the target references an unresolved {{field}}", async () => {

@@ -16,9 +16,8 @@
  * declare `baseUrlOverridable: true` (today: `openai-compatible`, exposed
  * via the picker's "Custom" entry as the self-hosted escape hatch).
  *
- * Edit mode is API-key-only — OAuth rows are immutable (label included)
- * and use the dedicated "reconnect" affordance, which re-enters the
- * modal with the same provider preselected to re-pair.
+ * OAuth rows are immutable (label included) outside the dedicated reconnect
+ * affordance, which re-enters the modal with the exact credential targeted.
  */
 
 import { useState } from "react";
@@ -67,8 +66,6 @@ interface CredentialFormModalProps {
   open: boolean;
   onClose: () => void;
   credential: ModelProviderCredentialInfo | null;
-  /** Preselect an OAuth provider — used by the "reconnect" affordance on stale rows. */
-  initialOauthProviderId?: string | null;
   isPending: boolean;
   onSubmit: (data: CredentialFormData) => void;
 }
@@ -110,13 +107,11 @@ function buildOptions(registry: readonly ProviderRegistryEntry[]): PickerOption[
 
 function CredentialFormBody({
   credential,
-  initialOauthProviderId,
   isPending,
   onSubmit,
   onClose,
 }: {
   credential: ModelProviderCredentialInfo | null;
-  initialOauthProviderId: string | null;
   isPending: boolean;
   onSubmit: (data: CredentialFormData) => void;
   onClose: () => void;
@@ -127,7 +122,11 @@ function CredentialFormBody({
   const options = buildOptions(registry);
 
   const [selectedId, setSelectedId] = useState<string>(() => {
-    if (initialOauthProviderId) return `oauth:${initialOauthProviderId}`;
+    if (credential?.providerId) {
+      return credential.authMode === "oauth2"
+        ? `oauth:${credential.providerId}`
+        : credential.providerId;
+    }
     return credential ? resolveProviderId(credential, registry) : "";
   });
 
@@ -272,6 +271,7 @@ function CredentialFormBody({
             <OAuthPairingBody
               key={selectedOption.providerId}
               providerId={selectedOption.providerId}
+              credentialId={credential?.id}
               onConnected={() => onClose()}
               onBusyChange={oauthDismiss.onBusyChange}
             />
@@ -438,19 +438,17 @@ export function CredentialFormModal({
   open,
   onClose,
   credential,
-  initialOauthProviderId = null,
   isPending,
   onSubmit,
 }: CredentialFormModalProps) {
   if (!open) return null;
   // Re-mount on every (re)open so internal state (selected provider,
   // form values, pairing token if any) resets cleanly.
-  const key = credential?.id ?? `__create__:${initialOauthProviderId ?? ""}`;
+  const key = credential?.id ?? "__create__";
   return (
     <CredentialFormBody
       key={key}
       credential={credential}
-      initialOauthProviderId={initialOauthProviderId}
       isPending={isPending}
       onSubmit={onSubmit}
       onClose={onClose}

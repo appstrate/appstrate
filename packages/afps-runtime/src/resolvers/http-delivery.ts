@@ -42,6 +42,68 @@ export interface HttpDeliveryPlan {
 }
 
 /**
+ * Credential-header decision shared by every HTTP delivery topology.
+ *
+ * `caller_override` is distinct from `none`: callers use it to preserve the
+ * manifest-authorised header while avoiding a refresh / reconnection verdict
+ * for a 401 that did not use the platform credential.
+ */
+export type HttpDeliveryInjectionDecision =
+  | { kind: "none" }
+  | { kind: "caller_override"; headerName: string }
+  | { kind: "inject"; header: { name: string; value: string } };
+
+// RFC 9110 `token` grammar. A bare token in Authorization position is an auth
+// scheme and therefore needs one SP before its credentials. Composite prefixes
+// (`Token token=`) and non-Authorization headers (`Cookie: session=`) remain
+// literal AFPS prefixes.
+const HTTP_TOKEN = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
+
+/**
+ * Plan the observable credential-header mutation for one outgoing request.
+ *
+ * This is the single rendering + override-policy seam for remote MCP, MITM,
+ * credential-proxy, and portable `api_call` callers. It never inspects or
+ * normalises `plan.value`: a valid secret whose bytes happen to start with an
+ * auth-scheme word must reach the upstream unchanged (#988).
+ *
+ * AFPS defines `prefix` as literal. Appstrate additionally accepts the legacy
+ * shorthand of a bare auth scheme in `Authorization` / `Proxy-Authorization`
+ * position and inserts the required separator. This compatibility rule is
+ * deliberately based on the separately-declared prefix, never on the secret.
+ */
+export function planHttpDeliveryInjection(
+  plan: Pick<HttpDeliveryPlan, "headerName" | "headerPrefix" | "value" | "allowServerOverride">,
+  callerHeaderNames: readonly string[],
+): HttpDeliveryInjectionDecision {
+  if (plan.headerName.length === 0) return { kind: "none" };
+
+  const callerSetHeader = callerHeaderNames.some(
+    (name) => name.toLowerCase() === plan.headerName.toLowerCase(),
+  );
+  if (plan.allowServerOverride && callerSetHeader) {
+    return { kind: "caller_override", headerName: plan.headerName };
+  }
+  if (plan.value.length === 0) return { kind: "none" };
+
+  const lowerHeaderName = plan.headerName.toLowerCase();
+  const isAuthorization =
+    lowerHeaderName === "authorization" || lowerHeaderName === "proxy-authorization";
+  const separator =
+    isAuthorization && plan.headerPrefix.length > 0 && HTTP_TOKEN.test(plan.headerPrefix)
+      ? " "
+      : "";
+
+  return {
+    kind: "inject",
+    header: {
+      name: plan.headerName,
+      value: `${plan.headerPrefix}${separator}${plan.value}`,
+    },
+  };
+}
+
+/**
  * Auth-type defaults for `delivery.http`. `valueFrom` names the credential
  * field to inject, using the **canonical snake_case storage keys** — the same
  * convention the OAuth2 strategy persists (`access_token`) and the AFPS spec

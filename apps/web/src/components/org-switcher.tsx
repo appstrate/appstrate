@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ChevronsUpDown, Check, Plus, Star, Library } from "lucide-react";
 import { useOrg } from "../hooks/use-org";
@@ -42,6 +42,7 @@ function OrgAvatar({ name, className }: { name: string; className?: string }) {
 
 export function OrgSwitcher() {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const { currentOrg, orgs, switchOrg, loading } = useOrg();
   const { isMobile } = useSidebar();
   const { data: applications } = useApplications();
@@ -102,7 +103,10 @@ export function OrgSwitcher() {
                   data-testid={`org-item-${org.id}`}
                   className="flex items-center gap-2"
                   onSelect={() => {
-                    if (!isActive) switchOrg(org.id);
+                    if (!isActive) {
+                      switchOrg(org.id);
+                      navigate("/", { replace: true });
+                    }
                   }}
                 >
                   <OrgAvatar name={org.name} className="size-6 rounded-md text-xs" />

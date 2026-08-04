@@ -8,10 +8,9 @@
  * core fetches a {@link ProxyCredentialsPayload} per call; here we
  * synthesise one from the integration's resolved `delivery.http` plan:
  *
- *   - the injected header (name/prefix/value) maps to
- *     `credentialHeaderName` / `credentialHeaderPrefix` + a synthetic
- *     credential field holding the rendered token, which
- *     `buildInjectedCredentialHeader` reads via `credentialFieldName`;
+ *   - the injected header plan (name/prefix/value/override policy) maps to
+ *     the proxy payload + a synthetic credential field holding the rendered
+ *     token, which the shared injector reads via `credentialFieldName`;
  *   - the auth's decrypted `fields` are exposed under `credentials` so an
  *     agent can still `{{var}}`-substitute them into the URL / headers /
  *     body;

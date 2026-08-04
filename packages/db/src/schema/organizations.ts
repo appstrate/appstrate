@@ -297,16 +297,22 @@ export const modelProviderPairings = pgTable(
       .references(() => organizations.id, { onDelete: "cascade" }),
     /** Provider id from the OAuth model provider registry. */
     providerId: text("provider_id").notNull(),
+    /**
+     * Existing credential targeted by a reconnect pairing. NULL for a new
+     * connection. Deliberately not a foreign key: if the credential is
+     * deleted while the helper is running, redeem must retain the original
+     * target id and fail instead of silently falling back to create mode.
+     */
+    reconnectCredentialId: uuid("reconnect_credential_id"),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
     /** When the helper successfully POSTed credentials. NULL means still pending. */
     consumedAt: timestamp("consumed_at", { withTimezone: true }),
     /** IP address that consumed the pairing — kept alongside `consumedAt` for audit. */
     consumedFromIp: text("consumed_from_ip"),
     /**
-     * `model_provider_credentials.id` created by the helper's POST /import.
-     * NULL while pending; populated atomically with `consumed_at`. Surfaced
-     * to the dashboard via `GET /pairing/:id` so the UI can act on the new
-     * credential without polling the credential list.
+     * Final `model_provider_credentials.id` created or reconnected by the
+     * helper. NULL while pending; surfaced via `GET /pairing/:id` after redeem
+     * so the UI can act on the result without polling the credential list.
      */
     credentialId: uuid("credential_id").references(() => modelProviderCredentials.id, {
       onDelete: "set null",

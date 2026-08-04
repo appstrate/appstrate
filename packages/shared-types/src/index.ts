@@ -5,6 +5,13 @@ import type { ModelCost } from "@appstrate/core/module";
 import type { TokenUsage } from "@appstrate/core/token-usage";
 import type { ModelApiShape } from "@appstrate/core/sidecar-types";
 
+export {
+  ASSIGNABLE_ORG_ROLES,
+  assignableRolesForMember,
+  canRemoveMember,
+  type AssignableOrgRole,
+} from "./member-role-policy.ts";
+
 export type { WebhookInfo, WebhookCreateResponse, WebhookDelivery } from "./webhooks.ts";
 import type { AgentIntegrationEntry } from "./integrations.ts";
 export type {

@@ -20,6 +20,7 @@ import { invalidRequest, notFound, parseBody, unauthorized } from "../lib/errors
 import { readJsonBody } from "../lib/request-body.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 import { getClientIp } from "../lib/client-ip.ts";
+import { getOrgModelProviderCredential } from "../services/model-providers/credentials.ts";
 
 /**
  * Body shape posted by `npx @appstrate/connect-helper <token>` after it
@@ -115,14 +116,17 @@ async function handlePairRedeem(c: Context<AppEnv>) {
     ...input,
     orgId: consumed.orgId,
     userId: consumed.userId,
+    ...(consumed.reconnectCredentialId ? { credentialId: consumed.reconnectCredentialId } : {}),
   });
 
-  // Link the new credential back to the pairing row so the dashboard's
+  // Link the resulting credential back to the pairing row so the dashboard's
   // GET /pairing/:id poll surfaces it without a separate list call.
   await linkPairingCredential(consumed.id, result.credentialId);
 
   await recordAuditFromContext(c, {
-    action: "oauth_model_provider.imported",
+    action: consumed.reconnectCredentialId
+      ? "oauth_model_provider.reconnected"
+      : "oauth_model_provider.imported",
     resourceType: "oauth_model_provider",
     resourceId: result.credentialId,
     after: {
@@ -176,6 +180,7 @@ export function createModelProvidersOAuthRouter() {
       (id) => isOAuthModelProvider(id),
       "providerId must be a registered OAuth model provider",
     ),
+    credentialId: z.uuid().optional(),
   });
 
   const pairingIdParam = z.object({
@@ -195,11 +200,27 @@ export function createModelProvidersOAuthRouter() {
       const user = c.get("user");
       const input = await readJsonBody(c, createPairingBody, { allowEmpty: true });
 
+      if (input.credentialId) {
+        const credential = await getOrgModelProviderCredential(orgId, input.credentialId);
+        if (
+          !credential ||
+          credential.source !== "custom" ||
+          credential.authMode !== "oauth2" ||
+          credential.providerId !== input.providerId
+        ) {
+          throw invalidRequest(
+            "credentialId must identify an OAuth credential for providerId in the current organization",
+            "credentialId",
+          );
+        }
+      }
+
       const platformUrl = getEnv().APP_URL;
       const { id, token, expiresAt } = await createPairing({
         userId: user.id,
         orgId,
         providerId: input.providerId,
+        ...(input.credentialId ? { reconnectCredentialId: input.credentialId } : {}),
         platformUrl,
         ttlSeconds: PAIRING_TTL_SECONDS,
       });
@@ -212,6 +233,7 @@ export function createModelProvidersOAuthRouter() {
         resourceId: id,
         after: {
           providerId: input.providerId,
+          reconnectCredentialId: input.credentialId ?? null,
           expiresAt: expiresAt.toISOString(),
           // No raw token in audit — leaks the bearer secret otherwise.
         },

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { ASSIGNABLE_ROLES } from "../../services/invitations.ts";
+import { ASSIGNABLE_ORG_ROLES } from "@appstrate/shared-types";
 
 export const organizationsPaths = {
   "/api/orgs": {
@@ -229,7 +229,7 @@ export const organizationsPaths = {
               required: ["email", "role"],
               properties: {
                 email: { type: "string", format: "email" },
-                role: { type: "string", enum: [...ASSIGNABLE_ROLES], default: "member" },
+                role: { type: "string", enum: [...ASSIGNABLE_ORG_ROLES], default: "member" },
               },
             },
           },
@@ -269,7 +269,8 @@ export const organizationsPaths = {
       operationId: "changeMemberRole",
       tags: ["Organizations"],
       summary: "Change member role",
-      description: "Change a member's role within the organization. Owner only.",
+      description:
+        "Change a member's role. Owners can manage any non-owner; admins can manage viewers and members.",
       parameters: [
         { name: "orgId", in: "path", required: true, schema: { type: "string" } },
         { name: "userId", in: "path", required: true, schema: { type: "string" } },
@@ -282,7 +283,7 @@ export const organizationsPaths = {
               type: "object",
               required: ["role"],
               properties: {
-                role: { type: "string", enum: [...ASSIGNABLE_ROLES] },
+                role: { type: "string", enum: [...ASSIGNABLE_ORG_ROLES] },
               },
             },
           },
@@ -342,7 +343,7 @@ export const organizationsPaths = {
       operationId: "changeInvitationRole",
       tags: ["Organizations"],
       summary: "Change invitation role",
-      description: "Change the role assigned to a pending invitation. Owner only.",
+      description: "Change the role assigned to a pending invitation. Admin or owner required.",
       parameters: [
         { name: "orgId", in: "path", required: true, schema: { type: "string" } },
         { name: "invitationId", in: "path", required: true, schema: { type: "string" } },
@@ -355,7 +356,7 @@ export const organizationsPaths = {
               type: "object",
               required: ["role"],
               properties: {
-                role: { type: "string", enum: [...ASSIGNABLE_ROLES] },
+                role: { type: "string", enum: [...ASSIGNABLE_ORG_ROLES] },
               },
             },
           },

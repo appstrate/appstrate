@@ -22,8 +22,9 @@ import {
 } from "../../components/onboarding-layout";
 import { CopyLinkButton } from "../../components/copy-link-button";
 import { $api } from "../../api/client";
-import { roleI18nKey, INVITE_ROLES } from "../../hooks/use-permissions";
+import { roleI18nKey } from "../../hooks/use-permissions";
 import { Spinner } from "../../components/spinner";
+import { ASSIGNABLE_ORG_ROLES, type AssignableOrgRole } from "@appstrate/shared-types";
 
 export function OnboardingMembersStep() {
   const { t } = useTranslation(["settings", "common"]);
@@ -33,7 +34,7 @@ export function OnboardingMembersStep() {
   const { nextRoute, prevRoute } = useOnboardingNav("members");
 
   const [email, setEmail] = useState("");
-  const [role, setRole] = useState<"viewer" | "member" | "admin">("member");
+  const [role, setRole] = useState<AssignableOrgRole>("member");
   const [error, setError] = useState<string | null>(null);
 
   const { data: orgData } = $api.useQuery(
@@ -95,15 +96,12 @@ export function OnboardingMembersStep() {
                 placeholder="email@example.com"
                 required
               />
-              <Select
-                value={role}
-                onValueChange={(v) => setRole(v as "viewer" | "member" | "admin")}
-              >
+              <Select value={role} onValueChange={(v) => setRole(v as AssignableOrgRole)}>
                 <SelectTrigger className="w-[140px]">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {INVITE_ROLES.map((r) => (
+                  {ASSIGNABLE_ORG_ROLES.map((r) => (
                     <SelectItem key={r} value={r}>
                       {t(roleI18nKey(r))}
                     </SelectItem>

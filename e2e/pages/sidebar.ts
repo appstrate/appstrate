@@ -31,8 +31,8 @@ export class Sidebar {
   async switchOrg(orgName: string) {
     await this.openSwitcher();
     await this.page.getByText(orgName).click();
-    // Wait for the org switch to take effect — agent list refetches
-    await this.page.waitForLoadState("domcontentloaded");
+    // Organization changes always return to the dashboard.
+    await expect(this.page).toHaveURL("/");
   }
 
   /** Open the app submenu and click an app by name. */

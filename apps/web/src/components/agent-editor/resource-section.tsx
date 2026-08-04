@@ -278,8 +278,7 @@ export function ResourceSection({
 
               For an integration the row also carries the cure. The message says
               "activate it to connect it", and until now nothing on this screen
-              could: the checkbox only removes the dependency, and the map's
-              library picker skips anything already declared. So the one action
+              could: the checkbox only removes the dependency. So the one action
               the sentence asks for had no button anywhere. */}
           {inactiveDeclaredIds.map((id) => (
             <div
