@@ -341,6 +341,13 @@ function supportEither(a: boolean | undefined, b: boolean | undefined): ModelCap
 
 function deriveGenerationCapabilities(entry: LiteLLMEntry): ModelGenerationCapabilities {
   const supportedParams = entry._appstrate_supported_openai_params;
+  const hasSupportedReasoningLevel = [
+    entry.supports_none_reasoning_effort,
+    entry.supports_minimal_reasoning_effort,
+    entry.supports_low_reasoning_effort,
+    entry.supports_xhigh_reasoning_effort,
+    entry.supports_max_reasoning_effort,
+  ].some((value) => value === true);
   const temperature =
     entry.supports_sampling_params === false
       ? "unsupported"
@@ -353,6 +360,7 @@ function deriveGenerationCapabilities(entry: LiteLLMEntry): ModelGenerationCapab
     entry.supports_reasoning === false
       ? "unsupported"
       : entry.supports_reasoning === true ||
+          hasSupportedReasoningLevel ||
           supportedParams?.includes("reasoning_effort") === true ||
           supportedParams?.includes("thinking") === true
         ? "supported"

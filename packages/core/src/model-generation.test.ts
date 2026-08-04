@@ -96,6 +96,21 @@ describe("resolveModelGenerationSettings", () => {
       }),
     ).toThrow("does not support reasoning level 'high'");
   });
+
+  it("rejects unconfirmed levels when LiteLLM only confirms one level", () => {
+    expect(() =>
+      resolveModelGenerationSettings({
+        capabilities: capabilities({
+          reasoning: {
+            supported: "unknown",
+            adaptive: null,
+            levels: { minimal: "supported" },
+          },
+        }),
+        override: { reasoningLevel: "high" },
+      }),
+    ).toThrow("does not support reasoning level 'high'");
+  });
 });
 
 describe("applyModelGenerationCapabilitiesOverride", () => {
@@ -146,6 +161,21 @@ describe("reconcileModelGenerationSettings", () => {
             supported: "supported",
             adaptive: false,
             levels: { medium: "unknown" },
+          },
+        }),
+      ),
+    ).toEqual({});
+  });
+
+  it("removes unconfirmed levels when only one explicit level is known", () => {
+    expect(
+      reconcileModelGenerationSettings(
+        { reasoningLevel: "high" },
+        capabilities({
+          reasoning: {
+            supported: "unknown",
+            adaptive: null,
+            levels: { minimal: "supported" },
           },
         }),
       ),

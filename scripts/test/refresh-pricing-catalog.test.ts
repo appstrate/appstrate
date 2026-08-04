@@ -293,6 +293,15 @@ describe("generation capabilities", () => {
     expect(capabilities.reasoning.levels.high).toBe("unknown");
   });
 
+  it("derives reasoning support from an explicitly supported level", () => {
+    const capabilities = deriveGenerationCapabilities({
+      supports_minimal_reasoning_effort: true,
+    });
+    expect(capabilities.reasoning.supported).toBe("supported");
+    expect(capabilities.reasoning.levels.minimal).toBe("supported");
+    expect(capabilities.reasoning.levels.high).toBe("unknown");
+  });
+
   it("maps LiteLLM's max effort to Appstrate's portable xhigh level", () => {
     const capabilities = deriveGenerationCapabilities({
       litellm_provider: "anthropic",

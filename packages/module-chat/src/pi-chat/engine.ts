@@ -164,6 +164,7 @@ export function runPiSubscriptionChat(input: PiSubscriptionChatInput): Response 
           provider,
           baseUrl: model.baseUrl,
           reasoning: model.reasoning,
+          ...(model.reasoningLevelMap ? { thinkingLevelMap: model.reasoningLevelMap } : {}),
           input: (model.input ?? ["text"]) as Model<Api>["input"],
           cost: (model.cost ?? { input: 0, output: 0 }) as Model<Api>["cost"],
           contextWindow: model.contextWindow ?? undefined,

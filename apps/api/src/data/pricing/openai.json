@@ -1584,13 +1584,14 @@
     "maxTokens": 128000,
     "capabilities": [
       "text",
-      "image"
+      "image",
+      "reasoning"
     ],
     "generation": {
       "temperature": "unsupported",
       "temperatureWithReasoning": "unknown",
       "reasoning": {
-        "supported": "unknown",
+        "supported": "supported",
         "adaptive": null,
         "levels": {
           "off": "unsupported",

@@ -84,6 +84,19 @@ export const INHERITED_MODEL_GENERATION_CAPABILITIES: ModelGenerationCapabilitie
   reasoning: { supported: "unsupported", adaptive: null, levels: {} },
 };
 
+/**
+ * Whether the source has started describing support per level. Once it has,
+ * omission means "not confirmed" rather than permission to guess.
+ */
+export function requiresExplicitReasoningLevelSupport(
+  capabilities?: ModelGenerationCapabilities | null,
+): boolean {
+  return (
+    capabilities?.reasoning.supported === "supported" ||
+    Object.values(capabilities?.reasoning.levels ?? {}).some((value) => value !== "unknown")
+  );
+}
+
 /** Merge a provider adapter's stricter transport facts over catalog metadata. */
 export function applyModelGenerationCapabilitiesOverride(
   capabilities: ModelGenerationCapabilities,
@@ -130,8 +143,8 @@ export function reconcileModelGenerationSettings(
   if (
     reasoningLevel != null &&
     (capabilities?.reasoning.supported === "unsupported" ||
-      (capabilities?.reasoning.supported === "supported" &&
-        capabilities.reasoning.levels[reasoningLevel] !== "supported"))
+      (requiresExplicitReasoningLevelSupport(capabilities) &&
+        capabilities?.reasoning.levels[reasoningLevel] !== "supported"))
   ) {
     const { reasoningLevel: _reasoningLevel, ...rest } = next;
     void _reasoningLevel;
@@ -215,7 +228,7 @@ export function resolveModelGenerationSettings({
   if (
     reasoningLevel !== undefined &&
     (parsedCapabilities.reasoning.levels[reasoningLevel] === "unsupported" ||
-      (parsedCapabilities.reasoning.supported === "supported" &&
+      (requiresExplicitReasoningLevelSupport(parsedCapabilities) &&
         parsedCapabilities.reasoning.levels[reasoningLevel] !== "supported"))
   ) {
     throw new ModelGenerationError(
