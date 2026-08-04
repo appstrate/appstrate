@@ -52,10 +52,14 @@ const ZERO_USAGE: LanguageModelV3Usage = {
 };
 
 /** Stand-in for the handler's `buildTurnMetadata` (same shape, fixed counters). */
-function buildMetadata(finishReason: ChatTurnFinishReason): ChatMessageMetadata {
+function buildMetadata(
+  finishReason: ChatTurnFinishReason,
+  errorText?: string,
+): ChatMessageMetadata {
   return mergeTurnMetadata(undefined, {
     engine: "ai-sdk",
     finishReason,
+    ...(errorText ? { errorText } : {}),
     stepCount: 1,
     maxSteps: CHAT_MAX_STEPS,
     maxStepsReached: false,
@@ -241,6 +245,10 @@ describe("ai-sdk turn deadline", () => {
 
     const message = await assembleMessage(chunks);
     expect(turnMetadataFromMessage(message)?.finishReason).not.toBe("deadline");
+    expect(turnMetadataFromMessage(message)).toMatchObject({
+      finishReason: "error",
+      errorText: "Error: upstream exploded",
+    });
   });
 
   it("does not mistake an explicit user stop for a deadline", async () => {
@@ -296,6 +304,25 @@ describe("createTurnClosureStream", () => {
     const controller = new AbortController();
     const input: UIMessageChunk[] = [{ type: "start", messageId: "a1" }];
     expect(await through(input, controller.signal)).toEqual(input);
+  });
+
+  it("synthesizes a persisted finish for an error-only stream", async () => {
+    const controller = new AbortController();
+    const out = await through(
+      [
+        { type: "start", messageId: "a1" },
+        { type: "error", errorText: "safe upstream failure" },
+      ],
+      controller.signal,
+    );
+
+    expect(out.filter((c) => c.type === "finish")).toHaveLength(1);
+    const message = await assembleMessage(out);
+    expect(message?.id).toBe("a1");
+    expect(turnMetadataFromMessage(message)).toMatchObject({
+      finishReason: "error",
+      errorText: "safe upstream failure",
+    });
   });
 });
 

@@ -58,6 +58,7 @@ import {
   isFinalChatStep,
   mergeTurnMetadata,
   type ChatMessageMetadata,
+  type ChatTurnErrorCategory,
   type ChatTurnFinishReason,
 } from "@appstrate/core/chat-turn-metadata";
 import {
@@ -248,15 +249,82 @@ function preview(value: unknown): string {
 
 /**
  * Message surfaced to the user when a turn fails (the AI SDK masks errors by
- * default). We pass the provider's own error through — typically the real
- * cause (e.g. a provider key misconfigured in the org's models).
+ * default). Provider details are classified into a stable, actionable message
+ * before crossing the client or persistence boundary.
  */
-function clientErrorMessage(error: unknown): string {
+export interface ClientTurnError {
+  text: string;
+  category: ChatTurnErrorCategory;
+  retryable: boolean;
+  requestId?: string;
+}
+
+/** Provider-neutral error classification used by persisted metadata and UI copy. */
+export function classifyClientTurnError(error: unknown): ClientTurnError {
   const msg = error instanceof Error ? error.message : typeof error === "string" ? error : "";
   const trimmed = msg.trim();
-  if (!trimmed)
-    return "Le modèle a échoué (erreur inconnue). Vérifiez la configuration des modèles de l'organisation.";
-  return `Le modèle a échoué : ${trimmed.length > 400 ? `${trimmed.slice(0, 400)}…` : trimmed}`;
+  const requestId = /\b(req_[A-Za-z0-9_-]+)\b/.exec(trimmed)?.[1];
+  const normalized = trimmed.toLowerCase();
+
+  if (
+    /\b(401|402|403)\b/.test(normalized) ||
+    normalized.includes("insufficient balance") ||
+    normalized.includes("insufficient credit") ||
+    normalized.includes("billing") ||
+    normalized.includes("api key") ||
+    normalized.includes("authentication") ||
+    normalized.includes("unauthorized") ||
+    normalized.includes("forbidden") ||
+    normalized.includes("credential")
+  ) {
+    return {
+      text: "Le modèle sélectionné est indisponible à cause de sa configuration d’accès ou de facturation. Choisissez un autre modèle ou corrigez sa connexion, puis réessayez.",
+      category: "credential_unavailable",
+      retryable: false,
+      ...(requestId ? { requestId } : {}),
+    };
+  }
+  if (/\b429\b/.test(normalized) || normalized.includes("rate limit")) {
+    return {
+      text: "Le modèle a atteint sa limite de débit. Réessayez dans quelques instants.",
+      category: "rate_limited",
+      retryable: true,
+      ...(requestId ? { requestId } : {}),
+    };
+  }
+  if (/\b5\d\d\b/.test(normalized) || normalized.includes("upstream model error")) {
+    return {
+      text: "Le service du modèle est temporairement indisponible. Réessayez dans quelques instants.",
+      category: "upstream_unavailable",
+      retryable: true,
+      ...(requestId ? { requestId } : {}),
+    };
+  }
+  if (/\b400\b/.test(normalized) || normalized.includes("invalid request")) {
+    return {
+      text: `Le modèle a refusé la demande : ${trimmed.length > 320 ? `${trimmed.slice(0, 320)}…` : trimmed}`,
+      category: "invalid_request",
+      retryable: false,
+      ...(requestId ? { requestId } : {}),
+    };
+  }
+  if (!trimmed) {
+    return {
+      text: "Le modèle a échoué (erreur inconnue). Vérifiez la configuration des modèles de l'organisation.",
+      category: "unknown",
+      retryable: true,
+    };
+  }
+  return {
+    text: `Le modèle a échoué : ${trimmed.length > 400 ? `${trimmed.slice(0, 400)}…` : trimmed}`,
+    category: "unknown",
+    retryable: true,
+    ...(requestId ? { requestId } : {}),
+  };
+}
+
+function clientErrorMessage(error: unknown): string {
+  return classifyClientTurnError(error).text;
 }
 
 /** An armed turn ceiling: how the turn aborted, and how to cancel the timer. */
@@ -343,7 +411,7 @@ export function createTurnClosureStream(options: {
    */
   abortReason?: () => unknown;
   /** Turn metadata for the synthesized `finish` chunk (same builder as the nominal path). */
-  buildMetadata: (finishReason: ChatTurnFinishReason) => ChatMessageMetadata;
+  buildMetadata: (finishReason: ChatTurnFinishReason, errorText?: string) => ChatMessageMetadata;
   /** Notice part id (tests pin it). */
   newId?: () => string;
   /** Observability seam — called once when the deadline actually closed the turn. */
@@ -355,13 +423,41 @@ export function createTurnClosureStream(options: {
   // notice for work that in fact completed.
   let sawFinish = false;
   let sawError = false;
+  let sawStart = false;
+  let streamedErrorText: string | undefined;
   return new TransformStream<UIMessageChunk, UIMessageChunk>({
     transform(chunk, controller) {
-      if (chunk.type === "finish") sawFinish = true;
-      if (chunk.type === "error") sawError = true;
+      if (chunk.type === "start") sawStart = true;
+      if (chunk.type === "error") {
+        sawError = true;
+        streamedErrorText = chunk.errorText;
+      }
+      if (chunk.type === "finish") {
+        sawFinish = true;
+        // ai@7 may emit a finish after its transient error chunk. Replace the
+        // finish metadata in-band so the safe error survives persistence and
+        // reload instead of existing only in assistant-ui's live status.
+        if (sawError) {
+          controller.enqueue({
+            ...chunk,
+            messageMetadata: options.buildMetadata("error", streamedErrorText),
+          });
+          return;
+        }
+      }
       controller.enqueue(chunk);
     },
     flush(controller) {
+      // Some providers close immediately after the error chunk and publish no
+      // finish at all. Ensure a real message boundary + persisted metadata.
+      if (sawError && !sawFinish) {
+        if (!sawStart) controller.enqueue({ type: "start", messageId: newId() });
+        controller.enqueue({
+          type: "finish",
+          messageMetadata: options.buildMetadata("error", streamedErrorText),
+        });
+        return;
+      }
       const closure = resolveTurnClosure({
         aborted: !sawFinish && options.signal.aborted,
         abortReason: options.abortReason ? options.abortReason() : options.signal.reason,
@@ -443,6 +539,7 @@ export async function handleChatStream(
   let lastToolName: string | undefined;
   let toolStepBudgetReached = false;
   let aiSdkFinishReason: FinishReason | "unknown" = "unknown";
+  let aiSdkError: ClientTurnError | undefined;
 
   // The proxy surfaces are bearer-only (cookies refused — CSRF model):
   // inference loopback calls carry a short-lived token only this process
@@ -854,7 +951,12 @@ export async function handleChatStream(
       onError: ({ error }) => {
         // MCP teardown is owned by `finalize` (its persist `finally`), which runs
         // to completion regardless of the client — so it is not closed here.
-        logger.error("chat stream error", { err: String(error) });
+        aiSdkError = classifyClientTurnError(error);
+        logger.error("chat stream error", {
+          err: String(error),
+          category: aiSdkError.category,
+          requestId: aiSdkError.requestId,
+        });
       },
       onEnd: ({ usage, finishReason }) => {
         aiSdkFinishReason = finishReason ?? "unknown";
@@ -873,10 +975,21 @@ export async function handleChatStream(
     // closure stream synthesizes when the deadline fired (ai@7 publishes no
     // `finish` on an abort) — so a deadline-killed turn reports the same step
     // counters as any other, with `finishReason: "deadline"`.
-    const buildTurnMetadata = (finishReason: ChatTurnFinishReason): ChatMessageMetadata =>
+    const buildTurnMetadata = (
+      finishReason: ChatTurnFinishReason,
+      streamedErrorText?: string,
+    ): ChatMessageMetadata =>
       mergeTurnMetadata(undefined, {
         engine: "ai-sdk",
         finishReason,
+        ...(finishReason === "error"
+          ? {
+              errorText: streamedErrorText ?? aiSdkError?.text ?? clientErrorMessage(undefined),
+              errorCategory: aiSdkError?.category ?? "unknown",
+              errorRetryable: aiSdkError?.retryable ?? true,
+              ...(aiSdkError?.requestId ? { requestId: aiSdkError.requestId } : {}),
+            }
+          : {}),
         stepCount: completedSteps,
         maxSteps: CHAT_MAX_STEPS,
         toolStepBudget: CHAT_TOOL_STEP_BUDGET,

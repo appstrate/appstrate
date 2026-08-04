@@ -26,6 +26,7 @@ import {
   CopyIcon,
   FileIcon,
   PaperclipIcon,
+  RotateCcwIcon,
   SendHorizontalIcon,
   SquareIcon,
   XIcon,
@@ -409,22 +410,45 @@ const GENERIC_TURN_ERROR = "La génération a échoué.";
  * finish chunk (e.g. a hard ai-sdk stream error).
  */
 function MessageError() {
-  const errorText = useAuiState(({ message: m }) => {
+  const errorState = useAuiState(({ message: m }) => {
     const turn = turnMetadataFromMessage(sourceMessage(m));
-    if (turn?.finishReason === "error") return turn.errorText ?? GENERIC_TURN_ERROR;
+    if (turn?.finishReason === "error") {
+      return {
+        text: turn.errorText ?? GENERIC_TURN_ERROR,
+        retryable: turn.errorRetryable !== false,
+      };
+    }
     if (m.status?.type === "incomplete" && m.status.reason === "error") {
       const err = m.status.error;
-      return typeof err === "string" && err ? err : GENERIC_TURN_ERROR;
+      return {
+        text: typeof err === "string" && err ? err : GENERIC_TURN_ERROR,
+        retryable: true,
+      };
     }
     return null;
   });
-  if (!errorText) return null;
+  if (!errorState) return null;
   return (
     <div
       role="alert"
-      className="border-destructive/40 bg-destructive/10 text-destructive mt-2 rounded-md border px-3 py-2 text-sm break-words"
+      className="border-destructive/40 bg-destructive/10 text-destructive mt-2 flex flex-wrap items-center justify-between gap-2 rounded-md border px-3 py-2 text-sm break-words"
     >
-      {errorText}
+      <span>{errorState.text}</span>
+      {errorState.retryable ? (
+        <ThreadPrimitive.If running={false}>
+          <ThreadPrimitive.Suggestion
+            prompt="Réessaie ma dernière demande. Vérifie d'abord l'état actuel avant de répéter une action qui aurait peut-être déjà réussi."
+            method="replace"
+            autoSend
+            asChild
+          >
+            <Button variant="outline" size="sm" className="shrink-0">
+              <RotateCcwIcon className="size-3.5" />
+              Réessayer
+            </Button>
+          </ThreadPrimitive.Suggestion>
+        </ThreadPrimitive.If>
+      ) : null}
     </div>
   );
 }
