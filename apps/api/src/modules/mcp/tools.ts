@@ -779,21 +779,23 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
       "the created run to chat for live progress, then returns " +
       "`{ id, packageId, status, done:true, result?, error? }` when the run reaches a terminal " +
       "status. Do NOT call `getRun` after this tool just to wait for completion; this tool already " +
-      "waits. The chat shows logs after the run id is known, but ONLY lines the run emits " +
-      "through the `log` runtime tool. For an " +
-      'inline run (`kind:"inline"`) you MUST therefore (1) declare `"runtime_tools": ["log"]` in ' +
-      "the manifest AND (2) instruct the run, in its `prompt`, to call the `log` " +
-      "tool to report each meaningful step — otherwise the in-chat run progress component stays empty. " +
-      "For every inline run, set `manifest.display_name` to a concise, task-specific human " +
-      "title in the user's language and `manifest.name` to a matching descriptive " +
-      "`@inline/<kebab-case-slug>`; never use an id or a generic label such as `one-shot`. " +
+      "waits. For an inline run, `manifest` is a PARTIAL canonical AFPS manifest: normally set " +
+      "only a concise task-specific `display_name` plus task dependencies/configuration. The " +
+      "platform derives `name` and fills omitted AFPS boilerplate, `runtime_tools` (log, output, " +
+      "publish_document), and an open object output schema. Defaults apply only to fields you omit; " +
+      "every field you provide replaces its default exactly, with no array or nested-object merge. " +
+      "That includes `runtime_tools: []`, which stays empty and disables every default runtime tool. " +
+      "A complete deterministic manifest may override every field, including a strict " +
+      "`output.schema`; when it does, its explicit `runtime_tools` must include `output`. The chat " +
+      "shows only lines emitted through `log`, so instruct the run to log meaningful steps whenever " +
+      "that tool is selected. Never use an id or a generic display name such as `one-shot`. " +
       "File deliverables: every file the run writes under its workspace `outputs/` directory is " +
       "published as a document when the run ends and returned here as a `resource_link` — when the " +
       "goal is a downloadable file (report, CSV, image…), instruct the run's `prompt` to write it " +
       "into `outputs/` with a descriptive, task-specific filename that remains understandable " +
       "outside this run; never use context-free names such as `report.md`, `summary.md`, or " +
-      "`output.md`. For inline runs, run_and_wait automatically exposes `publish_document`; that " +
-      "tool's own description defines when and how the run should select a primary deliverable. " +
+      "`output.md`. When selected (by default, or explicitly), `publish_document`'s own " +
+      "description defines when and how the run should select a primary deliverable. " +
       "Content merely returned in the output payload never becomes a document. " +
       "Chaining runs (kind:inline): feed earlier runs' deliverables to a later one by passing " +
       "their `document://` URIs in `context_documents` — never by copying their content into " +
@@ -836,14 +838,50 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
         manifest: {
           type: "object",
           description:
-            "Inline agent manifest to run (kind:inline). REQUIRED naming: set `display_name` to " +
-            "a concise human title in the user's language describing this run's exact action or " +
-            "outcome, and set `name` to a matching descriptive `@inline/<kebab-case-slug>`. " +
-            "Never use an id or a generic label such as `one-shot`, `inline-agent`, or `task`. " +
-            'Include `"log"` in `runtime_tools` so the ' +
-            "run can emit progress lines the chat shows live (the panel surfaces only `log`-tool " +
-            "output). Do NOT put the prompt inside the manifest — it goes in the separate " +
-            "top-level `prompt` argument.",
+            "Partial canonical AFPS agent manifest (kind:inline). Usually only `display_name` " +
+            "plus task-specific dependencies/configuration are needed; `name` is derived and " +
+            "AFPS boilerplate, runtime tools, and an open output schema are defaulted. Every " +
+            "provided field is an exact top-level replacement: arrays and nested objects are not " +
+            "merged, and `runtime_tools: []` is preserved. You may instead provide a complete, " +
+            "strict deterministic manifest and override every field. Do NOT put the prompt inside " +
+            "the manifest — it goes in the separate top-level `prompt` argument.",
+          properties: {
+            display_name: {
+              type: "string",
+              description:
+                "Task-specific human title. When name is omitted, the platform derives " +
+                "@inline/<slug> from this value.",
+            },
+            name: {
+              type: "string",
+              description:
+                "Optional exact canonical @scope/name override. Usually omit and provide " +
+                "display_name.",
+            },
+            dependencies: {
+              type: "object",
+              description: "Exact AFPS dependencies override.",
+              additionalProperties: true,
+            },
+            integrations_configuration: {
+              type: "object",
+              description: "Exact AFPS integration configuration override.",
+              additionalProperties: true,
+            },
+            runtime_tools: {
+              type: "array",
+              description:
+                "Exact runtime-tool selection. Omit for log/output/publish_document defaults; " +
+                "an explicit [] disables them all.",
+              items: { type: "string" },
+            },
+            output: {
+              type: "object",
+              description:
+                "Exact AFPS output contract override, including a deterministic JSON schema.",
+              additionalProperties: true,
+            },
+          },
           additionalProperties: true,
         },
         prompt: {

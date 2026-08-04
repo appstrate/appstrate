@@ -23,6 +23,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `@appstrate/core/run-and-wait-client` — inline `run_and_wait` accepts a
+  partial canonical AFPS manifest. It derives `name` from `display_name` and
+  fills omitted boilerplate, runtime tools, and an open output schema. The
+  materialization is deliberately shallow: every supplied top-level field is
+  preserved exactly, including nested deterministic schemas and
+  `runtime_tools: []`; no runtime capability is injected into an explicit
+  selection.
+
 - `@appstrate/core/run-and-wait-client` — `launchRunAndWait` forwards the new
   `connection_overrides` argument on BOTH kinds (`agent` and `inline`), and
   refuses it pre-dispatch whenever it is present but is not a plain object
@@ -35,8 +43,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `publish_document` now carries the complete conditional primary-selection rule in its shared
   tool descriptor, so named agents and inline runs receive identical guidance whenever the
-  capability is available. `run_and_wait` still equips inline manifests idempotently, but no
-  longer rewrites their prompts with a second copy of that policy.
+  capability is available. `run_and_wait` no longer rewrites prompts with a second copy of that
+  policy.
 
 - `@appstrate/core/run-and-wait-client` — `fetchRunDocuments` now returns only
   the documents the run itself produced. `GET /api/documents?run_id=…` answers

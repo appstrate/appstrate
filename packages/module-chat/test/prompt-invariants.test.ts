@@ -29,6 +29,9 @@ describe("SYSTEM_PROMPT invariants", () => {
 
   it("keeps the run_and_wait grounding (result is the deliverable)", () => {
     expect(SYSTEM_PROMPT).toContain("run_and_wait");
+    expect(SYSTEM_PROMPT).toMatch(/prefer calling `run_and_wait` directly/);
+    expect(SYSTEM_PROMPT).toMatch(/runAgent.*runInline.*remain available/);
+    expect(SYSTEM_PROMPT).toContain("intentionally need fire-and-forget semantics");
     expect(SYSTEM_PROMPT).toContain("never fabricate it");
   });
 
@@ -38,6 +41,14 @@ describe("SYSTEM_PROMPT invariants", () => {
     expect(SYSTEM_PROMPT).toContain("describes the exact action or outcome of THIS run");
     expect(SYSTEM_PROMPT).toContain('"display_name": "Analyse des 3 derniers e-mails"');
     expect(SYSTEM_PROMPT).not.toContain('"name": "@inline/one-shot"');
+  });
+
+  it("keeps inline manifests concise while allowing exact complete overrides", () => {
+    expect(SYSTEM_PROMPT).toContain("PARTIAL canonical AFPS agent");
+    expect(SYSTEM_PROMPT).toMatch(/Defaults apply ONLY to absent top-level fields/);
+    expect(SYSTEM_PROMPT).toContain("runtime_tools: []");
+    expect(SYSTEM_PROMPT).toMatch(/override EVERY field/);
+    expect(SYSTEM_PROMPT).toContain("complete strict `output.schema`");
   });
 
   it("keeps the fan-in-by-reference rule (context_documents, never a copy)", () => {

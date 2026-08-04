@@ -28,7 +28,7 @@ function parseResult(result: CallToolResult): Record<string, unknown> {
   return JSON.parse(first.text) as Record<string, unknown>;
 }
 
-function makeTools(permissions: string[]) {
+function makeTools(permissions: string[], contextInjected = false) {
   const calls: Request[] = [];
   const dispatch: Dispatch = async (req) => {
     calls.push(req);
@@ -44,6 +44,7 @@ function makeTools(permissions: string[]) {
     dispatch,
     actor: { type: "user", id: "user_1" },
     scope: { orgId: "org_1", applicationId: "app_1" },
+    contextInjected,
   });
   const byName = new Map(tools.map((t) => [t.descriptor.name, t]));
   return { byName, calls };
@@ -139,6 +140,21 @@ describe("describe_operation", () => {
     expect(body.method).toBe(op.method);
     expect(body.path).toBe(op.pathTemplate);
   });
+
+  it.each(["runInline", "runAgent"])(
+    "keeps the full %s operation available to context-injected chat",
+    async (operationId) => {
+      const { byName } = makeTools(["mcp:read"], true);
+      const res = await byName
+        .get("describe_operation")!
+        .handler({ operation_id: operationId }, noExtra);
+      const body = parseResult(res);
+
+      expect(body.operation_id).toBe(operationId);
+      expect(body).toHaveProperty("request_body");
+      expect(body).toHaveProperty("referenced_schemas");
+    },
+  );
 
   it("throws InvalidParams (-32602) on an unknown operationId — protocol error, not tool error", async () => {
     const { byName } = makeTools(["mcp:read"]);

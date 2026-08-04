@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { encodePackageIdPath } from "./naming.ts";
+import { encodePackageIdPath, toSlug } from "./naming.ts";
 
 /**
  * Fallback wait ceiling for a caller that has no deadline of its own.
@@ -103,6 +103,62 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
 
 function asString(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+const INLINE_MANIFEST_SCHEMA = "https://schemas.afps.dev/v0/agent.schema.json";
+
+/**
+ * Turn the concise manifest accepted by `run_and_wait` into the one canonical
+ * AFPS manifest sent to the inline-run route.
+ *
+ * This is a shallow defaulting boundary by design: defaults fill ABSENT
+ * top-level fields only, while every caller-supplied field replaces its
+ * default verbatim. In particular, an explicit `runtime_tools: []` remains an
+ * empty array; no capability is silently re-injected. Nested deterministic
+ * contracts such as `output.schema` therefore remain entirely caller-owned.
+ *
+ * `output` is part of the convenience runtime-tools default rather than an
+ * independent default. Once a caller explicitly selects `runtime_tools`, an
+ * absent `output` stays absent so side-effect-only agents — including
+ * `runtime_tools: []` — remain expressible.
+ */
+function materializeInlineManifest(manifest: Record<string, unknown>): {
+  manifest?: Record<string, unknown>;
+  error?: string;
+} {
+  const hasOwn = (key: string): boolean => Object.prototype.hasOwnProperty.call(manifest, key);
+
+  let derivedName: string | undefined;
+  if (!hasOwn("name")) {
+    const displayName = asString(manifest.display_name)?.trim();
+    const slug = displayName ? toSlug(displayName) : "";
+    if (!slug) {
+      return {
+        error:
+          "`manifest` must provide `display_name` (used to derive `name`) or an explicit " +
+          "canonical `name` for kind:'inline'.",
+      };
+    }
+    derivedName = `@inline/${slug}`;
+  }
+
+  const defaults: Record<string, unknown> = {};
+  if (!hasOwn("$schema")) defaults.$schema = INLINE_MANIFEST_SCHEMA;
+  if (!hasOwn("schema_version")) defaults.schema_version = "0.2";
+  if (!hasOwn("name")) defaults.name = derivedName;
+  if (!hasOwn("type")) defaults.type = "agent";
+  if (!hasOwn("version")) defaults.version = "1.0.0";
+  if (!hasOwn("dependencies")) defaults.dependencies = {};
+  if (!hasOwn("runtime_tools")) {
+    defaults.runtime_tools = ["log", "output", "publish_document"];
+    if (!hasOwn("output")) {
+      defaults.output = {
+        schema: { type: "object", properties: {}, additionalProperties: true },
+      };
+    }
+  }
+
+  return { manifest: { ...defaults, ...manifest } };
 }
 
 /**
@@ -434,15 +490,15 @@ export async function launchRunAndWait(
         },
       };
     }
-    const runtimeTools = (selected ?? []) as unknown[];
-    const launchManifest = {
-      ...manifest,
-      runtime_tools: runtimeTools.includes("publish_document")
-        ? runtimeTools
-        : [...runtimeTools, "publish_document"],
-    };
+    const materialized = materializeInlineManifest(manifest);
+    if (!materialized.manifest) {
+      return {
+        ok: false,
+        step: { payload: { error: materialized.error }, isError: true },
+      };
+    }
     launchPath = "/api/runs/inline";
-    launchBody = { manifest: launchManifest, prompt };
+    launchBody = { manifest: materialized.manifest, prompt };
     if (asRecord(args.input)) launchBody.input = args.input;
     if (asRecord(args.config)) launchBody.config = args.config;
     // Fan-in by reference: forwarded verbatim; the route resolves each URI
