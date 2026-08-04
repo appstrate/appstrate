@@ -32,6 +32,10 @@
  */
 
 import { useState } from "react";
+import { useTabWithHash } from "../hooks/use-tab-with-hash";
+
+/** Tab ids, also the URL fragments that select them. */
+const INTEGRATION_TABS = ["connections", "configuration", "tools", "about", "versions"] as const;
 import { useTranslation } from "react-i18next";
 import { useParams } from "react-router-dom";
 import { toast } from "sonner";
@@ -1400,7 +1404,10 @@ export function IntegrationDetailPage() {
   const deletePkg = useDeletePackage("integration");
   const downloadPackage = usePackageDownload(scope, name);
   const { isAdmin } = usePermissions();
-  const [tab, setTab] = useState("connections");
+  // Hash-driven like the agent page, so the tab can be LINKED to. Needed
+  // because "an administrator must register an OAuth client" is only useful if
+  // it can point at the screen where that happens.
+  const [tab, setTab] = useTabWithHash(INTEGRATION_TABS, "connections");
   const [forkOpen, setForkOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirmDeactivate, setConfirmDeactivate] = useState(false);
@@ -1475,7 +1482,11 @@ export function IntegrationDetailPage() {
         }
       />
 
-      <Tabs value={tab} onValueChange={setTab} className="mt-2">
+      <Tabs
+        value={tab}
+        onValueChange={(v) => setTab(v as (typeof INTEGRATION_TABS)[number])}
+        className="mt-2"
+      >
         <TabsList>
           <TabsTrigger value="connections" data-testid="tab-connections">
             {t("integration.tabs.connections")}

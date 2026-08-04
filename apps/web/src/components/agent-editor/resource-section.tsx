@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { type ChangeEvent, type ReactNode, useMemo, useRef } from "react";
+import { type ChangeEvent, type ReactNode, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { cn } from "@appstrate/ui/cn";
 import { SectionCard } from "../section-card";
+import { packageListPath } from "../../lib/package-paths";
 import {
   usePackageList,
   useUploadPackage,
@@ -20,8 +21,10 @@ import {
   SelectValue,
 } from "@appstrate/ui/components/select";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
+import { Button } from "@appstrate/ui/components/button";
 import { ShieldCheck, AlertTriangle } from "lucide-react";
 import { Spinner } from "../spinner";
+import { useActivateIntegration } from "../../hooks/use-integrations";
 import type { ResourceEntry } from "./types";
 import { caretRange } from "./utils";
 import { IntegrationToolPicker } from "./integration-tool-picker";
@@ -109,18 +112,33 @@ export function ResourceSection({
     activeOnly: type === "integration",
   });
   const upload = useUploadPackage(type);
+  const activate = useActivateIntegration();
 
   const selectedMap = new Map(selectedEntries.map((e) => [e.id, e]));
 
-  // An agent may still declare an integration that's no longer active here
-  // (uninstalled/disabled since). Those won't come back in the active list, so
-  // surface them in a flagged section — never silently drop a declared
-  // dependency (the run-time gate would reject it with `integration_not_active`).
+  // A declared dependency the catalog does not return: an integration that is no
+  // longer active here (uninstalled/disabled since), or a skill that is simply
+  // not installed. Either way it must stay VISIBLE — it is in the manifest and
+  // the run-time gate will reject it (`integration_not_active` /
+  // `missing_skill`), so hiding it makes the editor claim the agent declares
+  // less than it does. This used to be integration-only, which is how a declared
+  // skill missing from the catalogue rendered as "no skill at all".
+  // Ids declared when the editor opened. Kept because the flagged rows below are
+  // derived from what is CURRENTLY selected: unchecking one removed it from that
+  // set, so the row vanished from the screen entirely and the only way back was
+  // to cancel the whole edit. Anchoring on the opening state keeps the row in
+  // place with its box unticked, which is what "I can undo this" looks like.
+  const [declaredOnOpen] = useState(() => selectedEntries);
+
   const inactiveDeclaredIds = useMemo(() => {
-    if (type !== "integration" || !items) return [];
+    if (!items) return [];
     const present = new Set(items.map((i) => i.id));
-    return selectedEntries.filter((e) => !present.has(e.id)).map((e) => e.id);
-  }, [items, type, selectedEntries]);
+    const declared = new Set([
+      ...declaredOnOpen.map((e) => e.id),
+      ...selectedEntries.map((e) => e.id),
+    ]);
+    return [...declared].filter((id) => !present.has(id));
+  }, [items, selectedEntries, declaredOnOpen]);
 
   const toggle = (id: string) => {
     onChange((prev) => {
@@ -128,8 +146,13 @@ export function ResourceSection({
         return prev.filter((e) => e.id !== id);
       }
       const item = items?.find((i) => i.id === id);
-      if (!item?.version) return prev;
-      return [...prev, { id, version: caretRange(item.version) }];
+      if (item?.version) return [...prev, { id, version: caretRange(item.version) }];
+      // Not in the catalogue, so there is no version to read: this is a
+      // declared-but-missing dependency being re-checked after an unintended
+      // uncheck. Restore the entry exactly as the manifest had it — without this
+      // the box could be emptied but never refilled.
+      const original = declaredOnOpen.find((e) => e.id === id);
+      return original ? [...prev, original] : prev;
     });
   };
 
@@ -186,7 +209,7 @@ export function ResourceSection({
         <>
           <p className="text-muted-foreground text-xs">{emptyLabel}</p>
           <p className="text-muted-foreground text-xs">
-            <Link to="/skills">{t("editor.goToPackages")}</Link>
+            <Link to={packageListPath(type)}>{t("editor.goToPackages")}</Link>
           </p>
         </>
       ) : (
@@ -249,23 +272,43 @@ export function ResourceSection({
             );
           })}
 
-          {/* Declared but no longer active in this app — flagged so the user
-              can drop them (or an admin can re-activate). Uncheck removes the
-              dependency from the manifest. */}
+          {/* Declared but not usable here: an integration that is not active in
+              this application, or a skill that is not installed. Flagged rather
+              than hidden, because the run gate rejects them.
+
+              For an integration the row also carries the cure. The message says
+              "activate it to connect it", and until now nothing on this screen
+              could: the checkbox only removes the dependency. So the one action
+              the sentence asks for had no button anywhere. */}
           {inactiveDeclaredIds.map((id) => (
-            <div key={id} className="border-destructive/40 bg-destructive/5 rounded-md border">
-              <label className="flex cursor-pointer items-center gap-2.5 px-3 py-2">
-                <Checkbox checked onCheckedChange={() => toggle(id)} />
+            <div
+              key={id}
+              className="border-destructive/40 bg-destructive/5 flex items-center gap-2 rounded-md border pr-2"
+            >
+              <label className="flex flex-1 cursor-pointer items-center gap-2.5 px-3 py-2">
+                <Checkbox checked={selectedMap.has(id)} onCheckedChange={() => toggle(id)} />
                 <div className="flex min-w-0 flex-1 flex-col">
                   <span className="flex items-center gap-1.5 truncate text-sm font-medium">
                     {id}
                     <span className="text-destructive inline-flex items-center gap-1 text-xs font-normal">
                       <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-                      {t("editor.integrationInactive")}
+                      {type === "integration"
+                        ? t("editor.integrationInactive")
+                        : t("editor.dependencyMissing")}
                     </span>
                   </span>
                 </div>
               </label>
+              {type === "integration" && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={activate.isPending}
+                  onClick={() => activate.mutate({ params: { path: { packageId: id } } })}
+                >
+                  {activate.isPending ? <Spinner /> : t("editor.activateIntegration")}
+                </Button>
+              )}
             </div>
           ))}
         </div>
