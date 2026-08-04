@@ -42,8 +42,8 @@ export function markServerDraining(): void {
   serverReadiness = "draining";
 }
 
-/** Test-only reset of the module-level readiness flag. */
-export function _resetServerReadyForTesting(): void {
+/** Test-only reset of the module-level readiness state. */
+export function _resetServerReadinessForTesting(): void {
   serverReadiness = "starting";
   agentsHealthy = false;
 }

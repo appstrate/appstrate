@@ -31,7 +31,7 @@ import healthRouter, {
   bootGate,
   markServerDraining,
   markServerReady,
-  _resetServerReadyForTesting,
+  _resetServerReadinessForTesting,
 } from "../../../src/routes/health.ts";
 import { errorHandler } from "../../../src/middleware/error-handler.ts";
 import type { AppEnv } from "../../../src/types/index.ts";
@@ -49,12 +49,12 @@ function buildGatedApp(): Hono<AppEnv> {
 
 describe("boot gate", () => {
   beforeEach(() => {
-    _resetServerReadyForTesting();
+    _resetServerReadinessForTesting();
   });
 
   afterEach(() => {
     // Never leave the module-level flag flipped for other suites.
-    _resetServerReadyForTesting();
+    _resetServerReadinessForTesting();
   });
 
   // ─── While starting ────────────────────────────────────

@@ -20328,7 +20328,7 @@ export interface operations {
                      */
                     "application/json": {
                         /** @enum {string} */
-                        status?: "healthy" | "degraded" | "unhealthy";
+                        status?: "healthy" | "degraded";
                         version?: {
                             app: string;
                             commit?: string;
@@ -20349,32 +20349,28 @@ export interface operations {
                     };
                 };
             };
-            /** @description Platform unhealthy (database or critical service down) */
+            /** @description Platform unavailable while starting, draining, or unhealthy */
             503: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    /**
-                     * @example {
-                     *       "status": "unhealthy",
-                     *       "uptime_ms": 3600000,
-                     *       "checks": {
-                     *         "database": {
-                     *           "status": "unhealthy",
-                     *           "latency_ms": 5000
-                     *         },
-                     *         "agents": {
-                     *           "status": "healthy"
-                     *         }
-                     *       }
-                     *     }
-                     */
                     "application/json": {
                         /** @enum {string} */
-                        status?: "unhealthy";
-                        uptime_ms?: number;
-                        checks?: Record<string, never>;
+                        status: "starting" | "draining";
+                        version: {
+                            app: string;
+                            commit?: string;
+                        };
+                    } | {
+                        /** @enum {string} */
+                        status: "unhealthy";
+                        version: {
+                            app: string;
+                            commit?: string;
+                        };
+                        uptime_ms: number;
+                        checks: Record<string, never>;
                     };
                 };
             };
