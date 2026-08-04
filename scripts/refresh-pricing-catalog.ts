@@ -362,7 +362,9 @@ function deriveGenerationCapabilities(entry: LiteLLMEntry): ModelGenerationCapab
         : support(entry.supports_low_reasoning_effort),
     medium: reasoning,
     high: reasoning,
-    xhigh: support(entry.supports_xhigh_reasoning_effort),
+    // Pi exposes one portable top level (`xhigh`). LiteLLM calls that level
+    // either xhigh or max depending on the provider adapter.
+    xhigh: support(entry.supports_xhigh_reasoning_effort ?? entry.supports_max_reasoning_effort),
   };
 
   return {
@@ -564,8 +566,8 @@ async function fetchUpstream(): Promise<Record<string, LiteLLMEntry>> {
     : await (async () => {
         const res = await fetch(UPSTREAM_URL);
         if (!res.ok) throw new Error(`fetch ${UPSTREAM_URL} → HTTP ${res.status}`);
-        console.warn(
-          "WARNING: using the unpinned raw LiteLLM fallback; CI uses the pinned exporter artifact",
+        process.stderr.write(
+          "WARNING: using the unpinned raw LiteLLM fallback; CI uses the pinned exporter artifact\n",
         );
         return (await res.json()) as Record<string, LiteLLMEntry>;
       })();

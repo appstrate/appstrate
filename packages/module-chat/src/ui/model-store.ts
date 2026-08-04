@@ -13,10 +13,10 @@
 
 import {
   modelGenerationSettingsSchema,
+  reconcileModelGenerationSettings,
   type ModelGenerationCapabilities,
   type ModelGenerationSettings,
 } from "@appstrate/core/model-generation";
-import { reconcileGenerationSettings } from "./model-generation-settings.ts";
 
 const KEY = "appstrate.chat.model";
 const GENERATION_KEY = "appstrate.chat.generation";
@@ -47,7 +47,7 @@ export function getSelectedModel(): string | null {
 }
 
 export function setSelectedModel(id: string | null): void {
-  const reconciled = reconcileGenerationSettings(
+  const reconciled = reconcileModelGenerationSettings(
     generationCache,
     id === null ? undefined : generationCapabilities.get(id),
   );
@@ -73,7 +73,7 @@ export function getGenerationSettings(): ModelGenerationSettings {
 }
 
 export function getCompatibleGenerationSettings(): ModelGenerationSettings {
-  return reconcileGenerationSettings(
+  return reconcileModelGenerationSettings(
     generationCache,
     cache === null ? undefined : generationCapabilities.get(cache),
   );

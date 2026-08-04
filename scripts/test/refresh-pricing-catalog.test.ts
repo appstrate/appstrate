@@ -293,6 +293,14 @@ describe("generation capabilities", () => {
     expect(capabilities.reasoning.levels.high).toBe("supported");
   });
 
+  it("maps LiteLLM's max effort to Appstrate's portable xhigh level", () => {
+    const capabilities = deriveGenerationCapabilities({
+      supports_reasoning: true,
+      supports_max_reasoning_effort: true,
+    });
+    expect(capabilities.reasoning.levels.xhigh).toBe("supported");
+  });
+
   it("vendors the normalized generation block with pricing", () => {
     const projected = projectEntry("reasoner", {
       input_cost_per_token: 0.000001,

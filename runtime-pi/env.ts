@@ -17,7 +17,10 @@
 
 import { getErrorMessage } from "@appstrate/core/errors";
 import type { ModelApiShape } from "@appstrate/core/sidecar-types";
-import type { ModelReasoningLevel } from "@appstrate/core/model-generation";
+import {
+  modelReasoningLevelSchema,
+  type ModelReasoningLevel,
+} from "@appstrate/core/model-generation";
 
 export interface RuntimeEnv {
   /** Run identifier injected by the platform on container create. */
@@ -337,11 +340,13 @@ export function parseRuntimeEnv(source: NodeJS.ProcessEnv = process.env): Runtim
       `MODEL_TEMPERATURE: must be a finite number between 0 and 1 (got "${source.MODEL_TEMPERATURE}")`,
     );
   }
-  const reasoningLevels = new Set(["off", "minimal", "low", "medium", "high", "xhigh"]);
-  const modelReasoningLevel = source.MODEL_REASONING_LEVEL;
-  if (modelReasoningLevel !== undefined && !reasoningLevels.has(modelReasoningLevel)) {
+  const modelReasoningLevel =
+    source.MODEL_REASONING_LEVEL === undefined
+      ? undefined
+      : modelReasoningLevelSchema.safeParse(source.MODEL_REASONING_LEVEL);
+  if (modelReasoningLevel && !modelReasoningLevel.success) {
     issues.push(
-      `MODEL_REASONING_LEVEL: invalid value "${modelReasoningLevel}" (allowed: ${[...reasoningLevels].join(", ")})`,
+      `MODEL_REASONING_LEVEL: invalid value "${source.MODEL_REASONING_LEVEL}" (allowed: ${modelReasoningLevelSchema.options.join(", ")})`,
     );
   }
   const heartbeatIntervalMs = parsePositiveInt(
@@ -385,8 +390,8 @@ export function parseRuntimeEnv(source: NodeJS.ProcessEnv = process.env): Runtim
     modelApiKey: source.MODEL_API_KEY || undefined,
     modelReasoning: source.MODEL_REASONING === "true",
     ...(modelTemperature !== undefined ? { modelTemperature } : {}),
-    ...(modelReasoningLevel !== undefined
-      ? { modelReasoningLevel: modelReasoningLevel as ModelReasoningLevel }
+    ...(modelReasoningLevel?.success
+      ? { modelReasoningLevel: modelReasoningLevel.data as ModelReasoningLevel }
       : {}),
     modelInput,
     modelCost,

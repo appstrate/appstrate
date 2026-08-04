@@ -35,7 +35,7 @@ import { readJsonBody } from "../lib/request-body.ts";
 import { asJSONSchemaObject, mergeWithDefaults } from "@appstrate/core/form";
 import { getAppScope } from "../lib/scope.ts";
 import { resolveAgentConnectionReadiness } from "../services/integration-pins-service.ts";
-import { assertExplicitModelExists } from "../services/org-models.ts";
+import { assertExplicitModelExists, resolveModel } from "../services/org-models.ts";
 import {
   buildBundleForAgentExport,
   buildBundleFromAgentDraft,
@@ -46,7 +46,12 @@ import { toBundleApiError } from "../services/run-launcher/bundle-error-mapping.
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 import { SCOPED_PACKAGE_ROUTE } from "./scoped-package-route.ts";
-import { modelGenerationSettingsSchema } from "@appstrate/core/model-generation";
+import {
+  ModelGenerationError,
+  modelGenerationSettingsSchema,
+  reconcileModelGenerationSettings,
+  resolveModelGenerationSettings,
+} from "@appstrate/core/model-generation";
 export const proxyIdSchema = z.object({ proxyId: z.string().nullable() });
 export const modelIdSchema = z.object({
   modelId: z.string().nullable(),
@@ -231,18 +236,45 @@ export function createAgentsRouter() {
       const data = await readJsonBody(c, modelIdSchema);
 
       // Reject unknown/cross-org ids like run and schedule overrides do (#960); null clears.
-      await assertExplicitModelExists(scope.orgId, data.modelId);
+      const current = await getPackageConfig(scope.applicationId, agent.id);
+      const explicitModel = await assertExplicitModelExists(scope.orgId, data.modelId);
+      const selectedModel =
+        explicitModel ?? (await resolveModel(scope.orgId, agent.id, data.modelId));
+      let generation = data.generation;
+      if (generation && Object.keys(generation).length > 0) {
+        if (!selectedModel) {
+          throw invalidRequest(
+            "A model must be configured before generation settings can be saved",
+          );
+        }
+        try {
+          generation = resolveModelGenerationSettings({
+            capabilities: selectedModel.generation,
+            override: generation,
+          });
+        } catch (error) {
+          if (error instanceof ModelGenerationError) {
+            throw invalidRequest(error.message, "generation");
+          }
+          throw error;
+        }
+      } else if (generation === undefined && current.generationConfig) {
+        generation = reconcileModelGenerationSettings(
+          current.generationConfig,
+          selectedModel?.generation,
+        );
+      }
 
       await updateInstalledPackage(scope, agent.id, {
         modelId: data.modelId,
-        ...(data.generation !== undefined ? { generationConfig: data.generation } : {}),
+        ...(generation !== undefined ? { generationConfig: generation } : {}),
       });
 
       await recordAuditFromContext(c, {
         action: "agent.model_updated",
         resourceType: "agent",
         resourceId: agent.id,
-        after: { modelId: data.modelId, generation: data.generation },
+        after: { modelId: data.modelId, generation },
       });
 
       // Return the bare model-setting resource — same shape and read path

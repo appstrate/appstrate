@@ -4,14 +4,9 @@
 import { z } from "zod";
 
 /** Portable reasoning vocabulary understood by the Appstrate Pi runtime. */
-export const modelReasoningLevelSchema = z.enum([
-  "off",
-  "minimal",
-  "low",
-  "medium",
-  "high",
-  "xhigh",
-]);
+export const MODEL_REASONING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
+
+export const modelReasoningLevelSchema = z.enum(MODEL_REASONING_LEVELS);
 
 export type ModelReasoningLevel = z.infer<typeof modelReasoningLevelSchema>;
 
@@ -49,11 +44,81 @@ export const modelGenerationCapabilitiesSchema = z
 
 export type ModelGenerationCapabilities = z.infer<typeof modelGenerationCapabilitiesSchema>;
 
+/** Provider-wide facts that are stricter than a reused vendor catalog. */
+export interface ModelGenerationCapabilitiesOverride {
+  temperature?: ModelCapabilitySupport;
+  temperatureWithReasoning?: ModelCapabilitySupport;
+  reasoning?: {
+    supported?: ModelCapabilitySupport;
+    adaptive?: boolean | null;
+    levels?: Partial<Record<ModelReasoningLevel, ModelCapabilitySupport>>;
+  };
+}
+
 export const UNKNOWN_MODEL_GENERATION_CAPABILITIES: ModelGenerationCapabilities = {
   temperature: "unknown",
   temperatureWithReasoning: "unknown",
   reasoning: { supported: "unknown", adaptive: null, levels: {} },
 };
+
+/** Merge a provider adapter's stricter transport facts over catalog metadata. */
+export function applyModelGenerationCapabilitiesOverride(
+  capabilities: ModelGenerationCapabilities,
+  override?: ModelGenerationCapabilitiesOverride | null,
+): ModelGenerationCapabilities {
+  if (!override) return capabilities;
+  return {
+    temperature: override.temperature ?? capabilities.temperature,
+    temperatureWithReasoning:
+      override.temperatureWithReasoning ?? capabilities.temperatureWithReasoning,
+    reasoning: {
+      supported: override.reasoning?.supported ?? capabilities.reasoning.supported,
+      adaptive: override.reasoning?.adaptive ?? capabilities.reasoning.adaptive,
+      levels: {
+        ...capabilities.reasoning.levels,
+        ...override.reasoning?.levels,
+      },
+    },
+  };
+}
+
+/** Remove persisted/UI settings explicitly rejected by the selected model. */
+export function reconcileModelGenerationSettings(
+  value: ModelGenerationSettings,
+  capabilities?: ModelGenerationCapabilities | null,
+): ModelGenerationSettings {
+  let next = value;
+
+  if (next.temperature != null && capabilities?.temperature === "unsupported") {
+    const { temperature: _temperature, ...rest } = next;
+    void _temperature;
+    next = rest;
+  }
+
+  const reasoningLevel = next.reasoningLevel;
+  if (
+    reasoningLevel != null &&
+    (capabilities?.reasoning.supported === "unsupported" ||
+      capabilities?.reasoning.levels[reasoningLevel] === "unsupported")
+  ) {
+    const { reasoningLevel: _reasoningLevel, ...rest } = next;
+    void _reasoningLevel;
+    next = rest;
+  }
+
+  if (
+    next.temperature != null &&
+    next.reasoningLevel != null &&
+    next.reasoningLevel !== "off" &&
+    capabilities?.temperatureWithReasoning === "unsupported"
+  ) {
+    const { temperature: _temperature, ...rest } = next;
+    void _temperature;
+    next = rest;
+  }
+
+  return next;
+}
 
 export type ModelGenerationErrorCode =
   | "temperature_unsupported"

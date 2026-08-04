@@ -45,6 +45,8 @@
   "model.needsReconnection": "Reconnection required",
   "model.select": "Model",
   "model.settingsTitle": "Model and generation",
+  "model.tabs.models": "Models",
+  "model.tabs.configuration": "Configuration",
   "generation.temperature": "Temperature",
   "generation.temperatureHint": "0 is deterministic; 1 is more varied. Choose Auto to let the provider decide.",
   "generation.reasoning": "Reasoning",

@@ -2,7 +2,9 @@
 
 import { describe, expect, it } from "bun:test";
 import {
+  applyModelGenerationCapabilitiesOverride,
   ModelGenerationError,
+  reconcileModelGenerationSettings,
   resolveModelGenerationSettings,
   type ModelGenerationCapabilities,
 } from "./model-generation.ts";
@@ -76,5 +78,36 @@ describe("resolveModelGenerationSettings", () => {
         override: { temperature: 0.4, reasoningLevel: "medium" },
       }),
     ).toEqual({ temperature: 0.4, reasoningLevel: "medium" });
+  });
+});
+
+describe("applyModelGenerationCapabilitiesOverride", () => {
+  it("overrides only provider-specific facts and preserves catalog reasoning", () => {
+    const catalog = capabilities();
+    expect(
+      applyModelGenerationCapabilitiesOverride(catalog, { temperature: "unsupported" }),
+    ).toEqual({ ...catalog, temperature: "unsupported" });
+  });
+});
+
+describe("reconcileModelGenerationSettings", () => {
+  it("removes settings explicitly rejected by the selected model", () => {
+    expect(
+      reconcileModelGenerationSettings(
+        { temperature: 0.7, reasoningLevel: "xhigh" },
+        capabilities({
+          temperature: "unsupported",
+          reasoning: {
+            ...capabilities().reasoning,
+            levels: { xhigh: "unsupported" },
+          },
+        }),
+      ),
+    ).toEqual({});
+  });
+
+  it("preserves object identity when every setting remains compatible", () => {
+    const value = { temperature: 0.4, reasoningLevel: "high" } as const;
+    expect(reconcileModelGenerationSettings(value, capabilities())).toBe(value);
   });
 });

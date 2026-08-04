@@ -32,6 +32,7 @@ import { mapFetchErrorToTestResult } from "../lib/network-error.ts";
 import { getModelProvider } from "./model-providers/registry.ts";
 import { resolveOAuthTokenForSidecar } from "./model-providers/token-resolver.ts";
 import {
+  applyModelGenerationCapabilitiesOverride,
   UNKNOWN_MODEL_GENERATION_CAPABILITIES,
   type ModelGenerationCapabilities,
 } from "@appstrate/core/model-generation";
@@ -672,7 +673,16 @@ export function resolveCatalogDefaults(providerId: string, modelId: string): Cat
   const provider = getModelProvider(providerId);
   const catalogKey = provider?.catalogProviderId ?? providerId;
   const entry = lookupCatalogModel(catalogKey, modelId);
-  if (!entry) return {};
+  if (!entry) {
+    return provider?.generationOverride
+      ? {
+          generation: applyModelGenerationCapabilitiesOverride(
+            UNKNOWN_MODEL_GENERATION_CAPABILITIES,
+            provider.generationOverride,
+          ),
+        }
+      : {};
+  }
   return {
     label: entry.label,
     input: entry.capabilities.filter((c): c is "text" | "image" => c === "text" || c === "image"),
@@ -680,7 +690,10 @@ export function resolveCatalogDefaults(providerId: string, modelId: string): Cat
     maxTokens: entry.maxTokens,
     reasoning: entry.capabilities.includes("reasoning"),
     cost: entry.cost,
-    generation: entry.generation,
+    generation: applyModelGenerationCapabilitiesOverride(
+      entry.generation ?? UNKNOWN_MODEL_GENERATION_CAPABILITIES,
+      provider?.generationOverride,
+    ),
   };
 }
 
@@ -888,12 +901,13 @@ export async function modelNeedsReconnection(orgId: string, modelDbId: string): 
 export async function assertExplicitModelExists(
   orgId: string,
   modelId: string | null | undefined,
-): Promise<void> {
-  if (!modelId) return;
+): Promise<ResolvedModel | null> {
+  if (!modelId) return null;
   const model = await loadModel(orgId, modelId);
   if (!model) {
     throw notFound(`Model '${modelId}' not found — expected a model UUID or a system model key`);
   }
+  return model;
 }
 
 // --- Connection test ---

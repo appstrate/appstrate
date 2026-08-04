@@ -8,9 +8,12 @@
  * it per turn via the `X-Model-Id` header.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { CheckIcon, ChevronDownIcon, SlidersHorizontalIcon } from "lucide-react";
+import { cn } from "@appstrate/ui/cn";
 import { ModelGenerationControls } from "@appstrate/ui/components/model-generation-controls";
+import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/components/popover";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
 import type { OrgModelOption } from "./models-data.ts";
 import { isModelLive } from "../model-liveness.ts";
 import { useChatHost } from "./runtime-context.ts";
@@ -63,7 +66,7 @@ export function ModelSelect({
   onGenerationChange,
 }: Props) {
   const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
+  const [tab, setTab] = useState<"models" | "configuration">("models");
   const { t } = useChatHost();
   const active = models.find((m) => m.id === selectedId);
   const groups = groupByProvider(models);
@@ -72,31 +75,40 @@ export function ModelSelect({
     active?.generation?.temperature === "unsupported" &&
     active.generation.reasoning.supported === "unsupported";
 
-  useEffect(() => {
-    if (!open) return;
-    const onDoc = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
-    document.addEventListener("mousedown", onDoc);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDoc);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
-
   if (models.length === 0) return null;
 
   return (
-    <div className="relative" ref={ref}>
-      {open && (
-        <div
-          role="dialog"
-          aria-label={t("model.settingsTitle")}
-          className="bg-popover text-popover-foreground absolute bottom-[calc(100%+0.4rem)] left-0 z-10 grid max-h-[min(18rem,calc(100dvh-8rem))] w-[min(21rem,calc(100vw-1.5rem))] overflow-y-auto rounded-lg border shadow-xl sm:w-[min(38rem,calc(100vw-1.5rem))] sm:grid-cols-[14rem_minmax(0,1fr)] sm:overflow-hidden"
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverContent
+        side="top"
+        align="start"
+        sideOffset={6}
+        collisionPadding={12}
+        aria-label={t("model.settingsTitle")}
+        className="w-[min(21rem,calc(100vw-1.5rem))] overflow-hidden p-0 shadow-xl"
+      >
+        <Tabs
+          value={tab}
+          onValueChange={(value) => setTab(value as "models" | "configuration")}
+          className="flex max-h-[min(18rem,calc(100dvh-8rem))] min-h-0 flex-col p-2"
         >
-          <div className="max-h-32 overflow-y-auto p-1 sm:max-h-[min(18rem,calc(100dvh-8rem))]">
+          <TabsList className="grid h-8 w-full shrink-0 grid-cols-2">
+            <TabsTrigger value="models" className="h-6 px-2 text-xs">
+              {t("model.tabs.models")}
+            </TabsTrigger>
+            <TabsTrigger
+              value="configuration"
+              disabled={!active}
+              className="relative h-6 px-2 text-xs"
+            >
+              {t("model.tabs.configuration")}
+              {hasOverrides && (
+                <span className="bg-primary ml-1.5 size-1.5 rounded-full" aria-hidden="true" />
+              )}
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="models" className="mt-1 min-h-0 overflow-y-auto p-0">
             {groups.map((group, i) => (
               <div key={group.provider} className={i > 0 ? "mt-1 border-t pt-1" : undefined}>
                 <div className="text-muted-foreground px-2 py-1 text-[0.65rem] font-semibold tracking-wider uppercase">
@@ -115,16 +127,20 @@ export function ModelSelect({
                       type="button"
                       disabled={dead}
                       onClick={() => onSelect(m.id)}
-                      className={`flex w-full items-center justify-start gap-2 rounded-md px-2 py-1.5 text-left text-sm ${
+                      className={cn(
+                        "flex w-full items-center justify-start gap-2 rounded-md px-2 py-1.5 text-left text-sm",
                         dead
                           ? "text-muted-foreground cursor-not-allowed"
                           : isSelected
                             ? "bg-accent text-accent-foreground"
-                            : "hover:bg-accent hover:text-accent-foreground"
-                      }`}
+                            : "hover:bg-accent hover:text-accent-foreground",
+                      )}
                     >
                       <CheckIcon
-                        className={`size-3.5 shrink-0 ${isSelected ? "opacity-100" : "opacity-0"}`}
+                        className={cn(
+                          "size-3.5 shrink-0",
+                          isSelected ? "opacity-100" : "opacity-0",
+                        )}
                       />
                       <span className="flex-1 truncate text-left">{m.label ?? m.modelId}</span>
                       {dead && (
@@ -137,75 +153,78 @@ export function ModelSelect({
                 })}
               </div>
             ))}
-          </div>
-          {active && (
-            <div className="border-t p-2 sm:max-h-[min(18rem,calc(100dvh-8rem))] sm:overflow-y-auto sm:border-t-0 sm:border-l">
-              <div className="text-muted-foreground mb-2 truncate px-0.5 text-xs">
-                {active.label ?? active.modelId}
-              </div>
-              {hasNoGenerationControls ? (
-                <p className="text-muted-foreground rounded-md border border-dashed px-3 py-4 text-center text-xs">
-                  {t("generation.noneSupported")}
-                </p>
-              ) : (
-                <ModelGenerationControls
-                  stacked
-                  compact
-                  hideUnsupported
-                  value={generation}
-                  capabilities={active.generation}
-                  onChange={onGenerationChange}
-                  labels={{
-                    temperature: t("generation.temperature"),
-                    temperatureHint: t("generation.temperatureHint"),
-                    reasoning: t("generation.reasoning"),
-                    reasoningHint: t("generation.reasoningHint"),
-                    inherit: t("generation.inherit"),
-                    inheritShort: t("generation.inheritShort"),
-                    unsupported: t("generation.unsupported"),
-                    unsupportedShort: t("generation.unsupportedShort"),
-                    levels: {
-                      off: t("generation.level.off"),
-                      minimal: t("generation.level.minimal"),
-                      low: t("generation.level.low"),
-                      medium: t("generation.level.medium"),
-                      high: t("generation.level.high"),
-                      xhigh: t("generation.level.xhigh"),
-                    },
-                    shortLevels: {
-                      off: t("generation.levelShort.off"),
-                      minimal: t("generation.levelShort.minimal"),
-                      low: t("generation.levelShort.low"),
-                      medium: t("generation.levelShort.medium"),
-                      high: t("generation.levelShort.high"),
-                      xhigh: t("generation.levelShort.xhigh"),
-                    },
-                  }}
-                />
-              )}
-            </div>
+          </TabsContent>
+
+          <TabsContent value="configuration" className="mt-1 min-h-0 overflow-y-auto px-0.5 py-1">
+            {active && (
+              <>
+                <div className="text-muted-foreground mb-2 truncate text-xs">
+                  {active.label ?? active.modelId}
+                </div>
+                {hasNoGenerationControls ? (
+                  <p className="text-muted-foreground rounded-md border border-dashed px-3 py-4 text-center text-xs">
+                    {t("generation.noneSupported")}
+                  </p>
+                ) : (
+                  <ModelGenerationControls
+                    stacked
+                    compact
+                    hideUnsupported
+                    value={generation}
+                    capabilities={active.generation}
+                    onChange={onGenerationChange}
+                    labels={{
+                      temperature: t("generation.temperature"),
+                      temperatureHint: t("generation.temperatureHint"),
+                      reasoning: t("generation.reasoning"),
+                      reasoningHint: t("generation.reasoningHint"),
+                      inherit: t("generation.inherit"),
+                      inheritShort: t("generation.inheritShort"),
+                      unsupported: t("generation.unsupported"),
+                      unsupportedShort: t("generation.unsupportedShort"),
+                      levels: {
+                        off: t("generation.level.off"),
+                        minimal: t("generation.level.minimal"),
+                        low: t("generation.level.low"),
+                        medium: t("generation.level.medium"),
+                        high: t("generation.level.high"),
+                        xhigh: t("generation.level.xhigh"),
+                      },
+                      shortLevels: {
+                        off: t("generation.levelShort.off"),
+                        minimal: t("generation.levelShort.minimal"),
+                        low: t("generation.levelShort.low"),
+                        medium: t("generation.levelShort.medium"),
+                        high: t("generation.levelShort.high"),
+                        xhigh: t("generation.levelShort.xhigh"),
+                      },
+                    }}
+                  />
+                )}
+              </>
+            )}
+          </TabsContent>
+        </Tabs>
+      </PopoverContent>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          className={cn(
+            "border-input bg-background hover:bg-accent text-foreground inline-flex max-w-64 items-center justify-start gap-1.5 rounded-md border px-2.5 py-1 text-left text-xs",
+            hasOverrides && "border-primary/40 bg-primary/5",
           )}
-        </div>
-      )}
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
-        aria-haspopup="dialog"
-        className={`border-input bg-background hover:bg-accent text-foreground inline-flex max-w-64 items-center justify-start gap-1.5 rounded-md border px-2.5 py-1 text-left text-xs ${
-          hasOverrides ? "border-primary/40 bg-primary/5" : ""
-        }`}
-        title={t("model.settingsTitle")}
-      >
-        <SlidersHorizontalIcon className="text-muted-foreground size-3.5 shrink-0" />
-        {active ? (
-          <span className="truncate font-medium">{active.label ?? active.modelId}</span>
-        ) : (
-          <span className="font-medium">{t("model.select")}</span>
-        )}
-        {hasOverrides && <span className="bg-primary size-1.5 rounded-full" aria-hidden="true" />}
-        <ChevronDownIcon className="text-muted-foreground size-3.5 shrink-0" />
-      </button>
-    </div>
+          title={t("model.settingsTitle")}
+        >
+          <SlidersHorizontalIcon className="text-muted-foreground size-3.5 shrink-0" />
+          {active ? (
+            <span className="truncate font-medium">{active.label ?? active.modelId}</span>
+          ) : (
+            <span className="font-medium">{t("model.select")}</span>
+          )}
+          {hasOverrides && <span className="bg-primary size-1.5 rounded-full" aria-hidden="true" />}
+          <ChevronDownIcon className="text-muted-foreground size-3.5 shrink-0" />
+        </button>
+      </PopoverTrigger>
+    </Popover>
   );
 }

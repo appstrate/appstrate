@@ -2,10 +2,11 @@
 
 import { useId } from "react";
 import { CircleSlash2Icon } from "lucide-react";
-import type {
-  ModelGenerationCapabilities,
-  ModelGenerationSettings,
-  ModelReasoningLevel,
+import {
+  MODEL_REASONING_LEVELS,
+  type ModelGenerationCapabilities,
+  type ModelGenerationSettings,
+  type ModelReasoningLevel,
 } from "@appstrate/core/model-generation";
 import { cn } from "../cn.ts";
 import { Badge } from "./badge.tsx";
@@ -14,15 +15,6 @@ import { Slider } from "./slider.tsx";
 import { ToggleGroup, ToggleGroupItem } from "./toggle-group.tsx";
 
 const INHERIT = "__inherit__";
-const REASONING_LEVELS: ModelReasoningLevel[] = [
-  "off",
-  "minimal",
-  "low",
-  "medium",
-  "high",
-  "xhigh",
-];
-
 export interface ModelGenerationControlLabels {
   temperature: string;
   temperatureHint: string;
@@ -200,7 +192,7 @@ export function ModelGenerationControls({
             >
               {labels.inheritShort}
             </ToggleGroupItem>
-            {REASONING_LEVELS.map((level, index) => (
+            {MODEL_REASONING_LEVELS.map((level, index) => (
               <ToggleGroupItem
                 key={level}
                 value={level}
@@ -209,7 +201,7 @@ export function ModelGenerationControls({
                 title={labels.levels[level]}
                 className={cn(
                   "-ml-px h-8 min-w-0 rounded-none px-1 text-[0.65rem]",
-                  index === REASONING_LEVELS.length - 1 && "rounded-r-md",
+                  index === MODEL_REASONING_LEVELS.length - 1 && "rounded-r-md",
                 )}
               >
                 {labels.shortLevels[level]}

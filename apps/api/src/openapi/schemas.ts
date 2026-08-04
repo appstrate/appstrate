@@ -113,7 +113,7 @@ export const schemas = {
     additionalProperties: false,
     required: ["temperature", "temperatureWithReasoning", "reasoning"],
     description:
-      "Normalized support facts from Appstrate's pinned LiteLLM catalog snapshot. `unknown` is forward-compatible and differs from an explicit upstream refusal.",
+      "Normalized support facts from Appstrate's pinned LiteLLM catalog snapshot, refined by stricter provider transport declarations. `unknown` is forward-compatible and differs from an explicit upstream refusal.",
     properties: {
       temperature: { type: "string", enum: ["supported", "unsupported", "unknown"] },
       temperatureWithReasoning: {

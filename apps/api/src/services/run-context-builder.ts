@@ -30,6 +30,7 @@ import { getAgentResourceHints } from "@appstrate/core/validation";
 import { getExecutionMode } from "../infra/mode.ts";
 import { orchestratorAgentResources } from "./orchestrator/registry.ts";
 import {
+  reconcileModelGenerationSettings,
   resolveModelGenerationSettings,
   type ModelGenerationSettings,
 } from "@appstrate/core/model-generation";
@@ -223,9 +224,13 @@ export async function buildRunContext(params: {
   // `org_models.cost` override) — which is exactly the run whose `$0.00` would
   // otherwise read as "free".
   const modelCost = modelResult.cost ?? null;
+  const generationDefaults = reconcileModelGenerationSettings(
+    params.generationConfig ?? configFull?.generationConfig ?? {},
+    modelResult.generation,
+  );
   const generationConfig = resolveModelGenerationSettings({
     capabilities: modelResult.generation,
-    defaults: params.generationConfig ?? configFull?.generationConfig ?? null,
+    defaults: generationDefaults,
     override: params.generationConfigOverride,
   });
 

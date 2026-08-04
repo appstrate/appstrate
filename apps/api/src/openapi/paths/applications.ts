@@ -397,15 +397,10 @@ export const applicationsPaths = {
               properties: {
                 config: { type: "object" },
                 generationConfig: {
-                  type: ["object", "null"],
-                  additionalProperties: false,
-                  properties: {
-                    temperature: { type: ["number", "null"], minimum: 0, maximum: 1 },
-                    reasoningLevel: {
-                      type: ["string", "null"],
-                      enum: ["off", "minimal", "low", "medium", "high", "xhigh", null],
-                    },
-                  },
+                  oneOf: [
+                    { $ref: "#/components/schemas/ModelGenerationSettings" },
+                    { type: "null" },
+                  ],
                 },
                 modelId: { type: ["string", "null"] },
                 proxyId: { type: ["string", "null"] },

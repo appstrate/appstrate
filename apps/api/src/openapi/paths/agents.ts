@@ -552,15 +552,10 @@ export const agentsPaths = {
                   description: "Model ID or null to use org default",
                 },
                 generation: {
-                  type: ["object", "null"],
-                  additionalProperties: false,
-                  properties: {
-                    temperature: { type: ["number", "null"], minimum: 0, maximum: 1 },
-                    reasoningLevel: {
-                      type: ["string", "null"],
-                      enum: ["off", "minimal", "low", "medium", "high", "xhigh", null],
-                    },
-                  },
+                  oneOf: [
+                    { $ref: "#/components/schemas/ModelGenerationSettings" },
+                    { type: "null" },
+                  ],
                 },
               },
             },

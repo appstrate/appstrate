@@ -10,7 +10,14 @@ import {
   authHeaders,
   type TestContext,
 } from "../../helpers/auth.ts";
-import { seedAgent, seedSchedule, seedRun, seedEndUser } from "../../helpers/seed.ts";
+import {
+  seedAgent,
+  seedSchedule,
+  seedRun,
+  seedEndUser,
+  seedOrgModel,
+  seedOrgModelProviderOAuth,
+} from "../../helpers/seed.ts";
 import { installPackage } from "../../../src/services/application-packages.ts";
 
 const app = getTestApp();
@@ -202,6 +209,37 @@ describe("Schedules API", () => {
 
       expect(res.status).toBe(400);
     });
+
+    it("rejects generation settings unsupported by the overridden model", async () => {
+      const fid = agentId("unsupported-generation");
+      await seedAgent({ id: fid, orgId: ctx.orgId, createdBy: ctx.user.id });
+      await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, fid);
+      const credential = await seedOrgModelProviderOAuth({
+        orgId: ctx.orgId,
+        providerId: "codex",
+      });
+      const model = await seedOrgModel({
+        orgId: ctx.orgId,
+        credentialId: credential.id,
+        modelId: "gpt-5.6-luna",
+      });
+
+      const res = await app.request(`/api/agents/${fid}/schedules`, {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({
+          cron_expression: "0 9 * * *",
+          model_id_override: model.id,
+          generation_config_override: { temperature: 0.4 },
+        }),
+      });
+
+      expect(res.status).toBe(400);
+      expect(await res.json()).toMatchObject({
+        code: "invalid_request",
+        param: "generation_config_override",
+      });
+    });
   });
 
   describe("connection_overrides shape (flat per-integration map)", () => {
@@ -303,6 +341,37 @@ describe("Schedules API", () => {
       // EnrichedSchedule — same serializer as GET /schedules/:id (#657).
       expect(body.actor_type).toBe("user");
       expect(body).toHaveProperty("actor_name");
+    });
+
+    it("reconciles the generation override when the model changes", async () => {
+      const fid = agentId("reconcile-generation");
+      const agent = await seedAgent({ id: fid, orgId: ctx.orgId });
+      await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, fid);
+      const schedule = await seedSchedule({
+        packageId: agent.id,
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        userId: ctx.user.id,
+        generationConfigOverride: { temperature: 0.7 },
+      });
+      const credential = await seedOrgModelProviderOAuth({
+        orgId: ctx.orgId,
+        providerId: "codex",
+      });
+      const model = await seedOrgModel({
+        orgId: ctx.orgId,
+        credentialId: credential.id,
+        modelId: "gpt-5.6-luna",
+      });
+
+      const res = await app.request(`/api/schedules/${schedule.id}`, {
+        method: "PUT",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ model_id_override: model.id }),
+      });
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toMatchObject({ generation_config_override: {} });
     });
   });
 

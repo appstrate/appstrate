@@ -5101,7 +5101,7 @@ export interface components {
             /** @description Application ids (`app_…`) belonging to the caller's org where this package is installed. */
             installed_in: string[];
         }[];
-        /** @description Normalized support facts from Appstrate's pinned LiteLLM catalog snapshot. `unknown` is forward-compatible and differs from an explicit upstream refusal. */
+        /** @description Normalized support facts from Appstrate's pinned LiteLLM catalog snapshot, refined by stricter provider transport declarations. `unknown` is forward-compatible and differs from an explicit upstream refusal. */
         ModelGenerationCapabilities: {
             /** @enum {string} */
             temperature: "supported" | "unsupported" | "unknown";
@@ -6580,11 +6580,7 @@ export interface operations {
                 "application/json": {
                     /** @description Model ID or null to use org default */
                     modelId: string | null;
-                    generation?: {
-                        temperature?: number | null;
-                        /** @enum {string|null} */
-                        reasoningLevel?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | null;
-                    } | null;
+                    generation?: components["schemas"]["ModelGenerationSettings"] | null;
                 };
             };
         };
@@ -7867,11 +7863,7 @@ export interface operations {
             content: {
                 "application/json": {
                     config?: Record<string, never>;
-                    generationConfig?: {
-                        temperature?: number | null;
-                        /** @enum {string|null} */
-                        reasoningLevel?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | null;
-                    } | null;
+                    generationConfig?: components["schemas"]["ModelGenerationSettings"] | null;
                     modelId?: string | null;
                     proxyId?: string | null;
                     version_id?: number | null;
@@ -12941,6 +12933,7 @@ export interface operations {
                                 contextWindow: number;
                                 maxTokens?: number | null;
                                 capabilities: string[];
+                                generation?: components["schemas"]["ModelGenerationCapabilities"];
                                 /** @description Per-1M-token cost (USD). */
                                 cost: {
                                     input?: number;

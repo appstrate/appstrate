@@ -27,7 +27,10 @@ import { useProxies, useAgentProxy, useSetAgentProxy } from "../../hooks/use-pro
 import { usePackageDetail } from "../../hooks/use-packages";
 import { useSaveConfig } from "../../hooks/use-mutations";
 import type { JSONSchemaObject, SchemaWrapper } from "@appstrate/core/form";
-import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
+import {
+  reconcileModelGenerationSettings,
+  type ModelGenerationSettings,
+} from "@appstrate/core/model-generation";
 import { ModelGenerationFields } from "../model-generation-fields";
 
 // ─── Config Section ─────────────────────────────────────────────────
@@ -129,7 +132,16 @@ function ModelSectionEditor({
       <h3 className="text-sm font-medium">{t("models.tabTitle", { ns: "settings" })}</h3>
       <Select
         value={modelId ?? "__inherit__"}
-        onValueChange={(v) => setModelId(v === "__inherit__" ? null : v)}
+        onValueChange={(value) => {
+          const nextModelId = value === "__inherit__" ? null : value;
+          const nextModel = nextModelId
+            ? orgModels.find((model) => model.id === nextModelId)
+            : orgDefaultModel;
+          setModelId(nextModelId);
+          setGeneration((current) =>
+            reconcileModelGenerationSettings(current, nextModel?.generation),
+          );
+        }}
         disabled={setAgentModel.isPending}
       >
         <SelectTrigger>
