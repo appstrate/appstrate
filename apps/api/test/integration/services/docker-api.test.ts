@@ -490,13 +490,13 @@ describeRequiresDocker("removeNetwork", () => {
 
 describeRequiresDocker("cleanupOrphanedContainers", () => {
   it(
-    "cleans up labeled containers and networks",
+    "removes terminal managed containers without touching a live replica's containers",
     async () => {
-      // Create containers with the managed label
-      const id1 = await createRawContainer(["sleep", "60"]);
-      const id2 = await createRawContainer(["sleep", "60"]);
-      await startContainer(id1);
-      await startContainer(id2);
+      const liveId = await createRawContainer(["sleep", "60"]);
+      const terminalId = await createRawContainer(["sleep", "60"]);
+      await startContainer(liveId);
+      await startContainer(terminalId);
+      await stopContainer(terminalId);
 
       // Create a network with matching name pattern
       const netName = `appstrate-exec-test-${uid()}`;
@@ -505,21 +505,19 @@ describeRequiresDocker("cleanupOrphanedContainers", () => {
 
       const result = await cleanupOrphanedContainers();
 
-      // Should have removed at least our 2 containers
-      expect(result.containers).toBeGreaterThanOrEqual(2);
+      expect(result.containers).toBeGreaterThanOrEqual(1);
 
-      // Verify containers are gone
-      const res1 = await fetch(`${DOCKER_URL}/containers/${id1}/json`);
-      expect(res1.status).toBe(404);
-      const res2 = await fetch(`${DOCKER_URL}/containers/${id2}/json`);
-      expect(res2.status).toBe(404);
+      const liveRes = await fetch(`${DOCKER_URL}/containers/${liveId}/json`);
+      expect(liveRes.status).toBe(200);
+      const terminalRes = await fetch(`${DOCKER_URL}/containers/${terminalId}/json`);
+      expect(terminalRes.status).toBe(404);
+      untrackContainer(terminalId);
 
       // Verify network was cleaned up (name starts with appstrate-exec-)
       const netRes = await fetch(`${DOCKER_URL}/networks/${netId}`);
       expect(netRes.status).toBe(404);
 
-      // Clear cleanup tracking since cleanupOrphanedContainers handled removal
-      containersToCleanup.length = 0;
+      // The live container remains tracked for afterEach cleanup.
     },
     TIMEOUT,
   );

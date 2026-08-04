@@ -743,11 +743,22 @@ export async function cleanupOrphanedContainers(): Promise<{
   const containers = (await res.json()) as Array<{
     Id: string;
     Labels: Record<string, string>;
+    State: string;
   }>;
 
-  // Remove all containers in parallel (force=true handles running containers)
-  if (containers.length > 0) {
-    await Promise.allSettled(containers.map((c) => removeContainer(c.Id)));
+  // A second API replica can share this Docker daemon during a rolling deploy.
+  // Its managed containers are not orphans, even though this process did not
+  // create them. The stale-run sweep stops genuine orphans before reaching this
+  // generic cleanup, so only terminal containers are safe to reap here.
+  const terminalContainers = containers.filter(
+    (container) => container.State === "exited" || container.State === "dead",
+  );
+  let containerCount = 0;
+  if (terminalContainers.length > 0) {
+    const results = await Promise.allSettled(
+      terminalContainers.map((container) => removeContainer(container.Id)),
+    );
+    containerCount = results.filter((result) => result.status === "fulfilled").length;
   }
 
   // Clean up orphaned networks by listing Docker networks directly.
@@ -761,7 +772,7 @@ export async function cleanupOrphanedContainers(): Promise<{
   // Docker's "volume in use" check (409) doesn't refuse the delete.
   const volumeCount = await cleanupOrphanedVolumes();
 
-  return { containers: containers.length, networks: networkCount, volumes: volumeCount };
+  return { containers: containerCount, networks: networkCount, volumes: volumeCount };
 }
 
 /**

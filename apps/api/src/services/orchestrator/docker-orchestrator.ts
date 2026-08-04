@@ -19,6 +19,7 @@ import { getErrorMessage } from "@appstrate/core/errors";
 import { SIDECAR_MEMORY_BYTES, SIDECAR_NANO_CPUS } from "./constants.ts";
 import { buildBaseSidecarEnv } from "./sidecar-env.ts";
 import { SidecarExitWatcher } from "./sidecar-exit-watcher.ts";
+import { resolveDockerPlatformApiUrl } from "./platform-api-url.ts";
 
 class DockerWorkloadHandle implements WorkloadHandle {
   constructor(
@@ -458,15 +459,17 @@ export class DockerOrchestrator implements RunOrchestrator {
 
   /**
    * Resolve the base URL the agent container uses to reach the platform API.
-   * Identical logic to {@link createSidecar} — prefer the platform's own
-   * Docker network (keeps traffic on the bridge), fall back to
-   * `PLATFORM_API_URL` env, finally to `host.docker.internal` for local dev.
+   * A configured URL is a stable service address and must win during rolling
+   * deploys, where Docker network inspection may otherwise discover one
+   * short-lived replica alias. Without one, prefer the platform's own Docker
+   * network, then fall back to `host.docker.internal` for local development.
    */
   async resolvePlatformApiUrl(): Promise<string> {
     const env = getEnv();
-    const platformNetwork = await docker.detectPlatformNetwork();
-    if (platformNetwork) return `http://${platformNetwork.hostname}:${env.PORT}`;
-    if (env.PLATFORM_API_URL) return env.PLATFORM_API_URL;
-    return `http://host.docker.internal:${env.PORT}`;
+    return resolveDockerPlatformApiUrl({
+      configuredUrl: env.PLATFORM_API_URL,
+      port: env.PORT,
+      detectPlatformNetwork: docker.detectPlatformNetwork,
+    });
   }
 }
