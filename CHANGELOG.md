@@ -20,10 +20,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `display_name`; the shared client derives the canonical name and fills
   runtime/output defaults before the existing full validation boundary. Any
   supplied field remains an exact override, including `runtime_tools: []` and
-  complete deterministic schemas. In context-injected chat, describing or
-  searching for the fire-and-forget `runInline` / `runAgent` operations now
-  returns a compact redirect to `run_and_wait`; external MCP clients retain the
-  full OpenAPI payload.
+  complete deterministic schemas. The chat prompt prefers `run_and_wait` for
+  launch-and-wait flows while keeping the fire-and-forget `runInline` and
+  `runAgent` operations fully discoverable and invokable.
 
 ### Fixed
 

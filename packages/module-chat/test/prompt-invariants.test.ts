@@ -29,6 +29,9 @@ describe("SYSTEM_PROMPT invariants", () => {
 
   it("keeps the run_and_wait grounding (result is the deliverable)", () => {
     expect(SYSTEM_PROMPT).toContain("run_and_wait");
+    expect(SYSTEM_PROMPT).toMatch(/prefer calling `run_and_wait` directly/);
+    expect(SYSTEM_PROMPT).toMatch(/runAgent.*runInline.*remain available/);
+    expect(SYSTEM_PROMPT).toContain("intentionally need fire-and-forget semantics");
     expect(SYSTEM_PROMPT).toContain("never fabricate it");
   });
 

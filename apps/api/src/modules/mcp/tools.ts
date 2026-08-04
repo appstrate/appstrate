@@ -292,46 +292,6 @@ function describePayload(
   };
 }
 
-const RUN_LAUNCH_OPERATION_IDS = new Set(["runAgent", "runInline"]);
-
-/**
- * Chat already has the complete `run_and_wait` tool schema. Returning the raw
- * launch operation here would add tens of kilobytes of referenced OpenAPI
- * schemas and point the model at the fire-and-forget endpoint we explicitly do
- * not want it to compose. External MCP clients keep the full REST description:
- * some intentionally launch without waiting, and only chat sets
- * `contextInjected`.
- */
-function describePayloadForCaller(
-  ctx: McpToolContext,
-  op: CatalogOperation,
-  componentSchemas: Record<string, unknown>,
-): Record<string, unknown> {
-  if (!ctx.contextInjected || !RUN_LAUNCH_OPERATION_IDS.has(op.operationId)) {
-    return describePayload(op, componentSchemas);
-  }
-
-  const inline = op.operationId === "runInline";
-  return {
-    operation_id: op.operationId,
-    redirected_to: "run_and_wait",
-    reason:
-      "This chat launches runs through run_and_wait, which exposes progress and waits for the " +
-      "terminal result. Do not invoke the fire-and-forget REST operation.",
-    example: inline
-      ? {
-          kind: "inline",
-          manifest: { display_name: "Concise task-specific title" },
-          prompt: "Required top-level sub-agent prompt",
-        }
-      : { kind: "agent", scope: "@scope", name: "agent-name" },
-    note: inline
-      ? "manifest is a partial canonical AFPS manifest. Omitted fields receive defaults; every " +
-        "provided field replaces its default exactly, including runtime_tools: []."
-      : "Use version:'draft' only for a draft-only agent; otherwise omit version for latest published.",
-  };
-}
-
 function buildSearchTool(ctx: McpToolContext): AppstrateToolDefinition {
   const descriptor: Tool = {
     name: "search_operations",
@@ -339,9 +299,8 @@ function buildSearchTool(ctx: McpToolContext): AppstrateToolDefinition {
       "Search the Appstrate API for operations by keyword and/or tag. Returns matching " +
       "operationIds with their HTTP method, path, and summary. Use this first to discover " +
       "which operation to call. For a keyword search, the response also includes a " +
-      "`best_match` carrying the top result's full input schema (or, in chat, a compact " +
-      "run_and_wait redirect for launch operations) — when it matches your intent you need " +
-      "no describe_operation follow-up.",
+      "`best_match` carrying the top result's full input schema — when it matches your " +
+      "intent you can call invoke_operation directly, no describe_operation needed.",
     annotations: {
       title: "Search API operations",
       readOnlyHint: true,
@@ -396,9 +355,7 @@ function buildSearchTool(ctx: McpToolContext): AppstrateToolDefinition {
     // schema, to keep the response bounded; the rest stay compact.
     const top = scored[0];
     const bestMatch =
-      tokens.length > 0 && top
-        ? describePayloadForCaller(ctx, top.op, componentSchemas)
-        : undefined;
+      tokens.length > 0 && top ? describePayload(top.op, componentSchemas) : undefined;
 
     return textResult({
       count: scored.length,
@@ -423,8 +380,7 @@ function buildDescribeTool(ctx: McpToolContext): AppstrateToolDefinition {
     description:
       "Return the full OpenAPI definition for one operation (parameters, request body, " +
       "responses) with all referenced component schemas inlined, so you can construct a " +
-      "valid invoke_operation call. In chat, runAgent/runInline instead return a compact " +
-      "redirect to the declared run_and_wait tool.",
+      "valid invoke_operation call.",
     annotations: {
       title: "Describe API operation",
       readOnlyHint: true,
@@ -469,7 +425,7 @@ function buildDescribeTool(ctx: McpToolContext): AppstrateToolDefinition {
       operationId,
     });
 
-    return textResult(describePayloadForCaller(ctx, op, componentSchemas));
+    return textResult(describePayload(op, componentSchemas));
   };
 
   return { descriptor, handler };
