@@ -255,7 +255,6 @@ describe("mcp tool round-trip", () => {
       "describe_operation",
       "get_me",
       "get_runtime_capabilities",
-      "import_package_document",
       "invoke_operation",
       "list_documents",
       "read_document",
@@ -391,6 +390,12 @@ describe("mcp tool round-trip", () => {
     // single source of truth here — both chat engines and external MCP clients
     // read it from these instructions, so the chat prompt no longer restates it.
     expect(instructions).toContain("Integration preference");
+    // Package authoring guidance also lives only at the MCP seam. Both chat
+    // engines append these instructions, and external MCP clients receive the
+    // same safe validate-before-import workflow.
+    expect(instructions).toContain("MCP package authoring");
+    expect(instructions).toContain("BOTH `valid: true` AND `importable: true`");
+    expect(instructions).toContain("report them instead of attempting a doomed mutation");
     // The generated operation index is appended under this exact heading; the
     // chat splits on the same literal to strip it for uncached/no-tool
     // providers (see applyOperationIndexPolicy in module-chat). Keep in sync.

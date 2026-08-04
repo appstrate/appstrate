@@ -10,6 +10,7 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { AppstrateRequestExtra } from "@appstrate/mcp-transport";
+import type { Actor } from "@appstrate/connect";
 import {
   getCatalog,
   resetCatalog,
@@ -29,7 +30,11 @@ function parseResult(result: CallToolResult): Record<string, unknown> {
   return JSON.parse(first.text) as Record<string, unknown>;
 }
 
-function makeTools(permissions: string[], contextInjected = false) {
+function makeTools(
+  permissions: string[],
+  contextInjected = false,
+  actor: Actor = { type: "user", id: "user_1" },
+) {
   const calls: Request[] = [];
   const dispatch: Dispatch = async (req) => {
     calls.push(req);
@@ -43,7 +48,7 @@ function makeTools(permissions: string[], contextInjected = false) {
     authHeaders: new Headers({ authorization: "Bearer tok", "x-org-id": "org_1" }),
     permissions: new Set(permissions),
     dispatch,
-    actor: { type: "user", id: "user_1" },
+    actor,
     scope: { orgId: "org_1", applicationId: "app_1" },
     contextInjected,
   });
@@ -478,7 +483,6 @@ describe("buildMcpTools contextInjected", () => {
     expect(names).toEqual([
       "describe_operation",
       "get_runtime_capabilities",
-      "import_package_document",
       "invoke_operation",
       "list_documents",
       "read_document",
@@ -486,6 +490,19 @@ describe("buildMcpTools contextInjected", () => {
       "search_operations",
       "validate_package_document",
     ]);
+  });
+
+  it("exposes package import only to authorized organization users", () => {
+    expect(makeTools(["mcp:read", "mcp:invoke"]).byName.has("import_package_document")).toBe(false);
+    expect(
+      makeTools(["mcp:read", "mcp:invoke", "agents:write"]).byName.has("import_package_document"),
+    ).toBe(true);
+    expect(
+      makeTools(["mcp:read", "mcp:invoke", "agents:write"], false, {
+        type: "end_user",
+        id: "eu_1",
+      }).byName.has("import_package_document"),
+    ).toBe(false);
   });
 
   it("exposes the runtime registry used by package authoring and adapters", async () => {

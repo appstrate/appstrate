@@ -33,6 +33,14 @@ interface PackageDocumentBytes {
   mime: string;
 }
 
+function packageDocumentImportAccessError(ctx: PackageDocumentToolContext): string | undefined {
+  if (!ctx.permissions.has("mcp:invoke") || !ctx.permissions.has("agents:write")) {
+    return "Permissions 'mcp:invoke' and 'agents:write' are required to import packages.";
+  }
+  if (ctx.actor.type !== "user") return "Only organization users can import packages.";
+  return undefined;
+}
+
 function packageSizeError(): McpError {
   return new McpError(
     ErrorCode.InvalidParams,
@@ -174,15 +182,8 @@ function buildImportPackageDocumentTool(ctx: PackageDocumentToolContext): Appstr
     inputSchema: packageDocumentInputSchema(),
   };
   const handler = async (args: Record<string, unknown>): Promise<CallToolResult> => {
-    if (!ctx.permissions.has("mcp:invoke") || !ctx.permissions.has("agents:write")) {
-      return textResult(
-        { error: "Permissions 'mcp:invoke' and 'agents:write' are required to import packages." },
-        true,
-      );
-    }
-    if (ctx.actor.type !== "user") {
-      return textResult({ error: "Only organization users can import packages." }, true);
-    }
+    const accessError = packageDocumentImportAccessError(ctx);
+    if (accessError) return textResult({ error: accessError }, true);
     const uri = asString(args.document_uri);
     if (!uri) throw new McpError(ErrorCode.InvalidParams, "document_uri is required.");
     try {
@@ -280,7 +281,7 @@ export function buildPackageDocumentTools(
 ): AppstrateToolDefinition[] {
   return [
     buildValidatePackageDocumentTool(ctx),
-    buildImportPackageDocumentTool(ctx),
+    ...(packageDocumentImportAccessError(ctx) ? [] : [buildImportPackageDocumentTool(ctx)]),
     buildRuntimeCapabilitiesTool(),
   ];
 }

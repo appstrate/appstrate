@@ -12,11 +12,6 @@ import { describe, expect, it } from "bun:test";
 import { SYSTEM_PROMPT, formatCallerContext, normalizeChatLocale } from "../src/prompt.ts";
 
 describe("SYSTEM_PROMPT invariants", () => {
-  it("gates package import on both structural validity and conflict-free importability", () => {
-    expect(SYSTEM_PROMPT).toContain("BOTH `valid: true` AND `importable: true`");
-    expect(SYSTEM_PROMPT).toMatch(/When `importable` is false, do not attempt the import/);
-  });
-
   it("keeps the single-sub-agent rule for chained external actions", () => {
     expect(SYSTEM_PROMPT).toContain("compose ONE sub-agent");
     expect(SYSTEM_PROMPT).toContain("do NOT chain one run per action");
