@@ -6,9 +6,42 @@ import {
   CHAT_TOOL_STEP_BUDGET,
   CHAT_TURN_DEADLINE_MS,
   mergeTurnMetadata,
+  type ChatMessageMetadata,
+  type ChatTurnFinishReason,
 } from "@appstrate/core/chat-turn-metadata";
 import { resolveTurnClosure, turnDeadlineNoticeText, turnNoticeChunks } from "../turn-closure.ts";
-import { classifyClientTurnError, clientTurnErrorMarker } from "../turn-error.ts";
+import {
+  classifyClientTurnError,
+  clientTurnErrorMarker,
+  type ClientTurnError,
+} from "../turn-error.ts";
+
+/** Build the persisted terminal metadata shared by every subscription exit path. */
+export function buildSubscriptionTurnMetadata(input: {
+  finishReason: ChatTurnFinishReason;
+  clientError?: ClientTurnError;
+  stepCount: number;
+  stepCapReached: boolean;
+  lastToolName?: string;
+}): ChatMessageMetadata {
+  return mergeTurnMetadata(undefined, {
+    engine: "subscription",
+    finishReason: input.finishReason,
+    ...(input.clientError
+      ? {
+          errorCategory: input.clientError.category,
+          errorRetryable: input.clientError.retryable,
+          ...(input.clientError.requestId ? { requestId: input.clientError.requestId } : {}),
+        }
+      : {}),
+    stepCount: input.stepCount,
+    maxSteps: CHAT_MAX_STEPS,
+    toolStepBudget: CHAT_TOOL_STEP_BUDGET,
+    toolStepBudgetReached: input.stepCapReached,
+    maxStepsReached: input.stepCapReached,
+    ...(input.lastToolName ? { lastToolName: input.lastToolName } : {}),
+  });
+}
 
 /** Close a subscription turn whose setup or prompt escaped with an exception. */
 export function subscriptionFailureChunks(input: {
@@ -39,21 +72,11 @@ export function subscriptionFailureChunks(input: {
   }
   chunks.push({
     type: "finish",
-    messageMetadata: mergeTurnMetadata(undefined, {
-      engine: "subscription",
+    messageMetadata: buildSubscriptionTurnMetadata({
       finishReason: closure.finishReason,
-      ...(clientError
-        ? {
-            errorCategory: clientError.category,
-            errorRetryable: clientError.retryable,
-            ...(clientError.requestId ? { requestId: clientError.requestId } : {}),
-          }
-        : {}),
+      ...(clientError ? { clientError } : {}),
       stepCount: input.stepCount,
-      maxSteps: CHAT_MAX_STEPS,
-      toolStepBudget: CHAT_TOOL_STEP_BUDGET,
-      toolStepBudgetReached: input.stepCapReached,
-      maxStepsReached: input.stepCapReached,
+      stepCapReached: input.stepCapReached,
       ...(input.lastToolName ? { lastToolName: input.lastToolName } : {}),
     }),
   });

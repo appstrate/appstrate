@@ -4,7 +4,7 @@ import { describe, expect, it } from "bun:test";
 import { readUIMessageStream, type UIMessage, type UIMessageChunk } from "ai";
 import { turnMetadataFromMessage } from "@appstrate/core/chat-turn-metadata";
 import { ChatTurnDeadlineError, turnDeadlineNoticeText } from "../src/turn-closure.ts";
-import { subscriptionFailureChunks } from "../src/pi-chat/failure-closure.ts";
+import { subscriptionFailureChunks } from "../src/pi-chat/subscription-turn-closure.ts";
 
 async function assemble(chunks: UIMessageChunk[]): Promise<UIMessage | undefined> {
   const stream = new ReadableStream<UIMessageChunk>({
@@ -27,6 +27,7 @@ describe("subscriptionFailureChunks", () => {
       abortReason: undefined,
       stepCount: 0,
       stepCapReached: false,
+      lastToolName: "read_document",
       newId: () => "assistant-before-start",
     });
 
@@ -40,6 +41,11 @@ describe("subscriptionFailureChunks", () => {
       errorRetryable: true,
       requestId: "req_public123",
       stepCount: 0,
+      maxSteps: 16,
+      toolStepBudget: 15,
+      toolStepBudgetReached: false,
+      maxStepsReached: false,
+      lastToolName: "read_document",
     });
     expect(JSON.stringify(message)).not.toContain("leaked detail");
   });

@@ -32,12 +32,7 @@ import {
   type Api,
   type Model,
 } from "@appstrate/runner-pi";
-import {
-  mergeTurnMetadata,
-  CHAT_MAX_STEPS,
-  CHAT_TOOL_STEP_BUDGET,
-  CHAT_TURN_DEADLINE_MS,
-} from "@appstrate/core/chat-turn-metadata";
+import { CHAT_TOOL_STEP_BUDGET, CHAT_TURN_DEADLINE_MS } from "@appstrate/core/chat-turn-metadata";
 import type { SubscriptionChatModel, ChatUsageRecord } from "@appstrate/core/chat-contract";
 import { applyOperationIndexPolicy } from "../operation-index.ts";
 import { logger } from "../logger.ts";
@@ -54,7 +49,10 @@ import {
 } from "../turn-closure.ts";
 import { classifyClientTurnError, clientTurnErrorMarker } from "../turn-error.ts";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
-import { subscriptionFailureChunks } from "./failure-closure.ts";
+import {
+  buildSubscriptionTurnMetadata,
+  subscriptionFailureChunks,
+} from "./subscription-turn-closure.ts";
 
 /**
  * Wall-clock ceiling for a single chat turn. A turn fans out into up to
@@ -323,24 +321,14 @@ export function runPiSubscriptionChat(input: PiSubscriptionChatInput): Response 
 
         write({
           type: "finish",
-          messageMetadata: mergeTurnMetadata(undefined, {
-            engine: "subscription",
+          messageMetadata: buildSubscriptionTurnMetadata({
             finishReason: closure.finishReason,
-            ...(clientError
-              ? {
-                  errorCategory: clientError.category,
-                  errorRetryable: clientError.retryable,
-                  ...(clientError.requestId ? { requestId: clientError.requestId } : {}),
-                }
-              : {}),
+            ...(clientError ? { clientError } : {}),
             stepCount,
-            maxSteps: CHAT_MAX_STEPS,
-            toolStepBudget: CHAT_TOOL_STEP_BUDGET,
             // Both flags report the CAP, not arithmetic: a turn that never hit
             // the budget must not claim it did just because a retry pushed the
             // model-call count to the ceiling.
-            toolStepBudgetReached: stepCap.fired(),
-            maxStepsReached: stepCap.fired(),
+            stepCapReached: stepCap.fired(),
             ...(mapper.lastToolName() ? { lastToolName: mapper.lastToolName() } : {}),
           }),
         });
