@@ -154,5 +154,17 @@ loses the in-chat progress surface and the `resource_link` deliverables that
 `run_and_wait` returns. Reach for the REST operations only when you deliberately
 want to start a run and _not_ wait for it.
 
+For `kind:"inline"`, `manifest` is a partial canonical AFPS manifest. A normal
+call can provide only a task-specific `display_name` plus its dependencies and
+integration configuration; `run_and_wait` derives `name` and defaults the
+omitted AFPS boilerplate, `runtime_tools` (`log`, `output`,
+`publish_document`), and an open object output schema. Defaults fill absent
+top-level fields only. Every supplied field is preserved as an exact
+replacement—arrays and nested objects are not merged, and
+`runtime_tools: []` remains empty. Clients can therefore provide a complete
+deterministic manifest and override every field, including a strict
+`output.schema` (which requires `output` in an explicitly overridden
+`runtime_tools`).
+
 Streaming/SSE operations (live logs, realtime) cannot be called through
 `invoke_operation` — use `run_and_wait`, fetch logs, or poll instead.

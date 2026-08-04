@@ -40,6 +40,14 @@ describe("SYSTEM_PROMPT invariants", () => {
     expect(SYSTEM_PROMPT).not.toContain('"name": "@inline/one-shot"');
   });
 
+  it("keeps inline manifests concise while allowing exact complete overrides", () => {
+    expect(SYSTEM_PROMPT).toContain("PARTIAL canonical AFPS agent");
+    expect(SYSTEM_PROMPT).toMatch(/Defaults apply ONLY to absent top-level fields/);
+    expect(SYSTEM_PROMPT).toContain("runtime_tools: []");
+    expect(SYSTEM_PROMPT).toMatch(/override EVERY field/);
+    expect(SYSTEM_PROMPT).toContain("complete strict `output.schema`");
+  });
+
   it("keeps the fan-in-by-reference rule (context_documents, never a copy)", () => {
     expect(SYSTEM_PROMPT).toContain("context_documents");
     expect(SYSTEM_PROMPT).toMatch(/NEVER paste a previous run's content/);

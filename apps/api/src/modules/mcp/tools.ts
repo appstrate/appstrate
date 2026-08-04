@@ -292,6 +292,46 @@ function describePayload(
   };
 }
 
+const RUN_LAUNCH_OPERATION_IDS = new Set(["runAgent", "runInline"]);
+
+/**
+ * Chat already has the complete `run_and_wait` tool schema. Returning the raw
+ * launch operation here would add tens of kilobytes of referenced OpenAPI
+ * schemas and point the model at the fire-and-forget endpoint we explicitly do
+ * not want it to compose. External MCP clients keep the full REST description:
+ * some intentionally launch without waiting, and only chat sets
+ * `contextInjected`.
+ */
+function describePayloadForCaller(
+  ctx: McpToolContext,
+  op: CatalogOperation,
+  componentSchemas: Record<string, unknown>,
+): Record<string, unknown> {
+  if (!ctx.contextInjected || !RUN_LAUNCH_OPERATION_IDS.has(op.operationId)) {
+    return describePayload(op, componentSchemas);
+  }
+
+  const inline = op.operationId === "runInline";
+  return {
+    operation_id: op.operationId,
+    redirected_to: "run_and_wait",
+    reason:
+      "This chat launches runs through run_and_wait, which exposes progress and waits for the " +
+      "terminal result. Do not invoke the fire-and-forget REST operation.",
+    example: inline
+      ? {
+          kind: "inline",
+          manifest: { display_name: "Concise task-specific title" },
+          prompt: "Required top-level sub-agent prompt",
+        }
+      : { kind: "agent", scope: "@scope", name: "agent-name" },
+    note: inline
+      ? "manifest is a partial canonical AFPS manifest. Omitted fields receive defaults; every " +
+        "provided field replaces its default exactly, including runtime_tools: []."
+      : "Use version:'draft' only for a draft-only agent; otherwise omit version for latest published.",
+  };
+}
+
 function buildSearchTool(ctx: McpToolContext): AppstrateToolDefinition {
   const descriptor: Tool = {
     name: "search_operations",
@@ -299,8 +339,9 @@ function buildSearchTool(ctx: McpToolContext): AppstrateToolDefinition {
       "Search the Appstrate API for operations by keyword and/or tag. Returns matching " +
       "operationIds with their HTTP method, path, and summary. Use this first to discover " +
       "which operation to call. For a keyword search, the response also includes a " +
-      "`best_match` carrying the top result's full input schema — when it matches your " +
-      "intent you can call invoke_operation directly, no describe_operation needed.",
+      "`best_match` carrying the top result's full input schema (or, in chat, a compact " +
+      "run_and_wait redirect for launch operations) — when it matches your intent you need " +
+      "no describe_operation follow-up.",
     annotations: {
       title: "Search API operations",
       readOnlyHint: true,
@@ -355,7 +396,9 @@ function buildSearchTool(ctx: McpToolContext): AppstrateToolDefinition {
     // schema, to keep the response bounded; the rest stay compact.
     const top = scored[0];
     const bestMatch =
-      tokens.length > 0 && top ? describePayload(top.op, componentSchemas) : undefined;
+      tokens.length > 0 && top
+        ? describePayloadForCaller(ctx, top.op, componentSchemas)
+        : undefined;
 
     return textResult({
       count: scored.length,
@@ -380,7 +423,8 @@ function buildDescribeTool(ctx: McpToolContext): AppstrateToolDefinition {
     description:
       "Return the full OpenAPI definition for one operation (parameters, request body, " +
       "responses) with all referenced component schemas inlined, so you can construct a " +
-      "valid invoke_operation call.",
+      "valid invoke_operation call. In chat, runAgent/runInline instead return a compact " +
+      "redirect to the declared run_and_wait tool.",
     annotations: {
       title: "Describe API operation",
       readOnlyHint: true,
@@ -425,7 +469,7 @@ function buildDescribeTool(ctx: McpToolContext): AppstrateToolDefinition {
       operationId,
     });
 
-    return textResult(describePayload(op, componentSchemas));
+    return textResult(describePayloadForCaller(ctx, op, componentSchemas));
   };
 
   return { descriptor, handler };
@@ -779,21 +823,23 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
       "the created run to chat for live progress, then returns " +
       "`{ id, packageId, status, done:true, result?, error? }` when the run reaches a terminal " +
       "status. Do NOT call `getRun` after this tool just to wait for completion; this tool already " +
-      "waits. The chat shows logs after the run id is known, but ONLY lines the run emits " +
-      "through the `log` runtime tool. For an " +
-      'inline run (`kind:"inline"`) you MUST therefore (1) declare `"runtime_tools": ["log"]` in ' +
-      "the manifest AND (2) instruct the run, in its `prompt`, to call the `log` " +
-      "tool to report each meaningful step — otherwise the in-chat run progress component stays empty. " +
-      "For every inline run, set `manifest.display_name` to a concise, task-specific human " +
-      "title in the user's language and `manifest.name` to a matching descriptive " +
-      "`@inline/<kebab-case-slug>`; never use an id or a generic label such as `one-shot`. " +
+      "waits. For an inline run, `manifest` is a PARTIAL canonical AFPS manifest: normally set " +
+      "only a concise task-specific `display_name` plus task dependencies/configuration. The " +
+      "platform derives `name` and fills omitted AFPS boilerplate, `runtime_tools` (log, output, " +
+      "publish_document), and an open object output schema. Defaults apply only to fields you omit; " +
+      "every field you provide replaces its default exactly, with no array or nested-object merge. " +
+      "That includes `runtime_tools: []`, which stays empty and disables every default runtime tool. " +
+      "A complete deterministic manifest may override every field, including a strict " +
+      "`output.schema`; when it does, its explicit `runtime_tools` must include `output`. The chat " +
+      "shows only lines emitted through `log`, so instruct the run to log meaningful steps whenever " +
+      "that tool is selected. Never use an id or a generic display name such as `one-shot`. " +
       "File deliverables: every file the run writes under its workspace `outputs/` directory is " +
       "published as a document when the run ends and returned here as a `resource_link` — when the " +
       "goal is a downloadable file (report, CSV, image…), instruct the run's `prompt` to write it " +
       "into `outputs/` with a descriptive, task-specific filename that remains understandable " +
       "outside this run; never use context-free names such as `report.md`, `summary.md`, or " +
-      "`output.md`. For inline runs, run_and_wait automatically exposes `publish_document`; that " +
-      "tool's own description defines when and how the run should select a primary deliverable. " +
+      "`output.md`. When selected (by default, or explicitly), `publish_document`'s own " +
+      "description defines when and how the run should select a primary deliverable. " +
       "Content merely returned in the output payload never becomes a document. " +
       "Chaining runs (kind:inline): feed earlier runs' deliverables to a later one by passing " +
       "their `document://` URIs in `context_documents` — never by copying their content into " +
@@ -836,14 +882,50 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
         manifest: {
           type: "object",
           description:
-            "Inline agent manifest to run (kind:inline). REQUIRED naming: set `display_name` to " +
-            "a concise human title in the user's language describing this run's exact action or " +
-            "outcome, and set `name` to a matching descriptive `@inline/<kebab-case-slug>`. " +
-            "Never use an id or a generic label such as `one-shot`, `inline-agent`, or `task`. " +
-            'Include `"log"` in `runtime_tools` so the ' +
-            "run can emit progress lines the chat shows live (the panel surfaces only `log`-tool " +
-            "output). Do NOT put the prompt inside the manifest — it goes in the separate " +
-            "top-level `prompt` argument.",
+            "Partial canonical AFPS agent manifest (kind:inline). Usually only `display_name` " +
+            "plus task-specific dependencies/configuration are needed; `name` is derived and " +
+            "AFPS boilerplate, runtime tools, and an open output schema are defaulted. Every " +
+            "provided field is an exact top-level replacement: arrays and nested objects are not " +
+            "merged, and `runtime_tools: []` is preserved. You may instead provide a complete, " +
+            "strict deterministic manifest and override every field. Do NOT put the prompt inside " +
+            "the manifest — it goes in the separate top-level `prompt` argument.",
+          properties: {
+            display_name: {
+              type: "string",
+              description:
+                "Task-specific human title. When name is omitted, the platform derives " +
+                "@inline/<slug> from this value.",
+            },
+            name: {
+              type: "string",
+              description:
+                "Optional exact canonical @scope/name override. Usually omit and provide " +
+                "display_name.",
+            },
+            dependencies: {
+              type: "object",
+              description: "Exact AFPS dependencies override.",
+              additionalProperties: true,
+            },
+            integrations_configuration: {
+              type: "object",
+              description: "Exact AFPS integration configuration override.",
+              additionalProperties: true,
+            },
+            runtime_tools: {
+              type: "array",
+              description:
+                "Exact runtime-tool selection. Omit for log/output/publish_document defaults; " +
+                "an explicit [] disables them all.",
+              items: { type: "string" },
+            },
+            output: {
+              type: "object",
+              description:
+                "Exact AFPS output contract override, including a deterministic JSON schema.",
+              additionalProperties: true,
+            },
+          },
           additionalProperties: true,
         },
         prompt: {

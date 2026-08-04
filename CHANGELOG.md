@@ -13,6 +13,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `@appstrate/module-observability`. Core ships zero OTel footprint; add the
   module to `MODULES` and set `OTEL_ENABLED` to activate tracing/metrics.
 
+### Changed
+
+- **Inline `run_and_wait` manifests are concise without becoming limited** —
+  callers may omit AFPS boilerplate and provide only a task-specific
+  `display_name`; the shared client derives the canonical name and fills
+  runtime/output defaults before the existing full validation boundary. Any
+  supplied field remains an exact override, including `runtime_tools: []` and
+  complete deterministic schemas. In context-injected chat, describing or
+  searching for the fire-and-forget `runInline` / `runAgent` operations now
+  returns a compact redirect to `run_and_wait`; external MCP clients retain the
+  full OpenAPI payload.
+
 ### Fixed
 
 - **`POST /api/packages/import-bundle` skipped agent integration validation

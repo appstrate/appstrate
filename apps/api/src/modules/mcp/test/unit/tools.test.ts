@@ -28,7 +28,7 @@ function parseResult(result: CallToolResult): Record<string, unknown> {
   return JSON.parse(first.text) as Record<string, unknown>;
 }
 
-function makeTools(permissions: string[]) {
+function makeTools(permissions: string[], options: { contextInjected?: boolean } = {}) {
   const calls: Request[] = [];
   const dispatch: Dispatch = async (req) => {
     calls.push(req);
@@ -44,6 +44,7 @@ function makeTools(permissions: string[]) {
     dispatch,
     actor: { type: "user", id: "user_1" },
     scope: { orgId: "org_1", applicationId: "app_1" },
+    contextInjected: options.contextInjected,
   });
   const byName = new Map(tools.map((t) => [t.descriptor.name, t]));
   return { byName, calls };
@@ -138,6 +139,51 @@ describe("describe_operation", () => {
     const body = parseResult(res);
     expect(body.method).toBe(op.method);
     expect(body.path).toBe(op.pathTemplate);
+  });
+
+  it.each(["runInline", "runAgent"])(
+    "returns a compact run_and_wait redirect for %s in chat",
+    async (operationId) => {
+      const { byName } = makeTools(["mcp:read"], { contextInjected: true });
+      const res = await byName
+        .get("describe_operation")!
+        .handler({ operation_id: operationId }, noExtra);
+      const body = parseResult(res);
+
+      expect(body.operation_id).toBe(operationId);
+      expect(body.redirected_to).toBe("run_and_wait");
+      expect(body).not.toHaveProperty("request_body");
+      expect(body).not.toHaveProperty("referenced_schemas");
+      expect(JSON.stringify(body).length).toBeLessThan(1_500);
+    },
+  );
+
+  it("keeps the full runInline OpenAPI payload for external MCP clients", async () => {
+    const { byName } = makeTools(["mcp:read"]);
+    const res = await byName
+      .get("describe_operation")!
+      .handler({ operation_id: "runInline" }, noExtra);
+    const body = parseResult(res);
+
+    expect(body.operation_id).toBe("runInline");
+    expect(body).toHaveProperty("request_body");
+    expect(body).toHaveProperty("referenced_schemas");
+    expect(body.redirected_to).toBeUndefined();
+  });
+
+  it("uses the same compact redirect in chat search best_match", async () => {
+    const { byName } = makeTools(["mcp:read"], { contextInjected: true });
+    const searchRes = await byName
+      .get("search_operations")!
+      .handler({ query: "runInline" }, noExtra);
+    const best = parseResult(searchRes).best_match as Record<string, unknown>;
+    const describeRes = await byName
+      .get("describe_operation")!
+      .handler({ operation_id: "runInline" }, noExtra);
+
+    expect(best.operation_id).toBe("runInline");
+    expect(best.redirected_to).toBe("run_and_wait");
+    expect(best).toEqual(parseResult(describeRes));
   });
 
   it("throws InvalidParams (-32602) on an unknown operationId — protocol error, not tool error", async () => {
