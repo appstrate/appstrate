@@ -199,6 +199,9 @@ const codexProvider: ModelProviderDefinition = {
   // (`apps/api/src/data/subscription-watch/chatgpt.json`) — review this
   // list when that snapshot drifts.
   catalogProviderId: "openai",
+  // The ChatGPT Codex responses backend rejects `temperature` even though the
+  // underlying OpenAI API catalog advertises it for the same model ids.
+  generationOverride: { temperature: "unsupported" },
   // Explicit arrays, NOT a catalog selector (unlike `claude-code`, which
   // derives from the vendored anthropic catalog). The ChatGPT sign-in set is
   // defined by OpenAI's documentation and does not track the OpenAI API

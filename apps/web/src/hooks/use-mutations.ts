@@ -17,6 +17,7 @@ import {
   paginatedRunsKeys,
   persistenceKeys,
 } from "../lib/query-keys";
+import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 
 // NOTE on query keys: run-cache keys (["runs"], ["paginated-runs"], ["run"])
 // are PINNED legacy keys — use-global-run-sync.ts patches them from SSE
@@ -73,6 +74,8 @@ export interface RunAgentParams {
   modelId?: string;
   /** Per-run proxy id override (wire `proxyId`). From the run-with-options modal. */
   proxyId?: string;
+  /** Per-run temperature/reasoning override (wire `generation`). */
+  generation?: ModelGenerationSettings;
   /** Per-run config delta, deep-merged with the persisted config (wire `config`). */
   config?: Record<string, unknown>;
   /**
@@ -88,8 +91,16 @@ export function useRunAgent(packageId: string) {
   const navigate = useNavigate();
   return useMutation({
     mutationFn: async (params?: RunAgentParams) => {
-      const { input, version, connectionOverrides, modelId, proxyId, config, dependencyOverrides } =
-        params ?? {};
+      const {
+        input,
+        version,
+        connectionOverrides,
+        modelId,
+        proxyId,
+        generation,
+        config,
+        dependencyOverrides,
+      } = params ?? {};
       const { data } = await client.POST("/api/agents/{scope}/{name}/run", {
         params: {
           path: splitPackageRef(packageId),
@@ -109,6 +120,7 @@ export function useRunAgent(packageId: string) {
             ? { connection_overrides: connectionOverrides }
             : {}),
           ...(modelId !== undefined ? { modelId } : {}),
+          ...(generation !== undefined ? { generation } : {}),
           ...(proxyId !== undefined ? { proxyId } : {}),
           ...(config !== undefined ? { config } : {}),
           ...(dependencyOverrides !== undefined

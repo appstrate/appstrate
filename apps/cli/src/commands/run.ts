@@ -526,6 +526,12 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
     const runner = new PiRunner({
       model,
       apiKey: llmApiKey,
+      ...(typeof inheritedConfig.generation?.temperature === "number"
+        ? { temperature: inheritedConfig.generation.temperature }
+        : {}),
+      ...(inheritedConfig.generation?.reasoningLevel != null
+        ? { thinkingLevel: inheritedConfig.generation.reasoningLevel }
+        : {}),
       systemPrompt,
       cwd: workspaceDir,
       agentDir: path.join(workspaceDir, ".pi-agent"),

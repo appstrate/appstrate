@@ -66,6 +66,12 @@ import {
   turnDeadlineNoticeText,
   turnNoticeChunks,
 } from "./turn-closure.ts";
+import {
+  ModelGenerationError,
+  modelGenerationSettingsSchema,
+  reconcileModelGenerationSettings,
+  resolveModelGenerationSettings,
+} from "@appstrate/core/model-generation";
 
 /**
  * RFC 9457 `401` returned when the chosen subscription model's oauth credential
@@ -237,6 +243,7 @@ export const chatStreamSchema = z.object({
       });
     }),
   modelId: z.string().optional(),
+  generation: modelGenerationSettingsSchema.optional(),
 });
 
 /** Truncated JSON preview for debug logs (keeps lines readable). */
@@ -483,6 +490,20 @@ export async function handleChatStream(
       : resolveDefaultApplicationId(origin, headers, orgId, platformFetch),
   ]);
   const chosen = pickModel(models, modelId);
+  let generationSettings;
+  try {
+    const compatibleGeneration = reconcileModelGenerationSettings(
+      body.generation ?? {},
+      chosen.generation,
+    );
+    generationSettings = resolveModelGenerationSettings({
+      capabilities: chosen.generation,
+      override: compatibleGeneration,
+    });
+  } catch (error) {
+    if (error instanceof ModelGenerationError) throw invalidRequest(error.message);
+    throw error;
+  }
   const phaseAMs = Date.now() - phaseAStart;
   logger.info("model resolved", {
     model: chosen.id,
@@ -752,6 +773,7 @@ export async function handleChatStream(
           chatSessionId: meteringSessionId,
           prompt: buildTranscriptPrompt(messages),
           system,
+          generation: generationSettings,
           platformMcp: { url: platformMcpUrl(origin, orgId), headers: mcpHeaders },
           // Decoupled from the request connection (see `generation` above).
           abortSignal: generation.signal,
@@ -771,7 +793,14 @@ export async function handleChatStream(
   }
 
   // ai-sdk path — API-key providers only, bound to the llm-proxy.
-  const model = modelFromFamily(chosen, origin, inferenceHeaders, mintInferenceAuth, platformFetch);
+  const model = modelFromFamily(
+    chosen,
+    origin,
+    inferenceHeaders,
+    mintInferenceAuth,
+    platformFetch,
+    generationSettings,
+  );
   if (!model) {
     await failCleanup();
     throw invalidRequest(`Model family "${chosen.apiShape}" is not supported by the chat.`);
@@ -796,6 +825,9 @@ export async function handleChatStream(
 
     const result = streamText({
       model,
+      ...(typeof generationSettings.temperature === "number"
+        ? { temperature: generationSettings.temperature }
+        : {}),
       // System rides via the canonical `instructions` field as a cache-controlled
       // `SystemModelMessage`; ai@7 prepends it to the model prompt as a system
       // message (cacheControl preserved). See `aiSdkCachedSystemMessage` for why

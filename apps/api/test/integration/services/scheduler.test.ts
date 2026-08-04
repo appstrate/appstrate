@@ -149,6 +149,7 @@ describeRequiresRedis("scheduler service", () => {
         {
           cronExpression: "0 9 * * *",
           configOverride: { integrations: { gmail: { scopes: ["read"] } } },
+          generationConfigOverride: { temperature: 0, reasoningLevel: "high" },
           modelIdOverride: "model_abc",
           proxyIdOverride: "prx_xyz",
           versionOverride: "1.2.3",
@@ -157,6 +158,10 @@ describeRequiresRedis("scheduler service", () => {
 
       expect(schedule.config_override).toEqual({
         integrations: { gmail: { scopes: ["read"] } },
+      });
+      expect(schedule.generation_config_override).toEqual({
+        temperature: 0,
+        reasoningLevel: "high",
       });
       expect(schedule.model_id_override).toBe("model_abc");
       expect(schedule.proxy_id_override).toBe("prx_xyz");
@@ -174,6 +179,7 @@ describeRequiresRedis("scheduler service", () => {
       );
 
       expect(schedule.config_override).toBeNull();
+      expect(schedule.generation_config_override).toBeNull();
       expect(schedule.model_id_override).toBeNull();
       expect(schedule.proxy_id_override).toBeNull();
       expect(schedule.version_override).toBeNull();
@@ -388,6 +394,7 @@ describeRequiresRedis("scheduler service", () => {
         {
           cronExpression: "0 9 * * *",
           configOverride: { foo: "bar" },
+          generationConfigOverride: { reasoningLevel: "low" },
           modelIdOverride: "model_init",
           proxyIdOverride: "prx_init",
           versionOverride: "1.0.0",
@@ -401,6 +408,7 @@ describeRequiresRedis("scheduler service", () => {
         { cronExpression: "*/15 * * * *" },
       );
       expect(partialUpdate!.config_override).toEqual({ foo: "bar" });
+      expect(partialUpdate!.generation_config_override).toEqual({ reasoningLevel: "low" });
       expect(partialUpdate!.model_id_override).toBe("model_init");
       expect(partialUpdate!.proxy_id_override).toBe("prx_init");
       expect(partialUpdate!.version_override).toBe("1.0.0");
@@ -411,12 +419,14 @@ describeRequiresRedis("scheduler service", () => {
         created.id,
         {
           configOverride: null,
+          generationConfigOverride: null,
           modelIdOverride: null,
           proxyIdOverride: null,
           versionOverride: null,
         },
       );
       expect(cleared!.config_override).toBeNull();
+      expect(cleared!.generation_config_override).toBeNull();
       expect(cleared!.model_id_override).toBeNull();
       expect(cleared!.proxy_id_override).toBeNull();
       expect(cleared!.version_override).toBeNull();

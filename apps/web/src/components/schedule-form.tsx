@@ -29,6 +29,7 @@ import type { JSONSchemaObject, SchemaWrapper } from "@appstrate/core/form";
 import { RunOverridesPanel, type RunOverridesValue } from "./run-overrides-panel";
 import { AgentVersionField } from "./package-version-select";
 import { ActorSelect, type ActorValue } from "./actor-select";
+import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 
 // Sentinel for the schedule's "inherit" version choice — no pin stored; the
 // agent's version resolution applies at fire time.
@@ -67,6 +68,7 @@ export interface ScheduleSaveData {
    */
   config_override?: Record<string, unknown> | null;
   model_id_override?: string | null;
+  generation_config_override?: ModelGenerationSettings | null;
   proxy_id_override?: string | null;
   version_override?: string | null;
   /**
@@ -95,6 +97,7 @@ interface ScheduleFormProps {
     input?: Record<string, unknown>;
     config_override?: Record<string, unknown> | null;
     model_id_override?: string | null;
+    generation_config_override?: ModelGenerationSettings | null;
     proxy_id_override?: string | null;
     version_override?: string | null;
     connection_overrides?: Record<string, string> | null;
@@ -109,6 +112,7 @@ interface ScheduleFormProps {
   persistedConfig?: Record<string, unknown>;
   /** Persisted defaults — passed straight through to RunOverridesPanel. */
   persistedModelId?: string | null;
+  persistedGenerationConfig?: ModelGenerationSettings | null;
   persistedProxyId?: string | null;
   persistedVersion?: string | null;
   /** Package id needed by RunOverridesPanel to fetch versions. */
@@ -145,6 +149,7 @@ export function ScheduleForm({
   persistedConfig,
   agentIntegrations,
   persistedModelId,
+  persistedGenerationConfig,
   persistedProxyId,
   persistedVersion,
   packageId,
@@ -182,6 +187,8 @@ export function ScheduleForm({
     if (defaultValues?.connection_overrides)
       v.connection_overrides = defaultValues.connection_overrides;
     if (defaultValues?.model_id_override) v.model_id_override = defaultValues.model_id_override;
+    if (defaultValues?.generation_config_override)
+      v.generation_config_override = defaultValues.generation_config_override;
     if (defaultValues?.proxy_id_override) v.proxy_id_override = defaultValues.proxy_id_override;
     return v;
   });
@@ -207,6 +214,7 @@ export function ScheduleForm({
   const initialOverridesNonEmpty =
     !!(defaultValues?.config_override && Object.keys(defaultValues.config_override).length > 0) ||
     !!defaultValues?.model_id_override ||
+    !!defaultValues?.generation_config_override ||
     !!defaultValues?.proxy_id_override ||
     !!defaultValues?.version_override ||
     !!(
@@ -259,6 +267,7 @@ export function ScheduleForm({
       ? {
           config_override: overrides.config_override ?? null,
           model_id_override: overrides.model_id_override ?? null,
+          generation_config_override: overrides.generation_config_override ?? null,
           proxy_id_override: overrides.proxy_id_override ?? null,
           version_override: versionOverride ?? null,
           connection_overrides: overrides.connection_overrides ?? null,
@@ -267,6 +276,9 @@ export function ScheduleForm({
           ...(overrides.config_override ? { config_override: overrides.config_override } : {}),
           ...(overrides.model_id_override
             ? { model_id_override: overrides.model_id_override }
+            : {}),
+          ...(overrides.generation_config_override
+            ? { generation_config_override: overrides.generation_config_override }
             : {}),
           ...(overrides.proxy_id_override
             ? { proxy_id_override: overrides.proxy_id_override }
@@ -485,6 +497,7 @@ export function ScheduleForm({
                   configSchema={configSchema}
                   persistedConfig={persistedConfig ?? {}}
                   persistedModelId={persistedModelId ?? null}
+                  persistedGenerationConfig={persistedGenerationConfig ?? null}
                   persistedProxyId={persistedProxyId ?? null}
                   {...(agentIntegrations ? { agentIntegrations } : {})}
                   value={overrides}

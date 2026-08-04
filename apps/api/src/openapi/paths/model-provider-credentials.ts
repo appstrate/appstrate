@@ -110,6 +110,9 @@ export const modelProviderCredentialsPaths = {
                               contextWindow: { type: "integer" },
                               maxTokens: { type: ["integer", "null"] },
                               capabilities: { type: "array", items: { type: "string" } },
+                              generation: {
+                                $ref: "#/components/schemas/ModelGenerationCapabilities",
+                              },
                               cost: {
                                 type: "object",
                                 description: "Per-1M-token cost (USD).",

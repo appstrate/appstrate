@@ -24,6 +24,7 @@
     "@appstrate/db": "workspace:*",
     "@appstrate/mcp-transport": "workspace:*",
     "@appstrate/runner-pi": "workspace:*",
+    "@appstrate/ui": "workspace:*",
     "@assistant-ui/react": "^0.15.1",
     "@assistant-ui/react-ai-sdk": "^1.4.1",
     "@iconify/react": "^6.0.2",

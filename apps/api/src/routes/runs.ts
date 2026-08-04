@@ -52,6 +52,7 @@ import { TERMINAL_RUN_STATUSES, runStatusValues } from "@appstrate/db/schema";
 import { parseWaitQuery, waitForRunTerminal } from "../services/run-wait.ts";
 import { SCOPED_PACKAGE_ROUTE } from "./scoped-package-route.ts";
 import { readJsonBody } from "../lib/request-body.ts";
+import { modelGenerationSettingsSchema } from "@appstrate/core/model-generation";
 
 /**
  * Wire-shape guard for the inline-run body (`POST /runs/inline` +
@@ -67,6 +68,7 @@ const inlineRunBodySchema = z.object({
   input: z.record(z.string(), z.unknown()).optional(),
   config: z.record(z.string(), z.unknown()).optional(),
   modelId: z.string().nullable().optional(),
+  generation: modelGenerationSettingsSchema.optional(),
   proxyId: z.string().nullable().optional(),
   /**
    * `document://` URIs to mount read-only into the run's `documents/` directory
@@ -196,6 +198,7 @@ export function createRunsRouter() {
           pendingDocuments,
           consumedDocumentIds,
           modelIdOverride,
+          generationConfigOverride,
           proxyIdOverride,
           configOverride,
           connectionOverrides,
@@ -224,6 +227,7 @@ export function createRunsRouter() {
         const {
           config,
           modelId: preflightModelId,
+          generationConfig: preflightGenerationConfig,
           proxyId: preflightProxyId,
         } = await resolveRunPreflight({
           agent: effectiveAgent,
@@ -261,6 +265,8 @@ export function createRunsRouter() {
           config: mergedConfig,
           configOverride: configOverride ?? null,
           modelId: modelIdOverride ?? preflightModelId,
+          generationConfig: preflightGenerationConfig,
+          generationConfigOverride: generationConfigOverride ?? null,
           proxyId: proxyIdOverride ?? preflightProxyId,
           overrideVersionLabel,
           dependencyOverrides: dependencyOverrides ?? null,

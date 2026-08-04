@@ -68,6 +68,26 @@ import {
  */
 export type PiModelConfig = Model<Api>;
 
+/**
+ * Pi treats `xhigh` as unsupported unless a model-level mapping exists and
+ * silently clamps it to `high`. Appstrate's catalog deliberately permits
+ * unknown capabilities so the provider can remain the final authority; add a
+ * pass-through mapping when no explicit model mapping exists so an attempted
+ * xhigh request reaches the provider instead of being silently weakened.
+ */
+export function preserveRequestedThinkingLevel(
+  model: PiModelConfig,
+  level: PiRunnerOptions["thinkingLevel"],
+): PiModelConfig {
+  if (level !== "xhigh" || !model.reasoning || model.thinkingLevelMap?.xhigh !== undefined) {
+    return model;
+  }
+  return {
+    ...model,
+    thinkingLevelMap: { ...model.thinkingLevelMap, xhigh: "xhigh" },
+  };
+}
+
 export interface PiRunnerOptions {
   /** LLM model configuration passed to the Pi SDK. Required. */
   model: PiModelConfig;
@@ -112,7 +132,9 @@ export interface PiRunnerOptions {
   /** Path where the default auth store persists. Ignored if `authStorage` is set. */
   authStoragePath?: string;
   /** Pi SDK thinking level. Defaults to `"medium"`. */
-  thinkingLevel?: "low" | "medium" | "high";
+  thinkingLevel?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
+  /** Provider sampling temperature. Omitted to preserve provider/Pi defaults. */
+  temperature?: number;
   /**
    * Preferred transport for providers that support multiple transports.
    * Providers that do not support this option ignore it. Defaults to `"auto"`.
@@ -406,6 +428,7 @@ export class PiRunner implements Runner {
     const cwd = this.opts.cwd ?? process.cwd();
     const agentDir = this.opts.agentDir ?? "/tmp/pi-agent";
     const thinkingLevel = this.opts.thinkingLevel ?? "medium";
+    const sessionModel = preserveRequestedThinkingLevel(model, thinkingLevel);
 
     // Load the heavy Pi SDK value surface here (not at module top) so the
     // ~200ms `@mariozechner/pi-coding-agent` eval stays off the runtime's
@@ -450,12 +473,23 @@ export class PiRunner implements Runner {
     // from the one that sized this session's compaction pass.
     const budget = derivePiCompactionSettings(model, process.env);
 
+    const temperatureExtension: ExtensionFactory[] =
+      this.opts.temperature === undefined
+        ? []
+        : [
+            (pi) => {
+              pi.on("before_provider_request", (event) => {
+                if (!event.payload || typeof event.payload !== "object") return undefined;
+                return { ...event.payload, temperature: this.opts.temperature };
+              });
+            },
+          ];
     const resourceLoader = new DefaultResourceLoader({
       cwd,
       agentDir,
       settingsManager: SettingsManager.inMemory(),
-      extensionFactories: this.opts.extensionFactories ?? [],
-      noExtensions: (this.opts.extensionFactories ?? []).length === 0,
+      extensionFactories: [...(this.opts.extensionFactories ?? []), ...temperatureExtension],
+      noExtensions: (this.opts.extensionFactories ?? []).length + temperatureExtension.length === 0,
       noPromptTemplates: true,
       noThemes: true,
       systemPrompt,
@@ -465,7 +499,7 @@ export class PiRunner implements Runner {
     const { session } = await createAgentSession({
       cwd,
       agentDir,
-      model,
+      model: sessionModel,
       thinkingLevel,
       authStorage,
       modelRegistry,

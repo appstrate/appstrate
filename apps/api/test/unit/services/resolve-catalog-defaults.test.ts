@@ -14,6 +14,10 @@ import {
   resetModelProviders,
 } from "../../../src/services/model-providers/registry.ts";
 import { seedTestModelProviders } from "../../helpers/model-providers.ts";
+import {
+  ModelGenerationError,
+  resolveModelGenerationSettings,
+} from "@appstrate/core/model-generation";
 
 // `gpt-4o` ships in the vendored snapshot at $2.5 / $10 per M, 128k
 // context. Asserting the canonical numbers fails loudly if a catalog
@@ -64,6 +68,28 @@ describe("resolveCatalogDefaults", () => {
       const out = resolveCatalogDefaults(ALIAS_ID, "gpt-4o");
       expect(out.contextWindow).toBe(GPT_4O.contextWindow);
       expect(out.cost?.input).toBeCloseTo(GPT_4O.costInput, 4);
+    });
+  });
+
+  describe("provider generation overrides", () => {
+    it("keeps the OpenAI API capability while rejecting temperature on Codex", () => {
+      const openai = resolveCatalogDefaults("openai", "gpt-5.6-luna");
+      const codex = resolveCatalogDefaults("codex", "gpt-5.6-luna");
+
+      expect(openai.generation?.temperature).toBe("supported");
+      expect(codex.generation?.temperature).toBe("unsupported");
+      expect(() =>
+        resolveModelGenerationSettings({
+          capabilities: codex.generation,
+          override: { temperature: 0.4 },
+        }),
+      ).toThrow(ModelGenerationError);
+    });
+
+    it("keeps provider transport restrictions on a catalog miss", () => {
+      expect(resolveCatalogDefaults("codex", "future-codex-model").generation).toMatchObject({
+        temperature: "unsupported",
+      });
     });
   });
 });

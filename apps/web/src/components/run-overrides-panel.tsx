@@ -23,6 +23,11 @@ import { getModelIcon } from "./icons";
 import { useIntegrationDetail } from "../hooks/use-integrations";
 import { connectableAuthKeysForAgent } from "@appstrate/core/integration";
 import { IntegrationConnectionPicker } from "./integration-connect/integration-connection-picker";
+import { ModelGenerationFields } from "./model-generation-fields";
+import {
+  reconcileModelGenerationSettings,
+  type ModelGenerationSettings,
+} from "@appstrate/core/model-generation";
 
 const INHERIT = "__inherit__";
 // Wire value the server recognizes as "no proxy" (distinct from INHERIT =
@@ -38,6 +43,8 @@ export interface RunOverridesValue {
   config_override?: Record<string, unknown>;
   /** Per-run model id override. */
   model_id_override?: string;
+  /** Per-run/schedule generation layer. */
+  generation_config_override?: ModelGenerationSettings;
   /** Per-run proxy id override. */
   proxy_id_override?: string;
   /**
@@ -65,6 +72,8 @@ export interface RunOverridesPanelProps {
   persistedConfig: Record<string, unknown>;
   /** Persisted model id (or null = inherit org default). */
   persistedModelId: string | null;
+  /** Persisted generation defaults shown as the inherit baseline. */
+  persistedGenerationConfig?: ModelGenerationSettings | null;
   /** Persisted proxy id (or null = inherit org default). */
   persistedProxyId: string | null;
   /**
@@ -106,6 +115,7 @@ export function RunOverridesPanel({
   configSchema,
   persistedConfig,
   persistedModelId,
+  persistedGenerationConfig,
   persistedProxyId,
   agentIntegrations,
   value,
@@ -135,14 +145,34 @@ export function RunOverridesPanel({
   const hasConfigFields =
     !!configSchema?.properties && Object.keys(configSchema.properties).length > 0;
 
+  // The inherited row stays visible even when the default is unavailable, so
+  // users can still clear an override and see which model will be resolved.
+  const orgDefaultModel = orgModels?.find((model) => model.is_default);
+  const orgDefaultProxy = orgProxies?.find((proxy) => proxy.is_default && proxy.enabled);
+
   const setModel = (next: string) => {
-    if (next === INHERIT || next === persistedModelId) {
-      const { model_id_override: _omit, ...rest } = value;
-      void _omit;
-      onChange(rest);
+    const nextModelId = next === INHERIT ? persistedModelId : next;
+    const nextModel =
+      orgModels?.find((model) => model.id === nextModelId) ??
+      (nextModelId === null ? orgDefaultModel : undefined);
+    const generation = reconcileModelGenerationSettings(
+      value.generation_config_override ?? {},
+      nextModel?.generation,
+    );
+    const nextValue = { ...value };
+
+    if (Object.keys(generation).length === 0) {
+      delete nextValue.generation_config_override;
     } else {
-      onChange({ ...value, model_id_override: next });
+      nextValue.generation_config_override = generation;
     }
+
+    if (next === INHERIT || next === persistedModelId) {
+      delete nextValue.model_id_override;
+    } else {
+      nextValue.model_id_override = next;
+    }
+    onChange(nextValue);
   };
 
   const setProxy = (next: string) => {
@@ -167,14 +197,10 @@ export function RunOverridesPanel({
     }
   };
 
-  // No selectability filter: "inherit" must keep naming the org default even
-  // when that default is unusable — an unlabelled "inherit" row would hide the
-  // very thing the run is about to fail on. The label carries the reason
-  // instead (ModelUnselectableNote below).
-  const orgDefaultModel = orgModels?.find((m) => m.is_default);
-  const orgDefaultProxy = orgProxies?.find((p) => p.is_default && p.enabled);
-
   const modelSelectValue = value.model_id_override ?? persistedModelId ?? INHERIT;
+  const selectedModel =
+    orgModels?.find((model) => model.id === (value.model_id_override ?? persistedModelId)) ??
+    orgDefaultModel;
   const proxySelectValue = value.proxy_id_override ?? persistedProxyId ?? INHERIT;
 
   return (
@@ -216,6 +242,28 @@ export function RunOverridesPanel({
             </SelectContent>
           </Select>
         </div>
+      )}
+
+      {orgModels && orgModels.length > 0 && (
+        <ModelGenerationFields
+          value={value.generation_config_override ?? {}}
+          capabilities={selectedModel?.generation}
+          onChange={(generation) => {
+            if (Object.keys(generation).length === 0) {
+              const { generation_config_override: _omit, ...rest } = value;
+              void _omit;
+              onChange(rest);
+            } else {
+              onChange({ ...value, generation_config_override: generation });
+            }
+          }}
+        />
+      )}
+
+      {persistedGenerationConfig && Object.keys(persistedGenerationConfig).length > 0 && (
+        <p className="text-muted-foreground text-xs">
+          {t("run.overrides.generationInheritHint", { ns: "agents" })}
+        </p>
       )}
 
       {orgProxies && orgProxies.length > 0 && (

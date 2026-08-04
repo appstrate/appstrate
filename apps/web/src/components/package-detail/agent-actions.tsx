@@ -162,6 +162,9 @@ export function AgentActions({
               ...(Object.keys(input).length > 0 ? { input } : {}),
               version,
               ...(overrides.model_id_override ? { modelId: overrides.model_id_override } : {}),
+              ...(overrides.generation_config_override
+                ? { generation: overrides.generation_config_override }
+                : {}),
               ...(proxy ? { proxyId: proxy } : {}),
               ...(overrides.config_override ? { config: overrides.config_override } : {}),
               ...(overrides.connection_overrides
