@@ -13,7 +13,7 @@ import {
   RefreshCw,
   Settings,
 } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { Button } from "@appstrate/ui/components/button";
 import { Badge } from "@appstrate/ui/components/badge";
 import {
@@ -41,7 +41,7 @@ import { connectionDisplayLabel } from "./connection-label";
 import { connectableAuthKeys } from "./connectable-auth-keys";
 import { requiredScopesForAgent } from "@appstrate/core/integration";
 import { client } from "../../api/client";
-import { splitPackageRef } from "../../lib/package-paths";
+import { packageDetailPath, splitPackageRef } from "../../lib/package-paths";
 import { isVersioned } from "../../lib/version-selector";
 
 /**
@@ -326,7 +326,18 @@ export function IntegrationConnectionPicker({
           className="text-muted-foreground text-xs"
           data-testid={`member-pick-no-client-${integrationId}`}
         >
-          {t("settings:integration.auth.noClientHint")}
+          {t("settings:integration.auth.noClientHint")}{" "}
+          {/* The sentence names a screen; without the link the reader has to go
+              find it. Points at the integration's Configuration tab, where the
+              OAuth clients table lives. Shown to everyone, admin or not: a
+              non-admin lands on a page that tells them so, which beats a dead
+              sentence, and the tab itself is admin-gated anyway. */}
+          <Link
+            to={`${packageDetailPath("integration", integrationId)}#configuration`}
+            className="underline underline-offset-2"
+          >
+            {t("settings:integration.auth.noClientLink")}
+          </Link>
         </span>
       </div>
     );

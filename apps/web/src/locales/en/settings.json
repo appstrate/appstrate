@@ -760,6 +760,7 @@
   "integration.auth.expiresAt": "Expires {{date}}",
   "integration.auth.needsReconnection": "Reconnection needed",
   "integration.auth.noClientHint": "No OAuth client configured — an administrator must register one before an account can be connected.",
+  "integration.auth.noClientLink": "Configure the OAuth client",
   "integration.auth.noClientHintAdmin": "Connections are locked until the OAuth client above is registered.",
   "integration.auth.type.oauth2": "OAuth",
   "integration.auth.type.api_key": "API key",

@@ -236,6 +236,8 @@
   "editor.skillsEmpty": "No skills in packages. Add some from the Packages page.",
   "editor.integrationsEmpty": "No integrations imported. Visit the Integrations marketplace to import one.",
   "editor.integrationInactive": "Not active in this application",
+  "editor.activateIntegration": "Activate",
+  "editor.dependencyMissing": "Not installed in this organization",
   "editor.tabGeneral": "General",
   "editor.tabSchema": "Schemas",
   "editor.tabSkills": "Skills",

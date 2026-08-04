@@ -2,7 +2,9 @@
 
 import { useTranslation } from "react-i18next";
 import { Loader2, Puzzle } from "lucide-react";
+import { Button } from "@appstrate/ui/components/button";
 import {
+  useActivateIntegration,
   useIntegrations,
   useIntegrationDetail,
   useIntegrationAgentResolution,
@@ -90,6 +92,7 @@ function IntegrationConnectionCard({
 }: IntegrationConnectionCardProps) {
   const { t } = useTranslation(["agents"]);
   const { data: detail, isPending: detailPending } = useIntegrationDetail(packageId);
+  const activate = useActivateIntegration();
   const displayName = detail?.manifest.display_name ?? packageId;
 
   if (detailPending || !detail) {
@@ -108,11 +111,29 @@ function IntegrationConnectionCard({
   if (!appActive) {
     return (
       <CardShell title={displayName} subtitle={packageId}>
-        <span
-          className="text-destructive max-w-[18rem] text-right text-xs"
-          data-testid={`integration-inactive-${packageId}`}
-        >
-          {t("detail.integrationInactive")}
+        <span className="flex items-center gap-3">
+          <span
+            className="text-destructive max-w-[18rem] text-right text-xs"
+            data-testid={`integration-inactive-${packageId}`}
+          >
+            {t("detail.integrationInactive")}
+          </span>
+          {/* The sentence asks for an activation; without this the reader had to
+              go find the integration page to perform it. A non-admin gets the
+              API's refusal as a toast, which still beats a dead sentence. */}
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={activate.isPending}
+            onClick={() => activate.mutate({ params: { path: { packageId } } })}
+            data-testid={`integration-activate-${packageId}`}
+          >
+            {activate.isPending ? (
+              <Loader2 className="size-3.5 animate-spin" />
+            ) : (
+              t("editor.activateIntegration")
+            )}
+          </Button>
         </span>
       </CardShell>
     );
