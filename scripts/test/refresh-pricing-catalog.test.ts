@@ -11,6 +11,7 @@
 import { describe, it, expect, afterEach } from "bun:test";
 import {
   aliasedBackings,
+  assertNormalizedGenerationCatalog,
   buildFeatured,
   countCacheRates,
   coverageRow,
@@ -235,6 +236,67 @@ describe("formatCoverageSummary", () => {
 });
 
 describe("generation capabilities", () => {
+  const normalizedGeneration = {
+    temperature: "supported",
+    temperatureWithReasoning: "unsupported",
+    reasoning: {
+      supported: "supported",
+      adaptive: null,
+      levels: {
+        none: "supported",
+        minimal: "unsupported",
+        low: "supported",
+        medium: "supported",
+        high: "supported",
+        xhigh: "supported",
+        max: "supported",
+      },
+    },
+  } as const;
+
+  it("accepts a complete normalized generation contract for vendored chat entries", () => {
+    expect(() =>
+      assertNormalizedGenerationCatalog({
+        model: {
+          litellm_provider: "openai",
+          mode: "chat",
+          _appstrate_generation: normalizedGeneration,
+        },
+      }),
+    ).not.toThrow();
+  });
+
+  it("rejects a vendored chat entry without the normalized generation contract", () => {
+    expect(() =>
+      assertNormalizedGenerationCatalog({
+        model: { litellm_provider: "openai", mode: "chat" },
+      }),
+    ).toThrow(/model.*_appstrate_generation/);
+  });
+
+  it("rejects an artifact with no vendored chat entries", () => {
+    expect(() =>
+      assertNormalizedGenerationCatalog({
+        embedding: { litellm_provider: "openai", mode: "embedding" },
+      }),
+    ).toThrow(/no vendored chat entries/);
+  });
+
+  it("rejects malformed normalized generation values", () => {
+    expect(() =>
+      assertNormalizedGenerationCatalog({
+        model: {
+          litellm_provider: "anthropic",
+          mode: "chat",
+          _appstrate_generation: {
+            ...normalizedGeneration,
+            temperature: "maybe",
+          },
+        } as never,
+      }),
+    ).toThrow(/model.*_appstrate_generation/);
+  });
+
   it("normalizes LiteLLM reasoning efforts and supported request parameters", () => {
     expect(
       deriveGenerationCapabilities({

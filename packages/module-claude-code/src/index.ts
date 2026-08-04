@@ -123,6 +123,8 @@ const claudeCodeProvider: ModelProviderDefinition = {
   // Claude Code (Claude Pro/Max/Team subscription) authenticates against
   // the Anthropic catalog — metadata flows through anthropic.json.
   catalogProviderId: "anthropic",
+  // The shared Pi Anthropic transport drops temperature while thinking.
+  generationOverride: { temperatureWithReasoning: "unsupported" },
   // Both lists are DERIVED from the vendored anthropic catalog rather than
   // hand-enumerated. The Claude subscription serves Anthropic's current
   // generation — it has no published, machine-readable model list, and

@@ -97,11 +97,29 @@ jobs:
             "$image" /exporter.py /catalog.json > "$output"
 
           jq --exit-status '
+            ["supported", "unsupported", "unknown"] as $support |
+            ["openai", "anthropic", "mistral", "gemini", "cerebras", "groq",
+              "xai", "deepseek", "moonshot", "together_ai", "fireworks_ai", "zai"] as $providers |
             type == "object" and length > 0 and
+            any(to_entries[];
+              .value as $entry |
+              $entry.mode == "chat" and ($providers | index($entry.litellm_provider)) != null
+            ) and
             all(to_entries[];
-              (.value._appstrate_supported_openai_params == null) or
-              ((.value._appstrate_generation.reasoning.levels | keys) ==
-                ["high", "low", "max", "medium", "minimal", "none", "xhigh"])
+              .value as $entry |
+              if ($entry.mode == "chat" and ($providers | index($entry.litellm_provider)) != null)
+              then $entry._appstrate_generation as $generation |
+                ($generation | type) == "object" and
+                ($support | index($generation.temperature)) != null and
+                ($support | index($generation.temperatureWithReasoning)) != null and
+                ($support | index($generation.reasoning.supported)) != null and
+                (($generation.reasoning.adaptive == null) or
+                  (($generation.reasoning.adaptive | type) == "boolean")) and
+                (($generation.reasoning.levels | keys) ==
+                  ["high", "low", "max", "medium", "minimal", "none", "xhigh"]) and
+                all($generation.reasoning.levels[]; ($support | index(.)) != null)
+              else true
+              end
             )
           ' "$output" >/dev/null
 

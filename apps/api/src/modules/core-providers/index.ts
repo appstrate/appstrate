@@ -65,6 +65,10 @@ const anthropic: ModelProviderDefinition = {
   baseUrlOverridable: false,
   authMode: "api_key",
   featured: true,
+  // Pi's Anthropic transport intentionally omits temperature whenever
+  // extended thinking is enabled. Reject that combination before inference
+  // instead of presenting a catalog capability the transport cannot honor.
+  generationOverride: { temperatureWithReasoning: "unsupported" },
   featuredModels: featured("anthropic"),
 };
 

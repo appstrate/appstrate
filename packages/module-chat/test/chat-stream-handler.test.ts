@@ -38,6 +38,7 @@ import { handleChatStream, type ChatEnv } from "../src/chat-stream.ts";
 import { mintSessionId } from "../src/session-id.ts";
 import { buildChatPlatformDeps } from "../src/platform-services.ts";
 import { buildModuleInitContext } from "../../../apps/api/src/lib/modules/registry.ts";
+import { errorHandler } from "../../../apps/api/src/middleware/error-handler.ts";
 import { SYSTEM_PROMPT } from "../src/prompt.ts";
 
 /**
@@ -93,6 +94,11 @@ function modelsResponse(): Response {
         apiShape: "openai-completions",
         enabled: true,
         is_default: true,
+        generation: {
+          temperature: "unsupported",
+          temperatureWithReasoning: "unknown",
+          reasoning: { supported: "unsupported", adaptive: null, levels: {} },
+        },
       },
     ],
   });
@@ -224,6 +230,9 @@ describe("handleChatStream (ai-sdk path)", () => {
   /** A `Hono<ChatEnv>` app mirroring what the platform auth pipeline sets. */
   function buildApp(deps: ReturnType<typeof buildChatPlatformDeps>) {
     const app = new Hono<ChatEnv>();
+    // Mirror production's RFC 9457 error boundary so invalid client input is
+    // asserted at the HTTP contract, not as an uncaught handler exception.
+    app.onError((error, context) => errorHandler(error, context as never));
     app.post("/api/chat", (c) => {
       c.set("orgId", ctx.orgId);
       c.set("user", ctx.user);
@@ -236,7 +245,10 @@ describe("handleChatStream (ai-sdk path)", () => {
     return app;
   }
 
-  async function postChat(sessionId: string): Promise<Response> {
+  async function postChat(
+    sessionId: string,
+    generation?: { temperature?: number; reasoningLevel?: string },
+  ): Promise<Response> {
     const { dispatch, capture } = scriptedDispatch();
     // Real platform deps (the same context `init()` gets), with dispatch
     // overridden by the scripted one so no request leaves this process.
@@ -252,10 +264,20 @@ describe("handleChatStream (ai-sdk path)", () => {
       body: JSON.stringify({
         id: sessionId,
         messages: [{ id: "u1", role: "user", parts: [{ type: "text", text: "dis bonjour" }] }],
+        ...(generation ? { generation } : {}),
       }),
     });
     return Object.assign(res, { capture });
   }
+
+  it("rejects generation settings unsupported by the selected model", async () => {
+    const res = (await postChat(mintSessionId(), { temperature: 0.4 })) as Response & {
+      capture: DispatchCapture;
+    };
+
+    expect(res.status).toBe(400);
+    expect(res.capture.inferenceBody).toBeNull();
+  });
 
   it("streams start → text → finish with no error and persists the assistant turn", async () => {
     const sessionId = mintSessionId();

@@ -190,6 +190,59 @@ interface LiteLLMEntry {
   };
 }
 
+const NATIVE_REASONING_LEVELS: readonly ModelNativeReasoningLevel[] = [
+  "none",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+];
+const CAPABILITY_SUPPORT_VALUES: readonly ModelCapabilitySupport[] = [
+  "supported",
+  "unsupported",
+  "unknown",
+];
+
+/** Fail closed when a pinned exporter artifact lacks its normalized contract. */
+function assertNormalizedGenerationCatalog(data: Record<string, LiteLLMEntry>): void {
+  const vendoredProviders = new Set(Object.keys(LITELLM_TO_OURS));
+  const isSupport = (value: unknown): value is ModelCapabilitySupport =>
+    CAPABILITY_SUPPORT_VALUES.includes(value as ModelCapabilitySupport);
+  let vendoredChatEntries = 0;
+
+  for (const [modelId, entry] of Object.entries(data)) {
+    if (entry.mode !== "chat" || !vendoredProviders.has(entry.litellm_provider ?? "")) continue;
+    vendoredChatEntries += 1;
+
+    const generation = entry._appstrate_generation;
+    const levels = generation?.reasoning?.levels;
+    const validLevels =
+      levels != null &&
+      Object.keys(levels).length === NATIVE_REASONING_LEVELS.length &&
+      NATIVE_REASONING_LEVELS.every((level) => isSupport(levels[level]));
+    const valid =
+      generation != null &&
+      isSupport(generation.temperature) &&
+      isSupport(generation.temperatureWithReasoning) &&
+      isSupport(generation.reasoning?.supported) &&
+      (generation.reasoning?.adaptive === null ||
+        typeof generation.reasoning?.adaptive === "boolean") &&
+      validLevels;
+
+    if (!valid) {
+      throw new Error(
+        `LiteLLM model ${modelId} has an invalid or missing _appstrate_generation contract`,
+      );
+    }
+  }
+
+  if (vendoredChatEntries === 0) {
+    throw new Error("LiteLLM artifact contains no vendored chat entries");
+  }
+}
+
 interface Summary {
   provider: string;
   localSize: number;
@@ -607,6 +660,7 @@ async function fetchUpstream(): Promise<Record<string, LiteLLMEntry>> {
         );
         return (await res.json()) as Record<string, LiteLLMEntry>;
       })();
+  if (artifactPath) assertNormalizedGenerationCatalog(data);
   // Remove LiteLLM's `sample_spec` synthetic top-level entry — it documents
   // the schema, not a real model.
   delete data.sample_spec;
@@ -841,6 +895,7 @@ if (import.meta.main) {
 
 export {
   aliasedBackings,
+  assertNormalizedGenerationCatalog,
   buildFeatured,
   countCacheRates,
   coverageRow,

@@ -117,5 +117,19 @@ describe("resolveCatalogDefaults", () => {
         temperature: "unsupported",
       });
     });
+
+    it("rejects temperature combined with reasoning on Anthropic Pi transports", () => {
+      for (const providerId of ["anthropic", "claude-code"]) {
+        const defaults = resolveCatalogDefaults(providerId, "claude-3-7-sonnet-20250219");
+
+        expect(defaults.generation?.temperatureWithReasoning).toBe("unsupported");
+        expect(() =>
+          resolveModelGenerationSettings({
+            capabilities: defaults.generation,
+            override: { temperature: 0.4, reasoningLevel: "low" },
+          }),
+        ).toThrow(ModelGenerationError);
+      }
+    });
   });
 });
