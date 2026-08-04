@@ -360,14 +360,13 @@
     "contextWindow": 200000,
     "maxTokens": 100000,
     "capabilities": [
-      "text",
-      "reasoning"
+      "text"
     ],
     "generation": {
       "temperature": "supported",
-      "temperatureWithReasoning": "unknown",
+      "temperatureWithReasoning": "unsupported",
       "reasoning": {
-        "supported": "supported",
+        "supported": "unsupported",
         "adaptive": null,
         "levels": {
           "off": "unsupported",
@@ -1446,14 +1445,13 @@
     "maxTokens": 16384,
     "capabilities": [
       "text",
-      "image",
-      "reasoning"
+      "image"
     ],
     "generation": {
       "temperature": "supported",
-      "temperatureWithReasoning": "unknown",
+      "temperatureWithReasoning": "unsupported",
       "reasoning": {
-        "supported": "supported",
+        "supported": "unsupported",
         "adaptive": null,
         "levels": {
           "off": "unsupported",
@@ -1478,14 +1476,13 @@
     "maxTokens": 16384,
     "capabilities": [
       "text",
-      "image",
-      "reasoning"
+      "image"
     ],
     "generation": {
       "temperature": "supported",
-      "temperatureWithReasoning": "unknown",
+      "temperatureWithReasoning": "unsupported",
       "reasoning": {
-        "supported": "supported",
+        "supported": "unsupported",
         "adaptive": null,
         "levels": {
           "off": "unsupported",
@@ -1638,14 +1635,13 @@
     "maxTokens": 128000,
     "capabilities": [
       "text",
-      "image",
-      "reasoning"
+      "image"
     ],
     "generation": {
       "temperature": "unsupported",
       "temperatureWithReasoning": "unsupported",
       "reasoning": {
-        "supported": "supported",
+        "supported": "unsupported",
         "adaptive": null,
         "levels": {
           "off": "unsupported",

@@ -38,6 +38,7 @@
 
 import { resolve } from "node:path";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import type {
   ModelCapabilitySupport,
   ModelGenerationCapabilities,
@@ -49,6 +50,7 @@ const UPSTREAM_URL =
   "https://raw.githubusercontent.com/BerriAI/litellm/main/litellm/model_prices_and_context_window_backup.json";
 const REPO_ROOT = new URL("..", import.meta.url).pathname;
 const DATA_DIR = resolve(REPO_ROOT, "apps/api/src/data/pricing");
+const LITELLM_LOCK_PATH = resolve(REPO_ROOT, "scripts/litellm-catalog.lock.json");
 
 /**
  * LiteLLM `litellm_provider` slug → our vendored-file basename.
@@ -240,6 +242,19 @@ function assertNormalizedGenerationCatalog(data: Record<string, LiteLLMEntry>): 
 
   if (vendoredChatEntries === 0) {
     throw new Error("LiteLLM artifact contains no vendored chat entries");
+  }
+}
+
+/** Verify that the artifact is the exact normalized output recorded by the lock. */
+function assertNormalizedCatalogDigest(serialized: string, expectedDigest: unknown): void {
+  if (typeof expectedDigest !== "string" || !/^sha256:[0-9a-f]{64}$/.test(expectedDigest)) {
+    throw new Error("LiteLLM lock is missing a valid normalizedDigest");
+  }
+  const actualDigest = `sha256:${createHash("sha256").update(serialized).digest("hex")}`;
+  if (actualDigest !== expectedDigest) {
+    throw new Error(
+      `LiteLLM normalized artifact digest mismatch: expected ${expectedDigest}, got ${actualDigest}`,
+    );
   }
 }
 
@@ -650,8 +665,9 @@ function buildFeatured(
 
 async function fetchUpstream(): Promise<Record<string, LiteLLMEntry>> {
   const artifactPath = process.env.LITELLM_CATALOG_PATH;
-  const data = artifactPath
-    ? (JSON.parse(readFileSync(artifactPath, "utf8")) as Record<string, LiteLLMEntry>)
+  const artifactContents = artifactPath ? readFileSync(artifactPath, "utf8") : null;
+  const data = artifactContents
+    ? (JSON.parse(artifactContents) as Record<string, LiteLLMEntry>)
     : await (async () => {
         const res = await fetch(UPSTREAM_URL);
         if (!res.ok) throw new Error(`fetch ${UPSTREAM_URL} → HTTP ${res.status}`);
@@ -660,7 +676,13 @@ async function fetchUpstream(): Promise<Record<string, LiteLLMEntry>> {
         );
         return (await res.json()) as Record<string, LiteLLMEntry>;
       })();
-  if (artifactPath) assertNormalizedGenerationCatalog(data);
+  if (artifactContents) {
+    const lock = JSON.parse(readFileSync(LITELLM_LOCK_PATH, "utf8")) as {
+      normalizedDigest?: unknown;
+    };
+    assertNormalizedCatalogDigest(artifactContents, lock.normalizedDigest);
+    assertNormalizedGenerationCatalog(data);
+  }
   // Remove LiteLLM's `sample_spec` synthetic top-level entry — it documents
   // the schema, not a real model.
   delete data.sample_spec;
@@ -895,6 +917,7 @@ if (import.meta.main) {
 
 export {
   aliasedBackings,
+  assertNormalizedCatalogDigest,
   assertNormalizedGenerationCatalog,
   buildFeatured,
   countCacheRates,

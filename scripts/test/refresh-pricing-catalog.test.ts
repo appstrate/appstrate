@@ -9,9 +9,11 @@
  */
 
 import { describe, it, expect, afterEach } from "bun:test";
+import { createHash } from "node:crypto";
 import {
   aliasedBackings,
   assertNormalizedGenerationCatalog,
+  assertNormalizedCatalogDigest,
   buildFeatured,
   countCacheRates,
   coverageRow,
@@ -435,5 +437,24 @@ describe("generation capabilities", () => {
     });
     expect(projected?.generation.reasoning.supported).toBe("supported");
     expect(projected?.capabilities).toContain("reasoning");
+  });
+});
+
+describe("normalized artifact provenance", () => {
+  const artifact = '{"model":{"mode":"chat"}}\n';
+  const digest = `sha256:${createHash("sha256").update(artifact).digest("hex")}`;
+
+  it("accepts the exact normalized output recorded in the lock", () => {
+    expect(() => assertNormalizedCatalogDigest(artifact, digest)).not.toThrow();
+  });
+
+  it("rejects a stale or handcrafted normalized output", () => {
+    expect(() => assertNormalizedCatalogDigest(`${artifact} `, digest)).toThrow(
+      /normalized artifact digest mismatch/,
+    );
+  });
+
+  it("rejects a lock without a normalized output digest", () => {
+    expect(() => assertNormalizedCatalogDigest(artifact, undefined)).toThrow(/normalizedDigest/);
   });
 });

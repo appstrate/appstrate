@@ -2,9 +2,10 @@
 
 import { useTranslation } from "react-i18next";
 import { ModelGenerationControls } from "@appstrate/ui/components/model-generation-controls";
-import type {
-  ModelGenerationCapabilities,
-  ModelGenerationSettings,
+import {
+  mapModelReasoningLevels,
+  type ModelGenerationCapabilities,
+  type ModelGenerationSettings,
 } from "@appstrate/core/model-generation";
 
 export function ModelGenerationFields({
@@ -35,24 +36,10 @@ export function ModelGenerationFields({
         inheritShort: t("models.generation.inheritShort"),
         unsupported: t("models.generation.unsupported"),
         unsupportedShort: t("models.generation.unsupportedShort"),
-        levels: {
-          off: t("models.generation.levels.off"),
-          minimal: t("models.generation.levels.minimal"),
-          low: t("models.generation.levels.low"),
-          medium: t("models.generation.levels.medium"),
-          high: t("models.generation.levels.high"),
-          xhigh: t("models.generation.levels.xhigh"),
-          max: t("models.generation.levels.max"),
-        },
-        shortLevels: {
-          off: t("models.generation.levelsShort.off"),
-          minimal: t("models.generation.levelsShort.minimal"),
-          low: t("models.generation.levelsShort.low"),
-          medium: t("models.generation.levelsShort.medium"),
-          high: t("models.generation.levelsShort.high"),
-          xhigh: t("models.generation.levelsShort.xhigh"),
-          max: t("models.generation.levelsShort.max"),
-        },
+        levels: mapModelReasoningLevels((level) => t(`models.generation.levels.${level}`)),
+        shortLevels: mapModelReasoningLevels((level) =>
+          t(`models.generation.levelsShort.${level}`),
+        ),
       }}
     />
   );

@@ -1007,14 +1007,13 @@
     "maxTokens": null,
     "capabilities": [
       "text",
-      "image",
-      "reasoning"
+      "image"
     ],
     "generation": {
       "temperature": "supported",
-      "temperatureWithReasoning": "unknown",
+      "temperatureWithReasoning": "unsupported",
       "reasoning": {
-        "supported": "supported",
+        "supported": "unsupported",
         "adaptive": null,
         "levels": {
           "off": "unsupported",
@@ -1068,14 +1067,13 @@
     "maxTokens": null,
     "capabilities": [
       "text",
-      "image",
-      "reasoning"
+      "image"
     ],
     "generation": {
       "temperature": "supported",
-      "temperatureWithReasoning": "unknown",
+      "temperatureWithReasoning": "unsupported",
       "reasoning": {
-        "supported": "supported",
+        "supported": "unsupported",
         "adaptive": null,
         "levels": {
           "off": "unsupported",
@@ -1099,14 +1097,13 @@
     "maxTokens": null,
     "capabilities": [
       "text",
-      "image",
-      "reasoning"
+      "image"
     ],
     "generation": {
       "temperature": "supported",
-      "temperatureWithReasoning": "unknown",
+      "temperatureWithReasoning": "unsupported",
       "reasoning": {
-        "supported": "supported",
+        "supported": "unsupported",
         "adaptive": null,
         "levels": {
           "off": "unsupported",

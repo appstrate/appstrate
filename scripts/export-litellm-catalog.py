@@ -137,7 +137,17 @@ def generation_capabilities(
             effort: optional_params_support(model, provider, reasoning_effort=effort)
             for effort in REASONING_EFFORTS
         }
-        reasoning = "supported"
+        active_support = [levels[effort] for effort in ACTIVE_REASONING_EFFORTS]
+        if any(value == "supported" for value in active_support):
+            reasoning = "supported"
+        elif all(value == "unsupported" for value in active_support):
+            # `supports_reasoning` can describe an internally reasoning model
+            # even when its adapter exposes no configurable effort. Appstrate's
+            # field describes the control, so fail closed when every active
+            # value is explicitly rejected.
+            reasoning = "unsupported"
+        else:
+            reasoning = "unknown"
     else:
         reasoning = "unknown"
         levels = {effort: "unknown" for effort in REASONING_EFFORTS}

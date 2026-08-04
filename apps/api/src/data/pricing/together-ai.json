@@ -8,6 +8,7 @@
     ],
     "generation": {
       "temperature": "supported",
+      "temperatureWithReasoning": "unknown",
       "reasoning": {
         "supported": "unknown",
         "adaptive": null,
@@ -36,6 +37,7 @@
     ],
     "generation": {
       "temperature": "supported",
+      "temperatureWithReasoning": "unknown",
       "reasoning": {
         "supported": "unknown",
         "adaptive": null,
@@ -64,6 +66,7 @@
     ],
     "generation": {
       "temperature": "supported",
+      "temperatureWithReasoning": "unknown",
       "reasoning": {
         "supported": "unknown",
         "adaptive": null,
@@ -92,6 +95,7 @@
     ],
     "generation": {
       "temperature": "supported",
+      "temperatureWithReasoning": "unknown",
       "reasoning": {
         "supported": "unknown",
         "adaptive": null,
@@ -120,6 +124,7 @@
     ],
     "generation": {
       "temperature": "supported",
+      "temperatureWithReasoning": "unknown",
       "reasoning": {
         "supported": "unknown",
         "adaptive": null,
@@ -148,6 +153,7 @@
     ],
     "generation": {
       "temperature": "supported",
+      "temperatureWithReasoning": "unknown",
       "reasoning": {
         "supported": "unknown",
         "adaptive": null,
@@ -176,6 +182,7 @@
     ],
     "generation": {
       "temperature": "supported",
+      "temperatureWithReasoning": "unknown",
       "reasoning": {
         "supported": "unknown",
         "adaptive": null,
@@ -204,6 +211,7 @@
     ],
     "generation": {
       "temperature": "supported",
+      "temperatureWithReasoning": "unknown",
       "reasoning": {
         "supported": "unknown",
         "adaptive": null,
@@ -232,6 +240,7 @@
     ],
     "generation": {
       "temperature": "supported",
+      "temperatureWithReasoning": "unknown",
       "reasoning": {
         "supported": "unknown",
         "adaptive": null,
@@ -260,6 +269,7 @@
     ],
     "generation": {
       "temperature": "supported",
+      "temperatureWithReasoning": "unknown",
       "reasoning": {
         "supported": "unknown",
         "adaptive": null,
@@ -284,13 +294,13 @@
     "contextWindow": 128000,
     "maxTokens": 16384,
     "capabilities": [
-      "text",
-      "reasoning"
+      "text"
     ],
     "generation": {
       "temperature": "supported",
+      "temperatureWithReasoning": "unsupported",
       "reasoning": {
-        "supported": "supported",
+        "supported": "unsupported",
         "adaptive": null,
         "levels": {
           "off": "unsupported",
@@ -317,6 +327,7 @@
     ],
     "generation": {
       "temperature": "supported",
+      "temperatureWithReasoning": "unknown",
       "reasoning": {
         "supported": "unknown",
         "adaptive": null,
@@ -342,13 +353,13 @@
     "maxTokens": null,
     "capabilities": [
       "text",
-      "image",
-      "reasoning"
+      "image"
     ],
     "generation": {
       "temperature": "supported",
+      "temperatureWithReasoning": "unsupported",
       "reasoning": {
-        "supported": "supported",
+        "supported": "unsupported",
         "adaptive": null,
         "levels": {
           "off": "unsupported",
@@ -371,13 +382,13 @@
     "contextWindow": 131072,
     "maxTokens": null,
     "capabilities": [
-      "text",
-      "reasoning"
+      "text"
     ],
     "generation": {
       "temperature": "supported",
+      "temperatureWithReasoning": "unsupported",
       "reasoning": {
-        "supported": "supported",
+        "supported": "unsupported",
         "adaptive": null,
         "levels": {
           "off": "unsupported",
@@ -404,6 +415,7 @@
     ],
     "generation": {
       "temperature": "supported",
+      "temperatureWithReasoning": "unknown",
       "reasoning": {
         "supported": "unknown",
         "adaptive": null,
@@ -432,6 +444,7 @@
     ],
     "generation": {
       "temperature": "supported",
+      "temperatureWithReasoning": "unknown",
       "reasoning": {
         "supported": "unknown",
         "adaptive": null,
@@ -456,13 +469,13 @@
     "contextWindow": 200000,
     "maxTokens": null,
     "capabilities": [
-      "text",
-      "reasoning"
+      "text"
     ],
     "generation": {
       "temperature": "supported",
+      "temperatureWithReasoning": "unsupported",
       "reasoning": {
-        "supported": "supported",
+        "supported": "unsupported",
         "adaptive": null,
         "levels": {
           "off": "unsupported",
@@ -485,13 +498,13 @@
     "contextWindow": 200000,
     "maxTokens": null,
     "capabilities": [
-      "text",
-      "reasoning"
+      "text"
     ],
     "generation": {
       "temperature": "supported",
+      "temperatureWithReasoning": "unsupported",
       "reasoning": {
-        "supported": "supported",
+        "supported": "unsupported",
         "adaptive": null,
         "levels": {
           "off": "unsupported",

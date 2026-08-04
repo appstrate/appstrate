@@ -18,6 +18,16 @@ export const modelReasoningLevelSchema = z.enum(MODEL_REASONING_LEVELS);
 
 export type ModelReasoningLevel = z.infer<typeof modelReasoningLevelSchema>;
 
+/** Map every portable reasoning level without duplicating the vocabulary. */
+export function mapModelReasoningLevels<T>(
+  map: (level: ModelReasoningLevel) => T,
+): Record<ModelReasoningLevel, T> {
+  return Object.fromEntries(MODEL_REASONING_LEVELS.map((level) => [level, map(level)])) as Record<
+    ModelReasoningLevel,
+    T
+  >;
+}
+
 export const modelNativeReasoningLevelSchema = z.enum([
   "none",
   "minimal",

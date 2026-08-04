@@ -3,12 +3,27 @@
 import { describe, expect, it } from "bun:test";
 import {
   applyModelGenerationCapabilitiesOverride,
+  mapModelReasoningLevels,
   ModelGenerationError,
   reconcileModelGenerationSettings,
   resolveModelGenerationSettings,
   toNativeModelReasoningLevel,
   type ModelGenerationCapabilities,
 } from "./model-generation.ts";
+
+describe("mapModelReasoningLevels", () => {
+  it("maps the complete canonical vocabulary", () => {
+    expect(mapModelReasoningLevels((level) => level.toUpperCase())).toEqual({
+      off: "OFF",
+      minimal: "MINIMAL",
+      low: "LOW",
+      medium: "MEDIUM",
+      high: "HIGH",
+      xhigh: "XHIGH",
+      max: "MAX",
+    });
+  });
+});
 
 const capabilities = (
   over: Partial<ModelGenerationCapabilities> = {},
