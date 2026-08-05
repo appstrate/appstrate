@@ -8,6 +8,24 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    ignore:
+      # The `typescript` devDependency is NOT the compiler — it is the TypeScript
+      # 6 JavaScript compiler API, consumed by typescript-eslint, type-coverage
+      # and scripts/generate-api-types.ts. The compiler actually used by every
+      # `tsc` invocation is `@typescript/native` (TypeScript 7), installed
+      # side-by-side per Microsoft's guidance.
+      #
+      # TypeScript 7 ships no JavaScript API (its `lib/` is only version.cjs +
+      # tsc.js), so bumping this slot to >=7 does not upgrade anything — it
+      # breaks the lint and type-coverage steps of `bun run check`:
+      #   - typescript-eslint 8.x refuses TS 7.0 outright
+      #     (https://github.com/typescript-eslint/typescript-eslint/issues/10940)
+      #   - type-coverage crashes on `ts.SyntaxKind` being undefined
+      #
+      # Revisit once typescript-eslint supports TS >=7.1. Bumping the compiler
+      # itself means bumping `@typescript/native`, which is not ignored here.
+      - dependency-name: "typescript"
+        versions: [">=7"]
     groups:
       better-auth:
         patterns:

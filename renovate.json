@@ -15,6 +15,11 @@
       "automerge": false
     },
     {
+      "description": "The `typescript` devDependency is the TypeScript 6 JavaScript compiler API (consumed by typescript-eslint, type-coverage, scripts/generate-api-types.ts), NOT the compiler. The compiler is `@typescript/native` (TypeScript 7), installed side-by-side. TypeScript 7 ships no JavaScript API, so >=7 here breaks lint + type-coverage. Revisit when typescript-eslint supports TS >=7.1 (typescript-eslint#10940).",
+      "matchDepNames": ["typescript"],
+      "allowedVersions": "<7"
+    },
+    {
       "description": "Pi SDK is a single-maintainer, pinned-exact supply-chain dependency. Group both packages into one PR, require manual dashboard approval, never auto-merge. Ordered last so it overrides the devDependencies automerge rule. See docs/architecture/SUPPLY_CHAIN.md",
       "matchPackageNames": ["@mariozechner/pi-ai", "@mariozechner/pi-coding-agent"],
       "groupName": "pi sdk (manual review)",
