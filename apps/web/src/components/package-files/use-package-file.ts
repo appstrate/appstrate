@@ -23,17 +23,17 @@ import { baseName, isPreviewable, type PackageFileEntry } from "../../lib/packag
 export function usePackageFile(
   packageId: string,
   version: string | undefined,
-  entry: PackageFileEntry | null,
+  entry: PackageFileEntry,
 ): { text: string | undefined; isLoading: boolean; isError: boolean } {
   const scope = useOrgScope();
   // Only text files within the preview ceiling are ever fetched — a binary or
   // oversized entry renders a metadata card, never a body.
-  const needsFetch = !!entry && isPreviewable(entry) && entry.inline === undefined;
+  const needsFetch = isPreviewable(entry) && entry.inline === undefined;
 
   const init = {
     params: {
       path: splitPackageRef(packageId),
-      query: { path: entry?.path ?? "", version },
+      query: { path: entry.path, version },
       header: scope.header,
     },
   };
@@ -58,7 +58,7 @@ export function usePackageFile(
   });
 
   return {
-    text: entry?.inline ?? (needsFetch ? query.data : undefined),
+    text: entry.inline ?? (needsFetch ? query.data : undefined),
     // `isPending` stays true on a disabled query — gate it on actually fetching.
     isLoading: needsFetch && query.isPending,
     isError: needsFetch && query.isError,
@@ -72,6 +72,8 @@ export function usePackageFile(
  */
 export function usePackageFileDownload(packageId: string, version: string | undefined) {
   const { t } = useTranslation("common");
+  const scope = useOrgScope();
+  const header = scope.header;
   return useCallback(
     async (path: string) => {
       try {
@@ -79,10 +81,15 @@ export function usePackageFileDownload(packageId: string, version: string | unde
           params: {
             path: splitPackageRef(packageId),
             query: { path, version },
+            header,
           },
           parseAs: "blob",
         });
-        const url = URL.createObjectURL(data!);
+        // Re-wrapped under an INERT type. The response is already
+        // `application/octet-stream`, but a `blob:` URL inherits the platform
+        // origin, so the type it carries decides whether the browser would ever
+        // interpret these author-controlled bytes. Never widen this.
+        const url = URL.createObjectURL(new Blob([data!], { type: "application/octet-stream" }));
         const a = document.createElement("a");
         a.href = url;
         a.download = baseName(path);
@@ -94,6 +101,6 @@ export function usePackageFileDownload(packageId: string, version: string | unde
         toast.error(t("error.downloadFailed"));
       }
     },
-    [packageId, version, t],
+    [packageId, version, header, t],
   );
 }

@@ -14,7 +14,7 @@ import { $api } from "../../api/client";
 import { useOrgScope } from "../../hooks/use-org-scope";
 import { splitPackageRef } from "../../lib/package-paths";
 import { primaryDisplayFile } from "../../lib/package-files";
-import type { PackageFileEntry } from "../../lib/package-file-tree";
+import { pickActiveEntry, type PackageFileEntry } from "../../lib/package-file-tree";
 import { LoadingState, ErrorState, EmptyState } from "../page-states";
 import { ReadOnlyFileTree } from "./read-only-file-tree";
 import { FilePreview } from "./file-preview";
@@ -45,30 +45,22 @@ export function FileExplorer({ packageId, type, version }: FileExplorerProps) {
   );
 
   const entries: PackageFileEntry[] = useMemo(() => data?.entries ?? [], [data]);
-  const byPath = useMemo(() => new Map(entries.map((e) => [e.path, e])), [entries]);
+  const activeEntry = useMemo(
+    () => pickActiveEntry(entries, selectedPath, primaryDisplayFile(type).name),
+    [entries, selectedPath, type],
+  );
 
   if (loadError) return <ErrorState />;
   // Covers the disabled-query window too: with no org/app yet the query never
   // starts, and `isLoading` would be false while `data` is still absent.
   if (!data) return <LoadingState />;
-  if (entries.length === 0) {
+  if (activeEntry === null) {
     return <EmptyState icon={FolderOpen} message={t("files.empty")} compact />;
   }
-
-  // Derived, not state: a stale selection (version switch dropped the file)
-  // falls back to the default instead of being repaired by an effect, and a
-  // re-render never clobbers a selection the user made.
-  const activeEntry =
-    (selectedPath ? byPath.get(selectedPath) : undefined) ??
-    byPath.get(primaryDisplayFile(type).name) ??
-    entries[0]!;
 
   return (
     <div className="grid grid-cols-1 gap-4 md:grid-cols-[minmax(0,16rem)_minmax(0,1fr)]">
       <ReadOnlyFileTree
-        // Remount on snapshot change: the expansion set is seeded from the tree,
-        // so a different artifact must start from its own defaults.
-        key={version ?? "draft"}
         entries={entries}
         selectedPath={activeEntry.path}
         onSelect={setSelectedPath}

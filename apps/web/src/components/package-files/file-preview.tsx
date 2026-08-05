@@ -39,13 +39,6 @@ export function FilePreview({ packageId, version, entry }: FilePreviewProps) {
   // The whole verdict comes from the lib — this component holds no rule of its own.
   const blocked = previewBlockReason(entry);
 
-  const downloadButton = (
-    <Button variant="outline" size="sm" onClick={() => void download(entry.path)}>
-      <Download size={14} />
-      {t("btn.download", { ns: "common" })}
-    </Button>
-  );
-
   return (
     <div className="border-border bg-card flex min-w-0 flex-col rounded-lg border">
       <div className="border-border flex items-center gap-3 border-b px-3 py-2">
@@ -58,7 +51,10 @@ export function FilePreview({ packageId, version, entry }: FilePreviewProps) {
         <span className="text-muted-foreground shrink-0 text-xs tabular-nums">
           {formatBytes(entry.size)}
         </span>
-        {downloadButton}
+        <Button variant="outline" size="sm" onClick={() => void download(entry.path)}>
+          <Download size={14} />
+          {t("btn.download", { ns: "common" })}
+        </Button>
       </div>
 
       {blocked ? (
@@ -76,9 +72,13 @@ export function FilePreview({ packageId, version, entry }: FilePreviewProps) {
       ) : isLoading || text === undefined ? (
         <LoadingState />
       ) : (
+        // No `path` prop on purpose: it makes `@monaco-editor/react` create one
+        // model per file URI, and monaco is a module singleton that only ever
+        // disposes the current one — browsing a 200-file artifact would retain
+        // 200 models for the SPA session. `language` is passed explicitly and no
+        // view state is saved, so the URI buys nothing.
         <MonacoEditor
           height="520px"
-          path={entry.path}
           language={languageForPath(entry.path)}
           value={text}
           theme={resolvedTheme === "dark" ? "vs-dark" : "vs"}

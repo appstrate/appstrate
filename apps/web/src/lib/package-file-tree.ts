@@ -22,30 +22,44 @@ export type PackageFileEntry = components["schemas"]["PackageFileEntry"];
  */
 export const PREVIEW_SIZE_LIMIT = 1_048_576;
 
-export interface DirNode {
-  kind: "dir";
+/**
+ * Stable, unique row identity.
+ *
+ * NOT the path: `path` is not unique across a tree. An archive holding both a
+ * file `docs` and a file `docs/a.md` yields a directory node and a file node
+ * that both sit at `docs`, and duplicate entries for one path are possible in a
+ * hand-crafted ZIP. Focus, selection, the roving tabindex and the React key all
+ * key off `id`, so none of them can address two rows at once.
+ */
+interface NodeIdentity {
+  id: string;
   /** Full path from the artifact root, no trailing slash. */
   path: string;
   /** Last path segment — what the row renders. */
   name: string;
+}
+
+export interface DirNode extends NodeIdentity {
+  kind: "dir";
   children: TreeNode[];
 }
 
-export interface FileNode {
+export interface FileNode extends NodeIdentity {
   kind: "file";
-  path: string;
-  name: string;
   entry: PackageFileEntry;
 }
 
 export type TreeNode = DirNode | FileNode;
 
-/** A row of the flattened, windowed-render-ready tree. */
+/**
+ * A row of the flattened, windowed-render-ready tree.
+ *
+ * Carries ONLY what flattening computes. Identity, name and kind are read
+ * through `node`, never copied onto the row — a copy is a second source of
+ * truth that can silently disagree with the node it came from.
+ */
 export interface TreeRow {
   node: TreeNode;
-  path: string;
-  name: string;
-  kind: TreeNode["kind"];
   /** 0-based nesting depth. `aria-level` is `depth + 1`. */
   depth: number;
   /** Directories only — files are always `false`. */
@@ -68,8 +82,27 @@ export interface TreeRow {
 export function buildFileTree(entries: readonly PackageFileEntry[]): TreeNode[] {
   const roots: TreeNode[] = [];
   // Directory path → its children array, so a segment seen again is reused
-  // instead of duplicated.
+  // instead of duplicated. Directory paths are therefore unique by
+  // construction, which is what makes a path a valid key for the collapsed set.
   const dirs = new Map<string, TreeNode[]>();
+  const usedIds = new Set<string>();
+
+  // Ids stay deterministic for a given entry order, so a refetch that returns
+  // the same index keeps focus and selection pointing at the same rows.
+  const nextId = (kind: TreeNode["kind"], path: string): string => {
+    const base = `${kind}:${path}`;
+    if (!usedIds.has(base)) {
+      usedIds.add(base);
+      return base;
+    }
+    for (let n = 2; ; n++) {
+      const candidate = `${base}#${n}`;
+      if (!usedIds.has(candidate)) {
+        usedIds.add(candidate);
+        return candidate;
+      }
+    }
+  };
 
   for (const entry of entries) {
     const segments = entry.path.split("/").filter((s) => s.length > 0);
@@ -84,13 +117,19 @@ export function buildFileTree(entries: readonly PackageFileEntry[]): TreeNode[] 
       if (!children) {
         children = [];
         dirs.set(prefix, children);
-        siblings.push({ kind: "dir", path: prefix, name: segment, children });
+        siblings.push({
+          kind: "dir",
+          id: nextId("dir", prefix),
+          path: prefix,
+          name: segment,
+          children,
+        });
       }
       siblings = children;
     }
 
     const path = prefix === "" ? fileName : `${prefix}/${fileName}`;
-    siblings.push({ kind: "file", path, name: fileName, entry });
+    siblings.push({ kind: "file", id: nextId("file", path), path, name: fileName, entry });
   }
 
   sortChildren(roots);
@@ -110,96 +149,95 @@ function sortChildren(nodes: TreeNode[]): void {
  * bookkeeping with them. `aria-setsize` / `aria-posinset` MUST be computed here:
  * only a fraction of the rows is in the DOM at any time, so the browser cannot
  * infer either from the rendered siblings.
+ *
+ * Takes the COLLAPSED directories, not the expanded ones: everything is open by
+ * default, so a directory that appears in a later refetch is expanded by
+ * construction instead of being the one closed row in an otherwise open tree.
+ *
+ * Iterative, not recursive: a path's segment count is attacker-controlled (a
+ * crafted ZIP entry name), and one deep enough would overflow the stack and
+ * blank the tab for everyone in the org.
  */
 export function flattenVisibleRows(
   nodes: readonly TreeNode[],
-  expandedDirs: ReadonlySet<string>,
+  collapsedDirs: ReadonlySet<string>,
 ): TreeRow[] {
   const rows: TreeRow[] = [];
-  const walk = (siblings: readonly TreeNode[], depth: number) => {
-    siblings.forEach((node, index) => {
-      const expanded = node.kind === "dir" && expandedDirs.has(node.path);
-      rows.push({
+  // Pre-order traversal: siblings are pushed in reverse so the stack pops them
+  // back in document order.
+  const stack: TreeRow[] = [];
+  const pushLevel = (siblings: readonly TreeNode[], depth: number) => {
+    for (let i = siblings.length - 1; i >= 0; i--) {
+      const node = siblings[i]!;
+      stack.push({
         node,
-        path: node.path,
-        name: node.name,
-        kind: node.kind,
         depth,
-        expanded,
+        expanded: node.kind === "dir" && !collapsedDirs.has(node.path),
         setSize: siblings.length,
-        posInSet: index + 1,
+        posInSet: i + 1,
       });
-      if (node.kind === "dir" && expanded) walk(node.children, depth + 1);
-    });
+    }
   };
-  walk(nodes, 0);
+
+  pushLevel(nodes, 0);
+  while (stack.length > 0) {
+    const row = stack.pop()!;
+    rows.push(row);
+    if (row.node.kind === "dir" && row.expanded) pushLevel(row.node.children, row.depth + 1);
+  }
   return rows;
 }
 
-/** Every directory path in the tree — the default "expand everything" set. */
-export function collectDirPaths(
-  nodes: readonly TreeNode[],
-  acc: Set<string> = new Set(),
-): Set<string> {
-  for (const node of nodes) {
-    if (node.kind === "dir") {
-      acc.add(node.path);
-      collectDirPaths(node.children, acc);
-    }
-  }
-  return acc;
-}
-
 /** What a key press asks the tree to do. `null` = the key changes nothing. */
-export type TreeFocusAction =
-  | { type: "focus"; path: string }
-  | { type: "expand"; path: string }
-  | { type: "collapse"; path: string };
+export type TreeFocusAction = { type: "focus" | "expand" | "collapse"; id: string };
 
 /**
  * The keyboard model, as a reducer over the visible rows (WAI-ARIA tree
  * pattern). Expansion is returned as an intent rather than applied, so the
  * component stays a thin dispatcher and every branch is testable without a DOM.
  *
+ * Addresses rows by `node.id`, never by path — two rows can share a path, and
+ * keying off it makes ArrowDown/ArrowLeft/Enter act on the wrong one.
+ *
  * `null` is returned at the list boundaries and for unhandled keys — the caller
  * uses that to decide whether to `preventDefault()`.
  */
 export function nextTreeFocus(
   rows: readonly TreeRow[],
-  focusedPath: string | null,
+  focusedId: string | null,
   key: string,
 ): TreeFocusAction | null {
   if (rows.length === 0) return null;
   const first = rows[0]!;
   const last = rows[rows.length - 1]!;
-  const index = rows.findIndex((row) => row.path === focusedPath);
+  const index = rows.findIndex((row) => row.node.id === focusedId);
 
   switch (key) {
     case "Home":
-      return { type: "focus", path: first.path };
+      return { type: "focus", id: first.node.id };
     case "End":
-      return { type: "focus", path: last.path };
+      return { type: "focus", id: last.node.id };
     case "ArrowDown":
       // No focus yet (fresh tree, or the focused row disappeared): enter at the
       // top rather than doing nothing.
-      if (index < 0) return { type: "focus", path: first.path };
-      return index < rows.length - 1 ? { type: "focus", path: rows[index + 1]!.path } : null;
+      if (index < 0) return { type: "focus", id: first.node.id };
+      return index < rows.length - 1 ? { type: "focus", id: rows[index + 1]!.node.id } : null;
     case "ArrowUp":
-      if (index < 0) return { type: "focus", path: last.path };
-      return index > 0 ? { type: "focus", path: rows[index - 1]!.path } : null;
+      if (index < 0) return { type: "focus", id: last.node.id };
+      return index > 0 ? { type: "focus", id: rows[index - 1]!.node.id } : null;
     case "ArrowRight": {
       const row = index < 0 ? undefined : rows[index]!;
-      if (!row || row.kind !== "dir") return null;
-      if (!row.expanded) return { type: "expand", path: row.path };
+      if (!row || row.node.kind !== "dir") return null;
+      if (!row.expanded) return { type: "expand", id: row.node.id };
       // Already open: descend to the first child, which is the next row.
       const child = rows[index + 1];
-      return child && child.depth === row.depth + 1 ? { type: "focus", path: child.path } : null;
+      return child && child.depth === row.depth + 1 ? { type: "focus", id: child.node.id } : null;
     }
     case "ArrowLeft": {
       const row = index < 0 ? undefined : rows[index]!;
       if (!row) return null;
-      if (row.kind === "dir" && row.expanded) return { type: "collapse", path: row.path };
-      return parentPath(rows, index);
+      if (row.node.kind === "dir" && row.expanded) return { type: "collapse", id: row.node.id };
+      return parentRow(rows, index);
     }
     default:
       return typeAhead(rows, index, key);
@@ -207,11 +245,11 @@ export function nextTreeFocus(
 }
 
 /** Nearest row above `index` one level shallower — the parent directory. */
-function parentPath(rows: readonly TreeRow[], index: number): TreeFocusAction | null {
+function parentRow(rows: readonly TreeRow[], index: number): TreeFocusAction | null {
   const depth = rows[index]!.depth;
   if (depth === 0) return null;
   for (let i = index - 1; i >= 0; i--) {
-    if (rows[i]!.depth === depth - 1) return { type: "focus", path: rows[i]!.path };
+    if (rows[i]!.depth === depth - 1) return { type: "focus", id: rows[i]!.node.id };
   }
   return null;
 }
@@ -225,9 +263,30 @@ function typeAhead(rows: readonly TreeRow[], index: number, key: string): TreeFo
   const needle = key.toLowerCase();
   for (let step = 1; step <= rows.length; step++) {
     const row = rows[(index + step + rows.length) % rows.length]!;
-    if (row.name.toLowerCase().startsWith(needle)) return { type: "focus", path: row.path };
+    if (row.node.name.toLowerCase().startsWith(needle)) return { type: "focus", id: row.node.id };
   }
   return null;
+}
+
+/**
+ * The file whose preview is showing: the user's pick while it still exists,
+ * else the type's primary file, else the first entry.
+ *
+ * Derived on every render rather than repaired by an effect — a version switch
+ * that drops the selected file falls back silently, and no re-render can
+ * clobber a selection the user made.
+ */
+export function pickActiveEntry(
+  entries: readonly PackageFileEntry[],
+  selectedPath: string | null,
+  primaryFileName: string,
+): PackageFileEntry | null {
+  return (
+    (selectedPath === null ? undefined : entries.find((e) => e.path === selectedPath)) ??
+    entries.find((e) => e.path === primaryFileName) ??
+    entries[0] ??
+    null
+  );
 }
 
 /** Why a file cannot be previewed, or `null` when it can. */
@@ -283,14 +342,14 @@ const LANGUAGE_BY_EXTENSION: Record<string, string> = {
 };
 
 export function languageForPath(path: string): string {
-  const base = path.slice(path.lastIndexOf("/") + 1);
+  const base = baseName(path);
   const dot = base.lastIndexOf(".");
   // `dot <= 0` covers both "no extension" and dotfiles like `.gitignore`.
   if (dot <= 0) return "plaintext";
   return LANGUAGE_BY_EXTENSION[base.slice(dot + 1).toLowerCase()] ?? "plaintext";
 }
 
-/** Last path segment — the file name shown in the preview header. */
+/** Last path segment — the preview header's title and the download filename. */
 export function baseName(path: string): string {
   return path.slice(path.lastIndexOf("/") + 1);
 }

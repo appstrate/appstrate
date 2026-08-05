@@ -16,6 +16,7 @@ import {
   runKeys,
   paginatedRunsKeys,
   persistenceKeys,
+  invalidatePackageFiles,
 } from "../lib/query-keys";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 
@@ -376,6 +377,8 @@ export function useUpdatePackage(type: PackageType, packageId: string) {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: packageKeys.all });
+      // The saved bytes ARE what the Files tab shows.
+      invalidatePackageFiles(qc);
       if (type === "agent") qc.invalidateQueries({ queryKey: agentsKeys.all });
       // An agent's tools drive the required OAuth scopes, so editing them
       // changes the per-integration agent-resolution verdict (e.g. a connection
