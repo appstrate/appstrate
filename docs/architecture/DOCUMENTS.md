@@ -197,14 +197,14 @@ The hidden-path filter (`runtime-pi/publish.ts`, any segment starting with `.`) 
 The split is drawn on intent, because that is the only place it buys anything:
 
 - The **sweep** publishes whatever happens to be in a directory — including a `.env` an unrelated tool dropped there, which the agent never meant as a deliverable. Filtering is the difference between a mistake and a durable, org-visible document.
-- The **tools** are per-call decisions with explicit paths. Refusing hidden paths there removes **no capability** from a prompt-injected agent: `cp .env outputs/notes.txt` — or publishing that copy explicitly — surfaces the identical bytes under a non-hidden name. It would only cost a legitimate publish of a dotfile, and it is the kind of control that reads as a boundary while enforcing nothing.
+- The explicit **tool** is a per-call decision with an explicit path. Refusing hidden paths there removes **no capability** from a prompt-injected agent: `cp .env outputs/notes.txt` — or publishing that copy explicitly — surfaces the identical bytes under a non-hidden name. It would only cost a legitimate publish of a dotfile, and it is the kind of control that reads as a boundary while enforcing nothing.
 
 **Threat model, stated plainly.** An agent whose manifest enables `publish_document` can surface workspace files it can read as org-visible `agent_output` documents — that is the tool's purpose, and prompt injection can aim it. What bounds the exposure is not the path shape:
 
 - the document is attached to the run, so it inherits the run's container ACL (see "ACL") — never wider than who can already read the run;
 - reads are gated by `documents:read` and the capability matrix; preview goes through a short-lived signed token on a cookie-less route (see "Preview security").
 
-So the mitigation lives where the capability is granted (`manifest.runtime_tools` is opt-in per named agent), not in a filename check. **Enable either publishing tool only on agents whose workspace you would accept seeing published.** Inline runs receive both by default because their orchestrator explicitly creates a short-lived producing agent and needs a durable hand-off surface.
+So the mitigation lives where the capability is granted (`manifest.runtime_tools` is opt-in per named agent), not in a filename check. **Enable the publishing tool only on agents whose workspace you would accept seeing published.** Inline runs receive it by default because their orchestrator explicitly creates a short-lived producing agent and needs a durable hand-off surface.
 
 ### Identity model — display name vs workspace name (D-naming)
 
