@@ -41,7 +41,6 @@ export type ModelCapabilitySupport = z.infer<typeof modelCapabilitySupportSchema
 export const modelGenerationCapabilitiesSchema = z
   .object({
     temperature: modelCapabilitySupportSchema.default("unknown"),
-    temperatureWithReasoning: modelCapabilitySupportSchema.default("unknown"),
     reasoning: z
       .object({
         supported: modelCapabilitySupportSchema.default("unknown"),
@@ -62,7 +61,6 @@ export type ModelGenerationCapabilities = z.infer<typeof modelGenerationCapabili
 /** Provider-wide facts that are stricter than a reused vendor catalog. */
 export interface ModelGenerationCapabilitiesOverride {
   temperature?: ModelCapabilitySupport;
-  temperatureWithReasoning?: ModelCapabilitySupport;
   reasoning?: {
     supported?: ModelCapabilitySupport;
     adaptive?: boolean | null;
@@ -73,29 +71,14 @@ export interface ModelGenerationCapabilitiesOverride {
 
 export const UNKNOWN_MODEL_GENERATION_CAPABILITIES: ModelGenerationCapabilities = {
   temperature: "unknown",
-  temperatureWithReasoning: "unknown",
   reasoning: { supported: "unknown", adaptive: null, levels: {} },
 };
 
 /** Public alias contract: provider-specific generation controls stay inherited. */
 export const INHERITED_MODEL_GENERATION_CAPABILITIES: ModelGenerationCapabilities = {
   temperature: "unsupported",
-  temperatureWithReasoning: "unsupported",
   reasoning: { supported: "unsupported", adaptive: null, levels: {} },
 };
-
-/**
- * Whether the source has started describing support per level. Once it has,
- * omission means "not confirmed" rather than permission to guess.
- */
-export function requiresExplicitReasoningLevelSupport(
-  capabilities?: ModelGenerationCapabilities | null,
-): boolean {
-  return (
-    capabilities?.reasoning.supported === "supported" ||
-    Object.values(capabilities?.reasoning.levels ?? {}).some((value) => value !== "unknown")
-  );
-}
 
 /** Merge a provider adapter's stricter transport facts over catalog metadata. */
 export function applyModelGenerationCapabilitiesOverride(
@@ -109,8 +92,6 @@ export function applyModelGenerationCapabilitiesOverride(
   };
   return {
     temperature: override.temperature ?? capabilities.temperature,
-    temperatureWithReasoning:
-      override.temperatureWithReasoning ?? capabilities.temperatureWithReasoning,
     reasoning: {
       supported: override.reasoning?.supported ?? capabilities.reasoning.supported,
       adaptive:
@@ -143,22 +124,10 @@ export function reconcileModelGenerationSettings(
   if (
     reasoningLevel != null &&
     (capabilities?.reasoning.supported === "unsupported" ||
-      (requiresExplicitReasoningLevelSupport(capabilities) &&
-        capabilities?.reasoning.levels[reasoningLevel] !== "supported"))
+      capabilities?.reasoning.levels[reasoningLevel] !== "supported")
   ) {
     const { reasoningLevel: _reasoningLevel, ...rest } = next;
     void _reasoningLevel;
-    next = rest;
-  }
-
-  if (
-    next.temperature != null &&
-    next.reasoningLevel != null &&
-    next.reasoningLevel !== "off" &&
-    capabilities?.temperatureWithReasoning === "unsupported"
-  ) {
-    const { temperature: _temperature, ...rest } = next;
-    void _temperature;
     next = rest;
   }
 
@@ -166,10 +135,7 @@ export function reconcileModelGenerationSettings(
 }
 
 export type ModelGenerationErrorCode =
-  | "temperature_unsupported"
-  | "reasoning_unsupported"
-  | "reasoning_level_unsupported"
-  | "temperature_with_reasoning_unsupported";
+  "temperature_unsupported" | "reasoning_unsupported" | "reasoning_level_unsupported";
 
 export class ModelGenerationError extends Error {
   readonly code: ModelGenerationErrorCode;
@@ -189,8 +155,8 @@ export interface ResolveModelGenerationOptions {
 
 /**
  * Merge the agent and invocation layers, then validate catalog/provider facts.
- * A wholly unknown custom model remains forward-compatible. Once reasoning is
- * known to be configurable, however, only explicitly confirmed levels pass.
+ * Unknown temperature support remains forward-compatible, while reasoning
+ * levels must always be explicitly confirmed before they can be selected.
  */
 export function resolveModelGenerationSettings({
   capabilities = UNKNOWN_MODEL_GENERATION_CAPABILITIES,
@@ -227,25 +193,11 @@ export function resolveModelGenerationSettings({
 
   if (
     reasoningLevel !== undefined &&
-    (parsedCapabilities.reasoning.levels[reasoningLevel] === "unsupported" ||
-      (requiresExplicitReasoningLevelSupport(parsedCapabilities) &&
-        parsedCapabilities.reasoning.levels[reasoningLevel] !== "supported"))
+    parsedCapabilities.reasoning.levels[reasoningLevel] !== "supported"
   ) {
     throw new ModelGenerationError(
       "reasoning_level_unsupported",
       `The selected model does not support reasoning level '${reasoningLevel}'`,
-    );
-  }
-
-  if (
-    temperature !== undefined &&
-    reasoningLevel !== undefined &&
-    reasoningLevel !== "off" &&
-    parsedCapabilities.temperatureWithReasoning === "unsupported"
-  ) {
-    throw new ModelGenerationError(
-      "temperature_with_reasoning_unsupported",
-      "The selected model cannot combine a custom temperature with reasoning",
     );
   }
 

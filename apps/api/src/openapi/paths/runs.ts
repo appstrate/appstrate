@@ -75,7 +75,7 @@ export const runsPaths = {
                 generation: {
                   $ref: "#/components/schemas/ModelGenerationSettings",
                   description:
-                    "Per-run temperature/reasoning override. Explicitly unsupported values are rejected before a run row is created; omitted properties inherit the agent defaults.",
+                    "Per-run temperature/reasoning override. A custom temperature is rejected only when explicitly unsupported; a reasoning level is accepted only when explicitly supported. Omitted properties inherit the agent defaults.",
                 },
                 proxyId: {
                   type: "string",

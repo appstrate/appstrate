@@ -43,7 +43,6 @@ export const modelsPaths = {
                     modelId: "gpt-4o",
                     generation: {
                       temperature: "supported",
-                      temperatureWithReasoning: "unknown",
                       reasoning: { supported: "unsupported", adaptive: null, levels: {} },
                     },
                     iconUrl: "openai",

@@ -248,7 +248,6 @@ describe("generation capabilities", () => {
       }),
     ).toEqual({
       temperature: "supported",
-      temperatureWithReasoning: "unknown",
       reasoning: {
         supported: "supported",
         adaptive: true,
@@ -267,7 +266,6 @@ describe("generation capabilities", () => {
   it("keeps absent upstream facts unknown instead of guessing", () => {
     expect(deriveGenerationCapabilities({})).toEqual({
       temperature: "unknown",
-      temperatureWithReasoning: "unknown",
       reasoning: {
         supported: "unknown",
         adaptive: null,

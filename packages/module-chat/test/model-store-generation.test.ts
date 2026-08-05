@@ -12,7 +12,6 @@ import {
 
 const SUPPORTED: ModelGenerationCapabilities = {
   temperature: "supported",
-  temperatureWithReasoning: "supported",
   reasoning: {
     supported: "supported",
     adaptive: false,

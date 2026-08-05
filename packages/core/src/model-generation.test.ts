@@ -15,7 +15,6 @@ const capabilities = (
   over: Partial<ModelGenerationCapabilities> = {},
 ): ModelGenerationCapabilities => ({
   temperature: "supported",
-  temperatureWithReasoning: "supported",
   reasoning: {
     supported: "supported",
     adaptive: false,
@@ -65,21 +64,18 @@ describe("resolveModelGenerationSettings", () => {
     ).toThrow(ModelGenerationError);
   });
 
-  it("rejects temperature with reasoning when the pair is unsupported", () => {
+  it("rejects an unconfirmed reasoning level when every catalog fact is unknown", () => {
     expect(() =>
-      resolveModelGenerationSettings({
-        capabilities: capabilities({ temperatureWithReasoning: "unsupported" }),
-        override: { temperature: 0.2, reasoningLevel: "high" },
-      }),
-    ).toThrow("cannot combine");
-  });
-
-  it("allows unknown catalog facts for custom providers", () => {
-    expect(
       resolveModelGenerationSettings({
         override: { temperature: 0.4, reasoningLevel: "medium" },
       }),
-    ).toEqual({ temperature: 0.4, reasoningLevel: "medium" });
+    ).toThrow("does not support reasoning level 'medium'");
+  });
+
+  it("keeps an unknown custom provider forward-compatible for temperature alone", () => {
+    expect(resolveModelGenerationSettings({ override: { temperature: 0.4 } })).toEqual({
+      temperature: 0.4,
+    });
   });
 
   it("rejects an unconfirmed level once reasoning support is known", () => {

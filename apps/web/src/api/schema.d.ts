@@ -4866,7 +4866,7 @@ export interface components {
             [key: string]: unknown;
         }) & {
             /** @description Appstrate top-level extension: runtime tools the agent may use. Optional. */
-            runtime_tools?: ("output" | "log" | "note" | "pin" | "publish_document" | "publish_archive")[];
+            runtime_tools?: ("output" | "log" | "note" | "pin" | "publish_document")[];
         };
         AgentSkillRef: {
             id: string;
@@ -5101,12 +5101,10 @@ export interface components {
             /** @description Application ids (`app_…`) belonging to the caller's org where this package is installed. */
             installed_in: string[];
         }[];
-        /** @description Normalized support facts from Appstrate's pinned LiteLLM catalog snapshot, refined by stricter provider transport declarations. `unknown` is forward-compatible and differs from an explicit upstream refusal. */
+        /** @description Normalized support facts from Appstrate's pinned LiteLLM catalog snapshot, refined by stricter provider transport declarations. `unknown` keeps temperature forward-compatible, while reasoning levels are selectable only when explicitly supported; it remains distinct from an explicit upstream refusal. */
         ModelGenerationCapabilities: {
             /** @enum {string} */
             temperature: "supported" | "unsupported" | "unknown";
-            /** @enum {string} */
-            temperatureWithReasoning: "supported" | "unsupported" | "unknown";
             reasoning: {
                 /** @enum {string} */
                 supported: "supported" | "unsupported" | "unknown";
@@ -6940,7 +6938,7 @@ export interface operations {
                     rerun_from?: string;
                     /** @description Model ID override for this run — a system model key or an org-model UUID. Pins THIS run to that model, taking priority over the full resolution cascade (request `modelId` > agent model setting > org default model > system default). Without it, the org default is resolved at run creation — not ahead of time — so changing the org default between triggers silently changes the model used by subsequent runs. Returns 404 when the referenced model does not exist. The response echoes the resolved `model_label` + `model_source` so callers can verify which model the run actually uses. */
                     modelId?: string;
-                    /** @description Per-run temperature/reasoning override. Explicitly unsupported values are rejected before a run row is created; omitted properties inherit the agent defaults. */
+                    /** @description Per-run temperature/reasoning override. A custom temperature is rejected only when explicitly unsupported; a reasoning level is accepted only when explicitly supported. Omitted properties inherit the agent defaults. */
                     generation?: components["schemas"]["ModelGenerationSettings"];
                     /** @description Proxy ID override for this run, or "none" to disable proxying. Takes priority over agent and org defaults. */
                     proxyId?: string;
@@ -13404,7 +13402,6 @@ export interface operations {
                      *           "modelId": "gpt-4o",
                      *           "generation": {
                      *             "temperature": "supported",
-                     *             "temperatureWithReasoning": "unknown",
                      *             "reasoning": {
                      *               "supported": "unsupported",
                      *               "adaptive": null,

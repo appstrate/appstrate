@@ -111,15 +111,11 @@ export const schemas = {
   ModelGenerationCapabilities: {
     type: "object",
     additionalProperties: false,
-    required: ["temperature", "temperatureWithReasoning", "reasoning"],
+    required: ["temperature", "reasoning"],
     description:
-      "Normalized support facts from Appstrate's pinned LiteLLM catalog snapshot, refined by stricter provider transport declarations. `unknown` is forward-compatible and differs from an explicit upstream refusal.",
+      "Normalized support facts from Appstrate's pinned LiteLLM catalog snapshot, refined by stricter provider transport declarations. `unknown` keeps temperature forward-compatible, while reasoning levels are selectable only when explicitly supported; it remains distinct from an explicit upstream refusal.",
     properties: {
       temperature: { type: "string", enum: ["supported", "unsupported", "unknown"] },
-      temperatureWithReasoning: {
-        type: "string",
-        enum: ["supported", "unsupported", "unknown"],
-      },
       reasoning: {
         type: "object",
         additionalProperties: false,
@@ -1651,7 +1647,7 @@ export const schemas = {
             type: "array",
             items: {
               type: "string",
-              enum: ["output", "log", "note", "pin", "publish_document", "publish_archive"],
+              enum: ["output", "log", "note", "pin", "publish_document"],
             },
             description:
               "Appstrate top-level extension: runtime tools the agent may use. Optional.",

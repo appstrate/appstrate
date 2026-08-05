@@ -9,7 +9,7 @@ import {
 } from "../src/runtime-tools-catalog.ts";
 
 describe("runtime-tools-catalog", () => {
-  it("SELECTABLE set is the event emitters plus publishing tools", () => {
+  it("SELECTABLE set is the event emitters plus the publishing tool", () => {
     // Guards against drift with the OpenAPI manifest enum + the agent-editor
     // checklist, which mirror this list. If you change one, change all.
     expect([...SELECTABLE_RUNTIME_TOOLS]).toEqual([
@@ -18,13 +18,12 @@ describe("runtime-tools-catalog", () => {
       "note",
       "pin",
       "publish_document",
-      "publish_archive",
     ]);
   });
 
   it("EVENT_EMITTER set is the four standalone-buildable emitters", () => {
     // These are the tools `buildRuntimeToolDefs` builds standalone;
-    // Publishing tools are deliberately excluded (they need injected dependencies).
+    // The publishing tool is deliberately excluded (it needs injected dependencies).
     expect([...EVENT_EMITTER_RUNTIME_TOOLS]).toEqual(["output", "log", "note", "pin"]);
   });
 

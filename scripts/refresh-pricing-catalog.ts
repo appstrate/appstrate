@@ -395,9 +395,6 @@ function deriveGenerationCapabilities(entry: LiteLLMEntry): ModelGenerationCapab
 
   return {
     temperature,
-    // LiteLLM exposes the individual controls but not this combined constraint.
-    // Keep it unknown so providers remain the final authority.
-    temperatureWithReasoning: "unknown",
     reasoning: {
       supported: reasoning,
       adaptive:

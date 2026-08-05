@@ -153,7 +153,6 @@ export function registerTestOAuthProvider(): void {
       capabilities: ["text", "reasoning"],
       generation: {
         temperature: "unsupported",
-        temperatureWithReasoning: "unsupported",
         reasoning: {
           supported: "supported",
           adaptive: true,
