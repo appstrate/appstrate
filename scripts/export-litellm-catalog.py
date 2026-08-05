@@ -152,13 +152,11 @@ def generation_capabilities(
         reasoning = "unknown"
         levels = {effort: "unknown" for effort in REASONING_EFFORTS}
 
-    temperature_with_reasoning = "unknown"
+    temperature_compatible = None
     supported_active_efforts = [
         effort for effort in ACTIVE_REASONING_EFFORTS if levels[effort] == "supported"
     ]
-    if temperature == "unsupported" or reasoning == "unsupported":
-        temperature_with_reasoning = "unsupported"
-    elif temperature == "supported" and supported_active_efforts:
+    if temperature == "supported" and reasoning == "supported" and supported_active_efforts:
         pair_support = [
             optional_params_support(
                 model,
@@ -169,20 +167,23 @@ def generation_capabilities(
             for effort in supported_active_efforts
         ]
         if all(value == "supported" for value in pair_support):
-            temperature_with_reasoning = "supported"
+            temperature_compatible = "supported"
         elif all(value == "unsupported" for value in pair_support):
-            temperature_with_reasoning = "unsupported"
+            temperature_compatible = "unsupported"
+
+    reasoning_capabilities = {
+        "supported": reasoning,
+        "adaptive": entry.get("supports_adaptive_thinking")
+        if isinstance(entry.get("supports_adaptive_thinking"), bool)
+        else None,
+        "levels": levels,
+    }
+    if temperature_compatible is not None:
+        reasoning_capabilities["temperatureCompatible"] = temperature_compatible
 
     return {
         "temperature": temperature,
-        "temperatureWithReasoning": temperature_with_reasoning,
-        "reasoning": {
-            "supported": reasoning,
-            "adaptive": entry.get("supports_adaptive_thinking")
-            if isinstance(entry.get("supports_adaptive_thinking"), bool)
-            else None,
-            "levels": levels,
-        },
+        "reasoning": reasoning_capabilities,
     }
 
 

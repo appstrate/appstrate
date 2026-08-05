@@ -122,6 +122,12 @@ export const schemas = {
         required: ["supported", "adaptive", "levels"],
         properties: {
           supported: { type: "string", enum: ["supported", "unsupported", "unknown"] },
+          temperatureCompatible: {
+            type: "string",
+            enum: ["supported", "unsupported", "unknown"],
+            description:
+              "Optional compatibility fact for combining a custom temperature with active reasoning. Omission means unknown.",
+          },
           adaptive: { type: ["boolean", "null"] },
           levels: {
             type: "object",

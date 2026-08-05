@@ -9,9 +9,9 @@
     ],
     "generation": {
       "temperature": "supported",
-      "temperatureWithReasoning": "supported",
       "reasoning": {
         "supported": "supported",
+        "temperatureCompatible": "supported",
         "adaptive": null,
         "levels": {
           "off": "supported",
@@ -40,9 +40,9 @@
     ],
     "generation": {
       "temperature": "supported",
-      "temperatureWithReasoning": "supported",
       "reasoning": {
         "supported": "supported",
+        "temperatureCompatible": "supported",
         "adaptive": null,
         "levels": {
           "off": "supported",
@@ -70,9 +70,9 @@
     ],
     "generation": {
       "temperature": "supported",
-      "temperatureWithReasoning": "supported",
       "reasoning": {
         "supported": "supported",
+        "temperatureCompatible": "supported",
         "adaptive": null,
         "levels": {
           "off": "supported",
@@ -100,9 +100,9 @@
     ],
     "generation": {
       "temperature": "supported",
-      "temperatureWithReasoning": "supported",
       "reasoning": {
         "supported": "supported",
+        "temperatureCompatible": "supported",
         "adaptive": null,
         "levels": {
           "off": "supported",
@@ -131,9 +131,9 @@
     ],
     "generation": {
       "temperature": "supported",
-      "temperatureWithReasoning": "supported",
       "reasoning": {
         "supported": "supported",
+        "temperatureCompatible": "supported",
         "adaptive": null,
         "levels": {
           "off": "supported",
@@ -163,9 +163,9 @@
     ],
     "generation": {
       "temperature": "supported",
-      "temperatureWithReasoning": "supported",
       "reasoning": {
         "supported": "supported",
+        "temperatureCompatible": "supported",
         "adaptive": null,
         "levels": {
           "off": "supported",
@@ -193,9 +193,9 @@
     ],
     "generation": {
       "temperature": "supported",
-      "temperatureWithReasoning": "supported",
       "reasoning": {
         "supported": "supported",
+        "temperatureCompatible": "supported",
         "adaptive": null,
         "levels": {
           "off": "supported",
@@ -225,9 +225,9 @@
     ],
     "generation": {
       "temperature": "supported",
-      "temperatureWithReasoning": "supported",
       "reasoning": {
         "supported": "supported",
+        "temperatureCompatible": "supported",
         "adaptive": null,
         "levels": {
           "off": "supported",

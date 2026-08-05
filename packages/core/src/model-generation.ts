@@ -76,6 +76,7 @@ export const modelGenerationCapabilitiesSchema = z
     reasoning: z
       .object({
         supported: modelCapabilitySupportSchema.default("unknown"),
+        temperatureCompatible: modelCapabilitySupportSchema.optional(),
         adaptive: z.boolean().nullable().default(null),
         levels: z
           .partialRecord(modelReasoningLevelSchema, modelCapabilitySupportSchema)
@@ -95,20 +96,19 @@ export interface ModelGenerationCapabilitiesOverride {
   temperature?: ModelCapabilitySupport;
   reasoning?: {
     supported?: ModelCapabilitySupport;
+    temperatureCompatible?: ModelCapabilitySupport;
     adaptive?: boolean | null;
     levels?: Partial<Record<ModelReasoningLevel, ModelCapabilitySupport>>;
     nativeLevels?: Partial<Record<ModelReasoningLevel, ModelNativeReasoningLevel>>;
   };
 }
 
-/**
- * Anthropic's adaptive transport has no native `minimal` effort. LiteLLM stays
- * authoritative for whether a model supports the portable level; this adapter
- * only translates that supported value to Anthropic's lowest wire value.
- */
+/** Shared Anthropic wire constraints for API-key and Claude Code transports. */
 export const ANTHROPIC_GENERATION_CAPABILITIES_OVERRIDE = {
-  temperatureWithReasoning: "unsupported",
-  reasoning: { nativeLevels: { minimal: "low" } },
+  reasoning: {
+    temperatureCompatible: "unsupported",
+    nativeLevels: { minimal: "low" },
+  },
 } satisfies ModelGenerationCapabilitiesOverride;
 
 export const UNKNOWN_MODEL_GENERATION_CAPABILITIES: ModelGenerationCapabilities = {
@@ -132,10 +132,13 @@ export function applyModelGenerationCapabilitiesOverride(
     ...capabilities.reasoning.nativeLevels,
     ...override.reasoning?.nativeLevels,
   };
+  const temperatureCompatible =
+    override.reasoning?.temperatureCompatible ?? capabilities.reasoning.temperatureCompatible;
   return {
     temperature: override.temperature ?? capabilities.temperature,
     reasoning: {
       supported: override.reasoning?.supported ?? capabilities.reasoning.supported,
+      ...(temperatureCompatible !== undefined ? { temperatureCompatible } : {}),
       adaptive:
         override.reasoning?.adaptive !== undefined
           ? override.reasoning.adaptive
@@ -173,11 +176,25 @@ export function reconcileModelGenerationSettings(
     next = rest;
   }
 
+  if (
+    next.temperature != null &&
+    next.reasoningLevel != null &&
+    next.reasoningLevel !== "off" &&
+    capabilities?.reasoning.temperatureCompatible === "unsupported"
+  ) {
+    const { temperature: _temperature, ...rest } = next;
+    void _temperature;
+    next = rest;
+  }
+
   return next;
 }
 
 export type ModelGenerationErrorCode =
-  "temperature_unsupported" | "reasoning_unsupported" | "reasoning_level_unsupported";
+  | "temperature_unsupported"
+  | "reasoning_unsupported"
+  | "reasoning_level_unsupported"
+  | "temperature_with_reasoning_unsupported";
 
 export class ModelGenerationError extends Error {
   readonly code: ModelGenerationErrorCode;
@@ -240,6 +257,18 @@ export function resolveModelGenerationSettings({
     throw new ModelGenerationError(
       "reasoning_level_unsupported",
       `The selected model does not support reasoning level '${reasoningLevel}'`,
+    );
+  }
+
+  if (
+    temperature !== undefined &&
+    reasoningLevel !== undefined &&
+    reasoningLevel !== "off" &&
+    parsedCapabilities.reasoning.temperatureCompatible === "unsupported"
+  ) {
+    throw new ModelGenerationError(
+      "temperature_with_reasoning_unsupported",
+      "The selected model cannot combine a custom temperature with reasoning",
     );
   }
 

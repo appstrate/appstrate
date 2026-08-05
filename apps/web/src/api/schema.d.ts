@@ -5108,6 +5108,11 @@ export interface components {
             reasoning: {
                 /** @enum {string} */
                 supported: "supported" | "unsupported" | "unknown";
+                /**
+                 * @description Optional compatibility fact for combining a custom temperature with active reasoning. Omission means unknown.
+                 * @enum {string}
+                 */
+                temperatureCompatible?: "supported" | "unsupported" | "unknown";
                 adaptive: boolean | null;
                 levels: {
                     [key: string]: "supported" | "unsupported" | "unknown";

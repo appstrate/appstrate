@@ -162,3 +162,46 @@ describe("vendored catalog invariant — configurable reasoning has a supported 
     expect(violations).toEqual([]);
   });
 });
+
+describe("vendored catalog invariant — sparse temperature compatibility", () => {
+  it("serializes only conclusive pair facts for individually usable controls", () => {
+    const pairFacts = catalogFiles.flatMap((file) => {
+      const entries = JSON.parse(readFileSync(join(dataDir, file), "utf8")) as Record<
+        string,
+        {
+          generation?: {
+            temperature?: string;
+            reasoning?: {
+              supported?: string;
+              temperatureCompatible?: string;
+            };
+          };
+        }
+      >;
+
+      return Object.entries(entries).flatMap(([modelId, entry]) => {
+        const generation = entry.generation;
+        const compatibility = generation?.reasoning?.temperatureCompatible;
+        return compatibility === undefined ? [] : [{ file, modelId, generation, compatibility }];
+      });
+    });
+
+    expect(pairFacts.length).toBeGreaterThan(0);
+    expect(
+      pairFacts
+        .filter(
+          ({ generation, compatibility }) =>
+            generation?.temperature !== "supported" ||
+            generation.reasoning?.supported !== "supported" ||
+            !["supported", "unsupported"].includes(compatibility),
+        )
+        .map(({ file, modelId }) => `${file}:${modelId}`),
+    ).toEqual([]);
+  });
+
+  it("keeps the known OpenAI incompatibility guard", () => {
+    expect(
+      lookupCatalogModel("openai", "gpt-5.1")?.generation?.reasoning.temperatureCompatible,
+    ).toBe("unsupported");
+  });
+});

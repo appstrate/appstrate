@@ -23,7 +23,6 @@ const base: OrgModelInfo = {
   modelId: "deepseek-chat",
   generation: {
     temperature: "unsupported",
-    temperatureWithReasoning: "unsupported",
     reasoning: {
       supported: "supported",
       adaptive: true,
@@ -116,16 +115,49 @@ describe("projectAliasedModel", () => {
       aliased: true,
       generation: {
         temperature: "unknown",
-        temperatureWithReasoning: "unknown",
         reasoning: { supported: "unknown", adaptive: null, levels: {} },
       },
     });
 
     expect(out.generation).toEqual({
       temperature: "unsupported",
-      temperatureWithReasoning: "unsupported",
       reasoning: { supported: "unsupported", adaptive: null, levels: {} },
     });
+  });
+
+  it("fails closed when an alias pair is not explicitly compatible", () => {
+    const out = projectAliasedModel({
+      ...base,
+      aliased: true,
+      generation: {
+        temperature: "supported",
+        reasoning: {
+          supported: "supported",
+          adaptive: null,
+          levels: { low: "supported" },
+        },
+      },
+    });
+
+    expect(out.generation?.reasoning.temperatureCompatible).toBe("unsupported");
+  });
+
+  it("preserves explicitly compatible alias pairs", () => {
+    const out = projectAliasedModel({
+      ...base,
+      aliased: true,
+      generation: {
+        temperature: "supported",
+        reasoning: {
+          supported: "supported",
+          temperatureCompatible: "supported",
+          adaptive: null,
+          levels: { low: "supported" },
+        },
+      },
+    });
+
+    expect(out.generation?.reasoning.temperatureCompatible).toBe("supported");
   });
 
   it("preserves needs_reconnection on an aliased model", () => {

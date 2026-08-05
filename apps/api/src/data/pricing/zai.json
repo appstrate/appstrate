@@ -8,7 +8,6 @@
     ],
     "generation": {
       "temperature": "supported",
-      "temperatureWithReasoning": "unknown",
       "reasoning": {
         "supported": "unknown",
         "adaptive": null,
@@ -37,7 +36,6 @@
     ],
     "generation": {
       "temperature": "supported",
-      "temperatureWithReasoning": "unknown",
       "reasoning": {
         "supported": "unknown",
         "adaptive": null,
@@ -66,7 +64,6 @@
     ],
     "generation": {
       "temperature": "supported",
-      "temperatureWithReasoning": "unknown",
       "reasoning": {
         "supported": "unknown",
         "adaptive": null,
@@ -95,7 +92,6 @@
     ],
     "generation": {
       "temperature": "supported",
-      "temperatureWithReasoning": "unknown",
       "reasoning": {
         "supported": "unknown",
         "adaptive": null,
@@ -124,7 +120,6 @@
     ],
     "generation": {
       "temperature": "supported",
-      "temperatureWithReasoning": "unknown",
       "reasoning": {
         "supported": "unknown",
         "adaptive": null,
@@ -153,7 +148,6 @@
     ],
     "generation": {
       "temperature": "supported",
-      "temperatureWithReasoning": "unknown",
       "reasoning": {
         "supported": "unknown",
         "adaptive": null,
@@ -183,7 +177,6 @@
     ],
     "generation": {
       "temperature": "supported",
-      "temperatureWithReasoning": "unknown",
       "reasoning": {
         "supported": "unknown",
         "adaptive": null,
@@ -212,7 +205,6 @@
     ],
     "generation": {
       "temperature": "supported",
-      "temperatureWithReasoning": "unsupported",
       "reasoning": {
         "supported": "unsupported",
         "adaptive": null,
@@ -243,7 +235,6 @@
     ],
     "generation": {
       "temperature": "supported",
-      "temperatureWithReasoning": "unsupported",
       "reasoning": {
         "supported": "unsupported",
         "adaptive": null,
@@ -274,7 +265,6 @@
     ],
     "generation": {
       "temperature": "supported",
-      "temperatureWithReasoning": "unsupported",
       "reasoning": {
         "supported": "unsupported",
         "adaptive": null,
@@ -305,7 +295,6 @@
     ],
     "generation": {
       "temperature": "supported",
-      "temperatureWithReasoning": "unsupported",
       "reasoning": {
         "supported": "unsupported",
         "adaptive": null,

@@ -239,9 +239,9 @@ describe("formatCoverageSummary", () => {
 describe("generation capabilities", () => {
   const normalizedGeneration = {
     temperature: "supported",
-    temperatureWithReasoning: "unsupported",
     reasoning: {
       supported: "supported",
+      temperatureCompatible: "unsupported",
       adaptive: null,
       levels: {
         none: "supported",
@@ -262,6 +262,22 @@ describe("generation capabilities", () => {
           litellm_provider: "openai",
           mode: "chat",
           _appstrate_generation: normalizedGeneration,
+        },
+      }),
+    ).not.toThrow();
+  });
+
+  it("accepts an omitted pair fact when LiteLLM is inconclusive", () => {
+    const { temperatureCompatible: _temperatureCompatible, ...reasoning } =
+      normalizedGeneration.reasoning;
+    void _temperatureCompatible;
+
+    expect(() =>
+      assertNormalizedGenerationCatalog({
+        model: {
+          litellm_provider: "openai",
+          mode: "chat",
+          _appstrate_generation: { ...normalizedGeneration, reasoning },
         },
       }),
     ).not.toThrow();
@@ -292,6 +308,24 @@ describe("generation capabilities", () => {
           _appstrate_generation: {
             ...normalizedGeneration,
             temperature: "maybe",
+          },
+        } as never,
+      }),
+    ).toThrow(/model.*_appstrate_generation/);
+  });
+
+  it("rejects a malformed optional pair fact", () => {
+    expect(() =>
+      assertNormalizedGenerationCatalog({
+        model: {
+          litellm_provider: "openai",
+          mode: "chat",
+          _appstrate_generation: {
+            ...normalizedGeneration,
+            reasoning: {
+              ...normalizedGeneration.reasoning,
+              temperatureCompatible: "maybe",
+            },
           },
         } as never,
       }),
@@ -332,9 +366,9 @@ describe("generation capabilities", () => {
       deriveGenerationCapabilities({
         _appstrate_generation: {
           temperature: "supported",
-          temperatureWithReasoning: "unsupported",
           reasoning: {
             supported: "supported",
+            temperatureCompatible: "unsupported",
             adaptive: null,
             levels: {
               none: "supported",
@@ -350,9 +384,9 @@ describe("generation capabilities", () => {
       }),
     ).toEqual({
       temperature: "supported",
-      temperatureWithReasoning: "unsupported",
       reasoning: {
         supported: "supported",
+        temperatureCompatible: "unsupported",
         adaptive: null,
         levels: {
           off: "supported",

@@ -121,6 +121,34 @@ describe("resolveModelGenerationSettings", () => {
       }),
     ).toThrow("does not support reasoning level 'high'");
   });
+
+  it("rejects a known-incompatible temperature and reasoning pair", () => {
+    expect(() =>
+      resolveModelGenerationSettings({
+        capabilities: capabilities({
+          reasoning: {
+            ...capabilities().reasoning,
+            temperatureCompatible: "unsupported",
+          },
+        }),
+        override: { temperature: 0.4, reasoningLevel: "high" },
+      }),
+    ).toThrow("cannot combine a custom temperature with reasoning");
+  });
+
+  it("does not apply the pair constraint when reasoning is off", () => {
+    expect(
+      resolveModelGenerationSettings({
+        capabilities: capabilities({
+          reasoning: {
+            ...capabilities().reasoning,
+            temperatureCompatible: "unsupported",
+          },
+        }),
+        override: { temperature: 0.4, reasoningLevel: "off" },
+      }),
+    ).toEqual({ temperature: 0.4, reasoningLevel: "off" });
+  });
 });
 
 describe("applyModelGenerationCapabilitiesOverride", () => {
@@ -138,6 +166,14 @@ describe("applyModelGenerationCapabilitiesOverride", () => {
     expect(
       applyModelGenerationCapabilitiesOverride(catalog, { reasoning: { adaptive: null } }),
     ).toMatchObject({ reasoning: { adaptive: null } });
+  });
+
+  it("merges a sparse provider pair constraint into reasoning", () => {
+    expect(
+      applyModelGenerationCapabilitiesOverride(capabilities(), {
+        reasoning: { temperatureCompatible: "unsupported" },
+      }),
+    ).toMatchObject({ reasoning: { temperatureCompatible: "unsupported" } });
   });
 });
 
@@ -160,6 +196,20 @@ describe("reconcileModelGenerationSettings", () => {
   it("preserves object identity when every setting remains compatible", () => {
     const value = { temperature: 0.4, reasoningLevel: "high" } as const;
     expect(reconcileModelGenerationSettings(value, capabilities())).toBe(value);
+  });
+
+  it("drops temperature but keeps reasoning for a known-incompatible pair", () => {
+    expect(
+      reconcileModelGenerationSettings(
+        { temperature: 0.4, reasoningLevel: "high" },
+        capabilities({
+          reasoning: {
+            ...capabilities().reasoning,
+            temperatureCompatible: "unsupported",
+          },
+        }),
+      ),
+    ).toEqual({ reasoningLevel: "high" });
   });
 
   it("removes unconfirmed levels from a known reasoning model", () => {

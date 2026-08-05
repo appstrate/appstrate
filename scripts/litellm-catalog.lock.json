@@ -3,7 +3,7 @@
   "version": "v1.95.0",
   "image": "ghcr.io/berriai/litellm",
   "digest": "sha256:af806882b7a6ced41658db5b6a7e98ed7b9b51d03b935e0417bf1c8552d688af",
-  "normalizedDigest": "sha256:3b71f98fa09fa9edd2c4ed5b5a68c0e1556b247b2ef3221a0ec975e3710b5e05",
+  "normalizedDigest": "sha256:d12c7acc8dc99b1ea5b03a5a5f1fe578fe6ebbc03c4fd34d3e2626a854ebb878",
   "catalog": {
     "repository": "BerriAI/litellm",
     "commit": "a79f598f692e66ce49790bfda699b7f4dccb3ca0",

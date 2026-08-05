@@ -260,9 +260,9 @@ describe("run-launcher — sidecar skip decision", () => {
           reasoning: true,
           generation: {
             temperature: "supported",
-            temperatureWithReasoning: "unsupported",
             reasoning: {
               supported: "supported",
+              temperatureCompatible: "unsupported",
               adaptive: true,
               levels: { max: "supported" },
               nativeLevels: { max: "max" },

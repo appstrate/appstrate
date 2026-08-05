@@ -96,7 +96,6 @@ function modelsResponse(): Response {
         is_default: true,
         generation: {
           temperature: "unsupported",
-          temperatureWithReasoning: "unknown",
           reasoning: { supported: "unsupported", adaptive: null, levels: {} },
         },
       },

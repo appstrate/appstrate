@@ -108,17 +108,24 @@ function projectAliasedGenerationCapabilities(
   capabilities: ModelGenerationCapabilities | null,
 ): ModelGenerationCapabilities {
   const levels = capabilities?.reasoning.levels ?? {};
+  const temperatureSupported = capabilities?.temperature === "supported";
   const reasoningSupported = capabilities?.reasoning.supported === "supported";
 
   // Alias callers cannot inspect the backing model to compensate for an
   // unknown capability. Expose only catalog-confirmed support and fail closed
   // for unknowns. The runtime still resolves the full, unprojected contract.
   return {
-    temperature: capabilities?.temperature === "supported" ? "supported" : "unsupported",
-    temperatureWithReasoning:
-      capabilities?.temperatureWithReasoning === "supported" ? "supported" : "unsupported",
+    temperature: temperatureSupported ? "supported" : "unsupported",
     reasoning: {
       supported: reasoningSupported ? "supported" : "unsupported",
+      ...(temperatureSupported && reasoningSupported
+        ? {
+            temperatureCompatible:
+              capabilities?.reasoning.temperatureCompatible === "supported"
+                ? "supported"
+                : "unsupported",
+          }
+        : {}),
       adaptive: null,
       levels: reasoningSupported ? { ...levels } : {},
     },

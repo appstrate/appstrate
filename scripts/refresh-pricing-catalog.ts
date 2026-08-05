@@ -182,9 +182,9 @@ interface LiteLLMEntry {
   /** Effective value-level contract computed by the pinned LiteLLM adapters. */
   _appstrate_generation?: {
     temperature: ModelCapabilitySupport;
-    temperatureWithReasoning: ModelCapabilitySupport;
     reasoning: {
       supported: ModelCapabilitySupport;
+      temperatureCompatible?: ModelCapabilitySupport;
       adaptive: boolean | null;
       levels: Partial<Record<ModelNativeReasoningLevel, ModelCapabilitySupport>>;
     };
@@ -226,8 +226,9 @@ function assertNormalizedGenerationCatalog(data: Record<string, LiteLLMEntry>): 
     const valid =
       generation != null &&
       isSupport(generation.temperature) &&
-      isSupport(generation.temperatureWithReasoning) &&
       isSupport(generation.reasoning?.supported) &&
+      (generation.reasoning?.temperatureCompatible === undefined ||
+        isSupport(generation.reasoning.temperatureCompatible)) &&
       (generation.reasoning?.adaptive === null ||
         typeof generation.reasoning?.adaptive === "boolean") &&
       validLevels;
@@ -420,9 +421,11 @@ function deriveGenerationCapabilities(entry: LiteLLMEntry): ModelGenerationCapab
   if (exported) {
     return {
       temperature: exported.temperature,
-      temperatureWithReasoning: exported.temperatureWithReasoning,
       reasoning: {
         supported: exported.reasoning.supported,
+        ...(exported.reasoning.temperatureCompatible !== undefined
+          ? { temperatureCompatible: exported.reasoning.temperatureCompatible }
+          : {}),
         adaptive: exported.reasoning.adaptive,
         levels: {
           off: exported.reasoning.levels.none ?? "unknown",
