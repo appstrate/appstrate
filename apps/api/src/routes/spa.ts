@@ -14,6 +14,7 @@
 import type { Handler } from "hono";
 import { getEnv } from "@appstrate/env";
 import type { AppEnv } from "../types/index.ts";
+import { SPA_HTML_CACHE_CONTROL } from "../lib/static-cache.ts";
 
 const INDEX_HTML = "./apps/web/dist/index.html";
 
@@ -94,6 +95,13 @@ export function createSpaFallbackHandler(
     const raw = await readIndexHtml();
     return c.html(raw.replace("</head>", `${buildAppConfigScript()}\n</head>`), 200, {
       "Content-Security-Policy": csp,
+      // `no-cache` = "revalidate before reuse", NOT "do not store". The shell
+      // must never be reused blind: it embeds a per-request
+      // `window.__APP_CONFIG__` (`bootstrapTokenPending` flips the moment an
+      // unattended install is claimed) and names the current build's hashed
+      // asset URLs, which a deploy replaces. The hashed assets it points at are
+      // the ones that get pinned for a year (`lib/static-cache.ts`).
+      "Cache-Control": SPA_HTML_CACHE_CONTROL,
     });
   };
 }
