@@ -881,21 +881,30 @@ export async function parseRequestInput(
         // documents bucket into the run workspace (same path as uploads — the
         // runtime is unchanged). No re-materialization: the document already
         // exists and its bytes were validated when it was created.
-        const documentFiles: FileReference[] = [];
-        for (let j = 0; j < resolvedDocs.length; j++) {
-          const { ref, doc } = resolvedDocs[j]!;
-          const docName = documentWorkspaceNames[j]!;
-          const src = await streamDocumentContent(doc.storageKey);
-          if (!src) throw notFound(`Document '${doc.id}' content is missing`);
-          await streamRunDocument(runId, docName, src);
-          documentFiles.push({
-            fieldName: ref.fieldName,
-            name: doc.name,
-            workspaceName: docName,
-            type: doc.mime,
-            size: doc.size,
-          });
-        }
+        //
+        // Same bounded concurrency as the upload pass above, and for the same
+        // reason: each copy is store-bound, so a sequential loop paid the full
+        // round-trip once per referenced document while the memory floor stayed
+        // flat either way. `mapWithConcurrency` preserves input order in its
+        // result and aborts the remaining items on the first failure, so the
+        // rollback path below is unchanged.
+        const documentFiles: FileReference[] = await mapWithConcurrency(
+          resolvedDocs,
+          DOC_STREAM_CONCURRENCY,
+          async ({ ref, doc }, j) => {
+            const docName = documentWorkspaceNames[j]!;
+            const src = await streamDocumentContent(doc.storageKey);
+            if (!src) throw notFound(`Document '${doc.id}' content is missing`);
+            await streamRunDocument(runId, docName, src);
+            return {
+              fieldName: ref.fieldName,
+              name: doc.name,
+              workspaceName: docName,
+              type: doc.mime,
+              size: doc.size,
+            };
+          },
+        );
 
         // Strip the inline payloads from the input now that the bytes live in
         // the run workspace — the persisted run input (run record, prompt
