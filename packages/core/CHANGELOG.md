@@ -9,11 +9,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `publish_archive` runtime tool — packages an explicit, workspace-confined
-  list of regular files into a deterministic ZIP, publishes it through the
-  durable document channel, and returns the resulting `document://` URI. It is
-  included in the default inline-run capabilities alongside `publish_document`.
-
 - `publish_document.presentation: "primary"` — lets an agent explicitly select
   the run's featured deliverable after writing its final bytes. The published
   document and `document.published` event carry the selected presentation. The

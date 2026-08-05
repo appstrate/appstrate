@@ -39,7 +39,6 @@ import type { ExtensionFactory, Api, Model } from "./pi-sdk.ts";
 import {
   prepareBundleForPi,
   buildRuntimeToolExtensions,
-  buildPublishArchiveExtension,
   buildPublishDocumentExtension,
   deriveProviderFromApi,
   emitRuntimeReady,
@@ -74,12 +73,7 @@ import {
   type RuntimeEventDrainer,
 } from "@appstrate/core/runtime-event-drain";
 import { provisionWorkspace, provisionDocuments, type ProvisionDeps } from "./provision.ts";
-import {
-  createRunArchivePublisher,
-  createRunDocumentUploader,
-  sweepOutputs,
-  summarizeArtifacts,
-} from "./publish.ts";
+import { createRunDocumentUploader, sweepOutputs, summarizeArtifacts } from "./publish.ts";
 import type { SweepResult } from "./publish.ts";
 
 /**
@@ -251,11 +245,6 @@ const uploadRunDocument = createRunDocumentUploader({
   workspace: env.workspaceDir,
   publishedKeys: publishedDocumentKeys,
   publishedSourceHashes: publishedDocumentSourceHashes,
-});
-const publishRunArchive = createRunArchivePublisher({
-  workspace: env.workspaceDir,
-  uploader: uploadRunDocument,
-  maxArchiveBytes: resolveDocumentMaxFileBytes(),
 });
 
 /**
@@ -718,20 +707,6 @@ if (declaredRuntimeTools.includes("publish_document")) {
   extensionFactories.push(
     buildPublishDocumentExtension({
       uploader: uploadRunDocument,
-      emit: (event) => {
-        void bridgedSink.handle(event as RunEvent);
-      },
-    }),
-  );
-}
-
-// --- 2f. publish_archive runtime tool (opt-in via manifest.runtime_tools) ---
-// Archive construction needs direct, confined workspace access and the same
-// signed document uploader as `publish_document`, so it also stays in-process.
-if (declaredRuntimeTools.includes("publish_archive")) {
-  extensionFactories.push(
-    buildPublishArchiveExtension({
-      publisher: publishRunArchive,
       emit: (event) => {
         void bridgedSink.handle(event as RunEvent);
       },

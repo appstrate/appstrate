@@ -780,7 +780,7 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
       "waits. For an inline run, `manifest` is a PARTIAL canonical AFPS manifest: normally set " +
       "only a concise task-specific `display_name` plus task dependencies/configuration. The " +
       "platform derives `name` and fills omitted AFPS boilerplate, `runtime_tools` (log, output, " +
-      "publish_document, publish_archive), and an open object output schema. Defaults apply only " +
+      "publish_document), and an open object output schema. Defaults apply only " +
       "to fields you omit; " +
       "every field you provide replaces its default exactly, with no array or nested-object merge. " +
       "That includes `runtime_tools: []`, which stays empty and disables every default runtime tool. " +
@@ -795,8 +795,9 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
       "outside this run; never use context-free names such as `report.md`, `summary.md`, or " +
       "`output.md`. When selected (by default, or explicitly), `publish_document`'s own " +
       "description defines when and how the run should select a primary deliverable. " +
-      "For several files or an executable package, instruct the run to call `publish_archive` " +
-      "with an explicit file list and use the returned archive document. " +
+      "For several files or an executable package, instruct the run to build a `.zip` or `.afps` " +
+      "archive with its normal shell tools, then publish that single archive with " +
+      "`publish_document`. " +
       "Content merely returned in the output payload never becomes a document. " +
       "Chaining runs (kind:inline): feed earlier runs' deliverables to a later one by passing " +
       "their `document://` URIs in `context_documents` — never by copying their content into " +
@@ -873,7 +874,7 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
               type: "array",
               description:
                 "Exact runtime-tool selection. Omit for " +
-                "log/output/publish_document/publish_archive defaults; " +
+                "log/output/publish_document defaults; " +
                 "an explicit [] disables them all.",
               items: { type: "string" },
             },

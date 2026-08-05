@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it } from "bun:test";
 import { ErrorCode, McpError, type CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { AppstrateRequestExtra } from "@appstrate/mcp-transport";
 import { resetCatalog } from "../../catalog.ts";
+import { buildServerInstructions } from "../../router.ts";
 import { buildMcpTools, type Dispatch } from "../../tools.ts";
 
 const noExtra = {} as AppstrateRequestExtra;
@@ -27,7 +28,7 @@ const defaultInlineManifest = (overrides: Record<string, unknown>) => ({
   type: "agent",
   version: "1.0.0",
   dependencies: {},
-  runtime_tools: ["log", "output", "publish_document", "publish_archive"],
+  runtime_tools: ["log", "output", "publish_document"],
   output: { schema: { type: "object", properties: {}, additionalProperties: true } },
   ...overrides,
 });
@@ -97,6 +98,8 @@ describe("run_and_wait", () => {
     const { tool } = makeRunAndWait({});
 
     expect(tool.descriptor.description).toContain("publish_document");
+    expect(tool.descriptor.description).toContain("build a `.zip` or `.afps` archive");
+    expect(tool.descriptor.description).not.toContain("publish_archive");
     expect(tool.descriptor.description).toMatch(/fields you omit/i);
     expect(tool.descriptor.description).toContain("runtime_tools: []");
     expect(tool.descriptor.description).not.toMatch(/one main user-facing file/i);
@@ -115,6 +118,14 @@ describe("run_and_wait", () => {
         output: expect.any(Object),
       }),
     );
+  });
+
+  it("describes package authoring with the remaining document publisher", () => {
+    const instructions = buildServerInstructions(new Set(["mcp:read"]));
+
+    expect(instructions).toContain("python3 -m zipfile -c package.afps");
+    expect(instructions).toContain("publish that archive with `publish_document`");
+    expect(instructions).not.toContain("publish_archive");
   });
 
   it("launches an agent run, then waits for the final result", async () => {

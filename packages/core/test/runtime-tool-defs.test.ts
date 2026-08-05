@@ -2,7 +2,6 @@
 
 import { describe, it, expect } from "bun:test";
 import {
-  buildPublishArchiveDef,
   buildPublishDocumentDef,
   buildRuntimeToolDefs,
   documentPublishedEvent,
@@ -192,47 +191,5 @@ describe("buildPublishDocumentDef", () => {
 
     expect(requests).toEqual([["outputs/notes.md", undefined]]);
     expect(eventsOf(result._meta)[0]?.presentation).toBeNull();
-  });
-});
-
-describe("buildPublishArchiveDef", () => {
-  const archiveDocument: PublishedDocument = {
-    id: "doc_archive",
-    uri: "document://doc_archive",
-    name: "package.afps",
-    mime: "application/zip",
-    size: 128,
-    sha256: "archive-sha",
-    presentation: null,
-  };
-
-  it("passes the explicit file list and emits document.published", async () => {
-    const requests: Array<[readonly string[], string | undefined, "primary" | undefined]> = [];
-    const def = buildPublishArchiveDef(async (paths, name, presentation) => {
-      requests.push([paths, name, presentation]);
-      return archiveDocument;
-    });
-
-    const result = await def.handler({
-      paths: ["manifest.json", "main.js"],
-      name: "package.afps",
-    });
-
-    expect(requests).toEqual([[["manifest.json", "main.js"], "package.afps", undefined]]);
-    expect(eventsOf(result._meta)).toEqual([
-      { ...documentPublishedEvent(archiveDocument), timestamp: expect.any(Number) },
-    ]);
-  });
-
-  it("rejects empty and duplicate file lists before publishing", async () => {
-    let calls = 0;
-    const def = buildPublishArchiveDef(async () => {
-      calls++;
-      return archiveDocument;
-    });
-
-    expect((await def.handler({ paths: [] })).isError).toBe(true);
-    expect((await def.handler({ paths: ["main.js", "main.js"] })).isError).toBe(true);
-    expect(calls).toBe(0);
   });
 });

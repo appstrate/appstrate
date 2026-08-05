@@ -12,16 +12,14 @@
  */
 
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
-import { mkdtemp, mkdir, readFile, writeFile, symlink, realpath } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile, symlink, realpath } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { sign, verify } from "@appstrate/afps-runtime/events";
 import { buildPublishDocumentDef } from "@appstrate/core/runtime-tool-defs";
 import { decodeFilenameHeader, sanitizeFilename } from "@appstrate/core/naming";
-import { unzipArtifact } from "@appstrate/core/zip";
 import {
-  createRunArchivePublisher,
   createRunDocumentUploader,
   sweepOutputs,
   summarizeArtifacts,
@@ -345,65 +343,6 @@ describe("createRunDocumentUploader", () => {
     await mkdir(path.join(workspace, "outputs"), { recursive: true });
     await expect(makeUploader(new Set())("outputs")).rejects.toThrow(/not a regular file/);
     expect(config.received).toHaveLength(0);
-  });
-});
-
-describe("createRunArchivePublisher", () => {
-  it("publishes a ZIP with canonical relative paths and removes the temporary file", async () => {
-    await mkdir(path.join(workspace, "package", "src"), { recursive: true });
-    await writeFile(path.join(workspace, "package", "manifest.json"), '{"type":"mcp-server"}');
-    await writeFile(path.join(workspace, "package", "src", "main.js"), "export default 1;");
-
-    let temporaryPath = "";
-    let uploadedBytes = new Uint8Array();
-    const publisher = createRunArchivePublisher({
-      workspace,
-      uploader: async (relPath, name, presentation) => {
-        temporaryPath = path.join(workspace, relPath);
-        uploadedBytes = new Uint8Array(await readFile(temporaryPath));
-        return {
-          id: "doc_archive",
-          uri: "document://doc_archive",
-          name: name ?? "archive.zip",
-          mime: "application/zip",
-          size: uploadedBytes.byteLength,
-          sha256: sha256Hex(uploadedBytes),
-          presentation: presentation ?? null,
-        };
-      },
-    });
-
-    const doc = await publisher(
-      ["package/src/../manifest.json", "package/src/main.js"],
-      "server.afps",
-      "primary",
-    );
-
-    expect(doc.name).toBe("server.afps");
-    expect(doc.presentation).toBe("primary");
-    expect(Object.keys(unzipArtifact(uploadedBytes))).toEqual([
-      "package/manifest.json",
-      "package/src/main.js",
-    ]);
-    await expect(readFile(temporaryPath)).rejects.toThrow();
-  });
-
-  it("refuses directories and archives above the configured source-byte limit", async () => {
-    await mkdir(path.join(workspace, "folder"), { recursive: true });
-    await writeFile(path.join(workspace, "large.bin"), new Uint8Array([1, 2, 3]));
-    let uploadCalls = 0;
-    const publisher = createRunArchivePublisher({
-      workspace,
-      maxArchiveBytes: 2,
-      uploader: async () => {
-        uploadCalls++;
-        throw new Error("must not upload");
-      },
-    });
-
-    await expect(publisher(["folder"])).rejects.toThrow(/not a regular file/);
-    await expect(publisher(["large.bin"])).rejects.toThrow(/sources exceed/);
-    expect(uploadCalls).toBe(0);
   });
 });
 

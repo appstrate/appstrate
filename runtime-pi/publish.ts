@@ -6,8 +6,6 @@
  * Two consumers share this module:
  *   - the `publish_document` runtime tool, which calls {@link createRunDocumentUploader}
  *     to upload a single workspace file the agent chose to publish; and
- *   - the `publish_archive` runtime tool, which calls {@link createRunArchivePublisher}
- *     to package an explicit file set before using that same uploader; and
  *   - the end-of-run {@link sweepOutputs} pass, which auto-publishes every file
  *     the agent wrote under `workspace/outputs/`.
  *
@@ -27,17 +25,9 @@ import { randomUUID } from "node:crypto";
 import { sign } from "@appstrate/afps-runtime/events";
 import { resolveWorkspaceFile } from "@appstrate/afps-runtime/resolvers";
 import { getErrorMessage } from "@appstrate/core/errors";
-import {
-  documentPublishedEvent,
-  PUBLISH_ARCHIVE_MAX_FILES,
-} from "@appstrate/core/runtime-tool-defs";
+import { documentPublishedEvent } from "@appstrate/core/runtime-tool-defs";
 import { encodeFilenameHeader, sanitizeFilename } from "@appstrate/core/naming";
-import { zipArtifact } from "@appstrate/core/zip";
-import type {
-  ArchivePublisher,
-  DocumentUploader,
-  PublishedDocument,
-} from "@appstrate/core/runtime-tool-defs";
+import type { DocumentUploader, PublishedDocument } from "@appstrate/core/runtime-tool-defs";
 import type { RunArtifactsSummary } from "@appstrate/afps-runtime/runner";
 
 /**
@@ -330,78 +320,6 @@ export function createRunDocumentUploader(deps: RunDocumentUploaderDeps): Docume
       "upload_failed",
       `upload of '${relPath}' failed after ${MAX_UPLOAD_ATTEMPTS} attempts — ${lastError}`,
     );
-  };
-}
-
-export interface RunArchivePublisherDeps {
-  /** Absolute workspace root that confines every source path and the temporary ZIP. */
-  workspace: string;
-  /** Existing run document uploader used for the final durable publication. */
-  uploader: DocumentUploader;
-  /** Maximum source total and final ZIP size; defaults to the platform's 100 MiB cap. */
-  maxArchiveBytes?: number;
-}
-
-const DEFAULT_MAX_ARCHIVE_BYTES = 100 * 1024 * 1024;
-
-/**
- * Build the `publish_archive` implementation. It accepts only an explicit list
- * of regular workspace files, preserves their canonical relative paths in a
- * deterministic ZIP, uploads through the normal document channel, and always
- * removes the temporary archive.
- */
-export function createRunArchivePublisher(deps: RunArchivePublisherDeps): ArchivePublisher {
-  const maxArchiveBytes = deps.maxArchiveBytes ?? DEFAULT_MAX_ARCHIVE_BYTES;
-
-  return async (paths, name, presentation) => {
-    if (paths.length === 0 || paths.length > PUBLISH_ARCHIVE_MAX_FILES) {
-      throw new Error(`archive must contain between 1 and ${PUBLISH_ARCHIVE_MAX_FILES} files`);
-    }
-
-    const workspaceRoot = await fs.realpath(deps.workspace);
-    const entries = Object.create(null) as Record<string, Uint8Array>;
-    let sourceBytes = 0;
-
-    for (const relPath of paths) {
-      const { absPath, stat } = await resolveWorkspaceFile(workspaceRoot, relPath);
-      if (!stat.isFile()) {
-        throw new Error(`'${relPath}' is not a regular file`);
-      }
-
-      // Reject from metadata before allocating the file. Keep the post-read
-      // accounting below as a race guard if the file grows between stat/read.
-      if (sourceBytes + stat.size > maxArchiveBytes) {
-        throw new Error(`archive sources exceed the ${maxArchiveBytes}-byte limit`);
-      }
-
-      const archivePath = path.relative(workspaceRoot, absPath).split(path.sep).join("/");
-      if (archivePath.length === 0 || archivePath.startsWith("../") || archivePath in entries) {
-        throw new Error(`duplicate or invalid archive path '${archivePath || relPath}'`);
-      }
-
-      const bytes = new Uint8Array(await fs.readFile(absPath));
-      sourceBytes += bytes.byteLength;
-      if (sourceBytes > maxArchiveBytes) {
-        throw new Error(`archive sources exceed the ${maxArchiveBytes}-byte limit`);
-      }
-      entries[archivePath] = bytes;
-    }
-
-    const archive = zipArtifact(entries, 6);
-    if (archive.byteLength > maxArchiveBytes) {
-      throw new Error(`archive exceeds the ${maxArchiveBytes}-byte upload limit`);
-    }
-
-    const requestedName = name?.trim() || "archive.zip";
-    const documentName = sanitizeFilename(requestedName) || "archive.zip";
-    const tempName = `.appstrate-archive-${randomUUID()}.zip`;
-    const tempPath = path.join(workspaceRoot, tempName);
-    await fs.writeFile(tempPath, archive, { flag: "wx" });
-    try {
-      return await deps.uploader(tempName, documentName, presentation);
-    } finally {
-      await fs.unlink(tempPath).catch(() => {});
-    }
   };
 }
 

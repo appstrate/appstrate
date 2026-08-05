@@ -4866,7 +4866,7 @@ export interface components {
             [key: string]: unknown;
         }) & {
             /** @description Appstrate top-level extension: runtime tools the agent may use. Optional. */
-            runtime_tools?: ("output" | "log" | "note" | "pin" | "publish_document" | "publish_archive")[];
+            runtime_tools?: ("output" | "log" | "note" | "pin" | "publish_document")[];
         };
         AgentSkillRef: {
             id: string;
@@ -5105,8 +5105,6 @@ export interface components {
         ModelGenerationCapabilities: {
             /** @enum {string} */
             temperature: "supported" | "unsupported" | "unknown";
-            /** @enum {string} */
-            temperatureWithReasoning: "supported" | "unsupported" | "unknown";
             reasoning: {
                 /** @enum {string} */
                 supported: "supported" | "unsupported" | "unknown";
@@ -13404,7 +13402,6 @@ export interface operations {
                      *           "modelId": "gpt-4o",
                      *           "generation": {
                      *             "temperature": "supported",
-                     *             "temperatureWithReasoning": "unknown",
                      *             "reasoning": {
                      *               "supported": "unsupported",
                      *               "adaptive": null,

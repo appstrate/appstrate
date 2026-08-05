@@ -150,7 +150,7 @@ function materializeInlineManifest(manifest: Record<string, unknown>): {
   if (!hasOwn("version")) defaults.version = "1.0.0";
   if (!hasOwn("dependencies")) defaults.dependencies = {};
   if (!hasOwn("runtime_tools")) {
-    defaults.runtime_tools = ["log", "output", "publish_document", "publish_archive"];
+    defaults.runtime_tools = ["log", "output", "publish_document"];
     if (!hasOwn("output")) {
       defaults.output = {
         schema: { type: "object", properties: {}, additionalProperties: true },

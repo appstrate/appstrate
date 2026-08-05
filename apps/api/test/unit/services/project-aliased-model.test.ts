@@ -70,7 +70,6 @@ describe("projectAliasedModel", () => {
     expect(out.cost).toBeNull();
     expect(out.generation).toEqual({
       temperature: "unsupported",
-      temperatureWithReasoning: "unsupported",
       reasoning: { supported: "unsupported", adaptive: null, levels: {} },
     });
 

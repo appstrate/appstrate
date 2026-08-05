@@ -13,7 +13,6 @@ describe("applyGenerationToProxyBody", () => {
         apiShape: "anthropic-messages",
         generation: {
           temperature: "supported",
-          temperatureWithReasoning: "unknown",
           reasoning: {
             supported: "supported",
             adaptive: true,

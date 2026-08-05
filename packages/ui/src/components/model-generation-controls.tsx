@@ -4,7 +4,6 @@ import { useId } from "react";
 import { CircleSlash2Icon } from "lucide-react";
 import {
   MODEL_REASONING_LEVELS,
-  requiresExplicitReasoningLevelSupport,
   type ModelGenerationCapabilities,
   type ModelGenerationSettings,
   type ModelReasoningLevel,
@@ -77,13 +76,9 @@ export function ModelGenerationControls({
 }: ModelGenerationControlsProps) {
   const id = useId();
   const temperatureUnsupported = capabilities?.temperature === "unsupported";
-  const explicitReasoningLevels = requiresExplicitReasoningLevelSupport(capabilities);
   const reasoningUnsupported =
     capabilities?.reasoning.supported === "unsupported" ||
-    (explicitReasoningLevels &&
-      !MODEL_REASONING_LEVELS.some(
-        (level) => capabilities?.reasoning.levels[level] === "supported",
-      ));
+    !MODEL_REASONING_LEVELS.some((level) => capabilities?.reasoning.levels[level] === "supported");
   const temperatureDisabled = disabled || temperatureUnsupported;
   const reasoningDisabled = disabled || reasoningUnsupported;
   const selectedTemperature =
@@ -203,10 +198,7 @@ export function ModelGenerationControls({
               <ToggleGroupItem
                 key={level}
                 value={level}
-                disabled={
-                  capabilities?.reasoning.levels[level] === "unsupported" ||
-                  (explicitReasoningLevels && capabilities?.reasoning.levels[level] !== "supported")
-                }
+                disabled={capabilities?.reasoning.levels[level] !== "supported"}
                 aria-label={labels.levels[level]}
                 title={labels.levels[level]}
                 className={cn(
