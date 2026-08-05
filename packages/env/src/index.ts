@@ -794,6 +794,22 @@ const envSchema = z
     // AUTH_BOOTSTRAP_ORG_NAME — display name of the bootstrap org. Defaults
     // to "Default" when unset. Slug is derived from the name.
     AUTH_BOOTSTRAP_ORG_NAME: z.string().default("Default"),
+    // AUTH_SESSION_COOKIE_CACHE_SECONDS — TTL of Better Auth's signed
+    // `session_data` cookie. `0` (the default) DISABLES the cookie cache, so
+    // every authenticated request reads the session from Postgres.
+    //
+    // Enabling it trades a DB read per request for a revocation DELAY: a
+    // session revoked (logout elsewhere, member removed, admin action) stays
+    // accepted until the cached copy expires, because the check that would
+    // notice is the DB read being skipped. That window is exactly this value,
+    // which is why it is expressed in seconds and why the default is off —
+    // the number IS the security exposure, and it must be chosen deliberately
+    // per deployment rather than inherited.
+    //
+    // Measured behavior of the whole matrix (login, expiry + regeneration,
+    // logout, cross-device revocation, freshness gate, realm guard):
+    // `apps/api/test/integration/auth/session-cookie-cache.test.ts`.
+    AUTH_SESSION_COOKIE_CACHE_SECONDS: z.coerce.number().int().min(0).default(0),
     // AUTH_BOOTSTRAP_TOKEN — one-shot redemption token for unattended
     // installs that didn't supply a named owner email (#344 Layer 2b).
     // The CLI generates a 256-bit token at install time, writes it into
