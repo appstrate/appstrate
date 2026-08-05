@@ -903,6 +903,65 @@
       "cacheRead": 0
     }
   },
+  "gemini-robotics-er-1.6-preview": {
+    "label": "Gemini Robotics Er 1.6 Preview",
+    "contextWindow": 131072,
+    "maxTokens": 65536,
+    "capabilities": [
+      "text",
+      "image"
+    ],
+    "generation": {
+      "temperature": "supported",
+      "reasoning": {
+        "supported": "unsupported",
+        "adaptive": null,
+        "levels": {
+          "off": "unsupported",
+          "minimal": "unsupported",
+          "low": "unsupported",
+          "medium": "unsupported",
+          "high": "unsupported",
+          "xhigh": "unsupported",
+          "max": "unsupported"
+        }
+      }
+    },
+    "cost": {
+      "input": 1,
+      "output": 5
+    }
+  },
+  "gemini-robotics-er-2-preview": {
+    "label": "Gemini Robotics Er 2 Preview",
+    "contextWindow": 131072,
+    "maxTokens": 65536,
+    "capabilities": [
+      "text",
+      "image"
+    ],
+    "generation": {
+      "temperature": "supported",
+      "reasoning": {
+        "supported": "unsupported",
+        "adaptive": null,
+        "levels": {
+          "off": "unsupported",
+          "minimal": "unsupported",
+          "low": "unsupported",
+          "medium": "unsupported",
+          "high": "unsupported",
+          "xhigh": "unsupported",
+          "max": "unsupported"
+        }
+      }
+    },
+    "cost": {
+      "input": 2,
+      "output": 10,
+      "cacheRead": 0.2
+    }
+  },
   "gemma-3-27b-it": {
     "label": "Gemma 3 27b It",
     "contextWindow": 131072,
