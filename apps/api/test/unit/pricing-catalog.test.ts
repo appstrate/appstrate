@@ -21,6 +21,9 @@ import {
   lookupCatalogModel,
 } from "../../src/services/pricing-catalog.ts";
 
+const dataDir = join(dirname(dirname(import.meta.dir)), "src/data/pricing");
+const catalogFiles = readdirSync(dataDir).filter((file) => file.endsWith(".json"));
+
 describe("lookupCatalogModel", () => {
   it("returns null for an unknown providerId", () => {
     expect(lookupCatalogModel("not-a-real-provider", "anything")).toBeNull();
@@ -111,14 +114,11 @@ describe("vendored catalog invariant — maxTokens < contextWindow", () => {
   // LiteLLM (devstral, kimi-k2.5, … — known upstream bug). This test pins
   // the on-disk data so a future bad refresh can't reintroduce a cap that
   // crashes the sidecar / pins the compaction threshold at zero.
-  const dataDir = join(dirname(dirname(import.meta.dir)), "src/data/pricing");
-  const files = readdirSync(dataDir).filter((f) => f.endsWith(".json"));
-
   it("vendors at least the 12 known provider files", () => {
-    expect(files.length).toBeGreaterThanOrEqual(12);
+    expect(catalogFiles.length).toBeGreaterThanOrEqual(12);
   });
 
-  for (const file of files) {
+  for (const file of catalogFiles) {
     it(`${file}: every maxTokens is null or strictly below contextWindow`, () => {
       const entries = JSON.parse(readFileSync(join(dataDir, file), "utf8")) as Record<
         string,
@@ -135,4 +135,92 @@ describe("vendored catalog invariant — maxTokens < contextWindow", () => {
       expect(violations).toEqual([]);
     });
   }
+});
+
+describe("vendored catalog invariant — configurable reasoning has a supported effort", () => {
+  it("never advertises reasoning when LiteLLM rejects every active effort", () => {
+    const violations = catalogFiles.flatMap((file) => {
+      const entries = JSON.parse(readFileSync(join(dataDir, file), "utf8")) as Record<
+        string,
+        {
+          generation?: {
+            reasoning?: { supported?: string; levels?: Record<string, string> };
+          };
+        }
+      >;
+      return Object.entries(entries)
+        .filter(([, entry]) => {
+          const reasoning = entry.generation?.reasoning;
+          if (reasoning?.supported !== "supported") return false;
+          return !Object.entries(reasoning.levels ?? {}).some(
+            ([level, support]) => level !== "off" && support === "supported",
+          );
+        })
+        .map(([modelId]) => `${file}:${modelId}`);
+    });
+
+    expect(violations).toEqual([]);
+  });
+});
+
+describe("vendored catalog invariant — sparse reasoning levels", () => {
+  it("omits unknown level facts", () => {
+    const violations = catalogFiles.flatMap((file) => {
+      const entries = JSON.parse(readFileSync(join(dataDir, file), "utf8")) as Record<
+        string,
+        { generation?: { reasoning?: { levels?: Record<string, string> } } }
+      >;
+
+      return Object.entries(entries).flatMap(([modelId, entry]) =>
+        Object.entries(entry.generation?.reasoning?.levels ?? {})
+          .filter(([, support]) => support === "unknown")
+          .map(([level]) => `${file}:${modelId}:${level}`),
+      );
+    });
+
+    expect(violations).toEqual([]);
+  });
+});
+
+describe("vendored catalog invariant — sparse temperature compatibility", () => {
+  it("serializes only conclusive pair facts for individually usable controls", () => {
+    const pairFacts = catalogFiles.flatMap((file) => {
+      const entries = JSON.parse(readFileSync(join(dataDir, file), "utf8")) as Record<
+        string,
+        {
+          generation?: {
+            temperature?: string;
+            reasoning?: {
+              supported?: string;
+              temperatureCompatible?: string;
+            };
+          };
+        }
+      >;
+
+      return Object.entries(entries).flatMap(([modelId, entry]) => {
+        const generation = entry.generation;
+        const compatibility = generation?.reasoning?.temperatureCompatible;
+        return compatibility === undefined ? [] : [{ file, modelId, generation, compatibility }];
+      });
+    });
+
+    expect(pairFacts.length).toBeGreaterThan(0);
+    expect(
+      pairFacts
+        .filter(
+          ({ generation, compatibility }) =>
+            generation?.temperature !== "supported" ||
+            generation.reasoning?.supported !== "supported" ||
+            !["supported", "unsupported"].includes(compatibility),
+        )
+        .map(({ file, modelId }) => `${file}:${modelId}`),
+    ).toEqual([]);
+  });
+
+  it("keeps the known OpenAI incompatibility guard", () => {
+    expect(
+      lookupCatalogModel("openai", "gpt-5.1")?.generation?.reasoning.temperatureCompatible,
+    ).toBe("unsupported");
+  });
 });

@@ -28,7 +28,7 @@ import {
   loadPiCodingAgentSdk,
   derivePiCompactionSettings,
   deriveProviderFromApi,
-  preserveRequestedThinkingLevel,
+  prepareRequestedThinkingLevel,
   type Api,
   type Model,
 } from "@appstrate/runner-pi";
@@ -177,10 +177,12 @@ export function runPiSubscriptionChat(input: PiSubscriptionChatInput): Response 
           contextWindow: model.contextWindow ?? undefined,
           maxTokens: model.maxTokens ?? undefined,
         } as Model<Api>;
-        const sessionModel = preserveRequestedThinkingLevel(
-          piModel,
-          input.generation.reasoningLevel ?? "medium",
-        );
+        const requestedThinkingLevel = input.generation.reasoningLevel ?? "medium";
+        const {
+          model: sessionModel,
+          thinkingLevel,
+          thinkingBudgets,
+        } = prepareRequestedThinkingLevel(piModel, requestedThinkingLevel);
 
         // Real subscription token in-memory only — pi-ai emits the OAuth request
         // shape from it natively (never persisted, never sent to the client).
@@ -223,13 +225,14 @@ export function runPiSubscriptionChat(input: PiSubscriptionChatInput): Response 
           cwd: "/tmp",
           agentDir: "/tmp/pi-chat",
           model: sessionModel,
-          thinkingLevel: input.generation.reasoningLevel ?? "medium",
+          thinkingLevel,
           authStorage,
           modelRegistry,
           resourceLoader,
           sessionManager: SessionManager.inMemory(),
           settingsManager: SettingsManager.inMemory({
             compaction: derivePiCompactionSettings(piModel).compaction,
+            thinkingBudgets,
             // ONE retry: chat is interactive — a user watches blank "thinking"
             // dots for the whole retry window. One retry absorbs transient
             // blips; anything sturdier (quota 429s, auth failures) fails the

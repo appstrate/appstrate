@@ -26,7 +26,8 @@
  *     mid-quarter price drops can't silently change historical cost
  *     attribution.
  *
- * Refresh: `bun run scripts/refresh-pricing-catalog.ts --apply`.
+ * Refresh: run `scripts/refresh-pricing-catalog.ts --apply` with
+ * `LITELLM_CATALOG_PATH` pointing at the pinned exporter artifact.
  *
  * The lookup is keyed on **providerId** (not `apiShape`): cerebras,
  * groq, and xai all share `openai-completions` apiShape with different

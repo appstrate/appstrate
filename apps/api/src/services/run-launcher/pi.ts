@@ -48,6 +48,7 @@ import { runWithSpan, currentTraceparent, recordContainerSpawn } from "@appstrat
 import { getEnv } from "@appstrate/env";
 import { getModelProvider } from "../model-providers/registry.ts";
 import type { LlmProxyConfig, SidecarLaunchSpec } from "@appstrate/core/sidecar-types";
+import { toNativeModelReasoningLevel } from "@appstrate/core/model-generation";
 
 /**
  * Grace added to the platform's container watchdog on top of the agent's
@@ -228,8 +229,22 @@ async function runPlatformContainerImpl(
     // Model-alias swap descriptor (LLM-gateway alias pattern). The container is
     // handed the public alias as MODEL_ID (below); the sidecar swaps it for the
     // real upstream id on every call. The real id never enters the container.
+    const requestedReasoningLevel = plan.generationConfig?.reasoningLevel ?? "medium";
+    const nativeReasoningLevel = toNativeModelReasoningLevel(
+      requestedReasoningLevel,
+      llmConfig.generation,
+    );
     const modelSwap = llmConfig.aliased
-      ? { alias: llmConfig.aliasId, real: llmConfig.modelId }
+      ? {
+          alias: llmConfig.aliasId,
+          real: llmConfig.modelId,
+          ...(llmConfig.apiShape === "anthropic-messages" &&
+          llmConfig.generation?.reasoning.adaptive === true &&
+          requestedReasoningLevel !== "off" &&
+          nativeReasoningLevel !== "none"
+            ? { anthropicAdaptiveReasoning: { effort: nativeReasoningLevel } }
+            : {}),
+        }
       : undefined;
 
     let sidecarLlm: LlmProxyConfig | undefined;

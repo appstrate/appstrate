@@ -49,6 +49,7 @@ import type {
   ModelProviderHooks,
 } from "@appstrate/core/module";
 import { validateOfflineExpiry } from "@appstrate/core/module";
+import { ANTHROPIC_GENERATION_CAPABILITIES_OVERRIDE } from "@appstrate/core/model-generation";
 import { ANTHROPIC_OAUTH_PLACEHOLDER_API_KEY } from "@appstrate/core/oauth-bearer-swap";
 
 const claudeCodeHooks: ModelProviderHooks = {
@@ -123,6 +124,9 @@ const claudeCodeProvider: ModelProviderDefinition = {
   // Claude Code (Claude Pro/Max/Team subscription) authenticates against
   // the Anthropic catalog — metadata flows through anthropic.json.
   catalogProviderId: "anthropic",
+  // Keep LiteLLM's portable support facts, then apply Anthropic wire-level
+  // constraints shared with the API-key provider.
+  generationOverride: ANTHROPIC_GENERATION_CAPABILITIES_OVERRIDE,
   // Both lists are DERIVED from the vendored anthropic catalog rather than
   // hand-enumerated. The Claude subscription serves Anthropic's current
   // generation — it has no published, machine-readable model list, and

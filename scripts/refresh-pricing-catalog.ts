@@ -15,6 +15,7 @@
  *     "contextWindow": 200000,
  *     "maxTokens": 64000,
  *     "capabilities": ["text","image","reasoning"],
+ *     "generation": { "temperature": "supported", "reasoning": { … } },
  *     "cost": { "input": 1.0, "output": 5.0, "cacheRead": 0.1, "cacheWrite": 1.25 }
  *   }
  *
@@ -25,13 +26,15 @@
  *     branch on upstream schema drift — that risk is contained here.
  *
  * Two modes:
- *   - **dry run** (default): downloads, diffs against the local files,
- *     prints a summary, exits 1 on drift. CI weekly workflow consumes this.
- *   - **apply** (`--apply`): writes the new content.
+ *   - **dry run** (default): diffs a normalized exporter artifact against the
+ *     local files, prints a summary, exits 1 on drift.
+ *   - **apply** (`--apply`): writes the new content from a normalized exporter artifact.
  *
  * Usage:
- *   bun scripts/refresh-pricing-catalog.ts          # dry run
- *   bun scripts/refresh-pricing-catalog.ts --apply  # write to disk
+ *   LITELLM_CATALOG_PATH=/path/to/export.json \
+ *     bun scripts/refresh-pricing-catalog.ts         # dry run
+ *   LITELLM_CATALOG_PATH=/path/to/export.json \
+ *     bun scripts/refresh-pricing-catalog.ts --apply
  */
 
 import { resolve } from "node:path";
@@ -39,13 +42,13 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import type {
   ModelCapabilitySupport,
   ModelGenerationCapabilities,
+  ModelNativeReasoningLevel,
   ModelReasoningLevel,
 } from "@appstrate/core/model-generation";
 
-const UPSTREAM_URL =
-  "https://raw.githubusercontent.com/BerriAI/litellm/main/litellm/model_prices_and_context_window_backup.json";
 const REPO_ROOT = new URL("..", import.meta.url).pathname;
 const DATA_DIR = resolve(REPO_ROOT, "apps/api/src/data/pricing");
+const LITELLM_LOCK_PATH = resolve(REPO_ROOT, "scripts/litellm-catalog.lock.json");
 
 /**
  * LiteLLM `litellm_provider` slug → our vendored-file basename.
@@ -165,16 +168,85 @@ interface LiteLLMEntry {
   cache_read_input_token_cost?: number;
   cache_creation_input_token_cost?: number;
   supports_vision?: boolean;
-  supports_reasoning?: boolean;
-  supports_sampling_params?: boolean;
-  supports_none_reasoning_effort?: boolean;
-  supports_minimal_reasoning_effort?: boolean;
-  supports_low_reasoning_effort?: boolean;
-  supports_xhigh_reasoning_effort?: boolean;
-  supports_max_reasoning_effort?: boolean;
-  supports_adaptive_thinking?: boolean;
-  /** Added by the isolated pinned-LiteLLM exporter, never by the raw fallback. */
-  _appstrate_supported_openai_params?: string[];
+  /** Effective value-level contract computed by the pinned LiteLLM adapters. */
+  _appstrate_generation?: {
+    temperature: ModelCapabilitySupport;
+    reasoning: {
+      supported: ModelCapabilitySupport;
+      temperatureCompatible?: ModelCapabilitySupport;
+      adaptive: boolean | null;
+      levels: Partial<Record<ModelNativeReasoningLevel, ModelCapabilitySupport>>;
+    };
+  };
+}
+
+const NATIVE_REASONING_LEVELS: readonly ModelNativeReasoningLevel[] = [
+  "none",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+];
+const CAPABILITY_SUPPORT_VALUES: readonly ModelCapabilitySupport[] = [
+  "supported",
+  "unsupported",
+  "unknown",
+];
+
+/** Fail closed when a pinned exporter artifact lacks its normalized contract. */
+function assertNormalizedGenerationCatalog(data: Record<string, LiteLLMEntry>): void {
+  const vendoredProviders = new Set(Object.keys(LITELLM_TO_OURS));
+  const isSupport = (value: unknown): value is ModelCapabilitySupport =>
+    CAPABILITY_SUPPORT_VALUES.includes(value as ModelCapabilitySupport);
+  let vendoredChatEntries = 0;
+
+  for (const [modelId, entry] of Object.entries(data)) {
+    if (entry.mode !== "chat" || !vendoredProviders.has(entry.litellm_provider ?? "")) continue;
+    vendoredChatEntries += 1;
+
+    const generation = entry._appstrate_generation;
+    const levels = generation?.reasoning?.levels;
+    const validLevels =
+      levels != null &&
+      Object.keys(levels).length === NATIVE_REASONING_LEVELS.length &&
+      NATIVE_REASONING_LEVELS.every((level) => isSupport(levels[level]));
+    const valid =
+      generation != null &&
+      isSupport(generation.temperature) &&
+      isSupport(generation.reasoning?.supported) &&
+      (generation.reasoning?.temperatureCompatible === undefined ||
+        isSupport(generation.reasoning.temperatureCompatible)) &&
+      (generation.reasoning?.adaptive === null ||
+        typeof generation.reasoning?.adaptive === "boolean") &&
+      validLevels;
+
+    if (!valid) {
+      throw new Error(
+        `LiteLLM model ${modelId} has an invalid or missing _appstrate_generation contract`,
+      );
+    }
+  }
+
+  if (vendoredChatEntries === 0) {
+    throw new Error("LiteLLM artifact contains no vendored chat entries");
+  }
+}
+
+/** Verify that the artifact is the exact normalized output recorded by the lock. */
+function assertNormalizedCatalogDigest(serialized: string, expectedDigest: unknown): void {
+  if (typeof expectedDigest !== "string" || !/^sha256:[0-9a-f]{64}$/.test(expectedDigest)) {
+    throw new Error("LiteLLM lock is missing a valid normalizedDigest");
+  }
+  const hasher = new Bun.CryptoHasher("sha256");
+  hasher.update(serialized);
+  const actualDigest = `sha256:${hasher.digest("hex")}`;
+  if (actualDigest !== expectedDigest) {
+    throw new Error(
+      `LiteLLM normalized artifact digest mismatch: expected ${expectedDigest}, got ${actualDigest}`,
+    );
+  }
 }
 
 interface Summary {
@@ -329,80 +401,32 @@ function deriveLabel(id: string): string {
     .join(" ");
 }
 
-function support(value: boolean | undefined): ModelCapabilitySupport {
-  return value === true ? "supported" : value === false ? "unsupported" : "unknown";
-}
+function projectGenerationCapabilities(entry: LiteLLMEntry): ModelGenerationCapabilities {
+  const exported = entry._appstrate_generation;
+  if (!exported) {
+    throw new Error("LiteLLM entry is missing its normalized generation contract");
+  }
 
-function supportEither(a: boolean | undefined, b: boolean | undefined): ModelCapabilitySupport {
-  if (a === true || b === true) return "supported";
-  if (a === false || b === false) return "unsupported";
-  return "unknown";
-}
-
-function deriveGenerationCapabilities(entry: LiteLLMEntry): ModelGenerationCapabilities {
-  const supportedParams = entry._appstrate_supported_openai_params;
-  const hasSupportedReasoningLevel = [
-    entry.supports_none_reasoning_effort,
-    entry.supports_minimal_reasoning_effort,
-    entry.supports_low_reasoning_effort,
-    entry.supports_xhigh_reasoning_effort,
-    entry.supports_max_reasoning_effort,
-  ].some((value) => value === true);
-  const temperature =
-    entry.supports_sampling_params === false
-      ? "unsupported"
-      : supportedParams
-        ? supportedParams.includes("temperature")
-          ? "supported"
-          : "unsupported"
-        : "unknown";
-  const reasoning: ModelCapabilitySupport =
-    entry.supports_reasoning === false
-      ? "unsupported"
-      : entry.supports_reasoning === true ||
-          hasSupportedReasoningLevel ||
-          supportedParams?.includes("reasoning_effort") === true ||
-          supportedParams?.includes("thinking") === true
-        ? "supported"
-        : "unknown";
-  const levels: Partial<Record<ModelReasoningLevel, ModelCapabilitySupport>> = {
-    off: support(entry.supports_none_reasoning_effort),
-    minimal: support(entry.supports_minimal_reasoning_effort),
-    // A general `supports_reasoning` fact confirms the control, not each
-    // individual effort value. Keep unreported levels unknown rather than
-    // inventing provider support that can turn into a 400 at inference time.
-    low: support(entry.supports_low_reasoning_effort),
-    medium: "unknown",
-    high: "unknown",
-    // Pi exposes one portable top level (`xhigh`). LiteLLM calls that level
-    // either xhigh or max depending on the provider adapter.
-    xhigh: supportEither(
-      entry.supports_xhigh_reasoning_effort,
-      entry.supports_max_reasoning_effort,
-    ),
-  };
-  const nativeLevels =
-    levels.xhigh === "supported"
-      ? {
-          xhigh:
-            entry.litellm_provider === "anthropic" && entry.supports_max_reasoning_effort === true
-              ? ("max" as const)
-              : entry.supports_xhigh_reasoning_effort === true
-                ? ("xhigh" as const)
-                : ("max" as const),
-        }
-      : undefined;
+  // The normalized artifact remains exhaustive for validation and review. The
+  // runtime projection is sparse: omission already means "not confirmed", so
+  // persisting thousands of explicit `unknown` values only creates catalog
+  // churn without changing resolution or UI behaviour.
+  const levels: Partial<Record<ModelReasoningLevel, ModelCapabilitySupport>> = {};
+  for (const nativeLevel of NATIVE_REASONING_LEVELS) {
+    const capability = exported.reasoning.levels[nativeLevel];
+    if (capability === "unknown" || capability === undefined) continue;
+    levels[nativeLevel === "none" ? "off" : nativeLevel] = capability;
+  }
 
   return {
-    temperature,
+    temperature: exported.temperature,
     reasoning: {
-      supported: reasoning,
-      adaptive:
-        typeof entry.supports_adaptive_thinking === "boolean"
-          ? entry.supports_adaptive_thinking
-          : null,
+      supported: exported.reasoning.supported,
+      ...(exported.reasoning.temperatureCompatible !== undefined
+        ? { temperatureCompatible: exported.reasoning.temperatureCompatible }
+        : {}),
+      adaptive: exported.reasoning.adaptive,
       levels,
-      ...(nativeLevels ? { nativeLevels } : {}),
     },
   };
 }
@@ -420,7 +444,7 @@ function projectEntry(id: string, entry: LiteLLMEntry): CompactEntry | null {
   ) {
     return null;
   }
-  const generation = deriveGenerationCapabilities(entry);
+  const generation = projectGenerationCapabilities(entry);
   const caps: string[] = ["text"];
   if (entry.supports_vision) caps.push("image");
   if (generation.reasoning.supported === "supported") caps.push("reasoning");
@@ -583,18 +607,18 @@ function buildFeatured(
   return ranked.filter((id) => !excluded.has(id)).slice(0, FEATURED_COUNT);
 }
 
-async function fetchUpstream(): Promise<Record<string, LiteLLMEntry>> {
+function readNormalizedCatalog(): Record<string, LiteLLMEntry> {
   const artifactPath = process.env.LITELLM_CATALOG_PATH;
-  const data = artifactPath
-    ? (JSON.parse(readFileSync(artifactPath, "utf8")) as Record<string, LiteLLMEntry>)
-    : await (async () => {
-        const res = await fetch(UPSTREAM_URL);
-        if (!res.ok) throw new Error(`fetch ${UPSTREAM_URL} → HTTP ${res.status}`);
-        process.stderr.write(
-          "WARNING: using the unpinned raw LiteLLM fallback; CI uses the pinned exporter artifact\n",
-        );
-        return (await res.json()) as Record<string, LiteLLMEntry>;
-      })();
+  if (!artifactPath) {
+    throw new Error("LITELLM_CATALOG_PATH is required; use the pinned LiteLLM exporter artifact");
+  }
+  const artifactContents = readFileSync(artifactPath, "utf8");
+  const data = JSON.parse(artifactContents) as Record<string, LiteLLMEntry>;
+  const lock = JSON.parse(readFileSync(LITELLM_LOCK_PATH, "utf8")) as {
+    normalizedDigest?: unknown;
+  };
+  assertNormalizedCatalogDigest(artifactContents, lock.normalizedDigest);
+  assertNormalizedGenerationCatalog(data);
   // Remove LiteLLM's `sample_spec` synthetic top-level entry — it documents
   // the schema, not a real model.
   delete data.sample_spec;
@@ -665,7 +689,8 @@ async function main(): Promise<void> {
     mkdirSync(DATA_DIR, { recursive: true });
   }
 
-  const [upstream, modelsDev] = await Promise.all([fetchUpstream(), fetchModelsDev()]);
+  const upstream = readNormalizedCatalog();
+  const modelsDev = await fetchModelsDev();
   const summaries: Summary[] = [];
   const snapshots: Record<string, Record<string, CompactEntry>> = {};
   const coverageRows: CoverageRow[] = [];
@@ -822,10 +847,12 @@ if (import.meta.main) {
 
 export {
   aliasedBackings,
+  assertNormalizedCatalogDigest,
+  assertNormalizedGenerationCatalog,
   buildFeatured,
   countCacheRates,
   coverageRow,
-  deriveGenerationCapabilities,
+  projectGenerationCapabilities,
   formatCoverageSummary,
   projectEntry,
 };

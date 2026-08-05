@@ -19,7 +19,7 @@
 // --- cheap value (pi-ai, ~40ms) ---
 // Used synchronously at tool-registration time to build parameter schemas,
 // so it stays a static export.
-export { Type } from "@mariozechner/pi-ai";
+export { streamSimple, Type } from "@mariozechner/pi-ai";
 
 // --- types (erased at runtime) ---
 export type { AuthStorage, ExtensionAPI, ExtensionFactory } from "@mariozechner/pi-coding-agent";

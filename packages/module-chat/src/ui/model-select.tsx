@@ -17,7 +17,10 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@appstrate/ui/componen
 import type { OrgModelOption } from "./models-data.ts";
 import { isModelLive } from "../model-liveness.ts";
 import { useChatHost } from "./runtime-context.ts";
-import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
+import {
+  mapModelReasoningLevels,
+  type ModelGenerationSettings,
+} from "@appstrate/core/model-generation";
 
 /** Group/button label for a managed model — provider-neutral, binding not exposed. */
 const MANAGED_LABEL = "Géré";
@@ -182,22 +185,10 @@ export function ModelSelect({
                       inheritShort: t("generation.inheritShort"),
                       unsupported: t("generation.unsupported"),
                       unsupportedShort: t("generation.unsupportedShort"),
-                      levels: {
-                        off: t("generation.level.off"),
-                        minimal: t("generation.level.minimal"),
-                        low: t("generation.level.low"),
-                        medium: t("generation.level.medium"),
-                        high: t("generation.level.high"),
-                        xhigh: t("generation.level.xhigh"),
-                      },
-                      shortLevels: {
-                        off: t("generation.levelShort.off"),
-                        minimal: t("generation.levelShort.minimal"),
-                        low: t("generation.levelShort.low"),
-                        medium: t("generation.levelShort.medium"),
-                        high: t("generation.levelShort.high"),
-                        xhigh: t("generation.levelShort.xhigh"),
-                      },
+                      levels: mapModelReasoningLevels((level) => t(`generation.level.${level}`)),
+                      shortLevels: mapModelReasoningLevels((level) =>
+                        t(`generation.levelShort.${level}`),
+                      ),
                     }}
                   />
                 )}

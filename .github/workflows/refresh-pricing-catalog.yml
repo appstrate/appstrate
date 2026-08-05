@@ -97,8 +97,17 @@ jobs:
             "$image" /exporter.py /catalog.json > "$output"
 
           jq --exit-status 'type == "object" and length > 0' "$output" >/dev/null
+          normalized_digest="sha256:$(sha256sum "$output" | cut -d ' ' -f 1)"
+          jq \
+            --arg normalized_digest "$normalized_digest" \
+            '.normalizedDigest = $normalized_digest' \
+            "${output_dir}/litellm-catalog.lock.json" \
+            > "${output_dir}/litellm-catalog.lock.tmp.json"
+          mv \
+            "${output_dir}/litellm-catalog.lock.tmp.json" \
+            "${output_dir}/litellm-catalog.lock.json"
 
-          echo "Exported LiteLLM ${version} (${digest}) catalog ${catalog_commit} (${catalog_digest})"
+          echo "Exported LiteLLM ${version} (${digest}) catalog ${catalog_commit} (${catalog_digest}), normalized ${normalized_digest}"
 
       - name: Upload normalized LiteLLM source
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -196,7 +205,8 @@ jobs:
           latest stable GitHub release. The exact catalog commit, file digest,
           release tag and immutable OCI image digest are recorded in
           `scripts/litellm-catalog.lock.json`; the isolated exporter asks LiteLLM
-          which OpenAI-compatible request parameters each model supports.
+          to normalize request-parameter support, reasoning-effort values and
+          temperature/reasoning combinations for each model.
 
           Two generated trees, two different consequences:
           - `apps/api/src/data/pricing/*.json` — prices + model metadata, read at

@@ -3,12 +3,44 @@
 
 import { z } from "zod";
 
-/** Portable reasoning vocabulary understood by the Appstrate Pi runtime. */
-export const MODEL_REASONING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
+/** Portable reasoning vocabulary exposed by LiteLLM and accepted by Appstrate. */
+export const MODEL_REASONING_LEVELS = [
+  "off",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+] as const;
 
 export const modelReasoningLevelSchema = z.enum(MODEL_REASONING_LEVELS);
 
 export type ModelReasoningLevel = z.infer<typeof modelReasoningLevelSchema>;
+
+const ANTHROPIC_REASONING_BUDGET_TOKENS = {
+  minimal: 1024,
+  low: 2048,
+  medium: 4096,
+  high: 8192,
+  xhigh: 16384,
+  max: 32768,
+} satisfies Record<Exclude<ModelReasoningLevel, "off">, number>;
+
+/** Translate portable effort to Anthropic's classic token-budget transport. */
+export function anthropicReasoningBudgetTokens(level: Exclude<ModelReasoningLevel, "off">): number {
+  return ANTHROPIC_REASONING_BUDGET_TOKENS[level];
+}
+
+/** Map every portable reasoning level without duplicating the vocabulary. */
+export function mapModelReasoningLevels<T>(
+  map: (level: ModelReasoningLevel) => T,
+): Record<ModelReasoningLevel, T> {
+  return Object.fromEntries(MODEL_REASONING_LEVELS.map((level) => [level, map(level)])) as Record<
+    ModelReasoningLevel,
+    T
+  >;
+}
 
 export const modelNativeReasoningLevelSchema = z.enum([
   "none",
@@ -44,6 +76,7 @@ export const modelGenerationCapabilitiesSchema = z
     reasoning: z
       .object({
         supported: modelCapabilitySupportSchema.default("unknown"),
+        temperatureCompatible: modelCapabilitySupportSchema.optional(),
         adaptive: z.boolean().nullable().default(null),
         levels: z
           .partialRecord(modelReasoningLevelSchema, modelCapabilitySupportSchema)
@@ -63,21 +96,24 @@ export interface ModelGenerationCapabilitiesOverride {
   temperature?: ModelCapabilitySupport;
   reasoning?: {
     supported?: ModelCapabilitySupport;
+    temperatureCompatible?: ModelCapabilitySupport;
     adaptive?: boolean | null;
     levels?: Partial<Record<ModelReasoningLevel, ModelCapabilitySupport>>;
     nativeLevels?: Partial<Record<ModelReasoningLevel, ModelNativeReasoningLevel>>;
   };
 }
 
+/** Shared Anthropic wire constraints for API-key and Claude Code transports. */
+export const ANTHROPIC_GENERATION_CAPABILITIES_OVERRIDE = {
+  reasoning: {
+    temperatureCompatible: "unsupported",
+    nativeLevels: { minimal: "low" },
+  },
+} satisfies ModelGenerationCapabilitiesOverride;
+
 export const UNKNOWN_MODEL_GENERATION_CAPABILITIES: ModelGenerationCapabilities = {
   temperature: "unknown",
   reasoning: { supported: "unknown", adaptive: null, levels: {} },
-};
-
-/** Public alias contract: provider-specific generation controls stay inherited. */
-export const INHERITED_MODEL_GENERATION_CAPABILITIES: ModelGenerationCapabilities = {
-  temperature: "unsupported",
-  reasoning: { supported: "unsupported", adaptive: null, levels: {} },
 };
 
 /** Merge a provider adapter's stricter transport facts over catalog metadata. */
@@ -90,10 +126,13 @@ export function applyModelGenerationCapabilitiesOverride(
     ...capabilities.reasoning.nativeLevels,
     ...override.reasoning?.nativeLevels,
   };
+  const temperatureCompatible =
+    override.reasoning?.temperatureCompatible ?? capabilities.reasoning.temperatureCompatible;
   return {
     temperature: override.temperature ?? capabilities.temperature,
     reasoning: {
       supported: override.reasoning?.supported ?? capabilities.reasoning.supported,
+      ...(temperatureCompatible !== undefined ? { temperatureCompatible } : {}),
       adaptive:
         override.reasoning?.adaptive !== undefined
           ? override.reasoning.adaptive
@@ -131,11 +170,25 @@ export function reconcileModelGenerationSettings(
     next = rest;
   }
 
+  if (
+    next.temperature != null &&
+    next.reasoningLevel != null &&
+    next.reasoningLevel !== "off" &&
+    capabilities?.reasoning.temperatureCompatible === "unsupported"
+  ) {
+    const { temperature: _temperature, ...rest } = next;
+    void _temperature;
+    next = rest;
+  }
+
   return next;
 }
 
 export type ModelGenerationErrorCode =
-  "temperature_unsupported" | "reasoning_unsupported" | "reasoning_level_unsupported";
+  | "temperature_unsupported"
+  | "reasoning_unsupported"
+  | "reasoning_level_unsupported"
+  | "temperature_with_reasoning_unsupported";
 
 export class ModelGenerationError extends Error {
   readonly code: ModelGenerationErrorCode;
@@ -198,6 +251,18 @@ export function resolveModelGenerationSettings({
     throw new ModelGenerationError(
       "reasoning_level_unsupported",
       `The selected model does not support reasoning level '${reasoningLevel}'`,
+    );
+  }
+
+  if (
+    temperature !== undefined &&
+    reasoningLevel !== undefined &&
+    reasoningLevel !== "off" &&
+    parsedCapabilities.reasoning.temperatureCompatible === "unsupported"
+  ) {
+    throw new ModelGenerationError(
+      "temperature_with_reasoning_unsupported",
+      "The selected model cannot combine a custom temperature with reasoning",
     );
   }
 

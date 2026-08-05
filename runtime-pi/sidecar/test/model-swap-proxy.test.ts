@@ -60,6 +60,41 @@ describe("/llm/* model-alias swap (api_key)", () => {
     expect(JSON.parse(forwarded).model).toBe("deepseek-chat");
   });
 
+  it("forwards an adaptive Anthropic payload for an aliased adaptive model", async () => {
+    let forwarded = "";
+    const fetchFn = mock(async (_url: string, init?: RequestInit) => {
+      forwarded = await readBody(init);
+      return new Response('{"model":"claude-sonnet-4-6","content":[]}', {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }) as unknown as typeof fetch;
+    const deps = makeDeps(fetchFn);
+    if (deps.config.llm?.authMode !== "api_key") throw new Error("expected api_key llm");
+    deps.config.llm.modelSwap = {
+      alias: "appstrate-adaptive",
+      real: "claude-sonnet-4-6",
+      anthropicAdaptiveReasoning: { effort: "max" },
+    };
+
+    const app = createApp(deps);
+    await app.request("/llm/v1/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "appstrate-adaptive",
+        thinking: { type: "enabled", budget_tokens: 32_768, display: "summarized" },
+      }),
+    });
+
+    expect(JSON.parse(forwarded)).toMatchObject({
+      model: "claude-sonnet-4-6",
+      thinking: { type: "adaptive", display: "summarized" },
+      output_config: { effort: "max" },
+    });
+    expect(forwarded).not.toContain("budget_tokens");
+  });
+
   it("rewrites the non-stream response model real→alias", async () => {
     const fetchFn = mock(
       async () =>

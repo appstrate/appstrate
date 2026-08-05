@@ -3,13 +3,27 @@
 import { describe, expect, it } from "bun:test";
 import {
   applyModelGenerationCapabilitiesOverride,
-  INHERITED_MODEL_GENERATION_CAPABILITIES,
+  mapModelReasoningLevels,
   ModelGenerationError,
   reconcileModelGenerationSettings,
   resolveModelGenerationSettings,
   toNativeModelReasoningLevel,
   type ModelGenerationCapabilities,
 } from "./model-generation.ts";
+
+describe("mapModelReasoningLevels", () => {
+  it("maps the complete canonical vocabulary", () => {
+    expect(mapModelReasoningLevels((level) => level.toUpperCase())).toEqual({
+      off: "OFF",
+      minimal: "MINIMAL",
+      low: "LOW",
+      medium: "MEDIUM",
+      high: "HIGH",
+      xhigh: "XHIGH",
+      max: "MAX",
+    });
+  });
+});
 
 const capabilities = (
   over: Partial<ModelGenerationCapabilities> = {},
@@ -107,6 +121,34 @@ describe("resolveModelGenerationSettings", () => {
       }),
     ).toThrow("does not support reasoning level 'high'");
   });
+
+  it("rejects a known-incompatible temperature and reasoning pair", () => {
+    expect(() =>
+      resolveModelGenerationSettings({
+        capabilities: capabilities({
+          reasoning: {
+            ...capabilities().reasoning,
+            temperatureCompatible: "unsupported",
+          },
+        }),
+        override: { temperature: 0.4, reasoningLevel: "high" },
+      }),
+    ).toThrow("cannot combine a custom temperature with reasoning");
+  });
+
+  it("does not apply the pair constraint when reasoning is off", () => {
+    expect(
+      resolveModelGenerationSettings({
+        capabilities: capabilities({
+          reasoning: {
+            ...capabilities().reasoning,
+            temperatureCompatible: "unsupported",
+          },
+        }),
+        override: { temperature: 0.4, reasoningLevel: "off" },
+      }),
+    ).toEqual({ temperature: 0.4, reasoningLevel: "off" });
+  });
 });
 
 describe("applyModelGenerationCapabilitiesOverride", () => {
@@ -124,6 +166,14 @@ describe("applyModelGenerationCapabilitiesOverride", () => {
     expect(
       applyModelGenerationCapabilitiesOverride(catalog, { reasoning: { adaptive: null } }),
     ).toMatchObject({ reasoning: { adaptive: null } });
+  });
+
+  it("merges a sparse provider pair constraint into reasoning", () => {
+    expect(
+      applyModelGenerationCapabilitiesOverride(capabilities(), {
+        reasoning: { temperatureCompatible: "unsupported" },
+      }),
+    ).toMatchObject({ reasoning: { temperatureCompatible: "unsupported" } });
   });
 });
 
@@ -146,6 +196,20 @@ describe("reconcileModelGenerationSettings", () => {
   it("preserves object identity when every setting remains compatible", () => {
     const value = { temperature: 0.4, reasoningLevel: "high" } as const;
     expect(reconcileModelGenerationSettings(value, capabilities())).toBe(value);
+  });
+
+  it("drops temperature but keeps reasoning for a known-incompatible pair", () => {
+    expect(
+      reconcileModelGenerationSettings(
+        { temperature: 0.4, reasoningLevel: "high" },
+        capabilities({
+          reasoning: {
+            ...capabilities().reasoning,
+            temperatureCompatible: "unsupported",
+          },
+        }),
+      ),
+    ).toEqual({ reasoningLevel: "high" });
   });
 
   it("removes unconfirmed levels from a known reasoning model", () => {
@@ -177,15 +241,6 @@ describe("reconcileModelGenerationSettings", () => {
       ),
     ).toEqual({});
   });
-
-  it("clears every override for the public alias inherit-only contract", () => {
-    expect(
-      reconcileModelGenerationSettings(
-        { temperature: 0.6, reasoningLevel: "high" },
-        INHERITED_MODEL_GENERATION_CAPABILITIES,
-      ),
-    ).toEqual({});
-  });
 });
 
 describe("toNativeModelReasoningLevel", () => {
@@ -201,5 +256,9 @@ describe("toNativeModelReasoningLevel", () => {
         }),
       ),
     ).toBe("max");
+  });
+
+  it("keeps max as a distinct first-class effort", () => {
+    expect(toNativeModelReasoningLevel("max", capabilities())).toBe("max");
   });
 });

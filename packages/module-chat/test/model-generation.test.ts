@@ -29,6 +29,29 @@ describe("applyGenerationToProxyBody", () => {
     });
   });
 
+  it("translates portable minimal to Anthropic's native low effort", () => {
+    const body = applyGenerationToProxyBody(
+      JSON.stringify({ model: "preset" }),
+      {
+        apiShape: "anthropic-messages",
+        generation: {
+          temperature: "unsupported",
+          reasoning: {
+            supported: "supported",
+            adaptive: true,
+            levels: { minimal: "supported" },
+            nativeLevels: { minimal: "low" },
+          },
+        },
+      },
+      { reasoningLevel: "minimal" },
+    );
+    expect(parse(body)).toMatchObject({
+      thinking: { type: "adaptive" },
+      output_config: { effort: "low" },
+    });
+  });
+
   it("maps classic Anthropic levels to deterministic token budgets", () => {
     const body = applyGenerationToProxyBody(
       "{}",
@@ -45,6 +68,15 @@ describe("applyGenerationToProxyBody", () => {
       { reasoningLevel: "xhigh" },
     );
     expect(parse(body).reasoning_effort).toBe("xhigh");
+  });
+
+  it("keeps max distinct in OpenAI-compatible request bodies", () => {
+    const body = applyGenerationToProxyBody(
+      "{}",
+      { apiShape: "openai-completions", generation: null },
+      { reasoningLevel: "max" },
+    );
+    expect(parse(body).reasoning_effort).toBe("max");
   });
 
   it("removes Anthropic thinking fields for off", () => {

@@ -103,7 +103,7 @@ export const schemas = {
       },
       reasoningLevel: {
         type: ["string", "null"],
-        enum: ["off", "minimal", "low", "medium", "high", "xhigh", null],
+        enum: ["off", "minimal", "low", "medium", "high", "xhigh", "max", null],
         description: "Portable reasoning effort normalized across providers.",
       },
     },
@@ -122,6 +122,12 @@ export const schemas = {
         required: ["supported", "adaptive", "levels"],
         properties: {
           supported: { type: "string", enum: ["supported", "unsupported", "unknown"] },
+          temperatureCompatible: {
+            type: "string",
+            enum: ["supported", "unsupported", "unknown"],
+            description:
+              "Optional compatibility fact for combining a custom temperature with active reasoning. Omission means unknown.",
+          },
           adaptive: { type: ["boolean", "null"] },
           levels: {
             type: "object",
@@ -130,19 +136,19 @@ export const schemas = {
               enum: ["supported", "unsupported", "unknown"],
             },
             propertyNames: {
-              enum: ["off", "minimal", "low", "medium", "high", "xhigh"],
+              enum: ["off", "minimal", "low", "medium", "high", "xhigh", "max"],
             },
           },
           nativeLevels: {
             type: "object",
             description:
-              "Optional provider-native values for portable levels (for example xhigh to max).",
+              "Optional provider-native values for portable levels (for example off to none).",
             additionalProperties: {
               type: "string",
               enum: ["none", "minimal", "low", "medium", "high", "xhigh", "max"],
             },
             propertyNames: {
-              enum: ["off", "minimal", "low", "medium", "high", "xhigh"],
+              enum: ["off", "minimal", "low", "medium", "high", "xhigh", "max"],
             },
           },
         },

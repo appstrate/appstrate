@@ -27,6 +27,9 @@
  *     snapshot). Both `openai-responses` and `openai-codex-responses` (codex)
  *     are aliasable, so this nesting MUST be covered or the real id leaks in
  *     the stream.
+ *   - `thinking` / `output_config` — request-only correction for an adaptive
+ *     Anthropic backing. Pi sees the public alias, so the sidecar restores the
+ *     catalogued adaptive shape from its private swap descriptor.
  *
  * ERROR surfaces are handled differently: provider error bodies are free-form
  * prose that can name the backing anywhere (model id, hostname, provider
@@ -103,6 +106,24 @@ export function swapRequestModel(bodyText: string, swap: ModelSwap): string {
     const obj = JSON.parse(bodyText) as Record<string, unknown>;
     if (obj && typeof obj === "object" && obj["model"] === swap.alias) {
       obj["model"] = swap.real;
+      const thinking = obj["thinking"];
+      if (
+        swap.anthropicAdaptiveReasoning &&
+        thinking &&
+        typeof thinking === "object" &&
+        (thinking as Record<string, unknown>)["type"] === "enabled"
+      ) {
+        const display = (thinking as Record<string, unknown>)["display"];
+        obj["thinking"] = {
+          type: "adaptive",
+          ...(typeof display === "string" ? { display } : {}),
+        };
+        const outputConfig = obj["output_config"];
+        obj["output_config"] = {
+          ...(outputConfig && typeof outputConfig === "object" ? outputConfig : {}),
+          effort: swap.anthropicAdaptiveReasoning.effort,
+        };
+      }
       return JSON.stringify(obj);
     }
   } catch {

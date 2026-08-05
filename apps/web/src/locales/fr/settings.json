@@ -860,10 +860,12 @@
   "models.generation.levels.medium": "Moyen",
   "models.generation.levels.high": "Élevé",
   "models.generation.levels.xhigh": "Très élevé",
+  "models.generation.levels.max": "Maximum",
   "models.generation.levelsShort.off": "Off",
   "models.generation.levelsShort.minimal": "Min.",
   "models.generation.levelsShort.low": "Bas",
   "models.generation.levelsShort.medium": "Moy.",
   "models.generation.levelsShort.high": "Haut",
-  "models.generation.levelsShort.xhigh": "Max"
+  "models.generation.levelsShort.xhigh": "XHigh",
+  "models.generation.levelsShort.max": "Max"
 }
