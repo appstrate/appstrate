@@ -25,12 +25,19 @@
 \timing off
 
 \echo '=== 0. Stats window (an idx_scan of 0 means nothing without this) ==='
+-- `stats_reset` is NULL when the counters were never explicitly reset, which
+-- is the common case and tells you nothing on its own — hence the postmaster
+-- start time and the data's own age as the fallback bounds on the window.
 SELECT
-  datname,
-  stats_reset,
-  now() - stats_reset AS stats_age
-FROM pg_stat_database
-WHERE datname = current_database();
+  d.datname,
+  d.stats_reset,
+  now() - d.stats_reset          AS stats_age,
+  pg_postmaster_start_time()     AS postmaster_started,
+  now() - pg_postmaster_start_time() AS uptime,
+  (SELECT min(started_at) FROM runs) AS oldest_run,
+  (SELECT max(started_at) FROM runs) AS newest_run
+FROM pg_stat_database d
+WHERE d.datname = current_database();
 
 \echo ''
 \echo '=== 1a. runs: JSONB payload weight, p50 / p95 / max, over the last 10k rows ==='
@@ -154,14 +161,15 @@ ORDER BY pg_relation_size(short.index_oid) DESC;
 
 \echo ''
 \echo '=== 2b. Write amplification: index count and total index bytes per hot table ==='
+-- Join on `relid`, not on `relname`: the name is ambiguous between the two
+-- catalogs (and would match same-named relations in other schemas).
 SELECT
-  relname                                   AS table_name,
-  n_tup_ins + n_tup_upd + n_tup_del         AS writes_since_reset,
-  (SELECT count(*) FROM pg_index WHERE indrelid = c.oid) AS index_count,
-  pg_size_pretty(pg_indexes_size(c.oid))    AS total_index_size,
-  pg_size_pretty(pg_relation_size(c.oid))   AS heap_size
+  s.relname                                                AS table_name,
+  s.n_tup_ins + s.n_tup_upd + s.n_tup_del                  AS writes_since_reset,
+  (SELECT count(*) FROM pg_index i WHERE i.indrelid = s.relid) AS index_count,
+  pg_size_pretty(pg_indexes_size(s.relid))                 AS total_index_size,
+  pg_size_pretty(pg_relation_size(s.relid))                AS heap_size
 FROM pg_stat_user_tables s
-JOIN pg_class c ON c.relname = s.relname
 WHERE s.relname IN ('runs', 'run_logs', 'llm_usage', 'notifications', 'documents')
 ORDER BY writes_since_reset DESC;
 
