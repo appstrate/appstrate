@@ -161,7 +161,9 @@ export function createSchedulesRouter() {
   // GET /api/schedules — list all schedules (app-scoped)
   router.get("/schedules", async (c) => {
     const scope = getAppScope(c);
-    const schedules = await listSchedules(scope);
+    // The caller is the VIEWER of the run counters (`unread_count` is
+    // recipient-scoped), never the schedules' own execution actor.
+    const schedules = await listSchedules(scope, getActor(c));
     return c.json(listResponse(schedules));
   });
 
@@ -169,7 +171,7 @@ export function createSchedulesRouter() {
   router.get(`/agents/${SCOPED_PACKAGE_ROUTE}/schedules`, requireAgent(), async (c) => {
     const scope = getAppScope(c);
     const agent = c.get("package");
-    const schedules = await listPackageSchedules(scope, agent.id);
+    const schedules = await listPackageSchedules(scope, agent.id, getActor(c));
     return c.json(listResponse(schedules));
   });
 
@@ -268,7 +270,7 @@ export function createSchedulesRouter() {
   // GET /api/schedules/:id — get a single schedule
   router.get("/schedules/:id", async (c) => {
     const id = c.req.param("id");
-    const schedule = await getSchedule(id, getAppScope(c));
+    const schedule = await getSchedule(id, getAppScope(c), getActor(c));
     if (!schedule) {
       throw notFound(`Schedule '${id}' not found`);
     }
@@ -348,21 +350,29 @@ export function createSchedulesRouter() {
       actorChanged && data.connection_overrides === undefined ? null : data.connection_overrides;
 
     // Translate snake_case wire fields to internal camelCase for the service.
-    const schedule = await updateSchedule(scope, id, {
-      name: data.name,
-      cronExpression: data.cron_expression,
-      timezone: data.timezone,
-      input: data.input,
-      enabled: data.enabled,
-      configOverride: data.config_override,
-      modelIdOverride: data.model_id_override,
-      generationConfigOverride,
-      proxyIdOverride: data.proxy_id_override,
-      versionOverride: data.version_override,
-      connectionOverrides,
-      dependencyOverrides: data.dependency_overrides,
-      actor,
-    });
+    const schedule = await updateSchedule(
+      scope,
+      id,
+      {
+        name: data.name,
+        cronExpression: data.cron_expression,
+        timezone: data.timezone,
+        input: data.input,
+        enabled: data.enabled,
+        configOverride: data.config_override,
+        modelIdOverride: data.model_id_override,
+        generationConfigOverride,
+        proxyIdOverride: data.proxy_id_override,
+        versionOverride: data.version_override,
+        connectionOverrides,
+        dependencyOverrides: data.dependency_overrides,
+        actor,
+      },
+      // `actor` above is the schedule's (possibly re-pointed) execution
+      // identity; the run counters in the response belong to whoever is
+      // looking at it.
+      getActor(c),
+    );
     // Mirror schedule.created: explicit camelCase keys (dominant audit
     // convention — see api-keys.ts, modules/webhooks/routes.ts). Only
     // include keys the caller actually sent so the audit reflects the

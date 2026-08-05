@@ -5,7 +5,14 @@ import type { JobQueue, QueueJob } from "../infra/queue/index.ts";
 import { getCache } from "../infra/index.ts";
 import { and, eq, asc, inArray, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { schedules, endUsers, organizationMembers } from "@appstrate/db/schema";
+import {
+  schedules,
+  endUsers,
+  organizationMembers,
+  runs,
+  notifications,
+} from "@appstrate/db/schema";
+import { activeRunStatusValues } from "@appstrate/db/run-status";
 import { batchLoadUserNames } from "../lib/user-helpers.ts";
 import { logger } from "../lib/logger.ts";
 import type { ScheduleWireDto, EnrichedSchedule } from "@appstrate/shared-types";
@@ -27,7 +34,7 @@ import { validateInput } from "./schema.ts";
 import { mergeAndValidateConfigOverride } from "./agent-readiness.ts";
 import { asJSONSchemaObject } from "@appstrate/core/form";
 import { computeNextRun } from "../lib/cron.ts";
-import type { Actor } from "../lib/actor.ts";
+import { actorMatch, type Actor } from "../lib/actor.ts";
 import type { AppScope } from "../lib/scope.ts";
 import { setQueueDepthSource } from "@appstrate/core/telemetry";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
@@ -684,18 +691,22 @@ export async function triggerScheduledRun(
 // CRUD helpers
 // ---------------------------------------------------------------------------
 
-export async function listSchedules(scope: AppScope): Promise<EnrichedSchedule[]> {
+export async function listSchedules(
+  scope: AppScope,
+  viewer: Actor | null,
+): Promise<EnrichedSchedule[]> {
   const rows = await db
     .select()
     .from(schedules)
     .where(scopedWhere(schedules, { orgId: scope.orgId, applicationId: scope.applicationId }))
     .orderBy(asc(schedules.createdAt));
-  return enrichSchedules(rows.map(toSchedule), scope.orgId);
+  return enrichSchedules(rows.map(toSchedule), scope.orgId, viewer);
 }
 
 export async function listPackageSchedules(
   scope: AppScope,
   packageId: string,
+  viewer: Actor | null,
 ): Promise<EnrichedSchedule[]> {
   const rows = await db
     .select()
@@ -708,10 +719,14 @@ export async function listPackageSchedules(
       }),
     )
     .orderBy(asc(schedules.createdAt));
-  return enrichSchedules(rows.map(toSchedule), scope.orgId);
+  return enrichSchedules(rows.map(toSchedule), scope.orgId, viewer);
 }
 
-export async function getSchedule(id: string, scope?: AppScope): Promise<EnrichedSchedule | null> {
+export async function getSchedule(
+  id: string,
+  scope?: AppScope,
+  viewer: Actor | null = null,
+): Promise<EnrichedSchedule | null> {
   const rows = await db
     .select()
     .from(schedules)
@@ -725,17 +740,117 @@ export async function getSchedule(id: string, scope?: AppScope): Promise<Enriche
     .limit(1);
   if (!rows[0]) return null;
   const schedule = toSchedule(rows[0]);
-  const [enriched] = await enrichSchedules([schedule], schedule.orgId);
+  const [enriched] = await enrichSchedules([schedule], schedule.orgId, viewer);
   return enriched ?? null;
+}
+
+/** Per-schedule run counters served with the schedule itself (see {@link loadScheduleRunStats}). */
+interface ScheduleRunStats {
+  runningRuns: number;
+  unreadCount: number;
+  lastRunNumber: number;
+}
+
+const EMPTY_RUN_STATS: ScheduleRunStats = { runningRuns: 0, unreadCount: 0, lastRunNumber: 0 };
+
+/**
+ * Enrichment fields for the (unreachable in practice) branch where the
+ * enrichment query returns no row for a schedule we just wrote. Spread rather
+ * than re-listed at each call site so a new `EnrichedSchedule` field cannot be
+ * added to the happy path alone.
+ */
+const UNENRICHED_SCHEDULE_FIELDS = {
+  actor_name: null,
+  actor_type: null,
+  running_runs: 0,
+  unread_count: 0,
+  last_run_number: 0,
+} satisfies Omit<EnrichedSchedule, keyof ScheduleWireDto>;
+
+/**
+ * The three run counters every schedule card shows — active runs, unread runs
+ * for the VIEWER, and the highest run number — as ONE grouped query over the
+ * whole list.
+ *
+ * These used to be derived client-side: each card fetched
+ * `GET /api/schedules/:id/runs` (up to 20 enriched rows, each with its own
+ * unread EXISTS and document subqueries) purely to count three things, so a
+ * dashboard listing N schedules issued N extra HTTP requests and ~2N SQL
+ * queries. Serving them from the list the cards already have removes the fan-out
+ * entirely.
+ *
+ * Two deliberate semantics:
+ *  - the counts span ALL of a schedule's runs, not the most recent page. The
+ *    per-card version counted within the 20 rows it happened to fetch, so a
+ *    schedule with 25 unread runs reported 20.
+ *  - `unreadCount` is scoped to the VIEWER (`actorMatch` on the polymorphic
+ *    recipient tuple), never to the schedule's own actor — the same rule
+ *    `unreadForActor` applies to run lists, so a member and an end-user never
+ *    observe each other's read state. A null viewer (no actor context) reports
+ *    0: unread is a recipient-side concept.
+ */
+async function loadScheduleRunStats(
+  scheduleIds: string[],
+  orgId: string,
+  viewer: Actor | null,
+): Promise<Map<string, ScheduleRunStats>> {
+  if (scheduleIds.length === 0) return new Map();
+
+  const unreadPredicate = viewer
+    ? sql`exists (
+        select 1 from ${notifications}
+        where ${notifications.runId} = ${runs.id}
+          and ${actorMatch(viewer, {
+            typeCol: notifications.recipientType,
+            idCol: notifications.recipientId,
+          })}
+          and ${notifications.readAt} is null
+      )`
+    : sql`false`;
+
+  const rows = await db
+    .select({
+      scheduleId: runs.scheduleId,
+      runningRuns: sql<string>`count(*) filter (where ${inArray(runs.status, [
+        ...activeRunStatusValues,
+      ])})`,
+      unreadCount: sql<string>`count(*) filter (where ${unreadPredicate})`,
+      lastRunNumber: sql<string>`coalesce(max(${runs.runNumber}), 0)`,
+    })
+    .from(runs)
+    // `scheduleId` is already unique per org, but the org filter keeps the read
+    // tenant-scoped by construction rather than by trusting the id list.
+    .where(and(eq(runs.orgId, orgId), inArray(runs.scheduleId, scheduleIds)))
+    .groupBy(runs.scheduleId);
+
+  // postgres.js returns count()/max() as numeric STRINGS — coerce here so the
+  // wire DTO carries real numbers.
+  return new Map(
+    rows
+      .filter((r): r is typeof r & { scheduleId: string } => r.scheduleId !== null)
+      .map((r) => [
+        r.scheduleId,
+        {
+          runningRuns: Number(r.runningRuns),
+          unreadCount: Number(r.unreadCount),
+          lastRunNumber: Number(r.lastRunNumber),
+        },
+      ]),
+  );
 }
 
 /**
  * Enrich schedules with the display name of the actor (member or end-user)
- * each schedule runs as. Batches name lookups per actor kind.
+ * each schedule runs as, plus the viewer-scoped run counters the list UI would
+ * otherwise fetch per row. Batches every lookup across the whole list.
+ *
+ * @param viewer Actor the response is being rendered for — scopes
+ *   `unread_count` only. Null when there is no actor context.
  */
 async function enrichSchedules(
   schedules: ScheduleWireDto[],
-  _orgId: string,
+  orgId: string,
+  viewer: Actor | null,
 ): Promise<EnrichedSchedule[]> {
   if (schedules.length === 0) return [];
 
@@ -744,7 +859,7 @@ async function enrichSchedules(
     ...new Set(schedules.map((s) => s.endUserId).filter((id): id is string => !!id)),
   ];
 
-  const [userNameMap, endUserRows] = await Promise.all([
+  const [userNameMap, endUserRows, runStats] = await Promise.all([
     batchLoadUserNames(userIds),
     endUserIds.length > 0
       ? db
@@ -755,6 +870,11 @@ async function enrichSchedules(
           .from(endUsers)
           .where(inArray(endUsers.id, endUserIds))
       : Promise.resolve([] as { id: string; name: string | null }[]),
+    loadScheduleRunStats(
+      schedules.map((s) => s.id),
+      orgId,
+      viewer,
+    ),
   ]);
   const endUserNameMap = new Map(endUserRows.map((r) => [r.id, r.name]));
 
@@ -768,7 +888,16 @@ async function enrichSchedules(
       actorType = "end_user";
       actorName = endUserNameMap.get(schedule.endUserId) ?? null;
     }
-    return { ...schedule, actor_name: actorName, actor_type: actorType };
+    // A schedule that never fired has no `runs` rows, hence no group — zeroes.
+    const stats = runStats.get(schedule.id) ?? EMPTY_RUN_STATS;
+    return {
+      ...schedule,
+      actor_name: actorName,
+      actor_type: actorType,
+      running_runs: stats.runningRuns,
+      unread_count: stats.unreadCount,
+      last_run_number: stats.lastRunNumber,
+    };
   });
 }
 
@@ -830,8 +959,10 @@ export async function createSchedule(
 
   // Same EnrichedSchedule serializer as getSchedule/listSchedules, so the
   // create response matches the GET detail shape (actor_name/actor_type).
-  const [enriched] = await enrichSchedules([schedule], scope.orgId);
-  return enriched ?? { ...schedule, actor_name: null, actor_type: null };
+  // A viewer is not needed here: the schedule was just created, so it has no
+  // runs and every run counter is zero for ANY viewer.
+  const [enriched] = await enrichSchedules([schedule], scope.orgId, null);
+  return enriched ?? { ...schedule, ...UNENRICHED_SCHEDULE_FIELDS };
 }
 
 export async function updateSchedule(
@@ -856,6 +987,8 @@ export async function updateSchedule(
     // schedule always has an execution identity.
     actor?: Actor;
   },
+  /** Actor the response is rendered for — scopes `unread_count` only. */
+  viewer: Actor | null = null,
 ): Promise<EnrichedSchedule | null> {
   const existing = await getSchedule(id, scope);
   if (!existing) return null;
@@ -916,9 +1049,9 @@ export async function updateSchedule(
   }
 
   // Same EnrichedSchedule serializer as getSchedule/listSchedules, so the
-  // update response matches the GET detail shape (actor_name/actor_type).
-  const [enriched] = await enrichSchedules([schedule], scope.orgId);
-  return enriched ?? { ...schedule, actor_name: null, actor_type: null };
+  // update response matches the GET detail shape (actor/run counters).
+  const [enriched] = await enrichSchedules([schedule], scope.orgId, viewer);
+  return enriched ?? { ...schedule, ...UNENRICHED_SCHEDULE_FIELDS };
 }
 
 export async function deleteSchedule(scope: AppScope, id: string): Promise<boolean> {

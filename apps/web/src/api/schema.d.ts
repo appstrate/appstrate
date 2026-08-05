@@ -5669,6 +5669,12 @@ export interface components {
             actor_name: string | null;
             /** @enum {string|null} */
             actor_type: "user" | "end_user" | null;
+            /** @description Runs of this schedule currently pending or running. */
+            running_runs: number;
+            /** @description Runs of this schedule whose notification is unread by the CALLER. Scoped to the requesting actor, like `EnrichedRun.unread`. */
+            unread_count: number;
+            /** @description Highest run number this schedule ever produced; 0 when it never fired. */
+            last_run_number: number;
         };
         SmtpConfigView: {
             applicationId: string;

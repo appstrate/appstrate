@@ -6,6 +6,24 @@ import { useCurrentApplicationId } from "./use-current-application";
 import { useOrgScope } from "./use-org-scope";
 import { paginatedRunsKeys, runsKeys, runKeys } from "../lib/query-keys";
 
+/**
+ * Safety-net poll for the notification queries — a BACKSTOP, not the freshness
+ * mechanism.
+ *
+ * Freshness comes from the realtime stream: `use-global-run-sync` invalidates
+ * these caches on every terminal run it sees, and re-invalidates them on every
+ * (re)connect, which is what covers the frames lost while the stream was down
+ * (the SSE protocol has no replay). With both of those in place the poll only
+ * has to cover a client that is somehow neither streaming nor reconnecting, so
+ * it runs at 5 minutes instead of 30 seconds — 10× fewer requests per open tab,
+ * across three queries.
+ *
+ * Do NOT raise this without keeping the reconnect-side invalidation: on its own
+ * the interval is the ONLY thing that would eventually correct a badge, and
+ * "eventually" would become five minutes.
+ */
+const NOTIFICATION_POLL_INTERVAL_MS = 300_000;
+
 export function useUnreadCount() {
   const scope = useOrgScope();
   // Badge counters only need an application context (legacy behavior).
@@ -15,7 +33,7 @@ export function useUnreadCount() {
     "/api/notifications/unread-count",
     { params: { header: scope.header } },
     {
-      refetchInterval: 30_000,
+      refetchInterval: NOTIFICATION_POLL_INTERVAL_MS,
       enabled: !!applicationId,
       select: (d) => d.count,
     },
@@ -32,7 +50,7 @@ export function useNotifications(opts: { unread?: boolean; limit?: number } = {}
     "/api/notifications",
     { params: { header: scope.header, query: { unread, limit } } },
     {
-      refetchInterval: 30_000,
+      refetchInterval: NOTIFICATION_POLL_INTERVAL_MS,
       enabled: !!applicationId,
       select: (d) => d.data,
     },
@@ -48,7 +66,7 @@ export function useUnreadCountsByAgent() {
     "/api/notifications/unread-counts-by-agent",
     { params: { header: scope.header } },
     {
-      refetchInterval: 30_000,
+      refetchInterval: NOTIFICATION_POLL_INTERVAL_MS,
       enabled: !!applicationId,
       select: (d) => d.counts,
     },

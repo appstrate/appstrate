@@ -5,8 +5,7 @@ import { Badge } from "./status-badge";
 import { ScheduleStatusBadge } from "./schedule-status-badge";
 import { NextRunPreview } from "./next-run-preview";
 import { ActorLabel } from "./actor-label";
-import { useScheduleRuns } from "../hooks/use-schedules";
-import { ACTIVE_RUN_STATUSES, type EnrichedSchedule } from "@appstrate/shared-types";
+import type { EnrichedSchedule } from "@appstrate/shared-types";
 
 interface ScheduleCardProps {
   schedule: EnrichedSchedule;
@@ -14,19 +13,17 @@ interface ScheduleCardProps {
 }
 
 export function ScheduleCard({ schedule, agentName }: ScheduleCardProps) {
-  // PERF: N+1 — each card issues its own `GET .../schedules/:id/runs`, so a
-  // list of N schedules fans out to N requests. Acceptable at current list
-  // sizes; if this list grows, hoist the running/unread/last-run counts into
-  // the parent's schedule list payload (server-side aggregate) or a single
-  // batch endpoint and pass them down as props instead of querying per row.
-  const { data: runs } = useScheduleRuns(schedule.id);
-
-  // Running + unread counts scoped to this schedule's runs
-  const runningRuns = runs?.filter((e) => ACTIVE_RUN_STATUSES.has(e.status)).length ?? 0;
-  const unreadCount = runs?.filter((e) => e.unread).length ?? 0;
+  // The three counters this card shows are served WITH the schedule list
+  // (`enrichSchedules` in services/scheduler.ts). They used to come from a
+  // per-card `GET .../schedules/:id/runs`, which made a list of N schedules
+  // fan out to N HTTP requests and ~2N SQL queries just to count three things.
+  // They are also whole-history counts now, not counts within the last page of
+  // runs the card happened to fetch.
+  const runningRuns = schedule.running_runs;
+  const unreadCount = schedule.unread_count;
+  const lastRunNumber = schedule.last_run_number;
 
   const isActive = schedule.enabled ?? true;
-  const lastRunNumber = runs?.[0]?.runNumber ?? 0;
 
   const statusBadge = <ScheduleStatusBadge enabled={schedule.enabled ?? true} />;
 
