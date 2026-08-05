@@ -108,14 +108,32 @@ export default defineConfig({
         //   ajv dependency — which IS needed eagerly by @appstrate/core via
         //   @afps-spec/schema — and would drag the whole RJSF chunk into the
         //   entry graph.
-        advancedChunks: {
+        // `codeSplitting`, NOT `advancedChunks`: rolldown (bundled by Vite 8)
+        // deprecated the latter in 1.1 — "if `advancedChunks` and
+        // `codeSplitting` are both specified, `advancedChunks` will be ignored".
+        // Same option shape, so this is a rename plus the tightening below.
+        codeSplitting: {
+          // Without a floor, a group's `test` promotes even a two-line shared
+          // module into a chunk of its own, and the entry graph pays a request
+          // for each. Anything under 20 kB is cheaper inlined into its importer.
+          minSize: 20_000,
           groups: [
             {
               name: "react-vendor",
               test: /node_modules\/(react|react-dom|react-router|react-router-dom|scheduler)\//,
             },
-            { name: "query", test: /node_modules\/@tanstack\// },
-            { name: "radix", test: /node_modules\/@radix-ui\// },
+            // Query, narrowed from all of `@tanstack/*`: the entry graph needs
+            // the query client, while the other `@tanstack` packages (table,
+            // virtual, …) are reached from lazy routes only and were being
+            // dragged forward by the wider test.
+            { name: "query", test: /node_modules\/@tanstack\/(query-core|react-query)\// },
+            // Icons are imported by nearly every route; one shared chunk beats
+            // the same icon module being duplicated across route chunks.
+            { name: "icons", test: /node_modules\/lucide-react\// },
+            // Deliberately NO `@radix-ui` group: the primitives are imported
+            // per-component, so natural chunking already places each one with
+            // the route that uses it. Forcing them together built one large
+            // chunk that every route had to fetch to render any dialog.
           ],
         },
       },
