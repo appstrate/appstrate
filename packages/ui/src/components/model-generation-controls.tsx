@@ -76,11 +76,11 @@ export function ModelGenerationControls({
 }: ModelGenerationControlsProps) {
   const id = useId();
   const temperatureUnsupported = capabilities?.temperature === "unsupported";
-  const reasoningUnsupported =
+  const reasoningControlsUnavailable =
     capabilities?.reasoning.supported === "unsupported" ||
     !MODEL_REASONING_LEVELS.some((level) => capabilities?.reasoning.levels[level] === "supported");
   const temperatureDisabled = disabled || temperatureUnsupported;
-  const reasoningDisabled = disabled || reasoningUnsupported;
+  const reasoningDisabled = disabled || reasoningControlsUnavailable;
   const selectedTemperature =
     value.temperature == null ? labels.inherit : String(value.temperature);
   const selectedReasoning = value.reasoningLevel
@@ -150,7 +150,7 @@ export function ModelGenerationControls({
         </Field>
       )}
 
-      {(!hideUnsupported || !reasoningUnsupported) && (
+      {(!hideUnsupported || !reasoningControlsUnavailable) && (
         <Field
           data-disabled={reasoningDisabled || undefined}
           className={cn(
@@ -162,11 +162,11 @@ export function ModelGenerationControls({
           <div className="flex items-center justify-between gap-3">
             <FieldTitle id={`${id}-reasoning-label`}>{labels.reasoning}</FieldTitle>
             <Badge
-              variant={reasoningUnsupported ? "secondary" : "outline"}
+              variant={reasoningControlsUnavailable ? "secondary" : "outline"}
               className={cn("shrink-0 gap-1 truncate", compact ? "max-w-36" : "max-w-44")}
             >
-              {reasoningUnsupported && <CircleSlash2Icon className="size-3" />}
-              {reasoningUnsupported ? labels.unsupportedShort : selectedReasoning}
+              {reasoningControlsUnavailable && <CircleSlash2Icon className="size-3" />}
+              {reasoningControlsUnavailable ? labels.unsupportedShort : selectedReasoning}
             </Badge>
           </div>
           <ToggleGroup
@@ -210,7 +210,7 @@ export function ModelGenerationControls({
               </ToggleGroupItem>
             ))}
           </ToggleGroup>
-          {reasoningUnsupported && !compact ? (
+          {reasoningControlsUnavailable && !compact ? (
             <div
               id={`${id}-reasoning-description`}
               className={cn(
@@ -221,7 +221,7 @@ export function ModelGenerationControls({
               <CircleSlash2Icon className="mt-0.5 size-3.5 shrink-0" />
               <span>{labels.unsupported}</span>
             </div>
-          ) : !reasoningUnsupported && !compact ? (
+          ) : !reasoningControlsUnavailable && !compact ? (
             <FieldDescription id={`${id}-reasoning-description`}>
               {labels.reasoningHint}
             </FieldDescription>
