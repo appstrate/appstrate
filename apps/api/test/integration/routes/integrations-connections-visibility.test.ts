@@ -217,6 +217,44 @@ describe("GET /api/integrations/:packageId/connections — own ∪ org-shared", 
     expect(ids).not.toContain(adminPrivate);
   });
 
+  it("keeps identity_claims redacted on the admin's rename echo of a shared connection", async () => {
+    const sharedId = await seedConnection({
+      userId: other.id,
+      accountId: "mike-shared",
+      shared: true,
+    });
+
+    // An org admin may rename a connection they do not own (owner OR admin on
+    // the label branch). The 200 echo must not hand back what the list
+    // withheld — otherwise the redaction is one PATCH away from bypassed.
+    const res = await app.request(`/api/integrations/${INTEGRATION}/connections/${sharedId}`, {
+      method: "PATCH",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({ label: "Renamed by admin" }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as ConnectionDTO & { label?: string | null };
+    expect(body.label).toBe("Renamed by admin");
+    expect(body.identity_claims).toBeNull();
+  });
+
+  it("still returns identity_claims when the caller renames their OWN connection", async () => {
+    const ownId = await seedConnection({
+      userId: ctx.user.id,
+      accountId: "mine",
+      shared: false,
+    });
+
+    const res = await app.request(`/api/integrations/${INTEGRATION}/connections/${ownId}`, {
+      method: "PATCH",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({ label: "My renamed connection" }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as ConnectionDTO;
+    expect(body.identity_claims).toEqual({ email: "mine@example.com", sub: "sub-mine" });
+  });
+
   it("reports auths[].ready for an actor who owns nothing but inherits a share", async () => {
     await seedConnection({ userId: other.id, accountId: "mike-shared", shared: true });
 

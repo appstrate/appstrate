@@ -1131,7 +1131,14 @@ export function createIntegrationsRouter() {
       });
       // 200 + the bare connection resource — same serializer as the
       // connections list / connect flows (#657), not a hand-built stub.
-      return c.json(serializeIntegrationConnection(updated));
+      //
+      // An org admin may rename a connection they do not own, so this echo
+      // must honour the same rule the list does: sharing a connection consents
+      // to using it, not to publishing the owner's OIDC claim bag. Without the
+      // redaction a `PATCH {label}` reads back what
+      // `GET .../connections` deliberately withheld.
+      const serialized = serializeIntegrationConnection(updated);
+      return c.json(isOwner ? serialized : { ...serialized, identity_claims: null });
     },
   );
 

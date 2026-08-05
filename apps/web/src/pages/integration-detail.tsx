@@ -102,7 +102,10 @@ import { useCurrentOrgId } from "../hooks/use-org";
 import { useAuth } from "../hooks/use-auth";
 import { useCurrentApplicationId } from "../hooks/use-current-application";
 import { InlineConnectButton } from "../components/integration-connect/inline-connect-button";
-import { connectionDisplayLabel } from "../components/integration-connect/connection-label";
+import {
+  connectionDisplayLabel,
+  isConnectionOwnedBy,
+} from "../components/integration-connect/connection-label";
 import { isOauthAuthConnectable } from "../components/integration-connect/connectable-auth-keys";
 import { ConnectionStatusBadge } from "../components/integration-connect/connection-status-badge";
 
@@ -502,8 +505,8 @@ function ConnectAuthBlock({
   // account chooser" is about the CALLER's own accounts — it exists so a second
   // connect can't silently re-pick the account already signed in on this
   // browser. Someone else's shared connection says nothing about that.
-  const ownConnectionCount = status.connections.filter(
-    (c) => c.owner_type === "user" && c.owner_id === user?.id,
+  const ownConnectionCount = status.connections.filter((c) =>
+    isConnectionOwnedBy(c, user?.id),
   ).length;
 
   return (
@@ -1101,7 +1104,7 @@ function ConnectionTableRow({
   //   - share   → owner-only, because sharing is the owner's consent
   //               (`routes/integrations.ts`, `shared_with_org` branch);
   //   - rename  → owner OR org admin (same route, label branch).
-  const isOwn = connection.owner_type === "user" && connection.owner_id === user?.id;
+  const isOwn = isConnectionOwnedBy(connection, user?.id);
   const canRename = isOwn || isAdmin;
   const startEdit = () => {
     setDraftLabel(connection.label ?? "");
