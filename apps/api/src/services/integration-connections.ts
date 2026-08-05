@@ -20,7 +20,7 @@
  * module is the write side that populates it.
  */
 
-import { and, asc, eq, inArray, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, eq, inArray, sql, type SQL } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import {
   applicationPackages,
@@ -51,7 +51,7 @@ import { mergeSystemAndDb, setExactlyOneDefault, isUuid } from "../lib/db-helper
 import { logger } from "../lib/logger.ts";
 import { notFound, conflict, invalidRequest, forbidden } from "../lib/errors.ts";
 import type { ActorScope, AppScope } from "../lib/scope.ts";
-import { actorInsert, actorFilter } from "../lib/actor.ts";
+import { actorInsert, actorFilter, actorOrSharedFilter } from "../lib/actor.ts";
 import { getPackageDisplayName } from "../lib/package-helpers.ts";
 import type { Actor } from "@appstrate/connect";
 import {
@@ -200,7 +200,7 @@ async function loadActorConnection(
   authKey: string,
   context: { applicationId: string; actor: Actor; connectionId?: string },
 ): Promise<ActorConnectionRow | null> {
-  const ownerPredicate = actorFilter(context.actor, integrationConnections);
+  const accessible = actorOrSharedFilter(context.actor, integrationConnections);
   const rows = await db
     .select({
       id: integrationConnections.id,
@@ -217,7 +217,7 @@ async function loadActorConnection(
         eq(integrationConnections.integrationId, packageId),
         eq(integrationConnections.authKey, authKey),
         eq(integrationConnections.applicationId, context.applicationId),
-        or(ownerPredicate, eq(integrationConnections.sharedWithOrg, true)),
+        accessible,
         ...(context.connectionId ? [eq(integrationConnections.id, context.connectionId)] : []),
       ),
     )
@@ -279,7 +279,7 @@ async function loadAccessibleConnectionById(
   expectedAuthKey: string | null,
   context: { applicationId: string; actor: Actor },
 ): Promise<ResolvedConnectionRow | null> {
-  const ownerPredicate = actorFilter(context.actor, integrationConnections);
+  const accessible = actorOrSharedFilter(context.actor, integrationConnections);
   const [row] = await db
     .select({
       id: integrationConnections.id,
@@ -297,7 +297,7 @@ async function loadAccessibleConnectionById(
         eq(integrationConnections.integrationId, integrationId),
         ...(expectedAuthKey !== null ? [eq(integrationConnections.authKey, expectedAuthKey)] : []),
         eq(integrationConnections.applicationId, context.applicationId),
-        or(ownerPredicate, eq(integrationConnections.sharedWithOrg, true)),
+        accessible,
       ),
     )
     .limit(1);
@@ -2050,7 +2050,6 @@ export async function listIntegrationConnections(
   actor: Actor,
 ): Promise<IntegrationConnectionSummary[]> {
   await assertApplicationInScope(scope);
-  const ownerPredicate = actorFilter(actor, integrationConnections);
   const rows = await db
     .select()
     .from(integrationConnections)
@@ -2058,7 +2057,7 @@ export async function listIntegrationConnections(
       and(
         eq(integrationConnections.integrationId, packageId),
         eq(integrationConnections.applicationId, scope.applicationId),
-        or(ownerPredicate, eq(integrationConnections.sharedWithOrg, true)),
+        actorOrSharedFilter(actor, integrationConnections),
       ),
     );
   const ownerName = await resolveConnectionOwnerNames(rows);
@@ -2111,7 +2110,6 @@ export async function listUsableIntegrationsForActor(
   actor: Actor,
 ): Promise<UsableIntegration[]> {
   await assertApplicationInScope(scope);
-  const ownerPredicate = actorFilter(actor, integrationConnections);
   const rows = await db
     .select({
       integrationId: integrationConnections.integrationId,
@@ -2123,7 +2121,7 @@ export async function listUsableIntegrationsForActor(
     .where(
       and(
         eq(integrationConnections.applicationId, scope.applicationId),
-        or(ownerPredicate, eq(integrationConnections.sharedWithOrg, true)),
+        actorOrSharedFilter(actor, integrationConnections),
       ),
     );
   if (rows.length === 0) return [];

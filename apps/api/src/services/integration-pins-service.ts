@@ -48,7 +48,7 @@ import { parseManifestIntegrations } from "@appstrate/core/dependencies";
 import { isSystemIntegration } from "./integration-client-registry.ts";
 import { conflict, notFound, invalidRequest } from "../lib/errors.ts";
 import type { AppScope } from "../lib/scope.ts";
-import type { Actor } from "../lib/actor.ts";
+import { actorOrSharedFilter, type Actor } from "../lib/actor.ts";
 import type { ValidationFieldError } from "../lib/errors.ts";
 import { getPackage } from "./package-catalog.ts";
 import { resolveAgentRunVersion } from "./agent-version-resolver.ts";
@@ -65,7 +65,6 @@ import {
 // hook and OpenAPI spec can't drift from the service. Local aliases keep
 // the existing call sites readable.
 export type PinSummary = IntegrationPin;
-export type SharedConnectionSummary = AccessibleIntegrationConnection;
 export type { ConsumingAgentSummary };
 
 // ─────────────────────────── block_user_connections toggle ────────────────────
@@ -541,44 +540,29 @@ export async function loadConnectionOwnership(connectionId: string): Promise<{
  * List the connections an actor can pick from for a given
  * (application, integration). Used by the UI picker:
  * own + shared, with caller-facing labels.
+ *
+ * Same set — and now the same predicate — as `listIntegrationConnections`
+ * on the settings surface; only the projected DTO differs (this one carries
+ * `owner_name` and the split owner ids the picker keys on, the other the
+ * full connection summary). Both go through `actorOrSharedFilter`, so the
+ * two surfaces cannot drift on what "accessible" means.
  */
 export async function listAccessibleConnections(
   scope: AppScope,
   integrationId: string,
-  actorFilter: { userId?: string; endUserId?: string },
-): Promise<SharedConnectionSummary[]> {
-  const baseConditions = [
-    eq(integrationConnections.applicationId, scope.applicationId),
-    eq(integrationConnections.integrationId, integrationId),
-  ];
-
-  const [own, shared] = await Promise.all([
-    actorFilter.userId || actorFilter.endUserId
-      ? db
-          .select()
-          .from(integrationConnections)
-          .where(
-            and(
-              ...baseConditions,
-              actorFilter.userId
-                ? eq(integrationConnections.userId, actorFilter.userId)
-                : eq(integrationConnections.endUserId, actorFilter.endUserId!),
-            ),
-          )
-      : Promise.resolve([] as ConnectionRow[]),
-    db
-      .select()
-      .from(integrationConnections)
-      .where(and(...baseConditions, eq(integrationConnections.sharedWithOrg, true))),
-  ]);
-  const seen = new Set<string>();
-  const merged: ConnectionRow[] = [];
-  for (const r of [...own, ...shared]) {
-    if (seen.has(r.id)) continue;
-    seen.add(r.id);
-    merged.push(r);
-  }
-  return attachOwnerNames(merged);
+  actor: Actor,
+): Promise<AccessibleIntegrationConnection[]> {
+  const rows = await db
+    .select()
+    .from(integrationConnections)
+    .where(
+      and(
+        eq(integrationConnections.applicationId, scope.applicationId),
+        eq(integrationConnections.integrationId, integrationId),
+        actorOrSharedFilter(actor, integrationConnections),
+      ),
+    );
+  return attachOwnerNames(rows);
 }
 
 /**
@@ -587,7 +571,7 @@ export async function listAccessibleConnections(
  * query path untouched — names are a post-pass over whatever rows
  * survived the merge.
  */
-async function attachOwnerNames(rows: ConnectionRow[]): Promise<SharedConnectionSummary[]> {
+async function attachOwnerNames(rows: ConnectionRow[]): Promise<AccessibleIntegrationConnection[]> {
   const ownerName = await resolveConnectionOwnerNames(rows);
 
   return rows.map((row) => ({
@@ -653,12 +637,11 @@ export async function resolveAgentIntegrationPick(args: {
   const manifestRes = await fetchIntegrationManifest(integrationId);
   const manifest = manifestRes.ok ? manifestRes.manifest : null;
 
-  const actorFilter = actor.type === "user" ? { userId: actor.id } : { endUserId: actor.id };
   const userId = actor.type === "user" ? actor.id : null;
 
   const [candidatesRaw, adminPins, memberPins, blocked, orgDefault, resolution] = await Promise.all(
     [
-      listAccessibleConnections(scope, integrationId, actorFilter),
+      listAccessibleConnections(scope, integrationId, actor),
       listIntegrationPins(scope, integrationId),
       userId
         ? listMemberPinsForAgent(scope, agentPackageId, userId)

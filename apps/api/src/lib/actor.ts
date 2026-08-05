@@ -75,3 +75,27 @@ export function actorScopeFilter(actor: Actor, cols: { userId: Column; endUserId
   if (actor.type === "end_user") return ownership;
   return or(ownership, isNull(cols.userId))!;
 }
+
+/**
+ * WHERE clause for "connections this actor may use": their own rows UNION
+ * every row opted into org-wide sharing, whoever owns it. Applies to any
+ * table carrying the `{userId, endUserId, sharedWithOrg}` triple —
+ * `integration_connections` today.
+ *
+ * This is the set the runtime resolver picks from, so it is also the set
+ * every *read* surface must show: a reader that narrows to ownership alone
+ * reports "not connected" for an actor whose run would in fact resolve a
+ * shared connection, and hides from admin pickers the very connections the
+ * pin endpoints accept. Unlike {@link actorScopeFilter} the sharing branch
+ * is NOT gated on the actor kind — sharing is an explicit opt-in on the row
+ * (`shared_with_org`), so an end-user actor inherits it on the same terms.
+ *
+ * The single canonical helper for that semantic; do not re-derive the
+ * `or(ownership, eq(sharedWithOrg, true))` pattern inline.
+ */
+export function actorOrSharedFilter(
+  actor: Actor,
+  cols: { userId: Column; endUserId: Column; sharedWithOrg: Column },
+): SQL {
+  return or(actorFilter(actor, cols), eq(cols.sharedWithOrg, true))!;
+}

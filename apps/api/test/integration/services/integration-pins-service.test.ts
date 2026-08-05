@@ -167,7 +167,10 @@ describe("integration-pins-service — DB access/ownership", () => {
       // Another member's private connection — must NOT be visible.
       await seedConnection({ applicationId: scope.applicationId, userId: memberId });
 
-      const list = await listAccessibleConnections(scope, INTEGRATION, { userId: ctx.user.id });
+      const list = await listAccessibleConnections(scope, INTEGRATION, {
+        type: "user",
+        id: ctx.user.id,
+      });
       const ids = list.map((c) => c.id);
       expect(ids).toContain(own);
       expect(ids).toContain(sharedByMember);
@@ -193,7 +196,10 @@ describe("integration-pins-service — DB access/ownership", () => {
         sharedWithOrg: true,
       });
 
-      const list = await listAccessibleConnections(scope, INTEGRATION, { userId: ctx.user.id });
+      const list = await listAccessibleConnections(scope, INTEGRATION, {
+        type: "user",
+        id: ctx.user.id,
+      });
       expect(list.map((c) => c.id)).toEqual([visible]);
     });
   });
