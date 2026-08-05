@@ -48,7 +48,7 @@ import {
 } from "@appstrate/core/integration";
 import type { ResolutionFieldError } from "../lib/errors.ts";
 import type { Actor } from "../lib/actor.ts";
-import { actorFilter } from "../lib/actor.ts";
+import { actorOrSharedFilter } from "../lib/actor.ts";
 import type { AppScope } from "../lib/scope.ts";
 import { fetchIntegrationManifest, type IntegrationManifestCache } from "./integration-service.ts";
 import { listOrgDefaultsForResolver } from "./integration-org-defaults-service.ts";
@@ -734,13 +734,7 @@ async function loadAccessibleConnections(
       and(
         inArray(integrationConnections.integrationId, integrationIds),
         eq(integrationConnections.applicationId, applicationId),
-        or(
-          actorFilter(actor, {
-            userId: integrationConnections.userId,
-            endUserId: integrationConnections.endUserId,
-          }),
-          eq(integrationConnections.sharedWithOrg, true),
-        )!,
+        actorOrSharedFilter(actor, integrationConnections),
       ),
     );
   return rows;

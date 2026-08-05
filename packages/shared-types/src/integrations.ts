@@ -49,6 +49,14 @@ export interface IntegrationConnection {
   owner_type: "user" | "end_user";
   owner_id: string;
   /**
+   * Display name of the owner (member name, or end-user name falling back to
+   * `externalId`); `null` when the owner row was deleted. Present on the
+   * *list* surfaces — which return org-shared rows the caller does not own,
+   * and so must say whose they are — and absent on the single-connection
+   * write responses, where the row is the caller's own by construction.
+   */
+  owner_name?: string | null;
+  /**
    * Display name, set at creation: the extracted identity (email/login) when
    * available, else "Connexion N". Stable for the connection's lifetime and
    * user-editable. The UI renders it verbatim.

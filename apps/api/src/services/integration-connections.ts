@@ -20,7 +20,7 @@
  * module is the write side that populates it.
  */
 
-import { and, asc, eq, inArray, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, eq, inArray, sql, type SQL } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import {
   applicationPackages,
@@ -51,7 +51,7 @@ import { mergeSystemAndDb, setExactlyOneDefault, isUuid } from "../lib/db-helper
 import { logger } from "../lib/logger.ts";
 import { notFound, conflict, invalidRequest, forbidden } from "../lib/errors.ts";
 import type { ActorScope, AppScope } from "../lib/scope.ts";
-import { actorInsert, actorFilter } from "../lib/actor.ts";
+import { actorInsert, actorFilter, actorOrSharedFilter } from "../lib/actor.ts";
 import { getPackageDisplayName } from "../lib/package-helpers.ts";
 import type { Actor } from "@appstrate/connect";
 import {
@@ -66,6 +66,7 @@ import {
   toSupportedTokenEndpointAuthMethod,
 } from "./integration-manifest-helpers.ts";
 import { fetchMcpServerManifest } from "./integration-service.ts";
+import { resolveConnectionOwnerNames } from "./integration-connection-owner-names.ts";
 import type { AfpsManifestAuth } from "./integration-manifest-helpers.ts";
 import type { IntegrationAuthStatus } from "@appstrate/shared-types";
 import { getIntegration } from "./integration-service.ts";
@@ -199,7 +200,7 @@ async function loadActorConnection(
   authKey: string,
   context: { applicationId: string; actor: Actor; connectionId?: string },
 ): Promise<ActorConnectionRow | null> {
-  const ownerPredicate = actorFilter(context.actor, integrationConnections);
+  const accessible = actorOrSharedFilter(context.actor, integrationConnections);
   const rows = await db
     .select({
       id: integrationConnections.id,
@@ -216,7 +217,7 @@ async function loadActorConnection(
         eq(integrationConnections.integrationId, packageId),
         eq(integrationConnections.authKey, authKey),
         eq(integrationConnections.applicationId, context.applicationId),
-        or(ownerPredicate, eq(integrationConnections.sharedWithOrg, true)),
+        accessible,
         ...(context.connectionId ? [eq(integrationConnections.id, context.connectionId)] : []),
       ),
     )
@@ -278,7 +279,7 @@ async function loadAccessibleConnectionById(
   expectedAuthKey: string | null,
   context: { applicationId: string; actor: Actor },
 ): Promise<ResolvedConnectionRow | null> {
-  const ownerPredicate = actorFilter(context.actor, integrationConnections);
+  const accessible = actorOrSharedFilter(context.actor, integrationConnections);
   const [row] = await db
     .select({
       id: integrationConnections.id,
@@ -296,7 +297,7 @@ async function loadAccessibleConnectionById(
         eq(integrationConnections.integrationId, integrationId),
         ...(expectedAuthKey !== null ? [eq(integrationConnections.authKey, expectedAuthKey)] : []),
         eq(integrationConnections.applicationId, context.applicationId),
-        or(ownerPredicate, eq(integrationConnections.sharedWithOrg, true)),
+        accessible,
       ),
     )
     .limit(1);
@@ -2022,9 +2023,26 @@ export async function saveIntegrationConnection(
 }
 
 /**
- * List the actor's connections for an integration. End-users see only
- * their own rows; dashboard users see only their own rows. Filtering by
- * actor matches the runtime-side resolver in Phase 1.2a.
+ * List the connections the actor can *use* for an integration in this
+ * application: their own rows, plus every row opted into org-wide sharing
+ * (`sharedWithOrg`) whoever owns it.
+ *
+ * The union — not the actor's own rows — is the correct set here because
+ * it is what the runtime resolver will actually pick from
+ * (`loadActorConnection`, `loadAccessibleConnections`,
+ * `listAccessibleConnections`). An own-only list made three surfaces built
+ * on top of it silently wrong: the admin org-default and pin pickers
+ * (which filter this list for `shared_with_org` and could therefore only
+ * ever offer the admin's *own* shared rows, while the backend happily
+ * accepts anyone's — `integration-pins-service.ts` `upsertIntegrationPin`),
+ * and `auths[].ready`, which claimed "not connected" for an actor whose
+ * run would in fact resolve a shared connection.
+ *
+ * Rows the actor does not own come back with `identity_claims: null`:
+ * sharing a connection consents to *using* it, not to publishing the
+ * owner's OIDC claim bag (email, sub, …) to every member. `account_id`
+ * and `owner_name` stay — the picker DTO already exposes both, and a
+ * connection you can pick has to be identifiable.
  */
 export async function listIntegrationConnections(
   scope: AppScope,
@@ -2032,7 +2050,6 @@ export async function listIntegrationConnections(
   actor: Actor,
 ): Promise<IntegrationConnectionSummary[]> {
   await assertApplicationInScope(scope);
-  const ownerPredicate = actorFilter(actor, integrationConnections);
   const rows = await db
     .select()
     .from(integrationConnections)
@@ -2040,10 +2057,19 @@ export async function listIntegrationConnections(
       and(
         eq(integrationConnections.integrationId, packageId),
         eq(integrationConnections.applicationId, scope.applicationId),
-        ownerPredicate,
+        actorOrSharedFilter(actor, integrationConnections),
       ),
     );
-  return rows.map(serializeIntegrationConnection);
+  const ownerName = await resolveConnectionOwnerNames(rows);
+  return rows.map((row) => {
+    const isOwn = actor.type === "end_user" ? row.endUserId === actor.id : row.userId === actor.id;
+    const summary = serializeIntegrationConnection(row);
+    return {
+      ...summary,
+      ...(isOwn ? {} : { identity_claims: null }),
+      owner_name: ownerName(row),
+    };
+  });
 }
 
 /** One integration the actor could attach to an agent (own and/or org-shared). */
@@ -2084,7 +2110,6 @@ export async function listUsableIntegrationsForActor(
   actor: Actor,
 ): Promise<UsableIntegration[]> {
   await assertApplicationInScope(scope);
-  const ownerPredicate = actorFilter(actor, integrationConnections);
   const rows = await db
     .select({
       integrationId: integrationConnections.integrationId,
@@ -2096,7 +2121,7 @@ export async function listUsableIntegrationsForActor(
     .where(
       and(
         eq(integrationConnections.applicationId, scope.applicationId),
-        or(ownerPredicate, eq(integrationConnections.sharedWithOrg, true)),
+        actorOrSharedFilter(actor, integrationConnections),
       ),
     );
   if (rows.length === 0) return [];
@@ -2351,6 +2376,13 @@ export async function getIntegrationAuthStatuses(
       // consumers (chat connect card, …) never re-derive connection state and
       // stay correct as that logic evolves. Agent-agnostic (no scope/pin gate);
       // a run's authoritative readiness still comes from `validateInlineRun`.
+      //
+      // Reads the own ∪ org-shared union (see `listIntegrationConnections`),
+      // so an actor who owns nothing but inherits a shared connection is
+      // `ready: true` — deliberately, because their run resolves that
+      // connection. This is what makes the state correct under
+      // `block_user_connections`, where a member cannot create a connection at
+      // all and a shared one is the only path to a successful run.
       ready: keyConnections.some((c) => !c.needs_reconnection),
       has_oauth_client: oauthClientKeys.has(key),
       // Shared platform client (SYSTEM_INTEGRATIONS): when one serves this
