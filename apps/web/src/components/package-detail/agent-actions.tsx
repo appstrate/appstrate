@@ -22,7 +22,6 @@ import { RunWithOptionsModal } from "../run-with-options-modal";
 export function AgentActions({
   packageId,
   manifest,
-  companionFile,
   isOwned,
   isHistoricalVersion,
   downloadVersion,
@@ -33,7 +32,6 @@ export function AgentActions({
 }: {
   packageId: string;
   manifest?: Record<string, unknown>;
-  companionFile?: { name: string; content: string };
   isOwned: boolean;
   isHistoricalVersion: boolean;
   downloadVersion: string | undefined;
@@ -95,7 +93,6 @@ export function AgentActions({
         packageId={packageId}
         type="agent"
         manifest={manifest}
-        companionFile={companionFile}
         isOwned={isOwned}
         isBuiltIn={detail.source === "system"}
         isHistoricalVersion={isHistoricalVersion}

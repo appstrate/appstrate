@@ -15,7 +15,6 @@ import {
   PackageMinus,
   PowerOff,
   FileJson,
-  FileText,
   SlidersHorizontal,
 } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
@@ -36,7 +35,6 @@ interface PackageActionsDropdownProps {
   packageId: string;
   type: PackageType;
   manifest?: Record<string, unknown>;
-  companionFile?: { name: string; content: string };
   isOwned: boolean;
   isBuiltIn: boolean;
   isHistoricalVersion: boolean;
@@ -79,7 +77,6 @@ export function PackageActionsDropdown({
   packageId,
   type,
   manifest,
-  companionFile,
   isOwned,
   isBuiltIn,
   isHistoricalVersion,
@@ -110,11 +107,12 @@ export function PackageActionsDropdown({
   const navigate = useNavigate();
   const { isAdmin, isMember } = usePermissions();
   const [manifestOpen, setManifestOpen] = useState(false);
-  const [companionOpen, setCompanionOpen] = useState(false);
 
   const isAgent = type === "agent";
   const isMutable = isAdmin && !isBuiltIn && !isHistoricalVersion && isOwned;
-  const hasViewableFiles = !!manifest || !!companionFile;
+  // The package's files are browsed in the Files tab; the manifest stays here
+  // because it is a rendered object, not one of the artifact's files.
+  const hasViewableFiles = !!manifest;
 
   if (!isAgent && !hasViewableFiles) return null;
 
@@ -143,14 +141,6 @@ export function PackageActionsDropdown({
             <DropdownMenuItem onSelect={() => setManifestOpen(true)}>
               <FileJson size={14} />
               {t("viewManifest", { ns: "common" })}
-            </DropdownMenuItem>
-          )}
-
-          {/* ── Companion File ── */}
-          {companionFile && (
-            <DropdownMenuItem onSelect={() => setCompanionOpen(true)}>
-              <FileText size={14} />
-              {companionFile.name}
             </DropdownMenuItem>
           )}
 
@@ -287,20 +277,6 @@ export function PackageActionsDropdown({
           className="max-w-2xl"
         >
           <JsonView data={manifest} />
-        </Modal>
-      )}
-
-      {/* ── Companion File Modal ── */}
-      {companionFile && (
-        <Modal
-          open={companionOpen}
-          onClose={() => setCompanionOpen(false)}
-          title={companionFile.name}
-          className="max-w-2xl"
-        >
-          <pre className="text-muted-foreground bg-muted/50 overflow-x-auto rounded-md p-3 font-mono text-xs whitespace-pre-wrap">
-            {companionFile.content}
-          </pre>
         </Modal>
       )}
     </>

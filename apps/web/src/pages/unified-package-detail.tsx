@@ -23,7 +23,6 @@ import { LoadingState } from "../components/page-states";
 import { getVersionRedirect, hasActualChanges } from "../lib/version-helpers";
 import { packageDetailPath } from "../lib/package-paths";
 import { isModelSelectable } from "../lib/model-selectability";
-import { primaryDisplayFile, companionDisplayFile } from "../lib/package-files";
 import { AlertTriangle } from "lucide-react";
 
 // Shared components
@@ -34,6 +33,7 @@ import { VersionBanners } from "../components/version-banners";
 import { Alert, AlertDescription, AlertTitle } from "@appstrate/ui/components/alert";
 import { VersionHistory } from "../components/version-history";
 import { DiffTab } from "../components/diff-tab";
+import { FileExplorer } from "../components/package-files/file-explorer";
 import { CreateVersionModal } from "../components/create-version-modal";
 import { ForkPackageModal } from "../components/fork-package-modal";
 // Agent-specific components
@@ -261,14 +261,6 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   }
   const { isHistoricalVersion } = versionResult;
 
-  // Companion file for the dropdown (built from existing API fields). Only
-  // types with a content-sourced file have one — mcp-server (manifest-only)
-  // has no companion, so the dropdown shows the manifest alone.
-  const companion = companionDisplayFile(type);
-  const companionContent = isHistoricalVersion ? versionDetail?.content : currentContent;
-  const companionFile =
-    companion && companionContent ? { name: companion.name, content: companionContent } : undefined;
-
   // ── Version-aware config schema ──
   // When viewing a historical version, use that version's config schema (or empty if none).
   // An empty schema means "no config fields" — distinct from undefined which means "use draft".
@@ -306,6 +298,13 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
 
   // Determine available tabs based on type
 
+  // The artifact file explorer — one generic tab for every package type. Keeps
+  // the historical `"content"` id so existing deep links (#content) still land.
+  const filesTab: { id: DetailTab; label: string } = {
+    id: "content",
+    label: t("detail.tabFiles"),
+  };
+
   const agentTabs: Array<{ id: DetailTab; label: string }> = [
     { id: "runs", label: t("detail.tabRuns") },
     { id: "connections", label: t("detail.tabConnections") },
@@ -315,13 +314,11 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
     { id: "schedules", label: t("detail.tabSchedules") },
     { id: "memory", label: t("detail.tabMemory") },
     { id: "api", label: t("detail.tabApi") },
+    filesTab,
   ];
 
   const pkgTabs: Array<{ id: DetailTab; label: string }> = [
-    {
-      id: "content",
-      label: primaryDisplayFile(type).name,
-    },
+    filesTab,
     { id: "usedBy", label: t("packages.usedBy") },
   ];
 
@@ -357,7 +354,6 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
             <AgentActions
               packageId={packageId}
               manifest={isHistoricalVersion ? versionDetail?.manifest : agentDetail?.manifest}
-              companionFile={companionFile}
               isOwned={isOwned}
               isHistoricalVersion={isHistoricalVersion}
               downloadVersion={downloadVersion}
@@ -372,7 +368,6 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
                 packageId={packageId}
                 type={type}
                 manifest={isHistoricalVersion ? versionDetail?.manifest : pkgDetail?.manifest}
-                companionFile={companionFile}
                 isOwned={isOwned}
                 isBuiltIn={isBuiltIn}
                 isHistoricalVersion={isHistoricalVersion}
@@ -496,32 +491,9 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
       {type === "agent" && tab === "memory" && <AgentMemoryTab packageId={packageId} />}
       {type === "agent" && tab === "api" && <AgentApiTab packageId={packageId} />}
 
-      {type !== "agent" &&
-        tab === "content" &&
-        pkgDetail &&
-        (() => {
-          // The primary file's source decides what the content tab renders:
-          // manifest-sourced types (mcp-server) show the manifest verbatim —
-          // they have no content file; content-sourced types show their stored
-          // content (prompt.md, SKILL.md, …).
-          const body =
-            primaryDisplayFile(type).source === "manifest"
-              ? JSON.stringify(
-                  (isHistoricalVersion ? versionDetail?.manifest : pkgDetail.manifest) ?? {},
-                  null,
-                  2,
-                )
-              : isHistoricalVersion && versionDetail?.content != null
-                ? versionDetail.content
-                : pkgDetail.content;
-          return (
-            <div className="border-border bg-card rounded-lg border p-4">
-              <pre className="text-muted-foreground bg-muted/50 overflow-x-auto rounded-md p-3 font-mono text-xs whitespace-pre-wrap">
-                {body}
-              </pre>
-            </div>
-          );
-        })()}
+      {tab === "content" && (
+        <FileExplorer packageId={packageId} type={type} version={versionLabel} />
+      )}
 
       {type !== "agent" &&
         tab === "usedBy" &&

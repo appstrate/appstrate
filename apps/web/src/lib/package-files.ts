@@ -2,7 +2,10 @@
 
 import type { PackageType } from "@appstrate/core/validation";
 
-/** A file surfaced in the package UI (content tab label, diff sub-tab). */
+/**
+ * A file surfaced in the package UI: the editor's content tab label, the diff
+ * sub-tab, and the file the explorer pre-selects for a package type.
+ */
 export interface DisplayFile {
   /** File name, shown verbatim as a tab label (filenames are not translated). */
   name: string;
@@ -38,7 +41,8 @@ const DISPLAY_FILES: Record<PackageType, [DisplayFile, ...DisplayFile[]]> = {
   integration: [{ name: "INTEGRATION.md", source: "content" }],
 };
 
-/** Primary file shown in the content tab for a package type. */
+/** Primary file of a package type — the editor's content tab, and the entry
+ *  the file explorer opens on when the artifact carries it. */
 export function primaryDisplayFile(type: PackageType): DisplayFile {
   return DISPLAY_FILES[type][0];
 }
