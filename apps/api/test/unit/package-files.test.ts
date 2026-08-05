@@ -12,7 +12,9 @@ import type { PackageType } from "@appstrate/core/validation";
 import {
   applyDraftOverlay,
   buildFileIndex,
-  draftEtag,
+  draftSnapshotId,
+  indexEtag,
+  fileEtag,
   INLINE_MAX_BYTES,
   INDEX_JSON_BUDGET_BYTES,
   type PackageFileSnapshot,
@@ -27,7 +29,7 @@ function snapshot(files: Record<string, Uint8Array | string>): PackageFileSnapsh
   for (const [path, value] of Object.entries(files)) {
     normalized[path] = typeof value === "string" ? encoder.encode(value) : value;
   }
-  return { files: normalized, etag: '"test"', immutable: false };
+  return { files: normalized, snapshotId: "test", immutable: false };
 }
 
 function entryFor(files: Record<string, Uint8Array | string>, path: string) {
@@ -148,6 +150,18 @@ describe("buildFileIndex — media kind classification", () => {
     expect(entry.inline).toBeUndefined();
   });
 
+  it("keeps a leading BOM, so inline stays byte-faithful to size", () => {
+    // A default TextDecoder strips U+FEFF: `inline` would then be neither the
+    // full text nor a rendering of `size` bytes, and a client writing the
+    // preview back would silently drop the BOM.
+    const bom = new Uint8Array([0xef, 0xbb, 0xbf, ...encoder.encode("# title")]);
+    const entry = entryFor({ "bom.md": bom }, "bom.md");
+    expect(entry.media_kind).toBe("text");
+    expect(entry.inline).toBe("﻿# title");
+    expect(entry.size).toBe(bom.byteLength);
+    expect(encoder.encode(entry.inline!).byteLength).toBe(entry.size);
+  });
+
   it("treats a zero-byte file as text with an empty inline", () => {
     const entry = entryFor({ "empty.bin": new Uint8Array(0) }, "empty.bin");
     expect(entry.media_kind).toBe("text");
@@ -261,34 +275,69 @@ describe("buildFileIndex — determinism", () => {
   });
 });
 
-describe("draftEtag", () => {
+describe("draftSnapshotId", () => {
   it("is stable for identical content, independent of key order", () => {
-    const a = draftEtag({ "a.md": encoder.encode("one"), "b.md": encoder.encode("two") });
-    const b = draftEtag({ "b.md": encoder.encode("two"), "a.md": encoder.encode("one") });
+    const a = draftSnapshotId({ "a.md": encoder.encode("one"), "b.md": encoder.encode("two") });
+    const b = draftSnapshotId({ "b.md": encoder.encode("two"), "a.md": encoder.encode("one") });
     expect(a).toBe(b);
   });
 
   it("changes when a single byte changes", () => {
-    const before = draftEtag({ "a.md": encoder.encode("hello") });
-    const after = draftEtag({ "a.md": encoder.encode("hellp") });
+    const before = draftSnapshotId({ "a.md": encoder.encode("hello") });
+    const after = draftSnapshotId({ "a.md": encoder.encode("hellp") });
     expect(after).not.toBe(before);
   });
 
   it("changes when a file is added, removed, or renamed", () => {
     const base = { "a.md": encoder.encode("x") };
-    const etag = draftEtag(base);
-    expect(draftEtag({ ...base, "b.md": encoder.encode("") })).not.toBe(etag);
-    expect(draftEtag({})).not.toBe(etag);
-    expect(draftEtag({ "renamed.md": encoder.encode("x") })).not.toBe(etag);
+    const id = draftSnapshotId(base);
+    expect(draftSnapshotId({ ...base, "b.md": encoder.encode("") })).not.toBe(id);
+    expect(draftSnapshotId({})).not.toBe(id);
+    expect(draftSnapshotId({ "renamed.md": encoder.encode("x") })).not.toBe(id);
   });
 
-  it("does not confuse a path/content split (length is folded into the digest)", () => {
-    // Without the length delimiter, "ab" + "" and "a" + "b" could collide
-    // once path and content are concatenated into the same stream.
-    expect(draftEtag({ ab: encoder.encode("") })).not.toBe(draftEtag({ a: encoder.encode("b") }));
+  it("folds the entry LENGTH in, so an entry boundary cannot be shifted", () => {
+    // The case the length term actually defends. Both sides emit the identical
+    // byte stream once path and content are concatenated WITHOUT the length:
+    //   a \0 x  b \0 y   ==   a \0 x b \0 y
+    // so deleting the length term from the digest makes these two collide.
+    const twoFiles = { a: encoder.encode("x"), b: encoder.encode("y") };
+    const oneFile = { a: encoder.encode("xb\0y") };
+    expect(draftSnapshotId(twoFiles)).not.toBe(draftSnapshotId(oneFile));
   });
 
-  it("emits a quoted strong validator", () => {
-    expect(draftEtag({ "a.md": encoder.encode("x") })).toMatch(/^"pd-[0-9a-f]{64}"$/);
+  it("is an UNQUOTED id — the ETag helpers add the quotes", () => {
+    expect(draftSnapshotId({ "a.md": encoder.encode("x") })).toMatch(/^pd-[0-9a-f]{64}$/);
+  });
+});
+
+/**
+ * RFC 9110 §8.8.1 — an entity-tag identifies ONE representation. The index and
+ * a file are different representations, and so are two files of the same
+ * artifact (same URL, different `?path=`). A snapshot-wide tag would let a
+ * validator obtained for file A produce a `304` for file B — or for a path
+ * that does not exist at all.
+ */
+describe("indexEtag / fileEtag", () => {
+  it("emits quoted strong validators", () => {
+    expect(indexEtag("pd-abc")).toBe('"i-pd-abc"');
+    expect(fileEtag("pd-abc", "a.md")).toMatch(/^"f-pd-abc-[0-9a-f]{32}"$/);
+  });
+
+  it("never lets an index tag match a file tag", () => {
+    expect(indexEtag("pv-sha256-x")).not.toBe(fileEtag("pv-sha256-x", "a.md"));
+  });
+
+  it("distinguishes two paths within the same snapshot", () => {
+    expect(fileEtag("pv-x", "a.md")).not.toBe(fileEtag("pv-x", "b.md"));
+    expect(fileEtag("pv-x", "docs/a.md")).not.toBe(fileEtag("pv-x", "a.md"));
+  });
+
+  it("distinguishes the same path across two snapshots", () => {
+    expect(fileEtag("pv-one", "a.md")).not.toBe(fileEtag("pv-two", "a.md"));
+  });
+
+  it("is stable for the same (snapshot, path) pair", () => {
+    expect(fileEtag("pv-x", "a.md")).toBe(fileEtag("pv-x", "a.md"));
   });
 });

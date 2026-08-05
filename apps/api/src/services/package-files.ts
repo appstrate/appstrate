@@ -30,7 +30,8 @@ import { notFound } from "../lib/errors.ts";
 import { downloadPackageFiles } from "./package-items/storage.ts";
 import { downloadVersionZip, unzipAndNormalize } from "./package-storage.ts";
 import { getVersionForDownload } from "./package-versions.ts";
-import { CONFIG_BY_TYPE } from "./package-items/config.ts";
+import { CONFIG_BY_TYPE, SYSTEM_STORAGE_NAMESPACE } from "./package-items/config.ts";
+import { VERSION_SELECTOR_DRAFT } from "./agent-version-resolver.ts";
 import type { PackageType } from "@appstrate/core/validation";
 
 export type PackageFileMediaKind = "text" | "binary";
@@ -52,9 +53,13 @@ export interface PackageFileEntry {
 export interface PackageFileSnapshot {
   /** Normalized (path-sanitized) file map, draft overlay already applied. */
   files: Record<string, Uint8Array>;
-  /** Strong validator, already quoted — ready to write to the header. */
-  etag: string;
-  /** True for an exact published version (safe to cache forever). */
+  /**
+   * Opaque identity of this exact set of bytes, UNQUOTED and NOT itself an
+   * ETag — {@link indexEtag} / {@link fileEtag} derive the per-representation
+   * validators from it.
+   */
+  snapshotId: string;
+  /** True only for an exact, non-yanked published version. */
   immutable: boolean;
 }
 
@@ -69,9 +74,15 @@ export interface PackageFileSource {
 }
 
 /**
- * Largest file we will ever decode/inline. Mirrors the SPA's
- * `INLINE_MARKDOWN_MAX_BYTES` so the two sides agree on what "previewable"
- * means without a shared constant crossing the package boundary.
+ * Largest file we will ever decode or inline (1 MiB).
+ *
+ * Kept in lockstep with `PREVIEW_SIZE_LIMIT` in
+ * `apps/web/src/lib/package-file-tree.ts`, which is what the SPA uses to
+ * decide "preview vs. too_large". The two must agree, otherwise the UI offers
+ * a preview the index will never carry an `inline` for (or refuses one it
+ * already has). There is no shared constant: the value would have to cross the
+ * published `@appstrate/core` boundary to be shared, which is not worth a
+ * release lockstep for one number.
  */
 export const INLINE_MAX_BYTES = 1_048_576;
 
@@ -155,7 +166,7 @@ function classify(
 }
 
 /**
- * Content-addressed ETag over the OVERLAID file map.
+ * Content-addressed identity of the OVERLAID file map.
  *
  * `packages.updated_at` / `lock_version` are NOT usable here: the row is
  * written before the storage object is replaced, so a validator derived from
@@ -164,17 +175,40 @@ function classify(
  * Hashing the bytes we are about to serve is the only validator that cannot
  * disagree with the response.
  *
- * The length is folded in alongside the path so two entries cannot be
- * concatenated into the same digest as one.
+ * Each entry contributes `path \0 length \0 bytes`. The LENGTH term is what
+ * keeps the stream unambiguous: without it, `{a:"x", b:"y"}` and `{a:"xb\0y"}`
+ * serialize to the same digest.
  */
-export function draftEtag(files: Record<string, Uint8Array>): string {
+export function draftSnapshotId(files: Record<string, Uint8Array>): string {
   const hasher = new Bun.CryptoHasher("sha256");
   for (const path of Object.keys(files).sort()) {
     const bytes = files[path]!;
     hasher.update(`${path}\0${bytes.byteLength}\0`);
     hasher.update(bytes);
   }
-  return `"pd-${hasher.digest("hex")}"`;
+  return `pd-${hasher.digest("hex")}`;
+}
+
+/**
+ * Per-representation validators — RFC 9110 §8.8.1: an entity-tag identifies
+ * ONE representation, not a resource or a snapshot.
+ *
+ * The index and a file are different representations of different URLs, and
+ * two files of the same artifact are different representations of the SAME
+ * URL (they differ by `?path=`). Giving them all one snapshot-wide tag is what
+ * lets a client present a validator it obtained for file A — or for the index
+ * — and be told `304` for file B, or for a path that does not exist at all.
+ * So the path is folded in, and the two route families get distinct prefixes.
+ */
+export function indexEtag(snapshotId: string): string {
+  return `"i-${snapshotId}"`;
+}
+
+export function fileEtag(snapshotId: string, path: string): string {
+  // 128 bits of the path digest: this discriminates paths within one artifact,
+  // it is not a security boundary (the snapshot id already pins the content).
+  const pathDigest = new Bun.CryptoHasher("sha256").update(path).digest("hex").slice(0, 32);
+  return `"f-${snapshotId}-${pathDigest}"`;
 }
 
 const MANIFEST_FILE_NAME = "manifest.json";
@@ -226,15 +260,22 @@ export function applyDraftOverlay(files: Record<string, Uint8Array>, pkg: Packag
  * What a read WILL produce, resolved without touching object storage.
  *
  * A published version is content-addressed by the `integrity` column, so its
- * validator is a plain DB read — which means a conditional request for an
- * immutable version can be answered for the cost of one query, with no
- * download and no decompression. The draft has no such shortcut: its validator
- * is derived from the bytes themselves (see {@link draftEtag}), so `etag` is
+ * snapshot identity is a plain DB read — which means a conditional request for
+ * a version can be answered for the cost of one query, with no download and no
+ * decompression. The draft has no such shortcut: its identity is derived from
+ * the bytes themselves (see {@link draftSnapshotId}), so `snapshotId` is
  * `null` and the caller has to read before it can compare.
  */
 export type PackageFileValidator =
-  | { kind: "draft"; etag: null; immutable: false }
-  | { kind: "version"; etag: string; immutable: true; version: string; integrity: string };
+  | { kind: "draft"; snapshotId: null; immutable: false; yanked: false }
+  | {
+      kind: "version";
+      snapshotId: string;
+      immutable: boolean;
+      yanked: boolean;
+      version: string;
+      integrity: string;
+    };
 
 /**
  * Resolve the validator for a read. Cheap: at most one DB query, never a
@@ -248,15 +289,25 @@ export async function resolvePackageFileValidator(
   pkg: PackageFileSource,
   version?: string,
 ): Promise<PackageFileValidator> {
-  if (!version || version === "draft") {
-    return { kind: "draft", etag: null, immutable: false };
+  if (!version || version === VERSION_SELECTOR_DRAFT) {
+    return { kind: "draft", snapshotId: null, immutable: false, yanked: false };
   }
   const ver = await getVersionForDownload(pkg.id, version);
   if (!ver) throw notFound("Version not found");
+
+  // `immutable` is a promise that THIS URL will never mean anything else, so
+  // it can only be made when the caller pinned the exact version. A dist-tag
+  // or a semver range is a MOVING target — `?version=latest` starts meaning
+  // 1.1.0 the moment it is published, and a year-long `immutable` would stop
+  // the client from ever finding out. A yank is the same problem in reverse:
+  // a client holding an immutable copy could never learn it was withdrawn.
+  // Both still get the honest content ETag, just with revalidation.
+  const exact = version === ver.version;
   return {
     kind: "version",
-    etag: `"pv-${ver.integrity}"`,
-    immutable: true,
+    snapshotId: `pv-${ver.integrity}`,
+    immutable: exact && !ver.yanked,
+    yanked: ver.yanked,
     version: ver.version,
     integrity: ver.integrity,
   };
@@ -282,21 +333,25 @@ export async function readPackageSnapshot(
   const startedAt = performance.now();
 
   let files: Record<string, Uint8Array>;
-  let etag: string;
+  let snapshotId: string;
 
   if (validator.kind === "draft") {
-    // The ownership hint saves a guaranteed-miss org-path GET for system
-    // packages, whose bytes live in the global `_system/` namespace.
+    // Derive the namespace from the column that actually decides it:
+    // `packageItemOwnerNamespace` keys off `orgId`, NOT `source`. Reading
+    // `source` instead would send an (impossible, but silent) orgId-null local
+    // package to the org path and hand back an empty file list rather than an
+    // error.
+    const ownerNamespace = pkg.orgId ?? SYSTEM_STORAGE_NAMESPACE;
     const stored = await downloadPackageFiles(
       CONFIG_BY_TYPE[pkg.type].storageFolder,
-      pkg.orgId ?? "",
+      ownerNamespace,
       pkg.id,
       undefined,
-      pkg.source === "system" ? "system" : "org",
+      pkg.orgId === null ? "system" : "org",
     );
     files = stored ?? {};
     applyDraftOverlay(files, pkg);
-    etag = draftEtag(files);
+    snapshotId = draftSnapshotId(files);
   } else {
     // Integrity is passed on purpose: this is the same SRI gate the download
     // route applies. Reading a version through a path that skips it would make
@@ -304,7 +359,7 @@ export async function readPackageSnapshot(
     const zip = await downloadVersionZip(pkg.id, validator.version, validator.integrity);
     if (!zip) throw notFound("Artifact not found in storage");
     files = unzipAndNormalize(zip);
-    etag = validator.etag;
+    snapshotId = validator.snapshotId;
   }
 
   let decompressedBytes = 0;
@@ -318,13 +373,13 @@ export async function readPackageSnapshot(
   // (plan §7 defers the LRU). Without these numbers the answer is a guess.
   logger.info("Package file snapshot read", {
     packageId: pkg.id,
-    version: validator.kind === "version" ? validator.version : "draft",
+    version: validator.kind === "version" ? validator.version : VERSION_SELECTOR_DRAFT,
     fileCount,
     decompressedBytes,
     durationMs: Math.round(performance.now() - startedAt),
   });
 
-  return { files, etag, immutable: validator.immutable };
+  return { files, snapshotId, immutable: validator.immutable };
 }
 
 /**
@@ -337,7 +392,11 @@ export async function readPackageSnapshot(
  * files and the client derives the tree from the paths.
  */
 export function buildFileIndex(snapshot: PackageFileSnapshot): PackageFileEntry[] {
-  const decoder = new TextDecoder("utf-8", { fatal: true });
+  // `ignoreBOM: true` = do NOT strip a leading U+FEFF. The default silently
+  // drops it, which would make `inline` neither the full text nor a faithful
+  // rendering of `size` bytes — a client writing the preview back would lose
+  // the BOM.
+  const decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
   let remaining = INDEX_JSON_BUDGET_BYTES;
   const entries: PackageFileEntry[] = [];
 
@@ -345,7 +404,10 @@ export function buildFileIndex(snapshot: PackageFileSnapshot): PackageFileEntry[
     const bytes = snapshot.files[path]!;
     const { kind, text } = classify(path, bytes, decoder);
     const entry: PackageFileEntry = { path, size: bytes.byteLength, media_kind: kind };
-    if (text !== null) {
+    // `remaining > 0` short-circuits the stringify itself, not just its
+    // result: once the budget is spent, every remaining text file would
+    // otherwise allocate a full escaped copy only to have it discarded.
+    if (text !== null && remaining > 0) {
       const cost = JSON.stringify(text).length;
       if (cost <= remaining) {
         entry.inline = text;

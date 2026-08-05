@@ -17657,10 +17657,14 @@ export interface operations {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
                     "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    /** @description Strong entity-tag of the snapshot — the version artifact's integrity hash, or a content digest of the overlaid draft. */
+                    /** @description Strong entity-tag of this index representation (`"i-…"`), derived from the version artifact's integrity hash or from a content digest of the overlaid draft. It never matches a `files/content` tag. */
                     ETag?: string;
-                    /** @description `private, max-age=31536000, immutable` for a published version; `private, no-cache` for the draft. Always `private` — the response is tenant-scoped. */
+                    /** @description `private, max-age=31536000, immutable` ONLY for an exact, non-yanked version pin. A dist-tag or semver range is a moving target and a yank must stay discoverable, so both get `private, no-cache` — as does the draft. Always `private`: the response is tenant-scoped. */
                     "Cache-Control"?: string;
+                    /** @description Always `X-Org-Id, X-Application-Id` — access depends on both, so a cache must not reuse this body across organizations or applications. */
+                    Vary?: string;
+                    /** @description Present and set to `true` when the resolved version is yanked. */
+                    "X-Yanked"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -17670,10 +17674,14 @@ export interface operations {
             /** @description Cached copy is still current (`If-None-Match` matched). No body. */
             304: {
                 headers: {
-                    /** @description Strong entity-tag of the snapshot. */
+                    /** @description Strong entity-tag of this index representation. */
                     ETag?: string;
                     /** @description Same caching policy as the `200` response. */
                     "Cache-Control"?: string;
+                    /** @description Always `X-Org-Id, X-Application-Id`, as on the `200`. */
+                    Vary?: string;
+                    /** @description Present and set to `true` when the resolved version is yanked. */
+                    "X-Yanked"?: string;
                     [name: string]: unknown;
                 };
                 content?: never;
@@ -17682,6 +17690,15 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
             429: components["responses"]["RateLimited"];
+            /** @description The artifact could not be read: integrity/signature verification failed (`INTEGRITY_MISMATCH`) or the archive exceeded the decompression limits. RFC 9457 problem+json. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
         };
     };
     getPackageFileContent: {
@@ -17715,27 +17732,39 @@ export interface operations {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
                     "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    /** @description Strong entity-tag of the snapshot the file was read from. */
+                    /** @description Strong entity-tag of THIS FILE (`"f-…"`), folding in both the snapshot identity and the `path`. Per RFC 9110 §8.8.1 it identifies one representation: a tag obtained for another `path`, or from the file index, will not match. */
                     ETag?: string;
-                    /** @description `private, max-age=31536000, immutable` for a published version; `private, no-cache` for the draft. */
+                    /** @description `private, max-age=31536000, immutable` ONLY for an exact, non-yanked version pin; `private, no-cache` for a dist-tag, a semver range, a yanked version, and the draft. */
                     "Cache-Control"?: string;
+                    /** @description Always `X-Org-Id, X-Application-Id` — access depends on both, so a cache must not reuse these bytes across organizations or applications. */
+                    Vary?: string;
+                    /** @description Present and set to `true` when the resolved version is yanked. */
+                    "X-Yanked"?: string;
                     /** @description `attachment` with the file's sanitized base name. */
                     "Content-Disposition"?: string;
                     /** @description Always `nosniff`. */
                     "X-Content-Type-Options"?: string;
+                    /** @description Always `no-referrer`. */
+                    "Referrer-Policy"?: string;
+                    /** @description Always `same-origin`. */
+                    "Cross-Origin-Resource-Policy"?: string;
                     [name: string]: unknown;
                 };
                 content: {
                     "application/octet-stream": Blob;
                 };
             };
-            /** @description Cached copy is still current (`If-None-Match` matched). No body. */
+            /** @description Cached copy of THIS file is still current (`If-None-Match` matched its per-file tag). No body. A bare `If-None-Match: *` is deliberately NOT honoured before the artifact is read — it carries no path, so it cannot establish that the file exists. */
             304: {
                 headers: {
-                    /** @description Strong entity-tag of the snapshot. */
+                    /** @description Strong entity-tag of this file representation. */
                     ETag?: string;
                     /** @description Same caching policy as the `200` response. */
                     "Cache-Control"?: string;
+                    /** @description Always `X-Org-Id, X-Application-Id`, as on the `200`. */
+                    Vary?: string;
+                    /** @description Present and set to `true` when the resolved version is yanked. */
+                    "X-Yanked"?: string;
                     [name: string]: unknown;
                 };
                 content?: never;
@@ -17744,6 +17773,15 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
             429: components["responses"]["RateLimited"];
+            /** @description The artifact could not be read: integrity/signature verification failed (`INTEGRITY_MISMATCH`) or the archive exceeded the decompression limits. RFC 9457 problem+json. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
         };
     };
     forkPackage: {

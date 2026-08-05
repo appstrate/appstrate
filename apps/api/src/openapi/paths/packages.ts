@@ -410,12 +410,21 @@ export const packagesPaths = {
             "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
             ETag: {
               description:
-                "Strong entity-tag of the snapshot — the version artifact's integrity hash, or a content digest of the overlaid draft.",
+                'Strong entity-tag of this index representation (`"i-…"`), derived from the version artifact\'s integrity hash or from a content digest of the overlaid draft. It never matches a `files/content` tag.',
               schema: { type: "string" },
             },
             "Cache-Control": {
               description:
-                "`private, max-age=31536000, immutable` for a published version; `private, no-cache` for the draft. Always `private` — the response is tenant-scoped.",
+                "`private, max-age=31536000, immutable` ONLY for an exact, non-yanked version pin. A dist-tag or semver range is a moving target and a yank must stay discoverable, so both get `private, no-cache` — as does the draft. Always `private`: the response is tenant-scoped.",
+              schema: { type: "string" },
+            },
+            Vary: {
+              description:
+                "Always `X-Org-Id, X-Application-Id` — access depends on both, so a cache must not reuse this body across organizations or applications.",
+              schema: { type: "string" },
+            },
+            "X-Yanked": {
+              description: "Present and set to `true` when the resolved version is yanked.",
               schema: { type: "string" },
             },
           },
@@ -429,11 +438,19 @@ export const packagesPaths = {
           description: "Cached copy is still current (`If-None-Match` matched). No body.",
           headers: {
             ETag: {
-              description: "Strong entity-tag of the snapshot.",
+              description: "Strong entity-tag of this index representation.",
               schema: { type: "string" },
             },
             "Cache-Control": {
               description: "Same caching policy as the `200` response.",
+              schema: { type: "string" },
+            },
+            Vary: {
+              description: "Always `X-Org-Id, X-Application-Id`, as on the `200`.",
+              schema: { type: "string" },
+            },
+            "X-Yanked": {
+              description: "Present and set to `true` when the resolved version is yanked.",
               schema: { type: "string" },
             },
           },
@@ -442,6 +459,15 @@ export const packagesPaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "404": { $ref: "#/components/responses/NotFound" },
         "429": { $ref: "#/components/responses/RateLimited" },
+        "500": {
+          description:
+            "The artifact could not be read: integrity/signature verification failed (`INTEGRITY_MISMATCH`) or the archive exceeded the decompression limits. RFC 9457 problem+json.",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
       },
     },
   },
@@ -491,12 +517,22 @@ export const packagesPaths = {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
             "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
             ETag: {
-              description: "Strong entity-tag of the snapshot the file was read from.",
+              description:
+                'Strong entity-tag of THIS FILE (`"f-…"`), folding in both the snapshot identity and the `path`. Per RFC 9110 §8.8.1 it identifies one representation: a tag obtained for another `path`, or from the file index, will not match.',
               schema: { type: "string" },
             },
             "Cache-Control": {
               description:
-                "`private, max-age=31536000, immutable` for a published version; `private, no-cache` for the draft.",
+                "`private, max-age=31536000, immutable` ONLY for an exact, non-yanked version pin; `private, no-cache` for a dist-tag, a semver range, a yanked version, and the draft.",
+              schema: { type: "string" },
+            },
+            Vary: {
+              description:
+                "Always `X-Org-Id, X-Application-Id` — access depends on both, so a cache must not reuse these bytes across organizations or applications.",
+              schema: { type: "string" },
+            },
+            "X-Yanked": {
+              description: "Present and set to `true` when the resolved version is yanked.",
               schema: { type: "string" },
             },
             "Content-Disposition": {
@@ -507,6 +543,14 @@ export const packagesPaths = {
               description: "Always `nosniff`.",
               schema: { type: "string" },
             },
+            "Referrer-Policy": {
+              description: "Always `no-referrer`.",
+              schema: { type: "string" },
+            },
+            "Cross-Origin-Resource-Policy": {
+              description: "Always `same-origin`.",
+              schema: { type: "string" },
+            },
           },
           content: {
             "application/octet-stream": {
@@ -515,14 +559,23 @@ export const packagesPaths = {
           },
         },
         "304": {
-          description: "Cached copy is still current (`If-None-Match` matched). No body.",
+          description:
+            "Cached copy of THIS file is still current (`If-None-Match` matched its per-file tag). No body. A bare `If-None-Match: *` is deliberately NOT honoured before the artifact is read — it carries no path, so it cannot establish that the file exists.",
           headers: {
             ETag: {
-              description: "Strong entity-tag of the snapshot.",
+              description: "Strong entity-tag of this file representation.",
               schema: { type: "string" },
             },
             "Cache-Control": {
               description: "Same caching policy as the `200` response.",
+              schema: { type: "string" },
+            },
+            Vary: {
+              description: "Always `X-Org-Id, X-Application-Id`, as on the `200`.",
+              schema: { type: "string" },
+            },
+            "X-Yanked": {
+              description: "Present and set to `true` when the resolved version is yanked.",
               schema: { type: "string" },
             },
           },
@@ -531,6 +584,15 @@ export const packagesPaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "404": { $ref: "#/components/responses/NotFound" },
         "429": { $ref: "#/components/responses/RateLimited" },
+        "500": {
+          description:
+            "The artifact could not be read: integrity/signature verification failed (`INTEGRITY_MISMATCH`) or the archive exceeded the decompression limits. RFC 9457 problem+json.",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
       },
     },
   },

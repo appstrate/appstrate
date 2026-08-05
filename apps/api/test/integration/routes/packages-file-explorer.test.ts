@@ -14,7 +14,7 @@
 
 import { describe, it, expect, beforeEach } from "bun:test";
 import { eq } from "drizzle-orm";
-import { packages, packageDistTags } from "@appstrate/db/schema";
+import { packages, packageDistTags, packageVersions } from "@appstrate/db/schema";
 import { computeIntegrity } from "@appstrate/core/integrity";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
@@ -26,6 +26,7 @@ import {
 } from "../../../src/services/package-items/storage.ts";
 import { uploadPackageZip, buildMinimalZip } from "../../../src/services/package-storage.ts";
 import { insertShadowPackage } from "../../../src/services/inline-run.ts";
+import { hasPackageAccess } from "../../../src/services/application-packages.ts";
 import type { AgentManifest } from "../../../src/types/index.ts";
 import { INLINE_MAX_BYTES } from "../../../src/services/package-files.ts";
 
@@ -152,7 +153,7 @@ describe("package file explorer", () => {
     it("serves a draft with `private, no-cache` and a strong ETag", async () => {
       const { res } = await listFiles(ctx, id);
       expect(res.headers.get("Cache-Control")).toBe("private, no-cache");
-      expect(res.headers.get("ETag")).toMatch(/^"pd-[0-9a-f]{64}"$/);
+      expect(res.headers.get("ETag")).toMatch(/^"i-pd-[0-9a-f]{64}"$/);
     });
 
     it("overlays a skill's draft_content onto SKILL.md", async () => {
@@ -324,12 +325,52 @@ describe("package file explorer", () => {
       );
     });
 
-    it("resolves a dist-tag and caches a version immutably", async () => {
+    it("caches an EXACT version pin immutably", async () => {
+      const { res } = await listFiles(ctx, id, "?version=1.0.0");
+      expect(res.status).toBe(200);
+      expect(res.headers.get("Cache-Control")).toBe("private, max-age=31536000, immutable");
+      expect(res.headers.get("ETag")).toBe(`"i-pv-${(await versionIntegrity(id))!}"`);
+    });
+
+    it("resolves a dist-tag but must NOT mark it immutable", async () => {
+      // `?version=latest` is a MOVING target: pinning it for a year would mean
+      // publishing 1.1.0 never reaches a client that already cached 1.0.0.
       const { res, entries } = await listFiles(ctx, id, "?version=latest");
       expect(res.status).toBe(200);
       expect(entries.find((e) => e.path === "prompt.md")!.inline).toBe("published prompt v1");
-      expect(res.headers.get("Cache-Control")).toBe("private, max-age=31536000, immutable");
-      expect(res.headers.get("ETag")).toBe(`"pv-${(await versionIntegrity(id))!}"`);
+      expect(res.headers.get("Cache-Control")).toBe("private, no-cache");
+      // Same content tag as the exact pin — only the freshness policy differs.
+      expect(res.headers.get("ETag")).toBe(`"i-pv-${(await versionIntegrity(id))!}"`);
+    });
+
+    it("resolves a semver range without marking it immutable", async () => {
+      const { res } = await listFiles(ctx, id, "?version=%5E1.0.0");
+      expect(res.status).toBe(200);
+      expect(res.headers.get("Cache-Control")).toBe("private, no-cache");
+    });
+
+    it("never marks a yanked version immutable, and flags it with X-Yanked", async () => {
+      await db
+        .update(packageVersions)
+        .set({ yanked: true, yankedReason: "bad release" })
+        .where(eq(packageVersions.packageId, id));
+
+      const { res } = await listFiles(ctx, id, "?version=1.0.0");
+      expect(res.status).toBe(200);
+      // An immutable copy could never learn it had been withdrawn.
+      expect(res.headers.get("Cache-Control")).toBe("private, no-cache");
+      expect(res.headers.get("X-Yanked")).toBe("true");
+
+      const content = await fetchContent(ctx, id, "prompt.md", "&version=1.0.0");
+      expect(content.status).toBe(200);
+      expect(content.headers.get("X-Yanked")).toBe("true");
+    });
+
+    it("omits X-Yanked on a healthy version and on the draft", async () => {
+      const { res } = await listFiles(ctx, id, "?version=1.0.0");
+      expect(res.headers.get("X-Yanked")).toBeNull();
+      const draft = await listFiles(ctx, id);
+      expect(draft.res.headers.get("X-Yanked")).toBeNull();
     });
 
     it("404s an unknown version", async () => {
@@ -377,15 +418,24 @@ describe("package file explorer", () => {
       expect((await fetchContent(ctx, id, "prompt.md")).status).toBe(404);
     });
 
-    it("404s a package owned by another organization", async () => {
+    it("404s a package owned by another organization even when installed HERE", async () => {
       const other = await createTestContext({ orgSlug: "fexpother" });
       const id = "@fexpother/private-agent";
       await seedPackage({ id, orgId: other.orgId, type: "agent", draftContent: "secret" });
-      // Installed in the FOREIGN app — the org filter is what must reject it.
-      await seedInstalledPackage(other.defaultAppId, id);
+
+      // Install it in OUR application on purpose. `hasPackageAccess` does not
+      // filter `orgId`, so it now PASSES — which leaves `orgOrSystemFilter` as
+      // the only thing standing between us and another org's bytes. Seeding
+      // the install in the foreign app instead would make this test green with
+      // the org filter deleted.
+      await seedInstalledPackage(ctx.defaultAppId, id);
+      expect(
+        await hasPackageAccess({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, id),
+      ).toBe(true);
 
       const { res } = await listFiles(ctx, id);
       expect(res.status).toBe(404);
+      expect((await fetchContent(ctx, id, "prompt.md")).status).toBe(404);
     });
 
     it("404s an ephemeral inline-run shadow package", async () => {
@@ -573,6 +623,71 @@ describe("package file explorer", () => {
       });
       expect(wildcard.status).toBe(304);
     });
+
+    it("gives the index and a file DISTINCT tags", async () => {
+      const { res: index } = await listFiles(ctx, id);
+      const file = await fetchContent(ctx, id, "prompt.md");
+      expect(index.headers.get("ETag")).toMatch(/^"i-pd-[0-9a-f]{64}"$/);
+      expect(file.headers.get("ETag")).toMatch(/^"f-pd-[0-9a-f]{64}-[0-9a-f]{32}"$/);
+      expect(index.headers.get("ETag")).not.toBe(file.headers.get("ETag"));
+    });
+
+    it("gives two files of the same artifact distinct tags", async () => {
+      const a = await fetchContent(ctx, id, "prompt.md");
+      const b = await fetchContent(ctx, id, "manifest.json");
+      expect(a.status).toBe(200);
+      expect(b.status).toBe(200);
+      expect(a.headers.get("ETag")).not.toBe(b.headers.get("ETag"));
+    });
+
+    it("does not 304 one file on another file's tag", async () => {
+      const other = (await fetchContent(ctx, id, "manifest.json")).headers.get("ETag")!;
+      const res = await app.request(`/api/packages/${id}/files/content?path=prompt.md`, {
+        headers: authHeaders(ctx, { "If-None-Match": other }),
+      });
+      expect(res.status).toBe(200);
+    });
+
+    it("does not 304 a file on the INDEX's tag", async () => {
+      const indexTag = (await listFiles(ctx, id)).res.headers.get("ETag")!;
+      const res = await app.request(`/api/packages/${id}/files/content?path=prompt.md`, {
+        headers: authHeaders(ctx, { "If-None-Match": indexTag }),
+      });
+      expect(res.status).toBe(200);
+    });
+
+    it("404s — never 304s — a nonexistent path under a wildcard", async () => {
+      // `*` carries no path, so it cannot establish that the file exists.
+      // Answering 304 here would tell the caller a file is there.
+      const res = await app.request(`/api/packages/${id}/files/content?path=nope.md`, {
+        headers: authHeaders(ctx, { "If-None-Match": "*" }),
+      });
+      expect(res.status).toBe(404);
+    });
+
+    it("emits Vary on 200 AND 304 of both routes", async () => {
+      const expected = "X-Org-Id, X-Application-Id";
+
+      const { res: index } = await listFiles(ctx, id);
+      expect(index.headers.get("Vary")).toBe(expected);
+      const file = await fetchContent(ctx, id, "prompt.md");
+      expect(file.headers.get("Vary")).toBe(expected);
+
+      const indexNotModified = await app.request(`/api/packages/${id}/files`, {
+        headers: authHeaders(ctx, { "If-None-Match": index.headers.get("ETag")! }),
+      });
+      expect(indexNotModified.status).toBe(304);
+      expect(indexNotModified.headers.get("Vary")).toBe(expected);
+
+      const fileNotModified = await app.request(
+        `/api/packages/${id}/files/content?path=prompt.md`,
+        {
+          headers: authHeaders(ctx, { "If-None-Match": file.headers.get("ETag")! }),
+        },
+      );
+      expect(fileNotModified.status).toBe(304);
+      expect(fileNotModified.headers.get("Vary")).toBe(expected);
+    });
   });
 
   // ─── The immutable-ETag shortcut ───────────────────────────────────────────
@@ -608,27 +723,54 @@ describe("package file explorer", () => {
       expect(res.status).toBe(404);
     });
 
-    it("304s a conditional read WITHOUT downloading or decompressing the artifact", async () => {
+    it("304s a conditional index read WITHOUT downloading the artifact", async () => {
       // The artifact is unreachable (previous test). A 304 here is therefore
       // only possible if the validator was resolved from the DB and the bytes
       // were never fetched — a causal proof, no logging seam required.
       const res = await app.request(`/api/packages/${id}/files?version=1.0.0`, {
-        headers: authHeaders(ctx, { "If-None-Match": `"pv-${integrity}"` }),
+        headers: authHeaders(ctx, { "If-None-Match": `"i-pv-${integrity}"` }),
       });
       expect(res.status).toBe(304);
-      expect(res.headers.get("ETag")).toBe(`"pv-${integrity}"`);
+      expect(res.headers.get("ETag")).toBe(`"i-pv-${integrity}"`);
       expect(res.headers.get("Cache-Control")).toBe("private, max-age=31536000, immutable");
       expect(await res.text()).toBe("");
     });
 
-    it("short-circuits the content route the same way", async () => {
-      // `path` is never even looked at: there is no snapshot to look it up in.
+    it("short-circuits the content route on a genuine PER-FILE tag", async () => {
       const res = await app.request(
         `/api/packages/${id}/files/content?path=prompt.md&version=1.0.0`,
-        { headers: authHeaders(ctx, { "If-None-Match": `"pv-${integrity}"` }) },
+        { headers: authHeaders(ctx, { "If-None-Match": fileTag(integrity, "prompt.md") }) },
       );
       expect(res.status).toBe(304);
       expect(await res.text()).toBe("");
+    });
+
+    it("does not short-circuit the content route on another file's tag", async () => {
+      // No per-file match ⇒ it must go read the artifact, which is absent ⇒ 404.
+      // The important part is that it is NOT a 304.
+      const res = await app.request(
+        `/api/packages/${id}/files/content?path=prompt.md&version=1.0.0`,
+        { headers: authHeaders(ctx, { "If-None-Match": fileTag(integrity, "other.md") }) },
+      );
+      expect(res.status).toBe(404);
+    });
+
+    it("does not short-circuit the content route on a bare wildcard", async () => {
+      // `*` says nothing about WHICH path, so it cannot stand in for "this file
+      // exists". It must fall through to the read (which 404s here).
+      const res = await app.request(
+        `/api/packages/${id}/files/content?path=prompt.md&version=1.0.0`,
+        { headers: authHeaders(ctx, { "If-None-Match": "*" }) },
+      );
+      expect(res.status).toBe(404);
+    });
+
+    it("does not short-circuit the content route on the INDEX tag", async () => {
+      const res = await app.request(
+        `/api/packages/${id}/files/content?path=prompt.md&version=1.0.0`,
+        { headers: authHeaders(ctx, { "If-None-Match": `"i-pv-${integrity}"` }) },
+      );
+      expect(res.status).toBe(404);
     });
 
     it("still 404s an unknown version before any storage access", async () => {
@@ -639,20 +781,28 @@ describe("package file explorer", () => {
     });
 
     it("does not short-circuit the draft on a wildcard — the draft validator needs the bytes", async () => {
-      // `*` matches any current representation, so the draft still 304s; but it
-      // can only get there by reading, since its ETag is content-derived.
+      // `*` matches any current representation, so the draft index still 304s;
+      // but it can only get there by reading, since its id is content-derived.
       const res = await app.request(`/api/packages/${id}/files`, {
         headers: authHeaders(ctx, { "If-None-Match": "*" }),
       });
       expect(res.status).toBe(304);
-      expect(res.headers.get("ETag")).toMatch(/^"pd-[0-9a-f]{64}"$/);
+      expect(res.headers.get("ETag")).toMatch(/^"i-pd-[0-9a-f]{64}"$/);
     });
   });
 });
 
+/**
+ * The per-file ETag a client would legitimately hold, rebuilt independently of
+ * the production helper so the wire format itself is pinned by these tests.
+ */
+function fileTag(integrity: string, path: string): string {
+  const pathDigest = new Bun.CryptoHasher("sha256").update(path).digest("hex").slice(0, 32);
+  return `"f-pv-${integrity}-${pathDigest}"`;
+}
+
 /** Integrity of the single published version of `id`, for ETag assertions. */
 async function versionIntegrity(id: string): Promise<string | undefined> {
-  const { packageVersions } = await import("@appstrate/db/schema");
   const [row] = await db
     .select({ integrity: packageVersions.integrity })
     .from(packageVersions)

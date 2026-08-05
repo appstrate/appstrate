@@ -67,6 +67,8 @@ import {
   resolvePackageFileValidator,
   readPackageSnapshot,
   buildFileIndex,
+  indexEtag,
+  fileEtag,
   type PackageFileSource,
 } from "../services/package-files.ts";
 import {
@@ -1429,7 +1431,10 @@ const fileIndexQuerySchema = z.object({
 });
 const fileContentQuerySchema = z.object({
   version: z.string().trim().min(1).optional(),
-  path: z.string().trim().min(1),
+  // NOT trimmed: `unzipArtifact` preserves leading/trailing spaces in ZIP entry
+  // names, so an entry the index advertises as `"notes .md "` must stay
+  // fetchable by that exact key. Trimming would make it permanently 404.
+  path: z.string().min(1),
 });
 
 function parseFileQuery<T extends z.ZodType>(c: Context<AppEnv>, schema: T): z.infer<T> {
@@ -1479,27 +1484,58 @@ async function loadFileExplorerPackage(c: Context<AppEnv>): Promise<PackageFileS
 
 /**
  * `private` is mandatory on both routes: these are authenticated,
- * tenant-scoped bytes and a shared cache must never hold them. A published
- * version is content-addressed, so it is safe to pin forever; a draft changes
- * under the same URL and only ever gets revalidated (`no-cache` still allows
- * the 304 round-trip, it just forbids serving without one).
+ * tenant-scoped bytes and a shared cache must never hold them. An exact,
+ * non-yanked version is content-addressed, so it is safe to pin forever;
+ * everything else changes under the same URL and only ever gets revalidated
+ * (`no-cache` still allows the 304 round-trip, it just forbids serving
+ * without one).
+ *
+ * `Vary` is NOT optional here. The response body depends on `X-Org-Id` /
+ * `X-Application-Id` (via `hasPackageAccess`) while the URL does not mention
+ * either. Without it, switching applications in the SPA re-issues an identical
+ * URL and the browser answers from cache — showing application B an artifact
+ * that is only installed in application A.
  */
 function fileCacheHeaders(etag: string, immutable: boolean): Record<string, string> {
   return {
     ETag: etag,
     "Cache-Control": immutable ? "private, max-age=31536000, immutable" : "private, no-cache",
+    Vary: "X-Org-Id, X-Application-Id",
   };
 }
 
-/** RFC 9110 §13.1.2 — `*`, or any (weak-compared) member of the tag list. */
-function ifNoneMatchHits(header: string | undefined, etag: string): boolean {
+/**
+ * Same `X-Yanked: true` signal the version-download route emits. A yanked
+ * version stays readable — the explorer is how someone inspects what they were
+ * warned about — but the client has to be told.
+ */
+function yankedHeader(headers: Record<string, string>, yanked: boolean): Record<string, string> {
+  if (yanked) headers["X-Yanked"] = "true";
+  return headers;
+}
+
+/**
+ * RFC 9110 §13.1.2 — a (weak-compared) member of the tag list, or `*`.
+ *
+ * `allowWildcard: false` is for the pre-read short-circuit on the content
+ * route: `*` means "if any current representation exists", which the server
+ * cannot affirm before it knows whether that path is in the artifact. Honouring
+ * it there would turn `?path=does-not-exist` into a 304 and tell the caller a
+ * file exists. After the read, `*` is fine — existence has been established.
+ */
+function ifNoneMatchHits(
+  header: string | undefined,
+  etag: string,
+  opts?: { allowWildcard?: boolean },
+): boolean {
   if (!header) return false;
+  const allowWildcard = opts?.allowWildcard ?? true;
   const strip = (t: string) => t.replace(/^W\//, "");
   const target = strip(etag);
   return header
     .split(",")
     .map((t) => t.trim())
-    .some((t) => t === "*" || strip(t) === target);
+    .some((t) => (t === "*" ? allowWildcard : strip(t) === target));
 }
 
 /**
@@ -1511,7 +1547,15 @@ function ifNoneMatchHits(header: string | undefined, etag: string): boolean {
 function fileAttachmentDisposition(path: string): string {
   const base = path.slice(path.lastIndexOf("/") + 1);
   const ascii = base.replace(/[^\x20-\x7e]/g, "_").replace(/["\\]/g, "_");
-  return `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(base)}`;
+  // `encodeURIComponent` leaves `!'()*` raw, and `'` is the ext-value delimiter
+  // in RFC 5987 §3.2 — a name like `don't.md` would make a parser split the
+  // value in the wrong place. attr-char excludes all five, so percent-encode
+  // them too.
+  const encoded = encodeURIComponent(base).replace(
+    /['()*!]/g,
+    (ch) => `%${ch.charCodeAt(0).toString(16).toUpperCase()}`,
+  );
+  return `attachment; filename="${ascii}"; filename*=UTF-8''${encoded}`;
 }
 
 // ═══════════════════════════════════════════════
@@ -2070,20 +2114,27 @@ export function createPackagesRouter() {
     const pkg = await loadFileExplorerPackage(c);
     const inm = c.req.header("if-none-match");
 
-    // Resolve the validator FIRST. A published version's ETag comes straight
-    // from the `integrity` column, so a hit here answers the request for one
-    // query — no storage GET, no unzip, no SRI pass.
+    // Resolve the validator FIRST. A published version's snapshot id comes
+    // straight from the `integrity` column, so a hit here answers the request
+    // for one query — no storage GET, no unzip, no SRI pass.
     const validator = await resolvePackageFileValidator(pkg, version);
-    if (validator.etag !== null && ifNoneMatchHits(inm, validator.etag)) {
-      return new Response(null, {
-        status: 304,
-        headers: fileCacheHeaders(validator.etag, validator.immutable),
-      });
+    if (validator.snapshotId !== null) {
+      const etag = indexEtag(validator.snapshotId);
+      if (ifNoneMatchHits(inm, etag)) {
+        return new Response(null, {
+          status: 304,
+          headers: yankedHeader(fileCacheHeaders(etag, validator.immutable), validator.yanked),
+        });
+      }
     }
 
     const snapshot = await readPackageSnapshot(pkg, validator);
-    const headers = fileCacheHeaders(snapshot.etag, snapshot.immutable);
-    if (ifNoneMatchHits(inm, snapshot.etag)) {
+    const etag = indexEtag(snapshot.snapshotId);
+    const headers = yankedHeader(
+      fileCacheHeaders(etag, snapshot.immutable),
+      validator.kind === "version" && validator.yanked,
+    );
+    if (ifNoneMatchHits(inm, etag)) {
       return new Response(null, { status: 304, headers });
     }
     return c.json({ entries: buildFileIndex(snapshot) }, 200, headers);
@@ -2097,18 +2148,23 @@ export function createPackagesRouter() {
     const pkg = await loadFileExplorerPackage(c);
     const inm = c.req.header("if-none-match");
 
-    // Same short-circuit as the index: a version's validator is a DB read, so
-    // a revalidation of an immutable file never downloads the artifact.
+    // Same short-circuit as the index, but the tag folds in the PATH: a
+    // matching tag proves the client previously got a 200 for THIS file, which
+    // is what makes answering before the read sound. `*` is refused here — it
+    // says nothing about which path, so it cannot establish that the file
+    // exists.
     const validator = await resolvePackageFileValidator(pkg, version);
-    if (validator.etag !== null && ifNoneMatchHits(inm, validator.etag)) {
-      return new Response(null, {
-        status: 304,
-        headers: fileCacheHeaders(validator.etag, validator.immutable),
-      });
+    if (validator.snapshotId !== null) {
+      const etag = fileEtag(validator.snapshotId, path);
+      if (ifNoneMatchHits(inm, etag, { allowWildcard: false })) {
+        return new Response(null, {
+          status: 304,
+          headers: yankedHeader(fileCacheHeaders(etag, validator.immutable), validator.yanked),
+        });
+      }
     }
 
     const snapshot = await readPackageSnapshot(pkg, validator);
-    const headers = fileCacheHeaders(snapshot.etag, snapshot.immutable);
 
     // Plain own-key lookup on the already-sanitized map — no filesystem, no
     // `..` resolution. `Object.hasOwn` keeps a `__proto__`/`toString` probe
@@ -2118,19 +2174,29 @@ export function createPackagesRouter() {
     }
     const bytes = snapshot.files[path]!;
 
-    if (ifNoneMatchHits(inm, snapshot.etag)) {
+    const etag = fileEtag(snapshot.snapshotId, path);
+    const headers = yankedHeader(
+      fileCacheHeaders(etag, snapshot.immutable),
+      validator.kind === "version" && validator.yanked,
+    );
+    // Existence is established, so `*` is now a legitimate match.
+    if (ifNoneMatchHits(inm, etag)) {
       return new Response(null, { status: 304, headers });
     }
 
     // Always octet-stream + nosniff + attachment: package bytes are
     // author-controlled, so no response from here may be something a browser
-    // decides to execute or render in this origin.
+    // decides to execute or render in this origin. `Referrer-Policy` +
+    // `Cross-Origin-Resource-Policy` mirror what `routes/documents.ts` applies
+    // to comparable authenticated tenant bytes.
     return new Response(new Uint8Array(bytes), {
       status: 200,
       headers: {
         ...headers,
         "Content-Type": "application/octet-stream",
         "X-Content-Type-Options": "nosniff",
+        "Referrer-Policy": "no-referrer",
+        "Cross-Origin-Resource-Policy": "same-origin",
         "Content-Disposition": fileAttachmentDisposition(path),
         "Content-Length": String(bytes.byteLength),
       },
