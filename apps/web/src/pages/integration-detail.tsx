@@ -99,6 +99,7 @@ import {
 import { useIntegrations } from "../hooks/use-integrations";
 import { useDisconnectIntegrationConnection } from "../hooks/use-me-connections";
 import { useCurrentOrgId } from "../hooks/use-org";
+import { useAuth } from "../hooks/use-auth";
 import { useCurrentApplicationId } from "../hooks/use-current-application";
 import { InlineConnectButton } from "../components/integration-connect/inline-connect-button";
 import { connectionDisplayLabel } from "../components/integration-connect/connection-label";
@@ -492,10 +493,18 @@ function ConnectAuthBlock({
   isAdmin: boolean;
 }) {
   const { t } = useTranslation("settings");
+  const { user } = useAuth();
   const isOAuth = status.type === "oauth2";
   // Connectable when a client is usable: org-registered, shared system client,
   // or auto-provisioned at connect time (remote MCP CIMD/DCR). Shared gate.
   const clientMissing = isOAuth && !isOauthAuthConnectable(status);
+  // `status.connections` is the own ∪ org-shared union, but "force the IdP's
+  // account chooser" is about the CALLER's own accounts — it exists so a second
+  // connect can't silently re-pick the account already signed in on this
+  // browser. Someone else's shared connection says nothing about that.
+  const ownConnectionCount = status.connections.filter(
+    (c) => c.owner_type === "user" && c.owner_id === user?.id,
+  ).length;
 
   return (
     <div className="bg-card rounded-lg border p-4" data-testid={`auth-section-${status.auth_key}`}>
@@ -518,7 +527,7 @@ function ConnectAuthBlock({
             authKey={status.auth_key}
             intent="connect"
             label={t("integration.auth.addAccount")}
-            forceAccountSelect={status.connections.length > 0}
+            forceAccountSelect={ownConnectionCount > 0}
             lockToAuthKey
           />
         ) : null}
@@ -703,6 +712,19 @@ function BlockUserConnectionsToggle({
  * overrides it. `enforce` locks members; otherwise it's a soft default a
  * member can still override with their own pick.
  */
+/**
+ * Option label for the two admin pickers (org default, pins). Those lists
+ * are org-wide — since the connections endpoint returns shared connections
+ * owned by other members, an admin choosing a cross-agent default is picking
+ * between rows whose labels can collide ("Connexion 1" for two members), so
+ * the owner is part of the identity here. The per-row table carries the same
+ * information as a badge instead, where a suffix would fight the rename UI.
+ */
+function connectionOptionLabel(c: IntegrationConnection): string {
+  const base = connectionDisplayLabel(c);
+  return c.owner_name ? `${base} — ${c.owner_name}` : base;
+}
+
 function OrgDefaultSection({ packageId }: { packageId: string }) {
   const { t } = useTranslation("settings");
   const { data: orgDefault } = useIntegrationOrgDefault(packageId);
@@ -714,7 +736,7 @@ function OrgDefaultSection({ packageId }: { packageId: string }) {
   const connectionDisplay = (id: string): string => {
     const c = (connections ?? []).find((x) => x.id === id);
     if (!c) return id;
-    return connectionDisplayLabel(c);
+    return connectionOptionLabel(c);
   };
 
   const [connectionId, setConnectionId] = useState("");
@@ -829,7 +851,7 @@ function PinManagementSection({ packageId }: { packageId: string }) {
   const connectionDisplay = (id: string): string => {
     const c = (connections ?? []).find((x) => x.id === id);
     if (!c) return id;
-    return connectionDisplayLabel(c);
+    return connectionOptionLabel(c);
   };
 
   const onSubmitNewPin = () => {
@@ -1062,6 +1084,8 @@ function ConnectionTableRow({
   const disconnect = useDisconnectIntegrationConnection();
   const orgId = useCurrentOrgId();
   const applicationId = useCurrentApplicationId();
+  const { user } = useAuth();
+  const { isAdmin } = usePermissions();
   const [editing, setEditing] = useState(false);
   const [draftLabel, setDraftLabel] = useState(connection.label ?? "");
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -1069,6 +1093,16 @@ function ConnectionTableRow({
   // "Connexion N"); render it verbatim.
   const name = connectionDisplayLabel(connection);
   const isShared = connection.shared_with_org === true;
+  // The list now returns org-shared connections owned by OTHER members, so
+  // every per-row control has to be gated on the same rule the API enforces —
+  // otherwise the button renders and the request comes back 403:
+  //   - delete  → `DELETE /api/me/connections/:id`, strictly owner-scoped
+  //               (`routes/me.ts`), no admin escape hatch by design;
+  //   - share   → owner-only, because sharing is the owner's consent
+  //               (`routes/integrations.ts`, `shared_with_org` branch);
+  //   - rename  → owner OR org admin (same route, label branch).
+  const isOwn = connection.owner_type === "user" && connection.owner_id === user?.id;
+  const canRename = isOwn || isAdmin;
   const startEdit = () => {
     setDraftLabel(connection.label ?? "");
     setEditing(true);
@@ -1139,16 +1173,29 @@ function ConnectionTableRow({
           ) : (
             <div className="flex items-center gap-1">
               <span className="truncate font-medium">{name}</span>
-              <Button
-                size="icon"
-                variant="ghost"
-                className="size-6"
-                onClick={startEdit}
-                title={t("integration.connection.labelEdit")}
-                data-testid={`label-edit-${connection.id}`}
-              >
-                <Pencil className="size-3" />
-              </Button>
+              {!isOwn && (
+                <Badge
+                  variant="secondary"
+                  className="text-[0.6rem]"
+                  data-testid={`connection-owner-${connection.id}`}
+                >
+                  {connection.owner_name
+                    ? t("integration.connection.sharedByOwner", { owner: connection.owner_name })
+                    : t("integration.connection.sharedByUnknown")}
+                </Badge>
+              )}
+              {canRename && (
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="size-6"
+                  onClick={startEdit}
+                  title={t("integration.connection.labelEdit")}
+                  data-testid={`label-edit-${connection.id}`}
+                >
+                  <Pencil className="size-3" />
+                </Button>
+              )}
             </div>
           )}
         </TableCell>
@@ -1162,7 +1209,12 @@ function ConnectionTableRow({
                   <ConnectionStatusBadge tone="needsReconnection">
                     {t("integration.auth.needsReconnection")}
                   </ConnectionStatusBadge>
-                  {canRenew && authType === "oauth2" && (
+                  {/* Owner-only: the reconnect writes through
+                      `persistCredentialBundle` kind `update-owned`, whose WHERE
+                      carries the actor identity — a non-owner reconnect 404s.
+                      Only the owner can re-authenticate their own credential,
+                      so others see the state without a dead CTA. */}
+                  {isOwn && canRenew && authType === "oauth2" && (
                     <InlineConnectButton
                       packageId={packageId}
                       authKey={authKey}
@@ -1207,41 +1259,51 @@ function ConnectionTableRow({
           )}
         </TableCell>
 
-        {/* Org-share toggle */}
+        {/* Org-share toggle — owner-only (sharing is the owner's consent) */}
         <TableCell>
-          <label
-            className="flex items-center gap-1.5 text-xs"
-            title={t("integration.connection.shareWithOrg.help")}
-          >
-            <input
-              type="checkbox"
-              checked={isShared}
-              disabled={updateConnection.isPending}
-              onChange={(e) =>
-                updateConnection.mutate({
-                  params: { path: { packageId, connectionId: connection.id } },
-                  body: { shared_with_org: e.target.checked },
-                })
-              }
-              data-testid={`share-toggle-${connection.id}`}
-            />
-            {t("integration.connection.shareWithOrg.label")}
-          </label>
+          {isOwn ? (
+            <label
+              className="flex items-center gap-1.5 text-xs"
+              title={t("integration.connection.shareWithOrg.help")}
+            >
+              <input
+                type="checkbox"
+                checked={isShared}
+                disabled={updateConnection.isPending}
+                onChange={(e) =>
+                  updateConnection.mutate({
+                    params: { path: { packageId, connectionId: connection.id } },
+                    body: { shared_with_org: e.target.checked },
+                  })
+                }
+                data-testid={`share-toggle-${connection.id}`}
+              />
+              {t("integration.connection.shareWithOrg.label")}
+            </label>
+          ) : (
+            <span className="text-muted-foreground text-xs">
+              {t("integration.connection.shareWithOrg.label")}
+            </span>
+          )}
         </TableCell>
 
-        {/* Disconnect */}
+        {/* Disconnect — owner-only: the endpoint is `/api/me/connections` */}
         <TableCell className="text-right">
-          <Button
-            size="icon"
-            variant="ghost"
-            className="size-7"
-            onClick={onDelete}
-            disabled={disconnect.isPending}
-            title={t("integration.connection.delete")}
-            data-testid={`connection-delete-${connection.id}`}
-          >
-            <Trash2 className="text-destructive size-3.5" />
-          </Button>
+          {isOwn ? (
+            <Button
+              size="icon"
+              variant="ghost"
+              className="size-7"
+              onClick={onDelete}
+              disabled={disconnect.isPending}
+              title={t("integration.connection.delete")}
+              data-testid={`connection-delete-${connection.id}`}
+            >
+              <Trash2 className="text-destructive size-3.5" />
+            </Button>
+          ) : (
+            <span className="text-muted-foreground text-xs">—</span>
+          )}
         </TableCell>
       </TableRow>
       <ConfirmModal

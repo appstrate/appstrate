@@ -18,16 +18,14 @@
  * already has the role.
  */
 
-import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { db, toRows } from "@appstrate/db/client";
 import {
   applicationPackages,
-  endUsers,
   integrationConnections,
   integrationPins,
   integrationOrgDefaults,
   packages,
-  user,
 } from "@appstrate/db/schema";
 import type {
   IntegrationConnectionRow as ConnectionRow,
@@ -56,6 +54,7 @@ import { getPackage } from "./package-catalog.ts";
 import { resolveAgentRunVersion } from "./agent-version-resolver.ts";
 import { fetchIntegrationManifest } from "./integration-service.ts";
 import { getOrgDefault } from "./integration-org-defaults-service.ts";
+import { resolveConnectionOwnerNames } from "./integration-connection-owner-names.ts";
 import {
   resolveConnectionsForRun,
   translateResolutionError,
@@ -583,31 +582,13 @@ export async function listAccessibleConnections(
 }
 
 /**
- * Resolve owner display names in two batched lookups (user + end_users)
- * and project the connection rows into picker summaries. Keeps the dual
- * own/shared query path untouched — names are a post-pass over whatever
- * rows survived the merge.
+ * Project the connection rows into picker summaries, resolving owner
+ * display names via the shared batched lookup. Keeps the dual own/shared
+ * query path untouched — names are a post-pass over whatever rows
+ * survived the merge.
  */
 async function attachOwnerNames(rows: ConnectionRow[]): Promise<SharedConnectionSummary[]> {
-  const userIds = [...new Set(rows.map((r) => r.userId).filter((v): v is string => v !== null))];
-  const endUserIds = [
-    ...new Set(rows.map((r) => r.endUserId).filter((v): v is string => v !== null)),
-  ];
-
-  const [userRows, endUserRows] = await Promise.all([
-    userIds.length
-      ? db.select({ id: user.id, name: user.name }).from(user).where(inArray(user.id, userIds))
-      : Promise.resolve([] as { id: string; name: string }[]),
-    endUserIds.length
-      ? db
-          .select({ id: endUsers.id, name: endUsers.name, externalId: endUsers.externalId })
-          .from(endUsers)
-          .where(inArray(endUsers.id, endUserIds))
-      : Promise.resolve([] as { id: string; name: string | null; externalId: string | null }[]),
-  ]);
-
-  const userNames = new Map(userRows.map((u) => [u.id, u.name]));
-  const endUserNames = new Map(endUserRows.map((e) => [e.id, e.name ?? e.externalId]));
+  const ownerName = await resolveConnectionOwnerNames(rows);
 
   return rows.map((row) => ({
     id: row.id,
@@ -616,11 +597,7 @@ async function attachOwnerNames(rows: ConnectionRow[]): Promise<SharedConnection
     label: row.label,
     owner_user_id: row.userId,
     owner_end_user_id: row.endUserId,
-    owner_name: row.userId
-      ? (userNames.get(row.userId) ?? null)
-      : row.endUserId
-        ? (endUserNames.get(row.endUserId) ?? null)
-        : null,
+    owner_name: ownerName(row),
     scopes_granted: row.scopesGranted ?? [],
     shared_with_org: row.sharedWithOrg,
     needs_reconnection: row.needsReconnection,

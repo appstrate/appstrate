@@ -66,6 +66,7 @@ import {
   toSupportedTokenEndpointAuthMethod,
 } from "./integration-manifest-helpers.ts";
 import { fetchMcpServerManifest } from "./integration-service.ts";
+import { resolveConnectionOwnerNames } from "./integration-connection-owner-names.ts";
 import type { AfpsManifestAuth } from "./integration-manifest-helpers.ts";
 import type { IntegrationAuthStatus } from "@appstrate/shared-types";
 import { getIntegration } from "./integration-service.ts";
@@ -2022,9 +2023,26 @@ export async function saveIntegrationConnection(
 }
 
 /**
- * List the actor's connections for an integration. End-users see only
- * their own rows; dashboard users see only their own rows. Filtering by
- * actor matches the runtime-side resolver in Phase 1.2a.
+ * List the connections the actor can *use* for an integration in this
+ * application: their own rows, plus every row opted into org-wide sharing
+ * (`sharedWithOrg`) whoever owns it.
+ *
+ * The union — not the actor's own rows — is the correct set here because
+ * it is what the runtime resolver will actually pick from
+ * (`loadActorConnection`, `loadAccessibleConnections`,
+ * `listAccessibleConnections`). An own-only list made three surfaces built
+ * on top of it silently wrong: the admin org-default and pin pickers
+ * (which filter this list for `shared_with_org` and could therefore only
+ * ever offer the admin's *own* shared rows, while the backend happily
+ * accepts anyone's — `integration-pins-service.ts` `upsertIntegrationPin`),
+ * and `auths[].ready`, which claimed "not connected" for an actor whose
+ * run would in fact resolve a shared connection.
+ *
+ * Rows the actor does not own come back with `identity_claims: null`:
+ * sharing a connection consents to *using* it, not to publishing the
+ * owner's OIDC claim bag (email, sub, …) to every member. `account_id`
+ * and `owner_name` stay — the picker DTO already exposes both, and a
+ * connection you can pick has to be identifiable.
  */
 export async function listIntegrationConnections(
   scope: AppScope,
@@ -2040,10 +2058,19 @@ export async function listIntegrationConnections(
       and(
         eq(integrationConnections.integrationId, packageId),
         eq(integrationConnections.applicationId, scope.applicationId),
-        ownerPredicate,
+        or(ownerPredicate, eq(integrationConnections.sharedWithOrg, true)),
       ),
     );
-  return rows.map(serializeIntegrationConnection);
+  const ownerName = await resolveConnectionOwnerNames(rows);
+  return rows.map((row) => {
+    const isOwn = actor.type === "end_user" ? row.endUserId === actor.id : row.userId === actor.id;
+    const summary = serializeIntegrationConnection(row);
+    return {
+      ...summary,
+      ...(isOwn ? {} : { identity_claims: null }),
+      owner_name: ownerName(row),
+    };
+  });
 }
 
 /** One integration the actor could attach to an agent (own and/or org-shared). */
@@ -2351,6 +2378,13 @@ export async function getIntegrationAuthStatuses(
       // consumers (chat connect card, …) never re-derive connection state and
       // stay correct as that logic evolves. Agent-agnostic (no scope/pin gate);
       // a run's authoritative readiness still comes from `validateInlineRun`.
+      //
+      // Reads the own ∪ org-shared union (see `listIntegrationConnections`),
+      // so an actor who owns nothing but inherits a shared connection is
+      // `ready: true` — deliberately, because their run resolves that
+      // connection. This is what makes the state correct under
+      // `block_user_connections`, where a member cannot create a connection at
+      // all and a shared one is the only path to a successful run.
       ready: keyConnections.some((c) => !c.needs_reconnection),
       has_oauth_client: oauthClientKeys.has(key),
       // Shared platform client (SYSTEM_INTEGRATIONS): when one serves this

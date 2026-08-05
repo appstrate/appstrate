@@ -1676,7 +1676,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List the caller's connections for an integration */
+        /**
+         * List the connections the caller can use for an integration
+         * @description Returns the caller's own connections **plus** every connection in the application opted into org-wide sharing (`shared_with_org: true`), whoever owns it — the same set the runtime resolver picks from. Rows the caller does not own carry `owner_name` and have `identity_claims` redacted to `null`.
+         */
         get: operations["listIntegrationConnections"];
         put?: never;
         post?: never;
@@ -10810,6 +10813,8 @@ export interface operations {
                             /** @enum {string} */
                             owner_type: "user" | "end_user";
                             owner_id: string;
+                            /** @description Display name of the connection's owner (member name, or end-user name falling back to its external id); null when the owner row was deleted. Returned by the list surfaces, which include org-shared connections owned by other members; absent from the single-connection write responses, where the row is the caller's own. */
+                            owner_name?: string | null;
                             label?: string | null;
                             shared_with_org?: boolean;
                             /** @description The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting. */
@@ -10882,6 +10887,8 @@ export interface operations {
                                 /** @enum {string} */
                                 owner_type: "user" | "end_user";
                                 owner_id: string;
+                                /** @description Display name of the connection's owner (member name, or end-user name falling back to its external id); null when the owner row was deleted. Returned by the list surfaces, which include org-shared connections owned by other members; absent from the single-connection write responses, where the row is the caller's own. */
+                                owner_name?: string | null;
                                 label?: string | null;
                                 shared_with_org?: boolean;
                                 /** @description The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting. */
@@ -10988,6 +10995,8 @@ export interface operations {
                                 /** @enum {string} */
                                 owner_type: "user" | "end_user";
                                 owner_id: string;
+                                /** @description Display name of the connection's owner (member name, or end-user name falling back to its external id); null when the owner row was deleted. Returned by the list surfaces, which include org-shared connections owned by other members; absent from the single-connection write responses, where the row is the caller's own. */
+                                owner_name?: string | null;
                                 label?: string | null;
                                 shared_with_org?: boolean;
                                 /** @description The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting. */
@@ -11139,6 +11148,8 @@ export interface operations {
                         /** @enum {string} */
                         owner_type: "user" | "end_user";
                         owner_id: string;
+                        /** @description Display name of the connection's owner (member name, or end-user name falling back to its external id); null when the owner row was deleted. Returned by the list surfaces, which include org-shared connections owned by other members; absent from the single-connection write responses, where the row is the caller's own. */
+                        owner_name?: string | null;
                         label?: string | null;
                         shared_with_org?: boolean;
                         /** @description The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting. */
@@ -11417,6 +11428,8 @@ export interface operations {
                             /** @enum {string} */
                             owner_type: "user" | "end_user";
                             owner_id: string;
+                            /** @description Display name of the connection's owner (member name, or end-user name falling back to its external id); null when the owner row was deleted. Returned by the list surfaces, which include org-shared connections owned by other members; absent from the single-connection write responses, where the row is the caller's own. */
+                            owner_name?: string | null;
                             label?: string | null;
                             shared_with_org?: boolean;
                             /** @description The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting. */
@@ -11483,6 +11496,8 @@ export interface operations {
                         /** @enum {string} */
                         owner_type: "user" | "end_user";
                         owner_id: string;
+                        /** @description Display name of the connection's owner (member name, or end-user name falling back to its external id); null when the owner row was deleted. Returned by the list surfaces, which include org-shared connections owned by other members; absent from the single-connection write responses, where the row is the caller's own. */
+                        owner_name?: string | null;
                         label?: string | null;
                         shared_with_org?: boolean;
                         /** @description The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting. */
@@ -11985,6 +12000,8 @@ export interface operations {
                                 /** @enum {string} */
                                 owner_type: "user" | "end_user";
                                 owner_id: string;
+                                /** @description Display name of the connection's owner (member name, or end-user name falling back to its external id); null when the owner row was deleted. Returned by the list surfaces, which include org-shared connections owned by other members; absent from the single-connection write responses, where the row is the caller's own. */
+                                owner_name?: string | null;
                                 label?: string | null;
                                 shared_with_org?: boolean;
                                 /** @description The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting. */

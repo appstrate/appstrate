@@ -130,6 +130,11 @@ const integrationConnectionSchema = {
     expiresAt: { type: ["string", "null"], format: "date-time" },
     owner_type: { type: "string", enum: ["user", "end_user"] },
     owner_id: { type: "string" },
+    owner_name: {
+      type: ["string", "null"],
+      description:
+        "Display name of the connection's owner (member name, or end-user name falling back to its external id); null when the owner row was deleted. Returned by the list surfaces, which include org-shared connections owned by other members; absent from the single-connection write responses, where the row is the caller's own.",
+    },
     label: { type: ["string", "null"] },
     shared_with_org: { type: "boolean" },
     client_ref: {
@@ -995,7 +1000,9 @@ export const integrationsPaths = {
     get: {
       operationId: "listIntegrationConnections",
       tags: ["Integrations"],
-      summary: "List the caller's connections for an integration",
+      summary: "List the connections the caller can use for an integration",
+      description:
+        "Returns the caller's own connections **plus** every connection in the application opted into org-wide sharing (`shared_with_org: true`), whoever owns it — the same set the runtime resolver picks from. Rows the caller does not own carry `owner_name` and have `identity_claims` redacted to `null`.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
