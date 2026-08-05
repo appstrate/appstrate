@@ -16,8 +16,8 @@ import {
   buildFeatured,
   countCacheRates,
   coverageRow,
-  deriveGenerationCapabilities,
   formatCoverageSummary,
+  projectGenerationCapabilities,
   projectEntry,
   type CoverageRow,
 } from "../refresh-pricing-catalog.ts";
@@ -332,38 +332,9 @@ describe("generation capabilities", () => {
     ).toThrow(/model.*_appstrate_generation/);
   });
 
-  it("normalizes LiteLLM reasoning efforts and supported request parameters", () => {
-    expect(
-      deriveGenerationCapabilities({
-        supports_reasoning: true,
-        supports_none_reasoning_effort: true,
-        supports_minimal_reasoning_effort: false,
-        supports_low_reasoning_effort: true,
-        supports_xhigh_reasoning_effort: false,
-        supports_adaptive_thinking: true,
-        _appstrate_supported_openai_params: ["temperature", "tools"],
-      }),
-    ).toEqual({
-      temperature: "supported",
-      reasoning: {
-        supported: "supported",
-        adaptive: true,
-        levels: {
-          off: "supported",
-          minimal: "unsupported",
-          low: "supported",
-          medium: "unknown",
-          high: "unknown",
-          xhigh: "unsupported",
-          max: "unknown",
-        },
-      },
-    });
-  });
-
   it("projects LiteLLM's effective value-level contract without re-deriving it", () => {
     expect(
-      deriveGenerationCapabilities({
+      projectGenerationCapabilities({
         _appstrate_generation: {
           temperature: "supported",
           reasoning: {
@@ -401,52 +372,42 @@ describe("generation capabilities", () => {
     });
   });
 
-  it("keeps absent upstream facts unknown instead of guessing", () => {
-    expect(deriveGenerationCapabilities({})).toEqual({
+  it("omits unknown levels from the runtime projection", () => {
+    expect(
+      projectGenerationCapabilities({
+        _appstrate_generation: {
+          temperature: "unknown",
+          reasoning: {
+            supported: "unknown",
+            adaptive: null,
+            levels: {
+              none: "unsupported",
+              minimal: "unknown",
+              low: "supported",
+              medium: "unknown",
+              high: "unknown",
+              xhigh: "unknown",
+              max: "unsupported",
+            },
+          },
+        },
+      }),
+    ).toEqual({
       temperature: "unknown",
       reasoning: {
         supported: "unknown",
         adaptive: null,
         levels: {
-          off: "unknown",
-          minimal: "unknown",
-          low: "unknown",
-          medium: "unknown",
-          high: "unknown",
-          xhigh: "unknown",
-          max: "unknown",
+          off: "unsupported",
+          low: "supported",
+          max: "unsupported",
         },
       },
     });
   });
 
-  it("uses LiteLLM's supported parameter list as a reasoning capability fact", () => {
-    const capabilities = deriveGenerationCapabilities({
-      _appstrate_supported_openai_params: ["reasoning_effort"],
-    });
-    expect(capabilities.reasoning.supported).toBe("supported");
-    expect(capabilities.reasoning.levels.low).toBe("unknown");
-    expect(capabilities.reasoning.levels.medium).toBe("unknown");
-    expect(capabilities.reasoning.levels.high).toBe("unknown");
-  });
-
-  it("derives reasoning support from an explicitly supported level", () => {
-    const capabilities = deriveGenerationCapabilities({
-      supports_minimal_reasoning_effort: true,
-    });
-    expect(capabilities.reasoning.supported).toBe("supported");
-    expect(capabilities.reasoning.levels.minimal).toBe("supported");
-    expect(capabilities.reasoning.levels.high).toBe("unknown");
-  });
-
-  it("keeps LiteLLM's max effort distinct from xhigh", () => {
-    const capabilities = deriveGenerationCapabilities({
-      litellm_provider: "anthropic",
-      supports_reasoning: true,
-      supports_max_reasoning_effort: true,
-    });
-    expect(capabilities.reasoning.levels.xhigh).toBe("unknown");
-    expect(capabilities.reasoning.levels.max).toBe("supported");
+  it("rejects an entry without the normalized source contract", () => {
+    expect(() => projectGenerationCapabilities({})).toThrow(/normalized generation contract/);
   });
 
   it("vendors the normalized generation block with pricing", () => {
@@ -454,10 +415,9 @@ describe("generation capabilities", () => {
       input_cost_per_token: 0.000001,
       output_cost_per_token: 0.000002,
       max_input_tokens: 10_000,
-      supports_reasoning: true,
-      supports_sampling_params: false,
+      _appstrate_generation: normalizedGeneration,
     });
-    expect(projected?.generation.temperature).toBe("unsupported");
+    expect(projected?.generation.temperature).toBe("supported");
     expect(projected?.generation.reasoning.supported).toBe("supported");
   });
 
@@ -466,7 +426,7 @@ describe("generation capabilities", () => {
       input_cost_per_token: 0.000001,
       output_cost_per_token: 0.000002,
       max_input_tokens: 10_000,
-      _appstrate_supported_openai_params: ["reasoning_effort"],
+      _appstrate_generation: normalizedGeneration,
     });
     expect(projected?.generation.reasoning.supported).toBe("supported");
     expect(projected?.capabilities).toContain("reasoning");

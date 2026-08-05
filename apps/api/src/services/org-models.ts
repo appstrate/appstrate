@@ -107,7 +107,11 @@ const defaultModel = createDefaultPointer({
 function projectAliasedGenerationCapabilities(
   capabilities: ModelGenerationCapabilities | null,
 ): ModelGenerationCapabilities {
-  const levels = capabilities?.reasoning.levels ?? {};
+  const levels = Object.fromEntries(
+    Object.entries(capabilities?.reasoning.levels ?? {}).filter(
+      ([, support]) => support === "supported",
+    ),
+  ) as ModelGenerationCapabilities["reasoning"]["levels"];
   const temperatureSupported = capabilities?.temperature === "supported";
   const reasoningSupported = capabilities?.reasoning.supported === "supported";
 

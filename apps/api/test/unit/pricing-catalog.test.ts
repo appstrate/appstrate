@@ -163,6 +163,25 @@ describe("vendored catalog invariant — configurable reasoning has a supported 
   });
 });
 
+describe("vendored catalog invariant — sparse reasoning levels", () => {
+  it("omits unknown level facts", () => {
+    const violations = catalogFiles.flatMap((file) => {
+      const entries = JSON.parse(readFileSync(join(dataDir, file), "utf8")) as Record<
+        string,
+        { generation?: { reasoning?: { levels?: Record<string, string> } } }
+      >;
+
+      return Object.entries(entries).flatMap(([modelId, entry]) =>
+        Object.entries(entry.generation?.reasoning?.levels ?? {})
+          .filter(([, support]) => support === "unknown")
+          .map(([level]) => `${file}:${modelId}:${level}`),
+      );
+    });
+
+    expect(violations).toEqual([]);
+  });
+});
+
 describe("vendored catalog invariant — sparse temperature compatibility", () => {
   it("serializes only conclusive pair facts for individually usable controls", () => {
     const pairFacts = catalogFiles.flatMap((file) => {

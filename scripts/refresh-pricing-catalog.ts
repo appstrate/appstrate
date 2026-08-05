@@ -26,12 +26,13 @@
  *     branch on upstream schema drift — that risk is contained here.
  *
  * Two modes:
- *   - **dry run** (default): downloads, diffs against the local files,
- *     prints a summary, exits 1 on drift. CI weekly workflow consumes this.
+ *   - **dry run** (default): diffs a normalized exporter artifact against the
+ *     local files, prints a summary, exits 1 on drift.
  *   - **apply** (`--apply`): writes the new content from a normalized exporter artifact.
  *
  * Usage:
- *   bun scripts/refresh-pricing-catalog.ts          # dry run
+ *   LITELLM_CATALOG_PATH=/path/to/export.json \
+ *     bun scripts/refresh-pricing-catalog.ts         # dry run
  *   LITELLM_CATALOG_PATH=/path/to/export.json \
  *     bun scripts/refresh-pricing-catalog.ts --apply
  */
@@ -45,8 +46,6 @@ import type {
   ModelReasoningLevel,
 } from "@appstrate/core/model-generation";
 
-const UPSTREAM_URL =
-  "https://raw.githubusercontent.com/BerriAI/litellm/main/litellm/model_prices_and_context_window_backup.json";
 const REPO_ROOT = new URL("..", import.meta.url).pathname;
 const DATA_DIR = resolve(REPO_ROOT, "apps/api/src/data/pricing");
 const LITELLM_LOCK_PATH = resolve(REPO_ROOT, "scripts/litellm-catalog.lock.json");
@@ -169,16 +168,6 @@ interface LiteLLMEntry {
   cache_read_input_token_cost?: number;
   cache_creation_input_token_cost?: number;
   supports_vision?: boolean;
-  supports_reasoning?: boolean;
-  supports_sampling_params?: boolean;
-  supports_none_reasoning_effort?: boolean;
-  supports_minimal_reasoning_effort?: boolean;
-  supports_low_reasoning_effort?: boolean;
-  supports_xhigh_reasoning_effort?: boolean;
-  supports_max_reasoning_effort?: boolean;
-  supports_adaptive_thinking?: boolean;
-  /** Added by the isolated pinned-LiteLLM exporter, never by the raw fallback. */
-  _appstrate_supported_openai_params?: string[];
   /** Effective value-level contract computed by the pinned LiteLLM adapters. */
   _appstrate_generation?: {
     temperature: ModelCapabilitySupport;
@@ -412,80 +401,31 @@ function deriveLabel(id: string): string {
     .join(" ");
 }
 
-function support(value: boolean | undefined): ModelCapabilitySupport {
-  return value === true ? "supported" : value === false ? "unsupported" : "unknown";
-}
-
-function deriveGenerationCapabilities(entry: LiteLLMEntry): ModelGenerationCapabilities {
+function projectGenerationCapabilities(entry: LiteLLMEntry): ModelGenerationCapabilities {
   const exported = entry._appstrate_generation;
-  if (exported) {
-    return {
-      temperature: exported.temperature,
-      reasoning: {
-        supported: exported.reasoning.supported,
-        ...(exported.reasoning.temperatureCompatible !== undefined
-          ? { temperatureCompatible: exported.reasoning.temperatureCompatible }
-          : {}),
-        adaptive: exported.reasoning.adaptive,
-        levels: {
-          off: exported.reasoning.levels.none ?? "unknown",
-          minimal: exported.reasoning.levels.minimal ?? "unknown",
-          low: exported.reasoning.levels.low ?? "unknown",
-          medium: exported.reasoning.levels.medium ?? "unknown",
-          high: exported.reasoning.levels.high ?? "unknown",
-          xhigh: exported.reasoning.levels.xhigh ?? "unknown",
-          max: exported.reasoning.levels.max ?? "unknown",
-        },
-      },
-    };
+  if (!exported) {
+    throw new Error("LiteLLM entry is missing its normalized generation contract");
   }
 
-  const supportedParams = entry._appstrate_supported_openai_params;
-  const hasSupportedReasoningLevel = [
-    entry.supports_none_reasoning_effort,
-    entry.supports_minimal_reasoning_effort,
-    entry.supports_low_reasoning_effort,
-    entry.supports_xhigh_reasoning_effort,
-    entry.supports_max_reasoning_effort,
-  ].some((value) => value === true);
-  const temperature =
-    entry.supports_sampling_params === false
-      ? "unsupported"
-      : supportedParams
-        ? supportedParams.includes("temperature")
-          ? "supported"
-          : "unsupported"
-        : "unknown";
-  const reasoning: ModelCapabilitySupport =
-    entry.supports_reasoning === false
-      ? "unsupported"
-      : entry.supports_reasoning === true ||
-          hasSupportedReasoningLevel ||
-          supportedParams?.includes("reasoning_effort") === true ||
-          supportedParams?.includes("thinking") === true
-        ? "supported"
-        : "unknown";
-  const levels: Partial<Record<ModelReasoningLevel, ModelCapabilitySupport>> = {
-    off: support(entry.supports_none_reasoning_effort),
-    minimal: support(entry.supports_minimal_reasoning_effort),
-    // A general `supports_reasoning` fact confirms the control, not each
-    // individual effort value. Keep unreported levels unknown rather than
-    // inventing provider support that can turn into a 400 at inference time.
-    low: support(entry.supports_low_reasoning_effort),
-    medium: "unknown",
-    high: "unknown",
-    xhigh: support(entry.supports_xhigh_reasoning_effort),
-    max: support(entry.supports_max_reasoning_effort),
-  };
+  // The normalized artifact remains exhaustive for validation and review. The
+  // runtime projection is sparse: omission already means "not confirmed", so
+  // persisting thousands of explicit `unknown` values only creates catalog
+  // churn without changing resolution or UI behaviour.
+  const levels: Partial<Record<ModelReasoningLevel, ModelCapabilitySupport>> = {};
+  for (const nativeLevel of NATIVE_REASONING_LEVELS) {
+    const capability = exported.reasoning.levels[nativeLevel];
+    if (capability === "unknown" || capability === undefined) continue;
+    levels[nativeLevel === "none" ? "off" : nativeLevel] = capability;
+  }
 
   return {
-    temperature,
+    temperature: exported.temperature,
     reasoning: {
-      supported: reasoning,
-      adaptive:
-        typeof entry.supports_adaptive_thinking === "boolean"
-          ? entry.supports_adaptive_thinking
-          : null,
+      supported: exported.reasoning.supported,
+      ...(exported.reasoning.temperatureCompatible !== undefined
+        ? { temperatureCompatible: exported.reasoning.temperatureCompatible }
+        : {}),
+      adaptive: exported.reasoning.adaptive,
       levels,
     },
   };
@@ -504,7 +444,7 @@ function projectEntry(id: string, entry: LiteLLMEntry): CompactEntry | null {
   ) {
     return null;
   }
-  const generation = deriveGenerationCapabilities(entry);
+  const generation = projectGenerationCapabilities(entry);
   const caps: string[] = ["text"];
   if (entry.supports_vision) caps.push("image");
   if (generation.reasoning.supported === "supported") caps.push("reasoning");
@@ -667,26 +607,18 @@ function buildFeatured(
   return ranked.filter((id) => !excluded.has(id)).slice(0, FEATURED_COUNT);
 }
 
-async function fetchUpstream(): Promise<Record<string, LiteLLMEntry>> {
+function readNormalizedCatalog(): Record<string, LiteLLMEntry> {
   const artifactPath = process.env.LITELLM_CATALOG_PATH;
-  const artifactContents = artifactPath ? readFileSync(artifactPath, "utf8") : null;
-  const data = artifactContents
-    ? (JSON.parse(artifactContents) as Record<string, LiteLLMEntry>)
-    : await (async () => {
-        const res = await fetch(UPSTREAM_URL);
-        if (!res.ok) throw new Error(`fetch ${UPSTREAM_URL} → HTTP ${res.status}`);
-        process.stderr.write(
-          "WARNING: using the unpinned raw LiteLLM fallback; CI uses the pinned exporter artifact\n",
-        );
-        return (await res.json()) as Record<string, LiteLLMEntry>;
-      })();
-  if (artifactContents) {
-    const lock = JSON.parse(readFileSync(LITELLM_LOCK_PATH, "utf8")) as {
-      normalizedDigest?: unknown;
-    };
-    assertNormalizedCatalogDigest(artifactContents, lock.normalizedDigest);
-    assertNormalizedGenerationCatalog(data);
+  if (!artifactPath) {
+    throw new Error("LITELLM_CATALOG_PATH is required; use the pinned LiteLLM exporter artifact");
   }
+  const artifactContents = readFileSync(artifactPath, "utf8");
+  const data = JSON.parse(artifactContents) as Record<string, LiteLLMEntry>;
+  const lock = JSON.parse(readFileSync(LITELLM_LOCK_PATH, "utf8")) as {
+    normalizedDigest?: unknown;
+  };
+  assertNormalizedCatalogDigest(artifactContents, lock.normalizedDigest);
+  assertNormalizedGenerationCatalog(data);
   // Remove LiteLLM's `sample_spec` synthetic top-level entry — it documents
   // the schema, not a real model.
   delete data.sample_spec;
@@ -753,18 +685,12 @@ async function main(): Promise<void> {
     (globalThis as { process?: { argv?: string[] } }).process?.argv?.includes("--apply") ?? false;
   console.log(`Refreshing pricing catalog from LiteLLM (apply=${apply})\n`);
 
-  if (apply && !process.env.LITELLM_CATALOG_PATH) {
-    throw new Error(
-      "--apply requires LITELLM_CATALOG_PATH from the pinned LiteLLM exporter; " +
-        "the raw fallback does not contain value-level generation capabilities",
-    );
-  }
-
   if (apply && !existsSync(DATA_DIR)) {
     mkdirSync(DATA_DIR, { recursive: true });
   }
 
-  const [upstream, modelsDev] = await Promise.all([fetchUpstream(), fetchModelsDev()]);
+  const upstream = readNormalizedCatalog();
+  const modelsDev = await fetchModelsDev();
   const summaries: Summary[] = [];
   const snapshots: Record<string, Record<string, CompactEntry>> = {};
   const coverageRows: CoverageRow[] = [];
@@ -926,7 +852,7 @@ export {
   buildFeatured,
   countCacheRates,
   coverageRow,
-  deriveGenerationCapabilities,
+  projectGenerationCapabilities,
   formatCoverageSummary,
   projectEntry,
 };

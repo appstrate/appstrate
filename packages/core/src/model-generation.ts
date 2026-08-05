@@ -116,12 +116,6 @@ export const UNKNOWN_MODEL_GENERATION_CAPABILITIES: ModelGenerationCapabilities 
   reasoning: { supported: "unknown", adaptive: null, levels: {} },
 };
 
-/** Public alias contract: provider-specific generation controls stay inherited. */
-export const INHERITED_MODEL_GENERATION_CAPABILITIES: ModelGenerationCapabilities = {
-  temperature: "unsupported",
-  reasoning: { supported: "unsupported", adaptive: null, levels: {} },
-};
-
 /** Merge a provider adapter's stricter transport facts over catalog metadata. */
 export function applyModelGenerationCapabilitiesOverride(
   capabilities: ModelGenerationCapabilities,

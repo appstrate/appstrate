@@ -11,15 +11,7 @@
       "reasoning": {
         "supported": "unknown",
         "adaptive": null,
-        "levels": {
-          "off": "unknown",
-          "minimal": "unknown",
-          "low": "unknown",
-          "medium": "unknown",
-          "high": "unknown",
-          "xhigh": "unknown",
-          "max": "unknown"
-        }
+        "levels": {}
       }
     },
     "cost": {
@@ -39,15 +31,7 @@
       "reasoning": {
         "supported": "unknown",
         "adaptive": null,
-        "levels": {
-          "off": "unknown",
-          "minimal": "unknown",
-          "low": "unknown",
-          "medium": "unknown",
-          "high": "unknown",
-          "xhigh": "unknown",
-          "max": "unknown"
-        }
+        "levels": {}
       }
     },
     "cost": {
@@ -67,15 +51,7 @@
       "reasoning": {
         "supported": "unknown",
         "adaptive": null,
-        "levels": {
-          "off": "unknown",
-          "minimal": "unknown",
-          "low": "unknown",
-          "medium": "unknown",
-          "high": "unknown",
-          "xhigh": "unknown",
-          "max": "unknown"
-        }
+        "levels": {}
       }
     },
     "cost": {
@@ -95,15 +71,7 @@
       "reasoning": {
         "supported": "unknown",
         "adaptive": null,
-        "levels": {
-          "off": "unknown",
-          "minimal": "unknown",
-          "low": "unknown",
-          "medium": "unknown",
-          "high": "unknown",
-          "xhigh": "unknown",
-          "max": "unknown"
-        }
+        "levels": {}
       }
     },
     "cost": {
@@ -123,15 +91,7 @@
       "reasoning": {
         "supported": "unknown",
         "adaptive": null,
-        "levels": {
-          "off": "unknown",
-          "minimal": "unknown",
-          "low": "unknown",
-          "medium": "unknown",
-          "high": "unknown",
-          "xhigh": "unknown",
-          "max": "unknown"
-        }
+        "levels": {}
       }
     },
     "cost": {
@@ -151,15 +111,7 @@
       "reasoning": {
         "supported": "unknown",
         "adaptive": null,
-        "levels": {
-          "off": "unknown",
-          "minimal": "unknown",
-          "low": "unknown",
-          "medium": "unknown",
-          "high": "unknown",
-          "xhigh": "unknown",
-          "max": "unknown"
-        }
+        "levels": {}
       }
     },
     "cost": {
@@ -180,15 +132,7 @@
       "reasoning": {
         "supported": "unknown",
         "adaptive": null,
-        "levels": {
-          "off": "unknown",
-          "minimal": "unknown",
-          "low": "unknown",
-          "medium": "unknown",
-          "high": "unknown",
-          "xhigh": "unknown",
-          "max": "unknown"
-        }
+        "levels": {}
       }
     },
     "cost": {

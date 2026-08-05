@@ -91,7 +91,6 @@ describe("projectAliasedModel", () => {
         adaptive: null,
         levels: {
           off: "supported",
-          minimal: "unsupported",
           low: "supported",
           medium: "supported",
           high: "supported",
