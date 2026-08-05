@@ -30,7 +30,19 @@ function getInitials(name: string): string {
     .toUpperCase();
 }
 
-export function NavUser() {
+interface NavUserProps {
+  /**
+   * Drop every entry that needs an organization to be resolvable.
+   *
+   * `/preferences` lives under `MainLayout`, behind `OrgGate`: a user with no
+   * org who follows it is bounced straight back to `/onboarding/create`. The
+   * onboarding flow therefore mounts this menu with only the identity header,
+   * the theme switcher and logout — all org-independent.
+   */
+  minimal?: boolean;
+}
+
+export function NavUser({ minimal = false }: NavUserProps) {
   const { t } = useTranslation();
   const { user, profile, logout } = useAuth();
   const { theme, setTheme } = useTheme();
@@ -77,12 +89,14 @@ export function NavUser() {
           </div>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
-        <DropdownMenuItem asChild>
-          <Link to="/preferences" className="flex items-center gap-2">
-            <Settings size={14} />
-            {t("userMenu.preferences")}
-          </Link>
-        </DropdownMenuItem>
+        {!minimal && (
+          <DropdownMenuItem asChild>
+            <Link to="/preferences" className="flex items-center gap-2">
+              <Settings size={14} />
+              {t("userMenu.preferences")}
+            </Link>
+          </DropdownMenuItem>
+        )}
         <DropdownMenuSub>
           <DropdownMenuSubTrigger>
             <Palette size={14} />
@@ -104,17 +118,19 @@ export function NavUser() {
             ))}
           </DropdownMenuSubContent>
         </DropdownMenuSub>
-        <DropdownMenuItem asChild>
-          <a
-            href="/api/docs"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-2"
-          >
-            <FileText size={14} />
-            {t("userMenu.apiDocs")}
-          </a>
-        </DropdownMenuItem>
+        {!minimal && (
+          <DropdownMenuItem asChild>
+            <a
+              href="/api/docs"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-2"
+            >
+              <FileText size={14} />
+              {t("userMenu.apiDocs")}
+            </a>
+          </DropdownMenuItem>
+        )}
         <DropdownMenuSeparator />
         <DropdownMenuItem onSelect={() => void handleLogout()} className="flex items-center gap-2">
           <LogOut size={14} />
