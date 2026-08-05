@@ -370,6 +370,170 @@ export const packagesPaths = {
       },
     },
   },
+  "/api/packages/{scope}/{name}/files": {
+    get: {
+      operationId: "listPackageFiles",
+      tags: ["Packages"],
+      summary: "List the files in a package artifact",
+      description:
+        "Flat index of every file in the package artifact — one entry per real file, sorted by `path`; " +
+        "directories are not synthesized. Text files up to 1 MiB carry their full content in `inline` " +
+        "while the response's cumulative inline budget lasts; `inline` is never a truncated prefix, so an " +
+        "entry without it must be fetched from `GET /api/packages/{scope}/{name}/files/content`. " +
+        "Read-only. Rate-limited to 50 requests/minute.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
+        {
+          name: "version",
+          in: "query",
+          required: false,
+          schema: { type: "string" },
+          description:
+            "Which snapshot to read: omitted (or `draft`) reads the live draft, where the stored artifact is overlaid with the authoritative `manifest.json` / primary content from the database. Any other value is resolved as a version spec (exact version, dist-tag, or semver range) and returns exactly the published bytes, with no overlay.",
+        },
+        {
+          name: "If-None-Match",
+          in: "header",
+          required: false,
+          description: "Entity-tag of a cached copy. A match yields `304 Not Modified`.",
+          schema: { type: "string" },
+        },
+      ],
+      responses: {
+        "200": {
+          description: "File index",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+            ETag: {
+              description:
+                "Strong entity-tag of the snapshot — the version artifact's integrity hash, or a content digest of the overlaid draft.",
+              schema: { type: "string" },
+            },
+            "Cache-Control": {
+              description:
+                "`private, max-age=31536000, immutable` for a published version; `private, no-cache` for the draft. Always `private` — the response is tenant-scoped.",
+              schema: { type: "string" },
+            },
+          },
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/PackageFileIndex" },
+            },
+          },
+        },
+        "304": {
+          description: "Cached copy is still current (`If-None-Match` matched). No body.",
+          headers: {
+            ETag: {
+              description: "Strong entity-tag of the snapshot.",
+              schema: { type: "string" },
+            },
+            "Cache-Control": {
+              description: "Same caching policy as the `200` response.",
+              schema: { type: "string" },
+            },
+          },
+        },
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "404": { $ref: "#/components/responses/NotFound" },
+        "429": { $ref: "#/components/responses/RateLimited" },
+      },
+    },
+  },
+  "/api/packages/{scope}/{name}/files/content": {
+    get: {
+      operationId: "getPackageFileContent",
+      tags: ["Packages"],
+      summary: "Download one file from a package artifact",
+      description:
+        "Raw bytes of a single file from the package artifact — the fetch path for both preview and " +
+        "download. Always served as `application/octet-stream` with `nosniff` and `attachment`: package " +
+        "bytes are author-controlled and must never be rendered or executed in the platform origin. " +
+        "`path` must match an entry returned by `GET /api/packages/{scope}/{name}/files` exactly; " +
+        "anything else is a `404`. Read-only. Rate-limited to 50 requests/minute.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
+        {
+          name: "path",
+          in: "query",
+          required: true,
+          schema: { type: "string" },
+          description: "Exact `path` of an entry from the file index.",
+        },
+        {
+          name: "version",
+          in: "query",
+          required: false,
+          schema: { type: "string" },
+          description:
+            "Which snapshot to read from — same resolution as the file index: omitted (or `draft`) reads the live draft with the database overlay, any other value is an exact version, dist-tag, or semver range.",
+        },
+        {
+          name: "If-None-Match",
+          in: "header",
+          required: false,
+          description: "Entity-tag of a cached copy. A match yields `304 Not Modified`.",
+          schema: { type: "string" },
+        },
+      ],
+      responses: {
+        "200": {
+          description: "Raw file bytes",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+            ETag: {
+              description: "Strong entity-tag of the snapshot the file was read from.",
+              schema: { type: "string" },
+            },
+            "Cache-Control": {
+              description:
+                "`private, max-age=31536000, immutable` for a published version; `private, no-cache` for the draft.",
+              schema: { type: "string" },
+            },
+            "Content-Disposition": {
+              description: "`attachment` with the file's sanitized base name.",
+              schema: { type: "string" },
+            },
+            "X-Content-Type-Options": {
+              description: "Always `nosniff`.",
+              schema: { type: "string" },
+            },
+          },
+          content: {
+            "application/octet-stream": {
+              schema: { type: "string", format: "binary" },
+            },
+          },
+        },
+        "304": {
+          description: "Cached copy is still current (`If-None-Match` matched). No body.",
+          headers: {
+            ETag: {
+              description: "Strong entity-tag of the snapshot.",
+              schema: { type: "string" },
+            },
+            "Cache-Control": {
+              description: "Same caching policy as the `200` response.",
+              schema: { type: "string" },
+            },
+          },
+        },
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "404": { $ref: "#/components/responses/NotFound" },
+        "429": { $ref: "#/components/responses/RateLimited" },
+      },
+    },
+  },
   "/api/packages/{scope}/{name}/{version}/download": {
     get: {
       operationId: "downloadPackageVersion",

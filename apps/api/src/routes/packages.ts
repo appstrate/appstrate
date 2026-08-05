@@ -64,6 +64,12 @@ import { fetchGithubDirectory, GithubImportError } from "../services/github-impo
 import { validateAgentIntegrationSelections } from "../services/integration-scope-validation.ts";
 import { SCOPED_PACKAGE_ROUTE } from "./scoped-package-route.ts";
 import {
+  resolvePackageFileValidator,
+  readPackageSnapshot,
+  buildFileIndex,
+  type PackageFileSource,
+} from "../services/package-files.ts";
+import {
   collectConnectLoginWarnings,
   collectMetaWarnings,
 } from "../services/integration-install-warnings.ts";
@@ -1415,6 +1421,100 @@ function makeDeleteVersionHandler(rcfg: PackageRouteConfig) {
 }
 
 // ═══════════════════════════════════════════════
+// File explorer (read-only)
+// ═══════════════════════════════════════════════
+
+const fileIndexQuerySchema = z.object({
+  version: z.string().trim().min(1).optional(),
+});
+const fileContentQuerySchema = z.object({
+  version: z.string().trim().min(1).optional(),
+  path: z.string().trim().min(1),
+});
+
+function parseFileQuery<T extends z.ZodType>(c: Context<AppEnv>, schema: T): z.infer<T> {
+  const parsed = schema.safeParse(c.req.query());
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0];
+    throw invalidRequest(issue?.message ?? "Invalid query", issue?.path.join(".") || undefined);
+  }
+  return parsed.data;
+}
+
+/**
+ * Resolve the package a file-explorer request targets, or 404.
+ *
+ * `hasPackageAccess` IS the authorization gate here — it already excludes
+ * ephemeral shadows and answers "system package OR installed in THIS
+ * application", which is exactly the visibility rule the rest of the package
+ * surface uses. The follow-up row read adds the org boundary (it does not
+ * filter `orgId`) and fetches the draft columns the overlay needs.
+ */
+async function loadFileExplorerPackage(c: Context<AppEnv>): Promise<PackageFileSource> {
+  const packageId = getItemId(c);
+  const orgId = c.get("orgId");
+  const applicationId = c.get("applicationId");
+
+  if (!(await hasPackageAccess({ orgId, applicationId }, packageId))) {
+    throw notFound("Package not found");
+  }
+
+  const [pkg] = await db
+    .select({
+      id: packages.id,
+      type: packages.type,
+      orgId: packages.orgId,
+      source: packages.source,
+      draftManifest: packages.draftManifest,
+      draftContent: packages.draftContent,
+    })
+    .from(packages)
+    .where(and(eq(packages.id, packageId), orgOrSystemFilter(orgId), notEphemeralFilter()))
+    .limit(1);
+  if (!pkg) {
+    throw notFound("Package not found");
+  }
+  return pkg;
+}
+
+/**
+ * `private` is mandatory on both routes: these are authenticated,
+ * tenant-scoped bytes and a shared cache must never hold them. A published
+ * version is content-addressed, so it is safe to pin forever; a draft changes
+ * under the same URL and only ever gets revalidated (`no-cache` still allows
+ * the 304 round-trip, it just forbids serving without one).
+ */
+function fileCacheHeaders(etag: string, immutable: boolean): Record<string, string> {
+  return {
+    ETag: etag,
+    "Cache-Control": immutable ? "private, max-age=31536000, immutable" : "private, no-cache",
+  };
+}
+
+/** RFC 9110 §13.1.2 — `*`, or any (weak-compared) member of the tag list. */
+function ifNoneMatchHits(header: string | undefined, etag: string): boolean {
+  if (!header) return false;
+  const strip = (t: string) => t.replace(/^W\//, "");
+  const target = strip(etag);
+  return header
+    .split(",")
+    .map((t) => t.trim())
+    .some((t) => t === "*" || strip(t) === target);
+}
+
+/**
+ * `attachment` + a sanitized filename. Quotes and control characters would let
+ * an author-controlled path break out of the header value, so the ASCII
+ * fallback is scrubbed to printable-minus-quote and the real name is carried
+ * in the RFC 5987 form.
+ */
+function fileAttachmentDisposition(path: string): string {
+  const base = path.slice(path.lastIndexOf("/") + 1);
+  const ascii = base.replace(/[^\x20-\x7e]/g, "_").replace(/["\\]/g, "_");
+  return `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(base)}`;
+}
+
+// ═══════════════════════════════════════════════
 // Router
 // ═══════════════════════════════════════════════
 
@@ -1958,6 +2058,83 @@ export function createPackagesRouter() {
     );
 
     return handleImport(c, parsed, artifact, false, "github");
+  });
+
+  // --- File explorer (read-only) ---
+  // Registered BEFORE `/:version/download` so the literal `files` segment can
+  // never be captured as a version spec.
+
+  // GET /api/packages/:scope/:name/files — flat index of the artifact's files
+  router.get(`/${SCOPED_PACKAGE_ROUTE}/files`, rateLimit(50), async (c) => {
+    const { version } = parseFileQuery(c, fileIndexQuerySchema);
+    const pkg = await loadFileExplorerPackage(c);
+    const inm = c.req.header("if-none-match");
+
+    // Resolve the validator FIRST. A published version's ETag comes straight
+    // from the `integrity` column, so a hit here answers the request for one
+    // query — no storage GET, no unzip, no SRI pass.
+    const validator = await resolvePackageFileValidator(pkg, version);
+    if (validator.etag !== null && ifNoneMatchHits(inm, validator.etag)) {
+      return new Response(null, {
+        status: 304,
+        headers: fileCacheHeaders(validator.etag, validator.immutable),
+      });
+    }
+
+    const snapshot = await readPackageSnapshot(pkg, validator);
+    const headers = fileCacheHeaders(snapshot.etag, snapshot.immutable);
+    if (ifNoneMatchHits(inm, snapshot.etag)) {
+      return new Response(null, { status: 304, headers });
+    }
+    return c.json({ entries: buildFileIndex(snapshot) }, 200, headers);
+  });
+
+  // GET /api/packages/:scope/:name/files/content — raw bytes of ONE file.
+  // Serves preview AND download: a small text file that fell past the index's
+  // inline budget stays previewable through here.
+  router.get(`/${SCOPED_PACKAGE_ROUTE}/files/content`, rateLimit(50), async (c) => {
+    const { version, path } = parseFileQuery(c, fileContentQuerySchema);
+    const pkg = await loadFileExplorerPackage(c);
+    const inm = c.req.header("if-none-match");
+
+    // Same short-circuit as the index: a version's validator is a DB read, so
+    // a revalidation of an immutable file never downloads the artifact.
+    const validator = await resolvePackageFileValidator(pkg, version);
+    if (validator.etag !== null && ifNoneMatchHits(inm, validator.etag)) {
+      return new Response(null, {
+        status: 304,
+        headers: fileCacheHeaders(validator.etag, validator.immutable),
+      });
+    }
+
+    const snapshot = await readPackageSnapshot(pkg, validator);
+    const headers = fileCacheHeaders(snapshot.etag, snapshot.immutable);
+
+    // Plain own-key lookup on the already-sanitized map — no filesystem, no
+    // `..` resolution. `Object.hasOwn` keeps a `__proto__`/`toString` probe
+    // from resolving to something off the prototype chain.
+    if (!Object.hasOwn(snapshot.files, path)) {
+      throw notFound("File not found");
+    }
+    const bytes = snapshot.files[path]!;
+
+    if (ifNoneMatchHits(inm, snapshot.etag)) {
+      return new Response(null, { status: 304, headers });
+    }
+
+    // Always octet-stream + nosniff + attachment: package bytes are
+    // author-controlled, so no response from here may be something a browser
+    // decides to execute or render in this origin.
+    return new Response(new Uint8Array(bytes), {
+      status: 200,
+      headers: {
+        ...headers,
+        "Content-Type": "application/octet-stream",
+        "X-Content-Type-Options": "nosniff",
+        "Content-Disposition": fileAttachmentDisposition(path),
+        "Content-Length": String(bytes.byteLength),
+      },
+    });
   });
 
   // GET /api/packages/:scope/:name/:version/download — download a versioned package ZIP

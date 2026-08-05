@@ -318,6 +318,8 @@ const expectedEndpoints = [
   "POST /api/packages/import-github",
   "POST /api/packages/import-bundle",
   "GET /api/packages/{scope}/{name}/{version}/download",
+  "GET /api/packages/{scope}/{name}/files",
+  "GET /api/packages/{scope}/{name}/files/content",
   "POST /api/packages/{scope}/{name}/fork",
 
   // Organization settings

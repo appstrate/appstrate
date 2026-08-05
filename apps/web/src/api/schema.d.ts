@@ -3566,6 +3566,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/packages/{scope}/{name}/files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the files in a package artifact
+         * @description Flat index of every file in the package artifact — one entry per real file, sorted by `path`; directories are not synthesized. Text files up to 1 MiB carry their full content in `inline` while the response's cumulative inline budget lasts; `inline` is never a truncated prefix, so an entry without it must be fetched from `GET /api/packages/{scope}/{name}/files/content`. Read-only. Rate-limited to 50 requests/minute.
+         */
+        get: operations["listPackageFiles"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/packages/{scope}/{name}/files/content": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Download one file from a package artifact
+         * @description Raw bytes of a single file from the package artifact — the fetch path for both preview and download. Always served as `application/octet-stream` with `nosniff` and `attachment`: package bytes are author-controlled and must never be rendered or executed in the platform origin. `path` must match an entry returned by `GET /api/packages/{scope}/{name}/files` exactly; anything else is a `404`. Read-only. Rate-limited to 50 requests/minute.
+         */
+        get: operations["getPackageFileContent"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/packages/{scope}/{name}/fork": {
         parameters: {
             query?: never;
@@ -5379,6 +5419,23 @@ export interface components {
              * @description Creation timestamp
              */
             createdAt: string;
+        };
+        PackageFileEntry: {
+            /** @description Path inside the artifact, relative and normalized (e.g. `skills/a/SKILL.md`) */
+            path: string;
+            /** @description Uncompressed size in bytes */
+            size: number;
+            /**
+             * @description `text` when the file decodes as strict UTF-8 (files above the 1 MiB inline ceiling are classified by extension instead, since they can never be previewed).
+             * @enum {string}
+             */
+            media_kind: "text" | "binary";
+            /** @description Full decoded text, present only for `text` files at most 1 MiB that still fit the response's cumulative inline budget. NEVER truncated: when absent, fetch the file from `GET /api/packages/{scope}/{name}/files/content`. */
+            inline?: string;
+        };
+        PackageFileIndex: {
+            /** @description Files in the artifact, sorted by `path`. */
+            entries: components["schemas"]["PackageFileEntry"][];
         };
         PackageVersionDetail: {
             /** @description Version row id */
@@ -17569,6 +17626,124 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
+        };
+    };
+    listPackageFiles: {
+        parameters: {
+            query?: {
+                /** @description Which snapshot to read: omitted (or `draft`) reads the live draft, where the stored artifact is overlaid with the authoritative `manifest.json` / primary content from the database. Any other value is resolved as a version spec (exact version, dist-tag, or semver range) and returns exactly the published bytes, with no overlay. */
+                version?: string;
+            };
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
+                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Entity-tag of a cached copy. A match yields `304 Not Modified`. */
+                "If-None-Match"?: string;
+            };
+            path: {
+                /** @description Package scope (e.g. @myorg) */
+                scope: components["parameters"]["PackageScope"];
+                /** @description Package name */
+                name: components["parameters"]["PackageName"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description File index */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    /** @description Strong entity-tag of the snapshot — the version artifact's integrity hash, or a content digest of the overlaid draft. */
+                    ETag?: string;
+                    /** @description `private, max-age=31536000, immutable` for a published version; `private, no-cache` for the draft. Always `private` — the response is tenant-scoped. */
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PackageFileIndex"];
+                };
+            };
+            /** @description Cached copy is still current (`If-None-Match` matched). No body. */
+            304: {
+                headers: {
+                    /** @description Strong entity-tag of the snapshot. */
+                    ETag?: string;
+                    /** @description Same caching policy as the `200` response. */
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    getPackageFileContent: {
+        parameters: {
+            query: {
+                /** @description Exact `path` of an entry from the file index. */
+                path: string;
+                /** @description Which snapshot to read from — same resolution as the file index: omitted (or `draft`) reads the live draft with the database overlay, any other value is an exact version, dist-tag, or semver range. */
+                version?: string;
+            };
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
+                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Entity-tag of a cached copy. A match yields `304 Not Modified`. */
+                "If-None-Match"?: string;
+            };
+            path: {
+                /** @description Package scope (e.g. @myorg) */
+                scope: components["parameters"]["PackageScope"];
+                /** @description Package name */
+                name: components["parameters"]["PackageName"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Raw file bytes */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    /** @description Strong entity-tag of the snapshot the file was read from. */
+                    ETag?: string;
+                    /** @description `private, max-age=31536000, immutable` for a published version; `private, no-cache` for the draft. */
+                    "Cache-Control"?: string;
+                    /** @description `attachment` with the file's sanitized base name. */
+                    "Content-Disposition"?: string;
+                    /** @description Always `nosniff`. */
+                    "X-Content-Type-Options"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/octet-stream": Blob;
+                };
+            };
+            /** @description Cached copy is still current (`If-None-Match` matched). No body. */
+            304: {
+                headers: {
+                    /** @description Strong entity-tag of the snapshot. */
+                    ETag?: string;
+                    /** @description Same caching policy as the `200` response. */
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
         };
     };
     forkPackage: {

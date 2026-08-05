@@ -225,6 +225,12 @@ export const EXEMPT_SCHEMAS: Record<string, string> = {
   ChatSession:
     "module-chat wire DTO; ISO timestamps, no shared-type (UI uses the generated spec type)",
   ChatMessage: "module-chat opaque history-node wire DTO; no shared-type",
+  // File-explorer wire DTOs. Derived from ZIP entries, not from any table, so
+  // there is no Drizzle shared-type to compare against; the canonical TS shape
+  // lives in apps/api/src/services/package-files.ts and the SPA reads the
+  // generated spec type.
+  PackageFileEntry: "artifact file-index item derived from ZIP entries; no shared-type",
+  PackageFileIndex: "artifact file-index envelope; SPA uses the generated spec type",
 };
 
 /**
