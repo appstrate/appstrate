@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useEffect, useMemo } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { cn } from "@appstrate/ui/cn";
 import { Button } from "@appstrate/ui/components/button";
 import { useOrg } from "../hooks/use-org";
 import { useTheme } from "../stores/theme-store";
 import { useAppConfig } from "../hooks/use-app-config";
+import { NavUser } from "./nav-user";
 import { ArrowLeft, ArrowRight } from "lucide-react";
 
 export type StepKey = "create" | "plan" | "model" | "members" | "complete";
@@ -109,18 +110,33 @@ export function OnboardingLayout({
 }: OnboardingLayoutProps) {
   const { t } = useTranslation(["settings", "common"]);
   const { resolvedTheme } = useTheme();
+  const { orgs } = useOrg();
   const { steps, index: currentIndex, total: totalSteps } = useOnboardingNav(step);
 
   return (
     <div className="bg-background flex min-h-svh flex-col items-center justify-center gap-6 p-6 md:p-10">
       <div className="w-full max-w-lg">
-        {/* Logo */}
-        <div className="mb-6 flex justify-center">
+        {/*
+         * Header: logo optically centred, account cluster pinned right. The
+         * cluster is what lets a user escape a half-finished onboarding —
+         * sign out (wrong account, account switch) or, once an org exists,
+         * go straight to the app. It sits outside the scrollable content
+         * area below so the dropdown is never clipped.
+         */}
+        <div className="relative mb-6 flex items-center justify-center">
           <img
             src={resolvedTheme === "dark" ? "/logo-dark.svg" : "/logo-light.svg"}
             alt="Appstrate"
             className="h-[34px] w-auto"
           />
+          <div className="absolute right-0 flex items-center gap-1">
+            {orgs.length > 0 && (
+              <Button variant="ghost" size="sm" asChild>
+                <Link to="/">{t("onboarding.backToApp")}</Link>
+              </Button>
+            )}
+            <NavUser minimal />
+          </div>
         </div>
 
         {/* Progress bar */}
