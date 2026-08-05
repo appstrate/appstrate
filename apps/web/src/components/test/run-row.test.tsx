@@ -13,6 +13,8 @@
 
 import type { ReactElement } from "react";
 import { describe, it, expect } from "bun:test";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router-dom";
 import { I18nextProvider } from "react-i18next";
@@ -20,7 +22,7 @@ import type { EnrichedRun } from "@appstrate/shared-types";
 import agentsFr from "../../locales/fr/agents.json";
 import { formatDateField } from "../../lib/markdown.ts";
 import i18n, { i18nReady } from "../../i18n.ts";
-import { RunRow, RunRowDetails } from "../run-row.tsx";
+import { RunRow, RunRowDetails, ElapsedDuration } from "../run-row.tsx";
 
 // The SPA's own i18n instance, not a hand-rolled one: `formatDateField` reads
 // `i18n.language` off this singleton, so a private instance would render dates
@@ -131,6 +133,56 @@ describe("RunRow duration", () => {
       expect(html).not.toMatch(/class="[^"]*hidden[^"]*"[^>]*>4\.2s/);
     });
   }
+});
+
+/**
+ * The live timer is a LEAF (`ElapsedDuration`). It used to be a `setInterval`
+ * inside `RunRow` itself, which re-rendered the whole row — badges, trigger,
+ * links, popover — ten times a second for every running run on screen.
+ */
+describe("RunRow live elapsed timer", () => {
+  const RUN_ROW_SOURCE = readFileSync(
+    fileURLToPath(new URL("../run-row.tsx", import.meta.url)),
+    "utf-8",
+  );
+
+  it("renders the time elapsed since the run started", () => {
+    const startedAt = new Date(Date.now() - 2_500).toISOString();
+    const html = render(<ElapsedDuration startedAt={startedAt} />);
+    // ~2.5s, allowing for the render taking a few milliseconds.
+    expect(html).toMatch(/>2\.[45]s</);
+  });
+
+  it("is what a RUNNING row renders instead of the frozen duration", () => {
+    const startedAt = new Date(Date.now() - 3_000).toISOString();
+    const html = render(<RunRow run={makeRun({ status: "running", started_at: startedAt })} />);
+    // The stale `duration` column (4200ms) must not win over live time.
+    expect(html).not.toContain("4.2s");
+    expect(html).toMatch(/>[23]\.\ds</);
+  });
+
+  it("leaves a terminal row on its frozen duration", () => {
+    const html = render(<RunRow run={makeRun({ status: "success" })} />);
+    expect(html).toContain("4.2s");
+  });
+
+  it("keeps the ticking state OUT of RunRow — only the leaf owns a timer", () => {
+    const leafStart = RUN_ROW_SOURCE.indexOf("export function ElapsedDuration");
+    const rowStart = RUN_ROW_SOURCE.indexOf("export function RunRow(");
+    expect(leafStart).toBeGreaterThan(-1);
+    expect(rowStart).toBeGreaterThan(leafStart);
+
+    // Exactly one timer in the file, and it sits before `RunRow` begins.
+    const intervals = [...RUN_ROW_SOURCE.matchAll(/setInterval\(/g)].map((m) => m.index);
+    expect(intervals).toHaveLength(1);
+    expect(intervals[0]).toBeGreaterThan(leafStart);
+    expect(intervals[0]).toBeLessThan(rowStart);
+
+    // And `RunRow` holds no ticking state of its own.
+    const rowBody = RUN_ROW_SOURCE.slice(rowStart);
+    expect(rowBody).not.toContain("useState");
+    expect(rowBody).not.toContain("useEffect");
+  });
 });
 
 describe("RunRowDetails (the panel body)", () => {

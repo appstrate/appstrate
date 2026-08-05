@@ -10,7 +10,10 @@ import { usePaginatedRuns } from "../hooks/use-paginated-runs";
 import { LoadingState, ErrorState } from "../components/page-states";
 import { PackageCard } from "../components/package-card";
 import { ScheduleCard } from "../components/schedule-card";
-import { RunList } from "../components/run-list";
+import { RunRows } from "../components/run-list";
+
+/** Rows shown under "recent runs" — a prefix of the page's own run query. */
+const RECENT_RUNS_COUNT = 7;
 
 export function DashboardPage() {
   const { t } = useTranslation(["agents", "common"]);
@@ -157,7 +160,12 @@ export function DashboardPage() {
             {t("dashboard.seeAll")}
           </Link>
         </div>
-        <RunList pageSize={7} paginated={false} />
+        {/* Rendered from the runs THIS page already loaded. Mounting
+            `<RunList pageSize={7}>` here instead issued a second
+            `GET /api/runs` (a different `limit` is a different query key), and
+            with it a second `COUNT` + enriched page read, for rows the 15 above
+            already contain. */}
+        <RunRows runs={runs.slice(0, RECENT_RUNS_COUNT)} />
       </section>
     </div>
   );

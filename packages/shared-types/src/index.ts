@@ -354,6 +354,19 @@ export type EnrichedSchedule = ScheduleWireDto & {
   actor_name: string | null;
   /** Which actor kind owns the schedule run. Null for org/system-owned schedules. */
   actor_type: "user" | "end_user" | null;
+  /**
+   * Runs of this schedule currently in a non-terminal status (`pending` or
+   * `running`), across every run it ever produced.
+   */
+  running_runs: number;
+  /**
+   * Runs of this schedule whose notification is unread **by the caller**. Scoped
+   * to the requesting actor, like `EnrichedRun.unread` — a member and an
+   * end-user never observe each other's read state.
+   */
+  unread_count: number;
+  /** Highest `runNumber` this schedule ever produced; 0 when it never fired. */
+  last_run_number: number;
 };
 
 // --- Organization Types ---

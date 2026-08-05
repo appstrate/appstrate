@@ -137,6 +137,64 @@ describe("parseRequestInput — reserved context-documents field", () => {
     ]);
   });
 
+  /**
+   * The copies run through `mapWithConcurrency` (same bounded pool as the
+   * upload path), so more documents than the pool width is the case that would
+   * expose a concurrency bug: results landing out of order would pair a
+   * document with ANOTHER document's workspace name, and the run would read the
+   * wrong bytes under the name the prompt announces.
+   *
+   * Deliberately more documents than `DOC_STREAM_CONCURRENCY` (4), and every
+   * document holds its own index in its bytes so a swap is detectable.
+   */
+  it("materializes more documents than the concurrency limit, each under its own name", async () => {
+    const ctx = await createTestContext({ orgSlug: "ctxdocs-many" });
+    const scope: Scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
+
+    const COUNT = 9;
+    const ids: string[] = [];
+    for (let i = 0; i < COUNT; i++) {
+      ids.push(
+        await seedRunDocument(scope, {
+          name: `doc-${i}.txt`,
+          mime: "text/plain",
+          content: `content-${i}`,
+        }),
+      );
+    }
+
+    const { manifest, inputPatch } = injectContextDocuments(
+      inlineManifest(),
+      ids.map((id) => documentUri(id)),
+    );
+    const runId = `run_${crypto.randomUUID()}`;
+    const parsed = await parseRequestInput(
+      fakeCtx({}, scope, ctx.user.id),
+      runId,
+      asJSONSchemaObject(manifest.input!.schema),
+      { injectedInput: inputPatch },
+    );
+
+    expect(parsed.uploadedFiles).toHaveLength(COUNT);
+    // Order is the INPUT order, not completion order — the announced file list
+    // and the persisted URI list have to line up index for index.
+    expect(parsed.uploadedFiles!.map((f) => f.name)).toEqual(
+      Array.from({ length: COUNT }, (_, i) => `doc-${i}.txt`),
+    );
+    expect(parsed.input![CONTEXT_DOCUMENTS_FIELD]).toEqual(ids.map((id) => documentUri(id)));
+
+    // Every file's BYTES sit under its own workspace name — the assertion a
+    // mis-paired index would fail even though all the counts still matched.
+    for (const file of parsed.uploadedFiles!) {
+      const stream = await downloadRunDocumentStream(runId, file.workspaceName);
+      expect(stream).not.toBeNull();
+      const expected = `content-${file.name.slice("doc-".length, -".txt".length)}`;
+      expect(await new Response(stream!).text()).toBe(expected);
+    }
+
+    expect(parsed.consumedDocumentIds!.sort()).toEqual([...ids].sort());
+  });
+
   it("refuses a document from another application (container ACL preserved)", async () => {
     const owner = await createTestContext({ orgSlug: "ctxdocs-owner" });
     const other = await createTestContext({ orgSlug: "ctxdocs-other" });

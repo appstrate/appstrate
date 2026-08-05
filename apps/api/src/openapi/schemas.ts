@@ -1022,6 +1022,9 @@ export const schemas = {
       "updatedAt",
       "actor_name",
       "actor_type",
+      "running_runs",
+      "unread_count",
+      "last_run_number",
     ],
     properties: {
       id: { type: "string" },
@@ -1063,6 +1066,22 @@ export const schemas = {
       updatedAt: { type: "string", format: "date-time" },
       actor_name: { type: ["string", "null"], description: "Display name of the schedule actor" },
       actor_type: { type: ["string", "null"], enum: ["user", "end_user", null] },
+      running_runs: {
+        type: "integer",
+        minimum: 0,
+        description: "Runs of this schedule currently pending or running.",
+      },
+      unread_count: {
+        type: "integer",
+        minimum: 0,
+        description:
+          "Runs of this schedule whose notification is unread by the CALLER. Scoped to the requesting actor, like `EnrichedRun.unread`.",
+      },
+      last_run_number: {
+        type: "integer",
+        minimum: 0,
+        description: "Highest run number this schedule ever produced; 0 when it never fired.",
+      },
     },
   },
   ApiKeyInfo: {

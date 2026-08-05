@@ -199,7 +199,7 @@ describeRequiresRedis("scheduler service", () => {
         cronExpression: "*/30 * * * *",
       });
 
-      const schedules = await listSchedules({ orgId: orgId, applicationId: defaultAppId });
+      const schedules = await listSchedules({ orgId: orgId, applicationId: defaultAppId }, actor);
 
       expect(schedules).toHaveLength(2);
       const names = schedules.map((s) => s.name);
@@ -237,20 +237,20 @@ describeRequiresRedis("scheduler service", () => {
         },
       );
 
-      const schedules = await listSchedules({ orgId: orgId, applicationId: defaultAppId });
+      const schedules = await listSchedules({ orgId: orgId, applicationId: defaultAppId }, actor);
       expect(schedules).toHaveLength(1);
       expect(schedules[0]!.name).toBe("My Schedule");
 
-      const otherSchedules = await listSchedules({
-        orgId: otherOrg.id,
-        applicationId: otherDefaultAppId,
-      });
+      const otherSchedules = await listSchedules(
+        { orgId: otherOrg.id, applicationId: otherDefaultAppId },
+        actor,
+      );
       expect(otherSchedules).toHaveLength(1);
       expect(otherSchedules[0]!.name).toBe("Other Schedule");
     });
 
     it("returns an empty array when no schedules exist", async () => {
-      const schedules = await listSchedules({ orgId: orgId, applicationId: defaultAppId });
+      const schedules = await listSchedules({ orgId: orgId, applicationId: defaultAppId }, actor);
       expect(schedules).toBeArray();
       expect(schedules).toHaveLength(0);
     });
@@ -283,6 +283,7 @@ describeRequiresRedis("scheduler service", () => {
       const schedules = await listPackageSchedules(
         { orgId: orgId, applicationId: defaultAppId },
         packageId,
+        actor,
       );
       expect(schedules).toHaveLength(1);
       expect(schedules[0]!.name).toBe("Agent 1 Schedule");
@@ -290,6 +291,7 @@ describeRequiresRedis("scheduler service", () => {
       const schedules2 = await listPackageSchedules(
         { orgId: orgId, applicationId: defaultAppId },
         pkg2.id,
+        actor,
       );
       expect(schedules2).toHaveLength(1);
       expect(schedules2[0]!.name).toBe("Agent 2 Schedule");
@@ -299,6 +301,7 @@ describeRequiresRedis("scheduler service", () => {
       const schedules = await listPackageSchedules(
         { orgId: orgId, applicationId: defaultAppId },
         packageId,
+        actor,
       );
       expect(schedules).toBeArray();
       expect(schedules).toHaveLength(0);
@@ -572,7 +575,7 @@ describeRequiresRedis("scheduler service", () => {
 
       await deleteSchedule({ orgId: orgId, applicationId: defaultAppId }, schedule2.id);
 
-      const remaining = await listSchedules({ orgId: orgId, applicationId: defaultAppId });
+      const remaining = await listSchedules({ orgId: orgId, applicationId: defaultAppId }, actor);
       expect(remaining).toHaveLength(1);
       expect(remaining[0]!.id).toBe(schedule1.id);
       expect(remaining[0]!.name).toBe("Keep This");
