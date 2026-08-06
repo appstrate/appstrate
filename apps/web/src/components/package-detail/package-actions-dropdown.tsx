@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
@@ -14,7 +13,6 @@ import {
   Trash2,
   PackageMinus,
   PowerOff,
-  FileJson,
   SlidersHorizontal,
 } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
@@ -26,15 +24,12 @@ import {
   DropdownMenuSeparator,
 } from "@appstrate/ui/components/dropdown-menu";
 import type { PackageType } from "@appstrate/core/validation";
-import { Modal } from "../modal";
-import { JsonView } from "../json-view";
 import { packageEditPath } from "../../lib/package-paths";
 import { usePermissions } from "../../hooks/use-permissions";
 
 interface PackageActionsDropdownProps {
   packageId: string;
   type: PackageType;
-  manifest?: Record<string, unknown>;
   isOwned: boolean;
   isBuiltIn: boolean;
   isHistoricalVersion: boolean;
@@ -76,7 +71,6 @@ interface PackageActionsDropdownProps {
 export function PackageActionsDropdown({
   packageId,
   type,
-  manifest,
   isOwned,
   isBuiltIn,
   isHistoricalVersion,
@@ -106,179 +100,151 @@ export function PackageActionsDropdown({
   const { t } = useTranslation(["agents", "common", "settings"]);
   const navigate = useNavigate();
   const { isAdmin, isMember } = usePermissions();
-  const [manifestOpen, setManifestOpen] = useState(false);
 
   const isAgent = type === "agent";
   const isMutable = isAdmin && !isBuiltIn && !isHistoricalVersion && isOwned;
-  // The package's files are browsed in the Files tab; the manifest stays here
-  // because it is a rendered object, not one of the artifact's files.
-  const hasViewableFiles = !!manifest;
 
-  if (!isAgent && !hasViewableFiles) return null;
-
+  // The manifest is no longer reachable from here: the Aperçu tab renders it
+  // and the Package AFPS tab carries its raw `manifest.json`.
   return (
-    <>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button variant="outline" size="icon">
-            <MoreHorizontal size={16} />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
-          {/* ── Run with options (advanced launcher — per-run overrides) ── */}
-          {isAgent && isMember && onRunWithOptions && (
-            <>
-              <DropdownMenuItem onSelect={onRunWithOptions}>
-                <SlidersHorizontal size={14} />
-                {t("run.options.menuItem")}
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-            </>
-          )}
-
-          {/* ── View Manifest ── */}
-          {manifest && (
-            <DropdownMenuItem onSelect={() => setManifestOpen(true)}>
-              <FileJson size={14} />
-              {t("viewManifest", { ns: "common" })}
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="outline" size="icon">
+          <MoreHorizontal size={16} />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        {/* ── Run with options (advanced launcher — per-run overrides) ── */}
+        {isAgent && isMember && onRunWithOptions && (
+          <>
+            <DropdownMenuItem onSelect={onRunWithOptions}>
+              <SlidersHorizontal size={14} />
+              {t("run.options.menuItem")}
             </DropdownMenuItem>
-          )}
+            <DropdownMenuSeparator />
+          </>
+        )}
 
-          {hasViewableFiles && <DropdownMenuSeparator />}
+        {/* ── Download ── */}
+        {downloadVersion && onDownload && (
+          <DropdownMenuItem onSelect={() => onDownload(downloadVersion)}>
+            <Download size={14} />
+            {t("btn.download", { ns: "common" })}
+          </DropdownMenuItem>
+        )}
 
-          {/* ── Download ── */}
-          {downloadVersion && onDownload && (
-            <DropdownMenuItem onSelect={() => onDownload(downloadVersion)}>
-              <Download size={14} />
-              {t("btn.download", { ns: "common" })}
-            </DropdownMenuItem>
-          )}
-
-          {/* ── Download bundle (agent only — multi-package, transitive).
+        {/* ── Download bundle (agent only — multi-package, transitive).
               Disabled when no version has been published: the export
               endpoint resolves `(packageId, version)` from the registry,
               so a draft-only package would 404. */}
-          {isAgent && onDownloadBundle && (
-            <DropdownMenuItem
-              onSelect={() => hasPublishedVersion && onDownloadBundle(downloadVersion)}
-              disabled={!hasPublishedVersion}
-              title={!hasPublishedVersion ? t("bundle.requiresVersion") : undefined}
-            >
-              <Package size={14} />
-              {t("bundle.download")}
-            </DropdownMenuItem>
-          )}
+        {isAgent && onDownloadBundle && (
+          <DropdownMenuItem
+            onSelect={() => hasPublishedVersion && onDownloadBundle(downloadVersion)}
+            disabled={!hasPublishedVersion}
+            title={!hasPublishedVersion ? t("bundle.requiresVersion") : undefined}
+          >
+            <Package size={14} />
+            {t("bundle.download")}
+          </DropdownMenuItem>
+        )}
 
-          {/* ── Create version ── */}
-          {isMutable && onCreateVersion && (
-            <DropdownMenuItem onSelect={onCreateVersion}>
-              <GitBranchPlus size={14} />
-              {t("version.createVersion")}
-            </DropdownMenuItem>
-          )}
+        {/* ── Create version ── */}
+        {isMutable && onCreateVersion && (
+          <DropdownMenuItem onSelect={onCreateVersion}>
+            <GitBranchPlus size={14} />
+            {t("version.createVersion")}
+          </DropdownMenuItem>
+        )}
 
-          {/* ── Edit ── */}
-          {isMutable && (
-            <DropdownMenuItem onSelect={() => navigate(packageEditPath(type, packageId))}>
-              <Pencil size={14} />
-              {t("btn.edit")}
-            </DropdownMenuItem>
-          )}
+        {/* ── Edit ── */}
+        {isMutable && (
+          <DropdownMenuItem onSelect={() => navigate(packageEditPath(type, packageId))}>
+            <Pencil size={14} />
+            {t("btn.edit")}
+          </DropdownMenuItem>
+        )}
 
-          {/* ── Fork — only read-only system packages (org-owned ones are edited directly) ── */}
-          {isMember && !isOwned && onFork && (
-            <DropdownMenuItem onSelect={onFork}>
-              <GitFork size={14} />
-              {t("fork.button")}
-            </DropdownMenuItem>
-          )}
+        {/* ── Fork — only read-only system packages (org-owned ones are edited directly) ── */}
+        {isMember && !isOwned && onFork && (
+          <DropdownMenuItem onSelect={onFork}>
+            <GitFork size={14} />
+            {t("fork.button")}
+          </DropdownMenuItem>
+        )}
 
-          {/* ── Agent secondary actions ── */}
-          {isAgent && (
-            <>
-              <DropdownMenuSeparator />
-              {isAdmin && !hasFileInput && onAddSchedule && (
-                <DropdownMenuItem onSelect={onAddSchedule}>
-                  <CalendarPlus size={14} />
-                  {t("schedule.titleNew")}
-                </DropdownMenuItem>
-              )}
-              {isAdmin && hasRuns && onDeleteRuns && (
-                <DropdownMenuItem
-                  onSelect={onDeleteRuns}
-                  disabled={runningRuns > 0}
-                  className="text-destructive focus:text-destructive"
-                >
-                  <Trash2 size={14} />
-                  {t("detail.clearRuns")}
-                </DropdownMenuItem>
-              )}
-              {isAdmin && hasMemories && onDeleteMemories && (
-                <DropdownMenuItem
-                  onSelect={onDeleteMemories}
-                  className="text-destructive focus:text-destructive"
-                >
-                  <Trash2 size={14} />
-                  {t("detail.clearMemories")}
-                </DropdownMenuItem>
-              )}
-            </>
-          )}
+        {/* ── Agent secondary actions ── */}
+        {isAgent && (
+          <>
+            <DropdownMenuSeparator />
+            {isAdmin && !hasFileInput && onAddSchedule && (
+              <DropdownMenuItem onSelect={onAddSchedule}>
+                <CalendarPlus size={14} />
+                {t("schedule.titleNew")}
+              </DropdownMenuItem>
+            )}
+            {isAdmin && hasRuns && onDeleteRuns && (
+              <DropdownMenuItem
+                onSelect={onDeleteRuns}
+                disabled={runningRuns > 0}
+                className="text-destructive focus:text-destructive"
+              >
+                <Trash2 size={14} />
+                {t("detail.clearRuns")}
+              </DropdownMenuItem>
+            )}
+            {isAdmin && hasMemories && onDeleteMemories && (
+              <DropdownMenuItem
+                onSelect={onDeleteMemories}
+                className="text-destructive focus:text-destructive"
+              >
+                <Trash2 size={14} />
+                {t("detail.clearMemories")}
+              </DropdownMenuItem>
+            )}
+          </>
+        )}
 
-          {/* ── Deactivate / Uninstall / Delete ── */}
-          {isAdmin && (canDeactivate || canUninstall || (!isBuiltIn && isOwned)) && (
-            <>
-              <DropdownMenuSeparator />
-              {canDeactivate && onDeactivate && (
-                <DropdownMenuItem onSelect={onDeactivate} disabled={deactivatePending}>
-                  <PowerOff size={14} />
-                  {t("integrations.btn.deactivate", { ns: "settings" })}
-                </DropdownMenuItem>
-              )}
-              {canUninstall && onUninstall && (
-                <DropdownMenuItem
-                  onSelect={onUninstall}
-                  className="text-destructive focus:text-destructive"
-                >
-                  <PackageMinus size={14} />
-                  {t("packages.uninstall", { ns: "settings" })}
-                </DropdownMenuItem>
-              )}
-              {!isBuiltIn && isOwned && isAgent && onDeleteAgent && (
-                <DropdownMenuItem
-                  onSelect={onDeleteAgent}
-                  disabled={runningRuns > 0}
-                  className="text-destructive focus:text-destructive"
-                >
-                  <Trash2 size={14} />
-                  {t("btn.delete")}
-                </DropdownMenuItem>
-              )}
-              {!isBuiltIn && isOwned && !isAgent && canDeletePackage && onDeletePackage && (
-                <DropdownMenuItem
-                  onSelect={onDeletePackage}
-                  className="text-destructive focus:text-destructive"
-                >
-                  <Trash2 size={14} />
-                  {t("btn.delete")}
-                </DropdownMenuItem>
-              )}
-            </>
-          )}
-        </DropdownMenuContent>
-      </DropdownMenu>
-
-      {/* ── Manifest Modal ── */}
-      {manifest && (
-        <Modal
-          open={manifestOpen}
-          onClose={() => setManifestOpen(false)}
-          title={t("viewManifest", { ns: "common" })}
-          className="max-w-2xl"
-        >
-          <JsonView data={manifest} />
-        </Modal>
-      )}
-    </>
+        {/* ── Deactivate / Uninstall / Delete ── */}
+        {isAdmin && (canDeactivate || canUninstall || (!isBuiltIn && isOwned)) && (
+          <>
+            <DropdownMenuSeparator />
+            {canDeactivate && onDeactivate && (
+              <DropdownMenuItem onSelect={onDeactivate} disabled={deactivatePending}>
+                <PowerOff size={14} />
+                {t("integrations.btn.deactivate", { ns: "settings" })}
+              </DropdownMenuItem>
+            )}
+            {canUninstall && onUninstall && (
+              <DropdownMenuItem
+                onSelect={onUninstall}
+                className="text-destructive focus:text-destructive"
+              >
+                <PackageMinus size={14} />
+                {t("packages.uninstall", { ns: "settings" })}
+              </DropdownMenuItem>
+            )}
+            {!isBuiltIn && isOwned && isAgent && onDeleteAgent && (
+              <DropdownMenuItem
+                onSelect={onDeleteAgent}
+                disabled={runningRuns > 0}
+                className="text-destructive focus:text-destructive"
+              >
+                <Trash2 size={14} />
+                {t("btn.delete")}
+              </DropdownMenuItem>
+            )}
+            {!isBuiltIn && isOwned && !isAgent && canDeletePackage && onDeletePackage && (
+              <DropdownMenuItem
+                onSelect={onDeletePackage}
+                className="text-destructive focus:text-destructive"
+              >
+                <Trash2 size={14} />
+                {t("btn.delete")}
+              </DropdownMenuItem>
+            )}
+          </>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }

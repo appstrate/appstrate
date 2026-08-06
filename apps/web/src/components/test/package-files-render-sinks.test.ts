@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Security guard for the package file explorer: package bytes are SOURCE ONLY.
+ * Security guard for the two surfaces that render package content: package
+ * bytes and the manifest are SOURCE ONLY.
  *
  * A `.afps` artifact is author-controlled content that the explorer fetches
  * into the platform origin. HTML, SVG, Markdown and JSON in it must reach the
@@ -9,6 +10,12 @@
  * `<iframe srcDoc={…}>`, or one `blob:` URL opened under an interpretable MIME
  * type turns the explorer into stored XSS against every member of the org that
  * installed the package.
+ *
+ * The MANIFEST is in the same trust class, and `components/package-manifest`
+ * renders it as structure rather than as text — labels, badges, and (the part
+ * that matters) `href`s built from author-controlled strings. So it gets the
+ * same scan, in its own scope below, with its own allowlist: merging the two
+ * would silently let each directory import whatever the other needs.
  *
  * This is a STATIC SOURCE SCAN rather than a render assertion, for the same
  * reason `locales/test/locale-keys.test.ts` scans the SPA source: a render test
@@ -34,6 +41,7 @@ import { dirname, join, relative, resolve } from "node:path";
 const COMPONENTS_DIR = dirname(dirname(fileURLToPath(import.meta.url)));
 const WEB_SRC = dirname(COMPONENTS_DIR);
 const EXPLORER_DIR = join(COMPONENTS_DIR, "package-files");
+const MANIFEST_DIR = join(COMPONENTS_DIR, "package-manifest");
 
 /**
  * Every way author-controlled bytes could be INTERPRETED rather than displayed.
@@ -237,5 +245,99 @@ describe("package file explorer rendering sinks", () => {
         `URL.createObjectURL(new Blob([data], { type: "application/octet-stream" }))`,
       ),
     ).toEqual([]);
+  });
+});
+
+/**
+ * Same rules, second surface. `lib/package-manifest.ts` is scanned with the
+ * components for the reason `lib/package-file-tree.ts` is scanned with the
+ * explorer: it is the module every one of them imports, and it is where the
+ * decision "this author string may become an href" is actually made.
+ *
+ * The object-URL rule is absent by design — the manifest view builds no blobs.
+ * That is asserted directly below, which is stronger than pinning a MIME type
+ * on a call that does not exist.
+ */
+const MANIFEST_SOURCES = [
+  ...sourceFiles(MANIFEST_DIR),
+  join(WEB_SRC, "lib/package-manifest.ts"),
+].map((path) => ({ label: relative(WEB_SRC, path), source: readFileSync(path, "utf8") }));
+
+const MANIFEST_ALLOWED_IMPORTS = [
+  // Framework + libraries
+  "@appstrate/core/validation",
+  "@appstrate/ui/components/badge",
+  "lucide-react",
+  "react-i18next",
+  // SPA modules
+  "components/package-manifest/integration-details",
+  "components/package-manifest/manifest-fact",
+  "components/package-manifest/mcp-server-details",
+  "components/page-states",
+  "components/section-card",
+  "lib/package-manifest",
+];
+
+describe("package manifest rendering sinks", () => {
+  it("scans a non-empty source set", () => {
+    expect(MANIFEST_SOURCES.length).toBeGreaterThan(1);
+    expect(MANIFEST_SOURCES.map((s) => s.label)).toContain("lib/package-manifest.ts");
+  });
+
+  it("renders manifest strings through no sink that could interpret them", () => {
+    const offenders: string[] = [];
+    for (const { label, source } of MANIFEST_SOURCES) {
+      for (const sink of SINKS) {
+        if (sink.pattern.test(source)) offenders.push(`${label} → ${sink.name}`);
+      }
+    }
+
+    expect(offenders).toEqual([]);
+  });
+
+  it("builds no object URL at all", () => {
+    const offenders = MANIFEST_SOURCES.filter(({ source }) =>
+      source.includes("URL.createObjectURL("),
+    ).map(({ label }) => label);
+
+    expect(offenders).toEqual([]);
+  });
+
+  it("gives an href only to a protocol-checked URL", () => {
+    // The one place a manifest string reaches an `href`. Two rules, both
+    // needed: the JSX must not build the href itself, and the reader must
+    // reject everything that is not http(s) — `javascript:` and `data:` both
+    // parse as perfectly valid URLs, so a `new URL()` that throws is not a
+    // safety check.
+    const readers = MANIFEST_SOURCES.find((s) => s.label === "lib/package-manifest.ts")!.source;
+    expect(readers).toContain('parsed.protocol === "http:"');
+    expect(readers).toContain('parsed.protocol === "https:"');
+
+    for (const { label, source } of MANIFEST_SOURCES) {
+      if (!source.includes("href=")) continue;
+      // Only the field the reader populated may be bound, never a raw manifest
+      // value — `href={entry.value}` would render whatever the author wrote.
+      expect(`${label}: ${source.match(/href=\{[^}]*\}/g)?.join(" ")}`).toBe(
+        `${label}: href={entry.href}`,
+      );
+      expect(source).toContain('rel="noopener noreferrer"');
+    }
+  });
+
+  it("imports only from the closed allowlist", () => {
+    const found = new Set<string>();
+    const offenders: string[] = [];
+    for (const { label, source } of MANIFEST_SOURCES) {
+      const file = join(WEB_SRC, label);
+      for (const match of source.matchAll(IMPORT_RE)) {
+        const specifier = normalizeSpecifier(file, match[1]!);
+        found.add(specifier);
+        if (!MANIFEST_ALLOWED_IMPORTS.includes(specifier))
+          offenders.push(`${label} → ${specifier}`);
+      }
+    }
+
+    expect(offenders).toEqual([]);
+    expect(MANIFEST_ALLOWED_IMPORTS.filter((entry) => !found.has(entry))).toEqual([]);
   });
 });

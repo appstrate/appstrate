@@ -21,7 +21,6 @@ import { RunWithOptionsModal } from "../run-with-options-modal";
 
 export function AgentActions({
   packageId,
-  manifest,
   isOwned,
   isHistoricalVersion,
   downloadVersion,
@@ -31,7 +30,6 @@ export function AgentActions({
   onFork,
 }: {
   packageId: string;
-  manifest?: Record<string, unknown>;
   isOwned: boolean;
   isHistoricalVersion: boolean;
   downloadVersion: string | undefined;
@@ -92,7 +90,6 @@ export function AgentActions({
       <PackageActionsDropdown
         packageId={packageId}
         type="agent"
-        manifest={manifest}
         isOwned={isOwned}
         isBuiltIn={detail.source === "system"}
         isHistoricalVersion={isHistoricalVersion}

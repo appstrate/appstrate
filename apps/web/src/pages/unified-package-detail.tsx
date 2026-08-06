@@ -34,6 +34,7 @@ import { Alert, AlertDescription, AlertTitle } from "@appstrate/ui/components/al
 import { VersionHistory } from "../components/version-history";
 import { DiffTab } from "../components/diff-tab";
 import { FileExplorer } from "../components/package-files/file-explorer";
+import { ManifestOverview } from "../components/package-manifest/manifest-overview";
 import { CreateVersionModal } from "../components/create-version-modal";
 import { ForkPackageModal } from "../components/fork-package-modal";
 // Agent-specific components
@@ -54,6 +55,7 @@ import { useModels, useAgentModel } from "../hooks/use-models";
 import { useProxies } from "../hooks/use-proxies";
 
 type DetailTab =
+  | "overview"
   | "connections"
   | "runs"
   | "configuration"
@@ -207,6 +209,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
 
   // ── State ──
   const allValidTabs: DetailTab[] = [
+    "overview",
     "connections",
     "runs",
     "configuration",
@@ -232,7 +235,9 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
       const val = agentDetail?.config?.current?.[key];
       return val === undefined || val === null || val === "";
     });
-  const defaultTab: DetailTab = type === "agent" ? "runs" : "content";
+  // Agents open on their runs; every other type opens on the rendered manifest,
+  // which is the closest thing they have to a landing view.
+  const defaultTab: DetailTab = type === "agent" ? "runs" : "overview";
   const [tab, setTab] = useTabWithHash<DetailTab>(allValidTabs, defaultTab);
   // Reset tab if it becomes invalid
   useEffect(() => {
@@ -260,6 +265,10 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
     return <Navigate to={versionResult.redirect} replace />;
   }
   const { isHistoricalVersion } = versionResult;
+
+  // The manifest the page is looking at — the archived one when a version is
+  // pinned, the live draft otherwise. Same rule the file explorer follows.
+  const effectiveManifest = isHistoricalVersion ? versionDetail?.manifest : currentManifest;
 
   // ── Version-aware config schema ──
   // When viewing a historical version, use that version's config schema (or empty if none).
@@ -305,6 +314,12 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
     label: t("detail.tabFiles"),
   };
 
+  // The rendered manifest, next to the raw artifact it comes from.
+  const overviewTab: { id: DetailTab; label: string } = {
+    id: "overview",
+    label: t("detail.tabOverview"),
+  };
+
   const agentTabs: Array<{ id: DetailTab; label: string }> = [
     { id: "runs", label: t("detail.tabRuns") },
     { id: "connections", label: t("detail.tabConnections") },
@@ -314,10 +329,12 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
     { id: "schedules", label: t("detail.tabSchedules") },
     { id: "memory", label: t("detail.tabMemory") },
     { id: "api", label: t("detail.tabApi") },
+    overviewTab,
     filesTab,
   ];
 
   const pkgTabs: Array<{ id: DetailTab; label: string }> = [
+    overviewTab,
     filesTab,
     { id: "usedBy", label: t("packages.usedBy") },
   ];
@@ -353,7 +370,6 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
           type === "agent" ? (
             <AgentActions
               packageId={packageId}
-              manifest={isHistoricalVersion ? versionDetail?.manifest : agentDetail?.manifest}
               isOwned={isOwned}
               isHistoricalVersion={isHistoricalVersion}
               downloadVersion={downloadVersion}
@@ -367,7 +383,6 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
               <PackageActionsDropdown
                 packageId={packageId}
                 type={type}
-                manifest={isHistoricalVersion ? versionDetail?.manifest : pkgDetail?.manifest}
                 isOwned={isOwned}
                 isBuiltIn={isBuiltIn}
                 isHistoricalVersion={isHistoricalVersion}
@@ -490,6 +505,10 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
       {type === "agent" && tab === "schedules" && <AgentSchedulesTab packageId={packageId} />}
       {type === "agent" && tab === "memory" && <AgentMemoryTab packageId={packageId} />}
       {type === "agent" && tab === "api" && <AgentApiTab packageId={packageId} />}
+
+      {/* Both follow the version being viewed: the explorer through
+          `versionLabel`, the overview through the manifest picked above. */}
+      {tab === "overview" && <ManifestOverview manifest={effectiveManifest} type={type} />}
 
       {tab === "content" && (
         <FileExplorer packageId={packageId} type={type} version={versionLabel} />

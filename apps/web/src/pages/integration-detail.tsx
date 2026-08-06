@@ -5,8 +5,9 @@
  *
  * Shares the unified package layout (SharedHeader + PackageActionsDropdown)
  * with agents and skills. The activate/deactivate toggle lives in the header
- * (left action); manifest view / download / fork / delete live in the actions
- * dropdown. Integrations are import-only — there is no in-app editor.
+ * (left action); download / fork / delete live in the actions dropdown. The
+ * manifest's metadata is rendered by the À propos tab. Integrations are
+ * import-only — there is no in-app editor.
  *
  * Tabs:
  *   - Connexions — per-auth connect CTA (always the resolved default client —
@@ -33,6 +34,7 @@
 
 import { useState } from "react";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
+import { ManifestOverview } from "../components/package-manifest/manifest-overview";
 
 /** Tab ids, also the URL fragments that select them. */
 const INTEGRATION_TABS = ["connections", "configuration", "tools", "about", "versions"] as const;
@@ -62,7 +64,7 @@ import {
 import { LoadingState, ErrorState } from "../components/page-states";
 import { SharedHeader } from "../components/package-detail/shared-header";
 import { PackageActionsDropdown } from "../components/package-detail/package-actions-dropdown";
-import { SetupGuideSteps, MetadataBlock } from "../components/package-detail/integration-metadata";
+import { SetupGuideSteps } from "../components/package-detail/integration-metadata";
 import { VersionHistory } from "../components/version-history";
 import { ForkPackageModal } from "../components/fork-package-modal";
 import { ConfirmModal } from "../components/confirm-modal";
@@ -1326,7 +1328,6 @@ function ConnectionTableRow({
   );
 }
 
-// ─────────────────────────────────────────────
 // Page
 // ─────────────────────────────────────────────
 
@@ -1423,7 +1424,6 @@ export function IntegrationDetailPage() {
             <PackageActionsDropdown
               packageId={packageId}
               type="integration"
-              manifest={m}
               isOwned={isOwned}
               isBuiltIn={isBuiltIn}
               isHistoricalVersion={false}
@@ -1614,19 +1614,16 @@ export function IntegrationDetailPage() {
           </div>
         </TabsContent>
 
-        {/* ─── À propos (metadata) ─── */}
+        {/* ─── À propos (manifest, rendered) ───
+            The same component the Aperçu tab of the unified package page
+            mounts. It replaced a local metadata block that built
+            `<a href={manifest.repository}>` with no protocol check — a
+            published integration carrying `"repository": "javascript:…"` ran
+            on the platform origin as soon as someone clicked it. The href is
+            now gated on `safeHttpUrl`. */}
         <TabsContent value="about" className="mt-4">
-          <div className="max-w-2xl space-y-4">
-            <MetadataBlock manifest={m} />
-            {m.keywords && m.keywords.length > 0 && (
-              <div className="flex flex-wrap gap-1">
-                {m.keywords.map((k) => (
-                  <Badge key={k} variant="outline" className="text-[0.65rem]">
-                    {k}
-                  </Badge>
-                ))}
-              </div>
-            )}
+          <div className="max-w-2xl">
+            <ManifestOverview manifest={m} type="integration" />
           </div>
         </TabsContent>
 
