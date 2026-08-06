@@ -4,7 +4,7 @@
  * The single row shape the manifest view uses: a label above its value.
  *
  * The value becomes an `<a>` only when the reader already proved it is an
- * http(s) URL (`safeHttpUrl`) — this component never decides that itself, so
+ * http(s) URL (`normalizeHttpUrl`) — this component never decides that itself, so
  * there is one place in the codebase where a manifest string can turn into an
  * href, and it is not a JSX file.
  */

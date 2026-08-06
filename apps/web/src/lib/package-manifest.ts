@@ -14,6 +14,8 @@
  * the `tools_policy` flattening are pure functions of the manifest.
  */
 
+import { normalizeHttpUrl } from "@appstrate/core/url";
+
 /** Any jsonb object. The manifest and every nested object share this shape. */
 export type ManifestObject = Record<string, unknown>;
 
@@ -48,27 +50,6 @@ function joinStringMap(value: unknown): string | undefined {
   return pairs.length > 0 ? pairs.join(", ") : undefined;
 }
 
-/**
- * The value as an http(s) URL, or `undefined`.
- *
- * The manifest's `homepage` / `repository` / … are author-controlled strings
- * that end up in an `href`. `javascript:`, `data:` and `vbscript:` all parse
- * as valid URLs, so a protocol allowlist — not a parse check — is the rule.
- * Relative and non-URL values (`support@example.com`) also land here and are
- * rendered as plain text by the caller rather than dropped.
- */
-export function safeHttpUrl(value: unknown): string | undefined {
-  const raw = str(value);
-  if (!raw) return undefined;
-  let parsed: URL;
-  try {
-    parsed = new URL(raw);
-  } catch {
-    return undefined;
-  }
-  return parsed.protocol === "http:" || parsed.protocol === "https:" ? raw : undefined;
-}
-
 // ─── Shared metadata block ──────────────────────────────────────────
 
 /** A `label: value` row. `labelKey` is an i18n key in the `agents` namespace. */
@@ -79,7 +60,7 @@ export interface ManifestFact {
 
 /** A metadata row whose value is a URL when the manifest declared a safe one. */
 export interface ManifestLink extends ManifestFact {
-  /** Set only when `value` is an http(s) URL — see `safeHttpUrl`. */
+  /** Set only when `value` is an http(s) URL — see `normalizeHttpUrl`. */
   href?: string;
 }
 
@@ -115,9 +96,21 @@ function readRepository(value: unknown): string | undefined {
   return str(value) ?? str(obj(value)?.url);
 }
 
+/**
+ * A displayable row, linked only when the value is an http(s) URL.
+ *
+ * `homepage` / `repository` / … are author-controlled strings that end up in an
+ * `href`, and `javascript:`, `data:` and `vbscript:` all parse as valid URLs —
+ * so the rule is a protocol allowlist, not a successful parse. That allowlist
+ * is `@appstrate/core/url`, the same primitive the integration page uses
+ * (#1122): two copies of this check is how one of them ends up the lenient one.
+ *
+ * A rejected value still renders, as plain text. Dropping the row would hide
+ * exactly what someone auditing a package needs to see.
+ */
 function link(labelKey: string, value: string | undefined): ManifestLink | undefined {
   if (!value) return undefined;
-  const href = safeHttpUrl(value);
+  const href = normalizeHttpUrl(value);
   return href ? { labelKey, value, href } : { labelKey, value };
 }
 

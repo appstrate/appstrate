@@ -265,6 +265,7 @@ const MANIFEST_SOURCES = [
 
 const MANIFEST_ALLOWED_IMPORTS = [
   // Framework + libraries
+  "@appstrate/core/url",
   "@appstrate/core/validation",
   "@appstrate/ui/components/badge",
   "lucide-react",
@@ -309,9 +310,14 @@ describe("package manifest rendering sinks", () => {
     // reject everything that is not http(s) — `javascript:` and `data:` both
     // parse as perfectly valid URLs, so a `new URL()` that throws is not a
     // safety check.
+    // The check itself belongs to `@appstrate/core/url` — the same primitive
+    // the integration page uses (#1122) — so what is pinned here is that this
+    // module DELEGATES to it, not that it reimplements the allowlist inline.
+    // Pinning the inline form would have made moving the check to one shared
+    // place look like a regression.
     const readers = MANIFEST_SOURCES.find((s) => s.label === "lib/package-manifest.ts")!.source;
-    expect(readers).toContain('parsed.protocol === "http:"');
-    expect(readers).toContain('parsed.protocol === "https:"');
+    expect(readers).toContain('import { normalizeHttpUrl } from "@appstrate/core/url"');
+    expect(readers).toMatch(/href[\s\S]{0,120}normalizeHttpUrl\(/);
 
     for (const { label, source } of MANIFEST_SOURCES) {
       if (!source.includes("href=")) continue;

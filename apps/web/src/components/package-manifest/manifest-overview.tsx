@@ -19,7 +19,7 @@
  *
  * Everything rendered here is AUTHOR-CONTROLLED text. It reaches the screen as
  * JSX children and nothing else; the only string that becomes an `href` is one
- * `safeHttpUrl` accepted. See `components/test/package-files-render-sinks.test.ts`.
+ * `normalizeHttpUrl` accepted. See `components/test/package-files-render-sinks.test.ts`.
  */
 
 import { useTranslation } from "react-i18next";

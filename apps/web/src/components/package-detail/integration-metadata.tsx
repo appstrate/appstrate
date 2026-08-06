@@ -14,13 +14,8 @@
  * an `href`; a rejected URL degrades to plain text, never a dropped row.
  */
 
-import type React from "react";
 import { useTranslation } from "react-i18next";
 import { normalizeHttpUrl } from "@appstrate/core/url";
-import { Badge } from "@appstrate/ui/components/badge";
-// Canonical wire type, imported straight from shared-types rather than the
-// hooks re-export so this module has no runtime edge into the data layer.
-import type { IntegrationManifestView } from "@appstrate/shared-types";
 
 /**
  * AFPS §7.10 — `setup_guide.steps` is the canonical place for integration
@@ -67,73 +62,5 @@ export function SetupGuideSteps({
         })}
       </ol>
     </section>
-  );
-}
-
-export function MetadataBlock({ manifest }: { manifest: IntegrationManifestView }) {
-  const { t } = useTranslation("settings");
-  const authorRaw = (manifest as { author?: unknown }).author;
-  const author =
-    typeof authorRaw === "string"
-      ? authorRaw
-      : authorRaw && typeof authorRaw === "object" && "name" in authorRaw
-        ? (((authorRaw as { name?: unknown }).name as string | undefined) ?? "")
-        : "";
-  const repoRaw = (manifest as { repository?: unknown }).repository;
-  const repo =
-    typeof repoRaw === "string"
-      ? repoRaw
-      : repoRaw && typeof repoRaw === "object" && "url" in repoRaw
-        ? (((repoRaw as { url?: unknown }).url as string | undefined) ?? "")
-        : "";
-  // A manifest can declare any string here. Link only what is provably an
-  // http(s) target; anything else stays readable as text so the person
-  // auditing the package still sees exactly what the publisher wrote.
-  const repoHref = normalizeHttpUrl(repo);
-  const sourceKind = manifest.source?.kind ?? "api";
-  const rows: Array<[string, React.ReactNode]> = [
-    [t("integration.field.version"), <span className="font-mono">{manifest.version}</span>],
-    [t("integration.field.author"), author || "—"],
-    [t("integration.field.license"), manifest.license ?? "—"],
-    [
-      t("integration.field.repository"),
-      repoHref ? (
-        <a
-          href={repoHref}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-primary underline"
-        >
-          {repo}
-        </a>
-      ) : (
-        repo || "—"
-      ),
-    ],
-    [t("integration.field.serverType"), <span className="font-mono">{sourceKind}</span>],
-    ...(manifest.allow_undeclared_tools === true
-      ? ([
-          [
-            t("integration.field.allowUndeclaredTools"),
-            <Badge
-              variant="outline"
-              className="text-[0.65rem]"
-              data-testid="integration-meta-wildcard-badge"
-            >
-              {t("integration.field.allowUndeclaredToolsBadge")}
-            </Badge>,
-          ],
-        ] as Array<[string, React.ReactNode]>)
-      : []),
-  ];
-  return (
-    <dl className="grid grid-cols-1 gap-y-2 text-sm sm:grid-cols-[max-content_1fr] sm:gap-x-4">
-      {rows.map(([label, content]) => (
-        <div key={label} className="contents">
-          <dt className="text-muted-foreground">{label}</dt>
-          <dd>{content}</dd>
-        </div>
-      ))}
-    </dl>
   );
 }

@@ -1620,7 +1620,7 @@ export function IntegrationDetailPage() {
             `<a href={manifest.repository}>` with no protocol check — a
             published integration carrying `"repository": "javascript:…"` ran
             on the platform origin as soon as someone clicked it. The href is
-            now gated on `safeHttpUrl`. */}
+            now gated on `normalizeHttpUrl`. */}
         <TabsContent value="about" className="mt-4">
           <div className="max-w-2xl">
             <ManifestOverview manifest={m} type="integration" />

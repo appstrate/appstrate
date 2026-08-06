@@ -15,7 +15,6 @@ import {
   readIntegrationSource,
   readManifestOverview,
   readMcpServerDetails,
-  safeHttpUrl,
 } from "../package-manifest.ts";
 
 /** The narrowest manifest the AFPS skill schema accepts. */
@@ -88,7 +87,7 @@ describe("readManifestOverview", () => {
       // The whole reason this reader exists: `new URL()` accepts this happily.
       documentation: "javascript:alert(document.cookie)",
       support: "support@acme.test",
-      privacy_policies: ["https://acme.test/privacy"],
+      privacy_policies: ["https://acme.test/privacy", "//evil.test/privacy"],
     });
 
     expect(overview.links).toEqual([
@@ -104,6 +103,9 @@ describe("readManifestOverview", () => {
         value: "https://acme.test/privacy",
         href: "https://acme.test/privacy",
       },
+      // Scheme-relative: the one a `startsWith("http")` check would let past,
+      // and an off-origin navigation dressed up as a relative path.
+      { labelKey: "manifest.privacyPolicy", value: "//evil.test/privacy" },
     ]);
   });
 
@@ -144,29 +146,6 @@ describe("readManifestOverview", () => {
     for (const value of [undefined, null, "manifest", 42, ["a"]]) {
       expect(readManifestOverview(value).isEmpty).toBe(true);
     }
-  });
-});
-
-describe("safeHttpUrl", () => {
-  it("accepts http and https only", () => {
-    expect(safeHttpUrl("http://acme.test")).toBe("http://acme.test");
-    expect(safeHttpUrl("https://acme.test/a?b=1#c")).toBe("https://acme.test/a?b=1#c");
-  });
-
-  it("rejects every scheme a browser would interpret", () => {
-    expect(safeHttpUrl("javascript:alert(1)")).toBeUndefined();
-    expect(safeHttpUrl("JavaScript:alert(1)")).toBeUndefined();
-    expect(safeHttpUrl("data:text/html;base64,PHN2Zz4=")).toBeUndefined();
-    expect(safeHttpUrl("vbscript:msgbox(1)")).toBeUndefined();
-    expect(safeHttpUrl("blob:https://acme.test/1234")).toBeUndefined();
-  });
-
-  it("rejects what is not a URL", () => {
-    expect(safeHttpUrl("docs/README.md")).toBeUndefined();
-    expect(safeHttpUrl("support@acme.test")).toBeUndefined();
-    expect(safeHttpUrl("")).toBeUndefined();
-    expect(safeHttpUrl(undefined)).toBeUndefined();
-    expect(safeHttpUrl({ url: "https://acme.test" })).toBeUndefined();
   });
 });
 
