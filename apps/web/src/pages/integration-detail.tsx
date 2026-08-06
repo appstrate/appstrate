@@ -62,6 +62,7 @@ import {
 import { LoadingState, ErrorState } from "../components/page-states";
 import { SharedHeader } from "../components/package-detail/shared-header";
 import { PackageActionsDropdown } from "../components/package-detail/package-actions-dropdown";
+import { SetupGuideSteps, MetadataBlock } from "../components/package-detail/integration-metadata";
 import { VersionHistory } from "../components/version-history";
 import { ForkPackageModal } from "../components/fork-package-modal";
 import { ConfirmModal } from "../components/confirm-modal";
@@ -93,7 +94,6 @@ import {
   type IntegrationAuthType,
   type IntegrationClient,
   type IntegrationConnection,
-  type IntegrationManifestView,
   type IntegrationManifestAuth,
 } from "../hooks/use-integrations";
 import { useIntegrations } from "../hooks/use-integrations";
@@ -1323,113 +1323,6 @@ function ConnectionTableRow({
         }
       />
     </>
-  );
-}
-
-// ─────────────────────────────────────────────
-// Setup guide (admin-only)
-// ─────────────────────────────────────────────
-
-/**
- * AFPS §7.10 — `setup_guide.steps` is the canonical place for integration
- * publishers to describe IdP-side prerequisites (create an OAuth app, add a
- * redirect URI, …). Rendered as an ordered list on the admin view next to
- * the OAuth client form so the operator has the publisher's instructions at
- * eye level. Each step is `{ label: string, url?: string }`; the `url`
- * surfaces as a clickable link when present.
- */
-function SetupGuideSteps({ steps }: { steps: ReadonlyArray<{ label: string; url?: string }> }) {
-  const { t } = useTranslation("settings");
-  if (steps.length === 0) return null;
-  return (
-    <section
-      className="bg-muted/20 mb-4 rounded-md border p-4"
-      data-testid="setup-guide-steps"
-      aria-label={t("integration.setup_guide.step_label")}
-    >
-      <h3 className="mb-2 text-sm font-semibold">{t("integration.setup_guide.title")}</h3>
-      <ol className="text-muted-foreground list-decimal space-y-1 pl-5 text-xs">
-        {steps.map((step, i) => (
-          <li key={i} data-testid={`setup-guide-step-${i}`}>
-            {step.url ? (
-              <a
-                href={step.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-primary underline"
-              >
-                {step.label}
-              </a>
-            ) : (
-              <span>{step.label}</span>
-            )}
-          </li>
-        ))}
-      </ol>
-    </section>
-  );
-}
-
-// ─────────────────────────────────────────────
-// About + metadata blocks
-// ─────────────────────────────────────────────
-
-function MetadataBlock({ manifest }: { manifest: IntegrationManifestView }) {
-  const { t } = useTranslation("settings");
-  const authorRaw = (manifest as { author?: unknown }).author;
-  const author =
-    typeof authorRaw === "string"
-      ? authorRaw
-      : authorRaw && typeof authorRaw === "object" && "name" in authorRaw
-        ? (((authorRaw as { name?: unknown }).name as string | undefined) ?? "")
-        : "";
-  const repoRaw = (manifest as { repository?: unknown }).repository;
-  const repo =
-    typeof repoRaw === "string"
-      ? repoRaw
-      : repoRaw && typeof repoRaw === "object" && "url" in repoRaw
-        ? (((repoRaw as { url?: unknown }).url as string | undefined) ?? "")
-        : "";
-  const sourceKind = manifest.source?.kind ?? "api";
-  const rows: Array<[string, React.ReactNode]> = [
-    [t("integration.field.version"), <span className="font-mono">{manifest.version}</span>],
-    [t("integration.field.author"), author || "—"],
-    [t("integration.field.license"), manifest.license ?? "—"],
-    [
-      t("integration.field.repository"),
-      repo ? (
-        <a href={repo} target="_blank" rel="noopener noreferrer" className="text-primary underline">
-          {repo}
-        </a>
-      ) : (
-        "—"
-      ),
-    ],
-    [t("integration.field.serverType"), <span className="font-mono">{sourceKind}</span>],
-    ...(manifest.allow_undeclared_tools === true
-      ? ([
-          [
-            t("integration.field.allowUndeclaredTools"),
-            <Badge
-              variant="outline"
-              className="text-[0.65rem]"
-              data-testid="integration-meta-wildcard-badge"
-            >
-              {t("integration.field.allowUndeclaredToolsBadge")}
-            </Badge>,
-          ],
-        ] as Array<[string, React.ReactNode]>)
-      : []),
-  ];
-  return (
-    <dl className="grid grid-cols-1 gap-y-2 text-sm sm:grid-cols-[max-content_1fr] sm:gap-x-4">
-      {rows.map(([k, v]) => (
-        <div key={k} className="contents">
-          <dt className="text-muted-foreground">{k}</dt>
-          <dd>{v}</dd>
-        </div>
-      ))}
-    </dl>
   );
 }
 
