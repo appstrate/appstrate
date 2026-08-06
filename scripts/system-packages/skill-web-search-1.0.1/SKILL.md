@@ -1,6 +1,6 @@
 ---
 name: web-search
-description: Chercher ou lire le web en lançant un run inline (le chat n'a pas d'accès web direct — le runtime est sandboxé). Charge ce skill dès qu'il faut une recherche web (requête en langage naturel) ou lire une/des URLs. Détecte au runtime les fournisseurs de recherche connectés (Brave, Firecrawl, Tavily, Exa, SerpAPI) et les utilise ; sinon retombe sur @default/web-fetch (GET d'URLs publiques, sans credential), ou propose d'en connecter un. Donne le manifest inline, l'input et l'output structuré de chaque branche.
+description: Chercher ou lire le web en lançant un run inline (le chat n'a pas d'accès web direct — le runtime est sandboxé). Charge ce skill dès qu'il faut une recherche web (requête en langage naturel) ou lire une/des URLs. Détecte au runtime les fournisseurs de recherche réellement présents et connectés (Firecrawl est le seul livré en standard ; Brave, Tavily, Exa, SerpAPI supposent une intégration ajoutée par l'organisation) et les utilise ; à défaut, dit clairement qu'aucun accès web n'est disponible plutôt que d'inventer. Donne le manifest inline, l'input et l'output structuré de chaque branche.
 ---
 
 # Web Search — recette de run inline
@@ -15,18 +15,27 @@ Depuis le chat, tu fais ça via `invoke_operation` sur les opérations de l'API 
 
 ## Arbre de décision
 
-1. **Regarde ce qui est connecté.** Appelle `GET /api/integrations` et, pour chaque fournisseur de
-   recherche connu, `GET /api/integrations/{packageId}/connections`. Fournisseurs reconnus (par ordre
-   de préférence) : `@default/brave-search`, `@appstrate/firecrawl`, `@default/tavily`,
-   `@default/exa`, `@default/serpapi`. Un fournisseur est utilisable s'il a **≥1 connexion**
-   accessible (ou une connexion défaut org).
-2. **Si un fournisseur de recherche est connecté** et que la demande est une _recherche_ (requête en
-   langage naturel) → **Recette A** avec ce fournisseur.
-3. **Sinon, ou si on te donne des URLs précises à lire** → **Recette B** (`@default/web-fetch`),
-   qui fait un simple GET et renvoie le contenu. Pas de moteur de recherche : il faut connaître l'URL.
-4. Si tu voulais chercher mais qu'aucun fournisseur n'est connecté, **dis-le** à l'utilisateur
-   (« aucun moteur de recherche connecté — connecte Firecrawl/Brave/… ou donne-moi une URL ») et
-   propose de le connecter (via le flux de connexion natif) au lieu d'inventer des résultats.
+> **Rien n'est garanti présent.** Seul `@appstrate/firecrawl` est livré en standard avec Appstrate.
+> Tous les ids en `@default/…` ci-dessous sont des intégrations que l'organisation doit avoir
+> ajoutées elle-même : elles n'existent pas sur une instance neuve. Ne les cite jamais sans avoir
+> vérifié leur présence à l'étape 1.
+
+1. **Regarde ce qui existe ET ce qui est connecté.** Appelle `GET /api/integrations` : la réponse
+   est la liste de ce qui existe RÉELLEMENT ici. Puis, pour chaque fournisseur de recherche présent
+   dans cette liste, `GET /api/integrations/{packageId}/connections`. Fournisseurs reconnus, par
+   ordre de préférence : `@appstrate/firecrawl` (livré en standard), puis, **s'ils apparaissent dans
+   la liste**, `@default/brave-search`, `@default/tavily`, `@default/exa`, `@default/serpapi`. Un
+   fournisseur est utilisable s'il est présent **et** a ≥1 connexion accessible (ou un défaut org).
+2. **Si un fournisseur de recherche est utilisable** et que la demande est une _recherche_ (requête
+   en langage naturel) → **Recette A** avec ce fournisseur.
+3. **Si on te donne des URLs précises à lire** et que `@default/web-fetch` figure dans la liste de
+   l'étape 1 → **Recette B**, qui fait un simple GET et renvoie le contenu. Pas de moteur de
+   recherche : il faut connaître l'URL.
+4. **Dans tous les autres cas, dis-le.** Aucun fournisseur utilisable, ou `@default/web-fetch`
+   absent : annonce-le clairement (« aucun accès web disponible sur cette instance — Firecrawl peut
+   être connecté en un clic, sinon donne-moi le contenu directement ») et propose la connexion via
+   le flux natif. **N'invente jamais un résultat, et ne référence jamais une intégration que
+   l'étape 1 n'a pas retournée.**
 
 Toujours : citer ce que l'outil renvoie, ne jamais fabriquer un résultat.
 
@@ -102,6 +111,9 @@ sur l'URL choisie.
 
 ## Recette B — fetch d'URL publique (fallback sans credential)
 
+> **Conditionnelle.** `@default/web-fetch` n'est PAS livré avec Appstrate. Cette recette ne
+> s'applique que si l'étape 1 a bien retourné cette intégration. Sinon, applique l'étape 4.
+
 Intégration `@default/web-fetch` (source none, `allow_all_uris`, **sans clé**). Body de
 `POST /api/runs/inline` :
 
@@ -167,8 +179,9 @@ puis lis `result.output` (`output.results` pour A, `output.pages` pour B). Statu
 
 ## Notes
 
-- `@default/web-fetch` a besoin d'une **connexion** (même sans credential : champ `note` bidon) et d'un
-  **défaut org** pour que le run inline la résolve. Si elle manque, propose de la créer.
+- `@default/web-fetch` n'est pas un package système : il doit avoir été ajouté à l'organisation.
+  Une fois présent, il a besoin d'une **connexion** (même sans credential : champ `note` bidon) et
+  d'un **défaut org** pour que le run inline la résolve. Si elle manque, propose de la créer.
 - Le fetch générique ne contourne pas les portails authentifiés / anti-bot ni le JS côté client ;
   pour ça, préférer un fournisseur de scraping (Firecrawl `/v1/scrape`).
 - Limite le nombre d'URLs / la taille par run (réponses > ~32 KB spillent en `resource_link`).

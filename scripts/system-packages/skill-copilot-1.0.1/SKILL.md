@@ -148,7 +148,7 @@ Présente chaque idée ainsi, sans jargon :
 2. **Choix + dépendances** — savoir-faire : orchestration simple (pas de skill dédié) ; connecteur :
    `quickbooks-online` non connecté → je génère le lien OAuth dans le chat (« Connecte QuickBooks → »).
 3. **Génération** — agent : dépend de `@appstrate/quickbooks-online` (`tools: ["api_call"]`),
-   `runtime_tools: ["output","report"]`, prompt « lis les factures en retard → prépare les relances ».
+   `runtime_tools: ["output","log"]`, prompt « lis les factures en retard → prépare les relances ».
    Dry-run OK.
 4. **Connexion + activation** — le user clique le lien, autorise. J'importe l'agent et propose un
    `schedule` lundi 8h.
@@ -212,6 +212,11 @@ Les noms et paramètres exacts : `describe_operation`. Ne hardcode pas d'URL.
   → **zéro tool** (l'agent ne voit pas le connecteur). Intégration `none` → `["api_call"]` ;
   intégration MCP (`*-mcp`) → les vrais noms de tools (ou `"*"`).
 - **`output` doit figurer dans `runtime_tools` dès qu'un `output.schema` est déclaré** (sinon rejet).
+- **Un runtime tool non déclaré n'existe pas au runtime.** Le catalogue complet est
+  `output` · `log` · `note` · `pin` · `publish_document` (tout autre id est rejeté à la validation).
+  Conséquence pour un agent ⏰ **incrémental** : `pin` est OBLIGATOIRE dans `runtime_tools`, sinon
+  l'agent ne peut pas écrire son checkpoint et re-traite tout à chaque passage. Idem `note` dès que
+  la skill demande d'archiver une information durable (`minutes-actions`, par ex.).
 - **Lecture du résultat : `result.output.<champ>`** (pas `result.<champ>`).
 - Pas de type `"file"` : champ string `format:"uri"` + `contentMediaType` + sibling `file_constraints`.
 - `required` = tableau top-level (pas un booléen par propriété).
@@ -224,7 +229,7 @@ communication**, `## User Input`, `## Configuration`, `## Checkpoint`, doc des i
 
 - **Ne liste jamais les tools** (l'agent les découvre via `tools/list`).
 - **Tout passe par un tool** : le texte libre hors tool call est ignoré. Écris « appelle `output`
-  avec… », « appelle `report` pour… » — jamais « réponds avec… ».
+  avec… », « appelle `log` pour… » — jamais « réponds avec… ».
 - Décris l'**objectif**, les **étapes**, les **règles** (anti-hallucination, erreurs). Pour un agent
   ⏰ : lire l'état depuis `## Checkpoint`, écrire `pin({key:"checkpoint"})` à la fin (incrémental).
 
@@ -262,11 +267,16 @@ Connexion = via l'opération OAuth/champs (le lien présenté dans le chat) — 
 
 #### 📧 Mail — `gmail` / `microsoft-outlook`
 
-- ⏰ Brief inbox du matin (tri + résumé + priorités) · `triage-sentiment`
+- ⏰ Brief inbox du matin (tri + résumé + priorités) · `email-reply`
 - ⏰ Auto-brouillons de réponses récurrentes · `email-reply`
 - ⏰ Extraire les engagements/tâches des mails → projet · `minutes-actions`
 - ⏰ Alerte VIP / mots-clés (devis, résiliation, plainte) · `triage-sentiment`
 - 💬 Réponds à ce fil dans mon ton · `email-reply`
+- 💬 Rédige un email de prospection · `content-writing`
+
+> **Arbitrage mail** : `email-reply` dès qu'il s'agit d'une boîte de réception personnelle
+> (trier + rédiger la réponse). `triage-sentiment` dès qu'il s'agit d'un flux entrant partagé à
+> qualifier/router (support, alertes) — même quand il arrive par mail.
 
 #### 📁 Drive — `google-drive` / `onedrive` / `dropbox` / `notion`
 
@@ -284,28 +294,35 @@ Connexion = via l'opération OAuth/champs (le lien présenté dans le chat) — 
 
 #### 🧾 Facturation — `quickbooks-online` / `xero` / `stripe`
 
-- ⏰ Relances d'impayés automatiques · (orchestration)
+- ⏰ Relances d'impayés automatiques · `crm-update` (détection de stagnation) + `content-writing`
 - ⏰ Rapport cash / encaissements hebdo · `data-analysis`
 - ⏰ Catégoriser les transactions · `data-analysis`
+- ⏰ Extraire les données des factures reçues · `doc-extraction`
 - 💬 Statut de la facture X ? · (orchestration)
 
 #### 📅 Calendrier & réunions — `google-calendar` / `zoom` / `fathom`
 
 - ⏰ Prépa des réunions du jour (participants + docs liés) · `meeting-prep`
 - ⏰ CR + actions après chaque réunion (Fathom) · `minutes-actions`
+- ⏰ Journaliser le CR dans le CRM après un call client · `crm-update`
 - 💬 Trouve un créneau avec X · (orchestration)
 
 #### 💬 Messagerie interne — `slack` / `microsoft-teams`
 
 - ⏰ Digest des canaux clés + décisions + actions · `incremental-digest`
-- 💬 Résume #canal depuis hier · `minutes-actions`
+- 💬 Résume #canal depuis hier · `incremental-digest`
 - ⏰ FAQ interne dans un canal · `sourced-rag`
 
 #### 🤝 CRM — `hubspot` / `salesforce` / `pipedrive`
 
-- 💬 Brief avant call · `customer-research`
-- ⏰ Relances pipeline du jour · (orchestration)
+- 💬 Brief avant call · `meeting-prep`
+- ⏰ Relances pipeline du jour (deals qui stagnent) · `crm-update`
+- ⏰ Enrichir + journaliser un nouveau lead · `crm-update`
 - ⏰ Qualifier les leads entrants vs ICP · `customer-research`
+
+> **Arbitrage brief** : `meeting-prep` quand il y a un rendez-vous daté (participants, dernier
+> échange, points à aborder). `customer-research` quand la demande porte sur un compte, sans
+> réunion à préparer (qualification, fiche 360°).
 
 #### 🎧 Support — `zendesk` / `intercom` / `freshdesk`
 
@@ -315,23 +332,28 @@ Connexion = via l'opération OAuth/champs (le lien présenté dans le chat) — 
 
 #### 👩‍💻 Dev — `github-mcp` / `jira` / `linear`
 
-- ⏰ Résumé des PR ouvertes (matin) · `code-review`
-- 💬 Explique cette PR / ce diff · `code-review`
+- ⏰ Résumé des PR ouvertes (matin) · `sprint-report`
+- 💬 Revois cette PR / ce diff · `code-review`
 - ⏰ Triage des issues entrantes · `triage-sentiment`
 
 #### 🌐 Veille (transverse) — `firecrawl` + livraison `slack`/`gmail`
 
 - ⏰ Veille concurrents / sujets → digest du nouveau (checkpoint) · `incremental-digest`
 - 💬 Cherche & synthétise un sujet maintenant · `sourced-research`
+- 💬 Décline cette veille en post / article · `content-writing`
+
+> **Arbitrage sourcé** : `sourced-research` cherche à l'EXTÉRIEUR (web, concurrents, marché).
+> `sourced-rag` répond depuis les documents INTERNES de l'organisation (Drive, Notion, wiki).
 
 ## Référence — Sources dynamiques & sécurité
 
 > Chargé quand le copilote va chercher des idées (Phase 2) ou un skill/MCP (Phase 3).
 > **Capacité d'accès** : le runtime est **sandboxé** — pas d'HTTP direct. Toute recherche / lecture
-> web passe par le skill **`@default/web-search`** (recette de **run inline**) : il détecte les
-> fournisseurs connectés (**Brave** déjà connecté sur i31, Firecrawl, Tavily…) et retombe sur
-> `@default/web-fetch` pour lire une URL publique (n8n templates, `raw.githubusercontent.com`,
-> registres MCP). Réutilise ce skill, n'invente pas d'accès réseau.
+> web passe par le skill **`@appstrate/web-search`** (recette de **run inline**) : il détecte les
+> fournisseurs de recherche réellement connectés sur CETTE instance (Firecrawl est le seul livré
+> en standard ; Brave, Tavily, Exa, SerpAPI supposent une intégration ajoutée par l'organisation)
+> et, à défaut, dit qu'aucun accès web n'est disponible plutôt que d'inventer.
+> Réutilise ce skill, n'invente pas d'accès réseau.
 
 ### Listings d'automatisation (inspiration « ce que les gens automatisent »)
 
