@@ -37,15 +37,19 @@ export function RunsPage() {
           </Button>
         }
       >
+        {/* `collapse={false}` on both: shrink-to-fit flex items, so the measured
+            width would be the bar's own content width and the overflow menu
+            would feed on its own output. Two/three short filter triggers — they
+            have nothing to collapse anyway. */}
         <div className="mt-2 flex flex-wrap items-center gap-3">
           <Tabs value={userTab} onValueChange={(v) => setUserTab(v as UserTab)}>
-            <TabsList>
+            <TabsList collapse={false}>
               <TabsTrigger value="all">{t("runs.filterAll")}</TabsTrigger>
               <TabsTrigger value="me">{t("runs.filterMine")}</TabsTrigger>
             </TabsList>
           </Tabs>
           <Tabs value={kindTab} onValueChange={(v) => setKindTab(v as RunKindFilter)}>
-            <TabsList>
+            <TabsList collapse={false}>
               <TabsTrigger value="all">{t("runs.filterKindAll")}</TabsTrigger>
               <TabsTrigger value="package">{t("runs.filterKindPackage")}</TabsTrigger>
               <TabsTrigger value="inline">{t("runs.filterKindInline")}</TabsTrigger>

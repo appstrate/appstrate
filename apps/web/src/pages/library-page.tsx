@@ -50,7 +50,7 @@ export function LibraryPage() {
     <div className="p-6">
       <PageHeader title={t("library.title")} />
       <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as Tab)}>
-        <TabsList>
+        <TabsList overflowLabel={t("common:tabs.more")}>
           {TABS.map((tab) => (
             <TabsTrigger key={tab} value={tab}>
               {t(`library.tab.${tab}`)}

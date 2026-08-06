@@ -116,8 +116,12 @@ export function IntegrationsPage() {
       </PageHeader>
 
       <div className="mb-4 flex items-center gap-3">
+        {/* `collapse={false}`: shrink-to-fit flex item sharing the row with a
+            `flex-1` search field, so the measured width is the bar's own content
+            width — the overflow menu would collapse against its own output. Two
+            short filter triggers, nothing to collapse. */}
         <Tabs value={tab} onValueChange={(v) => setTab(v as "active" | "all")}>
-          <TabsList>
+          <TabsList collapse={false}>
             <TabsTrigger value="active">{t("integrations.tabs.active")}</TabsTrigger>
             <TabsTrigger value="all">{t("integrations.tabs.all")}</TabsTrigger>
           </TabsList>

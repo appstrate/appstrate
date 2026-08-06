@@ -95,7 +95,9 @@ export function ModelSelect({
           onValueChange={(value) => setTab(value as "models" | "configuration")}
           className="flex max-h-[min(18rem,calc(100dvh-8rem))] min-h-0 flex-col p-2"
         >
-          <TabsList className="grid h-8 w-full shrink-0 grid-cols-2">
+          {/* Segmented control, not a nav bar: two equal grid columns spanning the
+              popover width. Flex-based overflow measurement is meaningless here. */}
+          <TabsList collapse={false} className="grid h-8 w-full shrink-0 grid-cols-2">
             <TabsTrigger value="models" className="h-6 px-2 text-xs">
               {t("model.tabs.models")}
             </TabsTrigger>

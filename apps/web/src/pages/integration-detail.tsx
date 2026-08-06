@@ -1460,7 +1460,7 @@ export function IntegrationDetailPage() {
         onValueChange={(v) => setTab(v as (typeof INTEGRATION_TABS)[number])}
         className="mt-2"
       >
-        <TabsList>
+        <TabsList overflowLabel={t("common:tabs.more")}>
           <TabsTrigger value="connections" data-testid="tab-connections">
             {t("integration.tabs.connections")}
           </TabsTrigger>

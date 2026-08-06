@@ -99,7 +99,7 @@ export function EditorShell({
       )}
 
       <Tabs value={activeTab} onValueChange={onTabChange} className="mb-4">
-        <TabsList className="overflow-x-auto">
+        <TabsList overflowLabel={t("common:tabs.more")}>
           {tabs.map((tab) => (
             <TabsTrigger key={tab.id} value={tab.id}>
               {tab.label}

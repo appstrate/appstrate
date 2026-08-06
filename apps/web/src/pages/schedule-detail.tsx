@@ -95,7 +95,7 @@ export function ScheduleDetailPage() {
             </>
           }
         >
-          <TabsList className="mt-3">
+          <TabsList className="mt-3" overflowLabel={t("common:tabs.more")}>
             <TabsTrigger value="runs">{t("schedule.tabRuns")}</TabsTrigger>
             <TabsTrigger value="details">{t("schedule.tabDetails")}</TabsTrigger>
           </TabsList>

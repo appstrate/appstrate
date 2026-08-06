@@ -438,7 +438,7 @@ export function OrgSettingsModelsPage() {
   return (
     <>
       <Tabs value={subTab} onValueChange={(v) => setSubTab(v as "models-list" | "credentials")}>
-        <TabsList className="mb-4">
+        <TabsList className="mb-4" overflowLabel={t("common:tabs.more")}>
           <TabsTrigger value="models-list">{t("models.tabTitle")}</TabsTrigger>
           <TabsTrigger value="credentials">{t("credentials.title")}</TabsTrigger>
         </TabsList>

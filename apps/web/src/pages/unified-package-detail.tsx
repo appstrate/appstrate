@@ -486,15 +486,8 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
       )}
 
       {/* Tab bar */}
-      {/* `flex-wrap h-auto`: an agent reaches 10 tabs, and the shared TabsList
-          neither wraps nor scrolls. Its nearest scroll ancestor is
-          `overflow-y: auto`, so `overflow-x` computes to `auto` there and the
-          whole content area — not just the strip — grows a horizontal
-          scrollbar. Wrapping rather than scrolling because this is the page's
-          primary navigation; fixed at the call site because other pages depend
-          on the shared component's fixed height. */}
       <Tabs value={tab} onValueChange={(v) => setTab(v as DetailTab)} className="mb-4">
-        <TabsList className="h-auto flex-wrap">
+        <TabsList overflowLabel={t("common:tabs.more")}>
           {tabDefs.map((td) => (
             <TabsTrigger key={td.id} value={td.id}>
               {td.label}

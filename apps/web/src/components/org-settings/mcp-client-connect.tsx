@@ -77,7 +77,7 @@ export function McpClientConnect({ serverName, url }: McpClientConnectProps) {
 
       {/* Tier 2: per-client convenience snippets. */}
       <Tabs defaultValue="claude-code">
-        <TabsList className="flex-wrap">
+        <TabsList overflowLabel={t("common:tabs.more")}>
           <TabsTrigger value="claude-code">Claude Code</TabsTrigger>
           <TabsTrigger value="claude-desktop">Claude Desktop</TabsTrigger>
           <TabsTrigger value="cursor">Cursor</TabsTrigger>
