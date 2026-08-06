@@ -1,0 +1,9 @@
+{
+  "$schema": "https://schemas.afps.dev/v0/skill.schema.json",
+  "name": "@appstrate/sourced-rag",
+  "version": "1.0.0",
+  "type": "skill",
+  "schema_version": "0.1",
+  "display_name": "Réponse sourcée sur base de connaissance",
+  "description": "Répond aux questions à partir d'une base de connaissance (documents, wiki, Drive, Notion) en citant les sources et en disant explicitement quand l'information manque. Charge cette skill dès qu'un agent doit répondre en s'appuyant sur des documents internes plutôt que sur sa connaissance générale."
+}

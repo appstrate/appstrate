@@ -1,0 +1,9 @@
+{
+  "$schema": "https://schemas.afps.dev/v0/skill.schema.json",
+  "name": "@appstrate/sourced-research",
+  "version": "1.0.0",
+  "type": "skill",
+  "schema_version": "0.1",
+  "display_name": "Recherche sourcée (web)",
+  "description": "Effectue une recherche web sourcée sur un sujet, un concurrent ou un marché, et produit une synthèse structurée avec sources citées. Charge cette skill pour toute veille, recherche concurrentielle ou étude de sujet nécessitant des sources externes."
+}

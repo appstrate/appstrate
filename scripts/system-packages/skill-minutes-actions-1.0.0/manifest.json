@@ -1,0 +1,9 @@
+{
+  "$schema": "https://schemas.afps.dev/v0/skill.schema.json",
+  "name": "@appstrate/minutes-actions",
+  "version": "1.0.0",
+  "type": "skill",
+  "schema_version": "0.1",
+  "display_name": "Synthèse de réunion en décisions et actions",
+  "description": "Transforme un transcript ou des notes de réunion en résumé, décisions actées et actions assignées (responsable, échéance si mentionnés). Charge cette skill dès qu'un agent doit traiter un compte-rendu de réunion, un appel enregistré (Fathom, Zoom, Meet), ou toute transcription à structurer en décisions/actions."
+}

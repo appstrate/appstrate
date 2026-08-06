@@ -1,0 +1,9 @@
+{
+  "$schema": "https://schemas.afps.dev/v0/skill.schema.json",
+  "name": "@appstrate/crm-update",
+  "version": "1.0.0",
+  "type": "skill",
+  "schema_version": "0.1",
+  "display_name": "Mise à jour CRM et suivi de pipeline",
+  "description": "Enrichit un lead, journalise une interaction dans le CRM, ou signale une opportunité qui stagne. Charge cette skill pour tout agent qui touche à la gestion de pipeline commercial (nouveau lead, suivi post-réunion, relance)."
+}

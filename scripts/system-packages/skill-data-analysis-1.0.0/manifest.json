@@ -1,0 +1,9 @@
+{
+  "$schema": "https://schemas.afps.dev/v0/skill.schema.json",
+  "name": "@appstrate/data-analysis",
+  "version": "1.0.0",
+  "type": "skill",
+  "schema_version": "0.1",
+  "display_name": "Analyse de données tabulaires",
+  "description": "Analyse un jeu de données tabulaire (CSV/XLSX collé ou fichier) et en tire indicateurs, tendances et recommandations actionnables. Charge cette skill dès qu'un agent doit traiter des données chiffrées, un export, un tableau, ou répondre à une question quantitative."
+}

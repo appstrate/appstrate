@@ -1,0 +1,9 @@
+{
+  "$schema": "https://schemas.afps.dev/v0/skill.schema.json",
+  "name": "@appstrate/email-reply",
+  "version": "1.0.0",
+  "type": "skill",
+  "schema_version": "0.1",
+  "display_name": "Triage et brouillons de réponse email",
+  "description": "Trie une boîte mail (priorité, catégorie) et rédige des brouillons de réponse dans le ton de l'utilisateur, sans jamais envoyer sans validation. Charge cette skill dès qu'un agent doit traiter des emails entrants, en faire le tri, ou préparer des réponses."
+}

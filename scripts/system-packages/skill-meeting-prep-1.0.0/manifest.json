@@ -1,0 +1,9 @@
+{
+  "$schema": "https://schemas.afps.dev/v0/skill.schema.json",
+  "name": "@appstrate/meeting-prep",
+  "version": "1.0.0",
+  "type": "skill",
+  "schema_version": "0.1",
+  "display_name": "Préparation de rendez-vous",
+  "description": "Prépare un brief avant un rendez-vous : participants, historique de la relation, actualité pertinente, points à aborder. Charge cette skill quand un agent doit préparer une réunion, un appel, ou un rendez-vous à venir."
+}
