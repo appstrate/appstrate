@@ -313,10 +313,14 @@ export function formatCallerContext(raw: unknown, opts?: { locale?: string }): s
       );
     }
     lines.push(
-      "These are instruction sets for you, the assistant — not packages to attach to an agent. " +
-        "When one matches the situation, load it BEFORE acting: call `invoke_operation` with " +
+      "These are for you, the assistant. Some are instruction sets you follow yourself; others " +
+        "are reference methods, written for an agent. Never attach one to an agent as-is, and " +
+        "never paste its text into the agent's prompt either: create a skill under the user's " +
+        "own scope from that content first, then declare THAT package in the agent — otherwise " +
+        "the know-how ends up somewhere they cannot find, edit, or reuse. When one " +
+        "matches the situation, load it BEFORE acting: call `invoke_operation` with " +
         '`operation_id: "getSkill"` and `path_params` splitting the skill\'s `@scope/name` id ' +
-        "(KEEP the leading `@` on the scope), then follow the returned `content`.",
+        "(KEEP the leading `@` on the scope), then read the returned `content`.",
     );
   }
   if (ctx.recent_runs?.length) {

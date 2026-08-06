@@ -58,11 +58,17 @@ export function formatAssistantSkillsSection(skills: readonly AssistantSkillHint
   if (skills.length === 0) return "";
   const lines = [
     "## Assistant skills",
-    "Reusable instruction sets for recurring assistant situations. When one matches the " +
-      "situation, load its full instructions BEFORE acting: call `invoke_operation` with " +
-      '`operation_id: "getSkill"` and `path_params: { "scope": "<@scope>", "name": "<name>" }` ' +
-      "(split the skill's `@scope/name` id, KEEP the leading `@` on the scope), read the " +
-      "returned `content`, and follow it.",
+    "Reusable instruction sets for recurring assistant situations, plus reference methods you " +
+      "can copy into a user's own package. When one matches the situation, load it BEFORE " +
+      'acting: call `invoke_operation` with `operation_id: "getSkill"` and `path_params: ' +
+      '{ "scope": "<@scope>", "name": "<name>" }` (split the skill\'s `@scope/name` id, KEEP the ' +
+      "leading `@` on the scope), then read the returned `content`. Those written for YOU (an " +
+      "interview to run, a recipe to apply) you follow; those written for an AGENT you copy into " +
+      "a package the user owns. Never attach one to an agent as-is, and never paste its text " +
+      "into the agent's prompt either: create a skill under the user's own scope from that " +
+      "content first, then declare THAT package in the agent. Inlining the method into a prompt " +
+      "is the mistake this rule exists to prevent — it leaves the user with know-how they cannot " +
+      "find, edit, or reuse in their next agent.",
   ];
   for (const s of skills) {
     const label = s.display_name !== s.package_id ? `${s.display_name}: ` : "";
