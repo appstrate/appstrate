@@ -6,6 +6,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Security
+
+- **Package `GET` routes now enforce a read permission (#1123)** — every
+  `GET` under `/api/packages` was gated on `hasPackageAccess` alone, which
+  answers "is this package installed in this application, or a system
+  package?" and nothing about what the caller may do. An API key scoped
+  **without** `skills:read` could read a skill's manifest and its full
+  `SKILL.md` (the detail route serves the authored `content`), and pull the
+  published ZIP through `/{scope}/{name}/{version}/download`. Every `GET`
+  on the router now requires the matching `agents:read` / `skills:read` /
+  `integrations:read` / `mcp-servers:read`, and `/{version}/download`
+  additionally goes through `hasPackageAccess` like the rest of the surface —
+  it previously served artifact bytes for packages not installed in the
+  calling application.
+
+  **Breaking for API keys.** No org role is affected (every role, down to
+  `viewer`, holds all four read scopes), but a key minted without the
+  matching `*:read` scope now gets `403` where it used to get `200`, and a
+  download of a package that is not installed in the key's application now
+  gets `404`. Audit issued key scopes before upgrading.
+
 ### Added
 
 - **Opt-in observability module (#847)** — OpenTelemetry moves out of core
