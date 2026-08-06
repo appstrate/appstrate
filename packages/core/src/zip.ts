@@ -252,6 +252,18 @@ export class PackageZipError extends Error {
 /** Canonical compressed-size ceiling for one author-supplied package archive. */
 export const PACKAGE_ZIP_MAX_COMPRESSED_BYTES = 10 * 1024 * 1024; // 10 MB
 
+/**
+ * Canonical DECOMPRESSED ceiling for one package archive — the amplification
+ * budget that pairs with {@link PACKAGE_ZIP_MAX_COMPRESSED_BYTES}.
+ *
+ * Exported because the ceiling must be the SAME number on the way in and on the
+ * way back out. It used to be a function-local constant in `parsePackageZip`,
+ * so every path that re-read a stored artifact silently inherited
+ * `unzipArtifact`'s far looser 200 MB default and re-opened the amplification
+ * the import gate had just closed. One name, one value, both boundaries.
+ */
+export const PACKAGE_ZIP_MAX_DECOMPRESSED_BYTES = 50 * 1024 * 1024; // 50 MB
+
 /** Options for {@link parsePackageZip}. */
 export interface ParsePackageZipOptions {
   /** Maximum compressed size in bytes. Defaults to 10 MB. */
@@ -305,10 +317,11 @@ export function parsePackageZip(
 
   // Zip bomb protection is now enforced DURING decompression (streaming budget)
   // rather than after full materialization — a bomb aborts mid-inflate.
-  const MAX_DECOMPRESSED = 50 * 1024 * 1024; // 50 MB
   let files: Record<string, Uint8Array>;
   try {
-    files = unzipArtifact(zipBuffer, { maxDecompressedBytes: MAX_DECOMPRESSED });
+    files = unzipArtifact(zipBuffer, {
+      maxDecompressedBytes: PACKAGE_ZIP_MAX_DECOMPRESSED_BYTES,
+    });
   } catch (err) {
     if (err instanceof DecompressionLimitError) {
       // A resource-exhaustion verdict → ZIP_BOMB; a structural one → ZIP_INVALID.

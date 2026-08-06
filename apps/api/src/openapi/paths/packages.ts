@@ -458,10 +458,11 @@ export const packagesPaths = {
         "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "404": { $ref: "#/components/responses/NotFound" },
+        "422": { $ref: "#/components/responses/PackageArchiveUnreadable" },
         "429": { $ref: "#/components/responses/RateLimited" },
         "500": {
           description:
-            "The artifact could not be read: integrity/signature verification failed (`INTEGRITY_MISMATCH`) or the archive exceeded the decompression limits. RFC 9457 problem+json.",
+            "The artifact could not be read: integrity/signature verification failed (`INTEGRITY_MISMATCH`), or the stored bytes are not a readable ZIP. RFC 9457 problem+json.",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -583,10 +584,11 @@ export const packagesPaths = {
         "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "404": { $ref: "#/components/responses/NotFound" },
+        "422": { $ref: "#/components/responses/PackageArchiveUnreadable" },
         "429": { $ref: "#/components/responses/RateLimited" },
         "500": {
           description:
-            "The artifact could not be read: integrity/signature verification failed (`INTEGRITY_MISMATCH`) or the archive exceeded the decompression limits. RFC 9457 problem+json.",
+            "The artifact could not be read: integrity/signature verification failed (`INTEGRITY_MISMATCH`), or the stored bytes are not a readable ZIP. RFC 9457 problem+json.",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -1632,6 +1634,23 @@ export const packagesPaths = {
         },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
+        // Same CONDITION as `#/components/responses/PackageArchiveUnreadable`,
+        // deliberately NOT `$ref`-ed: the shared component tells the caller to
+        // republish the package, which is impossible here (a fork's source is
+        // always a package the calling org does not own), and it cannot state
+        // that nothing was written. Both facts are specific to this boundary.
+        "422": {
+          description:
+            "The SOURCE package's published artifact expands past the platform's decompression ceiling and was refused (`package_archive_unreadable`). Nothing was written: the fork is rejected while reading the source, before the name-collision check and before any package or version row is created, so there is no partial copy to clean up. A fork always targets a package the calling organization does NOT own, so the caller cannot repair the source — report it to whoever publishes it (or to the platform operator if it is a system package). RFC 9457 problem+json.",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+          },
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
       },
     },
   },

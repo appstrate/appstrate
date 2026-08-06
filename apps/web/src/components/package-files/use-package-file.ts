@@ -9,6 +9,28 @@ import { splitPackageRef } from "../../lib/package-paths";
 import { baseName, isPreviewable, type PackageFileEntry } from "../../lib/package-file-tree";
 
 /**
+ * The text of a finished fetch, or `undefined` when there is not one yet.
+ *
+ * Pure and exported because it IS the defect. openapi-fetch short-circuits on
+ * `Content-Length: "0"` before `parseAs` is honoured and returns
+ * `{ data: undefined }` — on a fully successful 200. So `data` alone cannot
+ * tell a zero-byte file apart from a file that was never fetched, and
+ * `file-preview` treats `text === undefined` as "still loading": an infinite
+ * spinner on every empty file in an artifact.
+ *
+ * The success flag is what separates the two cases, and it has to be consulted:
+ * `data` is equally `undefined` while the query is pending or disabled, so a
+ * bare `data ?? ""` would render an empty editor over a request still in
+ * flight — papering over a real failure instead of fixing an empty read.
+ */
+export function packageFileText(query: { isSuccess: boolean; data: unknown }): string | undefined {
+  if (!query.isSuccess) return undefined;
+  // `parseAs: "text"` yields a string; anything else here is the empty-body
+  // short-circuit, which is a successful read of nothing.
+  return typeof query.data === "string" ? query.data : "";
+}
+
+/**
  * Text of one package file, wherever it came from.
  *
  * The index carries `inline` for text files that fit the response's cumulative
@@ -52,13 +74,14 @@ export function usePackageFile(
   );
 
   // `parseAs: "text"` yields a string; the spec types the body as a Blob because
-  // the route always declares `application/octet-stream`. A zero-byte file comes
-  // back `null` from the empty-body branch — a successful read of an empty file,
-  // which is why it is normalised here rather than left to read as "not loaded".
-  const fetched = query.data as unknown as string | null | undefined;
+  // the route always declares `application/octet-stream`. A zero-byte file never
+  // reaches `parseAs` at all — the route sets `Content-Length: "0"` and
+  // openapi-fetch returns `data: undefined` on the success path — so "read an
+  // empty file" is read off the query state, not off `data`.
+  const fetched = packageFileText(query);
 
   return {
-    text: entry.inline ?? (needsFetch ? (fetched ?? undefined) : undefined),
+    text: entry.inline ?? (needsFetch ? fetched : undefined),
     // `isPending` stays true on a disabled query — gate it on actually fetching.
     isLoading: needsFetch && query.isPending,
     isError: needsFetch && query.isError,
@@ -85,11 +108,20 @@ export function usePackageFileDownload(packageId: string, version: string | unde
           },
           parseAs: "blob",
         });
+        // `data` is `undefined` for a zero-byte file — openapi-fetch's
+        // `Content-Length: "0"` short-circuit, on a successful 200 (a non-2xx
+        // throws in the client middleware and lands in the catch below). It has
+        // to become an empty part: `new Blob([undefined])` stringifies its
+        // argument, writing a 9-byte file whose contents are the word
+        // "undefined".
+        //
         // Re-wrapped under an INERT type. The response is already
         // `application/octet-stream`, but a `blob:` URL inherits the platform
         // origin, so the type it carries decides whether the browser would ever
         // interpret these author-controlled bytes. Never widen this.
-        const url = URL.createObjectURL(new Blob([data!], { type: "application/octet-stream" }));
+        const url = URL.createObjectURL(
+          new Blob([data ?? ""], { type: "application/octet-stream" }),
+        );
         const a = document.createElement("a");
         a.href = url;
         a.download = baseName(path);

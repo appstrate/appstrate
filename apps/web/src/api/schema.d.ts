@@ -5978,6 +5978,26 @@ export interface components {
                 "application/problem+json": components["schemas"]["ProblemDetail"];
             };
         };
+        /** @description The stored artifact expands past the package decompression ceiling and was refused (`package_archive_unreadable`). This is the SAME ceiling the import gate applies, so reaching it means the archive is a bomb or was stored before the gate covered this path — republish the package. RFC 9457 problem+json. */
+        PackageArchiveUnreadable: {
+            headers: {
+                "Request-Id": components["headers"]["RequestId"];
+                [name: string]: unknown;
+            };
+            content: {
+                /**
+                 * @example {
+                 *       "type": "https://docs.appstrate.dev/errors/package-archive-unreadable",
+                 *       "title": "Package Archive Unreadable",
+                 *       "status": 422,
+                 *       "detail": "The package archive expands past the 50 MB decompression limit and was refused (decompressed-budget-exceeded). Republish the package from bytes that fit the limit.",
+                 *       "code": "package_archive_unreadable",
+                 *       "requestId": "req_abc123"
+                 *     }
+                 */
+                "application/problem+json": components["schemas"]["ProblemDetail"];
+            };
+        };
         /** @description Same Idempotency-Key used with a different request body */
         IdempotencyConflict: {
             headers: {
@@ -17689,8 +17709,9 @@ export interface operations {
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
+            422: components["responses"]["PackageArchiveUnreadable"];
             429: components["responses"]["RateLimited"];
-            /** @description The artifact could not be read: integrity/signature verification failed (`INTEGRITY_MISMATCH`) or the archive exceeded the decompression limits. RFC 9457 problem+json. */
+            /** @description The artifact could not be read: integrity/signature verification failed (`INTEGRITY_MISMATCH`), or the stored bytes are not a readable ZIP. RFC 9457 problem+json. */
             500: {
                 headers: {
                     [name: string]: unknown;
@@ -17772,8 +17793,9 @@ export interface operations {
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
+            422: components["responses"]["PackageArchiveUnreadable"];
             429: components["responses"]["RateLimited"];
-            /** @description The artifact could not be read: integrity/signature verification failed (`INTEGRITY_MISMATCH`) or the archive exceeded the decompression limits. RFC 9457 problem+json. */
+            /** @description The artifact could not be read: integrity/signature verification failed (`INTEGRITY_MISMATCH`), or the stored bytes are not a readable ZIP. RFC 9457 problem+json. */
             500: {
                 headers: {
                     [name: string]: unknown;
@@ -17833,6 +17855,16 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            /** @description The SOURCE package's published artifact expands past the platform's decompression ceiling and was refused (`package_archive_unreadable`). Nothing was written: the fork is rejected while reading the source, before the name-collision check and before any package or version row is created, so there is no partial copy to clean up. A fork always targets a package the calling organization does NOT own, so the caller cannot repair the source — report it to whoever publishes it (or to the platform operator if it is a system package). RFC 9457 problem+json. */
+            422: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
         };
     };
     downloadPackageVersion: {

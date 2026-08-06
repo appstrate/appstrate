@@ -26,6 +26,7 @@ import {
   unzipAndNormalize,
 } from "../../../src/services/package-storage.ts";
 import { computeIntegrity } from "@appstrate/core/integrity";
+import { zipArtifact, PACKAGE_ZIP_MAX_COMPRESSED_BYTES } from "@appstrate/core/zip";
 import { auditEvents, packages, packageDistTags, packageVersions } from "@appstrate/db/schema";
 import { and, eq } from "drizzle-orm";
 import { db } from "../../helpers/db.ts";
@@ -3019,6 +3020,75 @@ describe("Packages API", () => {
         type?: string;
       };
       expect(zipped.type).toBe("integration");
+    });
+  });
+
+  // ═══════════════════════════════════════════════
+  // POST fork — the SOURCE artifact is READ here, so the decompression ceiling
+  // applies to this route too. A fork mints a new immutable artifact out of
+  // bytes the caller does not own, so expanding a high-ratio source would both
+  // amplify it and regrave it under the caller's own scope.
+  // ═══════════════════════════════════════════════
+
+  describe("POST fork — source artifact decompression ceiling", () => {
+    it("422s on a source that expands past the ceiling, and mints nothing", async () => {
+      const srcCtx = await createTestContext({ orgSlug: "forkbomb" });
+      const sourceId = "@forkbomb/high-ratio-agent";
+      const manifest = {
+        name: sourceId,
+        version: "0.1.0",
+        type: "agent",
+        schema_version: "0.1",
+        display_name: "High Ratio",
+        description: "Published source whose artifact over-expands",
+      };
+      await seedPackage({
+        id: sourceId,
+        orgId: srcCtx.orgId,
+        type: "agent",
+        draftManifest: manifest,
+        draftContent: "source prompt",
+      });
+
+      // Nine padding entries sharing ONE 6 MB buffer: 54 MB expanded, past the
+      // 50 MB ceiling, for a few tens of KB on the wire and one allocation here.
+      const block = new Uint8Array(6 * 1024 * 1024);
+      const entries: Record<string, Uint8Array> = {
+        "manifest.json": new TextEncoder().encode(JSON.stringify(manifest)),
+        "prompt.md": new TextEncoder().encode("source prompt"),
+      };
+      for (let i = 0; i < 9; i++) entries[`pad-${i}.bin`] = block;
+      const zip = Buffer.from(zipArtifact(entries, 9));
+      expect(zip.byteLength).toBeLessThan(PACKAGE_ZIP_MAX_COMPRESSED_BYTES);
+
+      await uploadPackageZip(sourceId, "0.1.0", zip);
+      const row = await seedPackageVersion({
+        packageId: sourceId,
+        version: "0.1.0",
+        manifest,
+        integrity: computeIntegrity(new Uint8Array(zip)),
+        artifactSize: zip.byteLength,
+      });
+      await db
+        .insert(packageDistTags)
+        .values({ packageId: sourceId, tag: "latest", versionId: row.id });
+
+      const res = await app.request(`/api/packages/${sourceId}/fork`, {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({}),
+      });
+
+      // A typed 422, NOT the opaque `500 internal_error` an unmapped throw
+      // would produce: the fork route has no try/catch, so the status is
+      // decided entirely by the error being an ApiError.
+      expect(res.status).toBe(422);
+      expect(res.headers.get("Content-Type")).toContain("application/problem+json");
+      expect(((await res.json()) as { code: string }).code).toBe("package_archive_unreadable");
+
+      // The refusal lands while READING the source — before the collision check
+      // and before any insert — so there is no half-made fork to clean up.
+      await assertDbMissing(packages, eq(packages.id, "@pkgorg/high-ratio-agent"));
     });
   });
 });

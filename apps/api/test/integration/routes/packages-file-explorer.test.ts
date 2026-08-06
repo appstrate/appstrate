@@ -17,6 +17,7 @@ import { eq } from "drizzle-orm";
 import { packages, packageDistTags, packageVersions } from "@appstrate/db/schema";
 import { computeIntegrity } from "@appstrate/core/integrity";
 import { PACKAGE_FILE_INLINE_MAX_BYTES } from "@appstrate/core/package-files";
+import { zipArtifact, PACKAGE_ZIP_MAX_COMPRESSED_BYTES } from "@appstrate/core/zip";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
@@ -387,6 +388,94 @@ describe("package file explorer", () => {
     it("400s an empty version parameter rather than silently reading the draft", async () => {
       const { res } = await listFiles(ctx, id, "?version=");
       expect(res.status).toBe(400);
+    });
+  });
+
+  // ─── Decompression ceiling ─────────────────────────────────────────────────
+
+  /**
+   * The explorer is a READ boundary over bytes the platform already stores, and
+   * it must apply the SAME decompressed ceiling the import gate applies. It did
+   * not: `unzipAndNormalize` passed no options and inherited `unzipArtifact`'s
+   * 200 MB default, so a stored archive could be re-expanded to four times what
+   * it would have needed to pass on the way in — one authenticated GET per
+   * expansion.
+   */
+  describe("decompression ceiling", () => {
+    const id = "@fexp/high-ratio-agent";
+
+    /**
+     * Build a version whose artifact expands to `blockMb * copies` MB.
+     *
+     * The padding entries all reference the SAME buffer, so a 54 MB expansion
+     * costs one 6 MB allocation here — no 50 MB fixture is materialized, and
+     * the archive itself stays a few tens of KB because a run of one repeated
+     * byte is what deflate compresses best.
+     */
+    async function seedVersionExpandingTo(blockMb: number, copies: number): Promise<Buffer> {
+      const block = new Uint8Array(blockMb * 1024 * 1024);
+      const entries: Record<string, Uint8Array> = {
+        "manifest.json": encoder.encode(JSON.stringify(manifestFor(id))),
+        "prompt.md": encoder.encode("published prompt v1"),
+      };
+      for (let i = 0; i < copies; i++) entries[`pad-${i}.bin`] = block;
+      const zip = Buffer.from(zipArtifact(entries, 9));
+
+      await uploadPackageZip(id, "1.0.0", zip);
+      await seedPackageVersion({
+        packageId: id,
+        version: "1.0.0",
+        manifest: manifestFor(id),
+        integrity: computeIntegrity(new Uint8Array(zip)),
+        artifactSize: zip.byteLength,
+      });
+      return zip;
+    }
+
+    beforeEach(async () => {
+      await seedPackage({
+        id,
+        orgId: ctx.orgId,
+        type: "agent",
+        draftManifest: manifestFor(id),
+        draftContent: "draft prompt",
+      });
+      await seedInstalledPackage(ctx.defaultAppId, id);
+    });
+
+    it("refuses an artifact that expands past the ceiling, on both read routes", async () => {
+      // 9 x 6 MB = 54 MB decompressed, over the 50 MB ceiling.
+      const zip = await seedVersionExpandingTo(6, 9);
+
+      // The archive is well under the COMPRESSED ceiling — which is exactly the
+      // point: the compressed size can never bound the expansion, so the
+      // decompressed budget is the only thing standing between a stored
+      // artifact and an amplification primitive.
+      expect(zip.byteLength).toBeLessThan(PACKAGE_ZIP_MAX_COMPRESSED_BYTES);
+
+      const { res } = await listFiles(ctx, id, "?version=1.0.0");
+      expect(res.status).toBe(422);
+      expect(res.headers.get("Content-Type")).toContain("application/problem+json");
+      const problem = (await res.json()) as { code: string; detail: string };
+      expect(problem.code).toBe("package_archive_unreadable");
+      expect(problem.detail).toContain("50 MB");
+
+      // The single-file route reads through the same snapshot, so it must
+      // refuse identically — otherwise the cheaper route stays exploitable.
+      const content = await fetchContent(ctx, id, "prompt.md", "&version=1.0.0");
+      expect(content.status).toBe(422);
+      expect(((await content.json()) as { code: string }).code).toBe("package_archive_unreadable");
+    });
+
+    it("still serves an artifact that stays under the ceiling", async () => {
+      // Positive control: without it, a cap that rejected EVERY high-ratio
+      // archive — or every archive at all — would pass the test above.
+      await seedVersionExpandingTo(6, 1);
+
+      const { res, entries } = await listFiles(ctx, id, "?version=1.0.0");
+      expect(res.status).toBe(200);
+      expect(entries.find((e) => e.path === "pad-0.bin")!.size).toBe(6 * 1024 * 1024);
+      expect(entries.find((e) => e.path === "prompt.md")!.inline).toBe("published prompt v1");
     });
   });
 

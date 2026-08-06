@@ -190,11 +190,60 @@ function objectUrlFaults(source: string): string[] {
 /** `from "x"`, bare `import "x"`, and `import("x")`. */
 const IMPORT_RE = /(?:\bfrom\s*|\bimport\s*\(?\s*)["']([^"']+)["']/g;
 
+/**
+ * Shown IN the failure, not above it, because the developer who trips this rule
+ * is reading a diff and not this file. The comment-blindness is the part that
+ * looks like a bug and is not, so the message has to carry the reason with it.
+ */
+const UNLISTED_IMPORT_GUIDANCE = [
+  "An unlisted specifier reached a scanned file. Two very different causes:",
+  "",
+  "  1. A REAL import. This is the decision point the allowlist exists for —",
+  "     add it deliberately (does it drag in an HTML sink?), or drop the import.",
+  "     Never widen the list just to make this green.",
+  "",
+  "  2. PROSE IN A COMMENT. This scanner reads raw file text and is deliberately",
+  '     comment-blind: stripping comments first would break on `from "https://…"`,',
+  "     where the `//` inside the URL eats the rest of the line — turning a REAL",
+  "     import into a false NEGATIVE. False positives on prose are the price, and",
+  "     they are the safe direction. Reword the comment; do not list the phrase.",
+  "",
+  "A specifier containing a space is always cause 2.",
+].join("\n");
+
 /** Relative specifiers become `dir/file`, so the entry is depth-independent. */
 function normalizeSpecifier(fromFile: string, specifier: string): string {
   if (!specifier.startsWith(".")) return specifier;
   const resolved = relative(WEB_SRC, resolve(dirname(fromFile), specifier));
   return resolved.replace(/\.(tsx?|jsx?)$/, "");
+}
+
+/**
+ * Both ways one surface's allowlist can be wrong: something it imports is not
+ * on the list, and something on the list is imported by nothing.
+ *
+ * Parametrized over `(sources, allowed)` the way `objectUrlFaults` is over one
+ * source — the SCAN is shared machinery, the SET and the LIST are not. Each
+ * surface passes its own pair at its own call site, so merging the two
+ * allowlists still takes an edit that is visible as one. Offender strings stay
+ * `label → specifier`, and `label` is the path relative to `src/`, so a failure
+ * names the file and the module exactly as before.
+ */
+function importFaults(
+  sources: readonly { label: string; source: string }[],
+  allowed: readonly string[],
+): { offenders: string[]; unused: string[] } {
+  const found = new Set<string>();
+  const offenders: string[] = [];
+  for (const { label, source } of sources) {
+    const file = join(WEB_SRC, label);
+    for (const match of source.matchAll(IMPORT_RE)) {
+      const specifier = normalizeSpecifier(file, match[1]!);
+      found.add(specifier);
+      if (!allowed.includes(specifier)) offenders.push(`${label} → ${specifier}`);
+    }
+  }
+  return { offenders, unused: allowed.filter((entry) => !found.has(entry)) };
 }
 
 describe("package file explorer rendering sinks", () => {
@@ -233,21 +282,12 @@ describe("package file explorer rendering sinks", () => {
     // The rule the pattern scan cannot express: a sink reached through an
     // import lives in someone else's file. Widening this list is the decision
     // point — do not do it to silence a failure.
-    const found = new Set<string>();
-    const offenders: string[] = [];
-    for (const { label, source } of SOURCES) {
-      const file = join(WEB_SRC, label);
-      for (const match of source.matchAll(IMPORT_RE)) {
-        const specifier = normalizeSpecifier(file, match[1]!);
-        found.add(specifier);
-        if (!ALLOWED_IMPORTS.includes(specifier)) offenders.push(`${label} → ${specifier}`);
-      }
-    }
+    const { offenders, unused } = importFaults(SOURCES, ALLOWED_IMPORTS);
 
-    expect(offenders).toEqual([]);
+    expect(offenders, UNLISTED_IMPORT_GUIDANCE).toEqual([]);
     // And the allowlist itself stays honest: an entry nobody imports any more
     // is a hole left open for the next person to walk through.
-    expect(ALLOWED_IMPORTS.filter((entry) => !found.has(entry))).toEqual([]);
+    expect(unused).toEqual([]);
   });
 
   it("actually detects each sink it claims to detect", () => {
@@ -417,19 +457,11 @@ describe("package manifest rendering sinks", () => {
   });
 
   it("imports only from the closed allowlist", () => {
-    const found = new Set<string>();
-    const offenders: string[] = [];
-    for (const { label, source } of MANIFEST_SOURCES) {
-      const file = join(WEB_SRC, label);
-      for (const match of source.matchAll(IMPORT_RE)) {
-        const specifier = normalizeSpecifier(file, match[1]!);
-        found.add(specifier);
-        if (!MANIFEST_ALLOWED_IMPORTS.includes(specifier))
-          offenders.push(`${label} → ${specifier}`);
-      }
-    }
+    // Its OWN allowlist, scanned by the shared helper — merging the two lists
+    // would silently let each directory import whatever the other needs.
+    const { offenders, unused } = importFaults(MANIFEST_SOURCES, MANIFEST_ALLOWED_IMPORTS);
 
-    expect(offenders).toEqual([]);
-    expect(MANIFEST_ALLOWED_IMPORTS.filter((entry) => !found.has(entry))).toEqual([]);
+    expect(offenders, UNLISTED_IMPORT_GUIDANCE).toEqual([]);
+    expect(unused).toEqual([]);
   });
 });
