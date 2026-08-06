@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useCallback } from "react";
-import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { client } from "../../api/client";
+import { $api, client } from "../../api/client";
 import { useOrgScope } from "../../hooks/use-org-scope";
 import { splitPackageRef } from "../../lib/package-paths";
 import { baseName, isPreviewable, type PackageFileEntry } from "../../lib/package-file-tree";
@@ -30,35 +29,36 @@ export function usePackageFile(
   // oversized entry renders a metadata card, never a body.
   const needsFetch = isPreviewable(entry) && entry.inline === undefined;
 
-  const init = {
-    params: {
-      path: splitPackageRef(packageId),
-      query: { path: entry.path, version },
-      header: scope.header,
+  // `parseAs` is not in the generated init type, but it is not an escape hatch
+  // either: openapi-react-query types init as `Init & { [key: string]: unknown }`
+  // and its queryFn forwards it verbatim (`fn(path, { signal, ...init })`), so
+  // the option reaches openapi-fetch exactly as a direct `client.GET` would.
+  // Going through `$api` is what keeps the key the generated
+  // `[method, path, init]` — hand-writing that array is the drift
+  // `lib/query-keys.ts` exists to warn about, and `invalidatePackageFiles`
+  // prefix-matches `["get", "…/files/content"]` to reach it.
+  const query = $api.useQuery(
+    "get",
+    "/api/packages/{scope}/{name}/files/content",
+    {
+      params: {
+        path: splitPackageRef(packageId),
+        query: { path: entry.path, version },
+        header: scope.header,
+      },
+      parseAs: "text",
     },
-  };
+    { enabled: scope.enabled && needsFetch },
+  );
 
-  // openapi-react-query cannot express `parseAs: "text"` (the spec types the
-  // body as a Blob, since the route always serves octet-stream), so the fetch
-  // goes through the raw typed client inside a plain query. The key keeps the
-  // client's `[method, path, init]` shape so it lives alongside the generated
-  // ones and picks up org/app scope.
-  const query = useQuery({
-    queryKey: ["get", "/api/packages/{scope}/{name}/files/content", init],
-    queryFn: async () => {
-      const { data } = await client.GET("/api/packages/{scope}/{name}/files/content", {
-        ...init,
-        parseAs: "text",
-      });
-      // `parseAs: "text"` yields a string; the spec types the body as a Blob
-      // because the route always declares `application/octet-stream`.
-      return data as unknown as string;
-    },
-    enabled: scope.enabled && needsFetch,
-  });
+  // `parseAs: "text"` yields a string; the spec types the body as a Blob because
+  // the route always declares `application/octet-stream`. A zero-byte file comes
+  // back `null` from the empty-body branch — a successful read of an empty file,
+  // which is why it is normalised here rather than left to read as "not loaded".
+  const fetched = query.data as unknown as string | null | undefined;
 
   return {
-    text: entry.inline ?? (needsFetch ? query.data : undefined),
+    text: entry.inline ?? (needsFetch ? (fetched ?? undefined) : undefined),
     // `isPending` stays true on a disabled query — gate it on actually fetching.
     isLoading: needsFetch && query.isPending,
     isError: needsFetch && query.isError,

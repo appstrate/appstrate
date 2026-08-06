@@ -35,7 +35,7 @@ import { downloadVersionZip, unzipAndNormalize } from "./package-storage.ts";
 import { getVersionForDownload } from "./package-versions.ts";
 import { CONFIG_BY_TYPE, SYSTEM_STORAGE_NAMESPACE } from "./package-items/config.ts";
 import { VERSION_SELECTOR_DRAFT } from "./agent-version-resolver.ts";
-import { PACKAGE_FILE_INLINE_MAX_BYTES } from "@appstrate/core/package-files";
+import { PACKAGE_CONTENT_FILE, PACKAGE_FILE_INLINE_MAX_BYTES } from "@appstrate/core/package-files";
 import type { PackageType } from "@appstrate/core/validation";
 
 export type PackageFileMediaKind = "text" | "binary";
@@ -79,11 +79,47 @@ export interface PackageFileSource {
 
 /**
  * Ceiling on the *serialized* weight of all `inline` strings in one index
- * response. Measured on `JSON.stringify(text).length` rather than the UTF-8
- * byte count: a file of quotes and newlines inflates ~2× once escaped, and a
- * budget counted on raw bytes would let the response blow past its own limit.
+ * response, counted in UTF-8 BYTES OF RESPONSE BODY — see
+ * {@link serializedInlineBytes}. Escaping is part of the weight: a file of
+ * quotes and newlines inflates ~2× once serialized, and a budget counted on
+ * raw file size alone would let the response blow past its own limit.
  */
 export const INDEX_JSON_BUDGET_BYTES = 2_097_152;
+
+/**
+ * How many bytes of response body `text` will occupy once serialized as a JSON
+ * string — escaping and the two delimiting quotes included.
+ *
+ * `JSON.stringify(text).length` is NOT that number: `String.length` counts
+ * UTF-16 code units, not bytes. A CJK character is 1 unit but 3 UTF-8 bytes and
+ * an astral emoji is 2 units but 4 bytes, so that measure undercounts by up to
+ * 3×. Measured on this exact path, five files of 1,048,575 bytes of `中` each
+ * scored 349,527 — all five inlined, for a 5,242,875-byte response under a
+ * "2 MiB" budget.
+ *
+ * Re-encoding the serialized string (`new TextEncoder().encode(json)`) would
+ * answer exactly, but at the cost of a second full copy of every file in
+ * memory. It is not needed, because `JSON.stringify` only ever ADDS ASCII: it
+ * emits the two quotes and rewrites `"`, `\` and the C0 controls — every one of
+ * them a single-byte ASCII character — into `\"` / `\\` / `\n` / `\uXXXX`,
+ * which are pure ASCII too. It never drops, reorders or re-encodes a character
+ * (U+2028/U+2029 are notably NOT escaped). So each UTF-16 unit the
+ * serialization adds is worth exactly one UTF-8 byte, and the length delta
+ * alone converts the raw byte count into the serialized one.
+ *
+ * The two inputs cannot disagree: `bytes` is the file's exact UTF-8 length and
+ * `text` is its strict-`fatal` decode of those same bytes. The one input for
+ * which `JSON.stringify` escapes a NON-ASCII unit — a lone surrogate, emitted
+ * as `\uD800` — cannot reach here: it would have thrown in {@link classify} and
+ * been called binary.
+ *
+ * Verified by exhaustive comparison against `TextEncoder().encode(...)` over
+ * every Unicode code point (surrogates excluded) plus a randomized sweep of
+ * mixed control/quote/multi-byte/astral strings.
+ */
+function serializedInlineBytes(text: string, bytes: Uint8Array): number {
+  return bytes.byteLength + (JSON.stringify(text).length - text.length);
+}
 
 /**
  * Extensions we accept as text WITHOUT decoding. Only consulted for files too
@@ -205,32 +241,25 @@ export function fileEtag(snapshotId: string, path: string): string {
 const MANIFEST_FILE_NAME = "manifest.json";
 
 /**
- * Which ZIP entry `packages.draft_content` is the authoritative copy of, per
- * type. Mirrors the extraction switch in `parsePackageZip`
- * (`packages/core/src/zip.ts:375-395`), which is what populates the column.
- * `null` = the column is a redundant copy of the manifest, not a file of its
- * own, and must not be materialized as a phantom entry.
- */
-const DRAFT_CONTENT_FILE: Record<PackageType, string | null> = {
-  agent: "prompt.md",
-  skill: "SKILL.md",
-  integration: "INTEGRATION.md",
-  "mcp-server": null,
-};
-
-/**
  * Apply the DB-authoritative draft columns on top of the stored ZIP, in place.
  * Exported so the per-type overlay matrix can be asserted without a database
  * or object storage — it is the part of the draft path most likely to drift
  * away from `parsePackageZip`.
+ *
+ * Which entry `packages.draft_content` is the authoritative copy of comes from
+ * `PACKAGE_CONTENT_FILE`: this overlay is the exact inverse of the extraction
+ * that populates the column, so the two read one declaration instead of
+ * mirroring each other's switch. `null` there = the column is a redundant copy
+ * of the manifest, not a file of its own, and must not be materialized as a
+ * phantom entry.
  */
 export function applyDraftOverlay(files: Record<string, Uint8Array>, pkg: PackageFileSource): void {
   const encoder = new TextEncoder();
 
-  const target = DRAFT_CONTENT_FILE[pkg.type];
+  const target = PACKAGE_CONTENT_FILE[pkg.type];
   if (target !== null && pkg.draftContent !== null) {
     // INTEGRATION.md is an OPTIONAL companion: when a bundle ships without
-    // one, `zip.ts:391` falls back to storing the manifest text in
+    // one, `parsePackageZip` falls back to storing the manifest text in
     // `draft_content`. Overlaying that would invent an INTEGRATION.md the
     // package does not have — so the overlay only applies on top of an entry
     // that already exists. agent/skill have no such fallback: their column is
@@ -399,7 +428,7 @@ export function buildFileIndex(snapshot: PackageFileSnapshot): PackageFileEntry[
     // result: once the budget is spent, every remaining text file would
     // otherwise allocate a full escaped copy only to have it discarded.
     if (text !== null && remaining > 0) {
-      const cost = JSON.stringify(text).length;
+      const cost = serializedInlineBytes(text, bytes);
       if (cost <= remaining) {
         entry.inline = text;
         remaining -= cost;

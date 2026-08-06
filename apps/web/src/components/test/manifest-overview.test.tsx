@@ -223,3 +223,46 @@ describe("ManifestOverview mcp-server tail", () => {
     expect(html).toContain(agentsFr["manifest.sensitive"]);
   });
 });
+
+describe("ManifestOverview mcp-server launch line", () => {
+  function mcpServer(manifest: Record<string, unknown>): string {
+    return render(
+      <ManifestOverview
+        manifest={{ name: "@acme/gh-mcp", version: "1.0.0", type: "mcp-server", ...manifest }}
+        type="mcp-server"
+      />,
+    );
+  }
+
+  it("reproduces a repeated flag instead of collapsing it", () => {
+    // The reader used to push every string array through a `Set`, which is
+    // right for `keywords` and wrong for an argv: this rendered
+    // `uv run --with pkgA pkgB server.py`, silently deleting the second
+    // `--with` and turning a two-package launch into a one-package one. The
+    // existing case above only carries a single arg, which is why it shipped.
+    const html = mcpServer({
+      server: {
+        type: "uv",
+        mcp_config: {
+          command: "uv",
+          args: ["run", "--with", "pkgA", "--with", "pkgB", "server.py"],
+        },
+      },
+    });
+
+    expect(html).toContain("uv run --with pkgA --with pkgB server.py");
+  });
+
+  it("names the runtime the platform would actually start", () => {
+    // `server.type` is MCPB vocabulary and has no `bun`; `_meta` carries the
+    // Appstrate override the runner reads. The row must state the second.
+    const html = mcpServer({
+      _meta: { "dev.appstrate/mcp-server": { runtime: "bun" } },
+      server: { type: "node", mcp_config: { command: "bun", args: ["src/index.ts"] } },
+    });
+
+    expect(html).toContain(agentsFr["manifest.serverRuntime"]);
+    expect(html).toContain(">bun<");
+    expect(html).not.toContain(">node<");
+  });
+});

@@ -11,7 +11,7 @@
 
 import { describe, it, expect } from "bun:test";
 import { Hono } from "hono";
-import { createOpenApiSpecRouter, ifNoneMatchSatisfied } from "../../../src/routes/openapi-spec.ts";
+import { createOpenApiSpecRouter } from "../../../src/routes/openapi-spec.ts";
 
 const spec = { openapi: "3.1.0", info: { title: "Appstrate API", version: "2026-03-21" } };
 
@@ -88,16 +88,5 @@ describe("GET /api/openapi.json", () => {
 
     expect(a.headers.get("ETag")).toBe(b.headers.get("ETag"));
     expect(buildCount()).toBe(1);
-  });
-});
-
-describe("ifNoneMatchSatisfied", () => {
-  it("rejects a missing or empty header", () => {
-    expect(ifNoneMatchSatisfied(undefined, '"abc"')).toBe(false);
-    expect(ifNoneMatchSatisfied("", '"abc"')).toBe(false);
-  });
-
-  it("does not treat a substring as a match", () => {
-    expect(ifNoneMatchSatisfied('"ab"', '"abc"')).toBe(false);
   });
 });

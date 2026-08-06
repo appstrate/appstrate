@@ -266,6 +266,43 @@ describe("readMcpServerDetails", () => {
     expect(readMcpServerDetails(MINIMAL).isEmpty).toBe(true);
     expect(readMcpServerDetails({ server: {} }).server).toBeUndefined();
   });
+
+  it("reports the runtime the platform would resolve, not the MCPB vocabulary", () => {
+    // The case core's own docstring records: MCPB's `server.type` enum has no
+    // `bun`, so a bun-native server keeps `server.type: "node"` and declares
+    // `bun` under `_meta`. The runner reads `_meta` first
+    // (`getMcpServerRuntime(manifest) ?? run.type`); reading `server.type` here
+    // labelled this server "node", which is not how it runs.
+    const details = readMcpServerDetails({
+      ...MINIMAL,
+      type: "mcp-server",
+      _meta: { "dev.appstrate/mcp-server": { runtime: "bun" } },
+      server: { type: "node", mcp_config: { command: "bun", args: ["src/index.ts"] } },
+    });
+
+    expect(details.server?.runtime).toBe("bun");
+  });
+
+  it("falls back to server.type when _meta declares nothing usable", () => {
+    // Same order the resolver uses, including its narrowing: `_meta` is
+    // author-controlled jsonb, so an unrecognised runtime is not a runtime.
+    for (const meta of [
+      undefined,
+      {},
+      { "dev.appstrate/mcp-server": {} },
+      { "dev.appstrate/mcp-server": { runtime: "deno" } },
+      { "dev.appstrate/mcp-server": "bun" },
+    ]) {
+      const details = readMcpServerDetails({
+        ...MINIMAL,
+        type: "mcp-server",
+        ...(meta ? { _meta: meta } : {}),
+        server: { type: "python", entry_point: "main.py" },
+      });
+
+      expect(details.server?.runtime).toBe("python");
+    }
+  });
 });
 
 /**
@@ -302,10 +339,13 @@ describe("isManifestOverviewEmpty", () => {
   });
 });
 
-describe("author-controlled arrays never produce duplicate list rows", () => {
-  it("dedupes keywords and privacy policies", () => {
-    // A manifest is hand-writable jsonb: nothing upstream makes these unique,
-    // and both are rendered as keyed lists.
+describe("author-controlled arrays are reproduced verbatim", () => {
+  it("keeps repeated keywords, platforms and privacy policies", () => {
+    // These used to be deduped through a `Set` so the keyed lists that render
+    // them could not emit duplicate React keys. That is the renderer's problem
+    // (every keyed site now includes the index) — editing the author's array on
+    // the way to the screen is not a rendering concern, and the same helper
+    // reads `mcp_config.args`, where dropping a repeat changes a command line.
     const overview = readManifestOverview({
       ...MINIMAL,
       keywords: ["tidy", "tidy", " ", "cli"],
@@ -313,10 +353,31 @@ describe("author-controlled arrays never produce duplicate list rows", () => {
       compatibility: { platforms: ["linux", "linux", "darwin"] },
     });
 
-    expect(overview.keywords).toEqual(["tidy", "cli"]);
-    expect(overview.links.filter((l) => l.labelKey === "manifest.privacyPolicy")).toHaveLength(1);
+    // The blank is still dropped — that rule is about a row with no value.
+    expect(overview.keywords).toEqual(["tidy", "tidy", "cli"]);
+    expect(overview.links.filter((l) => l.labelKey === "manifest.privacyPolicy")).toHaveLength(2);
     expect(overview.facts.find((f) => f.labelKey === "manifest.platforms")?.value).toBe(
-      "linux, darwin",
+      "linux, linux, darwin",
+    );
+  });
+
+  it("round-trips a repeated launch flag in mcp_config.args", () => {
+    // The defect the `Set` caused, on the one call site where the array is an
+    // ORDERED MULTISET: `uv run --with pkgA --with pkgB server.py` is how the
+    // runner starts this server, and `McpServerDetails` renders
+    // `[command, ...args].join(" ")` as exactly that line. Deduping produced
+    // `uv run --with pkgA pkgB server.py` — a command the author never wrote,
+    // and one that installs a single package instead of two.
+    const args = ["run", "--with", "pkgA", "--with", "pkgB", "server.py"];
+    const details = readMcpServerDetails({
+      ...MINIMAL,
+      type: "mcp-server",
+      server: { type: "uv", mcp_config: { command: "uv", args } },
+    });
+
+    expect(details.server?.args).toEqual(args);
+    expect([details.server!.command, ...details.server!.args].join(" ")).toBe(
+      "uv run --with pkgA --with pkgB server.py",
     );
   });
 
@@ -337,13 +398,13 @@ describe("author-controlled arrays never produce duplicate list rows", () => {
     ]);
   });
 
-  it("dedupes an auth's default scopes", () => {
+  it("keeps a repeated default scope", () => {
     const details = readIntegrationDetails({
       ...MINIMAL,
       type: "integration",
       auths: { google: { type: "oauth2", default_scopes: ["drive.readonly", "drive.readonly"] } },
     });
 
-    expect(details.auths[0]!.defaultScopes).toEqual(["drive.readonly"]);
+    expect(details.auths[0]!.defaultScopes).toEqual(["drive.readonly", "drive.readonly"]);
   });
 });

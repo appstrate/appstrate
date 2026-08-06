@@ -76,8 +76,11 @@ export function ManifestOverview({ manifest, type }: ManifestOverviewProps) {
       {overview.keywords.length > 0 && (
         <SectionCard title={t("manifest.keywords")}>
           <div className="flex flex-wrap gap-1.5">
-            {overview.keywords.map((keyword) => (
-              <Badge key={keyword} variant="secondary">
+            {/* Index in the key: `keywords` is author-controlled jsonb and the
+                reader keeps duplicates verbatim rather than editing the data to
+                make a React key unique. */}
+            {overview.keywords.map((keyword, index) => (
+              <Badge key={`${index}:${keyword}`} variant="secondary">
                 {keyword}
               </Badge>
             ))}

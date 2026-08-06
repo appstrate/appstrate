@@ -21,6 +21,7 @@ import {
   DecompressionLimitError,
   type BoundedUnzipLimits,
 } from "@appstrate/afps-shared/unzip-bounded";
+import { PACKAGE_CONTENT_FILE } from "./package-files.ts";
 
 export type { Zippable };
 export { unzipBounded, DecompressionLimitError };
@@ -371,15 +372,17 @@ export function parsePackageZip(
   // Extract primary content based on type. Companion-file presence is
   // already guaranteed above; the switch below only reads the bytes the
   // caller wants surfaced as `content`.
+  //
+  // WHICH entry that is per type is not decided here: it comes from
+  // `PACKAGE_CONTENT_FILE`, because the platform's file explorer overlays the
+  // stored `content` back onto the same entry and the two must not disagree.
+  // What stays here is the per-type handling of its ABSENCE.
   let content: string;
 
   switch (type) {
-    case "agent": {
-      content = new TextDecoder().decode(files["prompt.md"]!);
-      break;
-    }
+    case "agent":
     case "skill": {
-      content = new TextDecoder().decode(files["SKILL.md"]!);
+      content = new TextDecoder().decode(files[PACKAGE_CONTENT_FILE[type]!]!);
       break;
     }
     case "integration": {
@@ -388,14 +391,15 @@ export function parsePackageZip(
       // agent-facing documentation companion. Vendored server code lives
       // under `server/` and is left untouched by this parser — the
       // runtime resolver (Phase 1.2a) consumes it directly.
-      const integrationRaw = files["INTEGRATION.md"];
+      const integrationRaw = files[PACKAGE_CONTENT_FILE.integration!];
       content = integrationRaw ? new TextDecoder().decode(integrationRaw) : manifestText;
       break;
     }
     case "mcp-server": {
       // mcp-server packages (AFPS §3.4) are MCPB bundles — manifest.json is
-      // authoritative; the server payload under `server.entry_point` is left
-      // untouched for the runtime to consume directly.
+      // authoritative (hence the `null` entry in `PACKAGE_CONTENT_FILE`); the
+      // server payload under `server.entry_point` is left untouched for the
+      // runtime to consume directly.
       content = manifestText;
       break;
     }

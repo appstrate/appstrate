@@ -34,7 +34,8 @@ import { getErrorMessage } from "@appstrate/core/errors";
 import { uploadPackageFiles, downloadPackageFiles } from "../services/package-items/storage.ts";
 import { CONFIG_BY_TYPE, type PackageTypeConfig } from "../services/package-items/config.ts";
 import { validateManifest, type PackageType } from "@appstrate/core/validation";
-import { SLUG_REGEX } from "@appstrate/core/naming";
+import { SLUG_REGEX, attachmentDisposition } from "@appstrate/core/naming";
+import { ifNoneMatchSatisfied } from "../lib/if-none-match.ts";
 import { unzipAndNormalize } from "../services/package-storage.ts";
 import { isValidVersion } from "@appstrate/core/semver";
 import {
@@ -1530,47 +1531,14 @@ function yankedHeader(headers: Record<string, string>, yanked: boolean): Record<
 }
 
 /**
- * RFC 9110 §13.1.2 — a (weak-compared) member of the tag list, or `*`.
- *
- * `allowWildcard: false` is for the pre-read short-circuit on the content
- * route: `*` means "if any current representation exists", which the server
- * cannot affirm before it knows whether that path is in the artifact. Honouring
- * it there would turn `?path=does-not-exist` into a 304 and tell the caller a
- * file exists. After the read, `*` is fine — existence has been established.
- */
-function ifNoneMatchHits(
-  header: string | undefined,
-  etag: string,
-  opts?: { allowWildcard?: boolean },
-): boolean {
-  if (!header) return false;
-  const allowWildcard = opts?.allowWildcard ?? true;
-  const strip = (t: string) => t.replace(/^W\//, "");
-  const target = strip(etag);
-  return header
-    .split(",")
-    .map((t) => t.trim())
-    .some((t) => (t === "*" ? allowWildcard : strip(t) === target));
-}
-
-/**
- * `attachment` + a sanitized filename. Quotes and control characters would let
- * an author-controlled path break out of the header value, so the ASCII
- * fallback is scrubbed to printable-minus-quote and the real name is carried
- * in the RFC 5987 form.
+ * `attachment` + a sanitized filename, built by the ONE builder every download
+ * branch of the platform uses (`attachmentDisposition`, `@appstrate/core/naming`
+ * — it exists precisely because per-call-site copies had drifted before). Only
+ * the base name is handed to it: an explorer path is a directory path, and the
+ * directories are not part of the file's name.
  */
 function fileAttachmentDisposition(path: string): string {
-  const base = path.slice(path.lastIndexOf("/") + 1);
-  const ascii = base.replace(/[^\x20-\x7e]/g, "_").replace(/["\\]/g, "_");
-  // `encodeURIComponent` leaves `!'()*` raw, and `'` is the ext-value delimiter
-  // in RFC 5987 §3.2 — a name like `don't.md` would make a parser split the
-  // value in the wrong place. attr-char excludes all five, so percent-encode
-  // them too.
-  const encoded = encodeURIComponent(base).replace(
-    /['()*!]/g,
-    (ch) => `%${ch.charCodeAt(0).toString(16).toUpperCase()}`,
-  );
-  return `attachment; filename="${ascii}"; filename*=UTF-8''${encoded}`;
+  return attachmentDisposition(path.slice(path.lastIndexOf("/") + 1));
 }
 
 // ═══════════════════════════════════════════════
@@ -2135,7 +2103,7 @@ export function createPackagesRouter() {
     const validator = await resolvePackageFileValidator(pkg, version);
     if (validator.snapshotId !== null) {
       const etag = indexEtag(validator.snapshotId);
-      if (ifNoneMatchHits(inm, etag)) {
+      if (ifNoneMatchSatisfied(inm, etag)) {
         return new Response(null, {
           status: 304,
           headers: yankedHeader(fileCacheHeaders(etag, validator.immutable), validator.yanked),
@@ -2149,7 +2117,7 @@ export function createPackagesRouter() {
       fileCacheHeaders(etag, snapshot.immutable),
       validator.kind === "version" && validator.yanked,
     );
-    if (ifNoneMatchHits(inm, etag)) {
+    if (ifNoneMatchSatisfied(inm, etag)) {
       return new Response(null, { status: 304, headers });
     }
     return c.json({ entries: buildFileIndex(snapshot) }, 200, headers);
@@ -2171,7 +2139,7 @@ export function createPackagesRouter() {
     const validator = await resolvePackageFileValidator(pkg, version);
     if (validator.snapshotId !== null) {
       const etag = fileEtag(validator.snapshotId, path);
-      if (ifNoneMatchHits(inm, etag, { allowWildcard: false })) {
+      if (ifNoneMatchSatisfied(inm, etag, { allowWildcard: false })) {
         return new Response(null, {
           status: 304,
           headers: yankedHeader(fileCacheHeaders(etag, validator.immutable), validator.yanked),
@@ -2195,7 +2163,7 @@ export function createPackagesRouter() {
       validator.kind === "version" && validator.yanked,
     );
     // Existence is established, so `*` is now a legitimate match.
-    if (ifNoneMatchHits(inm, etag)) {
+    if (ifNoneMatchSatisfied(inm, etag)) {
       return new Response(null, { status: 304, headers });
     }
 

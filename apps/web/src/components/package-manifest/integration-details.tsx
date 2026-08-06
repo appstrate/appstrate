@@ -76,8 +76,14 @@ export function IntegrationDetails({ details }: { details: IntegrationManifestDe
                     {t("manifest.defaultScopes")}
                   </p>
                   <div className="mt-1 flex flex-wrap gap-1.5">
-                    {auth.defaultScopes.map((scope) => (
-                      <Badge key={scope} variant="outline" className="font-mono text-[0.65rem]">
+                    {/* Index in the key: `default_scopes` is author-controlled
+                        jsonb and the reader keeps duplicates verbatim. */}
+                    {auth.defaultScopes.map((scope, index) => (
+                      <Badge
+                        key={`${index}:${scope}`}
+                        variant="outline"
+                        className="font-mono text-[0.65rem]"
+                      >
                         {scope}
                       </Badge>
                     ))}

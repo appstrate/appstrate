@@ -7,6 +7,11 @@
  * http(s) URL (`normalizeHttpUrl`) — this component never decides that itself, so
  * there is one place in the codebase where a manifest string can turn into an
  * href, and it is not a JSX file.
+ *
+ * The row key carries the INDEX because the reader no longer dedupes: a
+ * manifest declaring the same `privacy_policies` entry twice is legal jsonb and
+ * produces two identical `labelKey:value` rows. Uniqueness is this component's
+ * problem, not a reason to drop the author's second entry.
  */
 
 import { useTranslation } from "react-i18next";
@@ -18,8 +23,8 @@ export function FactGrid({ facts }: { facts: ManifestLink[] }) {
 
   return (
     <dl className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-      {facts.map((entry) => (
-        <div key={`${entry.labelKey}:${entry.value}`} className="min-w-0">
+      {facts.map((entry, index) => (
+        <div key={`${index}:${entry.labelKey}:${entry.value}`} className="min-w-0">
           <dt className="text-muted-foreground text-xs">{t(entry.labelKey)}</dt>
           <dd className="text-sm break-words">
             {entry.href ? (

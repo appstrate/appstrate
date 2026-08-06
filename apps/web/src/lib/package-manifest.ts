@@ -16,6 +16,7 @@
  */
 
 import { normalizeHttpUrl } from "@appstrate/core/url";
+import { getMcpServerRuntime, type McpServerManifest } from "@appstrate/core/mcp-server-meta";
 import type { PackageType } from "@appstrate/core/validation";
 
 /** Any jsonb object. The manifest and every nested object share this shape. */
@@ -29,21 +30,24 @@ function str(value: unknown): string | undefined {
 }
 
 /**
- * The non-blank strings of an array, DEDUPED and in first-seen order.
+ * The non-blank strings of an array, VERBATIM — order preserved, duplicates
+ * kept. Non-strings and blanks are still dropped, as everywhere else here.
  *
- * Deduping is a data rule, not a rendering one, so it belongs here: every
- * consumer renders these as a keyed list (`keywords`, `default_scopes`, the
- * `labelKey:value` rows of `FactGrid`), and a manifest is hand-writable jsonb —
- * `"keywords": ["a", "a"]` is legal input and would emit duplicate React keys,
- * which is exactly the class of breakage this module exists to absorb.
+ * This used to dedupe through a `Set`, for the React-key reason: `keywords`,
+ * `default_scopes` and the `labelKey:value` rows of `FactGrid` are all keyed
+ * lists, and `"keywords": ["a", "a"]` is legal hand-written jsonb. But the same
+ * helper also reads `server.mcp_config.args`, and an argv is an ORDERED
+ * MULTISET, not a set: `["run","--with","pkgA","--with","pkgB","server.py"]`
+ * rendered as one launch line came out `uv run --with pkgA pkgB server.py` —
+ * the second `--with` silently deleted, i.e. this module inventing a command
+ * the author never wrote. Corrupting the data to make a key unique is the wrong
+ * trade in either direction, so uniqueness is now the RENDERER's job: every
+ * keyed site includes the index (`manifest-overview.tsx`,
+ * `integration-details.tsx`, `manifest-fact.tsx`).
  */
 function strArray(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
-  return [
-    ...new Set(
-      value.filter((entry): entry is string => typeof entry === "string" && entry.trim() !== ""),
-    ),
-  ];
+  return value.filter((entry): entry is string => typeof entry === "string" && entry.trim() !== "");
 }
 
 function obj(value: unknown): ManifestObject | undefined {
@@ -282,7 +286,10 @@ export function readIntegrationDetails(manifest: unknown): IntegrationManifestDe
 // ─── MCP server tail ────────────────────────────────────────────────
 
 export interface McpServerView {
-  /** Runner runtime (node | python | binary | uv). */
+  /**
+   * The runtime the PLATFORM would run this server on — `_meta` override first,
+   * MCPB `server.type` second. See {@link readMcpServer}.
+   */
   runtime?: string;
   entryPoint?: string;
   command?: string;
@@ -311,12 +318,31 @@ export interface McpServerManifestDetails {
   isEmpty: boolean;
 }
 
-function readMcpServer(value: unknown): McpServerView | undefined {
-  const server = obj(value);
+/**
+ * Takes the WHOLE manifest, not just `server`, because the runtime is not a
+ * property of `server`.
+ *
+ * The platform resolves it as `getMcpServerRuntime(manifest) ?? server.type`
+ * (`services/integration-spawn-resolver.ts`), and `getMcpServerRuntime` reads
+ * `_meta["dev.appstrate/mcp-server"].runtime` at the manifest ROOT. The two
+ * disagree by design: MCPB's `server.type` enum has no `bun`, so a bun-native
+ * server keeps `server.type: "node"` and declares `bun` in `_meta`. Reading
+ * `server.type` alone labelled that server "node" — a fact about the manifest's
+ * vocabulary presented as a fact about how the package runs.
+ *
+ * Core's reader is used rather than a second `_meta` walk here: a duplicate is
+ * how the view ends up describing a runtime the runner does not pick.
+ */
+function readMcpServer(manifest: ManifestObject): McpServerView | undefined {
+  const server = obj(manifest.server);
   if (!server) return undefined;
   const config = obj(server.mcp_config);
+  // `getMcpServerRuntime` narrows `_meta` itself and returns `undefined` for
+  // anything it does not recognise, so an author-controlled value cannot get
+  // past it — the `server.type` fallback is the MCPB value, verbatim.
+  const runtime = getMcpServerRuntime(manifest as unknown as McpServerManifest) ?? str(server.type);
   const view: McpServerView = {
-    ...(str(server.type) ? { runtime: str(server.type) } : {}),
+    ...(runtime ? { runtime } : {}),
     ...(str(server.entry_point) ? { entryPoint: str(server.entry_point) } : {}),
     ...(str(config?.command) ? { command: str(config?.command) } : {}),
     args: strArray(config?.args),
@@ -332,7 +358,7 @@ function readMcpServer(value: unknown): McpServerView | undefined {
 export function readMcpServerDetails(manifest: unknown): McpServerManifestDetails {
   const m = obj(manifest) ?? {};
   const manifestVersion = str(m.manifest_version);
-  const server = readMcpServer(m.server);
+  const server = readMcpServer(m);
   // `tools` is a raw jsonb ARRAY, not a keyed map, so nothing upstream makes
   // `name` unique: `[{"name":"a"},{"name":"a"}]` is legal MCPB input and the
   // view keys its rows by name. First declaration wins.
@@ -377,12 +403,13 @@ export function readMcpServerDetails(manifest: unknown): McpServerManifestDetail
  * True when the manifest overview would render its empty state — the shared
  * block AND, for the two types that have one, the tail.
  *
- * Two callers, and they must agree: `ManifestOverview` renders the empty state
- * from it, and `pages/unified-package-detail.tsx` uses it to pick the landing
- * tab (a manifest with nothing to show would otherwise open the page on an
- * empty card, with the artifact's own files one click away). Restating the
- * condition at the page would let the two drift into "lands on a tab that then
- * says there is nothing here".
+ * ONE caller: `ManifestOverview`, which renders the empty state from it. It is
+ * deliberately NOT what picks the landing tab — `unified-package-detail.tsx`
+ * reads `primaryDisplayFile(type).source`, a structural fact about the package
+ * type rather than a fullness threshold that shifts with how much metadata the
+ * author happened to fill in. Keeping the verdict in one exported function is
+ * still what stops the component restating the condition inline across its
+ * five section branches.
  */
 export function isManifestOverviewEmpty(manifest: unknown, type: PackageType): boolean {
   if (!readManifestOverview(manifest).isEmpty) return false;

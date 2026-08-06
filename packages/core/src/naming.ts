@@ -281,7 +281,24 @@ export function extensionForMime(mime: string | undefined): string | null {
  */
 export function attachmentDisposition(name: string): string {
   const ascii = name.replace(/[^\x20-\x7e]/g, "_").replace(/["\\]/g, "_") || "download";
-  return `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(name)}`;
+  return `attachment; filename="${ascii}"; filename*=UTF-8''${encodeExtValue(name)}`;
+}
+
+/**
+ * Percent-encode for the RFC 8187 §3.2 ext-value, which is stricter than
+ * `encodeURIComponent`.
+ *
+ * `encodeURIComponent` leaves `!'()*~-_.` raw. Of those, only `'`, `(`, `)` and
+ * `*` are outside `attr-char` — and `'` is the ext-value's own delimiter: the
+ * charset and language are the first two apostrophes, so a name like `don't.md`
+ * puts a third one in the value region and invites a parser to split there.
+ * `!` IS in `attr-char`, so it stays raw.
+ */
+function encodeExtValue(name: string): string {
+  return encodeURIComponent(name).replace(
+    /['()*]/g,
+    (ch) => `%${ch.charCodeAt(0).toString(16).toUpperCase()}`,
+  );
 }
 
 /**

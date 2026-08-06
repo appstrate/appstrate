@@ -66,10 +66,11 @@ function overlay(
 }
 
 /**
- * `packages.draft_content` holds a DIFFERENT file per type — see the
- * extraction switch in `parsePackageZip` (packages/core/src/zip.ts:375-395),
- * which is what populates the column. Overlaying it onto the wrong entry would
- * either erase the manifest or invent a file the package does not contain.
+ * `packages.draft_content` holds a DIFFERENT file per type — `PACKAGE_CONTENT_FILE`
+ * (`@appstrate/core/package-files`), the same map `parsePackageZip` extracts the
+ * column FROM. Overlaying it onto the wrong entry would either erase the
+ * manifest or invent a file the package does not contain, so these cases pin
+ * the whole matrix rather than trusting the shared declaration alone.
  */
 describe("applyDraftOverlay — per-type draft_content target", () => {
   it("agent → prompt.md", () => {
@@ -92,8 +93,8 @@ describe("applyDraftOverlay — per-type draft_content target", () => {
   });
 
   it("integration → nothing, when the package has no INTEGRATION.md", () => {
-    // `zip.ts:391` falls back to the MANIFEST TEXT in that case; materializing
-    // it would show a companion doc the bundle does not ship.
+    // `parsePackageZip` falls back to the MANIFEST TEXT in that case;
+    // materializing it would show a companion doc the bundle does not ship.
     const files = overlay(
       "integration",
       { draftContent: '{"name":"@t/pkg","type":"integration"}' },
@@ -218,11 +219,86 @@ describe("buildFileIndex — inline budgets", () => {
     expect(entryFor({ "over.txt": overCeiling }, "over.txt").inline).toBeUndefined();
   });
 
-  it("measures the cumulative budget on SERIALIZED JSON length, not raw bytes", () => {
+  /**
+   * Ground truth for "how many bytes of response body does this `inline` cost":
+   * serialize it and encode the result. Deliberately NOT the formula the
+   * implementation uses — that is what these tests are checking.
+   */
+  const serializedBytes = (text: string) => encoder.encode(JSON.stringify(text)).byteLength;
+
+  it("charges a multi-byte inline its UTF-8 weight, not its UTF-16 length", () => {
+    // U+4E2D: 1 UTF-16 code unit, 3 UTF-8 bytes. Nothing here is escaped, so
+    // the serialized form is the raw bytes plus the two delimiting quotes.
+    const cjk = "中".repeat(300_000);
+    expect(cjk.length).toBe(300_000);
+    expect(encoder.encode(cjk).byteLength).toBe(900_000);
+    expect(serializedBytes(cjk)).toBe(900_002);
+    // What `JSON.stringify(text).length` charges instead — 3× too little.
+    expect(JSON.stringify(cjk).length).toBe(300_002);
+
+    const index = buildFileIndex(snapshot({ "a.txt": cjk, "b.txt": cjk, "c.txt": cjk }));
+    const inlined = index.filter((e) => e.inline !== undefined);
+
+    // Two fit; a third would take the body to 2,700,006 B — 1.29× the 2 MiB
+    // budget. UTF-16 accounting scored each file at 300,002 and inlined all
+    // three, which is exactly the overrun the budget claims to prevent.
+    expect(inlined.length).toBe(2);
+    const weight = inlined.reduce((n, e) => n + serializedBytes(e.inline!), 0);
+    expect(weight).toBe(1_800_004);
+    expect(weight).toBeLessThanOrEqual(INDEX_JSON_BUDGET_BYTES);
+    expect(weight + 900_002).toBeGreaterThan(INDEX_JSON_BUDGET_BYTES);
+  });
+
+  it("charges an astral-plane inline its UTF-8 weight, not its UTF-16 length", () => {
+    // U+1F600 is a SURROGATE PAIR: 2 UTF-16 code units for 4 UTF-8 bytes. The
+    // undercount is 2× here rather than 3×, and it is the case a
+    // "count the units" fix would still get wrong.
+    const emoji = "😀".repeat(200_000);
+    expect(emoji.length).toBe(400_000);
+    expect(encoder.encode(emoji).byteLength).toBe(800_000);
+    expect(serializedBytes(emoji)).toBe(800_002);
+    expect(JSON.stringify(emoji).length).toBe(400_002);
+
+    const index = buildFileIndex(snapshot({ "a.txt": emoji, "b.txt": emoji, "c.txt": emoji }));
+    const inlined = index.filter((e) => e.inline !== undefined);
+
+    // Old accounting: 3 × 400,002 = 1,200,006 "budget bytes" → all three
+    // inlined, for a 2,400,006-byte body.
+    expect(inlined.length).toBe(2);
+    const weight = inlined.reduce((n, e) => n + serializedBytes(e.inline!), 0);
+    expect(weight).toBe(1_600_004);
+    expect(weight).toBeLessThanOrEqual(INDEX_JSON_BUDGET_BYTES);
+    expect(weight + 800_002).toBeGreaterThan(INDEX_JSON_BUDGET_BYTES);
+  });
+
+  it("counts escaping ON TOP of the multi-byte weight", () => {
+    // Both terms at once, in 30k blocks of nine `中` (27 bytes, 9 units,
+    // nothing escaped) plus one `"` (1 byte, 1 unit, escaped into two ASCII
+    // bytes): 840,000 raw bytes that serialize to 870,002.
+    const mixed = ("中".repeat(9) + '"').repeat(30_000);
+    expect(mixed.length).toBe(300_000);
+    expect(encoder.encode(mixed).byteLength).toBe(840_000);
+    expect(serializedBytes(mixed)).toBe(870_002);
+    expect(JSON.stringify(mixed).length).toBe(330_002);
+
+    const index = buildFileIndex(snapshot({ "a.txt": mixed, "b.txt": mixed, "c.txt": mixed }));
+    const inlined = index.filter((e) => e.inline !== undefined);
+
+    // Two fit (1,740,004 B); a third would be 2,610,006 B. UTF-16 accounting
+    // scored each file at 330,002 — it saw the escape but not the 3-byte
+    // characters — and inlined all three.
+    expect(inlined.length).toBe(2);
+    const weight = inlined.reduce((n, e) => n + serializedBytes(e.inline!), 0);
+    expect(weight).toBe(1_740_004);
+    expect(weight).toBeLessThanOrEqual(INDEX_JSON_BUDGET_BYTES);
+    expect(weight + 870_002).toBeGreaterThan(INDEX_JSON_BUDGET_BYTES);
+  });
+
+  it("charges escape expansion, not just the raw file size", () => {
     // Each char is 1 UTF-8 byte but serializes to 2 (`"` → `\"`), so the file
     // weighs ~2× its size once escaped. All three together are ~1.14 MiB of
     // raw bytes — comfortably under the 2 MiB budget — but ~2.3 MiB once
-    // serialized. Raw-byte accounting would therefore inline all three.
+    // serialized. Raw-size accounting would therefore inline all three.
     const chunk = '"'.repeat(400_000);
     const files = { "a.txt": chunk, "b.txt": chunk, "c.txt": chunk };
     const index = buildFileIndex(snapshot(files));
@@ -233,10 +309,11 @@ describe("buildFileIndex — inline budgets", () => {
     const inlined = index.filter((e) => e.inline !== undefined);
     expect(inlined.length).toBe(2);
 
-    const serialized = inlined.reduce((n, e) => n + JSON.stringify(e.inline).length, 0);
-    expect(serialized).toBeLessThanOrEqual(INDEX_JSON_BUDGET_BYTES);
+    const weight = inlined.reduce((n, e) => n + serializedBytes(e.inline!), 0);
+    expect(weight).toBe(1_600_004);
+    expect(weight).toBeLessThanOrEqual(INDEX_JSON_BUDGET_BYTES);
     // …and one more would have blown past it.
-    expect(serialized + JSON.stringify(chunk).length).toBeGreaterThan(INDEX_JSON_BUDGET_BYTES);
+    expect(weight + serializedBytes(chunk)).toBeGreaterThan(INDEX_JSON_BUDGET_BYTES);
   });
 
   it("still lists — with size and media_kind — the files that fell past the budget", () => {

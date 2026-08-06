@@ -102,7 +102,6 @@ const ALLOWED_IMPORTS = [
   "@appstrate/core/validation",
   "@appstrate/ui/cn",
   "@appstrate/ui/components/button",
-  "@tanstack/react-query",
   "@tanstack/react-virtual",
   "lucide-react",
   "react",
@@ -348,6 +347,10 @@ const MANIFEST_SOURCES = [
 
 const MANIFEST_ALLOWED_IMPORTS = [
   // Framework + libraries
+  // Manifest READERS, not renderers: `normalizeHttpUrl` is the href protocol
+  // allowlist and `getMcpServerRuntime` is the `_meta` runtime override the
+  // platform itself resolves with. Neither turns a manifest string into markup.
+  "@appstrate/core/mcp-server-meta",
   "@appstrate/core/url",
   "@appstrate/core/validation",
   "@appstrate/ui/components/badge",
