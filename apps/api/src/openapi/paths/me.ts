@@ -473,8 +473,8 @@ export const mePaths = {
                     description:
                       "Agents the caller can run in the current application (capped). Only " +
                       "present when the caller holds the `agents:run` permission; empty otherwise. " +
-                      "When `agents_truncated` is true, the long tail is reachable via the MCP " +
-                      "`search_operations` tool.",
+                      "When `agents_truncated` is true, the full list is reachable via the " +
+                      "`listAgents` operation.",
                     items: {
                       type: "object",
                       required: [
@@ -512,7 +512,7 @@ export const mePaths = {
                   agents_truncated: {
                     type: "boolean",
                     description:
-                      "True when the agent list was capped (more via search_operations).",
+                      "True when the agent list was capped (full list via `listAgents`).",
                   },
                   agents_total: {
                     type: "integer",
@@ -524,8 +524,8 @@ export const mePaths = {
                       "Skills the caller could attach to an agent in the current application " +
                       "(capped). Only present when the caller holds the `agents:run` permission; " +
                       "empty otherwise. Skills are not run directly — declare them under an agent " +
-                      "manifest's `dependencies.skills`. When `skills_truncated` is true, the long " +
-                      "tail is reachable via the MCP `search_operations` tool.",
+                      "manifest's `dependencies.skills`. When `skills_truncated` is true, the " +
+                      "full list is reachable via the `listSkills` operation.",
                     items: {
                       type: "object",
                       required: [
@@ -563,7 +563,7 @@ export const mePaths = {
                   skills_truncated: {
                     type: "boolean",
                     description:
-                      "True when the skill list was capped (more via search_operations).",
+                      "True when the skill list was capped (full list via `listSkills`).",
                   },
                   skills_total: {
                     type: "integer",
