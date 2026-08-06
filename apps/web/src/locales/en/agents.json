@@ -427,7 +427,7 @@
   "detail.configSectionProxy": "Proxy",
   "detail.configAlert": "Required configuration fields are not filled in.",
   "detail.tabApi": "API",
-  "detail.tabFiles": "Package AFPS",
+  "detail.tabFiles": "Content",
   "files.treeLabel": "Package files",
   "files.empty": "This package contains no files.",
   "files.notPreviewableBinary": "Binary file: no preview available. Download it to open it.",

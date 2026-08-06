@@ -167,7 +167,7 @@ function readDependencies(value: unknown): ManifestDependencyGroup[] {
  * inside the artifact: displaying author-controlled bytes as an image is the
  * sink the explorer's security scan exists to forbid, so they stay out.
  * `_meta` is an arbitrary extension bag with no renderable shape — it is
- * readable verbatim in the Package AFPS tab's `manifest.json`.
+ * readable verbatim in the Contenu tab's `manifest.json`.
  */
 export function readManifestOverview(manifest: unknown): ManifestOverview {
   const m = obj(manifest) ?? {};

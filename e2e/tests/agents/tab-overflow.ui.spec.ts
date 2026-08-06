@@ -68,16 +68,16 @@ test.describe("Tab bar overflow", () => {
       "active",
     );
 
-    // A collapsed tab is reachable and actually switches the panel. "Package
-    // AFPS" is near the end of the source order, so it is in the overflow here.
+    // A collapsed tab is reachable and actually switches the panel. "Contenu"
+    // is near the end of the source order, so it is in the overflow here.
     await overflow.click();
-    const hiddenItem = page.getByRole("menuitemradio", { name: "Package AFPS" });
+    const hiddenItem = page.getByRole("menuitemradio", { name: "Contenu" });
     await expect(hiddenItem).toBeVisible();
     await hiddenItem.click();
 
     // Selecting from the menu promotes the tab into the visible row, because
     // the partition never hides the active one.
-    await expect(tablist.getByRole("tab", { name: "Package AFPS" })).toHaveAttribute(
+    await expect(tablist.getByRole("tab", { name: "Contenu" })).toHaveAttribute(
       "data-state",
       "active",
     );
@@ -102,6 +102,57 @@ test.describe("Tab bar overflow", () => {
 
     const box = await page.getByRole("tablist").boundingBox();
     expect(box!.height).toBeLessThanOrEqual(ONE_ROW_MAX_HEIGHT);
+  });
+
+  test("the measuring ghost contributes no horizontal overflow", async ({
+    authedPage: page,
+    apiClient,
+    browserCtx,
+  }) => {
+    // The bar measures itself by laying out an invisible copy of the FULL
+    // trigger list. `visibility: hidden` drops it from painting but not from
+    // layout, so left unclipped that copy keeps its whole `w-max` width, counts
+    // toward its container's scrollable overflow, and spills its boxes across
+    // the content past the viewport edge. This shipped once: the container
+    // reported scrollWidth 886 against clientWidth 596 at this viewport, and
+    // the ghost's right edge sat 266px outside a 900px window. None of the
+    // assertions above notice it — they only look at the visible row.
+    await page.setViewportSize({ width: 900, height: 720 });
+    await gotoNewAgent(page, apiClient, browserCtx.org.orgSlug, "tab-ghost");
+
+    const report = await page.evaluate(() => {
+      const describe = (el: Element) => `${el.tagName}.${el.className.toString().slice(0, 60)}`;
+
+      const tablist = document.querySelector('[role="tablist"]')!;
+      const bar = tablist.closest("div")!.parentElement!;
+
+      const scrollers: string[] = [];
+      for (let node: Element | null = tablist; node; node = node.parentElement) {
+        if (node.scrollWidth > node.clientWidth + 1) {
+          scrollers.push(
+            `${describe(node)} scrollW=${node.scrollWidth} clientW=${node.clientWidth}`,
+          );
+        }
+      }
+
+      const spills: string[] = [];
+      for (const el of Array.from(bar.querySelectorAll("*"))) {
+        const right = el.getBoundingClientRect().right;
+        if (right > window.innerWidth + 1) {
+          spills.push(`${describe(el)} right=${Math.round(right)}`);
+        }
+      }
+
+      const doc = document.documentElement;
+      return { scrollers, spills, docScrollW: doc.scrollWidth, docClientW: doc.clientWidth };
+    });
+
+    // No ancestor of the bar, up to <html>, may have become scrollable.
+    expect(report.scrollers).toEqual([]);
+    // Nothing inside the bar — visible row or ghost — may reach past the window.
+    expect(report.spills).toEqual([]);
+    // And the page itself must not have grown a horizontal scroll area.
+    expect(report.docScrollW).toBe(report.docClientW);
   });
 
   test("collapses and expands as the viewport is resized", async ({

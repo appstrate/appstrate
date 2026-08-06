@@ -221,20 +221,39 @@ function CollapsingTabsList({
 
   return (
     <div ref={containerRef} className={cn("relative min-w-0", className)}>
-      {/* Ghost strip: out of flow, invisible, inert. Only used for measurement. */}
+      {/* Ghost strip: out of flow, clipped, invisible, inert. Only used for
+          measurement.
+
+          The zero-sized `overflow-hidden` host is load-bearing, not decoration.
+          `visibility: hidden` removes the row from *painting* only — the boxes
+          keep their full `w-max` width in layout and still count toward the
+          containing block's scrollable overflow area. Left unclipped, the
+          container reports a `scrollWidth` of the whole uncollapsed strip and
+          the ghost's boxes lie across the content area past the viewport edge;
+          any `overflow-y: auto` ancestor between the bar and the viewport
+          computes `overflow-x` to `auto` and turns that into a real horizontal
+          scrollbar over the entire page content.
+
+          Clipping is a paint-time operation, so `getBoundingClientRect()` on
+          the clipped descendants still returns their true laid-out widths and
+          the measurement below is unaffected — while the host contributes zero
+          overflow of its own. `invisible` stays on the row on top of the clip:
+          it also keeps the ghost out of forced-colors and print rendering, and
+          out of any future `overflow: visible` regression on the host. */}
       <div
-        ref={ghostRef}
         aria-hidden="true"
-        className="pointer-events-none invisible absolute top-0 left-0 flex w-max flex-nowrap"
+        className="pointer-events-none absolute top-0 left-0 h-0 w-0 overflow-hidden"
       >
-        {items.map((item, index) => (
-          <span key={item.key ?? index} className={cn(TRIGGER_CLASS, item.props.className)}>
-            {item.props.children}
+        <div ref={ghostRef} className="invisible flex w-max flex-nowrap">
+          {items.map((item, index) => (
+            <span key={item.key ?? index} className={cn(TRIGGER_CLASS, item.props.className)}>
+              {item.props.children}
+            </span>
+          ))}
+          <span className={OVERFLOW_TRIGGER_CLASS}>
+            <MoreHorizontal className="size-4" aria-hidden="true" />
           </span>
-        ))}
-        <span className={OVERFLOW_TRIGGER_CLASS}>
-          <MoreHorizontal className="size-4" aria-hidden="true" />
-        </span>
+        </div>
       </div>
 
       {/* The pill wraps the list and the overflow trigger side by side: a

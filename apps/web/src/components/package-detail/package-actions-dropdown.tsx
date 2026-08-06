@@ -106,7 +106,7 @@ export function PackageActionsDropdown({
 
   // The manifest is no longer reachable from here, and does not need to be:
   // every page that mounts this dropdown carries both tabs — À propos renders
-  // the manifest, Package AFPS serves its raw `manifest.json`. That holds for
+  // the manifest, the Contenu tab serves its raw `manifest.json`. That holds for
   // integrations too, which route to `pages/integration-detail.tsx` and have
   // their own tab set: dropping the menu item without a file explorer there
   // left an integration's `manifest.json` and `INTEGRATION.md` reachable only

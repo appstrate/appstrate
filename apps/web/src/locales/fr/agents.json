@@ -427,7 +427,7 @@
   "detail.configSectionProxy": "Proxy",
   "detail.configAlert": "Des champs de configuration obligatoires ne sont pas remplis.",
   "detail.tabApi": "API",
-  "detail.tabFiles": "Package AFPS",
+  "detail.tabFiles": "Contenu",
   "files.treeLabel": "Fichiers du package",
   "files.empty": "Ce package ne contient aucun fichier.",
   "files.notPreviewableBinary": "Fichier binaire : aperçu indisponible. Téléchargez-le pour l'ouvrir.",

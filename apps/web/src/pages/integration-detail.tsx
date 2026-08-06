@@ -24,7 +24,7 @@
  *     primitives). Per-tool description + required scopes + URL patterns.
  *   - À propos — metadata (version, author, license, repo, …), privacy policy,
  *     keywords.
- *   - Package AFPS — the artifact's own files, read-only, opening on
+ *   - Contenu — the artifact's own files, read-only, opening on
  *     INTEGRATION.md. This is where `manifest.json` is readable verbatim: an
  *     admin auditing a third-party integration before granting it OAuth scopes
  *     must not have to download the `.afps` and unzip it.
@@ -1645,7 +1645,7 @@ export function IntegrationDetailPage() {
           </div>
         </TabsContent>
 
-        {/* ─── Package AFPS (the artifact's own files, read-only) ───
+        {/* ─── Contenu (the artifact's own files, read-only) ───
             Same generic explorer the unified package page mounts; the type
             only decides which file opens first (INTEGRATION.md here). No
             `version` prop: this page has no historical-version view, so the
