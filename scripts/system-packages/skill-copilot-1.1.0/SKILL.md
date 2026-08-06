@@ -85,12 +85,25 @@ Exemples de croisement :
 
 Une fois une idée choisie, réunis ses briques.
 
-**Le savoir-faire (skill)** :
+**Le savoir-faire (skill)** — dans cet ordre, sans sauter d'étape :
 
-- Déjà dans l'org → déclare-le en dépendance.
-- Dans un repo whitelisté (`anthropics/skills` → `skill-creator`, `mcp-builder` ; `letta-ai/skills`)
-  → importe-le depuis GitHub.
-- Aucun → rédige-le à la méthode du skill `skill-creator`.
+1. **Regarde d'abord ce que l'organisation possède.** Toutes ses skills sont listées dans ton
+   contexte (« ## Skills you can attach to an agent »), quelle que soit leur origine : créées par
+   toi lors d'un agent précédent, écrites par le client, importées d'ailleurs. **Si l'une d'elles
+   couvre le besoin, déclare-la, même imparfaite.** Ne crée jamais une méthode concurrente à une
+   méthode existante : c'est la sienne, elle porte peut-être des affinages, et la dupliquer les
+   perd. Hésitation entre deux ? Lis leur contenu (`getSkill`) avant de trancher, c'est gratuit.
+2. **Sinon, pars d'une méthode de référence.** Ce sont des skills système `@appstrate/<nom>`,
+   invisibles du catalogue du client mais lisibles par leur id exact — celles que tu vois listées
+   comme skills assistant. Chaque recette de la section « Référence — Connecteurs Appstrate &
+   recettes d'automatisation » en nomme une. Tu la lis, tu la **matérialises** dans l'organisation
+   (voir « Référence — Prompt ou skill » ci-dessous), puis tu déclares le package créé.
+3. **Sinon**, repo whitelisté (`anthropics/skills` → `skill-creator`, `mcp-builder` ;
+   `letta-ai/skills`) → importe depuis GitHub. Rien du tout → rédige la méthode toi-même, à la
+   manière de `skill-creator`.
+
+Mes 14 recettes sont un **point de départ**, pas un catalogue : elles ne sont pas des packages,
+le client ne les voit pas, et une organisation mature finit par tourner surtout sur les siennes.
 
 **L'accès (connecteur)** — applique la **cascade** (on n'est PAS limité aux connecteurs
 built-in) :
@@ -114,18 +127,31 @@ voir la section « Référence — Générer un agent — ce que le schéma ne d
 > Pour un **one-shot**, saute l'enregistrement : lance directement un **run inline** et montre le
 > résultat. Les étapes ci-dessous valent pour un **agent enregistré** (réutilisable / récurrent).
 
-1. **Génère** le `manifest.json` + `prompt.md` de l'agent : déclare le(s) skill(s) et
+1. **Crée d'abord la skill, l'agent ensuite.** Pour un agent enregistré, le savoir-faire ne va
+   JAMAIS dans le `prompt.md` : il va dans un skill que possède l'organisation. Dans l'ordre,
+   sans exception :
+   - la skill existe déjà chez le client → passe à l'étape 2 en la déclarant ;
+   - sinon → lis la méthode de référence (`getSkill` sur `@appstrate/<nom>`), puis **appelle
+     l'opération de création de skill** avec `name: "@<slug de l'org>/<nom>"` et le contenu lu tel
+     quel. Tu dois voir passer cet appel avant de créer l'agent.
+
+   Ce qui reste dans le `prompt.md` : uniquement l'instance (quel connecteur, quel canal, quels
+   champs de sortie, quelles limites). Règle de partage et exemple : « Référence — Prompt ou
+   skill » ci-dessous. Un agent enregistré dont `dependencies.skills` est vide est une erreur,
+   sauf si l'utilisateur a explicitement dit que la méthode est un cas unique.
+
+2. **Génère** le `manifest.json` + `prompt.md` de l'agent : déclare le(s) skill(s) et
    intégration(s), câble `integrations_configuration.<id>.tools` (sinon zéro tool exposé),
    choisis les `runtime_tools`, définis `input`/`output`. Voir la section « Référence — Générer
    un agent — ce que le schéma ne dit pas » ci-dessous.
-2. **Valide** en dry-run — aucun crédit consommé.
-3. **Connecte** ce qui manque via le flux de connexion natif : quel que soit le type d'auth (OAuth,
+3. **Valide** en dry-run — aucun crédit consommé.
+4. **Connecte** ce qui manque via le flux de connexion natif : quel que soit le type d'auth (OAuth,
    clé API, basic, custom), il rend un **bouton de connexion one-click** dans le chat qui ouvre une
    page de connexion hébergée (écran OAuth du fournisseur ou formulaire de credentials selon l'auth).
    Le secret est saisi sur cette page hébergée, jamais dans la conversation — ne demande donc JAMAIS
    de coller un secret dans le chat.
-4. **Importe** l'agent, puis **propose un `schedule`** si c'est un agent ⏰.
-5. **Itère** : lance un premier run, montre le résultat, ajuste.
+5. **Importe** l'agent, puis **propose un `schedule`** si c'est un agent ⏰.
+6. **Itère** : lance un premier run, montre le résultat, ajuste.
 
 Toutes ces opérations (lire les connexions, valider, importer, connecter, planifier) :
 voir la section « Référence — Agir sur Appstrate (sans dupliquer le platform MCP) » ci-dessous.
@@ -188,16 +214,93 @@ Les noms et paramètres exacts : `describe_operation`. Ne hardcode pas d'URL.
 2. **Liens de connexion** : pour un connecteur manquant, démarre la connexion OAuth et **présente
    l'URL comme un lien cliquable** dans le chat (« Connecte Gmail → ») ; pour une clé API, demande-la.
 3. **Dry-run avant import** : valide toujours l'agent généré avant de l'importer (0 crédit).
-4. **Récupérer un skill** : d'abord l'org, sinon import depuis un repo **whitelisté** — validation
+4. **Skill avant agent** : pour un agent enregistré, la skill de l'organisation doit exister
+   AVANT l'appel de création de l'agent. Si tu es en train de recopier une méthode dans un
+   `prompt.md`, tu t'es trompé de fichier : crée la skill et déclare-la.
+5. **Récupérer un skill** : d'abord l'org, sinon import depuis un repo **whitelisté** — validation
    obligatoire (voir la section « Référence — Sources dynamiques & sécurité » ci-dessous).
-5. Tout passe par les **permissions du user** (le platform MCP réapplique l'auth/RBAC à chaque appel).
-6. **Connexion qui échoue** : si générer un lien OAuth renvoie une erreur (ex. **403** = pas de client
+6. Tout passe par les **permissions du user** (le platform MCP réapplique l'auth/RBAC à chaque appel).
+7. **Connexion qui échoue** : si générer un lien OAuth renvoie une erreur (ex. **403** = pas de client
    OAuth configuré pour ce service sur l'instance), **ne réessaie pas en boucle**. Explique-le
    simplement (« l'intégration X n'est pas encore configurée ici — un admin doit ajouter les
    credentials d'app ») et propose une **alternative** (un autre connecteur, un export CSV/collé, ou
    faire sans pour démarrer).
-7. **Ne régénère pas un lien déjà donné** : si tu as déjà fourni le lien de connexion d'un service
+8. **Ne régénère pas un lien déjà donné** : si tu as déjà fourni le lien de connexion d'un service
    dans la conversation, réutilise-le — ne rappelle pas l'opération OAuth à chaque tour.
+
+## Référence — Prompt ou skill, et comment matérialiser
+
+> Chargé en Phase 3 (résoudre le savoir-faire) et Phase 4 (assembler).
+
+### La règle de découpe
+
+**`prompt` = l'instance. `skill` = le savoir-faire réutilisable.** Avant d'écrire, pose-toi une
+seule question sur chaque phrase :
+
+> Est-ce que ça resservirait **tel quel** à un autre agent, chez quelqu'un d'autre dans la boîte ?
+
+Oui → skill. Non → prompt. Exemple, agent « tri des tickets » :
+
+| Dans le skill (transférable)                            | Dans le prompt (cette instance)              |
+| ------------------------------------------------------- | -------------------------------------------- |
+| comment évaluer l'urgence, les catégories, le sentiment | lire les tickets Zendesk taggués `new`       |
+| quand escalader plutôt que répondre                     | poster dans `#support-tickets`               |
+| ne jamais envoyer sans validation                       | 50 tickets max par passage, schéma de sortie |
+
+Le partage se relit tout seul : **rien du skill ne doit nommer un outil, un canal ou un champ**, et
+rien du prompt n'a de sens pour un autre agent. Les deux façons de se tromper coûtent cher :
+
+- trop dans le skill → le prochain agent hérite de `#support-tickets` et la méthode n'est plus
+  réutilisable ;
+- trop dans le prompt → le prochain agent doit re-deviner la grille d'urgence, et les affinages du
+  client ne profitent qu'à un seul agent.
+
+### Quand créer un skill, quand s'en passer
+
+| Situation                                                        | Où va le savoir-faire                               |
+| ---------------------------------------------------------------- | --------------------------------------------------- |
+| **Run inline** (one-shot, rien à garder)                         | dans le `prompt` du run. Ne crée jamais de package. |
+| **Agent enregistré**                                             | dans un **skill de l'organisation**, par défaut.    |
+| Agent enregistré dont la méthode est explicitement un cas unique | dans le `prompt`, si l'utilisateur le dit.          |
+
+Le défaut « skill » pour tout agent enregistré est délibéré : on ne sait pas à l'avance ce qui sera
+réutilisé, et le deuxième agent arrive souvent des semaines plus tard, trop tard pour bien faire.
+Se tromper dans ce sens coûte un package de plus ; dans l'autre, ça coûte une méthode dupliquée et
+divergente.
+
+### Matérialiser une recette
+
+Créer, dans l'organisation, un vrai package à partir d'une méthode de référence :
+
+1. **Vérifie qu'il n'existe pas déjà** — regarde la liste des skills de l'organisation. S'il y est,
+   tu ne crées rien, tu le déclares. C'est ce qui fait qu'un affinage du client profite à tous ses
+   agents.
+2. **Lis la méthode de référence** : opération de lecture d'un skill, sur `@appstrate/<nom>`.
+3. **Crée le package** avec l'opération de création de skill : le `content` est le contenu lu **tel
+   quel** (son frontmatter `name`/`description` est déjà au bon format), le nom du package est
+   `@<slug de l'org>/<nom>`. Ne réécris pas la méthode, ne la spécialise pas pour le connecteur :
+   ce qui est propre au connecteur appartient au prompt.
+4. **Déclare-le** dans `dependencies.skills` de l'agent, avec un range sur la version créée.
+
+Ne déclare **jamais** une méthode `@appstrate/<nom>` directement dans un agent : elle est invisible
+du client, il ne pourrait ni la lire ni l'ajuster. Elle sert de modèle, pas de dépendance.
+
+Annonce-le en une ligne, sans jargon : « j'ajoute la méthode _Tri des tickets_ à ton espace, tu
+pourras l'ajuster et tes prochains agents s'appuieront dessus ».
+
+### Extraire un savoir-faire d'un agent existant
+
+Si tu découvres qu'un agent déjà en place porte dans son `prompt` un savoir-faire générique dont le
+nouvel agent a besoin aussi : **propose de l'extraire** en skill, puis repointe les deux agents
+dessus. C'est ainsi qu'une organisation se constitue sa bibliothèque au fil de l'usage. Ne le fais
+jamais sans l'accord de l'utilisateur : tu modifies un agent qui tourne.
+
+### Nommer
+
+Le nom apparaît dans SON catalogue, pas dans le nôtre. Prends le vocabulaire de sa boîte plutôt que
+mon identifiant technique quand les deux diffèrent, et garde-le stable : c'est lui qui permettra de
+réutiliser la méthode plus tard. Jamais de suffixe `-2` ; deux méthodes distinctes portent deux
+noms distincts et parlants.
 
 ## Référence — Générer un agent — ce que le schéma ne dit pas
 
@@ -242,6 +345,13 @@ Connexion = via l'opération OAuth/champs (le lien présenté dans le chat) — 
 
 > Chargé à la demande par le copilote en Phase 2 (proposer) et Phase 3 (résoudre l'accès).
 > Légende : 💬 chat (à la demande) · ⏰ run (autonome/cron) · `skill` = savoir-faire mobilisé.
+>
+> **Ces recettes sont un aide-mémoire, pas un inventaire.** Chaque nom de skill ci-dessous renvoie
+> à `references/<nom>.md`, une méthode complète livrée avec moi, à matérialiser dans
+> l'organisation si elle n'y a pas déjà d'équivalent (Phase 3). La liste des skills réellement
+> disponibles est celle de ton contexte, complétée au besoin par l'opération de listing des
+> skills : une méthode que le client possède l'emporte toujours sur ma recette, et une skill de
+> son espace que cette table ne mentionne pas reste proposable.
 
 ### Connecteurs built-in (~64), par famille
 
