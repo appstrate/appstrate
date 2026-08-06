@@ -10,14 +10,14 @@
  * pulls the whole data layer on import and cannot be rendered in the SPA's
  * DOM-less test harness; these two are pure and prop-driven, so they can.
  *
- * Every manifest-supplied URL goes through `safeExternalUrl` before reaching
+ * Every manifest-supplied URL goes through `normalizeHttpUrl` before reaching
  * an `href`; a rejected URL degrades to plain text, never a dropped row.
  */
 
 import type React from "react";
 import { useTranslation } from "react-i18next";
+import { normalizeHttpUrl } from "@appstrate/core/url";
 import { Badge } from "@appstrate/ui/components/badge";
-import { safeExternalUrl } from "../../lib/safe-url";
 // Canonical wire type, imported straight from shared-types rather than the
 // hooks re-export so this module has no runtime edge into the data layer.
 import type { IntegrationManifestView } from "@appstrate/shared-types";
@@ -47,7 +47,7 @@ export function SetupGuideSteps({
       <h3 className="mb-2 text-sm font-semibold">{t("integration.setup_guide.title")}</h3>
       <ol className="text-muted-foreground list-decimal space-y-1 pl-5 text-xs">
         {steps.map((step, i) => {
-          const href = safeExternalUrl(step.url);
+          const href = normalizeHttpUrl(step.url);
           return (
             <li key={i} data-testid={`setup-guide-step-${i}`}>
               {href ? (
@@ -89,7 +89,7 @@ export function MetadataBlock({ manifest }: { manifest: IntegrationManifestView 
   // A manifest can declare any string here. Link only what is provably an
   // http(s) target; anything else stays readable as text so the person
   // auditing the package still sees exactly what the publisher wrote.
-  const repoHref = safeExternalUrl(repo);
+  const repoHref = normalizeHttpUrl(repo);
   const sourceKind = manifest.source?.kind ?? "api";
   const rows: Array<[string, React.ReactNode]> = [
     [t("integration.field.version"), <span className="font-mono">{manifest.version}</span>],
@@ -128,10 +128,10 @@ export function MetadataBlock({ manifest }: { manifest: IntegrationManifestView 
   ];
   return (
     <dl className="grid grid-cols-1 gap-y-2 text-sm sm:grid-cols-[max-content_1fr] sm:gap-x-4">
-      {rows.map(([k, v]) => (
-        <div key={k} className="contents">
-          <dt className="text-muted-foreground">{k}</dt>
-          <dd>{v}</dd>
+      {rows.map(([label, content]) => (
+        <div key={label} className="contents">
+          <dt className="text-muted-foreground">{label}</dt>
+          <dd>{content}</dd>
         </div>
       ))}
     </dl>

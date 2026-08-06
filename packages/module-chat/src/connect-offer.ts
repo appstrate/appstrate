@@ -18,10 +18,12 @@
  * scrubbed from the payload is what surfaces as the offer, so the two can never
  * drift apart.
  *
- * Dependency-free on purpose: `ui/auth-offer.ts` (bundled into the SPA) imports
- * the {@link ConnectOffer} type and {@link readConnectOffer} from here, so this
- * module must not pull in server-only imports (MCP client, logger).
+ * `ui/auth-offer.ts` (bundled into the SPA) imports the {@link ConnectOffer}
+ * type and {@link readConnectOffer} from here, so this module may only pull in
+ * client-safe leaf imports — never server-only modules (MCP client, logger).
  */
+
+import { normalizeHttpUrl } from "@appstrate/core/url";
 
 /**
  * Placeholder that replaces a connect/authorize URL in the MODEL-visible tool
@@ -106,9 +108,11 @@ function splitValue(value: unknown, depth: number): SplitResult {
     if (CONNECT_URL_KEYS.has(key) && typeof v === "string") {
       out[key] = REDACTED_CONNECT_LINK;
       changed = true;
-      // Capture only real absolute URLs — an already-redacted placeholder (or
-      // any other prose under a connect key) is scrubbed but never offered.
-      if (!offer && /^https?:\/\//.test(v)) offer = offerFromNode(obj, v);
+      // Capture only parsed absolute HTTP(S) URLs — an already-redacted
+      // placeholder, malformed value or other scheme is scrubbed but never
+      // offered. Persist the same normalized href the browser will navigate.
+      const connectUrl = !offer ? normalizeHttpUrl(v) : null;
+      if (connectUrl) offer = offerFromNode(obj, connectUrl);
       continue;
     }
     const r = splitValue(v, depth + 1);
@@ -267,9 +271,10 @@ export function readConnectOffer(result: unknown): ConnectOffer | null {
 function asConnectOffer(value: unknown): ConnectOffer | null {
   if (value == null || typeof value !== "object") return null;
   const o = value as Record<string, unknown>;
-  if (typeof o.connect_url !== "string" || !/^https?:\/\//.test(o.connect_url)) return null;
+  const connectUrl = normalizeHttpUrl(o.connect_url);
+  if (!connectUrl) return null;
   return {
-    connect_url: o.connect_url,
+    connect_url: connectUrl,
     ...(typeof o.state === "string" ? { state: o.state } : {}),
     ...(typeof o.expires_at === "number" ? { expires_at: o.expires_at } : {}),
   };

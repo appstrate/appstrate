@@ -87,6 +87,7 @@
     "./chat-turn-metadata": "./src/chat-turn-metadata.ts",
     "./bearer": "./src/bearer.ts",
     "./oauth-bearer-swap": "./src/oauth-bearer-swap.ts",
+    "./url": "./src/url.ts",
     "./run-and-wait-client": "./src/run-and-wait-client.ts"
   },
   "dependencies": {

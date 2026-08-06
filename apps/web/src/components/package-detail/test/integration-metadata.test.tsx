@@ -4,9 +4,10 @@
  * Call-site coverage for the manifest-URL guard.
  *
  * Both blocks render publisher-authored AFPS manifest data. The server accepts
- * `repository` as `z.string().min(1)` and does not validate `setup_guide`
- * at all, so a hostile value reaches these components verbatim and the guard
- * is the only thing between it and an `href`.
+ * `repository` as a non-empty string, while the canonical AFPS schema validates
+ * the `setup_guide` structure but leaves each optional URL as an unconstrained
+ * string. Neither path constrains the scheme, so the navigation guard remains
+ * the trust boundary before an `href`.
  *
  * Same harness as `components/test/plan-card.test.tsx`: no DOM, so components
  * are rendered with `renderToStaticMarkup` and asserted on their HTML.
