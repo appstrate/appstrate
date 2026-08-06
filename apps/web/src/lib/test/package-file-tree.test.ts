@@ -10,6 +10,7 @@
  */
 
 import { describe, it, expect } from "bun:test";
+import { PACKAGE_FILE_INLINE_MAX_BYTES } from "@appstrate/core/package-files";
 import {
   baseName,
   buildFileTree,
@@ -19,7 +20,6 @@ import {
   nextTreeFocus,
   pickActiveEntry,
   previewBlockReason,
-  PREVIEW_SIZE_LIMIT,
   type PackageFileEntry,
   type TreeNode,
 } from "../package-file-tree.ts";
@@ -407,8 +407,12 @@ describe("pickActiveEntry", () => {
 describe("previewBlockReason", () => {
   it("pins the ceiling to the server's inline limit", () => {
     // Without the literal, every boundary assertion below is trivially true for
-    // whatever value the constant happens to hold.
-    expect(PREVIEW_SIZE_LIMIT).toBe(1_048_576);
+    // whatever value the constant happens to hold. The value is also a wire
+    // contract: it is written out in the published OpenAPI description text
+    // ("Text files up to 1 MiB", `apps/api/src/openapi/paths/packages.ts` and
+    // `openapi/schemas.ts`), so moving it without touching the spec would
+    // desynchronise the two.
+    expect(PACKAGE_FILE_INLINE_MAX_BYTES).toBe(1_048_576);
   });
 
   it("clears text below the ceiling, including an empty file", () => {
@@ -416,7 +420,7 @@ describe("previewBlockReason", () => {
     expect(previewBlockReason(file("a.md", { size: 12 }))).toBeNull();
   });
 
-  it("treats the ceiling as inclusive, matching the server's `size <= INLINE_MAX_BYTES`", () => {
+  it("treats the ceiling as inclusive, matching the server's `size <= PACKAGE_FILE_INLINE_MAX_BYTES`", () => {
     expect(previewBlockReason(file("a.md", { size: 1_048_576 }))).toBeNull();
     expect(previewBlockReason(file("a.md", { size: 1_048_575 }))).toBeNull();
     expect(previewBlockReason(file("a.md", { size: 1_048_577 }))).toBe("too_large");
@@ -426,7 +430,7 @@ describe("previewBlockReason", () => {
     // At or below the ceiling the server decoded the bytes, so `binary` is a
     // checked fact and the more useful one — shrinking the file would not make
     // it previewable.
-    for (const size of [0, 12, PREVIEW_SIZE_LIMIT]) {
+    for (const size of [0, 12, PACKAGE_FILE_INLINE_MAX_BYTES]) {
       expect(previewBlockReason(file("logo.png", { media_kind: "binary", size }))).toBe("binary");
     }
   });
@@ -445,7 +449,7 @@ describe("previewBlockReason", () => {
     // Same answer for a file that really is binary: above the ceiling size is
     // the binding constraint either way, so the verdict does not depend on a
     // classification nobody verified.
-    for (const size of [PREVIEW_SIZE_LIMIT + 1, 50_000_000]) {
+    for (const size of [PACKAGE_FILE_INLINE_MAX_BYTES + 1, 50_000_000]) {
       expect(previewBlockReason(file("logo.png", { media_kind: "binary", size }))).toBe(
         "too_large",
       );
@@ -454,7 +458,9 @@ describe("previewBlockReason", () => {
 
   it("keeps the two reasons distinct — the panel shows a different message for each", () => {
     const binary = previewBlockReason(file("logo.png", { media_kind: "binary", size: 8_192 }));
-    const tooLarge = previewBlockReason(file("dump.html", { size: PREVIEW_SIZE_LIMIT + 1 }));
+    const tooLarge = previewBlockReason(
+      file("dump.html", { size: PACKAGE_FILE_INLINE_MAX_BYTES + 1 }),
+    );
     expect(binary).toBe("binary");
     expect(tooLarge).toBe("too_large");
     expect(binary).not.toBe(tooLarge);
@@ -467,7 +473,10 @@ describe("previewBlockReason", () => {
     // on size regardless, so handing the component bytes cannot unblock it.
     expect(
       previewBlockReason(
-        file("dump.html", { size: PREVIEW_SIZE_LIMIT + 1, inline: "<script>alert(1)</script>" }),
+        file("dump.html", {
+          size: PACKAGE_FILE_INLINE_MAX_BYTES + 1,
+          inline: "<script>alert(1)</script>",
+        }),
       ),
     ).toBe("too_large");
   });
@@ -477,10 +486,10 @@ describe("isPreviewable", () => {
   it("is exactly `previewBlockReason() === null`", () => {
     const cases = [
       file("a.md", { size: 0 }),
-      file("a.md", { size: PREVIEW_SIZE_LIMIT }),
-      file("a.md", { size: PREVIEW_SIZE_LIMIT + 1 }),
+      file("a.md", { size: PACKAGE_FILE_INLINE_MAX_BYTES }),
+      file("a.md", { size: PACKAGE_FILE_INLINE_MAX_BYTES + 1 }),
       file("logo.png", { media_kind: "binary" }),
-      file("logo.png", { media_kind: "binary", size: PREVIEW_SIZE_LIMIT + 1 }),
+      file("logo.png", { media_kind: "binary", size: PACKAGE_FILE_INLINE_MAX_BYTES + 1 }),
     ];
     for (const entry of cases) {
       expect(isPreviewable(entry)).toBe(previewBlockReason(entry) === null);

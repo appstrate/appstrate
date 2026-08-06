@@ -9,13 +9,13 @@
 
 import { describe, it, expect } from "bun:test";
 import type { PackageType } from "@appstrate/core/validation";
+import { PACKAGE_FILE_INLINE_MAX_BYTES } from "@appstrate/core/package-files";
 import {
   applyDraftOverlay,
   buildFileIndex,
   draftSnapshotId,
   indexEtag,
   fileEtag,
-  INLINE_MAX_BYTES,
   INDEX_JSON_BUDGET_BYTES,
   type PackageFileSnapshot,
   type PackageFileSource,
@@ -136,12 +136,14 @@ describe("applyDraftOverlay — per-type draft_content target", () => {
 describe("buildFileIndex — media kind classification", () => {
   it("pins the inline ceiling to its literal", () => {
     // Every size assertion in this file is written in terms of the SYMBOL, so
-    // raising the constant would keep this whole suite green while the server
-    // started inlining files the SPA then refuses to preview. The web side
-    // pins the same literal (`PREVIEW_SIZE_LIMIT`, in
-    // `apps/web/src/lib/test/package-file-tree.test.ts`); one literal on each
-    // side is what makes the documented lockstep real rather than asserted.
-    expect(INLINE_MAX_BYTES).toBe(1_048_576);
+    // raising the constant would keep this whole suite green while the value
+    // silently moved. It cannot move silently: 1 MiB is baked into the
+    // published OpenAPI description text ("Text files up to 1 MiB",
+    // `apps/api/src/openapi/paths/packages.ts` and `openapi/schemas.ts`), so a
+    // change here desynchronises the spec from the behaviour it documents.
+    // The web side pins the same constant in
+    // `apps/web/src/lib/test/package-file-tree.test.ts`.
+    expect(PACKAGE_FILE_INLINE_MAX_BYTES).toBe(1_048_576);
   });
 
   it("classifies a UTF-8 file as text and inlines it verbatim", () => {
@@ -183,7 +185,7 @@ describe("buildFileIndex — media kind classification", () => {
     // Both files are the SAME bytes and both are undecodable. Only the
     // extension differs, which proves the >1 MiB branch never looked at
     // content: a content check would have called both of them binary.
-    const huge = new Uint8Array(INLINE_MAX_BYTES + 1).fill(0xff);
+    const huge = new Uint8Array(PACKAGE_FILE_INLINE_MAX_BYTES + 1).fill(0xff);
     const index = buildFileIndex(snapshot({ "big.md": huge, "big.bin": huge }));
     const md = index.find((e) => e.path === "big.md")!;
     const bin = index.find((e) => e.path === "big.bin")!;
@@ -196,13 +198,13 @@ describe("buildFileIndex — media kind classification", () => {
   });
 
   it("classifies a dotfile by its full base name", () => {
-    const huge = new Uint8Array(INLINE_MAX_BYTES + 1).fill(0xff);
+    const huge = new Uint8Array(PACKAGE_FILE_INLINE_MAX_BYTES + 1).fill(0xff);
     expect(entryFor({ ".gitignore": huge }, ".gitignore").media_kind).toBe("text");
     expect(entryFor({ blob: huge }, "blob").media_kind).toBe("binary");
   });
 
   it("classifies by extension on the base name, not the directory path", () => {
-    const huge = new Uint8Array(INLINE_MAX_BYTES + 1).fill(0xff);
+    const huge = new Uint8Array(PACKAGE_FILE_INLINE_MAX_BYTES + 1).fill(0xff);
     expect(entryFor({ "a.md/nested": huge }, "a.md/nested").media_kind).toBe("binary");
     expect(entryFor({ "a.bin/nested.md": huge }, "a.bin/nested.md").media_kind).toBe("text");
   });
@@ -210,8 +212,8 @@ describe("buildFileIndex — media kind classification", () => {
 
 describe("buildFileIndex — inline budgets", () => {
   it("does not inline a text file at the 1 MiB ceiling boundary + 1", () => {
-    const atCeiling = "a".repeat(INLINE_MAX_BYTES);
-    const overCeiling = "a".repeat(INLINE_MAX_BYTES + 1);
+    const atCeiling = "a".repeat(PACKAGE_FILE_INLINE_MAX_BYTES);
+    const overCeiling = "a".repeat(PACKAGE_FILE_INLINE_MAX_BYTES + 1);
     expect(entryFor({ "at.txt": atCeiling }, "at.txt").inline).toBe(atCeiling);
     expect(entryFor({ "over.txt": overCeiling }, "over.txt").inline).toBeUndefined();
   });
@@ -238,7 +240,7 @@ describe("buildFileIndex — inline budgets", () => {
   });
 
   it("still lists — with size and media_kind — the files that fell past the budget", () => {
-    const chunk = "x".repeat(INLINE_MAX_BYTES);
+    const chunk = "x".repeat(PACKAGE_FILE_INLINE_MAX_BYTES);
     const index = buildFileIndex(
       snapshot({ "a.txt": chunk, "b.txt": chunk, "c.txt": chunk, "d.txt": chunk }),
     );
@@ -247,12 +249,12 @@ describe("buildFileIndex — inline budgets", () => {
     expect(dropped.length).toBeGreaterThan(0);
     for (const entry of dropped) {
       expect(entry.media_kind).toBe("text");
-      expect(entry.size).toBe(INLINE_MAX_BYTES);
+      expect(entry.size).toBe(PACKAGE_FILE_INLINE_MAX_BYTES);
     }
   });
 
   it("never emits a truncated inline — inline is the whole file or absent", () => {
-    const chunk = "x".repeat(INLINE_MAX_BYTES);
+    const chunk = "x".repeat(PACKAGE_FILE_INLINE_MAX_BYTES);
     const index = buildFileIndex(
       snapshot({ "a.txt": chunk, "b.txt": chunk, "c.txt": chunk, "d.txt": chunk }),
     );
@@ -273,7 +275,7 @@ describe("buildFileIndex — determinism", () => {
   });
 
   it("drops the same entries from the budget regardless of insertion order", () => {
-    const chunk = "y".repeat(INLINE_MAX_BYTES);
+    const chunk = "y".repeat(PACKAGE_FILE_INLINE_MAX_BYTES);
     const files = { "a.txt": chunk, "b.txt": chunk, "c.txt": chunk, "d.txt": chunk };
     const forward = buildFileIndex(snapshot(files));
     const reverse = buildFileIndex(

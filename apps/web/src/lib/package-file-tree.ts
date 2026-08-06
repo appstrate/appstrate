@@ -10,17 +10,11 @@
  * coverable at all — and it keeps the React layer to "draw these rows".
  */
 
+import { PACKAGE_FILE_INLINE_MAX_BYTES } from "@appstrate/core/package-files";
 import type { components } from "../api/schema";
 
 /** One real file in the artifact, as returned by `GET .../files`. */
 export type PackageFileEntry = components["schemas"]["PackageFileEntry"];
-
-/**
- * Largest file the preview will render. Mirrors the API's inline ceiling: past
- * it the server never carries `inline`, and a multi-megabyte blob in Monaco is
- * a browser hazard rather than a preview.
- */
-export const PREVIEW_SIZE_LIMIT = 1_048_576;
 
 /**
  * Stable, unique row identity.
@@ -302,7 +296,7 @@ export type PreviewBlockReason = "binary" | "too_large";
  * the bytes are fetched on demand.
  *
  * SIZE WINS over the binary verdict, and only above the ceiling. The server
- * never decodes a file larger than `INLINE_MAX_BYTES` — above it,
+ * never decodes a file larger than `PACKAGE_FILE_INLINE_MAX_BYTES` — above it,
  * `media_kind` is decided by extension alone (`services/package-files.ts`), so
  * a 1.5 MB `CHANGELOG` or `LICENSE` arrives as `"binary"` while being ordinary
  * text. Telling the user it is binary would be a claim the server never
@@ -311,9 +305,10 @@ export type PreviewBlockReason = "binary" | "too_large";
  * so a real binary is still reported as one at any size under it.
  */
 export function previewBlockReason(entry: PackageFileEntry): PreviewBlockReason | null {
-  // Inclusive, mirroring the server's `size <= INLINE_MAX_BYTES`: a file of
-  // exactly the ceiling is still inlined, so it must still be previewable.
-  if (entry.size > PREVIEW_SIZE_LIMIT) return "too_large";
+  // Inclusive, mirroring the server's `size <= PACKAGE_FILE_INLINE_MAX_BYTES`:
+  // a file of exactly the ceiling is still inlined, so it must still be
+  // previewable.
+  if (entry.size > PACKAGE_FILE_INLINE_MAX_BYTES) return "too_large";
   if (entry.media_kind === "binary") return "binary";
   return null;
 }

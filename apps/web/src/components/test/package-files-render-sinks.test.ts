@@ -96,6 +96,9 @@ const EXPLORER_SINKS = [...SINKS, ...EXPLORER_ONLY_SINKS];
 const ALLOWED_IMPORTS = [
   // Framework + libraries
   "@appstrate/core/format",
+  // A single numeric constant, no imports of its own — the shared ceiling the
+  // server inlines up to and the preview refuses above. Not a renderer.
+  "@appstrate/core/package-files",
   "@appstrate/core/validation",
   "@appstrate/ui/cn",
   "@appstrate/ui/components/button",

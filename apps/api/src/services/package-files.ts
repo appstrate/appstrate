@@ -35,6 +35,7 @@ import { downloadVersionZip, unzipAndNormalize } from "./package-storage.ts";
 import { getVersionForDownload } from "./package-versions.ts";
 import { CONFIG_BY_TYPE, SYSTEM_STORAGE_NAMESPACE } from "./package-items/config.ts";
 import { VERSION_SELECTOR_DRAFT } from "./agent-version-resolver.ts";
+import { PACKAGE_FILE_INLINE_MAX_BYTES } from "@appstrate/core/package-files";
 import type { PackageType } from "@appstrate/core/validation";
 
 export type PackageFileMediaKind = "text" | "binary";
@@ -75,19 +76,6 @@ export interface PackageFileSource {
   draftManifest: unknown;
   draftContent: string | null;
 }
-
-/**
- * Largest file we will ever decode or inline (1 MiB).
- *
- * Kept in lockstep with `PREVIEW_SIZE_LIMIT` in
- * `apps/web/src/lib/package-file-tree.ts`, which is what the SPA uses to
- * decide "preview vs. too_large". The two must agree, otherwise the UI offers
- * a preview the index will never carry an `inline` for (or refuses one it
- * already has). There is no shared constant: the value would have to cross the
- * published `@appstrate/core` boundary to be shared, which is not worth a
- * release lockstep for one number.
- */
-export const INLINE_MAX_BYTES = 1_048_576;
 
 /**
  * Ceiling on the *serialized* weight of all `inline` strings in one index
@@ -158,7 +146,7 @@ function classify(
   bytes: Uint8Array,
   decoder: TextDecoder,
 ): { kind: PackageFileMediaKind; text: string | null } {
-  if (bytes.byteLength > INLINE_MAX_BYTES) {
+  if (bytes.byteLength > PACKAGE_FILE_INLINE_MAX_BYTES) {
     return { kind: TEXT_EXTENSIONS.has(extensionOf(path)) ? "text" : "binary", text: null };
   }
   try {

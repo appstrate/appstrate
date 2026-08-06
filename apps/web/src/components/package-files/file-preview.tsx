@@ -32,6 +32,7 @@ import { useTranslation } from "react-i18next";
 import { Download, FileWarning } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { formatBytes } from "@appstrate/core/format";
+import { PACKAGE_FILE_INLINE_MAX_BYTES } from "@appstrate/core/package-files";
 import { MonacoEditor } from "../monaco";
 import { useTheme } from "../../stores/theme-store";
 import { LoadingState, ErrorState } from "../page-states";
@@ -39,7 +40,6 @@ import {
   baseName,
   languageForPath,
   previewBlockReason,
-  PREVIEW_SIZE_LIMIT,
   type PackageFileEntry,
 } from "../../lib/package-file-tree";
 import { usePackageFile, usePackageFileDownload } from "./use-package-file";
@@ -96,7 +96,9 @@ export function FilePreview({ id, packageId, version, entry }: FilePreviewProps)
           <p className="text-sm">
             {blocked === "binary"
               ? t("files.notPreviewableBinary")
-              : t("files.notPreviewableTooLarge", { limit: formatBytes(PREVIEW_SIZE_LIMIT) })}
+              : t("files.notPreviewableTooLarge", {
+                  limit: formatBytes(PACKAGE_FILE_INLINE_MAX_BYTES),
+                })}
           </p>
         </div>
       ) : isError ? (

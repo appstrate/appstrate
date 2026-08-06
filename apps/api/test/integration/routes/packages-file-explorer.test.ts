@@ -16,6 +16,7 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { eq } from "drizzle-orm";
 import { packages, packageDistTags, packageVersions } from "@appstrate/db/schema";
 import { computeIntegrity } from "@appstrate/core/integrity";
+import { PACKAGE_FILE_INLINE_MAX_BYTES } from "@appstrate/core/package-files";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
@@ -28,7 +29,6 @@ import { uploadPackageZip, buildMinimalZip } from "../../../src/services/package
 import { insertShadowPackage } from "../../../src/services/inline-run.ts";
 import { hasPackageAccess } from "../../../src/services/application-packages.ts";
 import type { AgentManifest } from "../../../src/types/index.ts";
-import { INLINE_MAX_BYTES } from "../../../src/services/package-files.ts";
 
 const app = getTestApp();
 const encoder = new TextEncoder();
@@ -543,7 +543,7 @@ describe("package file explorer", () => {
     it("retrieves a text file that fell past the index inline budget", async () => {
       // Four ~1 MiB text files: the 2 MiB serialized budget cannot cover them
       // all, but every one of them must remain fetchable in full.
-      const chunk = "z".repeat(INLINE_MAX_BYTES);
+      const chunk = "z".repeat(PACKAGE_FILE_INLINE_MAX_BYTES);
       await uploadPackageFiles("agents", ctx.orgId, id, {
         "a.txt": encoder.encode(chunk),
         "b.txt": encoder.encode(chunk),
