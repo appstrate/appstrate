@@ -24,6 +24,10 @@
  *     primitives). Per-tool description + required scopes + URL patterns.
  *   - À propos — metadata (version, author, license, repo, …), privacy policy,
  *     keywords.
+ *   - Package AFPS — the artifact's own files, read-only, opening on
+ *     INTEGRATION.md. This is where `manifest.json` is readable verbatim: an
+ *     admin auditing a third-party integration before granting it OAuth scopes
+ *     must not have to download the `.afps` and unzip it.
  *   - Versions — read-only release history (non-system packages only).
  *
  * Connect drives a popup through the hosted connect portal (issue #769) —
@@ -35,9 +39,19 @@
 import { useState } from "react";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
 import { ManifestOverview } from "../components/package-manifest/manifest-overview";
+import { FileExplorer } from "../components/package-files/file-explorer";
 
-/** Tab ids, also the URL fragments that select them. */
-const INTEGRATION_TABS = ["connections", "configuration", "tools", "about", "versions"] as const;
+/** Tab ids, also the URL fragments that select them. `content` is the same id
+ *  the unified package page uses for its file explorer, so a deep link reads
+ *  the same on either page. */
+const INTEGRATION_TABS = [
+  "connections",
+  "configuration",
+  "tools",
+  "about",
+  "content",
+  "versions",
+] as const;
 import { useTranslation } from "react-i18next";
 import { useParams } from "react-router-dom";
 import { toast } from "sonner";
@@ -1328,6 +1342,7 @@ function ConnectionTableRow({
   );
 }
 
+// ─────────────────────────────────────────────
 // Page
 // ─────────────────────────────────────────────
 
@@ -1352,7 +1367,7 @@ function ActivationHint({ onActivate, pending }: { onActivate: () => void; pendi
 }
 
 export function IntegrationDetailPage() {
-  const { t } = useTranslation(["settings", "common"]);
+  const { t } = useTranslation(["settings", "common", "agents"]);
   const { scope, name } = useParams<{ scope: string; name: string }>();
   const packageId = scope && name ? `${scope}/${name}` : "";
   const { data: detail, isLoading, error } = useIntegrationDetail(packageId || undefined);
@@ -1476,6 +1491,9 @@ export function IntegrationDetailPage() {
           </TabsTrigger>
           <TabsTrigger value="about" data-testid="tab-about">
             {t("integration.tabs.about")}
+          </TabsTrigger>
+          <TabsTrigger value="content" data-testid="tab-content">
+            {t("detail.tabFiles", { ns: "agents" })}
           </TabsTrigger>
           {!isBuiltIn && (
             <TabsTrigger value="versions" data-testid="tab-versions">
@@ -1625,6 +1643,15 @@ export function IntegrationDetailPage() {
           <div className="max-w-2xl">
             <ManifestOverview manifest={m} type="integration" />
           </div>
+        </TabsContent>
+
+        {/* ─── Package AFPS (the artifact's own files, read-only) ───
+            Same generic explorer the unified package page mounts; the type
+            only decides which file opens first (INTEGRATION.md here). No
+            `version` prop: this page has no historical-version view, so the
+            explorer reads the live draft. */}
+        <TabsContent value="content" className="mt-4">
+          <FileExplorer packageId={packageId} type="integration" />
         </TabsContent>
 
         {/* ─── Versions (read-only history; non-system only) ─── */}

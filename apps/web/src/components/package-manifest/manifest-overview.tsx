@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Rendered, read-only view of an AFPS manifest — the "Aperçu" tab.
+ * Rendered, read-only view of an AFPS manifest — the "À propos" tab.
  *
  * One generic component for all four package types: they share ~21 metadata
  * fields, and only `integration` and `mcp-server` carry a tail worth
@@ -12,10 +12,11 @@
  * system package and every archived version had no structured view at all.
  *
  * TWO MOUNT POINTS, and that asymmetry is correct — do not "fix" it. Agents,
- * skills and mcp-servers reach this through the Aperçu tab of
+ * skills and mcp-servers reach this through the À propos tab of
  * `pages/unified-package-detail.tsx`; integrations do not use that page at all
  * (`app.tsx` routes them to `pages/integration-detail.tsx`, which has its own
- * tab set) and mount the same component in their À propos tab.
+ * tab set) and mount the same component in their own À propos tab. One
+ * component, one name — the two tabs are deliberately labelled alike.
  *
  * Everything rendered here is AUTHOR-CONTROLLED text. It reaches the screen as
  * JSX children and nothing else; the only string that becomes an `href` is one
@@ -27,6 +28,7 @@ import { FileJson } from "lucide-react";
 import { Badge } from "@appstrate/ui/components/badge";
 import type { PackageType } from "@appstrate/core/validation";
 import {
+  isManifestOverviewEmpty,
   readIntegrationDetails,
   readManifestOverview,
   readMcpServerDetails,
@@ -51,7 +53,9 @@ export function ManifestOverview({ manifest, type }: ManifestOverviewProps) {
   const integration = type === "integration" ? readIntegrationDetails(manifest) : undefined;
   const mcpServer = type === "mcp-server" ? readMcpServerDetails(manifest) : undefined;
 
-  if (overview.isEmpty && (integration?.isEmpty ?? true) && (mcpServer?.isEmpty ?? true)) {
+  // Same verdict the detail page reads to pick its landing tab — shared so a
+  // page can never open on this tab and then be told there is nothing here.
+  if (isManifestOverviewEmpty(manifest, type)) {
     return <EmptyState icon={FileJson} message={t("manifest.empty")} compact />;
   }
 

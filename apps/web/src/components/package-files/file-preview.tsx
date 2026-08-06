@@ -3,10 +3,29 @@
 /**
  * Preview panel for one file of a package artifact.
  *
- * SOURCE ONLY, always. HTML, SVG, Markdown and JSON are rendered as text in a
- * read-only editor — never injected, framed, or turned into a blob URL. These
- * bytes are author-controlled and reach the platform origin, so there is no
- * rendering mode in which they are safe to interpret.
+ * SOURCE ONLY, always: every file — HTML, SVG, Markdown, JSON — is shown as
+ * text in a read-only editor, never injected, framed, or navigated to. (The
+ * download button below does build a blob URL, through
+ * `usePackageFileDownload`; it is pinned to an inert MIME type and handed
+ * straight to an `<a download>`, so it reaches the disk and never the
+ * renderer.) Two reasons for source-only, and the second is the one that
+ * decides it:
+ *
+ *   - these bytes are author-controlled and are served from the platform
+ *     origin, so any renderer added here has to be one with no HTML sink behind
+ *     it (`components/test/package-files-render-sinks.test.ts` is what keeps
+ *     that true, import by import);
+ *   - and this surface exists to show what the artifact CONTAINS. A `SKILL.md`
+ *     or a `prompt.md` is its YAML frontmatter and its exact whitespace —
+ *     rendering it would hide precisely what an author or an auditor opened it
+ *     to read.
+ *
+ * The platform does render author-controlled Markdown elsewhere: the manifest's
+ * `description` goes through `<InlineMarkdown>` in `shared-header.tsx`, on
+ * react-markdown without `rehype-raw`, so embedded HTML is escaped rather than
+ * parsed. So a future "Rendu / Source" toggle here would be a product call
+ * about what this panel is for — weigh it on that, not on a claim that no safe
+ * rendering mode exists.
  */
 
 import { useTranslation } from "react-i18next";
@@ -26,13 +45,15 @@ import {
 import { usePackageFile, usePackageFileDownload } from "./use-package-file";
 
 interface FilePreviewProps {
+  /** Target of the tree's `aria-controls` — see `FileExplorer`. */
+  id: string;
   packageId: string;
   version: string | undefined;
   entry: PackageFileEntry;
 }
 
-export function FilePreview({ packageId, version, entry }: FilePreviewProps) {
-  const { t } = useTranslation(["agents", "common"]);
+export function FilePreview({ id, packageId, version, entry }: FilePreviewProps) {
+  const { t } = useTranslation("agents");
   const { resolvedTheme } = useTheme();
   const { text, isLoading, isError } = usePackageFile(packageId, version, entry);
   const download = usePackageFileDownload(packageId, version);
@@ -40,7 +61,15 @@ export function FilePreview({ packageId, version, entry }: FilePreviewProps) {
   const blocked = previewBlockReason(entry);
 
   return (
-    <div className="border-border bg-card flex min-w-0 flex-col rounded-lg border">
+    // Named after the file it shows: the panel is a landmark a screen-reader
+    // user reaches from the tree, and "region" alone says nothing about which
+    // of the artifact's files is in it.
+    <div
+      id={id}
+      role="region"
+      aria-label={entry.path}
+      className="border-border bg-card flex min-w-0 flex-col rounded-lg border"
+    >
       <div className="border-border flex items-center gap-3 border-b px-3 py-2">
         <span
           className="text-foreground min-w-0 flex-1 truncate font-mono text-xs"
@@ -51,9 +80,12 @@ export function FilePreview({ packageId, version, entry }: FilePreviewProps) {
         <span className="text-muted-foreground shrink-0 text-xs tabular-nums">
           {formatBytes(entry.size)}
         </span>
+        {/* "Télécharger le fichier", not "Télécharger": the actions dropdown
+            already shows a Download-icon "Télécharger" for the WHOLE archive,
+            and both are visible on this tab at the same time. */}
         <Button variant="outline" size="sm" onClick={() => void download(entry.path)}>
           <Download size={14} />
-          {t("btn.download", { ns: "common" })}
+          {t("files.downloadFile")}
         </Button>
       </div>
 
@@ -84,6 +116,10 @@ export function FilePreview({ packageId, version, entry }: FilePreviewProps) {
           theme={resolvedTheme === "dark" ? "vs-dark" : "vs"}
           options={{
             readOnly: true,
+            // Monaco's default is the generic "Editor content; press Alt+F1 for
+            // options" — which file is open would otherwise be announced
+            // nowhere inside the editor.
+            ariaLabel: entry.path,
             minimap: { enabled: false },
             fontSize: 13,
             fontFamily: "'SF Mono', 'Fira Code', monospace",

@@ -301,14 +301,20 @@ export type PreviewBlockReason = "binary" | "too_large";
  * and still have been dropped from the response's inline budget, in which case
  * the bytes are fetched on demand.
  *
- * Binary wins over size: a 5 MB image is reported as binary, which is the fact
- * that matters — shrinking it would not make it previewable.
+ * SIZE WINS over the binary verdict, and only above the ceiling. The server
+ * never decodes a file larger than `INLINE_MAX_BYTES` — above it,
+ * `media_kind` is decided by extension alone (`services/package-files.ts`), so
+ * a 1.5 MB `CHANGELOG` or `LICENSE` arrives as `"binary"` while being ordinary
+ * text. Telling the user it is binary would be a claim the server never
+ * checked; "too large" is true either way and is the constraint that actually
+ * blocks the preview. Below the ceiling the classification IS content-based,
+ * so a real binary is still reported as one at any size under it.
  */
 export function previewBlockReason(entry: PackageFileEntry): PreviewBlockReason | null {
-  if (entry.media_kind === "binary") return "binary";
   // Inclusive, mirroring the server's `size <= INLINE_MAX_BYTES`: a file of
   // exactly the ceiling is still inlined, so it must still be previewable.
   if (entry.size > PREVIEW_SIZE_LIMIT) return "too_large";
+  if (entry.media_kind === "binary") return "binary";
   return null;
 }
 

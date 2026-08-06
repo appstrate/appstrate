@@ -11,10 +11,12 @@
  *
  * The readers live here rather than in the components because that is what
  * makes the rules testable without a DOM: presence, ordering, URL safety and
- * the `tools_policy` flattening are pure functions of the manifest.
+ * de-duplication are all pure functions of the manifest. (`tools_policy` is
+ * deliberately NOT read — see `IntegrationManifestDetails` for why.)
  */
 
 import { normalizeHttpUrl } from "@appstrate/core/url";
+import type { PackageType } from "@appstrate/core/validation";
 
 /** Any jsonb object. The manifest and every nested object share this shape. */
 export type ManifestObject = Record<string, unknown>;
@@ -26,9 +28,22 @@ function str(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() !== "" ? value : undefined;
 }
 
+/**
+ * The non-blank strings of an array, DEDUPED and in first-seen order.
+ *
+ * Deduping is a data rule, not a rendering one, so it belongs here: every
+ * consumer renders these as a keyed list (`keywords`, `default_scopes`, the
+ * `labelKey:value` rows of `FactGrid`), and a manifest is hand-writable jsonb —
+ * `"keywords": ["a", "a"]` is legal input and would emit duplicate React keys,
+ * which is exactly the class of breakage this module exists to absorb.
+ */
 function strArray(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
-  return value.filter((entry): entry is string => typeof entry === "string" && entry.trim() !== "");
+  return [
+    ...new Set(
+      value.filter((entry): entry is string => typeof entry === "string" && entry.trim() !== ""),
+    ),
+  ];
 }
 
 function obj(value: unknown): ManifestObject | undefined {
@@ -318,11 +333,16 @@ export function readMcpServerDetails(manifest: unknown): McpServerManifestDetail
   const m = obj(manifest) ?? {};
   const manifestVersion = str(m.manifest_version);
   const server = readMcpServer(m.server);
+  // `tools` is a raw jsonb ARRAY, not a keyed map, so nothing upstream makes
+  // `name` unique: `[{"name":"a"},{"name":"a"}]` is legal MCPB input and the
+  // view keys its rows by name. First declaration wins.
+  const seenTools = new Set<string>();
   const tools = present(
     (Array.isArray(m.tools) ? m.tools : []).map((raw) => {
       const tool = obj(raw);
       const name = str(tool?.name);
-      if (!name) return undefined;
+      if (!name || seenTools.has(name)) return undefined;
+      seenTools.add(name);
       const description = str(tool?.description);
       return { name, ...(description ? { description } : {}) };
     }),
@@ -349,4 +369,24 @@ export function readMcpServerDetails(manifest: unknown): McpServerManifestDetail
     userConfig,
     isEmpty: !manifestVersion && !server && tools.length === 0 && userConfig.length === 0,
   };
+}
+
+// ─── Whole-view verdict ─────────────────────────────────────────────
+
+/**
+ * True when the manifest overview would render its empty state — the shared
+ * block AND, for the two types that have one, the tail.
+ *
+ * Two callers, and they must agree: `ManifestOverview` renders the empty state
+ * from it, and `pages/unified-package-detail.tsx` uses it to pick the landing
+ * tab (a manifest with nothing to show would otherwise open the page on an
+ * empty card, with the artifact's own files one click away). Restating the
+ * condition at the page would let the two drift into "lands on a tab that then
+ * says there is nothing here".
+ */
+export function isManifestOverviewEmpty(manifest: unknown, type: PackageType): boolean {
+  if (!readManifestOverview(manifest).isEmpty) return false;
+  if (type === "integration") return readIntegrationDetails(manifest).isEmpty;
+  if (type === "mcp-server") return readMcpServerDetails(manifest).isEmpty;
+  return true;
 }

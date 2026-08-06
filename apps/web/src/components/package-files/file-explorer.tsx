@@ -6,11 +6,11 @@
  * the type only decides which file is pre-selected.
  */
 
-import { useMemo, useState } from "react";
+import { useId, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { FolderOpen } from "lucide-react";
 import type { PackageType } from "@appstrate/core/validation";
-import { $api } from "../../api/client";
+import { $api, ApiError } from "../../api/client";
 import { useOrgScope } from "../../hooks/use-org-scope";
 import { splitPackageRef } from "../../lib/package-paths";
 import { primaryDisplayFile } from "../../lib/package-files";
@@ -30,6 +30,8 @@ export function FileExplorer({ packageId, type, version }: FileExplorerProps) {
   const { t } = useTranslation("agents");
   const scope = useOrgScope();
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  // Ties the tree to the panel it drives (`aria-controls` → `id`).
+  const previewId = useId();
 
   const { data, error: loadError } = $api.useQuery(
     "get",
@@ -50,7 +52,15 @@ export function FileExplorer({ packageId, type, version }: FileExplorerProps) {
     [entries, selectedPath, type],
   );
 
-  if (loadError) return <ErrorState />;
+  // A 404 here is not a network blip and must not read like one: the realistic
+  // trigger is opening a historical version whose object was pruned from
+  // storage, which the API answers `404 "Artifact not found in storage"`. Only
+  // that status means "this version's files are gone" — anything else is a
+  // transient failure the user can retry.
+  if (loadError) {
+    const missing = loadError instanceof ApiError && loadError.status === 404;
+    return <ErrorState message={t(missing ? "files.errorMissingArtifact" : "files.errorLoad")} />;
+  }
   // Covers the disabled-query window too: with no org/app yet the query never
   // starts, and `isLoading` would be false while `data` is still absent.
   if (!data) return <LoadingState />;
@@ -65,9 +75,10 @@ export function FileExplorer({ packageId, type, version }: FileExplorerProps) {
         selectedPath={activeEntry.path}
         onSelect={setSelectedPath}
         label={t("files.treeLabel")}
+        controlsId={previewId}
         className="border-border bg-card max-h-[560px] rounded-lg border p-1"
       />
-      <FilePreview packageId={packageId} version={version} entry={activeEntry} />
+      <FilePreview id={previewId} packageId={packageId} version={version} entry={activeEntry} />
     </div>
   );
 }

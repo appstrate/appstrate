@@ -3,15 +3,18 @@
 /**
  * Read-only file explorer for a package's artifact.
  *
- * Single choke point: BOTH the index route and the content route read through
- * this module, in two steps — {@link resolvePackageFileValidator} (cheap, DB
- * only) then {@link readPackageSnapshot} (the only thing that fetches bytes).
- * The split is what lets a conditional request for an immutable version be
- * answered without a download. Every future optimization (a decompressed-
- * snapshot LRU, a byte-range reader, …) lands inside this module without
- * touching a route handler — which is why the routes never call
+ * Single choke point FOR THE FILE-EXPLORER ROUTES: both of them (the index and
+ * the content route) read through this module, in two steps —
+ * {@link resolvePackageFileValidator} (cheap, DB only) then
+ * {@link readPackageSnapshot} (the only thing that fetches bytes). The split is
+ * what lets a conditional request for an exact version be answered from one DB
+ * read, with no download. Every future optimization (a decompressed-snapshot
+ * LRU, a byte-range reader, …) lands inside this module without touching a
+ * route handler — which is why those two handlers never call
  * `downloadPackageFiles` / `downloadVersionZip` / `getVersionForDownload`
- * directly.
+ * themselves. The claim is scoped to them: the download, publish and version
+ * routes in `routes/packages.ts` call all three directly, and are not served
+ * by this module.
  *
  * The two read modes are deliberately asymmetric:
  *

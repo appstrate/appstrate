@@ -5,12 +5,13 @@
  *
  * These are the rules the rendered view cannot restate: a manifest is
  * author-controlled jsonb, so "which fields are present", "which strings may
- * become an href" and "how `tools_policy` reads on one line" are decided here,
+ * become an href" and "which repeated entries collapse" are decided here,
  * once, rather than in each JSX branch.
  */
 
 import { describe, it, expect } from "bun:test";
 import {
+  isManifestOverviewEmpty,
   readIntegrationDetails,
   readIntegrationSource,
   readManifestOverview,
@@ -264,5 +265,85 @@ describe("readMcpServerDetails", () => {
   it("is empty for a manifest that declares no server tail", () => {
     expect(readMcpServerDetails(MINIMAL).isEmpty).toBe(true);
     expect(readMcpServerDetails({ server: {} }).server).toBeUndefined();
+  });
+});
+
+/**
+ * The whole-view verdict `ManifestOverview` renders its empty state from —
+ * the shared block AND the type tail, so the component never emits a card
+ * containing nothing. It is deliberately NOT what picks the landing tab
+ * (`pages/unified-package-detail.tsx` reads `primaryDisplayFile(type).source`,
+ * a structural fact rather than a fullness threshold).
+ */
+describe("isManifestOverviewEmpty", () => {
+  it("is empty for a manifest carrying only its required fields", () => {
+    // Legal per the AFPS schema — the case the empty state exists for.
+    expect(isManifestOverviewEmpty(MINIMAL, "skill")).toBe(true);
+    expect(isManifestOverviewEmpty(undefined, "skill")).toBe(true);
+  });
+
+  it("is not empty as soon as one shared field is declared", () => {
+    expect(isManifestOverviewEmpty({ ...MINIMAL, author: "Ada" }, "skill")).toBe(false);
+    expect(isManifestOverviewEmpty({ ...MINIMAL, keywords: ["tidy"] }, "skill")).toBe(false);
+  });
+
+  it("counts the type tails, which only the tailed types have", () => {
+    // A manifest whose ONLY content is its tail: empty as a skill (no tail is
+    // read), non-empty as its own type. Reading the shared block alone would
+    // make an mcp-server or an integration render an empty state while it had
+    // a server / auth block to show.
+    const mcp = { ...MINIMAL, type: "mcp-server", server: { type: "node" } };
+    expect(isManifestOverviewEmpty(mcp, "mcp-server")).toBe(false);
+    expect(isManifestOverviewEmpty(mcp, "skill")).toBe(true);
+
+    const integration = { ...MINIMAL, type: "integration", auths: { google: { type: "oauth2" } } };
+    expect(isManifestOverviewEmpty(integration, "integration")).toBe(false);
+    expect(isManifestOverviewEmpty(integration, "skill")).toBe(true);
+  });
+});
+
+describe("author-controlled arrays never produce duplicate list rows", () => {
+  it("dedupes keywords and privacy policies", () => {
+    // A manifest is hand-writable jsonb: nothing upstream makes these unique,
+    // and both are rendered as keyed lists.
+    const overview = readManifestOverview({
+      ...MINIMAL,
+      keywords: ["tidy", "tidy", " ", "cli"],
+      privacy_policies: ["https://acme.test/privacy", "https://acme.test/privacy"],
+      compatibility: { platforms: ["linux", "linux", "darwin"] },
+    });
+
+    expect(overview.keywords).toEqual(["tidy", "cli"]);
+    expect(overview.links.filter((l) => l.labelKey === "manifest.privacyPolicy")).toHaveLength(1);
+    expect(overview.facts.find((f) => f.labelKey === "manifest.platforms")?.value).toBe(
+      "linux, darwin",
+    );
+  });
+
+  it("dedupes an mcp-server's tools by name, keeping the first declaration", () => {
+    const details = readMcpServerDetails({
+      ...MINIMAL,
+      type: "mcp-server",
+      tools: [
+        { name: "list_repos", description: "first" },
+        { name: "list_repos", description: "second" },
+        { name: "whoami" },
+      ],
+    });
+
+    expect(details.tools).toEqual([
+      { name: "list_repos", description: "first" },
+      { name: "whoami" },
+    ]);
+  });
+
+  it("dedupes an auth's default scopes", () => {
+    const details = readIntegrationDetails({
+      ...MINIMAL,
+      type: "integration",
+      auths: { google: { type: "oauth2", default_scopes: ["drive.readonly", "drive.readonly"] } },
+    });
+
+    expect(details.auths[0]!.defaultScopes).toEqual(["drive.readonly"]);
   });
 });

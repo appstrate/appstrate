@@ -415,7 +415,7 @@ export const packagesPaths = {
             },
             "Cache-Control": {
               description:
-                "`private, max-age=31536000, immutable` ONLY for an exact, non-yanked version pin. A dist-tag or semver range is a moving target and a yank must stay discoverable, so both get `private, no-cache` — as does the draft. Always `private`: the response is tenant-scoped.",
+                "`private, max-age=300` ONLY for an exact, non-yanked version pin — never `immutable`, because a version can be deleted and republished over different bytes under the same number. A dist-tag or semver range is a moving target and a yank must stay discoverable, so both get `private, no-cache` — as does the draft. Always `private`: the response is tenant-scoped.",
               schema: { type: "string" },
             },
             Vary: {
@@ -523,7 +523,7 @@ export const packagesPaths = {
             },
             "Cache-Control": {
               description:
-                "`private, max-age=31536000, immutable` ONLY for an exact, non-yanked version pin; `private, no-cache` for a dist-tag, a semver range, a yanked version, and the draft.",
+                "`private, max-age=300` ONLY for an exact, non-yanked version pin (never `immutable` — a version number can be republished over different bytes); `private, no-cache` for a dist-tag, a semver range, a yanked version, and the draft.",
               schema: { type: "string" },
             },
             Vary: {

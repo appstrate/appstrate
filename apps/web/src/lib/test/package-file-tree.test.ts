@@ -422,9 +422,33 @@ describe("previewBlockReason", () => {
     expect(previewBlockReason(file("a.md", { size: 1_048_577 }))).toBe("too_large");
   });
 
-  it("reports binary as binary at any size — shrinking it would not help", () => {
-    for (const size of [0, 12, PREVIEW_SIZE_LIMIT, PREVIEW_SIZE_LIMIT + 1, 50_000_000]) {
+  it("reports binary as binary at every size the server actually inspected", () => {
+    // At or below the ceiling the server decoded the bytes, so `binary` is a
+    // checked fact and the more useful one — shrinking the file would not make
+    // it previewable.
+    for (const size of [0, 12, PREVIEW_SIZE_LIMIT]) {
       expect(previewBlockReason(file("logo.png", { media_kind: "binary", size }))).toBe("binary");
+    }
+  });
+
+  it("says too large, not binary, above the ceiling — the server only guessed there", () => {
+    // Over 1 MiB the server classifies by EXTENSION without decoding
+    // (`services/package-files.ts`), so an extension-less text file comes back
+    // `binary`. Reporting that verbatim told the user a 1.5 MB CHANGELOG was
+    // a binary file.
+    expect(previewBlockReason(file("CHANGELOG", { media_kind: "binary", size: 1_572_864 }))).toBe(
+      "too_large",
+    );
+    expect(previewBlockReason(file("LICENSE", { media_kind: "binary", size: 1_048_577 }))).toBe(
+      "too_large",
+    );
+    // Same answer for a file that really is binary: above the ceiling size is
+    // the binding constraint either way, so the verdict does not depend on a
+    // classification nobody verified.
+    for (const size of [PREVIEW_SIZE_LIMIT + 1, 50_000_000]) {
+      expect(previewBlockReason(file("logo.png", { media_kind: "binary", size }))).toBe(
+        "too_large",
+      );
     }
   });
 

@@ -35,6 +35,7 @@ import { VersionHistory } from "../components/version-history";
 import { DiffTab } from "../components/diff-tab";
 import { FileExplorer } from "../components/package-files/file-explorer";
 import { ManifestOverview } from "../components/package-manifest/manifest-overview";
+import { primaryDisplayFile } from "../lib/package-files";
 import { CreateVersionModal } from "../components/create-version-modal";
 import { ForkPackageModal } from "../components/fork-package-modal";
 // Agent-specific components
@@ -235,9 +236,20 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
       const val = agentDetail?.config?.current?.[key];
       return val === undefined || val === null || val === "";
     });
-  // Agents open on their runs; every other type opens on the rendered manifest,
-  // which is the closest thing they have to a landing view.
-  const defaultTab: DetailTab = type === "agent" ? "runs" : "overview";
+  // Agents open on their runs. Every other type opens where its SUBSTANCE
+  // lives, which `lib/package-files.ts` already encodes and which does not
+  // depend on how much metadata the author happened to fill in: a skill IS its
+  // SKILL.md (`source: "content"`) → open the files; an mcp-server IS its
+  // manifest (`source: "manifest"`, it has no content file at all) → open the
+  // rendered view. Same distinction that made the old content tab carry a
+  // filename as its label. Pure derivation, so a URL that already names a tab
+  // still wins in `useTabWithHash`.
+  const defaultTab: DetailTab =
+    type === "agent"
+      ? "runs"
+      : primaryDisplayFile(type).source === "content"
+        ? "content"
+        : "overview";
   const [tab, setTab] = useTabWithHash<DetailTab>(allValidTabs, defaultTab);
   // Reset tab if it becomes invalid
   useEffect(() => {
@@ -474,8 +486,15 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
       )}
 
       {/* Tab bar */}
+      {/* `flex-wrap h-auto`: an agent reaches 10 tabs, and the shared TabsList
+          neither wraps nor scrolls. Its nearest scroll ancestor is
+          `overflow-y: auto`, so `overflow-x` computes to `auto` there and the
+          whole content area — not just the strip — grows a horizontal
+          scrollbar. Wrapping rather than scrolling because this is the page's
+          primary navigation; fixed at the call site because other pages depend
+          on the shared component's fixed height. */}
       <Tabs value={tab} onValueChange={(v) => setTab(v as DetailTab)} className="mb-4">
-        <TabsList>
+        <TabsList className="h-auto flex-wrap">
           {tabDefs.map((td) => (
             <TabsTrigger key={td.id} value={td.id}>
               {td.label}

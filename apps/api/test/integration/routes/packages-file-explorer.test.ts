@@ -325,14 +325,20 @@ describe("package file explorer", () => {
       );
     });
 
-    it("caches an EXACT version pin immutably", async () => {
+    it("caches an EXACT version pin briefly, and never as `immutable`", async () => {
+      // A version number is NOT permanently content-addressed: deleting a
+      // version and republishing the number over different bytes is a
+      // supported sequence, and `immutable` would let a client that had the
+      // old one open serve it for a year with no revalidation — unreachable by
+      // any client-side invalidation, since the HTTP cache answers first.
       const { res } = await listFiles(ctx, id, "?version=1.0.0");
       expect(res.status).toBe(200);
-      expect(res.headers.get("Cache-Control")).toBe("private, max-age=31536000, immutable");
+      expect(res.headers.get("Cache-Control")).toBe("private, max-age=300");
+      expect(res.headers.get("Cache-Control")).not.toContain("immutable");
       expect(res.headers.get("ETag")).toBe(`"i-pv-${(await versionIntegrity(id))!}"`);
     });
 
-    it("resolves a dist-tag but must NOT mark it immutable", async () => {
+    it("resolves a dist-tag but must NOT even get the short max-age", async () => {
       // `?version=latest` is a MOVING target: pinning it for a year would mean
       // publishing 1.1.0 never reaches a client that already cached 1.0.0.
       const { res, entries } = await listFiles(ctx, id, "?version=latest");
@@ -343,13 +349,13 @@ describe("package file explorer", () => {
       expect(res.headers.get("ETag")).toBe(`"i-pv-${(await versionIntegrity(id))!}"`);
     });
 
-    it("resolves a semver range without marking it immutable", async () => {
+    it("resolves a semver range without any max-age", async () => {
       const { res } = await listFiles(ctx, id, "?version=%5E1.0.0");
       expect(res.status).toBe(200);
       expect(res.headers.get("Cache-Control")).toBe("private, no-cache");
     });
 
-    it("never marks a yanked version immutable, and flags it with X-Yanked", async () => {
+    it("never caches a yanked version at all, and flags it with X-Yanked", async () => {
       await db
         .update(packageVersions)
         .set({ yanked: true, yankedReason: "bad release" })
@@ -357,7 +363,7 @@ describe("package file explorer", () => {
 
       const { res } = await listFiles(ctx, id, "?version=1.0.0");
       expect(res.status).toBe(200);
-      // An immutable copy could never learn it had been withdrawn.
+      // A cached copy could never learn it had been withdrawn.
       expect(res.headers.get("Cache-Control")).toBe("private, no-cache");
       expect(res.headers.get("X-Yanked")).toBe("true");
 
@@ -690,9 +696,9 @@ describe("package file explorer", () => {
     });
   });
 
-  // ─── The immutable-ETag shortcut ───────────────────────────────────────────
+  // ─── The exact-version ETag shortcut ───────────────────────────────────────
 
-  describe("conditional request on an immutable version", () => {
+  describe("conditional request on an exact version", () => {
     const id = "@fexp/no-artifact-agent";
     // Any value works: a version's ETag is derived from the `integrity` COLUMN,
     // which is exactly what makes the shortcut a pure DB read.
@@ -732,7 +738,7 @@ describe("package file explorer", () => {
       });
       expect(res.status).toBe(304);
       expect(res.headers.get("ETag")).toBe(`"i-pv-${integrity}"`);
-      expect(res.headers.get("Cache-Control")).toBe("private, max-age=31536000, immutable");
+      expect(res.headers.get("Cache-Control")).toBe("private, max-age=300");
       expect(await res.text()).toBe("");
     });
 

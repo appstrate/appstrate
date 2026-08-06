@@ -17659,7 +17659,7 @@ export interface operations {
                     "Appstrate-Version": components["headers"]["AppstrateVersion"];
                     /** @description Strong entity-tag of this index representation (`"i-…"`), derived from the version artifact's integrity hash or from a content digest of the overlaid draft. It never matches a `files/content` tag. */
                     ETag?: string;
-                    /** @description `private, max-age=31536000, immutable` ONLY for an exact, non-yanked version pin. A dist-tag or semver range is a moving target and a yank must stay discoverable, so both get `private, no-cache` — as does the draft. Always `private`: the response is tenant-scoped. */
+                    /** @description `private, max-age=300` ONLY for an exact, non-yanked version pin — never `immutable`, because a version can be deleted and republished over different bytes under the same number. A dist-tag or semver range is a moving target and a yank must stay discoverable, so both get `private, no-cache` — as does the draft. Always `private`: the response is tenant-scoped. */
                     "Cache-Control"?: string;
                     /** @description Always `X-Org-Id, X-Application-Id` — access depends on both, so a cache must not reuse this body across organizations or applications. */
                     Vary?: string;
@@ -17734,7 +17734,7 @@ export interface operations {
                     "Appstrate-Version": components["headers"]["AppstrateVersion"];
                     /** @description Strong entity-tag of THIS FILE (`"f-…"`), folding in both the snapshot identity and the `path`. Per RFC 9110 §8.8.1 it identifies one representation: a tag obtained for another `path`, or from the file index, will not match. */
                     ETag?: string;
-                    /** @description `private, max-age=31536000, immutable` ONLY for an exact, non-yanked version pin; `private, no-cache` for a dist-tag, a semver range, a yanked version, and the draft. */
+                    /** @description `private, max-age=300` ONLY for an exact, non-yanked version pin (never `immutable` — a version number can be republished over different bytes); `private, no-cache` for a dist-tag, a semver range, a yanked version, and the draft. */
                     "Cache-Control"?: string;
                     /** @description Always `X-Org-Id, X-Application-Id` — access depends on both, so a cache must not reuse these bytes across organizations or applications. */
                     Vary?: string;

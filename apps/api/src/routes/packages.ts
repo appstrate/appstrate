@@ -1484,11 +1484,22 @@ async function loadFileExplorerPackage(c: Context<AppEnv>): Promise<PackageFileS
 
 /**
  * `private` is mandatory on both routes: these are authenticated,
- * tenant-scoped bytes and a shared cache must never hold them. An exact,
- * non-yanked version is content-addressed, so it is safe to pin forever;
- * everything else changes under the same URL and only ever gets revalidated
- * (`no-cache` still allows the 304 round-trip, it just forbids serving
- * without one).
+ * tenant-scoped bytes and a shared cache must never hold them. Everything that
+ * moves under its own URL (draft, dist-tag, semver range, yanked version) gets
+ * `no-cache`, which still allows the 304 round-trip — it only forbids serving
+ * without one.
+ *
+ * An exact, non-yanked version gets a SHORT `max-age` and, deliberately, NOT
+ * `immutable`. A version number is not permanently content-addressed here:
+ * `DELETE /versions/{version}` is a live UI affordance and `validateForwardVersion`
+ * only rejects versions still present in `package_versions`, so the same number
+ * can be republished over different bytes. Under `max-age=31536000, immutable`
+ * a client that had the old one open would keep serving it for a year with no
+ * revalidation, and `invalidatePackageFiles` could not reach it — the HTTP
+ * cache short-circuits the fetch before React Query ever sees it. The
+ * revalidation this buys back is nearly free: `resolvePackageFileValidator`
+ * answers an exact version's 304 from one DB read, with no storage GET and no
+ * unzip. That is the entire reason it is split out from `readPackageSnapshot`.
  *
  * `Vary` is NOT optional here. The response body depends on `X-Org-Id` /
  * `X-Application-Id` (via `hasPackageAccess`) while the URL does not mention
@@ -1496,10 +1507,14 @@ async function loadFileExplorerPackage(c: Context<AppEnv>): Promise<PackageFileS
  * URL and the browser answers from cache — showing application B an artifact
  * that is only installed in application A.
  */
+const EXACT_VERSION_MAX_AGE_SECONDS = 300;
+
 function fileCacheHeaders(etag: string, immutable: boolean): Record<string, string> {
   return {
     ETag: etag,
-    "Cache-Control": immutable ? "private, max-age=31536000, immutable" : "private, no-cache",
+    "Cache-Control": immutable
+      ? `private, max-age=${EXACT_VERSION_MAX_AGE_SECONDS}`
+      : "private, no-cache",
     Vary: "X-Org-Id, X-Application-Id",
   };
 }

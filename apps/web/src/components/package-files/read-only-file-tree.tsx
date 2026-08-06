@@ -33,6 +33,8 @@ interface ReadOnlyFileTreeProps {
   onSelect: (path: string) => void;
   /** Accessible name of the tree (translated by the caller). */
   label: string;
+  /** `id` of the panel this tree drives — announced as `aria-controls`. */
+  controlsId?: string;
   className?: string;
 }
 
@@ -41,6 +43,7 @@ export function ReadOnlyFileTree({
   selectedPath,
   onSelect,
   label,
+  controlsId,
   className,
 }: ReadOnlyFileTreeProps) {
   const tree = useMemo(() => buildFileTree(entries), [entries]);
@@ -139,6 +142,7 @@ export function ReadOnlyFileTree({
       <div
         role="tree"
         aria-label={label}
+        aria-controls={controlsId}
         onKeyDown={handleKeyDown}
         style={{ height: virtualizer.getTotalSize(), width: "100%", position: "relative" }}
       >

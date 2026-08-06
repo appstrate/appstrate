@@ -134,6 +134,16 @@ describe("applyDraftOverlay — per-type draft_content target", () => {
 });
 
 describe("buildFileIndex — media kind classification", () => {
+  it("pins the inline ceiling to its literal", () => {
+    // Every size assertion in this file is written in terms of the SYMBOL, so
+    // raising the constant would keep this whole suite green while the server
+    // started inlining files the SPA then refuses to preview. The web side
+    // pins the same literal (`PREVIEW_SIZE_LIMIT`, in
+    // `apps/web/src/lib/test/package-file-tree.test.ts`); one literal on each
+    // side is what makes the documented lockstep real rather than asserted.
+    expect(INLINE_MAX_BYTES).toBe(1_048_576);
+  });
+
   it("classifies a UTF-8 file as text and inlines it verbatim", () => {
     const entry = entryFor({ "README.md": "# héllo\nwörld" }, "README.md");
     expect(entry.media_kind).toBe("text");

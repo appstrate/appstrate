@@ -104,8 +104,13 @@ export function PackageActionsDropdown({
   const isAgent = type === "agent";
   const isMutable = isAdmin && !isBuiltIn && !isHistoricalVersion && isOwned;
 
-  // The manifest is no longer reachable from here: the Aperçu tab renders it
-  // and the Package AFPS tab carries its raw `manifest.json`.
+  // The manifest is no longer reachable from here, and does not need to be:
+  // every page that mounts this dropdown carries both tabs — À propos renders
+  // the manifest, Package AFPS serves its raw `manifest.json`. That holds for
+  // integrations too, which route to `pages/integration-detail.tsx` and have
+  // their own tab set: dropping the menu item without a file explorer there
+  // left an integration's `manifest.json` and `INTEGRATION.md` reachable only
+  // by downloading the `.afps`, so that page mounts the explorer as well.
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>

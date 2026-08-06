@@ -62,8 +62,27 @@ const SINKS = [
   { name: "document.write", pattern: /\bdocument\s*\.\s*write\b/ },
   { name: "eval()", pattern: /\beval\s*\(/ },
   { name: "new Function()", pattern: /\bnew\s+Function\s*\(/ },
+  // Navigating to a blob URL renders it in this origin exactly as opening a
+  // window would. `window.open` alone left three equivalent doors open.
   { name: "window.open()", pattern: /\bwindow\s*\.\s*open\s*\(/ },
+  { name: "location.href =", pattern: /\blocation\s*\.\s*href\s*=(?!=)/ },
+  { name: "location.assign()", pattern: /\blocation\s*\.\s*assign\s*\(/ },
+  { name: "location.replace()", pattern: /\blocation\s*\.\s*replace\s*\(/ },
 ] as const;
+
+/**
+ * Forbidden in the EXPLORER only. The manifest view legitimately renders one
+ * `<a href={entry.href}>`, and its own rule below pins that the href can only
+ * be a value `normalizeHttpUrl` accepted — so the sink is checked there, not
+ * banned. Nothing in the explorer has any business turning package bytes into
+ * a link, and until now an `href={…}` in `components/package-files/` was
+ * checked by neither scope.
+ */
+const EXPLORER_ONLY_SINKS = [
+  { name: "<a href={…}>", pattern: /<a\b[^>]*\bhref\s*=\s*\{/ },
+] as const;
+
+const EXPLORER_SINKS = [...SINKS, ...EXPLORER_ONLY_SINKS];
 
 /**
  * Every module the explorer is allowed to reach, relative specifiers resolved
@@ -123,18 +142,43 @@ const SOURCES = FILES.map((path) => ({
 }));
 
 /**
+ * The text between a call's `(` and the paren that CLOSES it, or `null` when
+ * the source never closes it.
+ */
+function callArgument(source: string, afterOpenParen: number): string | null {
+  let depth = 1;
+  for (let i = afterOpenParen; i < source.length; i++) {
+    const ch = source[i];
+    if (ch === "(") depth++;
+    else if (ch === ")" && --depth === 0) return source.slice(afterOpenParen, i);
+  }
+  return null;
+}
+
+/**
  * Every way a `URL.createObjectURL` call in this source is unsafe: it must
  * wrap a blob THIS code built (not bytes handed to it) and pin that blob to an
  * inert type. Shared by the rule and its control positive, so the control
  * exercises the rule rather than a copy of its string literals.
+ *
+ * Scoped to the call's OWN argument list — the first token after `(`, and the
+ * inert type anywhere before the paren closing it at depth 1. A fixed-width
+ * window let an adjacent statement supply both tokens, so
+ *
+ *     URL.createObjectURL(new Blob([text], { type: "text/html" }));
+ *     const dl = new Blob([bytes], { type: "application/octet-stream" });
+ *
+ * scanned clean — a verified bypass of this exact rule.
  */
 function objectUrlFaults(source: string): string[] {
   const faults: string[] = [];
   for (const match of source.matchAll(/URL\.createObjectURL\(/g)) {
-    const call = source.slice(match.index, match.index + 200);
-    if (!call.includes("new Blob(")) {
+    const arg = callArgument(source, match.index + match[0].length);
+    if (arg === null) {
+      faults.push("createObjectURL with an unterminated argument list");
+    } else if (!/^\s*new Blob\(/.test(arg)) {
       faults.push("createObjectURL on a blob it did not build");
-    } else if (!call.includes('type: "application/octet-stream"')) {
+    } else if (!arg.includes('type: "application/octet-stream"')) {
       faults.push("createObjectURL without an inert MIME type");
     }
   }
@@ -162,7 +206,7 @@ describe("package file explorer rendering sinks", () => {
   it("renders package bytes through no sink that could interpret them", () => {
     const offenders: string[] = [];
     for (const { label, source } of SOURCES) {
-      for (const sink of SINKS) {
+      for (const sink of EXPLORER_SINKS) {
         if (sink.pattern.test(source)) offenders.push(`${label} → ${sink.name}`);
       }
     }
@@ -207,7 +251,7 @@ describe("package file explorer rendering sinks", () => {
   it("actually detects each sink it claims to detect", () => {
     // Control positive: without this, a typo'd pattern makes the guard
     // decorative and every scan above passes vacuously.
-    const samples: Record<(typeof SINKS)[number]["name"], string> = {
+    const samples: Record<(typeof EXPLORER_SINKS)[number]["name"], string> = {
       dangerouslySetInnerHTML: `<div dangerouslySetInnerHTML={{ __html: text }} />`,
       "<iframe>": `<iframe sandbox="" src={url} />`,
       srcDoc: `<iframe\n  srcDoc={text}\n/>`,
@@ -220,15 +264,26 @@ describe("package file explorer rendering sinks", () => {
       "eval()": `eval(text);`,
       "new Function()": `new Function("t", text);`,
       "window.open()": `window.open(objectUrl, "_blank");`,
+      "location.href =": `window.location.href = previewUrl;`,
+      "location.assign()": `location.assign(previewUrl);`,
+      "location.replace()": `window.location.replace(previewUrl);`,
+      "<a href={…}>": `<a\n  target="_blank"\n  href={objectUrl}\n>open</a>`,
     };
-    for (const sink of SINKS) {
+    for (const sink of EXPLORER_SINKS) {
       expect(sink.pattern.test(samples[sink.name])).toBe(true);
     }
     // And each leaves its innocuous neighbour alone.
-    const byName = (name: (typeof SINKS)[number]["name"]) => SINKS.find((s) => s.name === name)!;
+    const byName = (name: (typeof EXPLORER_SINKS)[number]["name"]) =>
+      EXPLORER_SINKS.find((s) => s.name === name)!;
     expect(byName("<img src={…}>").pattern.test(`<img src="/logo.svg" />`)).toBe(false);
     expect(byName(".innerHTML =").pattern.test(`const html = el.innerHTML;`)).toBe(false);
     expect(byName("eval()").pattern.test(`const evaluated = score;`)).toBe(false);
+    // The download path assigns `a.href`, which is not a navigation.
+    expect(byName("location.href =").pattern.test(`a.href = url;`)).toBe(false);
+    expect(byName("location.href =").pattern.test(`if (location.href === url) return;`)).toBe(
+      false,
+    );
+    expect(byName("<a href={…}>").pattern.test(`<a href="/docs">docs</a>`)).toBe(false);
   });
 
   it("actually detects an object URL built under an interpretable type", () => {
@@ -245,6 +300,31 @@ describe("package file explorer rendering sinks", () => {
         `URL.createObjectURL(new Blob([data], { type: "application/octet-stream" }))`,
       ),
     ).toEqual([]);
+  });
+
+  it("does not let a neighbouring statement launder the object URL", () => {
+    // The bypass a fixed-width window allowed: the preview blob is `text/html`
+    // and the inert literal comes from the NEXT line, which is a perfectly
+    // ordinary download call. Both tokens the old rule looked for were present
+    // within 200 characters, so it scanned clean.
+    const bypass = [
+      `const previewUrl = URL.createObjectURL(new Blob([text], { type: "text/html" }));`,
+      `const dl = new Blob([bytes], { type: "application/octet-stream" });`,
+      `window.location.href = previewUrl;`,
+    ].join("\n");
+
+    expect(objectUrlFaults(bypass)).toEqual(["createObjectURL without an inert MIME type"]);
+    // …and the navigation that consumes it is a sink in its own right, so the
+    // two rules catch this independently.
+    expect(EXPLORER_SINKS.some((sink) => sink.pattern.test(bypass))).toBe(true);
+  });
+
+  it("reports a call whose argument list is never closed", () => {
+    // Paren matching has to fail LOUD: silently treating an unterminated call
+    // as compliant would make truncated or minified input a free pass.
+    expect(
+      objectUrlFaults(`URL.createObjectURL(new Blob([data], { type: "application/octet-stream" }`),
+    ).toEqual(["createObjectURL with an unterminated argument list"]);
   });
 });
 
