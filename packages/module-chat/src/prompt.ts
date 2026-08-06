@@ -251,7 +251,10 @@ export function formatCallerContext(raw: unknown, opts?: { locale?: string }): s
       );
     }
     if (ctx.agents_truncated) {
-      lines.push("More agents are available — use the search_operations tool to find them.");
+      lines.push(
+        "More agents are available — call `invoke_operation` with " +
+          '`operation_id: "listAgents"` for the full list.',
+      );
     }
     lines.push(
       "Prefer running an existing agent over doing the work inline when one fits the task. " +
@@ -269,7 +272,10 @@ export function formatCallerContext(raw: unknown, opts?: { locale?: string }): s
       );
     }
     if (ctx.skills_truncated) {
-      lines.push("More skills are available — use the search_operations tool to find them.");
+      lines.push(
+        "More skills are available — call `invoke_operation` with " +
+          '`operation_id: "listSkills"` for the full list.',
+      );
     }
     lines.push(
       "Skills are not run on their own. When you build or configure an agent and one of these " +

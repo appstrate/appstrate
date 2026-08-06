@@ -131,10 +131,10 @@ describe("formatCallerContext", () => {
     expect(out).toContain("`@acme/report`");
     expect(out).toContain("(takes input: yes)");
     expect(out).toContain("Prefer running an existing agent");
-    expect(out).not.toContain("use the search_operations tool");
+    expect(out).not.toContain("More agents are available");
   });
 
-  it("adds the search_operations note only when the agent list is truncated", () => {
+  it("adds the listAgents note only when the agent list is truncated", () => {
     const out = formatCallerContext({
       user: { name: "Ada" },
       org: { role: "member" },
@@ -142,7 +142,7 @@ describe("formatCallerContext", () => {
       agents: [{ package_id: "@appstrate/triage", takes_input: false }],
       agents_truncated: true,
     });
-    expect(out).toContain("use the search_operations tool");
+    expect(out).toContain('`operation_id: "listAgents"`');
   });
 
   it("renders a context block from agents alone (no identity/connections)", () => {
@@ -199,6 +199,10 @@ describe("formatCallerContext", () => {
       skills_truncated: true,
     });
     expect(out).toContain("More skills are available");
+    // The escape hatch must name the operation. `search_operations` ranks
+    // `listSkills` below every create/delete variant, so a keyword search is
+    // not a reliable path back to the truncated list.
+    expect(out).toContain('`operation_id: "listSkills"`');
   });
 
   it("renders a context block from skills alone (no identity/connections/agents)", () => {
