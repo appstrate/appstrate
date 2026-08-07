@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Hono } from "hono";
+import type { Context } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import { listResponse } from "../lib/list-response.ts";
 import { getRunningRunCounts } from "../services/state/runs.ts";
@@ -30,7 +31,7 @@ import { getActor } from "../lib/actor.ts";
 import { parseScopedName } from "@appstrate/core/naming";
 import { computeIntegrity } from "@appstrate/core/integrity";
 import { z } from "zod";
-import { ApiError, invalidRequest, notFound } from "../lib/errors.ts";
+import { ApiError, forbidden, invalidRequest, notFound } from "../lib/errors.ts";
 import { readJsonBody } from "../lib/request-body.ts";
 import { asJSONSchemaObject, mergeWithDefaults } from "@appstrate/core/form";
 import { getAppScope } from "../lib/scope.ts";
@@ -41,7 +42,7 @@ import {
   buildBundleFromAgentDraft,
   resolveExportVersion,
 } from "../services/bundle-assembly.ts";
-import { writeBundleToBuffer } from "@appstrate/afps-runtime/bundle";
+import { writeBundleToBuffer, type Bundle } from "@appstrate/afps-runtime/bundle";
 import { toBundleApiError } from "../services/run-launcher/bundle-error-mapping.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
@@ -78,6 +79,66 @@ function scopeFromQueryParams(
     return { type: "end_user", id: actorIdParam };
   }
   throw invalidRequest("Invalid actor_type / actor_id combination");
+}
+
+/**
+ * Read guards for the package types a bundle can carry BEYOND its root.
+ *
+ * Both export paths walk `depTypes: ["skills"]`, so `skill` is the only type
+ * that can appear today. Anything else fails CLOSED — an archive must never
+ * ship bytes whose read scope this route does not name.
+ */
+const BUNDLE_DEPENDENCY_READ_GUARDS = new Map<string, ReturnType<typeof requirePermission>>([
+  ["skill", requirePermission("skills", "read")],
+]);
+
+/**
+ * Authorize the DEPENDENCY bytes an export is about to hand out.
+ *
+ * `agents:read` covers the root agent, whose files the export narrows to
+ * `manifest.json` + `prompt.md`. Dependencies are a different surface: both
+ * catalogs put a dependency's ENTIRE stored file map into the archive
+ * (`DraftPackageCatalog.fetch` reads `downloadPackageFiles` whole,
+ * `DbPackageCatalog.fetch` extracts the whole published artifact). A bundle
+ * carrying a skill therefore hands out exactly the bytes
+ * `GET /api/packages/skills/{id}/files[/content]` serves — and #1123/#1124
+ * settled that those need `skills:read`, resolved per package TYPE rather than
+ * one blanket scope. Without this guard the export is a looser door to the same
+ * bytes: an `agents:read`-only credential is 403'd on the file explorer and
+ * served the identical content here.
+ *
+ * Checked against the ASSEMBLED bundle, not the root manifest, so transitive
+ * deps and any future widening of `depTypes` are covered by construction.
+ *
+ * Visibility is deliberately NOT re-derived here. Dependency resolution is
+ * org-scoped in every catalog, which is what lets a run reach a skill that is
+ * not installed in the current application; re-checking `hasPackageAccess` over
+ * the dep set would make the export stricter than the run it mirrors and break
+ * `appstrate run @scope/agent` where clicking Run in the dashboard succeeds.
+ * Scope, not visibility, is what this route was missing.
+ */
+async function requireBundleDependencyReadPermissions(
+  c: Context<AppEnv>,
+  bundle: Bundle,
+): Promise<void> {
+  const checked = new Set<string>();
+  for (const [identity, pkg] of bundle.packages) {
+    if (identity === bundle.root) continue;
+    const rawType = asRecord(pkg.manifest).type;
+    const type = typeof rawType === "string" ? rawType : "";
+    if (checked.has(type)) continue;
+    checked.add(type);
+    const guard = BUNDLE_DEPENDENCY_READ_GUARDS.get(type);
+    if (!guard) {
+      throw forbidden(
+        `Insufficient permissions: the bundle carries a '${type || "unknown"}' dependency and no read scope is defined for that type`,
+      );
+    }
+    // `requirePermission` is middleware; invoking it with a no-op `next`
+    // reuses the same 403 shape, denial audit hook, and fail-closed semantics
+    // as every route-level RBAC call site.
+    await guard(c, async () => {});
+  }
 }
 
 export function createAgentsRouter() {
@@ -560,6 +621,11 @@ export function createAgentsRouter() {
             metadata: { builder: "appstrate-platform" },
           });
         }
+        // The archive carries every dependency's full stored file map, which
+        // `agents:read` does not authorize. Gate on the read scope of each
+        // dependency TYPE before any bytes are serialised, so this route is not
+        // a looser door to the same content the package file explorer guards.
+        await requireBundleDependencyReadPermissions(c, bundle);
         // Serialization stays inside the try: `writeBundleToBuffer` re-validates
         // the assembled map and raises the same `BundleError` family, so leaving
         // it outside would keep that throw on the untyped path.
@@ -573,7 +639,8 @@ export function createAgentsRouter() {
         //
         // Anything the mapper does not own returns null and rethrows untouched,
         // keeping its own status — the 404s from `resolveExportVersion`, the 400
-        // from an invalid draft manifest.
+        // from an invalid draft manifest, the 403 from the dependency read-scope
+        // guard above.
         const mapped = toBundleApiError(err);
         if (mapped) throw mapped;
         throw err;
