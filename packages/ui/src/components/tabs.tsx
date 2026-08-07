@@ -78,10 +78,10 @@ Tabs.displayName = TabsPrimitive.Root.displayName;
 interface TabsListProps extends React.ComponentPropsWithoutRef<typeof TabsPrimitive.List> {
   /**
    * Collapse the triggers that do not fit into a trailing overflow menu so the
-   * bar always occupies exactly one row. On by default — a tab bar that silently
-   * overflows or wraps is a bug, not a call-site concern.
+   * bar always occupies exactly one row. Opt in only for a parent-sized tab bar
+   * whose children are plain `TabsTrigger` elements.
    *
-   * Two hard preconditions. Turn this OFF wherever either does not hold:
+   * Two hard preconditions:
    *
    * 1. **The bar's container must be sized by its parent, not by its content.**
    *    A block-level parent (the usual case — a `Tabs` root in normal flow) is
@@ -106,7 +106,7 @@ interface TabsListProps extends React.ComponentPropsWithoutRef<typeof TabsPrimit
 }
 
 const TabsList = React.forwardRef<React.ComponentRef<typeof TabsPrimitive.List>, TabsListProps>(
-  ({ className, collapse = true, overflowLabel, ...props }, ref) => {
+  ({ className, collapse = false, overflowLabel, ...props }, ref) => {
     if (!collapse) {
       return <TabsPrimitive.List ref={ref} className={cn(PILL_CLASS, className)} {...props} />;
     }

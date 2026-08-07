@@ -396,29 +396,33 @@ describe("package file explorer", () => {
   /**
    * The explorer is a READ boundary over bytes the platform already stores, and
    * it must apply the SAME decompressed ceiling the import gate applies. It did
-   * not: `unzipAndNormalize` passed no options and inherited `unzipArtifact`'s
-   * 200 MB default, so a stored archive could be re-expanded to four times what
-   * it would have needed to pass on the way in — one authenticated GET per
-   * expansion.
+   * not: its draft and version paths used different storage helpers, and either
+   * could inherit `unzipArtifact`'s 200 MB generic default. These assertions pin
+   * both paths to the package-specific 50 MB ceiling.
    */
   describe("decompression ceiling", () => {
     const id = "@fexp/high-ratio-agent";
 
     /**
-     * Build a version whose artifact expands to `blockMb * copies` MB.
+     * Build entries that expand to `blockMb * copies` MB.
      *
      * The padding entries all reference the SAME buffer, so a 54 MB expansion
      * costs one 6 MB allocation here — no 50 MB fixture is materialized, and
      * the archive itself stays a few tens of KB because a run of one repeated
      * byte is what deflate compresses best.
      */
-    async function seedVersionExpandingTo(blockMb: number, copies: number): Promise<Buffer> {
+    function expandingEntries(blockMb: number, copies: number): Record<string, Uint8Array> {
       const block = new Uint8Array(blockMb * 1024 * 1024);
       const entries: Record<string, Uint8Array> = {
         "manifest.json": encoder.encode(JSON.stringify(manifestFor(id))),
         "prompt.md": encoder.encode("published prompt v1"),
       };
       for (let i = 0; i < copies; i++) entries[`pad-${i}.bin`] = block;
+      return entries;
+    }
+
+    async function seedVersionExpandingTo(blockMb: number, copies: number): Promise<Buffer> {
+      const entries = expandingEntries(blockMb, copies);
       const zip = Buffer.from(zipArtifact(entries, 9));
 
       await uploadPackageZip(id, "1.0.0", zip);
@@ -443,7 +447,7 @@ describe("package file explorer", () => {
       await seedInstalledPackage(ctx.defaultAppId, id);
     });
 
-    it("refuses an artifact that expands past the ceiling, on both read routes", async () => {
+    it("refuses a published artifact that expands past the ceiling, on both read routes", async () => {
       // 9 x 6 MB = 54 MB decompressed, over the 50 MB ceiling.
       const zip = await seedVersionExpandingTo(6, 9);
 
@@ -463,6 +467,24 @@ describe("package file explorer", () => {
       // The single-file route reads through the same snapshot, so it must
       // refuse identically — otherwise the cheaper route stays exploitable.
       const content = await fetchContent(ctx, id, "prompt.md", "&version=1.0.0");
+      expect(content.status).toBe(422);
+      expect(((await content.json()) as { code: string }).code).toBe("package_archive_unreadable");
+    });
+
+    it("refuses a draft artifact that expands past the ceiling, on both read routes", async () => {
+      // Drafts use a different storage helper from published versions. Keep
+      // this assertion separate so neither path can silently drift to the
+      // generic ZIP helper's larger default.
+      await uploadPackageFiles("agents", ctx.orgId, id, expandingEntries(6, 9));
+
+      const { res } = await listFiles(ctx, id);
+      expect(res.status).toBe(422);
+      expect(res.headers.get("Content-Type")).toContain("application/problem+json");
+      const problem = (await res.json()) as { code: string; detail: string };
+      expect(problem.code).toBe("package_archive_unreadable");
+      expect(problem.detail).toContain("50 MB");
+
+      const content = await fetchContent(ctx, id, "prompt.md");
       expect(content.status).toBe(422);
       expect(((await content.json()) as { code: string }).code).toBe("package_archive_unreadable");
     });

@@ -34,14 +34,14 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { readFileSync, readdirSync, statSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { dirname, join, relative, resolve } from "node:path";
 
-const COMPONENTS_DIR = dirname(dirname(fileURLToPath(import.meta.url)));
-const WEB_SRC = dirname(COMPONENTS_DIR);
-const EXPLORER_DIR = join(COMPONENTS_DIR, "package-files");
-const MANIFEST_DIR = join(COMPONENTS_DIR, "package-manifest");
+const COMPONENTS_DIR = decodeURIComponent(new URL("../", import.meta.url).pathname).replace(
+  /\/$/,
+  "",
+);
+const WEB_SRC = decodeURIComponent(new URL("../../", import.meta.url).pathname).replace(/\/$/, "");
+const EXPLORER_DIR = `${COMPONENTS_DIR}/package-files`;
+const MANIFEST_DIR = `${COMPONENTS_DIR}/package-manifest`;
 
 /**
  * Every way author-controlled bytes could be INTERPRETED rather than displayed.
@@ -122,13 +122,23 @@ const ALLOWED_IMPORTS = [
   "stores/theme-store",
 ];
 
-function sourceFiles(dir: string, acc: string[] = []): string[] {
-  for (const entry of readdirSync(dir)) {
-    const path = join(dir, entry);
-    if (statSync(path).isDirectory()) sourceFiles(path, acc);
-    else if (/\.tsx?$/.test(path)) acc.push(path);
-  }
-  return acc;
+function sourceFiles(dir: string): string[] {
+  return [...new Bun.Glob("**/*.{ts,tsx}").scanSync({ cwd: dir, absolute: true, onlyFiles: true })];
+}
+
+function relativeToWebSource(path: string): string {
+  const prefix = `${WEB_SRC}/`;
+  if (!path.startsWith(prefix)) throw new Error(`Source is outside apps/web/src: ${path}`);
+  return path.slice(prefix.length);
+}
+
+async function readSources(paths: readonly string[]) {
+  return Promise.all(
+    paths.map(async (path) => ({
+      label: relativeToWebSource(path),
+      source: await Bun.file(path).text(),
+    })),
+  );
 }
 
 /**
@@ -136,12 +146,9 @@ function sourceFiles(dir: string, acc: string[] = []): string[] {
  * living outside the component directory — a directory-shaped rule would leave
  * the module every one of these files imports unscanned.
  */
-const FILES = [...sourceFiles(EXPLORER_DIR), join(WEB_SRC, "lib/package-file-tree.ts")];
+const FILES = [...sourceFiles(EXPLORER_DIR), `${WEB_SRC}/lib/package-file-tree.ts`];
 
-const SOURCES = FILES.map((path) => ({
-  label: relative(WEB_SRC, path),
-  source: readFileSync(path, "utf8"),
-}));
+const SOURCES = await readSources(FILES);
 
 /**
  * The text between a call's `(` and the paren that CLOSES it, or `null` when
@@ -214,8 +221,8 @@ const UNLISTED_IMPORT_GUIDANCE = [
 /** Relative specifiers become `dir/file`, so the entry is depth-independent. */
 function normalizeSpecifier(fromFile: string, specifier: string): string {
   if (!specifier.startsWith(".")) return specifier;
-  const resolved = relative(WEB_SRC, resolve(dirname(fromFile), specifier));
-  return resolved.replace(/\.(tsx?|jsx?)$/, "");
+  const resolved = decodeURIComponent(new URL(specifier, `file://${fromFile}`).pathname);
+  return relativeToWebSource(resolved).replace(/\.(tsx?|jsx?)$/, "");
 }
 
 /**
@@ -236,7 +243,7 @@ function importFaults(
   const found = new Set<string>();
   const offenders: string[] = [];
   for (const { label, source } of sources) {
-    const file = join(WEB_SRC, label);
+    const file = `${WEB_SRC}/${label}`;
     for (const match of source.matchAll(IMPORT_RE)) {
       const specifier = normalizeSpecifier(file, match[1]!);
       found.add(specifier);
@@ -380,10 +387,10 @@ describe("package file explorer rendering sinks", () => {
  * That is asserted directly below, which is stronger than pinning a MIME type
  * on a call that does not exist.
  */
-const MANIFEST_SOURCES = [
+const MANIFEST_SOURCES = await readSources([
   ...sourceFiles(MANIFEST_DIR),
-  join(WEB_SRC, "lib/package-manifest.ts"),
-].map((path) => ({ label: relative(WEB_SRC, path), source: readFileSync(path, "utf8") }));
+  `${WEB_SRC}/lib/package-manifest.ts`,
+]);
 
 const MANIFEST_ALLOWED_IMPORTS = [
   // Framework + libraries

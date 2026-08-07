@@ -42,7 +42,7 @@ export function WebhookDetailPage() {
         }
       >
         <Tabs value={tab} onValueChange={(v) => setTab(v as typeof tab)} className="mt-2">
-          <TabsList overflowLabel={t("common:tabs.more")}>
+          <TabsList>
             <TabsTrigger value="deliveries">{t("settings:webhooks.deliveries")}</TabsTrigger>
             <TabsTrigger value="settings">{t("settings:webhooks.settings")}</TabsTrigger>
           </TabsList>

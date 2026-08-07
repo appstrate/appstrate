@@ -70,11 +70,7 @@ export function ConversationContextActions({
           dispatch({ type: "select-tab", tab: tab as ConversationSidebarTab })
         }
       >
-        {/* Icon-only segmented toggle, not a nav bar: fixed 28px square triggers
-            wrapped in tooltips. Collapsing would measure the tooltip wrappers
-            rather than the triggers, and a "…" menu of unlabelled icons in a
-            three-item strip is worse than the strip itself. */}
-        <TabsList collapse={false} className="h-8" aria-label={t("context.label")}>
+        <TabsList className="h-8" aria-label={t("context.label")}>
           {tabs.map(({ id, Icon, label }) => (
             <Tooltip key={id}>
               <TooltipTrigger asChild>

@@ -55,7 +55,7 @@ export function DiffTab({ type, latestVersion, currentManifest, currentContent }
         onValueChange={(v) => setSubTab(v as "manifest" | "content")}
         className="mb-4"
       >
-        <TabsList overflowLabel={t("common:tabs.more")}>
+        <TabsList>
           {hasManifestChanges && (
             <TabsTrigger value="manifest">{t("version.diffManifest")}</TabsTrigger>
           )}

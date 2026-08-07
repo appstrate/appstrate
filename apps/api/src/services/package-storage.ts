@@ -1,13 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import {
-  zipArtifact,
-  unzipArtifact,
-  DecompressionLimitError,
-  PACKAGE_ZIP_MAX_DECOMPRESSED_BYTES,
-  type Zippable,
-} from "@appstrate/core/zip";
-import { ApiError } from "../lib/errors.ts";
+import { zipArtifact, type Zippable } from "@appstrate/core/zip";
 import { verifyArtifactIntegrity } from "@appstrate/core/integrity";
 import * as storage from "@appstrate/db/storage";
 import { logger } from "../lib/logger.ts";
@@ -24,6 +17,7 @@ import { getErrorMessage } from "@appstrate/core/errors";
 import { RunPackageCatalog } from "./run-launcher/run-package-catalog.ts";
 import { loadAndVerifyBundle } from "./run-launcher/bundle-signature-policy.ts";
 import { AGENT_PACKAGES_BUCKET, versionZipKey } from "./package-storage-keys.ts";
+import { unzipPackageArchive } from "./package-archive.ts";
 
 // Bucket + key layout live in a LEAF module so the deletion outbox and the
 // orphan scanner can derive the exact same keys without importing this file's
@@ -246,41 +240,9 @@ export function buildMinimalZip(
  * Unzip a buffer and normalize (strip __MACOSX, directory entries).
  * Returns a map of path → content as Uint8Array.
  *
- * Enforces the SAME decompressed ceiling as `parsePackageZip`
- * ({@link PACKAGE_ZIP_MAX_DECOMPRESSED_BYTES}) instead of inheriting
- * `unzipArtifact`'s 200 MB default. Every caller either ingests an
- * author-supplied archive or re-reads one the import gate already accepted, so
- * a higher ceiling here buys nothing legitimate and turned each read of a
- * stored artifact into an amplification primitive: a 52 KB archive expanded to
- * 53 MB through the package file explorer. An artifact that crosses the
- * ceiling on read is either a bomb that predates the gate or bytes that never
- * passed one — refusing it is the point.
- *
- * @throws ApiError 422 when a decompression budget is crossed. All four call
- *   sites sit on an HTTP request path, and an unmapped throw would reach the
- *   global handler as an opaque `500 internal_error` with a logged stack.
- * @throws DecompressionLimitError("corrupt-archive") verbatim for a malformed
- *   archive — deliberately unchanged, so callers that already classify that
- *   case keep the behaviour they were written against.
+ * The shared package-archive helper applies the canonical decompression budget
+ * and maps budget failures to the public 422 contract.
  */
 export function unzipAndNormalize(zipBuffer: Buffer): Record<string, Uint8Array> {
-  try {
-    return unzipArtifact(new Uint8Array(zipBuffer), {
-      maxDecompressedBytes: PACKAGE_ZIP_MAX_DECOMPRESSED_BYTES,
-    });
-  } catch (err) {
-    if (!(err instanceof DecompressionLimitError) || err.reason === "corrupt-archive") throw err;
-    const limitMb = PACKAGE_ZIP_MAX_DECOMPRESSED_BYTES / 1024 / 1024;
-    logger.warn("Refused to expand a package archive past its decompression budget", {
-      reason: err.reason,
-      compressedBytes: zipBuffer.length,
-      maxDecompressedBytes: PACKAGE_ZIP_MAX_DECOMPRESSED_BYTES,
-    });
-    throw new ApiError({
-      status: 422,
-      code: "package_archive_unreadable",
-      title: "Package Archive Unreadable",
-      detail: `The package archive expands past the ${limitMb} MB decompression limit and was refused (${err.reason}). Republish the package from bytes that fit the limit.`,
-    });
-  }
+  return unzipPackageArchive(zipBuffer);
 }

@@ -291,16 +291,10 @@ export function RunDetailPage() {
             {/* `flex-wrap`, not a fixed row: at 375px the tab list alone eats most of
                 the width, and the actions group (cost pill, context gauge, Re-run /
                 Cancel) cannot fit beside it. The tabs themselves scroll inside
-                their bounded region rather than widening the page.
-
-                `collapse={false}`: TabsList's overflow menu needs a container
-                sized by its parent, and here the strip is a shrink-to-fit flex
-                item — its width IS the pill's content width, so collapsing would
-                shrink what it measures and collapse again, down to a single tab.
-                The scroll wrapper below is the affordance for this layout. */}
+                their bounded region rather than widening the page. */}
             <div className="mb-4 flex flex-wrap items-center justify-between gap-4">
               <div className="max-w-full min-w-0 overflow-x-auto pb-1">
-                <TabsList collapse={false} className="w-max">
+                <TabsList className="w-max">
                   {hasDeliverable && (
                     <TabsTrigger value="deliverable">{t("run.tabDeliverable")}</TabsTrigger>
                   )}

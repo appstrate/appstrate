@@ -93,6 +93,14 @@ export function FilePreview({ id, packageId, version, entry }: FilePreviewProps)
         <div className="text-muted-foreground flex flex-col items-center justify-center gap-3 px-4 py-16 text-center">
           <FileWarning className="h-10 w-10 opacity-40" aria-hidden />
           <p className="font-mono text-sm">{baseName(entry.path)}</p>
+          <p className="text-xs">
+            {t("files.mediaKind", {
+              kind:
+                entry.media_kind === "binary"
+                  ? t("files.mediaKindBinary")
+                  : t("files.mediaKindText"),
+            })}
+          </p>
           <p className="text-sm">
             {blocked === "binary"
               ? t("files.notPreviewableBinary")
@@ -123,6 +131,10 @@ export function FilePreview({ id, packageId, version, entry }: FilePreviewProps)
             // nowhere inside the editor.
             ariaLabel: entry.path,
             minimap: { enabled: false },
+            quickSuggestions: false,
+            suggestOnTriggerCharacters: false,
+            wordBasedSuggestions: "off",
+            largeFileOptimizations: true,
             fontSize: 13,
             fontFamily: "'SF Mono', 'Fira Code', monospace",
             scrollBeyondLastLine: false,
