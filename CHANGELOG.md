@@ -21,11 +21,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   it previously served artifact bytes for packages not installed in the
   calling application.
 
-  **Breaking for API keys.** No org role is affected (every role, down to
-  `viewer`, holds all four read scopes), but a key minted without the
-  matching `*:read` scope now gets `403` where it used to get `200`, and a
-  download of a package that is not installed in the key's application now
-  gets `404`. Audit issued key scopes before upgrading.
+  **The read-permission change is breaking for API keys.** No org role loses
+  access through the new RBAC guard (every role, down to `viewer`, holds all
+  four read scopes), but a key minted without the matching `*:read` scope now
+  gets `403` where it used to get `200`. Separately, the download visibility
+  fix affects every caller: a package not installed in the calling application
+  now returns `404`, including for org-role sessions. Audit issued key scopes
+  before upgrading.
 
 ### Added
 
