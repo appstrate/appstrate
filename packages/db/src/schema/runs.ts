@@ -243,6 +243,14 @@ export const runs = pgTable(
     // trail so a run that consumed draft bytes is never mistaken for a
     // reproducible one. Null when the run resolved the manifest pins verbatim.
     dependencyOverrides: jsonb("dependency_overrides").$type<Record<string, string>>(),
+    // Exact skill dependency selections frozen into the run bundle. Published
+    // dependencies carry their concrete semver; mutable working copies carry
+    // `source: "draft"` with no version so they cannot be mistaken for a
+    // reproducible artifact.
+    resolvedSkillVersions:
+      jsonb("resolved_skill_versions").$type<
+        Record<string, { version: string | null; source: "version" | "draft" }>
+      >(),
     // Snapshot of the agent's @scope/name at run creation time. Survives
     // package rename, delete, or inline-run compaction (where manifest is
     // NULLed). Read by global /api/runs view and UI to display agent name

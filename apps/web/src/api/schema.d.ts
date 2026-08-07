@@ -5662,6 +5662,14 @@ export interface components {
             dependency_overrides: {
                 [key: string]: string;
             } | null;
+            /** @description Exact skill dependency selections frozen into the run bundle. Published artifacts expose `{ "version": "<semver>", "source": "version" }`; mutable working copies expose `{ "version": null, "source": "draft" }`. */
+            resolved_skill_versions: {
+                [key: string]: {
+                    version: string | null;
+                    /** @enum {string} */
+                    source: "version" | "draft";
+                };
+            } | null;
             /** @description Connections resolved for this run, projected from the internal snapshot for display. Null when the agent declares no integrations. */
             connections_used: {
                 integration_id: string;
@@ -7111,6 +7119,7 @@ export interface operations {
                      *       "modelCredentialId": "mpc_8h2k4m6n",
                      *       "connection_overrides": null,
                      *       "dependency_overrides": null,
+                     *       "resolved_skill_versions": null,
                      *       "user_name": null,
                      *       "end_user_name": null,
                      *       "api_key_name": null,
@@ -18692,6 +18701,7 @@ export interface operations {
                      *       "modelCredentialId": "mpc_8h2k4m6n",
                      *       "connection_overrides": null,
                      *       "dependency_overrides": null,
+                     *       "resolved_skill_versions": null,
                      *       "user_name": null,
                      *       "end_user_name": null,
                      *       "api_key_name": null,
@@ -19073,6 +19083,7 @@ export interface operations {
                      *       "modelCredentialId": null,
                      *       "connection_overrides": null,
                      *       "dependency_overrides": null,
+                     *       "resolved_skill_versions": null,
                      *       "user_name": "Pierre",
                      *       "end_user_name": null,
                      *       "api_key_name": null,
@@ -19182,6 +19193,7 @@ export interface operations {
                      *       "modelCredentialId": null,
                      *       "connection_overrides": null,
                      *       "dependency_overrides": null,
+                     *       "resolved_skill_versions": null,
                      *       "user_name": "Pierre",
                      *       "end_user_name": null,
                      *       "api_key_name": null,

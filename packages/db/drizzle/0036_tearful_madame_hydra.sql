@@ -1,0 +1,1 @@
+ALTER TABLE "runs" ADD COLUMN "resolved_skill_versions" jsonb;

@@ -46,6 +46,7 @@ import {
   type PackageCatalog,
   type PackageIdentity,
   type ResolvedPackage,
+  parsePackageIdentity,
 } from "@appstrate/afps-runtime/bundle";
 import { DbPackageCatalog } from "./db-package-catalog.ts";
 import { DraftPackageCatalog } from "./draft-package-catalog.ts";
@@ -73,6 +74,11 @@ export interface RunPackageCatalogOptions {
   };
 }
 
+export type ResolvedSkillVersionMap = Record<
+  string,
+  { version: string | null; source: "version" | "draft" }
+>;
+
 export class RunPackageCatalog implements PackageCatalog {
   private readonly db: PackageCatalog;
   private readonly makeDraft: () => PackageCatalog;
@@ -81,6 +87,8 @@ export class RunPackageCatalog implements PackageCatalog {
   private readonly overrides: Map<string, string>;
   /** identity → the backing catalog that resolved it (routes `fetch`). */
   private readonly owners = new Map<PackageIdentity, PackageCatalog>();
+  /** Package id → the concrete skill selection frozen into this run bundle. */
+  private readonly resolvedSkillVersions: ResolvedSkillVersionMap = {};
 
   constructor(opts: RunPackageCatalogOptions) {
     this.db = opts.deps?.db ?? new DbPackageCatalog({ orgId: opts.orgId });
@@ -98,7 +106,10 @@ export class RunPackageCatalog implements PackageCatalog {
     if (override === VERSION_SELECTOR_DRAFT) {
       const cat = this.draft();
       const resolved = await cat.resolve(name, versionSpec);
-      if (resolved) this.owners.set(resolved.identity, cat);
+      if (resolved) {
+        this.owners.set(resolved.identity, cat);
+        this.resolvedSkillVersions[name] = { version: null, source: "draft" };
+      }
       return resolved;
     }
 
@@ -106,8 +117,20 @@ export class RunPackageCatalog implements PackageCatalog {
     // Both resolve against published versions via the DB catalog.
     const effectiveSpec = override ?? versionSpec;
     const resolved = await this.db.resolve(name, effectiveSpec);
-    if (resolved) this.owners.set(resolved.identity, this.db);
+    if (resolved) {
+      this.owners.set(resolved.identity, this.db);
+      const parsed = parsePackageIdentity(resolved.identity);
+      this.resolvedSkillVersions[name] = {
+        version: parsed?.version ?? null,
+        source: "version",
+      };
+    }
     return resolved;
+  }
+
+  /** Snapshot safe to persist after bundle assembly completes. */
+  getResolvedSkillVersions(): ResolvedSkillVersionMap {
+    return structuredClone(this.resolvedSkillVersions);
   }
 
   async fetch(identity: PackageIdentity): Promise<BundlePackage> {

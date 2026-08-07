@@ -149,6 +149,11 @@ export interface RunWireDto {
    * means the run is NOT reproducible from its `version_ref` alone.
    */
   dependency_overrides: unknown;
+  /** Concrete skill dependency selections frozen into this run's bundle. */
+  resolved_skill_versions: Record<
+    string,
+    { version: string | null; source: "version" | "draft" }
+  > | null;
 }
 
 /**

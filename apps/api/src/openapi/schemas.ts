@@ -692,6 +692,7 @@ export const schemas = {
       "modelCredentialId",
       "connection_overrides",
       "dependency_overrides",
+      "resolved_skill_versions",
       "user_name",
       "end_user_name",
       "api_key_name",
@@ -981,6 +982,20 @@ export const schemas = {
         description:
           'Per-run dependency version overrides (#666). Flat map: `{ "@scope/skill": "draft" | "<semver|dist-tag>" }`. A `"draft"` value means the run consumed a dependency\'s mutable working copy — so it is NOT reproducible from `version_ref` alone. Null when the run resolved the manifest pins verbatim against published versions.',
         additionalProperties: { type: "string" },
+      },
+      resolved_skill_versions: {
+        type: ["object", "null"],
+        description:
+          'Exact skill dependency selections frozen into the run bundle. Published artifacts expose `{ "version": "<semver>", "source": "version" }`; mutable working copies expose `{ "version": null, "source": "draft" }`.',
+        additionalProperties: {
+          type: "object",
+          required: ["version", "source"],
+          properties: {
+            version: { type: ["string", "null"] },
+            source: { type: "string", enum: ["version", "draft"] },
+          },
+          additionalProperties: false,
+        },
       },
       connections_used: {
         type: ["array", "null"],

@@ -91,6 +91,17 @@ describe("RunPackageCatalog — routing", () => {
     expect(db.resolveCalls).toEqual([]);
   });
 
+  it("records the concrete published and draft skill selections", async () => {
+    const { catalog } = make({ "@s/drafted": "draft" });
+    await catalog.resolve("@s/published", "^1.0.0");
+    await catalog.resolve("@s/drafted", "^1.0.0");
+
+    expect(catalog.getResolvedSkillVersions()).toEqual({
+      "@s/published": { version: "db", source: "version" },
+      "@s/drafted": { version: null, source: "draft" },
+    });
+  });
+
   it("only constructs the draft catalog when a `draft` override is actually used", async () => {
     const noDraft = make({ "@s/skill": "^1.0.0" });
     await noDraft.catalog.resolve("@s/skill", "^1.0.0");
