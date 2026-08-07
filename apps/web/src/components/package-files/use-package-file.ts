@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { $api, client } from "../../api/client";
 import { useOrgScope } from "../../hooks/use-org-scope";
+import { triggerBlobDownload } from "../../lib/blob-download";
 import { splitPackageRef } from "../../lib/package-paths";
 import { baseName, previewBlockReason, type PackageFileEntry } from "../../lib/package-file-tree";
 
@@ -89,9 +90,12 @@ export function usePackageFile(
 }
 
 /**
- * Download one file from the artifact. Same object-URL approach as
- * `usePackageDownload` — the route serves `Content-Disposition: attachment`,
- * but the blob still has to be handed to an `<a download>` to name it.
+ * Download one file from the artifact. The route serves
+ * `Content-Disposition: attachment`, but the blob still has to be handed to an
+ * `<a download>` to name it — `triggerBlobDownload` is that step, shared with
+ * every other download in the SPA so its empty-body (#1118) and inert-type
+ * guards apply here too. A non-2xx throws in the client middleware and lands in
+ * the catch below.
  */
 export function usePackageFileDownload(packageId: string, version: string | undefined) {
   const { t } = useTranslation("common");
@@ -108,27 +112,7 @@ export function usePackageFileDownload(packageId: string, version: string | unde
           },
           parseAs: "blob",
         });
-        // `data` is `undefined` for a zero-byte file — openapi-fetch's
-        // `Content-Length: "0"` short-circuit, on a successful 200 (a non-2xx
-        // throws in the client middleware and lands in the catch below). It has
-        // to become an empty part: `new Blob([undefined])` stringifies its
-        // argument, writing a 9-byte file whose contents are the word
-        // "undefined".
-        //
-        // Re-wrapped under an INERT type. The response is already
-        // `application/octet-stream`, but a `blob:` URL inherits the platform
-        // origin, so the type it carries decides whether the browser would ever
-        // interpret these author-controlled bytes. Never widen this.
-        const url = URL.createObjectURL(
-          new Blob([data ?? ""], { type: "application/octet-stream" }),
-        );
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = baseName(path);
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
+        triggerBlobDownload(data, baseName(path));
       } catch {
         toast.error(t("error.downloadFailed"));
       }
