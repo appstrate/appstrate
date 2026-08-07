@@ -12,7 +12,7 @@ import { splitPackageRef } from "../lib/package-paths";
 import { VERSION_DRAFT, isVersioned } from "../lib/version-selector";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentApplicationId } from "./use-current-application";
-import { packageKeys, agentsKeys } from "../lib/query-keys";
+import { packageKeys, agentsKeys, invalidatePackageFiles } from "../lib/query-keys";
 import type {
   OrgPackageItem,
   OrgPackageItemDetail,
@@ -389,6 +389,9 @@ export function useCreateVersion(type: PackageType, packageId: string) {
       qc.invalidateQueries({ queryKey: ["version-info"] });
       qc.invalidateQueries({ queryKey: agentsKeys.all });
       qc.invalidateQueries({ queryKey: packageKeys.all });
+      // A published artifact appeared or vanished: a pinned Files tab and any
+      // dist-tag-resolved read of it are now wrong.
+      invalidatePackageFiles(qc);
     },
   });
 }
@@ -408,6 +411,9 @@ export function useDeleteVersion(type: PackageType, packageId: string) {
       qc.invalidateQueries({ queryKey: ["version-info"] });
       qc.invalidateQueries({ queryKey: agentsKeys.all });
       qc.invalidateQueries({ queryKey: packageKeys.all });
+      // A published artifact appeared or vanished: a pinned Files tab and any
+      // dist-tag-resolved read of it are now wrong.
+      invalidatePackageFiles(qc);
     },
   });
 }
@@ -435,6 +441,8 @@ export function useRestoreVersion(type: PackageType, packageId: string) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: agentsKeys.all });
       qc.invalidateQueries({ queryKey: packageKeys.all });
+      // A restore overwrites the DRAFT artifact wholesale.
+      invalidatePackageFiles(qc);
     },
   });
 }

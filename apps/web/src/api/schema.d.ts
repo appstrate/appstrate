@@ -3566,6 +3566,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/packages/{scope}/{name}/files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the files in a package artifact
+         * @description Flat index of every file in the package artifact — one entry per real file, sorted by `path`; directories are not synthesized. Text files up to 1 MiB carry their full content in `inline` while the response's cumulative inline budget lasts; `inline` is never a truncated prefix, so an entry without it must be fetched from `GET /api/packages/{scope}/{name}/files/content`. Read-only. Rate-limited to 50 requests/minute.
+         */
+        get: operations["listPackageFiles"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/packages/{scope}/{name}/files/content": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Download one file from a package artifact
+         * @description Raw bytes of a single file from the package artifact — the fetch path for both preview and download. Always served as `application/octet-stream` with `nosniff` and `attachment`: package bytes are author-controlled and must never be rendered or executed in the platform origin. `path` must match an entry returned by `GET /api/packages/{scope}/{name}/files` exactly; anything else is a `404`. Read-only. Rate-limited to 50 requests/minute.
+         */
+        get: operations["getPackageFileContent"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/packages/{scope}/{name}/fork": {
         parameters: {
             query?: never;
@@ -5380,6 +5420,23 @@ export interface components {
              */
             createdAt: string;
         };
+        PackageFileEntry: {
+            /** @description Path inside the artifact, relative and normalized (e.g. `skills/a/SKILL.md`) */
+            path: string;
+            /** @description Uncompressed size in bytes */
+            size: number;
+            /**
+             * @description `text` when the file decodes as strict UTF-8 (files above the 1 MiB inline ceiling are classified by extension instead, since they can never be previewed).
+             * @enum {string}
+             */
+            media_kind: "text" | "binary";
+            /** @description Full decoded text, present only for `text` files at most 1 MiB that still fit the response's cumulative inline budget. NEVER truncated: when absent, fetch the file from `GET /api/packages/{scope}/{name}/files/content`. */
+            inline?: string;
+        };
+        PackageFileIndex: {
+            /** @description Files in the artifact, sorted by `path`. */
+            entries: components["schemas"]["PackageFileEntry"][];
+        };
         PackageVersionDetail: {
             /** @description Version row id */
             id: number;
@@ -5915,6 +5972,26 @@ export interface components {
                  *       "status": 500,
                  *       "detail": "An unexpected error occurred. Please try again or contact support.",
                  *       "code": "internal_error",
+                 *       "requestId": "req_abc123"
+                 *     }
+                 */
+                "application/problem+json": components["schemas"]["ProblemDetail"];
+            };
+        };
+        /** @description The stored artifact expands past the package decompression ceiling and was refused (`package_archive_unreadable`). This is the SAME ceiling the import gate applies, so reaching it means the archive is a bomb or was stored before the gate covered this path — republish the package. RFC 9457 problem+json. */
+        PackageArchiveUnreadable: {
+            headers: {
+                "Request-Id": components["headers"]["RequestId"];
+                [name: string]: unknown;
+            };
+            content: {
+                /**
+                 * @example {
+                 *       "type": "https://docs.appstrate.dev/errors/package-archive-unreadable",
+                 *       "title": "Package Archive Unreadable",
+                 *       "status": 422,
+                 *       "detail": "The package archive expands past the 50 MB decompression limit and was refused (decompressed-budget-exceeded). Republish the package from bytes that fit the limit.",
+                 *       "code": "package_archive_unreadable",
                  *       "requestId": "req_abc123"
                  *     }
                  */
@@ -17595,6 +17672,166 @@ export interface operations {
             };
         };
     };
+    listPackageFiles: {
+        parameters: {
+            query?: {
+                /** @description Which snapshot to read: omitted (or `draft`) reads the live draft, where the stored artifact is overlaid with the authoritative `manifest.json` / primary content from the database. Any other value is resolved as a version spec (exact version, dist-tag, or semver range) and returns exactly the published bytes, with no overlay. */
+                version?: string;
+            };
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
+                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Entity-tag of a cached copy. A match yields `304 Not Modified`. */
+                "If-None-Match"?: string;
+            };
+            path: {
+                /** @description Package scope (e.g. @myorg) */
+                scope: components["parameters"]["PackageScope"];
+                /** @description Package name */
+                name: components["parameters"]["PackageName"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description File index */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    /** @description Strong entity-tag of this index representation (`"i-…"`), derived from the version artifact's integrity hash or from a content digest of the overlaid draft. It never matches a `files/content` tag. */
+                    ETag?: string;
+                    /** @description `private, max-age=300` ONLY for an exact, non-yanked version pin — never `immutable`, because a version can be deleted and republished over different bytes under the same number. A dist-tag or semver range is a moving target and a yank must stay discoverable, so both get `private, no-cache` — as does the draft. Always `private`: the response is tenant-scoped. */
+                    "Cache-Control"?: string;
+                    /** @description Always `X-Org-Id, X-Application-Id` — access depends on both, so a cache must not reuse this body across organizations or applications. */
+                    Vary?: string;
+                    /** @description Present and set to `true` when the resolved version is yanked. */
+                    "X-Yanked"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PackageFileIndex"];
+                };
+            };
+            /** @description Cached copy is still current (`If-None-Match` matched). No body. */
+            304: {
+                headers: {
+                    /** @description Strong entity-tag of this index representation. */
+                    ETag?: string;
+                    /** @description Same caching policy as the `200` response. */
+                    "Cache-Control"?: string;
+                    /** @description Always `X-Org-Id, X-Application-Id`, as on the `200`. */
+                    Vary?: string;
+                    /** @description Present and set to `true` when the resolved version is yanked. */
+                    "X-Yanked"?: string;
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["PackageArchiveUnreadable"];
+            429: components["responses"]["RateLimited"];
+            /** @description The artifact could not be read: integrity/signature verification failed (`INTEGRITY_MISMATCH`), or the stored bytes are not a readable ZIP. RFC 9457 problem+json. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    getPackageFileContent: {
+        parameters: {
+            query: {
+                /** @description Exact `path` of an entry from the file index. */
+                path: string;
+                /** @description Which snapshot to read from — same resolution as the file index: omitted (or `draft`) reads the live draft with the database overlay, any other value is an exact version, dist-tag, or semver range. */
+                version?: string;
+            };
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
+                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Entity-tag of a cached copy. A match yields `304 Not Modified`. */
+                "If-None-Match"?: string;
+            };
+            path: {
+                /** @description Package scope (e.g. @myorg) */
+                scope: components["parameters"]["PackageScope"];
+                /** @description Package name */
+                name: components["parameters"]["PackageName"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Raw file bytes */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    /** @description Strong entity-tag of THIS FILE (`"f-…"`), folding in both the snapshot identity and the `path`. Per RFC 9110 §8.8.1 it identifies one representation: a tag obtained for another `path`, or from the file index, will not match. */
+                    ETag?: string;
+                    /** @description `private, max-age=300` ONLY for an exact, non-yanked version pin (never `immutable` — a version number can be republished over different bytes); `private, no-cache` for a dist-tag, a semver range, a yanked version, and the draft. */
+                    "Cache-Control"?: string;
+                    /** @description Always `X-Org-Id, X-Application-Id` — access depends on both, so a cache must not reuse these bytes across organizations or applications. */
+                    Vary?: string;
+                    /** @description Present and set to `true` when the resolved version is yanked. */
+                    "X-Yanked"?: string;
+                    /** @description `attachment` with the file's sanitized base name. */
+                    "Content-Disposition"?: string;
+                    /** @description Always `nosniff`. */
+                    "X-Content-Type-Options"?: string;
+                    /** @description Always `no-referrer`. */
+                    "Referrer-Policy"?: string;
+                    /** @description Always `same-origin`. */
+                    "Cross-Origin-Resource-Policy"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/octet-stream": Blob;
+                };
+            };
+            /** @description Cached copy of THIS file is still current (`If-None-Match` matched its per-file tag). No body. A bare `If-None-Match: *` is deliberately NOT honoured before the artifact is read — it carries no path, so it cannot establish that the file exists. */
+            304: {
+                headers: {
+                    /** @description Strong entity-tag of this file representation. */
+                    ETag?: string;
+                    /** @description Same caching policy as the `200` response. */
+                    "Cache-Control"?: string;
+                    /** @description Always `X-Org-Id, X-Application-Id`, as on the `200`. */
+                    Vary?: string;
+                    /** @description Present and set to `true` when the resolved version is yanked. */
+                    "X-Yanked"?: string;
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["PackageArchiveUnreadable"];
+            429: components["responses"]["RateLimited"];
+            /** @description The artifact could not be read: integrity/signature verification failed (`INTEGRITY_MISMATCH`), or the stored bytes are not a readable ZIP. RFC 9457 problem+json. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
     forkPackage: {
         parameters: {
             query?: never;
@@ -17644,6 +17881,16 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            /** @description The SOURCE package's published artifact expands past the platform's decompression ceiling and was refused (`package_archive_unreadable`). Nothing was written: the fork is rejected while reading the source, before the name-collision check and before any package or version row is created, so there is no partial copy to clean up. A fork always targets a package the calling organization does NOT own, so the caller cannot repair the source — report it to whoever publishes it (or to the platform operator if it is a system package). RFC 9457 problem+json. */
+            422: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
         };
     };
     downloadPackageVersion: {

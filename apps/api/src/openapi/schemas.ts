@@ -611,6 +611,41 @@ export const schemas = {
       dist_tags: { type: "array", items: { type: "string" } },
     },
   },
+  // One real file in a package artifact. The index is FLAT — directories are
+  // not synthesized; a client derives the tree from the `path` values.
+  PackageFileEntry: {
+    type: "object",
+    required: ["path", "size", "media_kind"],
+    properties: {
+      path: {
+        type: "string",
+        description: "Path inside the artifact, relative and normalized (e.g. `skills/a/SKILL.md`)",
+      },
+      size: { type: "integer", description: "Uncompressed size in bytes" },
+      media_kind: {
+        type: "string",
+        enum: ["text", "binary"],
+        description:
+          "`text` when the file decodes as strict UTF-8 (files above the 1 MiB inline ceiling are classified by extension instead, since they can never be previewed).",
+      },
+      inline: {
+        type: "string",
+        description:
+          "Full decoded text, present only for `text` files at most 1 MiB that still fit the response's cumulative inline budget. NEVER truncated: when absent, fetch the file from `GET /api/packages/{scope}/{name}/files/content`.",
+      },
+    },
+  },
+  PackageFileIndex: {
+    type: "object",
+    required: ["entries"],
+    properties: {
+      entries: {
+        type: "array",
+        items: { $ref: "#/components/schemas/PackageFileEntry" },
+        description: "Files in the artifact, sorted by `path`.",
+      },
+    },
+  },
   Run: {
     type: "object",
     // Every field a run response carries unconditionally. The list/detail/

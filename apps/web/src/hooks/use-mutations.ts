@@ -16,6 +16,7 @@ import {
   runKeys,
   paginatedRunsKeys,
   persistenceKeys,
+  invalidatePackageFiles,
 } from "../lib/query-keys";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 
@@ -182,6 +183,11 @@ export function useImportPackage() {
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: agentsKeys.all });
       qc.invalidateQueries({ queryKey: packageKeys.all });
+      // An import REPLACES the draft artifact, and this mutation navigates
+      // straight to the detail page — without this the explorer renders the
+      // pre-import index and the pre-import `inline` bodies until the query
+      // goes stale.
+      invalidatePackageFiles(qc);
       // Non-blocking install-time warnings (AFPS §7.7) —
       // surface each one as a sonner warning toast so publishers see them
       // immediately after a successful import.
@@ -207,6 +213,8 @@ export function useImportFromGithub() {
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: agentsKeys.all });
       qc.invalidateQueries({ queryKey: packageKeys.all });
+      // Same reason as `useImportPackage`: the draft artifact was replaced.
+      invalidatePackageFiles(qc);
       navigate(`/${data.type === "agent" ? "agent" : data.type}s/${data.packageId}`);
     },
     onError: onMutationError,
@@ -376,6 +384,8 @@ export function useUpdatePackage(type: PackageType, packageId: string) {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: packageKeys.all });
+      // The saved bytes ARE what the Files tab shows.
+      invalidatePackageFiles(qc);
       if (type === "agent") qc.invalidateQueries({ queryKey: agentsKeys.all });
       // An agent's tools drive the required OAuth scopes, so editing them
       // changes the per-integration agent-resolution verdict (e.g. a connection

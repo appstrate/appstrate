@@ -18,15 +18,7 @@
 
 import { Hono } from "hono";
 import type { AppEnv } from "../types/index.ts";
-
-/** RFC 9110 §13.1.2 — `*`, or any entity-tag in the comma-separated list (weak comparison). */
-export function ifNoneMatchSatisfied(header: string | undefined, etag: string): boolean {
-  if (!header) return false;
-  const candidates = header.split(",").map((v) => v.trim());
-  if (candidates.includes("*")) return true;
-  const strip = (v: string) => (v.startsWith("W/") ? v.slice(2) : v);
-  return candidates.some((v) => strip(v) === strip(etag));
-}
+import { ifNoneMatchSatisfied } from "../lib/if-none-match.ts";
 
 /**
  * @param buildSpec - Assembles the spec. Called at most once per router

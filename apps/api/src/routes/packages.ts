@@ -34,8 +34,9 @@ import { getErrorMessage } from "@appstrate/core/errors";
 import { uploadPackageFiles, downloadPackageFiles } from "../services/package-items/storage.ts";
 import { CONFIG_BY_TYPE, type PackageTypeConfig } from "../services/package-items/config.ts";
 import { validateManifest, type PackageType } from "@appstrate/core/validation";
-import { SLUG_REGEX } from "@appstrate/core/naming";
-import { unzipAndNormalize } from "../services/package-storage.ts";
+import { SLUG_REGEX, attachmentDisposition } from "@appstrate/core/naming";
+import { ifNoneMatchSatisfied } from "../lib/if-none-match.ts";
+import { unzipPackageArchive } from "../services/package-archive.ts";
 import { isValidVersion } from "@appstrate/core/semver";
 import {
   getVersionDetail,
@@ -63,6 +64,14 @@ import { tryParseSkillOnlyZip } from "../services/skill-zip.ts";
 import { fetchGithubDirectory, GithubImportError } from "../services/github-import.ts";
 import { validateAgentIntegrationSelections } from "../services/integration-scope-validation.ts";
 import { SCOPED_PACKAGE_ROUTE } from "./scoped-package-route.ts";
+import {
+  resolvePackageFileValidator,
+  readPackageSnapshot,
+  buildFileIndex,
+  indexEtag,
+  fileEtag,
+  type PackageFileSource,
+} from "../services/package-files.ts";
 import {
   collectConnectLoginWarnings,
   collectMetaWarnings,
@@ -277,7 +286,7 @@ async function parsePackageUpload(
     const archive = new Uint8Array(await file.arrayBuffer());
     let normalizedFiles: Record<string, Uint8Array>;
     try {
-      normalizedFiles = unzipAndNormalize(Buffer.from(archive));
+      normalizedFiles = unzipPackageArchive(archive);
     } catch {
       throw invalidRequest("Invalid ZIP file", "file");
     }
@@ -1415,6 +1424,137 @@ function makeDeleteVersionHandler(rcfg: PackageRouteConfig) {
 }
 
 // ═══════════════════════════════════════════════
+// File explorer (read-only)
+// ═══════════════════════════════════════════════
+
+const fileIndexQuerySchema = z.object({
+  version: z.string().trim().min(1).optional(),
+});
+const fileContentQuerySchema = z.object({
+  version: z.string().trim().min(1).optional(),
+  // NOT trimmed: `unzipArtifact` preserves leading/trailing spaces in ZIP entry
+  // names, so an entry the index advertises as `"notes .md "` must stay
+  // fetchable by that exact key. Trimming would make it permanently 404.
+  path: z.string().min(1),
+});
+
+function parseFileQuery<T extends z.ZodType>(c: Context<AppEnv>, schema: T): z.infer<T> {
+  const parsed = schema.safeParse(c.req.query());
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0];
+    throw invalidRequest(issue?.message ?? "Invalid query", issue?.path.join(".") || undefined);
+  }
+  return parsed.data;
+}
+
+/**
+ * Resolve the package a file-explorer request targets AND authorize the read —
+ * 404 when the package is not reachable, 403 when it is but the caller may not
+ * read it.
+ *
+ * Two gates that answer different questions, both required:
+ *
+ * - `hasPackageAccess` is VISIBILITY: "is this a system package, or installed
+ *   in THIS application?" (it also excludes ephemeral shadows). It says
+ *   nothing about what the caller is ALLOWED to do — a credential with
+ *   `scopes: []` passes it. Believing otherwise is exactly the mistake #1124
+ *   had to undo across the rest of the package surface.
+ * - `requirePackageReadPermission` is AUTHORIZATION: the resolved row's
+ *   `<type>:read` scope. Both file-explorer routes are registered on the
+ *   router ROOT, so the RBAC resource is not knowable from the path — only
+ *   from the row — which is why the guard runs here and not as route-level
+ *   middleware.
+ *
+ * The row read in between adds the org boundary (`hasPackageAccess` does not
+ * filter `orgId`) and fetches the draft columns the overlay needs.
+ *
+ * Authorizing HERE rather than at each call site is what makes the ordering
+ * safe. Both handlers call this before they touch a validator, so no
+ * response — 200, 304 or 404 — is reachable without the permission check. A
+ * guard placed after the ETag short-circuit would still leave `/files/content`
+ * an oracle: replaying an `If-None-Match` would answer 304 and tell an
+ * unauthorized caller that this exact file exists with this exact content.
+ *
+ * 404-before-403 is forced, not a policy choice: the RBAC resource comes from
+ * the row, so visibility has to be settled first. Same order as
+ * `/{version}/download`.
+ */
+async function loadFileExplorerPackage(c: Context<AppEnv>): Promise<PackageFileSource> {
+  const packageId = getItemId(c);
+  const orgId = c.get("orgId");
+  const applicationId = c.get("applicationId");
+
+  if (!(await hasPackageAccess({ orgId, applicationId }, packageId))) {
+    throw notFound("Package not found");
+  }
+
+  const [pkg] = await db
+    .select({
+      id: packages.id,
+      type: packages.type,
+      orgId: packages.orgId,
+      draftManifest: packages.draftManifest,
+      draftContent: packages.draftContent,
+    })
+    .from(packages)
+    .where(and(eq(packages.id, packageId), orgOrSystemFilter(orgId), notEphemeralFilter()))
+    .limit(1);
+  if (!pkg) {
+    throw notFound("Package not found");
+  }
+
+  // The index lists every file and inlines text content; `/files/content`
+  // serves any byte of the artifact. Both are at least as sensitive as the
+  // detail route, so both need the same `<type>:read`.
+  await requirePackageReadPermission(c, pkg.type);
+
+  return pkg;
+}
+
+/**
+ * `private` is mandatory on both routes: these are authenticated,
+ * tenant-scoped bytes and a shared cache must never hold them. Everything that
+ * moves under its own URL (draft, dist-tag, semver range, yanked version) gets
+ * `no-cache`, which still allows the 304 round-trip — it only forbids serving
+ * without one.
+ *
+ * An exact, non-yanked version gets a SHORT `max-age` and, deliberately, NOT
+ * `immutable`. A version number is not permanently content-addressed here:
+ * `DELETE /versions/{version}` is a live UI affordance and `validateForwardVersion`
+ * only rejects versions still present in `package_versions`, so the same number
+ * can be republished over different bytes. Under `max-age=31536000, immutable`
+ * a client that had the old one open would keep serving it for a year with no
+ * revalidation, and `invalidatePackageFiles` could not reach it — the HTTP
+ * cache short-circuits the fetch before React Query ever sees it. The
+ * revalidation this buys back is nearly free: `resolvePackageFileValidator`
+ * answers an exact version's 304 from one DB read, with no storage GET and no
+ * unzip. That is the entire reason it is split out from `readPackageSnapshot`.
+ *
+ * `Vary` is NOT optional here. The response body depends on `X-Org-Id` /
+ * `X-Application-Id` (via `hasPackageAccess`) while the URL does not mention
+ * either. Without it, switching applications in the SPA re-issues an identical
+ * URL and the browser answers from cache — showing application B an artifact
+ * that is only installed in application A.
+ */
+const EXACT_VERSION_MAX_AGE_SECONDS = 300;
+
+function fileCacheHeaders(
+  etag: string,
+  freshCacheable: boolean,
+  yanked: boolean,
+): Record<string, string> {
+  const headers: Record<string, string> = {
+    ETag: etag,
+    "Cache-Control": freshCacheable
+      ? `private, max-age=${EXACT_VERSION_MAX_AGE_SECONDS}`
+      : "private, no-cache",
+    Vary: "X-Org-Id, X-Application-Id",
+  };
+  if (yanked) headers["X-Yanked"] = "true";
+  return headers;
+}
+
+// ═══════════════════════════════════════════════
 // Read permission
 // ═══════════════════════════════════════════════
 
@@ -2029,6 +2169,104 @@ export function createPackagesRouter() {
     );
 
     return handleImport(c, parsed, artifact, false, "github");
+  });
+
+  // --- File explorer (read-only) ---
+  // Registered BEFORE `/:version/download` so the literal `files` segment can
+  // never be captured as a version spec.
+
+  // GET /api/packages/:scope/:name/files — flat index of the artifact's files
+  router.get(`/${SCOPED_PACKAGE_ROUTE}/files`, rateLimit(50), async (c) => {
+    const { version } = parseFileQuery(c, fileIndexQuerySchema);
+    // Visibility + `<type>:read` are both settled inside this call, BEFORE any
+    // validator is resolved — nothing below can answer an unauthorized caller.
+    const pkg = await loadFileExplorerPackage(c);
+    const inm = c.req.header("if-none-match");
+
+    // Resolve the validator FIRST. A published version's snapshot id comes
+    // straight from the `integrity` column, so a hit here answers the request
+    // for one query — no storage GET, no unzip, no SRI pass.
+    const validator = await resolvePackageFileValidator(pkg, version);
+    if (validator.snapshotId !== null) {
+      const etag = indexEtag(validator.snapshotId);
+      if (ifNoneMatchSatisfied(inm, etag)) {
+        return new Response(null, {
+          status: 304,
+          headers: fileCacheHeaders(etag, validator.freshCacheable, validator.yanked),
+        });
+      }
+    }
+
+    const snapshot = await readPackageSnapshot(pkg, validator);
+    const etag = indexEtag(snapshot.snapshotId);
+    const headers = fileCacheHeaders(etag, validator.freshCacheable, validator.yanked);
+    if (ifNoneMatchSatisfied(inm, etag)) {
+      return new Response(null, { status: 304, headers });
+    }
+    return c.json({ entries: buildFileIndex(snapshot) }, 200, headers);
+  });
+
+  // GET /api/packages/:scope/:name/files/content — raw bytes of ONE file.
+  // Serves preview AND download: a small text file that fell past the index's
+  // inline budget stays previewable through here.
+  router.get(`/${SCOPED_PACKAGE_ROUTE}/files/content`, rateLimit(50), async (c) => {
+    const { version, path } = parseFileQuery(c, fileContentQuerySchema);
+    // Must stay ABOVE the validator: the 304 short-circuit below answers
+    // without reading the artifact, so a permission check placed after it
+    // would turn `If-None-Match` into a file-existence oracle.
+    const pkg = await loadFileExplorerPackage(c);
+    const inm = c.req.header("if-none-match");
+
+    // Same short-circuit as the index, but the tag folds in the PATH: a
+    // matching tag proves the client previously got a 200 for THIS file, which
+    // is what makes answering before the read sound. `*` is refused here — it
+    // says nothing about which path, so it cannot establish that the file
+    // exists.
+    const validator = await resolvePackageFileValidator(pkg, version);
+    if (validator.snapshotId !== null) {
+      const etag = fileEtag(validator.snapshotId, path);
+      if (ifNoneMatchSatisfied(inm, etag, { allowWildcard: false })) {
+        return new Response(null, {
+          status: 304,
+          headers: fileCacheHeaders(etag, validator.freshCacheable, validator.yanked),
+        });
+      }
+    }
+
+    const snapshot = await readPackageSnapshot(pkg, validator);
+
+    // Plain own-key lookup on the already-sanitized map — no filesystem, no
+    // `..` resolution. `Object.hasOwn` keeps a `__proto__`/`toString` probe
+    // from resolving to something off the prototype chain.
+    if (!Object.hasOwn(snapshot.files, path)) {
+      throw notFound("File not found");
+    }
+    const bytes = snapshot.files[path]!;
+
+    const etag = fileEtag(snapshot.snapshotId, path);
+    const headers = fileCacheHeaders(etag, validator.freshCacheable, validator.yanked);
+    // Existence is established, so `*` is now a legitimate match.
+    if (ifNoneMatchSatisfied(inm, etag)) {
+      return new Response(null, { status: 304, headers });
+    }
+
+    // Always octet-stream + nosniff + attachment: package bytes are
+    // author-controlled, so no response from here may be something a browser
+    // decides to execute or render in this origin. `Referrer-Policy` +
+    // `Cross-Origin-Resource-Policy` mirror what `routes/documents.ts` applies
+    // to comparable authenticated tenant bytes.
+    return new Response(new Uint8Array(bytes), {
+      status: 200,
+      headers: {
+        ...headers,
+        "Content-Type": "application/octet-stream",
+        "X-Content-Type-Options": "nosniff",
+        "Referrer-Policy": "no-referrer",
+        "Cross-Origin-Resource-Policy": "same-origin",
+        "Content-Disposition": attachmentDisposition(path.slice(path.lastIndexOf("/") + 1)),
+        "Content-Length": String(bytes.byteLength),
+      },
+    });
   });
 
   // GET /api/packages/:scope/:name/:version/download — download a versioned package ZIP

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { zipArtifact, unzipArtifact } from "@appstrate/core/zip";
+import { zipArtifact } from "@appstrate/core/zip";
 import { computeIntegrity } from "@appstrate/core/integrity";
 import { verifyArtifactIntegrity } from "@appstrate/core/integrity";
 import * as storage from "@appstrate/db/storage";
@@ -12,6 +12,7 @@ import {
   packageItemOwnerNamespace,
 } from "./config.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
+import { unzipPackageArchive } from "../package-archive.ts";
 
 // Re-exported for the existing import sites (`system-packages.ts` and friends)
 // — the constant + namespace resolver now live in the leaf `config.ts` so the
@@ -89,7 +90,7 @@ export async function downloadPackageFiles(
       );
     }
   }
-  return unzipArtifact(bytes);
+  return unzipPackageArchive(bytes);
 }
 
 // NOTE: there is deliberately no `deletePackageFiles` here. Physical deletion

@@ -5,8 +5,9 @@
  *
  * Shares the unified package layout (SharedHeader + PackageActionsDropdown)
  * with agents and skills. The activate/deactivate toggle lives in the header
- * (left action); manifest view / download / fork / delete live in the actions
- * dropdown. Integrations are import-only — there is no in-app editor.
+ * (left action); download / fork / delete live in the actions dropdown. The
+ * manifest's metadata is rendered by the À propos tab. Integrations are
+ * import-only — there is no in-app editor.
  *
  * Tabs:
  *   - Connexions — per-auth connect CTA (always the resolved default client —
@@ -23,6 +24,10 @@
  *     primitives). Per-tool description + required scopes + URL patterns.
  *   - À propos — metadata (version, author, license, repo, …), privacy policy,
  *     keywords.
+ *   - Contenu — the artifact's own files, read-only, opening on
+ *     INTEGRATION.md. This is where `manifest.json` is readable verbatim: an
+ *     admin auditing a third-party integration before granting it OAuth scopes
+ *     must not have to download the `.afps` and unzip it.
  *   - Versions — read-only release history (non-system packages only).
  *
  * Connect drives a popup through the hosted connect portal (issue #769) —
@@ -33,9 +38,20 @@
 
 import { useState } from "react";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
+import { ManifestOverview } from "../components/package-manifest/manifest-overview";
+import { FileExplorer } from "../components/package-files/file-explorer";
 
-/** Tab ids, also the URL fragments that select them. */
-const INTEGRATION_TABS = ["connections", "configuration", "tools", "about", "versions"] as const;
+/** Tab ids, also the URL fragments that select them. `content` is the same id
+ *  the unified package page uses for its file explorer, so a deep link reads
+ *  the same on either page. */
+const INTEGRATION_TABS = [
+  "connections",
+  "configuration",
+  "tools",
+  "about",
+  "content",
+  "versions",
+] as const;
 import { useTranslation } from "react-i18next";
 import { useParams } from "react-router-dom";
 import { toast } from "sonner";
@@ -62,7 +78,7 @@ import {
 import { LoadingState, ErrorState } from "../components/page-states";
 import { SharedHeader } from "../components/package-detail/shared-header";
 import { PackageActionsDropdown } from "../components/package-detail/package-actions-dropdown";
-import { SetupGuideSteps, MetadataBlock } from "../components/package-detail/integration-metadata";
+import { SetupGuideSteps } from "../components/package-detail/setup-guide-steps";
 import { VersionHistory } from "../components/version-history";
 import { ForkPackageModal } from "../components/fork-package-modal";
 import { ConfirmModal } from "../components/confirm-modal";
@@ -1351,7 +1367,7 @@ function ActivationHint({ onActivate, pending }: { onActivate: () => void; pendi
 }
 
 export function IntegrationDetailPage() {
-  const { t } = useTranslation(["settings", "common"]);
+  const { t } = useTranslation(["settings", "common", "agents"]);
   const { scope, name } = useParams<{ scope: string; name: string }>();
   const packageId = scope && name ? `${scope}/${name}` : "";
   const { data: detail, isLoading, error } = useIntegrationDetail(packageId || undefined);
@@ -1423,7 +1439,6 @@ export function IntegrationDetailPage() {
             <PackageActionsDropdown
               packageId={packageId}
               type="integration"
-              manifest={m}
               isOwned={isOwned}
               isBuiltIn={isBuiltIn}
               isHistoricalVersion={false}
@@ -1445,44 +1460,49 @@ export function IntegrationDetailPage() {
         onValueChange={(v) => setTab(v as (typeof INTEGRATION_TABS)[number])}
         className="mt-2"
       >
-        <TabsList>
-          <TabsTrigger value="connections" data-testid="tab-connections">
-            {t("integration.tabs.connections")}
-          </TabsTrigger>
-          {isAdmin && (
-            <TabsTrigger value="configuration" data-testid="tab-configuration">
-              {t("integration.tabs.configuration")}
+        <div className="max-w-full overflow-x-auto pb-1">
+          <TabsList className="w-max">
+            <TabsTrigger value="connections" data-testid="tab-connections">
+              {t("integration.tabs.connections")}
             </TabsTrigger>
-          )}
-          <TabsTrigger value="tools" data-testid="tab-tools">
-            {t("integration.tabs.tools")}
-            {detail.tool_catalog && detail.tool_catalog.length > 0 && (
-              <Badge variant="outline" className="ml-1.5 text-[0.65rem]">
-                {detail.tool_catalog.length}
-                {detail.allow_undeclared_tools ? "+" : ""}
-              </Badge>
+            {isAdmin && (
+              <TabsTrigger value="configuration" data-testid="tab-configuration">
+                {t("integration.tabs.configuration")}
+              </TabsTrigger>
             )}
-            {detail.tool_catalog &&
-              detail.tool_catalog.length === 0 &&
-              detail.allow_undeclared_tools && (
-                <Badge
-                  variant="outline"
-                  className="ml-1.5 text-[0.65rem]"
-                  data-testid="tab-tools-wildcard-badge"
-                >
-                  *
+            <TabsTrigger value="tools" data-testid="tab-tools">
+              {t("integration.tabs.tools")}
+              {detail.tool_catalog && detail.tool_catalog.length > 0 && (
+                <Badge variant="outline" className="ml-1.5 text-[0.65rem]">
+                  {detail.tool_catalog.length}
+                  {detail.allow_undeclared_tools ? "+" : ""}
                 </Badge>
               )}
-          </TabsTrigger>
-          <TabsTrigger value="about" data-testid="tab-about">
-            {t("integration.tabs.about")}
-          </TabsTrigger>
-          {!isBuiltIn && (
-            <TabsTrigger value="versions" data-testid="tab-versions">
-              {t("integration.tabs.versions")}
+              {detail.tool_catalog &&
+                detail.tool_catalog.length === 0 &&
+                detail.allow_undeclared_tools && (
+                  <Badge
+                    variant="outline"
+                    className="ml-1.5 text-[0.65rem]"
+                    data-testid="tab-tools-wildcard-badge"
+                  >
+                    *
+                  </Badge>
+                )}
             </TabsTrigger>
-          )}
-        </TabsList>
+            <TabsTrigger value="about" data-testid="tab-about">
+              {t("integration.tabs.about")}
+            </TabsTrigger>
+            <TabsTrigger value="content" data-testid="tab-content">
+              {t("detail.tabFiles", { ns: "agents" })}
+            </TabsTrigger>
+            {!isBuiltIn && (
+              <TabsTrigger value="versions" data-testid="tab-versions">
+                {t("integration.tabs.versions")}
+              </TabsTrigger>
+            )}
+          </TabsList>
+        </div>
 
         {/* ─── Connexions (per-auth connect CTA + accounts table) ─── */}
         <TabsContent value="connections" className="mt-4 space-y-4">
@@ -1614,20 +1634,26 @@ export function IntegrationDetailPage() {
           </div>
         </TabsContent>
 
-        {/* ─── À propos (metadata) ─── */}
+        {/* ─── À propos (manifest, rendered) ───
+            The same component the Aperçu tab of the unified package page
+            mounts. It replaced a local metadata block that built
+            `<a href={manifest.repository}>` with no protocol check — a
+            published integration carrying `"repository": "javascript:…"` ran
+            on the platform origin as soon as someone clicked it. The href is
+            now gated on `normalizeHttpUrl`. */}
         <TabsContent value="about" className="mt-4">
-          <div className="max-w-2xl space-y-4">
-            <MetadataBlock manifest={m} />
-            {m.keywords && m.keywords.length > 0 && (
-              <div className="flex flex-wrap gap-1">
-                {m.keywords.map((k) => (
-                  <Badge key={k} variant="outline" className="text-[0.65rem]">
-                    {k}
-                  </Badge>
-                ))}
-              </div>
-            )}
+          <div className="max-w-2xl">
+            <ManifestOverview manifest={m} type="integration" />
           </div>
+        </TabsContent>
+
+        {/* ─── Contenu (the artifact's own files, read-only) ───
+            Same generic explorer the unified package page mounts; the type
+            only decides which file opens first (INTEGRATION.md here). No
+            `version` prop: this page has no historical-version view, so the
+            explorer reads the live draft. */}
+        <TabsContent value="content" className="mt-4">
+          <FileExplorer packageId={packageId} type="integration" />
         </TabsContent>
 
         {/* ─── Versions (read-only history; non-system only) ─── */}

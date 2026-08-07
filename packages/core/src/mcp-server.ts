@@ -21,74 +21,35 @@
 
 import { z } from "zod";
 import {
+  MCP_SERVER_APPSTRATE_META_KEY,
+  MCP_SERVER_RUNTIME_CAPABILITIES,
+  MCP_SERVER_RUNTIMES,
+  isMcpServerRuntime,
+} from "./mcp-server-meta.ts";
+import {
   mcpServerManifestSchema as afpsMcpServerManifestSchema,
   type McpServerManifest,
 } from "@afps-spec/schema";
 
 export type { McpServerManifest };
 
-/** The `_meta` key carrying Appstrate-specific mcp-server runtime hints. */
-export const MCP_SERVER_APPSTRATE_META_KEY = "dev.appstrate/mcp-server";
+// Re-exported so `@appstrate/core/mcp-server` stays the one place backend code
+// imports mcp-server facts from. They LIVE in `./mcp-server-meta.ts` because
+// this module pulls `@afps-spec/schema`, which instantiates AJV at module
+// scope and declares no `sideEffects: false` — so a browser consumer that only
+// needs the runtime hint cannot tree-shake it away. Measured: +65 kB gzipped
+// on the integration detail page.
+export {
+  MCP_SERVER_APPSTRATE_META_KEY,
+  MCP_SERVER_RUNTIME_CAPABILITIES,
+  MCP_SERVER_RUNTIMES,
+  isMcpServerRuntime,
+  getMcpServerRuntime,
+} from "./mcp-server-meta.ts";
+export type { McpServerRuntime } from "./mcp-server-meta.ts";
 
 /** The `_meta` key carrying the shared-workspace opt-in declaration. */
 export const MCP_SERVER_WORKSPACE_META_KEY = "dev.appstrate/workspace";
-
-/**
- * Runtime identifiers accepted by both integration runtime adapters. This is
- * the public capability registry used by package authoring/discovery; adapter
- * implementation details (image refs and host commands) remain private.
- */
-export const MCP_SERVER_RUNTIME_CAPABILITIES = {
-  node: {
-    manifestVersion: "0.3",
-    manifestServerType: "node",
-    manifestCommand: "node",
-    manifestArgsBeforeEntryPoint: [],
-    entryPoint: "JavaScript entry point present in the archive",
-  },
-  bun: {
-    manifestVersion: "0.3",
-    manifestServerType: "node",
-    manifestCommand: "bun",
-    manifestArgsBeforeEntryPoint: [],
-    entryPoint: "JavaScript or TypeScript entry point present in the archive",
-    runtimeOverride: "bun",
-  },
-  python: {
-    manifestVersion: "0.3",
-    manifestServerType: "python",
-    manifestCommand: "python3",
-    manifestArgsBeforeEntryPoint: [],
-    entryPoint: "Python entry point present in the archive",
-  },
-  uv: {
-    manifestVersion: "0.4",
-    manifestServerType: "uv",
-    manifestCommand: "uv",
-    manifestArgsBeforeEntryPoint: ["run"],
-    entryPoint: "Python entry point present in the archive; uv resolves project dependencies",
-  },
-  binary: {
-    manifestVersion: "0.3",
-    manifestServerType: "binary",
-    manifestCommand: null,
-    manifestArgsBeforeEntryPoint: [],
-    entryPoint: "Executable entry point present in the archive",
-  },
-} as const;
-
-export type McpServerRuntime = keyof typeof MCP_SERVER_RUNTIME_CAPABILITIES;
-
-export const MCP_SERVER_RUNTIMES = Object.freeze(
-  Object.keys(MCP_SERVER_RUNTIME_CAPABILITIES) as McpServerRuntime[],
-);
-
-export function isMcpServerRuntime(value: unknown): value is McpServerRuntime {
-  return (
-    typeof value === "string" &&
-    Object.prototype.hasOwnProperty.call(MCP_SERVER_RUNTIME_CAPABILITIES, value)
-  );
-}
 
 /**
  * MCPB `user_config` entry shape (Appendix C / MCPB spec). Upstream
@@ -307,20 +268,6 @@ export function getMcpServerWorkspaceMount(
   }
 
   return { mount, access };
-}
-
-/**
- * Read the Appstrate runtime override from `_meta["dev.appstrate/mcp-server"]
- * .runtime`. MCPB's `server.type` enum is `node|python|binary|uv` — it has no
- * `bun`. A bun-native server therefore keeps an MCPB-vocabulary
- * `server.type: "node"` (with `mcp_config.command: "bun"`) and declares `bun`
- * here so the platform's runner picks the bun interpreter/image. Returns
- * `undefined` when absent, in which case callers fall back to `server.type`.
- */
-export function getMcpServerRuntime(manifest: McpServerManifest): McpServerRuntime | undefined {
-  const meta = (manifest as { _meta?: Record<string, unknown> })._meta;
-  const appstrate = meta?.[MCP_SERVER_APPSTRATE_META_KEY] as { runtime?: unknown } | undefined;
-  return isMcpServerRuntime(appstrate?.runtime) ? appstrate.runtime : undefined;
 }
 
 /**
