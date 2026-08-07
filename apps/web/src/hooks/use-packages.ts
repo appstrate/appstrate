@@ -102,7 +102,6 @@ function normalizePackageItemDetail(
     created_by_name: null,
     auto_installed: d.auto_installed,
     content: d.content,
-    source_code: d.source_code ?? null,
     manifest: d.manifest,
     agents: d.agents,
   };

@@ -571,8 +571,6 @@ export interface OrgPackageItem extends BasePackageListItem {
 export interface OrgPackageItemDetail extends Omit<OrgPackageItem, "used_by_agents"> {
   /** Present but nullable — the draft_content column is nullable. */
   content: string | null;
-  /** Secondary source file content (e.g. .ts for tools). */
-  source_code?: string | null;
   agents: { id: string; display_name: string }[];
   manifest?: Record<string, unknown>;
   manifest_name?: string | null;
@@ -606,8 +604,6 @@ export interface VersionListItem extends Omit<PackageVersionInfo, "createdAt"> {
 export interface VersionDetailResponse extends Omit<PackageVersionInfo, "createdAt"> {
   manifest: Record<string, unknown>;
   content?: string | null;
-  /** Secondary source file content (e.g. .ts for tools). */
-  source_code?: string | null;
   yanked_reason: string | null;
   createdAt: string | null;
   dist_tags: string[];

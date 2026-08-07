@@ -678,6 +678,44 @@ describe("Packages API", () => {
       const body = (await res.json()) as any;
       expect(body.lock_version).toBeGreaterThan(created.lock_version);
     });
+
+    // `source_code` was dropped from both JSON-body schemas once the last
+    // reader died with the `tool` package type. Neither schema is `.strict()`,
+    // so Zod strips the unknown key instead of rejecting it — a client still
+    // sending it must keep working exactly as before (it was already a no-op:
+    // no route config ever declared the `sourceFileName` that would have
+    // written it). This pins that the removal did not tighten validation.
+    it("still accepts a body carrying the retired source_code key", async () => {
+      const createRes = await app.request("/api/packages/integrations", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          manifest: remoteIntegrationManifest("@pkgorg/legacy-source-code"),
+          source_code: "export const unused = true;",
+        }),
+      });
+
+      expect(createRes.status).toBe(201);
+      const created = (await createRes.json()) as any;
+      expect(created.source_code).toBeUndefined();
+
+      const updateRes = await app.request("/api/packages/integrations/@pkgorg/legacy-source-code", {
+        method: "PUT",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          manifest: {
+            ...remoteIntegrationManifest("@pkgorg/legacy-source-code"),
+            display_name: "Renamed Integration",
+          },
+          source_code: "export const stillUnused = true;",
+          lock_version: created.lock_version,
+        }),
+      });
+
+      expect(updateRes.status).toBe(200);
+      const updated = (await updateRes.json()) as any;
+      expect(updated.source_code).toBeUndefined();
+    });
   });
 
   // ═══════════════════════════════════════════════

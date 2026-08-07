@@ -599,10 +599,6 @@ export const schemas = {
         type: ["string", "null"],
         description: "Primary content file extracted from the version ZIP",
       },
-      source_code: {
-        type: ["string", "null"],
-        description: "Secondary source file content (e.g. .ts), when present",
-      },
       yanked: { type: "boolean", description: "Whether this version has been yanked" },
       yanked_reason: { type: ["string", "null"] },
       integrity: { type: "string", description: "SRI integrity hash (sha256-...)" },
@@ -1218,10 +1214,6 @@ export const schemas = {
       name: { type: "string" }, // getPackageDisplayName always returns a string (falls back to id)
       description: { type: ["string", "null"] },
       content: { type: ["string", "null"], description: "Package item content" },
-      source_code: {
-        type: ["string", "null"],
-        description: "Secondary source file content (e.g. .ts for tools)",
-      },
       source: { type: "string", enum: ["system", "local"] },
       created_by: { type: ["string", "null"] },
       auto_installed: { type: "boolean" },

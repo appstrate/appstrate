@@ -5357,8 +5357,6 @@ export interface components {
             description: string | null;
             /** @description Package item content */
             content: string | null;
-            /** @description Secondary source file content (e.g. .ts for tools) */
-            source_code?: string | null;
             /** @enum {string} */
             source: "system" | "local";
             created_by: string | null;
@@ -5448,8 +5446,6 @@ export interface components {
             };
             /** @description Primary content file extracted from the version ZIP */
             content?: string | null;
-            /** @description Secondary source file content (e.g. .ts), when present */
-            source_code?: string | null;
             /** @description Whether this version has been yanked */
             yanked: boolean;
             yanked_reason: string | null;
@@ -16015,8 +16011,6 @@ export interface operations {
                     };
                     /** @description Primary package file content (manifest document). */
                     content?: string;
-                    /** @description Optional source code payload for the integration runner. */
-                    source_code?: string;
                 };
             };
         };
@@ -17165,8 +17159,6 @@ export interface operations {
                     };
                     /** @description SKILL.md content (markdown with YAML frontmatter). */
                     content?: string;
-                    /** @description Optional source code payload. */
-                    source_code?: string;
                 };
             };
         };

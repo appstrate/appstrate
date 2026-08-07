@@ -745,7 +745,6 @@ export const packagesPaths = {
                   type: "string",
                   description: "SKILL.md content (markdown with YAML frontmatter).",
                 },
-                source_code: { type: "string", description: "Optional source code payload." },
               },
             },
           },
@@ -2003,10 +2002,6 @@ export const packagesPaths = {
                 content: {
                   type: "string",
                   description: "Primary package file content (manifest document).",
-                },
-                source_code: {
-                  type: "string",
-                  description: "Optional source code payload for the integration runner.",
                 },
               },
             },

@@ -201,20 +201,21 @@ export const forkSchema = z.object({
 /**
  * JSON-body create/update payloads for the manifest-driven package types
  * (agent). `manifest` is validated structurally here (must be an object) and
- * then deeply by `validateManifest`. Bodies with wrong-typed `content` /
- * `source_code` (e.g. `content: 1`) are now rejected as a 400 instead of
- * blowing up downstream as a 500.
+ * then deeply by `validateManifest`. Bodies with a wrong-typed `content`
+ * (e.g. `content: 1`) are rejected as a 400 instead of blowing up downstream
+ * as a 500.
+ *
+ * Both objects are non-strict, so an unknown key (a client still sending the
+ * retired `source_code`, say) is silently stripped rather than rejected.
  */
 const packageJsonCreateSchema = z.object({
   manifest: z.record(z.string(), z.unknown()),
   content: z.string().optional(),
-  source_code: z.string().optional(),
 });
 
 const packageJsonUpdateSchema = z.object({
   manifest: z.record(z.string(), z.unknown()).optional(),
   content: z.string().optional(),
-  source_code: z.string().optional(),
   lock_version: z.number().optional(),
 });
 
@@ -420,11 +421,25 @@ interface PackageRouteConfig {
     contentFileExt: string | null;
   };
   validateContent?: (content: string) => { valid: boolean; errors: string[]; warnings: string[] };
-  /** Validates the secondary source file (e.g. .ts for tools). */
-  validateSource?: (source: string) => { valid: boolean; errors: string[]; warnings: string[] };
-  storageFileName: (id: string) => string;
-  /** Secondary source file name (e.g. {name}.ts for tools). */
-  sourceFileName?: (id: string) => string;
+  /**
+   * Which storage file this type's editor `content` is written to — a per-type
+   * editor-wiring fact.
+   *
+   * It answers a DIFFERENT question from `PACKAGE_CONTENT_FILE`
+   * (`@appstrate/core/package-files`), which names the archive entry
+   * `draft_content` mirrors. Both are right where they differ: for
+   * `integration` the SPA editor deliberately sends the manifest JSON as
+   * `content` (`toWireBody`, `apps/web/src/pages/package-editor.tsx`), so
+   * `manifest.json` is exactly where that `content` belongs.
+   *
+   * Do NOT "reconcile" the two maps. Pointing `integration` at
+   * `INTEGRATION.md` would write manifest JSON into the docs file, strand the
+   * real `manifest.json` (nothing refreshes it afterwards), and — because
+   * `createVersionFromDraft` spreads the stored files into the artifact — mint
+   * immutable, integrity-pinned published ZIPs whose `INTEGRATION.md` is
+   * manifest JSON. Unfixable once published.
+   */
+  storageFileName: () => string;
   /** Hook called after a new package is created. */
   afterCreate?: (params: {
     packageId: string;
@@ -559,7 +574,6 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
 
       const manifest = body.manifest;
       const content = body.content ?? "";
-      const sourceCode = body.source_code ?? "";
 
       const validatedManifest = await validateManifestForRoute(
         manifest,
@@ -580,24 +594,6 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
               field: "content",
               code: "invalid_content",
               title: "Invalid Content",
-              message,
-            })),
-          );
-        }
-      }
-
-      if (rcfg.sourceFileName && !sourceCode.trim()) {
-        throw invalidRequest("Source is required", "source_code");
-      }
-
-      if (rcfg.validateSource && sourceCode) {
-        const validation = rcfg.validateSource(sourceCode);
-        if (!validation.valid) {
-          throw validationFailed(
-            validation.errors.map((message) => ({
-              field: "source_code",
-              code: "invalid_source",
-              title: "Invalid Source",
               message,
             })),
           );
@@ -651,11 +647,8 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
 
       // Upload files to S3 storage
       const normalizedFiles: Record<string, Uint8Array> = {
-        [rcfg.storageFileName(packageId)]: new TextEncoder().encode(content),
+        [rcfg.storageFileName()]: new TextEncoder().encode(content),
       };
-      if (rcfg.sourceFileName && sourceCode) {
-        normalizedFiles[rcfg.sourceFileName(packageId)] = new TextEncoder().encode(sourceCode);
-      }
       await uploadPackageFiles(rcfg.cfg.storageFolder, orgId, packageId, normalizedFiles);
 
       // Create initial version (non-fatal). Snapshot the STORED draft
@@ -846,19 +839,8 @@ async function buildPackageDetailDto(
 
   if (!item) return null;
 
-  // Extract secondary source file from S3 storage (e.g. .ts for tools)
-  let sourceText: string | null = null;
-  if (rcfg.sourceFileName) {
-    const files = await downloadPackageFiles(rcfg.cfg.storageFolder, orgId, itemId);
-    const sourceData = files?.[rcfg.sourceFileName(itemId)];
-    if (sourceData) {
-      sourceText = new TextDecoder().decode(sourceData);
-    }
-  }
-
   return {
     ...item,
-    ...(sourceText != null ? { source_code: sourceText } : {}),
     version_count: versionCount,
     has_unarchived_changes: computeHasUnpublishedChanges(
       item.source,
@@ -938,7 +920,6 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
     const manifest =
       authoredManifest ?? (existing as { manifest?: Record<string, unknown> }).manifest ?? {};
     const content = body.content ?? existing.content ?? "";
-    const sourceCode = body.source_code;
 
     // Everything downstream — the persisted row, the after-update hook, the
     // id-immutability check — reads the VALIDATED manifest, never the raw one.
@@ -980,26 +961,6 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
       }
     }
 
-    // Source validation (tools)
-    if (rcfg.sourceFileName && sourceCode !== undefined) {
-      if (!sourceCode.trim()) {
-        throw invalidRequest("Source cannot be empty", "source_code");
-      }
-      if (rcfg.validateSource) {
-        const validation = rcfg.validateSource(sourceCode);
-        if (!validation.valid) {
-          throw validationFailed(
-            validation.errors.map((message) => ({
-              field: "source_code",
-              code: "invalid_source",
-              title: "Invalid Source",
-              message,
-            })),
-          );
-        }
-      }
-    }
-
     const updated = await updateOrgItem(
       orgId,
       itemId,
@@ -1015,11 +976,8 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
     const existingFiles = await downloadPackageFiles(rcfg.cfg.storageFolder, orgId, itemId);
     const updatedFiles: Record<string, Uint8Array> = {
       ...(existingFiles ?? {}),
-      [rcfg.storageFileName(itemId)]: new TextEncoder().encode(content),
+      [rcfg.storageFileName()]: new TextEncoder().encode(content),
     };
-    if (rcfg.sourceFileName && sourceCode !== undefined) {
-      updatedFiles[rcfg.sourceFileName(itemId)] = new TextEncoder().encode(sourceCode);
-    }
     await uploadPackageFiles(rcfg.cfg.storageFolder, orgId, itemId, updatedFiles);
 
     // After-update hook (e.g. agent junction table sync)
@@ -1138,18 +1096,10 @@ async function buildVersionDetailDto(
 
   // Extract primary content file from the ZIP
   let content: string | null = null;
-  let sourceText: string | null = null;
   if (detail.content) {
-    const fileName = rcfg.storageFileName(itemId);
-    const fileData = detail.content[fileName];
+    const fileData = detail.content[rcfg.storageFileName()];
     if (fileData) {
       content = new TextDecoder().decode(fileData);
-    }
-    if (rcfg.sourceFileName) {
-      const sourceData = detail.content[rcfg.sourceFileName(itemId)];
-      if (sourceData) {
-        sourceText = new TextDecoder().decode(sourceData);
-      }
     }
   }
 
@@ -1158,7 +1108,6 @@ async function buildVersionDetailDto(
     version: detail.version,
     manifest: detail.manifest,
     content,
-    ...(sourceText != null ? { source_code: sourceText } : {}),
     yanked: detail.yanked,
     yanked_reason: detail.yankedReason,
     integrity: detail.integrity,
@@ -1321,8 +1270,7 @@ function makeRestoreVersionHandler(rcfg: PackageRouteConfig) {
     // Extract content from version ZIP
     let content = detail.prompt ?? "";
     if (detail.content) {
-      const fileName = rcfg.storageFileName(itemId);
-      const fileData = detail.content[fileName];
+      const fileData = detail.content[rcfg.storageFileName()];
       if (fileData) {
         content = new TextDecoder().decode(fileData);
       }
