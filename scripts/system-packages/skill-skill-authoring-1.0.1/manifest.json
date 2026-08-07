@@ -1,0 +1,12 @@
+{
+  "name": "@appstrate/skill-authoring",
+  "version": "1.0.1",
+  "type": "skill",
+  "schema_version": "0.2",
+  "display_name": "Écriture d'une skill",
+  "description": "Écrire de zéro une skill de méthode pour l'organisation quand aucun savoir-faire existant ne couvre l'agent à créer. Charge ce guide avant de rédiger le SKILL.md. Il règle les deux descriptions, la séparation méthode/instance, le nom AFPS, les capacités runtime requises et les critères de complétion.",
+  "license": "Apache-2.0 AND MIT",
+  "_meta": {
+    "dev.appstrate/visibility": { "level": "unlisted" }
+  }
+}

@@ -99,8 +99,9 @@ Une fois une idée choisie, réunis ses briques.
    recettes d'automatisation » en nomme une. Tu la lis, tu la **matérialises** dans l'organisation
    (voir « Référence — Prompt ou skill » ci-dessous), puis tu déclares le package créé.
 3. **Sinon**, repo whitelisté (`anthropics/skills` → `skill-creator`, `mcp-builder` ;
-   `letta-ai/skills`) → importe depuis GitHub. Rien du tout → rédige la méthode toi-même, à la
-   manière de `skill-creator`.
+   `letta-ai/skills`) → importe depuis GitHub. Rien du tout → lis d'abord
+   `@appstrate/skill-authoring` avec `getSkill`, puis suis-le pour rédiger la méthode. Ce chargement
+   doit apparaître dans la trace avant l'appel `createSkill`.
 
 Mes 14 recettes sont un **point de départ**, pas un catalogue : elles ne sont pas des packages,
 le client ne les voit pas, et une organisation mature finit par tourner surtout sur les siennes.
