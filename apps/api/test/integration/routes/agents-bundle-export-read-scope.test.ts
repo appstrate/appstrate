@@ -5,7 +5,10 @@
  *
  * #1123 / #1124 settled that a skill's stored bytes need `skills:read`, per
  * package TYPE rather than one blanket scope — that is what
- * `GET /api/packages/skills/{id}/files[/content]` enforces.
+ * `GET /api/packages/{scope}/{name}/files[/content]` enforces. (No type segment
+ * in that path: the route sits at the packages router root and resolves its
+ * RBAC resource from the package ROW, which is precisely why it can enforce a
+ * per-type scope on a path that does not name the type.)
  *
  * The bundle export was the remaining looser door to the same bytes. It is
  * registered under `agents:read` alone, and while the ROOT agent is narrowed to
@@ -33,7 +36,13 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { zipSync } from "fflate";
 import { db, truncateAll } from "../../helpers/db.ts";
-import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
+import {
+  createTestContext,
+  createTestUser,
+  addOrgMember,
+  authHeaders,
+  type TestContext,
+} from "../../helpers/auth.ts";
 import { seedPackage, seedPackageVersion, seedApiKey } from "../../helpers/seed.ts";
 import { getTestApp } from "../../helpers/app.ts";
 import { installPackage } from "../../../src/services/application-packages.ts";
@@ -227,11 +236,22 @@ describe("GET /api/agents/:scope/:name/bundle — dependency read scope", () => 
     // The blast radius of this change is scoped credentials only. If a role
     // ever loses `skills:read` while keeping `agents:read`, this fails loudly
     // rather than silently 403ing the dashboard's export button.
-    for (const source of ["draft", "published"]) {
-      const res = await app.request(`/api/agents/${AGENT_ID}/bundle?source=${source}`, {
-        headers: authHeaders(ctx),
-      });
-      expect(`${source}: ${res.status}`).toBe(`${source}: 200`);
+    //
+    // EVERY role, not just the owner `ctx` was created with: `member` and
+    // `viewer` are the ones whose grant lists could plausibly be trimmed, and
+    // they are exactly the two an owner-only check never reaches. Each gets its
+    // own user — role is a property of the membership row, not of the session.
+    for (const role of ["owner", "admin", "member", "viewer"] as const) {
+      const roleUser = await createTestUser();
+      await addOrgMember(ctx.orgId, roleUser.id, role);
+      const headers = authHeaders({ ...ctx, cookie: roleUser.cookie });
+
+      for (const source of ["draft", "published"]) {
+        const res = await app.request(`/api/agents/${AGENT_ID}/bundle?source=${source}`, {
+          headers,
+        });
+        expect(`${role}/${source}: ${res.status}`).toBe(`${role}/${source}: 200`);
+      }
     }
   });
 
@@ -285,7 +305,20 @@ describe("GET /api/agents/:scope/:name/bundle — dependency read scope", () => 
     // is the app-install boundary and nothing else — the run reached bytes the
     // file explorer refuses to show. That asymmetry is the run path's own rule,
     // deliberately left alone.
-    const res = await app.request(`/api/packages/skills/${SKILL_ID}/files`, {
+    //
+    // The route is at the packages router ROOT (`/api/packages/{scope}/{name}/
+    // files`) — there is NO per-type segment, because its RBAC resource comes
+    // from the row, not the path. A `/skills/` in the middle makes
+    // `SCOPED_PACKAGE_ROUTE` fail to match and Hono 404s before any handler
+    // runs, which is indistinguishable from the 404 being asserted. Hence the
+    // positive control first: the same URL shape, for a package that IS
+    // installed, must reach the handler.
+    const installed = await app.request(`/api/packages/${AGENT_ID}/files`, {
+      headers: authHeaders(ctx),
+    });
+    expect(installed.status).toBe(200);
+
+    const res = await app.request(`/api/packages/${SKILL_ID}/files`, {
       headers: authHeaders(ctx),
     });
     expect(res.status).toBe(404);

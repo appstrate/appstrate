@@ -271,10 +271,22 @@ export function applyDraftOverlay(files: Record<string, Uint8Array>, pkg: Packag
     // the explorer pre-selects. The stored file is intact in both cases, so
     // declining the overlay shows the truth rather than a stale guess.
     //
+    // An EMPTY column counts as "no authoritative copy" for the same reason
+    // and is listed explicitly, because `isManifestTextFallback` short-circuits
+    // on a falsy input and would otherwise call `""` the real doc: overlaying
+    // it truncated a genuine `INTEGRATION.md` to a 0-byte file in the explorer
+    // while `?version=…` on the same package still served it. `forkPackage`
+    // produced exactly that column until it started reading
+    // `PACKAGE_CONTENT_ENTRY`; the guard stays regardless, since any future
+    // writer that leaves the column empty must degrade to the stored bytes
+    // rather than erase them.
+    //
     // A REQUIRED entry has no such fallback — its column is genuinely its only
     // file, a freshly created package with no stored ZIP must still list it,
-    // and a JSON-shaped `prompt.md` must never be mistaken for a manifest.
-    const isFallback = !entry.required && isManifestTextFallback(pkg.draftContent);
+    // and a JSON-shaped `prompt.md` must never be mistaken for a manifest. An
+    // empty one there is an empty prompt, which is the truth.
+    const isFallback =
+      !entry.required && (!pkg.draftContent || isManifestTextFallback(pkg.draftContent));
     if (!isFallback && (entry.required || Object.hasOwn(files, entry.path))) {
       files[entry.path] = encoder.encode(pkg.draftContent);
     }
@@ -300,12 +312,39 @@ export function applyDraftOverlay(files: Record<string, Uint8Array>, pkg: Packag
  * agent's platform prompt (`fetchIntegrationPromptDocs`), and the file
  * explorer began serving manifest JSON under the name `INTEGRATION.md`.
  *
+ * ## INCOMING's shape is the FIRST question, and it is what gates the guard
+ *
+ * The guard only engages when the value being WRITTEN is manifest-shaped,
+ * because that is the shape the platform generates and can therefore read
+ * unambiguously: a manifest-shaped `incoming` can only have come from the
+ * manifest editor's `toWireBody`, which has no `INTEGRATION.md` field to have
+ * produced it from. A markdown-shaped `incoming` is a caller sending the doc.
+ *
+ * Gating on STORED's shape ALONE made the field WRITE-ONCE, and silently: a
+ * non-SPA client (curl, CI, an agent through the MCP module) that PUT a new
+ * `INTEGRATION.md` over a column already holding one got `200` and its
+ * markdown dropped on the floor — nowhere at all, since this type's storage
+ * sink is `manifest.json`. The same request DID land whenever the column
+ * happened to hold the manifest fallback, so the field wrote exactly once per
+ * package with no way for the client to tell which mode it was in.
+ *
  * So a manifest-shaped write REFRESHES the manifest-text fallback — an
  * integration that legitimately ships no doc must keep a current one — and is
- * declined over a column that holds the real thing. Nothing else can author
- * that doc through this path, so "keep what is there" is the only correct
- * answer; a genuine replacement arrives through import
- * (`parsePackageZip` → `draft_content`), which is unaffected.
+ * declined ONLY over a column that holds the real thing. Every other write,
+ * including one that carries an actual `INTEGRATION.md`, lands.
+ *
+ * ## Known limit: a doc that is ONE template block
+ *
+ * `isManifestTextFallback` is a `{`…`}` sniff, so an `INTEGRATION.md` whose
+ * whole body is `{{ tmpl }}` reads as a manifest. The `stored` half of the
+ * condition below therefore still mistakes such a doc for a refreshable
+ * fallback and lets an editor save overwrite it. That half cannot simply be
+ * dropped: without it, a manifest-shaped write is declined unconditionally and
+ * the fallback can never be refreshed — the two requirements are mutually
+ * exclusive under a shape test. Closing it needs a stronger predicate
+ * (`JSON.parse` + a manifest-shaped check), which this sniff deliberately
+ * avoids and which all four of its readers would inherit. Pinned as a known
+ * case in `test/unit/package-files.test.ts`.
  *
  * Storage is a separate sink and is deliberately NOT routed through here: the
  * editor's manifest JSON still belongs in the integration's `manifest.json`.
@@ -320,8 +359,10 @@ export function resolveDraftContent(
   // (mcp-server): the column is a redundant manifest copy by definition. In
   // neither case can the column mean two things, so neither is guarded.
   if (entry === null || entry.required) return incoming;
+  // Nothing to protect — and returning `stored` here would hand back the very
+  // `null` / `""` the signature promises never to produce.
   if (!stored) return incoming;
-  return isManifestTextFallback(stored) ? incoming : stored;
+  return isManifestTextFallback(incoming) && !isManifestTextFallback(stored) ? stored : incoming;
 }
 
 /**

@@ -109,6 +109,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Saving an integration destroyed its `INTEGRATION.md`** — `draft_content` is
+  overloaded for integrations: the importer stores the bundle's
+  `INTEGRATION.md` when it ships one and the manifest text when it does not,
+  with nothing on the row saying which. The package editor authors a manifest
+  and has no documentation field, so it always wrote the manifest form —
+  opening a documented integration and pressing Save, with no edit, replaced
+  its documentation with its own manifest JSON. The integration then stopped
+  contributing its agent-facing docs to every agent's platform prompt, and the
+  file explorer served that manifest under the name `INTEGRATION.md`, the entry
+  it pre-selects. Version restore and package fork produced the same corruption
+  by other routes. All four write paths now agree on which entry the column
+  mirrors, and the explorer declines to show a manifest copy over a real
+  stored file.
+
+  **Operators: existing rows are not repaired automatically.** The file
+  explorer is fixed at read time — the real `INTEGRATION.md` is still intact in
+  object storage and is served again immediately. The platform prompt is not:
+  an integration whose column was already clobbered keeps contributing no
+  documentation to agent runs until its row is repaired. Re-importing the
+  integration's AFPS archive, or restoring a published version that ships the
+  doc, rewrites the column correctly. No backfill migration ships with this
+  release.
+
 - **`POST /api/packages/import-bundle` skipped agent integration validation
   entirely** — bytes `POST /api/packages/import` refused imported cleanly
   through it and froze a broken selection into an immutable version. The same

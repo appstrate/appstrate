@@ -18,7 +18,10 @@ import {
 } from "../../../src/services/integration-client-registry.ts";
 import { installPackage } from "../../../src/services/application-packages.ts";
 import { assertDbMissing, assertDbHas } from "../../helpers/assertions.ts";
-import { mcpServerManifest } from "../../helpers/integration-manifests.ts";
+import {
+  mcpServerManifest,
+  remoteIntegrationManifest,
+} from "../../helpers/integration-manifests.ts";
 import {
   buildMinimalZip,
   uploadPackageZip,
@@ -3058,6 +3061,199 @@ describe("Packages API", () => {
         type?: string;
       };
       expect(zipped.type).toBe("integration");
+    });
+  });
+
+  // ═══════════════════════════════════════════════
+  // POST fork — `packages.draft_content`, the FOURTH writer of the
+  // "which archive entry is this type's primary content" fact. Import
+  // (`parsePackageZip`), the file explorer's overlay and the package UI all
+  // read it from `PACKAGE_CONTENT_ENTRY`; the fork read a hardcoded
+  // `prompt.md`/`SKILL.md` pair, so it covered two of the four types and
+  // produced `""` for the other two — a column NO import of the same bytes
+  // could ever produce.
+  // ═══════════════════════════════════════════════
+
+  describe("POST fork — draft_content comes from PACKAGE_CONTENT_ENTRY", () => {
+    const INTEGRATION_DOC = "# Forkable\n\nAgent-facing docs shipped by the bundle.\n";
+
+    /** Publish an integration in another org, with whatever companion entries. */
+    async function publishIntegration(
+      packageId: string,
+      orgId: string,
+      companions: Record<string, Uint8Array>,
+    ): Promise<void> {
+      const manifest = remoteIntegrationManifest({
+        name: packageId,
+        version: "0.1.0",
+        auths: {},
+      }) as unknown as Record<string, unknown>;
+      await seedPackage({
+        id: packageId,
+        orgId,
+        type: "integration",
+        draftManifest: manifest,
+        // What an IMPORT of these bytes stores: the doc when there is one, the
+        // manifest text otherwise. The source row is deliberately correct so
+        // the fork is the only thing under test.
+        draftContent: companions["INTEGRATION.md"]
+          ? new TextDecoder().decode(companions["INTEGRATION.md"])
+          : JSON.stringify(manifest, null, 2),
+      });
+      const zip = Buffer.from(
+        zipArtifact(
+          {
+            "manifest.json": new TextEncoder().encode(JSON.stringify(manifest, null, 2)),
+            ...companions,
+          },
+          6,
+        ),
+      );
+      await uploadPackageZip(packageId, "0.1.0", zip);
+      const row = await seedPackageVersion({
+        packageId,
+        version: "0.1.0",
+        manifest,
+        integrity: computeIntegrity(new Uint8Array(zip)),
+        artifactSize: zip.byteLength,
+      });
+      await db.insert(packageDistTags).values({ packageId, tag: "latest", versionId: row.id });
+    }
+
+    async function forkInto(sourceId: string, targetId: string): Promise<void> {
+      const res = await app.request(`/api/packages/${sourceId}/fork`, {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({}),
+      });
+      expect(res.status).toBe(201);
+      // Pin the id the rest of the test reads its rows by — a change in how the
+      // route derives it would otherwise surface as "row not found".
+      expect(((await res.json()) as { id: string }).id).toBe(targetId);
+      // The route auto-installs the fork in the calling application, which is
+      // what satisfies the explorer's `hasPackageAccess` gate below — so no
+      // install of our own, which would 409 as `already_installed`. The `200`
+      // asserted in `fileIndex` is the proof that it happened.
+    }
+
+    async function draftContentOf(packageId: string): Promise<string | null> {
+      const [row] = await db
+        .select({ draftContent: packages.draftContent })
+        .from(packages)
+        .where(eq(packages.id, packageId))
+        .limit(1);
+      return row!.draftContent;
+    }
+
+    /**
+     * The explorer index. The route lives at the packages router ROOT —
+     * `/api/packages/{scope}/{name}/files`, with NO per-type segment, because
+     * its RBAC resource comes from the package row rather than the path (see
+     * `loadFileExplorerPackage`). Inserting `integrations/` makes
+     * `SCOPED_PACKAGE_ROUTE` fail to match `:scope{@…}` and Hono answers 404
+     * before any handler runs — a routing miss that looks exactly like the
+     * app-install 404 this suite would otherwise be probing.
+     */
+    async function fileIndex(
+      packageId: string,
+    ): Promise<{ path: string; size: number; inline?: string }[]> {
+      const res = await app.request(`/api/packages/${packageId}/files`, {
+        headers: authHeaders(ctx),
+      });
+      expect(res.status).toBe(200);
+      return ((await res.json()) as { entries: { path: string; size: number; inline?: string }[] })
+        .entries;
+    }
+
+    it("carries a forked integration's INTEGRATION.md through to the explorer", async () => {
+      const srcCtx = await createTestContext({ orgSlug: "forkdoc" });
+      const sourceId = "@forkdoc/documented";
+      await publishIntegration(sourceId, srcCtx.orgId, {
+        "INTEGRATION.md": new TextEncoder().encode(INTEGRATION_DOC),
+      });
+
+      const targetId = "@pkgorg/documented";
+      await forkInto(sourceId, targetId);
+
+      // The column the runtime reads (`fetchIntegrationPromptDocs`) — it was
+      // `""`, so the fork silently stopped contributing its docs to every
+      // agent's platform prompt.
+      expect(await draftContentOf(targetId)).toBe(INTEGRATION_DOC);
+
+      // …and what the explorer serves. The ZIP entry was always there; the
+      // empty column was overlaid ON TOP of it, reporting `size: 0`.
+      const doc = (await fileIndex(targetId)).find((f) => f.path === "INTEGRATION.md");
+      expect(doc).toBeDefined();
+      expect(doc!.inline).toBe(INTEGRATION_DOC);
+      expect(doc!.size).toBe(new TextEncoder().encode(INTEGRATION_DOC).byteLength);
+    });
+
+    it('stores the manifest text — not `""` — when the source ships no doc', async () => {
+      const srcCtx = await createTestContext({ orgSlug: "forknodoc" });
+      const sourceId = "@forknodoc/bare";
+      await publishIntegration(sourceId, srcCtx.orgId, {});
+
+      const targetId = "@pkgorg/bare";
+      await forkInto(sourceId, targetId);
+
+      // What an import of the FORK's own bytes would have stored: for an
+      // integration with no INTEGRATION.md, `parsePackageZip` falls back to the
+      // manifest text. So the column must equal the fork's own `manifest.json`
+      // — the renamed manifest, not the source's.
+      const zip = await downloadVersionZip(targetId, "0.1.0");
+      const artifactManifest = new TextDecoder().decode(
+        unzipPackageArchive(zip!)["manifest.json"]!,
+      );
+      expect(await draftContentOf(targetId)).toBe(artifactManifest);
+      expect(JSON.parse(artifactManifest)).toMatchObject({ name: targetId });
+
+      // And the explorer invents no companion: a manifest-text column is a
+      // fallback, never materialized as a phantom `INTEGRATION.md`.
+      expect((await fileIndex(targetId)).map((f) => f.path)).not.toContain("INTEGRATION.md");
+    });
+
+    it("still reads an agent's prompt.md — the required entries are unchanged", async () => {
+      const srcCtx = await createTestContext({ orgSlug: "forkprompt" });
+      const sourceId = "@forkprompt/agent";
+      const manifest = {
+        name: sourceId,
+        version: "0.1.0",
+        type: "agent",
+        schema_version: "0.1",
+        display_name: "Prompted",
+        description: "Its prompt must survive the fork",
+      };
+      await seedPackage({
+        id: sourceId,
+        orgId: srcCtx.orgId,
+        type: "agent",
+        draftManifest: manifest,
+        draftContent: "You are the source agent.",
+      });
+      const zip = buildMinimalZip(manifest, "You are the source agent.", "prompt.md");
+      await uploadPackageZip(sourceId, "0.1.0", zip);
+      const row = await seedPackageVersion({
+        packageId: sourceId,
+        version: "0.1.0",
+        manifest,
+        integrity: computeIntegrity(new Uint8Array(zip)),
+        artifactSize: zip.byteLength,
+      });
+      await db
+        .insert(packageDistTags)
+        .values({ packageId: sourceId, tag: "latest", versionId: row.id });
+
+      const res = await app.request(`/api/packages/${sourceId}/fork`, {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({}),
+      });
+      expect(res.status).toBe(201);
+
+      // NOT the manifest text: a required entry has no fallback in the parser
+      // either, and storing one here would make the overlay materialize
+      // manifest JSON AS the agent's prompt.
+      expect(await draftContentOf("@pkgorg/agent")).toBe("You are the source agent.");
     });
   });
 

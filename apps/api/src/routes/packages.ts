@@ -447,7 +447,7 @@ interface PackageRouteConfig {
    * `INTEGRATION.md` is nobody's editor field) and must rebuild the storage
    * file from the manifest instead of echoing a carried-forward `content`.
    */
-  storageFileName: () => string;
+  storageFileName: string;
   /** Hook called after a new package is created. */
   afterCreate?: (params: {
     packageId: string;
@@ -492,7 +492,7 @@ const ROUTE_CONFIGS: Partial<Record<PackageType, PackageRouteConfig>> = {
     cfg: CONFIG_BY_TYPE.skill,
     path: "skills",
     parseOpts: { requiredFile: "SKILL.md", contentFileExt: null },
-    storageFileName: () => "SKILL.md",
+    storageFileName: "SKILL.md",
     jsonBodyCreate: true,
     requireContent: true,
   },
@@ -500,7 +500,7 @@ const ROUTE_CONFIGS: Partial<Record<PackageType, PackageRouteConfig>> = {
     cfg: CONFIG_BY_TYPE.agent,
     path: "agents",
     parseOpts: { requiredFile: null, contentFileExt: null },
-    storageFileName: () => "prompt.md",
+    storageFileName: "prompt.md",
     jsonBodyCreate: true,
     requireContent: true,
     requireMutableForVersionOps: true,
@@ -521,7 +521,7 @@ const ROUTE_CONFIGS: Partial<Record<PackageType, PackageRouteConfig>> = {
     cfg: CONFIG_BY_TYPE.integration,
     path: "integrations",
     parseOpts: { requiredFile: null, contentFileExt: null },
-    storageFileName: () => "manifest.json",
+    storageFileName: "manifest.json",
     jsonBodyCreate: true,
   },
   // AFPS §3.4 — standalone mcp-server packages. Import-only like
@@ -533,7 +533,7 @@ const ROUTE_CONFIGS: Partial<Record<PackageType, PackageRouteConfig>> = {
     cfg: CONFIG_BY_TYPE["mcp-server"],
     path: "mcp-servers",
     parseOpts: { requiredFile: null, contentFileExt: null },
-    storageFileName: () => "manifest.json",
+    storageFileName: "manifest.json",
     jsonBodyCreate: false,
   },
 };
@@ -655,7 +655,7 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
 
       // Upload files to S3 storage
       const normalizedFiles: Record<string, Uint8Array> = {
-        [rcfg.storageFileName()]: new TextEncoder().encode(content),
+        [rcfg.storageFileName]: new TextEncoder().encode(content),
       };
       await uploadPackageFiles(rcfg.cfg.storageFolder, orgId, packageId, normalizedFiles);
 
@@ -987,7 +987,7 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
       throw conflict("conflict", `${label} was modified concurrently. Reload and try again.`);
     }
 
-    // Bytes for `rcfg.storageFileName()`. When that file is NOT the type's
+    // Bytes for `rcfg.storageFileName`. When that file is NOT the type's
     // content entry it is the manifest (integration, mcp-server), and it is
     // rebuilt from the VALIDATED manifest rather than echoing `content`: this
     // route accepts a manifest-only PUT, and the `existing.content`
@@ -995,7 +995,7 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
     // integration is its INTEGRATION.md. Echoing it would overwrite the
     // package's `manifest.json` with its documentation.
     const storageContent =
-      PACKAGE_CONTENT_ENTRY[rcfg.cfg.type]?.path === rcfg.storageFileName()
+      PACKAGE_CONTENT_ENTRY[rcfg.cfg.type]?.path === rcfg.storageFileName
         ? content
         : JSON.stringify(validatedManifest, null, 2);
 
@@ -1003,7 +1003,7 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
     const existingFiles = await downloadPackageFiles(rcfg.cfg.storageFolder, orgId, itemId);
     const updatedFiles: Record<string, Uint8Array> = {
       ...(existingFiles ?? {}),
-      [rcfg.storageFileName()]: new TextEncoder().encode(storageContent),
+      [rcfg.storageFileName]: new TextEncoder().encode(storageContent),
     };
     await uploadPackageFiles(rcfg.cfg.storageFolder, orgId, itemId, updatedFiles);
 
@@ -1124,7 +1124,7 @@ async function buildVersionDetailDto(
   // Extract primary content file from the ZIP
   let content: string | null = null;
   if (detail.content) {
-    const fileData = detail.content[rcfg.storageFileName()];
+    const fileData = detail.content[rcfg.storageFileName];
     if (fileData) {
       content = new TextDecoder().decode(fileData);
     }
@@ -1298,7 +1298,7 @@ function makeRestoreVersionHandler(rcfg: PackageRouteConfig) {
     //
     // The column mirrors the archive's CONTENT ENTRY (`PACKAGE_CONTENT_ENTRY`),
     // NOT the file this type's editor `content` is stored under
-    // (`rcfg.storageFileName()`). The two names agree for `agent`/`skill` and
+    // (`rcfg.storageFileName`). The two names agree for `agent`/`skill` and
     // DIVERGE for `integration`, whose column holds the optional
     // `INTEGRATION.md` while its editor content is `manifest.json` — reading
     // the storage name restored a manifest copy over the docs, the exact
@@ -1311,7 +1311,7 @@ function makeRestoreVersionHandler(rcfg: PackageRouteConfig) {
     if (detail.content) {
       const fileData =
         (contentEntryPath ? detail.content[contentEntryPath] : undefined) ??
-        detail.content[rcfg.storageFileName()];
+        detail.content[rcfg.storageFileName];
       if (fileData) {
         content = new TextDecoder().decode(fileData);
       }
