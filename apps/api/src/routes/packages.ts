@@ -1512,23 +1512,22 @@ async function loadFileExplorerPackage(c: Context<AppEnv>): Promise<PackageFileS
 }
 
 /**
- * `private` is mandatory on both routes: these are authenticated,
- * tenant-scoped bytes and a shared cache must never hold them. Everything that
- * moves under its own URL (draft, dist-tag, semver range, yanked version) gets
- * `no-cache`, which still allows the 304 round-trip — it only forbids serving
- * without one.
+ * One policy for every response on both routes: `private, no-cache`.
  *
- * An exact, non-yanked version gets a SHORT `max-age` and, deliberately, NOT
- * `immutable`. A version number is not permanently content-addressed here:
- * `DELETE /versions/{version}` is a live UI affordance and `validateForwardVersion`
- * only rejects versions still present in `package_versions`, so the same number
- * can be republished over different bytes. Under `max-age=31536000, immutable`
- * a client that had the old one open would keep serving it for a year with no
- * revalidation, and `invalidatePackageFiles` could not reach it — the HTTP
- * cache short-circuits the fetch before React Query ever sees it. The
- * revalidation this buys back is nearly free: `resolvePackageFileValidator`
- * answers an exact version's 304 from one DB read, with no storage GET and no
- * unzip. That is the entire reason it is split out from `readPackageSnapshot`.
+ * `private` is mandatory: these are authenticated, tenant-scoped bytes and a
+ * shared cache must never hold them. `no-cache` is mandatory for the same
+ * reason — it still allows the 304 round-trip, it only forbids serving without
+ * one, and that round-trip is what keeps authorization live. Any fresh window,
+ * however short, is served by the browser with ZERO server contact: revoke
+ * `<type>:read`, remove the member from the org, or uninstall the package from
+ * the application, and the cached 200 keeps being handed out until it expires.
+ * `Vary` cannot rescue that — revocation changes no request header. Forcing the
+ * round-trip re-enters `loadFileExplorerPackage`, so `hasPackageAccess` and
+ * `requirePackageReadPermission` run on every hit.
+ *
+ * The revalidation this costs is nearly free: `resolvePackageFileValidator`
+ * answers a version's 304 from one DB read, with no storage GET and no unzip.
+ * That is the entire reason it is split out from `readPackageSnapshot`.
  *
  * `Vary` is NOT optional here. The response body depends on `X-Org-Id` /
  * `X-Application-Id` (via `hasPackageAccess`) while the URL does not mention
@@ -1536,18 +1535,10 @@ async function loadFileExplorerPackage(c: Context<AppEnv>): Promise<PackageFileS
  * URL and the browser answers from cache — showing application B an artifact
  * that is only installed in application A.
  */
-const EXACT_VERSION_MAX_AGE_SECONDS = 300;
-
-function fileCacheHeaders(
-  etag: string,
-  freshCacheable: boolean,
-  yanked: boolean,
-): Record<string, string> {
+function fileCacheHeaders(etag: string, yanked: boolean): Record<string, string> {
   const headers: Record<string, string> = {
     ETag: etag,
-    "Cache-Control": freshCacheable
-      ? `private, max-age=${EXACT_VERSION_MAX_AGE_SECONDS}`
-      : "private, no-cache",
+    "Cache-Control": "private, no-cache",
     Vary: "X-Org-Id, X-Application-Id",
   };
   if (yanked) headers["X-Yanked"] = "true";
@@ -2192,14 +2183,14 @@ export function createPackagesRouter() {
       if (ifNoneMatchSatisfied(inm, etag)) {
         return new Response(null, {
           status: 304,
-          headers: fileCacheHeaders(etag, validator.freshCacheable, validator.yanked),
+          headers: fileCacheHeaders(etag, validator.yanked),
         });
       }
     }
 
     const snapshot = await readPackageSnapshot(pkg, validator);
     const etag = indexEtag(snapshot.snapshotId);
-    const headers = fileCacheHeaders(etag, validator.freshCacheable, validator.yanked);
+    const headers = fileCacheHeaders(etag, validator.yanked);
     if (ifNoneMatchSatisfied(inm, etag)) {
       return new Response(null, { status: 304, headers });
     }
@@ -2228,7 +2219,7 @@ export function createPackagesRouter() {
       if (ifNoneMatchSatisfied(inm, etag, { allowWildcard: false })) {
         return new Response(null, {
           status: 304,
-          headers: fileCacheHeaders(etag, validator.freshCacheable, validator.yanked),
+          headers: fileCacheHeaders(etag, validator.yanked),
         });
       }
     }
@@ -2244,7 +2235,7 @@ export function createPackagesRouter() {
     const bytes = snapshot.files[path]!;
 
     const etag = fileEtag(snapshot.snapshotId, path);
-    const headers = fileCacheHeaders(etag, validator.freshCacheable, validator.yanked);
+    const headers = fileCacheHeaders(etag, validator.yanked);
     // Existence is established, so `*` is now a legitimate match.
     if (ifNoneMatchSatisfied(inm, etag)) {
       return new Response(null, { status: 304, headers });

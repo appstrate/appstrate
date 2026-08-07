@@ -415,7 +415,7 @@ export const packagesPaths = {
             },
             "Cache-Control": {
               description:
-                "`private, max-age=300` ONLY for an exact, non-yanked version pin — never `immutable`, because a version can be deleted and republished over different bytes under the same number. A dist-tag or semver range is a moving target and a yank must stay discoverable, so both get `private, no-cache` — as does the draft. Always `private`: the response is tenant-scoped.",
+                "Always `private, no-cache`, for every selector — draft, exact version pin, dist-tag, semver range, yanked. Always `private`: the response is tenant-scoped. Never a fresh window and never `immutable`: this index is RBAC-gated, and a copy the browser may serve without contacting the server would outlive a revoked `<type>:read`, an org removal, or the package being uninstalled from the application. `no-cache` still permits the `304` round-trip, which a version pin answers from a single database read.",
               schema: { type: "string" },
             },
             Vary: {
@@ -442,7 +442,7 @@ export const packagesPaths = {
               schema: { type: "string" },
             },
             "Cache-Control": {
-              description: "Same caching policy as the `200` response.",
+              description: "Always `private, no-cache`, as on the `200`.",
               schema: { type: "string" },
             },
             Vary: {
@@ -525,7 +525,7 @@ export const packagesPaths = {
             },
             "Cache-Control": {
               description:
-                "`private, max-age=300` ONLY for an exact, non-yanked version pin (never `immutable` — a version number can be republished over different bytes); `private, no-cache` for a dist-tag, a semver range, a yanked version, and the draft.",
+                "Always `private, no-cache`, for every selector — draft, exact version pin, dist-tag, semver range, yanked. Never a fresh window and never `immutable`: these bytes are RBAC-gated, and a copy the browser may serve without contacting the server would outlive a revoked `<type>:read`, an org removal, or the package being uninstalled from the application.",
               schema: { type: "string" },
             },
             Vary: {
@@ -569,7 +569,7 @@ export const packagesPaths = {
               schema: { type: "string" },
             },
             "Cache-Control": {
-              description: "Same caching policy as the `200` response.",
+              description: "Always `private, no-cache`, as on the `200`.",
               schema: { type: "string" },
             },
             Vary: {

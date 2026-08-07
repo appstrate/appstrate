@@ -326,31 +326,35 @@ describe("package file explorer", () => {
       );
     });
 
-    it("caches an EXACT version pin briefly, and never as `immutable`", async () => {
-      // A version number is NOT permanently content-addressed: deleting a
-      // version and republishing the number over different bytes is a
-      // supported sequence, and `immutable` would let a client that had the
-      // old one open serve it for a year with no revalidation — unreachable by
-      // any client-side invalidation, since the HTTP cache answers first.
+    it("gives an EXACT, non-yanked version pin no fresh window — it would outlive a permission revocation", async () => {
+      // Any `max-age` lets the browser serve these RBAC-gated, tenant-scoped
+      // bytes with zero server contact, so a revoked `<type>:read`, a removed
+      // member or an uninstalled package would keep being answered from cache.
       const { res } = await listFiles(ctx, id, "?version=1.0.0");
       expect(res.status).toBe(200);
-      expect(res.headers.get("Cache-Control")).toBe("private, max-age=300");
-      expect(res.headers.get("Cache-Control")).not.toContain("immutable");
+      expect(res.headers.get("Cache-Control")).toBe("private, no-cache");
+      expect(res.headers.get("Cache-Control")).not.toContain("max-age");
       expect(res.headers.get("ETag")).toBe(`"i-pv-${(await versionIntegrity(id))!}"`);
+
+      // Same on the route that actually hands over the artifact's bytes.
+      const content = await fetchContent(ctx, id, "prompt.md", "&version=1.0.0");
+      expect(content.status).toBe(200);
+      expect(content.headers.get("Cache-Control")).toBe("private, no-cache");
+      expect(content.headers.get("Cache-Control")).not.toContain("max-age");
     });
 
-    it("resolves a dist-tag but must NOT even get the short max-age", async () => {
-      // `?version=latest` is a MOVING target: pinning it for a year would mean
-      // publishing 1.1.0 never reaches a client that already cached 1.0.0.
+    it("resolves a dist-tag to the same bytes, under the same policy", async () => {
+      // `?version=latest` is a MOVING target on top of everything else: a
+      // cached copy would also hide a freshly published 1.1.0.
       const { res, entries } = await listFiles(ctx, id, "?version=latest");
       expect(res.status).toBe(200);
       expect(entries.find((e) => e.path === "prompt.md")!.inline).toBe("published prompt v1");
       expect(res.headers.get("Cache-Control")).toBe("private, no-cache");
-      // Same content tag as the exact pin — only the freshness policy differs.
+      // Same content tag as the exact pin — the selector does not change it.
       expect(res.headers.get("ETag")).toBe(`"i-pv-${(await versionIntegrity(id))!}"`);
     });
 
-    it("resolves a semver range without any max-age", async () => {
+    it("resolves a semver range under the same policy", async () => {
       const { res } = await listFiles(ctx, id, "?version=%5E1.0.0");
       expect(res.status).toBe(200);
       expect(res.headers.get("Cache-Control")).toBe("private, no-cache");
@@ -849,7 +853,7 @@ describe("package file explorer", () => {
       });
       expect(res.status).toBe(304);
       expect(res.headers.get("ETag")).toBe(`"i-pv-${integrity}"`);
-      expect(res.headers.get("Cache-Control")).toBe("private, max-age=300");
+      expect(res.headers.get("Cache-Control")).toBe("private, no-cache");
       expect(await res.text()).toBe("");
     });
 

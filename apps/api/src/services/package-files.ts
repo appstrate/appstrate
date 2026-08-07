@@ -285,11 +285,10 @@ export function applyDraftOverlay(files: Record<string, Uint8Array>, pkg: Packag
  * `null` and the caller has to read before it can compare.
  */
 export type PackageFileValidator =
-  | { kind: "draft"; snapshotId: null; freshCacheable: false; yanked: false }
+  | { kind: "draft"; snapshotId: null; yanked: false }
   | {
       kind: "version";
       snapshotId: string;
-      freshCacheable: boolean;
       yanked: boolean;
       version: string;
       integrity: string;
@@ -308,18 +307,14 @@ export async function resolvePackageFileValidator(
   version?: string,
 ): Promise<PackageFileValidator> {
   if (!version || version === VERSION_SELECTOR_DRAFT) {
-    return { kind: "draft", snapshotId: null, freshCacheable: false, yanked: false };
+    return { kind: "draft", snapshotId: null, yanked: false };
   }
   const ver = await getVersionForDownload(pkg.id, version);
   if (!ver) throw notFound("Version not found");
 
-  // Only exact, non-yanked selectors may be served fresh for a short window.
-  // Dist-tags, ranges and yanked versions must revalidate on every use.
-  const exact = version === ver.version;
   return {
     kind: "version",
     snapshotId: `pv-${ver.integrity}`,
-    freshCacheable: exact && !ver.yanked,
     yanked: ver.yanked,
     version: ver.version,
     integrity: ver.integrity,
