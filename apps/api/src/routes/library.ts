@@ -6,6 +6,7 @@ import { db } from "@appstrate/db/client";
 import { packages, applicationPackages, applications } from "@appstrate/db/schema";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { orgOrSystemFilter, notEphemeralFilter } from "../lib/package-helpers.ts";
+import { isUnlisted } from "../lib/package-visibility.ts";
 import { asRecord } from "@appstrate/core/safe-json";
 import type { AppEnv } from "../types/index.ts";
 
@@ -63,9 +64,12 @@ export function createLibraryRouter() {
     >();
 
     for (const row of rows) {
+      // Unlisted packages (`_meta["dev.appstrate/visibility"]`) are excluded
+      // from the catalogue — resolvable by exact id only.
+      const m = asRecord(row.draftManifest);
+      if (isUnlisted(m)) continue;
       let entry = pkgMap.get(row.id);
       if (!entry) {
-        const m = asRecord(row.draftManifest);
         entry = {
           id: row.id,
           type: row.type,
