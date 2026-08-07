@@ -41,6 +41,7 @@ describe("buildServerInstructions — assistant skills index", () => {
     expect(section).toContain("`@appstrate/web-search`");
     expect(section).toContain("`@appstrate/connector-choice`");
     expect(section).toContain("`@appstrate/skill-authoring`");
+    expect(section).toContain("Créer ou améliorer une skill de méthode");
     expect(section).toContain('`operation_id: "getSkill"`');
   });
 });

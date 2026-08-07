@@ -1,20 +1,42 @@
 ---
 name: skill-authoring
-description: Écrire de zéro une skill de méthode pour l'organisation quand aucun savoir-faire existant ne couvre l'agent à créer. Charge ce guide avant de rédiger le SKILL.md. Il règle les deux descriptions, la séparation méthode/instance, le nom AFPS, les capacités runtime requises et les critères de complétion.
+description: Créer ou améliorer une skill de méthode de l'organisation. Charge ce guide avant createSkill ou updateSkill quand une méthode manque, déclenche mal, guide mal l'exécution ou doit être simplifiée. Il impose la lecture complète de l'existant, une modification minimale et une comparaison publiée contre draft avant publication.
 ---
 
-# Écrire une skill de méthode Appstrate
+# Créer ou améliorer une skill de méthode Appstrate
 
 Utilise ce guide après avoir vérifié les skills de l'organisation et les méthodes de référence. Le
-résultat attendu est une méthode durable, possédée par l'organisation, que plusieurs agents peuvent
-réutiliser sans hériter des détails d'une instance particulière.
+résultat attendu est une méthode durable que plusieurs agents peuvent réutiliser sans hériter des
+détails d'une instance particulière. Préserve une bonne méthode existante au lieu de créer une
+variante concurrente.
 
-Produis toujours les deux artefacts transmis séparément à `createSkill` :
+Une création transmet deux artefacts séparés à `createSkill` :
 
 1. le `manifest`, qui présente le package au copilote ;
 2. le `content`, un `SKILL.md` avec son propre frontmatter, que l'agent exécutera.
 
+Une amélioration part du draft courant et de son `lock_version`, puis transmet les deux artefacts
+complets à `updateSkill`. Ne publie jamais une version pendant l'itération.
+
 ## Processus
+
+### 0. Choisir entre création et amélioration
+
+Cherche d'abord une méthode existante dont le besoin et la frontière correspondent. Si elle existe,
+améliore-la. Crée une nouvelle skill seulement quand aucune méthode n'a le même propriétaire
+conceptuel.
+
+Avant toute amélioration :
+
+1. appelle `getSkill` pour obtenir le manifest, le contenu et le `lock_version` du draft ;
+2. appelle `listPackageFiles` avec `version: "draft"`, puis lis le contenu `inline` de chaque fichier
+   pertinent, notamment `SKILL.md`, `manifest.json` et les références Markdown ;
+3. appelle `getSkillVersionInfo`. Si une version publiée existe, relis aussi ses fichiers avec
+   `listPackageFiles` et son numéro exact, afin de distinguer la base publiée du draft courant.
+
+Un fichier texte pertinent sans contenu `inline` n'est pas réputé lu. Signale cette limite et ne
+réécris pas à l'aveugle une règle qui peut dépendre de ce fichier. Cette étape est terminée quand tu
+peux nommer la règle défaillante, sa source actuelle et les consommateurs qu'elle affecte.
 
 ### 1. Isoler la méthode de l'instance
 
@@ -76,9 +98,11 @@ Organise le corps par ordre d'exécution :
 4. règles et cas limites consultés au moment utile ;
 5. exemple ou schéma seulement s'il change réellement le comportement.
 
-Conserve dans le fichier principal tout ce qui est requis pour réussir. Un pointeur vers une
-référence absente rend la méthode incomplète. Regroupe une règle et son exception sous le même
-titre afin qu'elles soient lues ensemble.
+Conserve dans le fichier principal tout ce qui est requis à chaque exécution. Déplace une table,
+une référence volumineuse ou une variante rarement consultée dans un fichier dédié seulement si ce
+fichier fait réellement partie du package et si le corps indique précisément quand le lire. Un
+pointeur vers une référence absente rend la méthode incomplète. Regroupe une règle et son exception
+sous le même titre afin qu'elles soient lues ensemble.
 
 ### 4. Rendre les instructions exécutables
 
@@ -97,6 +121,8 @@ titre afin qu'elles soient lues ensemble.
   sur un détail et finit par diverger.
 - Retire les branches périmées au lieu d'empiler des correctifs. La skill doit décrire la méthode
   actuelle, pas conserver le journal de ses anciennes versions.
+- Lors d'une amélioration, change la plus petite surface qui explique l'échec observé. Préserve les
+  règles utiles, les noms stables et les références qui ne participent pas au problème.
 
 ### 5. Déclarer les capacités runtime
 
@@ -119,8 +145,8 @@ et un quasi-cas qui ne doit pas la sélectionner. Le quasi-cas doit partager son
 besoin sans exiger la même méthode.
 
 Inscris ces trois requêtes dans le `SKILL.md`, sous une section `Déclenchement`, avant d'appeler
-`createSkill`. Elles font partie de l'artefact vérifiable : ne les garde pas seulement dans ton
-raisonnement ou dans la conversation.
+`createSkill` ou `updateSkill`. Elles font partie de l'artefact vérifiable : ne les garde pas
+seulement dans ton raisonnement ou dans la conversation.
 
 Si le comportement de départ est incertain, compare une exécution sans la skill et une exécution
 avec la skill. Dans une conversation vierge, vérifie que :
@@ -132,6 +158,33 @@ avec la skill. Dans une conversation vierge, vérifie que :
 Révise les descriptions quand la sélection est mauvaise. Révise le corps quand la sélection est
 bonne mais l'exécution échoue. Appuie chaque affirmation de réussite sur cette vérification fraîche,
 pas sur une exécution antérieure qui avait déjà la méthode en contexte.
+
+## Boucle d'amélioration publiée contre draft
+
+Applique cette boucle à une skill existante avant de proposer sa publication :
+
+1. **Reproduire.** Choisis les requêtes de `Déclenchement` qui exposent le défaut. Définis le signal
+   attendu avant de modifier le draft : sélection de la skill, critère de sortie, erreur outil,
+   reprise ou contrainte métier.
+2. **Modifier.** Mets à jour le draft avec `updateSkill`, en renvoyant le manifest et le contenu
+   complets ainsi que le dernier `lock_version`. Si le verrou a changé, relis le draft et réapplique
+   la modification au lieu d'écraser le travail concurrent.
+3. **Comparer.** Pour chaque requête retenue, lance deux `run_and_wait` inline adjacents avec le même
+   manifest de test, le même prompt, le même input et la même configuration. Le run A sélectionne
+   la dernière version publiée exacte dans `dependency_overrides`. Le run B sélectionne `draft`.
+   N'altère aucun autre paramètre entre A et B.
+4. **Observer.** Une fois les deux runs terminaux, lis leur ressource avec `getRun` pour les
+   métadonnées de comparaison, puis leurs traces avec `getRunLogs`. Cet appel ne sert pas à attendre
+   une seconde fois. Compare le résultat, le statut, la durée, l'usage de tokens, les erreurs et
+   reprises d'outils, le chargement de la skill et chaque critère défini à l'étape 1.
+5. **Décider.** Garde le draft seulement s'il améliore les cas positifs sans faire déclencher le
+   quasi-cas ni dégrader une contrainte existante. Sinon, corrige la cause précise et rejoue le plus
+   petit sous-ensemble discriminant.
+
+S'il n'existe aucune version publiée, utilise comme A un inline identique sans la nouvelle skill et
+comme B le draft. Présente les ids des runs, les différences observées et les incertitudes. Demande
+une validation humaine avant `createSkillVersion` : une exécution réussie ne publie jamais
+automatiquement la méthode.
 
 ## Exemple de découpe
 
@@ -146,11 +199,12 @@ colonnes, canal RH, fréquence et volume maximal par passage.
 
 La skill reste ainsi valable si l'organisation change de messagerie, de tableur ou de canal.
 
-## Contrôle avant création
+## Contrôle avant écriture
 
-Vérifie chaque point avant d'appeler `createSkill` :
+Vérifie chaque point avant d'appeler `createSkill` ou `updateSkill` :
 
-- le besoin n'est couvert ni par une skill de l'organisation ni par une méthode de référence ;
+- le parcours choisi évite une skill parallèle quand une méthode existante possède déjà le besoin ;
+- en amélioration, tous les fichiers pertinents ont été lus et la base publiée est identifiée ;
 - le manifest et le `SKILL.md` portent deux descriptions adaptées à leurs lecteurs ;
 - le `name` du frontmatter égale le dernier segment du nom de package ;
 - la méthode reste indépendante des connecteurs et paramètres de l'instance ;
@@ -159,7 +213,9 @@ Vérifie chaque point avant d'appeler `createSkill` :
 - chaque garde-fou indique le comportement autorisé ;
 - le corps contient une section `Déclenchement` avec deux cas positifs et un quasi-cas, puis ces cas
   vérifient le déclenchement dans une conversation vierge ;
+- en amélioration, les runs publiée et draft ne diffèrent que par `dependency_overrides`, leurs logs
+  ont été comparés et leurs ids sont conservés dans le compte rendu ;
 - chaque ligne restante change une décision ou une action de l'agent.
 
-La création est prête quand les deux artefacts passent ce contrôle et que le prompt de l'agent ne
-porte plus que l'instance.
+Le draft est prêt à être proposé quand les deux artefacts passent ce contrôle et que le prompt de
+l'agent ne porte plus que l'instance. La publication reste une décision séparée.

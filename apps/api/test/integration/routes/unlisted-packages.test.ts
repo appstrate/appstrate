@@ -143,6 +143,10 @@ describe("Unlisted package visibility", () => {
       expect(ids).toContain("@appstrate/web-search");
       expect(ids).toContain("@appstrate/connector-choice");
       expect(ids).toContain("@appstrate/skill-authoring");
+      expect(
+        body.assistant_skills.find((skill) => skill.package_id === "@appstrate/skill-authoring")
+          ?.description,
+      ).toContain("améliorer");
       for (const s of body.assistant_skills) {
         expect(s.description.length).toBeGreaterThan(0);
       }
