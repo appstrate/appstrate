@@ -5,6 +5,7 @@ import { Link } from "react-router-dom";
 import { OrgSwitcher } from "@/components/org-switcher";
 import { NavOrg } from "@/components/nav-org";
 import { SidebarBilling } from "@/components/sidebar-billing";
+import { UpdateBadge } from "@/components/update-badge";
 import { useTheme } from "@/stores/theme-store";
 import {
   Sidebar,
@@ -57,6 +58,7 @@ export function AppSidebar(props: ComponentProps<typeof Sidebar>) {
         <SidebarBilling />
       </SidebarContent>
       <SidebarFooter>
+        <UpdateBadge />
         <OrgSwitcher />
       </SidebarFooter>
     </Sidebar>
