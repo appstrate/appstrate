@@ -16,6 +16,7 @@ import {
   draftSnapshotId,
   indexEtag,
   fileEtag,
+  resolveDraftContent,
   INDEX_JSON_BUDGET_BYTES,
   type PackageFileSnapshot,
   type PackageFileSource,
@@ -108,6 +109,34 @@ describe("applyDraftOverlay — per-type draft_content target", () => {
     expect(files["manifest.json"]).toBe("{}");
   });
 
+  it("integration → nothing, when draft_content is a manifest copy but the ZIP HAS a doc", () => {
+    // The already-corrupted row. Every write path that fed the editor's
+    // manifest JSON into `draft_content` left the real INTEGRATION.md sitting
+    // intact in storage, so the overlay had a file to land on and served the
+    // package's own manifest under the name of its documentation — the entry
+    // the explorer pre-selects. No write-path fix can reach a row already in
+    // this state; declining the overlay shows the stored truth instead.
+    const files = overlay(
+      "integration",
+      { draftContent: '{\n  "name": "@t/pkg",\n  "type": "integration"\n}' },
+      { "INTEGRATION.md": "# Real docs", "manifest.json": "{}" },
+    );
+    expect(files["INTEGRATION.md"]).toBe("# Real docs");
+  });
+
+  it("agent/skill are never sniffed — a JSON-shaped prompt still overlays", () => {
+    // `required: true` means the column has no manifest-text fallback to be
+    // confused with, so the manifest-copy test must not be applied there: a
+    // prompt that happens to be a JSON object is still the prompt.
+    const jsonish = '{"role": "you are a formatter"}';
+    expect(overlay("agent", { draftContent: jsonish }, { "prompt.md": "STALE" })).toEqual({
+      "prompt.md": jsonish,
+    });
+    expect(overlay("skill", { draftContent: jsonish }, { "SKILL.md": "STALE" })).toEqual({
+      "SKILL.md": jsonish,
+    });
+  });
+
   it("mcp-server → nothing (draft_content is only a manifest copy)", () => {
     const files = overlay(
       "mcp-server",
@@ -135,6 +164,49 @@ describe("applyDraftOverlay — per-type draft_content target", () => {
   it("leaves the stored files untouched when both draft columns are null", () => {
     const stored = { "manifest.json": "{}", "prompt.md": "p" };
     expect(overlay("agent", {}, stored)).toEqual(stored);
+  });
+});
+
+/**
+ * The write-side guard, and the exact inverse of the overlay above: which
+ * value a write whose `content` is a MANIFEST COPY may put in
+ * `packages.draft_content`.
+ *
+ * Both package editors and the version-restore route feed one `content` field.
+ * For `agent`/`skill` it IS the column's file. For `integration` it is the
+ * manifest JSON while the column holds the optional `INTEGRATION.md`, so an
+ * unguarded write destroyed the doc — the integration stopped contributing its
+ * agent-facing documentation to every agent's platform prompt, and the file
+ * explorer began serving manifest JSON under the name `INTEGRATION.md`.
+ */
+describe("resolveDraftContent — manifest-shaped writes never clobber a real doc", () => {
+  const DOC = "# Real integration docs";
+  const MANIFEST = '{\n  "name": "@t/pkg",\n  "type": "integration"\n}';
+
+  it("keeps an integration's INTEGRATION.md over a manifest-shaped write", () => {
+    expect(resolveDraftContent("integration", DOC, MANIFEST)).toBe(DOC);
+  });
+
+  it("REFRESHES the manifest-text fallback when the package ships no doc", () => {
+    // An integration that legitimately has no INTEGRATION.md must keep a
+    // CURRENT manifest copy — freezing the old one would make the column stale
+    // relative to the manifest it mirrors.
+    const older = '{"name":"@t/pkg","version":"1.0.0"}';
+    expect(resolveDraftContent("integration", older, MANIFEST)).toBe(MANIFEST);
+    expect(resolveDraftContent("integration", null, MANIFEST)).toBe(MANIFEST);
+    expect(resolveDraftContent("integration", "", MANIFEST)).toBe(MANIFEST);
+  });
+
+  it("never guards a REQUIRED entry — the editor is prompt.md / SKILL.md's only author", () => {
+    expect(resolveDraftContent("agent", "old prompt", "new prompt")).toBe("new prompt");
+    expect(resolveDraftContent("skill", "old skill", "new skill")).toBe("new skill");
+    // Including when the stored value is itself JSON-shaped: `required: true`
+    // means there is no fallback for it to be confused with.
+    expect(resolveDraftContent("agent", MANIFEST, "new prompt")).toBe("new prompt");
+  });
+
+  it("never guards mcp-server — its column is a manifest copy by definition", () => {
+    expect(resolveDraftContent("mcp-server", MANIFEST, "anything")).toBe("anything");
   });
 });
 

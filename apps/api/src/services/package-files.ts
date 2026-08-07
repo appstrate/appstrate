@@ -40,6 +40,7 @@ import {
   PACKAGE_CONTENT_ENTRY,
   PACKAGE_FILE_INLINE_MAX_BYTES,
 } from "@appstrate/core/package-files";
+import { isManifestTextFallback } from "../lib/manifest-utils.ts";
 import type { PackageType } from "@appstrate/core/validation";
 
 export type PackageFileMediaKind = "text" | "binary";
@@ -260,13 +261,21 @@ export function applyDraftOverlay(files: Record<string, Uint8Array>, pkg: Packag
   const entry = PACKAGE_CONTENT_ENTRY[pkg.type];
   if (entry !== null && pkg.draftContent !== null) {
     // An OPTIONAL entry (`required: false`, i.e. INTEGRATION.md) is overlaid
-    // only on top of one that already exists: when a bundle ships without it,
-    // `parsePackageZip` falls back to storing the manifest text in
-    // `draft_content`, and materializing that would invent a companion the
-    // package does not have. A REQUIRED entry has no such fallback — its
-    // column is genuinely its only file, and a freshly created package with no
-    // stored ZIP must still list it.
-    if (entry.required || Object.hasOwn(files, entry.path)) {
+    // only on top of one that already exists AND only when the column actually
+    // holds it: when a bundle ships without one, `parsePackageZip` falls back
+    // to storing the manifest text in `draft_content`. Materializing that with
+    // no file underneath would invent a companion the package does not have —
+    // and overlaying it on top of a REAL `INTEGRATION.md` (which every write
+    // path that produces a manifest copy used to leave behind) serves the
+    // package's own manifest UNDER THE NAME OF ITS DOCUMENTATION, the entry
+    // the explorer pre-selects. The stored file is intact in both cases, so
+    // declining the overlay shows the truth rather than a stale guess.
+    //
+    // A REQUIRED entry has no such fallback — its column is genuinely its only
+    // file, a freshly created package with no stored ZIP must still list it,
+    // and a JSON-shaped `prompt.md` must never be mistaken for a manifest.
+    const isFallback = !entry.required && isManifestTextFallback(pkg.draftContent);
+    if (!isFallback && (entry.required || Object.hasOwn(files, entry.path))) {
       files[entry.path] = encoder.encode(pkg.draftContent);
     }
   }
@@ -274,6 +283,45 @@ export function applyDraftOverlay(files: Record<string, Uint8Array>, pkg: Packag
   if (pkg.draftManifest !== null && pkg.draftManifest !== undefined) {
     files[MANIFEST_FILE_NAME] = encoder.encode(JSON.stringify(pkg.draftManifest, null, 2));
   }
+}
+
+/**
+ * What to persist into `packages.draft_content` on a write whose `content` is
+ * a copy of the MANIFEST rather than the type's content file — the guard on
+ * the inverse of {@link applyDraftOverlay}.
+ *
+ * The package editors and the version-restore route both feed one `content`
+ * field. For `agent` / `skill` that field IS `prompt.md` / `SKILL.md`, so it
+ * simply wins. For `integration` it is the manifest JSON (the editor authors a
+ * manifest and has no `INTEGRATION.md` field at all — see
+ * `apps/web/src/pages/package-editor.tsx`), while the COLUMN holds the
+ * optional `INTEGRATION.md`. Writing one into the other destroyed the doc: the
+ * integration stopped contributing its agent-facing documentation to every
+ * agent's platform prompt (`fetchIntegrationPromptDocs`), and the file
+ * explorer began serving manifest JSON under the name `INTEGRATION.md`.
+ *
+ * So a manifest-shaped write REFRESHES the manifest-text fallback — an
+ * integration that legitimately ships no doc must keep a current one — and is
+ * declined over a column that holds the real thing. Nothing else can author
+ * that doc through this path, so "keep what is there" is the only correct
+ * answer; a genuine replacement arrives through import
+ * (`parsePackageZip` → `draft_content`), which is unaffected.
+ *
+ * Storage is a separate sink and is deliberately NOT routed through here: the
+ * editor's manifest JSON still belongs in the integration's `manifest.json`.
+ */
+export function resolveDraftContent(
+  type: PackageType,
+  stored: string | null,
+  incoming: string,
+): string {
+  const entry = PACKAGE_CONTENT_ENTRY[type];
+  // REQUIRED (prompt.md / SKILL.md): `incoming` IS that file. `null`
+  // (mcp-server): the column is a redundant manifest copy by definition. In
+  // neither case can the column mean two things, so neither is guarded.
+  if (entry === null || entry.required) return incoming;
+  if (!stored) return incoming;
+  return isManifestTextFallback(stored) ? incoming : stored;
 }
 
 /**

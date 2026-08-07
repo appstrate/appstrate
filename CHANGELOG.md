@@ -8,6 +8,45 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Security
 
+- **The agent bundle export now requires each dependency type's read scope** —
+  `GET /api/agents/{scope}/{name}/bundle` gated on `agents:read` alone. That
+  covers the root agent, whose files the export narrows to `manifest.json` +
+  `prompt.md`, but a dependency goes into the archive as its ENTIRE stored file
+  map: a bundle carrying a skill hands out exactly the bytes
+  `GET /api/packages/skills/{id}/files[/content]` serves, which #1123/#1124
+  settled need `skills:read`. This route was the last looser door to the same
+  content — a credential `403`'d on the file explorer was served the identical
+  bytes here. The guard now runs against the ASSEMBLED bundle rather than the
+  root manifest, so transitive dependencies are covered by construction and an
+  unrecognised type fails closed. It gates on SCOPE, not visibility:
+  dependency resolution stays org-scoped, so a bundle can still reach a skill
+  that is not installed in the calling application, exactly like the run it
+  mirrors.
+
+  **Behaviour change for scoped credentials.** A credential holding
+  `agents:read` but NOT `skills:read` now gets `403` where it used to get
+  `200`, on both `?source=draft` and the published export, whenever the agent
+  declares a skill dependency. In practice that is a scoped API key or OIDC
+  token — every org role (owner, admin, member, viewer) carries both scopes, so
+  no dashboard user is affected. An agent with no skill dependency is still
+  exported to an `agents:read`-only key. Audit the scopes of any key that
+  exports bundles from CI before upgrading.
+
+- **Package file responses are never served from a fresh browser cache** —
+  `Cache-Control: private, max-age=300` on the file explorer routes let a
+  browser serve authenticated, tenant-scoped, RBAC-gated artifact bytes for
+  five minutes with zero server contact. A revoked `<type>:read`, a member
+  removed from the org, or a package uninstalled from the application all left
+  the cached `200` being handed out until it expired, and `Vary` cannot rescue
+  that — revocation changes no request header. Every response on both routes is
+  now `private, no-cache`, which was already the behaviour for drafts,
+  dist-tags, semver ranges and yanked versions. `no-cache` still permits the
+  304 round-trip; it only forbids serving without one, and forcing that
+  round-trip re-runs `hasPackageAccess` and the read-permission guard on every
+  hit. **The trade**: a repeat view of the same file now pays a conditional
+  request instead of reading the local cache. That revalidation answers a
+  version's 304 from one DB read, with no storage GET and no unzip.
+
 - **Package `GET` routes now enforce a read permission (#1123)** — every
   `GET` under `/api/packages` was gated on `hasPackageAccess` alone, which
   answers "is this package installed in this application, or a system
@@ -38,6 +77,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **`@appstrate/core` released as 6.2.0** — 6.1.0 was already published to npm,
+  so the four export subpaths added since (`./package-files` and
+  `./mcp-server-meta` from #1118, `./model-generation` from #1099, `./url` from
+  #1122) could not be resolved by out-of-tree consumers installing from npm,
+  even though the code ships in the tarball. Additive only, so a minor;
+  `CORE_VERSION` moves with it. **Maintainers**: bump `cloud` and
+  `connect-helper` to `^6.2.0` right after the `core@6.2.0` tag is pushed —
+  leaving them at 6.1.0 makes the next core release compute a delta of 2 and
+  hard-fail the lockstep gate.
+
 - **Inline `run_and_wait` manifests are concise without becoming limited** —
   callers may omit AFPS boilerplate and provide only a task-specific
   `display_name`; the shared client derives the canonical name and fills
@@ -46,6 +95,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   complete deterministic schemas. The chat prompt prefers `run_and_wait` for
   launch-and-wait flows while keeping the fire-and-forget `runInline` and
   `runAgent` operations fully discoverable and invokable.
+
+### Removed
+
+- **`source_code` from the package create/update contract** — the
+  `sourceFileName` plumbing behind it has been unreachable since the `tool`
+  package type was dropped: no route config declared it, so `source_code` was
+  never on the wire and sending one in a request body was already a no-op (such
+  a body is still accepted, now stripped by non-strict Zod instead of parsed
+  and ignored). No runtime behaviour changes — the published OpenAPI spec
+  simply stops advertising a field that never existed at runtime, which
+  `detect:breaking` reports as 27 response-field removals.
 
 ### Fixed
 

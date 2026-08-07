@@ -67,11 +67,13 @@ import { SCOPED_PACKAGE_ROUTE } from "./scoped-package-route.ts";
 import {
   resolvePackageFileValidator,
   readPackageSnapshot,
+  resolveDraftContent,
   buildFileIndex,
   indexEtag,
   fileEtag,
   type PackageFileSource,
 } from "../services/package-files.ts";
+import { PACKAGE_CONTENT_ENTRY } from "@appstrate/core/package-files";
 import {
   collectConnectLoginWarnings,
   collectMetaWarnings,
@@ -438,6 +440,12 @@ interface PackageRouteConfig {
    * `createVersionFromDraft` spreads the stored files into the artifact — mint
    * immutable, integrity-pinned published ZIPs whose `INTEGRATION.md` is
    * manifest JSON. Unfixable once published.
+   *
+   * Their DISAGREEMENT is load-bearing, not merely tolerated: it is what tells
+   * the update / restore handlers that this type's `content` is a manifest
+   * copy, so they must not put it in `packages.draft_content` (that column's
+   * `INTEGRATION.md` is nobody's editor field) and must rebuild the storage
+   * file from the manifest instead of echoing a carried-forward `content`.
    */
   storageFileName: () => string;
   /** Hook called after a new package is created. */
@@ -961,10 +969,17 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
       }
     }
 
+    // `content` feeds TWO sinks that are the same file for `agent`/`skill` and
+    // different files for the manifest-backed types — see `storageFileName`.
+    // `resolveDraftContent` guards the column; the storage write below is
+    // resolved on its own terms.
     const updated = await updateOrgItem(
       orgId,
       itemId,
-      { manifest: validatedManifest, content },
+      {
+        manifest: validatedManifest,
+        content: resolveDraftContent(rcfg.cfg.type, existing.content, content),
+      },
       body.lock_version,
     );
 
@@ -972,11 +987,23 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
       throw conflict("conflict", `${label} was modified concurrently. Reload and try again.`);
     }
 
+    // Bytes for `rcfg.storageFileName()`. When that file is NOT the type's
+    // content entry it is the manifest (integration, mcp-server), and it is
+    // rebuilt from the VALIDATED manifest rather than echoing `content`: this
+    // route accepts a manifest-only PUT, and the `existing.content`
+    // carried forward above is `packages.draft_content` — which for an
+    // integration is its INTEGRATION.md. Echoing it would overwrite the
+    // package's `manifest.json` with its documentation.
+    const storageContent =
+      PACKAGE_CONTENT_ENTRY[rcfg.cfg.type]?.path === rcfg.storageFileName()
+        ? content
+        : JSON.stringify(validatedManifest, null, 2);
+
     // Update storage files (merge with existing to preserve ancillary files)
     const existingFiles = await downloadPackageFiles(rcfg.cfg.storageFolder, orgId, itemId);
     const updatedFiles: Record<string, Uint8Array> = {
       ...(existingFiles ?? {}),
-      [rcfg.storageFileName()]: new TextEncoder().encode(content),
+      [rcfg.storageFileName()]: new TextEncoder().encode(storageContent),
     };
     await uploadPackageFiles(rcfg.cfg.storageFolder, orgId, itemId, updatedFiles);
 
@@ -1267,10 +1294,24 @@ function makeRestoreVersionHandler(rcfg: PackageRouteConfig) {
       throw notFound(`${label} '${itemId}' not found`);
     }
 
-    // Extract content from version ZIP
+    // Extract `packages.draft_content` from the version ZIP.
+    //
+    // The column mirrors the archive's CONTENT ENTRY (`PACKAGE_CONTENT_ENTRY`),
+    // NOT the file this type's editor `content` is stored under
+    // (`rcfg.storageFileName()`). The two names agree for `agent`/`skill` and
+    // DIVERGE for `integration`, whose column holds the optional
+    // `INTEGRATION.md` while its editor content is `manifest.json` — reading
+    // the storage name restored a manifest copy over the docs, the exact
+    // overload `parsePackageZip` avoids. Falling back to the storage name
+    // reproduces that parser's own manifest-text fallback for a bundle that
+    // ships no companion, and is a no-op for the three types whose two names
+    // already coincide.
+    const contentEntryPath = PACKAGE_CONTENT_ENTRY[rcfg.cfg.type]?.path;
     let content = detail.prompt ?? "";
     if (detail.content) {
-      const fileData = detail.content[rcfg.storageFileName()];
+      const fileData =
+        (contentEntryPath ? detail.content[contentEntryPath] : undefined) ??
+        detail.content[rcfg.storageFileName()];
       if (fileData) {
         content = new TextDecoder().decode(fileData);
       }
