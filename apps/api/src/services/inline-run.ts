@@ -387,6 +387,7 @@ export async function triggerInlineRun(params: {
     modelIdOverride,
     proxyIdOverride,
     connectionOverrides,
+    dependencyOverrides,
   } = preflight;
 
   // `parseRequestInput` already collapses an effectively-empty input to
@@ -436,6 +437,7 @@ export async function triggerInlineRun(params: {
       applicationId,
       apiKeyId,
       connectionOverrides,
+      dependencyOverrides,
       traceparent,
     });
   } catch (err) {

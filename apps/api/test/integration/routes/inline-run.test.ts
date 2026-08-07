@@ -250,6 +250,31 @@ describe("POST /api/runs/inline — dependency resolution", () => {
     const body = (await res.json()) as { code?: string };
     expect(body.code).toBe("missing_skill");
   });
+
+  it("rejects an override key the inline manifest does not declare", async () => {
+    const res = await post({
+      manifest: validManifest(),
+      prompt: "do something",
+      dependency_overrides: { "@inlineorg/not-declared": "draft" },
+    });
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { code?: string; detail?: string };
+    expect(body.code).toBe("invalid_request");
+    expect(body.detail).toContain("not a declared skill or integration dependency");
+  });
+
+  it("rejects a malformed dependency override before creating a shadow package", async () => {
+    const res = await post({
+      manifest: validManifest(),
+      prompt: "do something",
+      dependency_overrides: { "@inlineorg/helper": "not a version!!" },
+    });
+
+    expect(res.status).toBe(400);
+    const rows = await db.select().from(packages).where(eq(packages.ephemeral, true));
+    expect(rows).toHaveLength(0);
+  });
 });
 
 describe("POST /api/runs/inline — rate limiting", () => {

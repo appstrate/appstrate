@@ -17,7 +17,7 @@ import {
 } from "../services/state/runs.ts";
 import { listUserRuns } from "../services/state/notifications.ts";
 import { resolveAgentRunVersion } from "../services/agent-version-resolver.ts";
-import { parseRequestInput } from "../services/input-parser.ts";
+import { isValidDependencyOverride, parseRequestInput } from "../services/input-parser.ts";
 import { deleteRunWorkspace } from "../services/run-workspace-storage.ts";
 import { asJSONSchemaObject } from "@appstrate/core/form";
 import { mergeAndValidateConfigOverride } from "../services/agent-readiness.ts";
@@ -91,6 +91,18 @@ const inlineRunBodySchema = z.object({
    * on the same body.
    */
   connection_overrides: z.record(z.string(), z.string().min(1)).optional(),
+  /**
+   * Per-dependency version picks for this run. The pipeline owns the declared
+   * key and tenant-scoped resolution checks; this wire guard rejects malformed
+   * selectors consistently on launch and dry-run validation.
+   */
+  dependency_overrides: z
+    .record(z.string(), z.string())
+    .optional()
+    .refine(
+      (overrides) => !overrides || Object.values(overrides).every(isValidDependencyOverride),
+      '`dependency_overrides` values must be "draft" or a valid version spec (semver range or dist-tag)',
+    ),
 });
 
 /**

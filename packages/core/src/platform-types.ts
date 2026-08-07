@@ -315,6 +315,13 @@ export interface InlineRunBody {
    * server refuses. Omit the field to mean "no picks".
    */
   connection_overrides?: Record<string, string>;
+  /**
+   * Per-dependency version overrides for THIS run. Keys name declared skill
+   * or integration dependencies; `"draft"` selects the org-visible working
+   * copy and any other accepted selector replaces the manifest pin against
+   * published versions. Run-scoped only and persisted on the resulting run.
+   */
+  dependency_overrides?: Record<string, string>;
 }
 
 // ---------------------------------------------------------------------------

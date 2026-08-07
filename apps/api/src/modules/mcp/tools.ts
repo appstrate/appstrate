@@ -802,6 +802,9 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
       "Chaining runs (kind:inline): feed earlier runs' deliverables to a later one by passing " +
       "their `document://` URIs in `context_documents` — never by copying their content into " +
       "`prompt`. " +
+      "For controlled dependency testing, pass top-level `dependency_overrides` to select a " +
+      "declared skill or integration working copy (`draft`) or another published selector for " +
+      "this run only. " +
       "Prefer an existing agent over an inline manifest when one matches the intent.",
     annotations: {
       title: "Run and wait",
@@ -914,6 +917,17 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
             "it under, which matches no integration and is ignored. TOP-LEVEL argument, " +
             "alongside `manifest`/`config` — pass the object itself; JSON-encoding it is " +
             "refused before the launch.",
+        },
+        dependency_overrides: {
+          type: "object",
+          additionalProperties: { type: "string" },
+          description:
+            'Run-scoped dependency version picks (either kind): `{ "@scope/dep": "draft" | ' +
+            '"<semver|dist-tag>" }`. Keys must name dependencies declared by the selected agent ' +
+            'or inline manifest. `"draft"` loads that dependency\'s org-visible working copy; ' +
+            "another selector replaces the manifest pin against published versions. The map is " +
+            "recorded on the run and never changes the agent manifest. Pass it as a top-level " +
+            "object, alongside `manifest` or `input`.",
         },
         context_documents: {
           type: "array",

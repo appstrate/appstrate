@@ -62,6 +62,13 @@ export interface InlineRunPreflightResult {
    * the run uses.
    */
   connectionOverrides: ConnectionOverrides | null;
+  /**
+   * Caller's per-dependency version picks, normalized once and carried into
+   * the shared run pipeline. The pipeline validates declared keys, resolves
+   * within the run org, freezes integration versions, bundles skill bytes,
+   * and persists this exact map on the run.
+   */
+  dependencyOverrides: Record<string, string> | null;
 }
 
 type Mode = "fail-fast" | "accumulate";
@@ -120,6 +127,10 @@ export async function runInlinePreflight(params: {
   const modelIdOverride = body.modelId ?? null;
   const proxyIdOverride = body.proxyId ?? null;
   const runOverrides = body.connection_overrides ?? null;
+  const dependencyOverrides =
+    body.dependency_overrides && Object.keys(body.dependency_overrides).length > 0
+      ? body.dependency_overrides
+      : null;
 
   // ----- 2. input against manifest schema (AJV) -----
   // config + prompt validation are delegated entirely to agent readiness
@@ -213,6 +224,7 @@ export async function runInlinePreflight(params: {
     modelIdOverride,
     proxyIdOverride,
     connectionOverrides: runOverrides,
+    dependencyOverrides,
   };
 }
 

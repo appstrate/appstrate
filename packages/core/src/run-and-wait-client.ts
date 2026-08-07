@@ -210,6 +210,37 @@ function connectionOverridesArgument(args: Record<string, unknown>): {
   return { overrides };
 }
 
+/**
+ * The tool's run-scoped dependency version picks. Shape validation belongs at
+ * this shared client boundary because chat and MCP transports can both call it
+ * without JSON-schema enforcement. Selector syntax and declared-key checks
+ * remain owned by the run route and shared pipeline respectively.
+ */
+function dependencyOverridesArgument(args: Record<string, unknown>): {
+  overrides?: Record<string, unknown>;
+  error?: string;
+} {
+  const present = args.dependency_overrides !== undefined;
+  if (typeof args.dependency_overrides === "string") {
+    return {
+      error:
+        "`dependency_overrides` must be a JSON object mapping each declared dependency id to " +
+        'a version selector (`{"@scope/skill": "draft"}`), not a string. Pass the object ' +
+        "itself, do not JSON-encode it.",
+    };
+  }
+  const overrides = asRecord(args.dependency_overrides);
+  if (!overrides && present) {
+    return {
+      error:
+        "`dependency_overrides` must be a JSON object mapping each declared dependency id to " +
+        'a version selector (`{"@scope/skill": "draft"}`). Omit the argument entirely when ' +
+        "no dependency override is needed.",
+    };
+  }
+  return { overrides };
+}
+
 export function isRunAndWaitTerminalStatus(status: unknown): boolean {
   return typeof status === "string" && RUN_AND_WAIT_TERMINAL_STATUSES.has(status);
 }
@@ -393,6 +424,13 @@ export async function launchRunAndWait(
       step: { payload: { error: connectionOverrides.error }, isError: true },
     };
   }
+  const dependencyOverrides = dependencyOverridesArgument(args);
+  if (dependencyOverrides.error) {
+    return {
+      ok: false,
+      step: { payload: { error: dependencyOverrides.error }, isError: true },
+    };
+  }
 
   let launchPath: string;
   let launchBody: Record<string, unknown> | undefined;
@@ -514,6 +552,9 @@ export async function launchRunAndWait(
   // Both run bodies carry the same field, so one forward covers both kinds.
   if (connectionOverrides.overrides) {
     launchBody = { ...launchBody, connection_overrides: connectionOverrides.overrides };
+  }
+  if (dependencyOverrides.overrides) {
+    launchBody = { ...launchBody, dependency_overrides: dependencyOverrides.overrides };
   }
 
   const launchRes = await opts.fetch(apiUrl(opts.origin, launchPath), {

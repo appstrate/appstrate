@@ -311,5 +311,51 @@ describe("POST /api/runs/inline/validate", () => {
       expect(res.status).toBe(200);
       expect(await shadowCount()).toBe(0);
     });
+
+    it("accepts a draft override for a declared org-visible skill", async () => {
+      await seedPackage({
+        id: "@inlineorg/draft-helper",
+        type: "skill",
+        source: "local",
+        orgId: ctx.orgId,
+      });
+      const manifest = manifestWithDeps({
+        skills: { "@inlineorg/draft-helper": "^1.0.0" },
+      });
+
+      const res = await post({
+        manifest,
+        prompt: "do something",
+        dependency_overrides: { "@inlineorg/draft-helper": "draft" },
+      });
+
+      expect(res.status).toBe(200);
+      expect(((await res.json()) as { valid: boolean }).valid).toBe(true);
+      expect(await shadowCount()).toBe(0);
+    });
+
+    it("does not make another organization's draft skill visible", async () => {
+      const other = await createTestContext({ orgSlug: "otherinlineorg" });
+      await seedPackage({
+        id: "@otherinlineorg/private-helper",
+        type: "skill",
+        source: "local",
+        orgId: other.orgId,
+      });
+      const manifest = manifestWithDeps({
+        skills: { "@otherinlineorg/private-helper": "^1.0.0" },
+      });
+
+      const res = await post({
+        manifest,
+        prompt: "do something",
+        dependency_overrides: { "@otherinlineorg/private-helper": "draft" },
+      });
+
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { errors?: { code: string }[] };
+      expect(body.errors?.some((error) => error.code === "missing_skill")).toBe(true);
+      expect(await shadowCount()).toBe(0);
+    });
   });
 });

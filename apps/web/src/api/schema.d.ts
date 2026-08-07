@@ -18626,6 +18626,10 @@ export interface operations {
                     connection_overrides?: {
                         [key: string]: string;
                     };
+                    /** @description Per-run dependency version overrides. Flat map `{ "@scope/dep": "draft" | "<semver|dist-tag>" }`; keys may name a declared skill or integration. `"draft"` selects that dependency's org-visible working copy for this run, while any other value replaces the manifest pin against published versions. The map is persisted on the run. Unknown keys return 400 and unresolvable selectors return 422. */
+                    dependency_overrides?: {
+                        [key: string]: string;
+                    };
                     modelId?: string | null;
                     proxyId?: string | null;
                 };
@@ -18804,6 +18808,10 @@ export interface operations {
                     context_documents?: string[];
                     /** @description Same field as `POST /api/runs/inline` — applied to the integration readiness check so a pick that clears `must_choose_connection` here clears it on the real launch too. Never persisted; no run is created. */
                     connection_overrides?: {
+                        [key: string]: string;
+                    };
+                    /** @description Same syntactic selector contract as `POST /api/runs/inline`. The dry-run checks the manifest and dependency visibility but creates no run and therefore persists nothing. */
+                    dependency_overrides?: {
                         [key: string]: string;
                     };
                     modelId?: string | null;

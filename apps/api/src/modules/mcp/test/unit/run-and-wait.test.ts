@@ -272,6 +272,90 @@ describe("run_and_wait", () => {
     });
   });
 
+  describe("dependency_overrides", () => {
+    it("declares dependency_overrides as an optional object of string selectors", () => {
+      const { tool } = makeRunAndWait({});
+      const property = (
+        tool.descriptor.inputSchema.properties as Record<string, Record<string, unknown>>
+      ).dependency_overrides;
+
+      expect(property).toBeDefined();
+      expect(property!.type).toBe("object");
+      expect(property!.additionalProperties).toEqual({ type: "string" });
+      expect(tool.descriptor.inputSchema.required as string[]).toEqual(["kind"]);
+    });
+
+    it("forwards dependency_overrides verbatim on an inline launch", async () => {
+      const { tool, calls } = makeRunAndWait({
+        launch: () => jsonResponse({ id: "run_inline", status: "pending" }),
+        getRun: [jsonResponse({ id: "run_inline", status: "success" })],
+      });
+
+      await tool.handler(
+        {
+          kind: "inline",
+          manifest: {
+            name: "tmp",
+            dependencies: { skills: { "@acme/helper": "^1.0.0" } },
+          },
+          prompt: "do it",
+          dependency_overrides: { "@acme/helper": "draft" },
+        },
+        noExtra,
+      );
+
+      const post = calls.find((c) => c.method === "POST");
+      expect(post?.path).toBe("/api/runs/inline");
+      expect(post?.body).toEqual({
+        manifest: defaultInlineManifest({
+          name: "tmp",
+          dependencies: { skills: { "@acme/helper": "^1.0.0" } },
+        }),
+        prompt: expect.stringContaining("do it"),
+        dependency_overrides: { "@acme/helper": "draft" },
+      });
+    });
+
+    it("forwards dependency_overrides verbatim on an agent launch", async () => {
+      const { tool, calls } = makeRunAndWait({
+        launch: () => jsonResponse({ id: "run_42", status: "pending" }),
+        getRun: [jsonResponse({ id: "run_42", status: "success" })],
+      });
+
+      await tool.handler(
+        {
+          kind: "agent",
+          scope: "@acme",
+          name: "writer",
+          dependency_overrides: { "@acme/helper": "draft" },
+        },
+        noExtra,
+      );
+
+      const post = calls.find((c) => c.method === "POST");
+      expect(post?.path).toBe("/api/agents/@acme/writer/run");
+      expect(post?.body).toEqual({ dependency_overrides: { "@acme/helper": "draft" } });
+    });
+
+    it("rejects a JSON-encoded dependency_overrides map before dispatch", async () => {
+      const { tool, calls } = makeRunAndWait({});
+
+      const res = await tool.handler(
+        {
+          kind: "agent",
+          scope: "@acme",
+          name: "writer",
+          dependency_overrides: '{"@acme/helper":"draft"}',
+        },
+        noExtra,
+      );
+
+      expect(res.isError).toBe(true);
+      expect(parseResult(res).error).toContain("not a string");
+      expect(calls).toHaveLength(0);
+    });
+  });
+
   it("returns a resource_link block per document the run published", async () => {
     const { tool } = makeRunAndWait({
       launch: () => jsonResponse({ id: "run_7", packageId: "@acme/writer", status: "pending" }),

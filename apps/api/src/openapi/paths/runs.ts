@@ -452,6 +452,12 @@ export const runsPaths = {
                     'Per-integration connection picks for THIS run (flat-connections mechanism #2). Flat map: `{ "@scope/integration": "<connection_id>" }` — one connection per integration; the chosen connection carries its own authKey. Loses to admin pins (mechanism #1), beats the schedule-frozen layer (#3) and the actor-fallback (#4). Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same pick. Returns 412 `missing_integration_connection` if the chosen id is not accessible to the actor.',
                   additionalProperties: { type: "string" },
                 },
+                dependency_overrides: {
+                  type: "object",
+                  description:
+                    'Per-run dependency version overrides. Flat map `{ "@scope/dep": "draft" | "<semver|dist-tag>" }`; keys may name a declared skill or integration. `"draft"` selects that dependency\'s org-visible working copy for this run, while any other value replaces the manifest pin against published versions. The map is persisted on the run. Unknown keys return 400 and unresolvable selectors return 422.',
+                  additionalProperties: { type: "string" },
+                },
                 modelId: { type: ["string", "null"] },
                 proxyId: { type: ["string", "null"] },
               },
@@ -671,6 +677,14 @@ export const runsPaths = {
                     "Same field as `POST /api/runs/inline` — applied to the integration readiness " +
                     "check so a pick that clears `must_choose_connection` here clears it on the " +
                     "real launch too. Never persisted; no run is created.",
+                },
+                dependency_overrides: {
+                  type: "object",
+                  additionalProperties: { type: "string" },
+                  description:
+                    "Same syntactic selector contract as `POST /api/runs/inline`. The dry-run " +
+                    "checks the manifest and dependency visibility but creates no run and " +
+                    "therefore persists nothing.",
                 },
                 modelId: { type: ["string", "null"] },
                 proxyId: { type: ["string", "null"] },
