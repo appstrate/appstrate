@@ -18,6 +18,7 @@ import { parseManifestIntegrations } from "@appstrate/core/dependencies";
 import { getSystemPackages } from "./system-packages.ts";
 import type { IntegrationSummary } from "@appstrate/shared-types";
 import { orgOrSystemFilter, notEphemeralFilter } from "../lib/package-helpers.ts";
+import { isManifestTextFallback } from "../lib/manifest-utils.ts";
 import { pickVersion } from "./run-launcher/db-package-catalog.ts";
 import { VERSION_SELECTOR_DRAFT } from "./agent-version-resolver.ts";
 import { logger } from "../lib/logger.ts";
@@ -648,12 +649,12 @@ export async function fetchIntegrationPromptDocs(
     // present, or a fallback to the manifest JSON when the package was
     // uploaded without an INTEGRATION.md (see `packages/core/src/zip.ts`).
     // Only inline content that looks like markdown documentation, not
-    // the manifest JSON fallback.
+    // the manifest JSON fallback — the SAME predicate the file explorer's
+    // overlay and the package write paths use, so the four of them cannot
+    // disagree about what the column holds.
     const rawContent = row.draftContent ?? "";
-    const looksLikeJsonFallback =
-      rawContent.trimStart().startsWith("{") && rawContent.trimEnd().endsWith("}");
     const doc =
-      rawContent.trim().length > 0 && !looksLikeJsonFallback
+      rawContent.trim().length > 0 && !isManifestTextFallback(rawContent)
         ? truncateIntegrationDoc(rawContent)
         : undefined;
     out.push({

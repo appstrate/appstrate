@@ -67,11 +67,13 @@ import { SCOPED_PACKAGE_ROUTE } from "./scoped-package-route.ts";
 import {
   resolvePackageFileValidator,
   readPackageSnapshot,
+  resolveDraftContent,
   buildFileIndex,
   indexEtag,
   fileEtag,
   type PackageFileSource,
 } from "../services/package-files.ts";
+import { PACKAGE_CONTENT_ENTRY } from "@appstrate/core/package-files";
 import {
   collectConnectLoginWarnings,
   collectMetaWarnings,
@@ -88,6 +90,7 @@ import {
   type ValidationFieldError,
 } from "../lib/errors.ts";
 import { parsePathMessages } from "../lib/field-errors.ts";
+import { isManifestTextFallback } from "../lib/manifest-utils.ts";
 
 function manifestErrorsToFieldErrors(errors: string[]): ValidationFieldError[] {
   return parsePathMessages(errors, {
@@ -201,20 +204,21 @@ export const forkSchema = z.object({
 /**
  * JSON-body create/update payloads for the manifest-driven package types
  * (agent). `manifest` is validated structurally here (must be an object) and
- * then deeply by `validateManifest`. Bodies with wrong-typed `content` /
- * `source_code` (e.g. `content: 1`) are now rejected as a 400 instead of
- * blowing up downstream as a 500.
+ * then deeply by `validateManifest`. Bodies with a wrong-typed `content`
+ * (e.g. `content: 1`) are rejected as a 400 instead of blowing up downstream
+ * as a 500.
+ *
+ * Both objects are non-strict, so an unknown key (a client still sending the
+ * retired `source_code`, say) is silently stripped rather than rejected.
  */
 const packageJsonCreateSchema = z.object({
   manifest: z.record(z.string(), z.unknown()),
   content: z.string().optional(),
-  source_code: z.string().optional(),
 });
 
 const packageJsonUpdateSchema = z.object({
   manifest: z.record(z.string(), z.unknown()).optional(),
   content: z.string().optional(),
-  source_code: z.string().optional(),
   lock_version: z.number().optional(),
 });
 
@@ -420,11 +424,31 @@ interface PackageRouteConfig {
     contentFileExt: string | null;
   };
   validateContent?: (content: string) => { valid: boolean; errors: string[]; warnings: string[] };
-  /** Validates the secondary source file (e.g. .ts for tools). */
-  validateSource?: (source: string) => { valid: boolean; errors: string[]; warnings: string[] };
-  storageFileName: (id: string) => string;
-  /** Secondary source file name (e.g. {name}.ts for tools). */
-  sourceFileName?: (id: string) => string;
+  /**
+   * Which storage file this type's editor `content` is written to — a per-type
+   * editor-wiring fact.
+   *
+   * It answers a DIFFERENT question from `PACKAGE_CONTENT_FILE`
+   * (`@appstrate/core/package-files`), which names the archive entry
+   * `draft_content` mirrors. Both are right where they differ: for
+   * `integration` the SPA editor deliberately sends the manifest JSON as
+   * `content` (`toWireBody`, `apps/web/src/pages/package-editor.tsx`), so
+   * `manifest.json` is exactly where that `content` belongs.
+   *
+   * Do NOT "reconcile" the two maps. Pointing `integration` at
+   * `INTEGRATION.md` would write manifest JSON into the docs file, strand the
+   * real `manifest.json` (nothing refreshes it afterwards), and — because
+   * `createVersionFromDraft` spreads the stored files into the artifact — mint
+   * immutable, integrity-pinned published ZIPs whose `INTEGRATION.md` is
+   * manifest JSON. Unfixable once published.
+   *
+   * Their DISAGREEMENT is load-bearing, not merely tolerated: it is what tells
+   * the update / restore handlers that this type's `content` is a manifest
+   * copy, so they must not put it in `packages.draft_content` (that column's
+   * `INTEGRATION.md` is nobody's editor field) and must rebuild the storage
+   * file from the manifest instead of echoing a carried-forward `content`.
+   */
+  storageFileName: string;
   /** Hook called after a new package is created. */
   afterCreate?: (params: {
     packageId: string;
@@ -469,7 +493,7 @@ const ROUTE_CONFIGS: Partial<Record<PackageType, PackageRouteConfig>> = {
     cfg: CONFIG_BY_TYPE.skill,
     path: "skills",
     parseOpts: { requiredFile: "SKILL.md", contentFileExt: null },
-    storageFileName: () => "SKILL.md",
+    storageFileName: "SKILL.md",
     jsonBodyCreate: true,
     requireContent: true,
   },
@@ -477,7 +501,7 @@ const ROUTE_CONFIGS: Partial<Record<PackageType, PackageRouteConfig>> = {
     cfg: CONFIG_BY_TYPE.agent,
     path: "agents",
     parseOpts: { requiredFile: null, contentFileExt: null },
-    storageFileName: () => "prompt.md",
+    storageFileName: "prompt.md",
     jsonBodyCreate: true,
     requireContent: true,
     requireMutableForVersionOps: true,
@@ -498,7 +522,7 @@ const ROUTE_CONFIGS: Partial<Record<PackageType, PackageRouteConfig>> = {
     cfg: CONFIG_BY_TYPE.integration,
     path: "integrations",
     parseOpts: { requiredFile: null, contentFileExt: null },
-    storageFileName: () => "manifest.json",
+    storageFileName: "manifest.json",
     jsonBodyCreate: true,
   },
   // AFPS §3.4 — standalone mcp-server packages. Import-only like
@@ -510,7 +534,7 @@ const ROUTE_CONFIGS: Partial<Record<PackageType, PackageRouteConfig>> = {
     cfg: CONFIG_BY_TYPE["mcp-server"],
     path: "mcp-servers",
     parseOpts: { requiredFile: null, contentFileExt: null },
-    storageFileName: () => "manifest.json",
+    storageFileName: "manifest.json",
     jsonBodyCreate: false,
   },
 };
@@ -559,7 +583,6 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
 
       const manifest = body.manifest;
       const content = body.content ?? "";
-      const sourceCode = body.source_code ?? "";
 
       const validatedManifest = await validateManifestForRoute(
         manifest,
@@ -580,24 +603,6 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
               field: "content",
               code: "invalid_content",
               title: "Invalid Content",
-              message,
-            })),
-          );
-        }
-      }
-
-      if (rcfg.sourceFileName && !sourceCode.trim()) {
-        throw invalidRequest("Source is required", "source_code");
-      }
-
-      if (rcfg.validateSource && sourceCode) {
-        const validation = rcfg.validateSource(sourceCode);
-        if (!validation.valid) {
-          throw validationFailed(
-            validation.errors.map((message) => ({
-              field: "source_code",
-              code: "invalid_source",
-              title: "Invalid Source",
               message,
             })),
           );
@@ -651,11 +656,8 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
 
       // Upload files to S3 storage
       const normalizedFiles: Record<string, Uint8Array> = {
-        [rcfg.storageFileName(packageId)]: new TextEncoder().encode(content),
+        [rcfg.storageFileName]: new TextEncoder().encode(content),
       };
-      if (rcfg.sourceFileName && sourceCode) {
-        normalizedFiles[rcfg.sourceFileName(packageId)] = new TextEncoder().encode(sourceCode);
-      }
       await uploadPackageFiles(rcfg.cfg.storageFolder, orgId, packageId, normalizedFiles);
 
       // Create initial version (non-fatal). Snapshot the STORED draft
@@ -846,19 +848,8 @@ async function buildPackageDetailDto(
 
   if (!item) return null;
 
-  // Extract secondary source file from S3 storage (e.g. .ts for tools)
-  let sourceText: string | null = null;
-  if (rcfg.sourceFileName) {
-    const files = await downloadPackageFiles(rcfg.cfg.storageFolder, orgId, itemId);
-    const sourceData = files?.[rcfg.sourceFileName(itemId)];
-    if (sourceData) {
-      sourceText = new TextDecoder().decode(sourceData);
-    }
-  }
-
   return {
     ...item,
-    ...(sourceText != null ? { source_code: sourceText } : {}),
     version_count: versionCount,
     has_unarchived_changes: computeHasUnpublishedChanges(
       item.source,
@@ -938,7 +929,6 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
     const manifest =
       authoredManifest ?? (existing as { manifest?: Record<string, unknown> }).manifest ?? {};
     const content = body.content ?? existing.content ?? "";
-    const sourceCode = body.source_code;
 
     // Everything downstream — the persisted row, the after-update hook, the
     // id-immutability check — reads the VALIDATED manifest, never the raw one.
@@ -953,6 +943,7 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
       orgId,
       authoredManifest ? "author" : "stored",
     );
+    const manifestText = JSON.stringify(validatedManifest, null, 2);
 
     // Ensure ID immutability (all types)
     const newScopedName = validatedManifest.name;
@@ -980,30 +971,29 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
       }
     }
 
-    // Source validation (tools)
-    if (rcfg.sourceFileName && sourceCode !== undefined) {
-      if (!sourceCode.trim()) {
-        throw invalidRequest("Source cannot be empty", "source_code");
-      }
-      if (rcfg.validateSource) {
-        const validation = rcfg.validateSource(sourceCode);
-        if (!validation.valid) {
-          throw validationFailed(
-            validation.errors.map((message) => ({
-              field: "source_code",
-              code: "invalid_source",
-              title: "Invalid Source",
-              message,
-            })),
-          );
-        }
-      }
-    }
+    // A manifest-only integration PUT has no authored `content`. When the
+    // overloaded column contains the manifest fallback (rather than a real
+    // INTEGRATION.md), refresh it from the validated manifest instead of
+    // carrying the old fallback forward. A real companion remains protected.
+    const entry = PACKAGE_CONTENT_ENTRY[rcfg.cfg.type];
+    const draftContentInput =
+      body.content === undefined &&
+      entry?.required === false &&
+      (!existing.content || isManifestTextFallback(existing.content))
+        ? manifestText
+        : content;
 
+    // `content` feeds TWO sinks that are the same file for `agent`/`skill` and
+    // different files for the manifest-backed types — see `storageFileName`.
+    // `resolveDraftContent` guards the column; the storage write below is
+    // resolved on its own terms.
     const updated = await updateOrgItem(
       orgId,
       itemId,
-      { manifest: validatedManifest, content },
+      {
+        manifest: validatedManifest,
+        content: resolveDraftContent(rcfg.cfg.type, existing.content, draftContentInput),
+      },
       body.lock_version,
     );
 
@@ -1011,15 +1001,22 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
       throw conflict("conflict", `${label} was modified concurrently. Reload and try again.`);
     }
 
+    // Bytes for `rcfg.storageFileName`. When that file is NOT the type's
+    // content entry it is the manifest (integration, mcp-server), and it is
+    // rebuilt from the VALIDATED manifest rather than echoing `content`: this
+    // route accepts a manifest-only PUT, and the `existing.content`
+    // carried forward above is `packages.draft_content` — which for an
+    // integration is its INTEGRATION.md. Echoing it would overwrite the
+    // package's `manifest.json` with its documentation.
+    const storageContent =
+      PACKAGE_CONTENT_ENTRY[rcfg.cfg.type]?.path === rcfg.storageFileName ? content : manifestText;
+
     // Update storage files (merge with existing to preserve ancillary files)
     const existingFiles = await downloadPackageFiles(rcfg.cfg.storageFolder, orgId, itemId);
     const updatedFiles: Record<string, Uint8Array> = {
       ...(existingFiles ?? {}),
-      [rcfg.storageFileName(itemId)]: new TextEncoder().encode(content),
+      [rcfg.storageFileName]: new TextEncoder().encode(storageContent),
     };
-    if (rcfg.sourceFileName && sourceCode !== undefined) {
-      updatedFiles[rcfg.sourceFileName(itemId)] = new TextEncoder().encode(sourceCode);
-    }
     await uploadPackageFiles(rcfg.cfg.storageFolder, orgId, itemId, updatedFiles);
 
     // After-update hook (e.g. agent junction table sync)
@@ -1138,18 +1135,10 @@ async function buildVersionDetailDto(
 
   // Extract primary content file from the ZIP
   let content: string | null = null;
-  let sourceText: string | null = null;
   if (detail.content) {
-    const fileName = rcfg.storageFileName(itemId);
-    const fileData = detail.content[fileName];
+    const fileData = detail.content[rcfg.storageFileName];
     if (fileData) {
       content = new TextDecoder().decode(fileData);
-    }
-    if (rcfg.sourceFileName) {
-      const sourceData = detail.content[rcfg.sourceFileName(itemId)];
-      if (sourceData) {
-        sourceText = new TextDecoder().decode(sourceData);
-      }
     }
   }
 
@@ -1158,7 +1147,6 @@ async function buildVersionDetailDto(
     version: detail.version,
     manifest: detail.manifest,
     content,
-    ...(sourceText != null ? { source_code: sourceText } : {}),
     yanked: detail.yanked,
     yanked_reason: detail.yankedReason,
     integrity: detail.integrity,
@@ -1318,11 +1306,24 @@ function makeRestoreVersionHandler(rcfg: PackageRouteConfig) {
       throw notFound(`${label} '${itemId}' not found`);
     }
 
-    // Extract content from version ZIP
+    // Extract `packages.draft_content` from the version ZIP.
+    //
+    // The column mirrors the archive's CONTENT ENTRY (`PACKAGE_CONTENT_ENTRY`),
+    // NOT the file this type's editor `content` is stored under
+    // (`rcfg.storageFileName`). The two names agree for `agent`/`skill` and
+    // DIVERGE for `integration`, whose column holds the optional
+    // `INTEGRATION.md` while its editor content is `manifest.json` — reading
+    // the storage name restored a manifest copy over the docs, the exact
+    // overload `parsePackageZip` avoids. Falling back to the storage name
+    // reproduces that parser's own manifest-text fallback for a bundle that
+    // ships no companion, and is a no-op for the three types whose two names
+    // already coincide.
+    const contentEntryPath = PACKAGE_CONTENT_ENTRY[rcfg.cfg.type]?.path;
     let content = detail.prompt ?? "";
     if (detail.content) {
-      const fileName = rcfg.storageFileName(itemId);
-      const fileData = detail.content[fileName];
+      const fileData =
+        (contentEntryPath ? detail.content[contentEntryPath] : undefined) ??
+        detail.content[rcfg.storageFileName];
       if (fileData) {
         content = new TextDecoder().decode(fileData);
       }
@@ -1512,23 +1513,22 @@ async function loadFileExplorerPackage(c: Context<AppEnv>): Promise<PackageFileS
 }
 
 /**
- * `private` is mandatory on both routes: these are authenticated,
- * tenant-scoped bytes and a shared cache must never hold them. Everything that
- * moves under its own URL (draft, dist-tag, semver range, yanked version) gets
- * `no-cache`, which still allows the 304 round-trip — it only forbids serving
- * without one.
+ * One policy for every response on both routes: `private, no-cache`.
  *
- * An exact, non-yanked version gets a SHORT `max-age` and, deliberately, NOT
- * `immutable`. A version number is not permanently content-addressed here:
- * `DELETE /versions/{version}` is a live UI affordance and `validateForwardVersion`
- * only rejects versions still present in `package_versions`, so the same number
- * can be republished over different bytes. Under `max-age=31536000, immutable`
- * a client that had the old one open would keep serving it for a year with no
- * revalidation, and `invalidatePackageFiles` could not reach it — the HTTP
- * cache short-circuits the fetch before React Query ever sees it. The
- * revalidation this buys back is nearly free: `resolvePackageFileValidator`
- * answers an exact version's 304 from one DB read, with no storage GET and no
- * unzip. That is the entire reason it is split out from `readPackageSnapshot`.
+ * `private` is mandatory: these are authenticated, tenant-scoped bytes and a
+ * shared cache must never hold them. `no-cache` is mandatory for the same
+ * reason — it still allows the 304 round-trip, it only forbids serving without
+ * one, and that round-trip is what keeps authorization live. Any fresh window,
+ * however short, is served by the browser with ZERO server contact: revoke
+ * `<type>:read`, remove the member from the org, or uninstall the package from
+ * the application, and the cached 200 keeps being handed out until it expires.
+ * `Vary` cannot rescue that — revocation changes no request header. Forcing the
+ * round-trip re-enters `loadFileExplorerPackage`, so `hasPackageAccess` and
+ * `requirePackageReadPermission` run on every hit.
+ *
+ * The revalidation this costs is nearly free: `resolvePackageFileValidator`
+ * answers a version's 304 from one DB read, with no storage GET and no unzip.
+ * That is the entire reason it is split out from `readPackageSnapshot`.
  *
  * `Vary` is NOT optional here. The response body depends on `X-Org-Id` /
  * `X-Application-Id` (via `hasPackageAccess`) while the URL does not mention
@@ -1536,18 +1536,10 @@ async function loadFileExplorerPackage(c: Context<AppEnv>): Promise<PackageFileS
  * URL and the browser answers from cache — showing application B an artifact
  * that is only installed in application A.
  */
-const EXACT_VERSION_MAX_AGE_SECONDS = 300;
-
-function fileCacheHeaders(
-  etag: string,
-  freshCacheable: boolean,
-  yanked: boolean,
-): Record<string, string> {
+function fileCacheHeaders(etag: string, yanked: boolean): Record<string, string> {
   const headers: Record<string, string> = {
     ETag: etag,
-    "Cache-Control": freshCacheable
-      ? `private, max-age=${EXACT_VERSION_MAX_AGE_SECONDS}`
-      : "private, no-cache",
+    "Cache-Control": "private, no-cache",
     Vary: "X-Org-Id, X-Application-Id",
   };
   if (yanked) headers["X-Yanked"] = "true";
@@ -2192,14 +2184,14 @@ export function createPackagesRouter() {
       if (ifNoneMatchSatisfied(inm, etag)) {
         return new Response(null, {
           status: 304,
-          headers: fileCacheHeaders(etag, validator.freshCacheable, validator.yanked),
+          headers: fileCacheHeaders(etag, validator.yanked),
         });
       }
     }
 
     const snapshot = await readPackageSnapshot(pkg, validator);
     const etag = indexEtag(snapshot.snapshotId);
-    const headers = fileCacheHeaders(etag, validator.freshCacheable, validator.yanked);
+    const headers = fileCacheHeaders(etag, validator.yanked);
     if (ifNoneMatchSatisfied(inm, etag)) {
       return new Response(null, { status: 304, headers });
     }
@@ -2228,7 +2220,7 @@ export function createPackagesRouter() {
       if (ifNoneMatchSatisfied(inm, etag, { allowWildcard: false })) {
         return new Response(null, {
           status: 304,
-          headers: fileCacheHeaders(etag, validator.freshCacheable, validator.yanked),
+          headers: fileCacheHeaders(etag, validator.yanked),
         });
       }
     }
@@ -2244,7 +2236,7 @@ export function createPackagesRouter() {
     const bytes = snapshot.files[path]!;
 
     const etag = fileEtag(snapshot.snapshotId, path);
-    const headers = fileCacheHeaders(etag, validator.freshCacheable, validator.yanked);
+    const headers = fileCacheHeaders(etag, validator.yanked);
     // Existence is established, so `*` is now a legitimate match.
     if (ifNoneMatchSatisfied(inm, etag)) {
       return new Response(null, { status: 304, headers });

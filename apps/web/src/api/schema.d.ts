@@ -5357,8 +5357,6 @@ export interface components {
             description: string | null;
             /** @description Package item content */
             content: string | null;
-            /** @description Secondary source file content (e.g. .ts for tools) */
-            source_code?: string | null;
             /** @enum {string} */
             source: "system" | "local";
             created_by: string | null;
@@ -5448,8 +5446,6 @@ export interface components {
             };
             /** @description Primary content file extracted from the version ZIP */
             content?: string | null;
-            /** @description Secondary source file content (e.g. .ts), when present */
-            source_code?: string | null;
             /** @description Whether this version has been yanked */
             yanked: boolean;
             yanked_reason: string | null;
@@ -16015,8 +16011,6 @@ export interface operations {
                     };
                     /** @description Primary package file content (manifest document). */
                     content?: string;
-                    /** @description Optional source code payload for the integration runner. */
-                    source_code?: string;
                 };
             };
         };
@@ -16092,7 +16086,7 @@ export interface operations {
                     manifest: {
                         [key: string]: unknown;
                     };
-                    content: string;
+                    content?: string;
                     /** @description Optimistic lock version */
                     lock_version: number;
                 };
@@ -16214,7 +16208,7 @@ export interface operations {
                     manifest: {
                         [key: string]: unknown;
                     };
-                    content: string;
+                    content?: string;
                     /** @description Optimistic lock version */
                     lock_version: number;
                 };
@@ -17165,8 +17159,6 @@ export interface operations {
                     };
                     /** @description SKILL.md content (markdown with YAML frontmatter). */
                     content?: string;
-                    /** @description Optional source code payload. */
-                    source_code?: string;
                 };
             };
         };
@@ -17703,7 +17695,7 @@ export interface operations {
                     "Appstrate-Version": components["headers"]["AppstrateVersion"];
                     /** @description Strong entity-tag of this index representation (`"i-…"`), derived from the version artifact's integrity hash or from a content digest of the overlaid draft. It never matches a `files/content` tag. */
                     ETag?: string;
-                    /** @description `private, max-age=300` ONLY for an exact, non-yanked version pin — never `immutable`, because a version can be deleted and republished over different bytes under the same number. A dist-tag or semver range is a moving target and a yank must stay discoverable, so both get `private, no-cache` — as does the draft. Always `private`: the response is tenant-scoped. */
+                    /** @description Always `private, no-cache`, for every selector — draft, exact version pin, dist-tag, semver range, yanked. Always `private`: the response is tenant-scoped. Never a fresh window and never `immutable`: this index is RBAC-gated, and a copy the browser may serve without contacting the server would outlive a revoked `<type>:read`, an org removal, or the package being uninstalled from the application. `no-cache` still permits the `304` round-trip, which a version pin answers from a single database read. */
                     "Cache-Control"?: string;
                     /** @description Always `X-Org-Id, X-Application-Id` — access depends on both, so a cache must not reuse this body across organizations or applications. */
                     Vary?: string;
@@ -17720,7 +17712,7 @@ export interface operations {
                 headers: {
                     /** @description Strong entity-tag of this index representation. */
                     ETag?: string;
-                    /** @description Same caching policy as the `200` response. */
+                    /** @description Always `private, no-cache`, as on the `200`. */
                     "Cache-Control"?: string;
                     /** @description Always `X-Org-Id, X-Application-Id`, as on the `200`. */
                     Vary?: string;
@@ -17780,7 +17772,7 @@ export interface operations {
                     "Appstrate-Version": components["headers"]["AppstrateVersion"];
                     /** @description Strong entity-tag of THIS FILE (`"f-…"`), folding in both the snapshot identity and the `path`. Per RFC 9110 §8.8.1 it identifies one representation: a tag obtained for another `path`, or from the file index, will not match. */
                     ETag?: string;
-                    /** @description `private, max-age=300` ONLY for an exact, non-yanked version pin (never `immutable` — a version number can be republished over different bytes); `private, no-cache` for a dist-tag, a semver range, a yanked version, and the draft. */
+                    /** @description Always `private, no-cache`, for every selector — draft, exact version pin, dist-tag, semver range, yanked. Never a fresh window and never `immutable`: these bytes are RBAC-gated, and a copy the browser may serve without contacting the server would outlive a revoked `<type>:read`, an org removal, or the package being uninstalled from the application. */
                     "Cache-Control"?: string;
                     /** @description Always `X-Org-Id, X-Application-Id` — access depends on both, so a cache must not reuse these bytes across organizations or applications. */
                     Vary?: string;
@@ -17805,7 +17797,7 @@ export interface operations {
                 headers: {
                     /** @description Strong entity-tag of this file representation. */
                     ETag?: string;
-                    /** @description Same caching policy as the `200` response. */
+                    /** @description Always `private, no-cache`, as on the `200`. */
                     "Cache-Control"?: string;
                     /** @description Always `X-Org-Id, X-Application-Id`, as on the `200`. */
                     Vary?: string;

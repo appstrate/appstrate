@@ -318,7 +318,6 @@ export function useCreatePackage(type: Exclude<PackageType, "mcp-server">) {
       id?: string;
       manifest: Record<string, unknown>;
       content: string;
-      source_code?: string;
     }): Promise<{ id: string }> => {
       // 201 → the created package resource, bare (issue #657).
       switch (type) {
@@ -367,15 +366,14 @@ export function useUpdatePackage(type: PackageType, packageId: string) {
     mutationFn: async (body: {
       manifest: Record<string, unknown>;
       content: string;
-      source_code?: string;
       lock_version: number;
     }): Promise<{ id: string; lock_version: number }> => {
       const { data } = await client.PUT(`/api/packages/${cfg.path}/{scope}/{name}`, {
         params: { path: splitPackageRef(packageId) },
         // No cast needed: the body's explicit `{manifest, content,
-        // source_code?, lock_version}` keys satisfy the skill/integration/
-        // mcp-server update operations (generic-object manifest) in the
-        // dynamic-path union, so the assignment typechecks directly.
+        // lock_version}` keys satisfy the skill/integration/mcp-server update
+        // operations (generic-object manifest) in the dynamic-path union, so
+        // the assignment typechecks directly.
         body,
       });
       // 200 → the updated package resource, bare (issue #657). The resource

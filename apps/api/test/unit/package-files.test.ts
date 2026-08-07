@@ -16,6 +16,7 @@ import {
   draftSnapshotId,
   indexEtag,
   fileEtag,
+  resolveDraftContent,
   INDEX_JSON_BUDGET_BYTES,
   type PackageFileSnapshot,
   type PackageFileSource,
@@ -65,11 +66,16 @@ function overlay(
 }
 
 /**
- * `packages.draft_content` holds a DIFFERENT file per type — `PACKAGE_CONTENT_FILE`
+ * `packages.draft_content` holds a DIFFERENT file per type — `PACKAGE_CONTENT_ENTRY`
  * (`@appstrate/core/package-files`), the same map `parsePackageZip` extracts the
  * column FROM. Overlaying it onto the wrong entry would either erase the
  * manifest or invent a file the package does not contain, so these cases pin
  * the whole matrix rather than trusting the shared declaration alone.
+ *
+ * The map's `required` flag decides the no-stored-ZIP case: a required entry is
+ * materialized from the column alone, an optional one only lands on top of a
+ * file that is already there. The table itself (every type present, each
+ * classified) is pinned in `packages/core/test/package-files.test.ts`.
  */
 describe("applyDraftOverlay — per-type draft_content target", () => {
   it("agent → prompt.md", () => {
@@ -103,6 +109,60 @@ describe("applyDraftOverlay — per-type draft_content target", () => {
     expect(files["manifest.json"]).toBe("{}");
   });
 
+  it("integration → nothing, when draft_content is EMPTY but the ZIP has a doc", () => {
+    // `isManifestTextFallback` short-circuits on a falsy input, so an empty
+    // column reads as "a real doc that happens to be empty" unless the overlay
+    // says otherwise — and overlaying it TRUNCATED a genuine INTEGRATION.md to
+    // a 0-byte file in the explorer while `?version=…` still served it.
+    // `forkPackage` wrote exactly that column for every integration it forked.
+    const files = overlay(
+      "integration",
+      { draftContent: "" },
+      { "INTEGRATION.md": "# Real docs", "manifest.json": "{}" },
+    );
+    expect(files["INTEGRATION.md"]).toBe("# Real docs");
+  });
+
+  it("agent/skill → an EMPTY column still overlays — an empty prompt is the truth", () => {
+    // The empty-column guard is scoped to OPTIONAL entries. A required entry's
+    // column is its only copy, so declining would show stale ZIP bytes as the
+    // draft the user is editing.
+    expect(overlay("agent", { draftContent: "" }, { "prompt.md": "STALE" })).toEqual({
+      "prompt.md": "",
+    });
+    expect(overlay("skill", { draftContent: "" }, { "SKILL.md": "STALE" })).toEqual({
+      "SKILL.md": "",
+    });
+  });
+
+  it("integration → nothing, when draft_content is a manifest copy but the ZIP HAS a doc", () => {
+    // The already-corrupted row. Every write path that fed the editor's
+    // manifest JSON into `draft_content` left the real INTEGRATION.md sitting
+    // intact in storage, so the overlay had a file to land on and served the
+    // package's own manifest under the name of its documentation — the entry
+    // the explorer pre-selects. No write-path fix can reach a row already in
+    // this state; declining the overlay shows the stored truth instead.
+    const files = overlay(
+      "integration",
+      { draftContent: '{\n  "name": "@t/pkg",\n  "type": "integration"\n}' },
+      { "INTEGRATION.md": "# Real docs", "manifest.json": "{}" },
+    );
+    expect(files["INTEGRATION.md"]).toBe("# Real docs");
+  });
+
+  it("agent/skill are never sniffed — a JSON-shaped prompt still overlays", () => {
+    // `required: true` means the column has no manifest-text fallback to be
+    // confused with, so the manifest-copy test must not be applied there: a
+    // prompt that happens to be a JSON object is still the prompt.
+    const jsonish = '{"role": "you are a formatter"}';
+    expect(overlay("agent", { draftContent: jsonish }, { "prompt.md": "STALE" })).toEqual({
+      "prompt.md": jsonish,
+    });
+    expect(overlay("skill", { draftContent: jsonish }, { "SKILL.md": "STALE" })).toEqual({
+      "SKILL.md": jsonish,
+    });
+  });
+
   it("mcp-server → nothing (draft_content is only a manifest copy)", () => {
     const files = overlay(
       "mcp-server",
@@ -130,6 +190,94 @@ describe("applyDraftOverlay — per-type draft_content target", () => {
   it("leaves the stored files untouched when both draft columns are null", () => {
     const stored = { "manifest.json": "{}", "prompt.md": "p" };
     expect(overlay("agent", {}, stored)).toEqual(stored);
+  });
+});
+
+/**
+ * The write-side guard, and the exact inverse of the overlay above: which
+ * value a write whose `content` is a MANIFEST COPY may put in
+ * `packages.draft_content`.
+ *
+ * Both package editors and the version-restore route feed one `content` field.
+ * For `agent`/`skill` it IS the column's file. For `integration` it is the
+ * manifest JSON while the column holds the optional `INTEGRATION.md`, so an
+ * unguarded write destroyed the doc — the integration stopped contributing its
+ * agent-facing documentation to every agent's platform prompt, and the file
+ * explorer began serving manifest JSON under the name `INTEGRATION.md`.
+ *
+ * The decision is made on the shape of the value being WRITTEN, so the four
+ * cases below are the whole matrix for the one type with an optional entry:
+ * two write shapes × two legitimate column states. Deciding on the COLUMN's
+ * shape instead made the field write-once — the two markdown rows silently
+ * returned the old value — and made it write-once *conditionally*, so a client
+ * could not tell which mode it was in.
+ */
+describe("resolveDraftContent — the shape of the WRITE decides, never the stored value", () => {
+  const DOC = "# Real integration docs";
+  const NEW_DOC = "# Real integration docs — v2";
+  const MANIFEST = '{\n  "name": "@t/pkg",\n  "type": "integration"\n}';
+
+  it("manifest-shaped write over a real doc → keeps the doc", () => {
+    // The SPA save. `toWireBody` sends the manifest as `content` and the editor
+    // has no INTEGRATION.md field, so this write cannot be an authored doc.
+    expect(resolveDraftContent("integration", DOC, MANIFEST)).toBe(DOC);
+  });
+
+  it("manifest-shaped write over a manifest fallback → REFRESHES it", () => {
+    // An integration that legitimately has no INTEGRATION.md must keep a
+    // CURRENT manifest copy — freezing the old one would make the column stale
+    // relative to the manifest it mirrors.
+    const older = '{"name":"@t/pkg","version":"1.0.0"}';
+    expect(resolveDraftContent("integration", older, MANIFEST)).toBe(MANIFEST);
+  });
+
+  it("markdown write over a real doc → LANDS (the write-once regression)", () => {
+    // A non-SPA client — curl, CI, an agent through the MCP module — PUTs a new
+    // INTEGRATION.md. Guarding on `stored` returned the OLD doc here: `200`, a
+    // DTO showing the old text, and the markdown written NOWHERE, because this
+    // type's storage sink is `manifest.json`.
+    expect(resolveDraftContent("integration", DOC, NEW_DOC)).toBe(NEW_DOC);
+  });
+
+  it("markdown write over a manifest fallback → lands", () => {
+    expect(resolveDraftContent("integration", MANIFEST, NEW_DOC)).toBe(NEW_DOC);
+  });
+
+  it("writes unconditionally when the column is empty or absent", () => {
+    // Also a type guard: returning `stored` in these two cases would hand back
+    // `null` / `""` from a function that promises a `string` content value.
+    expect(resolveDraftContent("integration", null, MANIFEST)).toBe(MANIFEST);
+    expect(resolveDraftContent("integration", "", MANIFEST)).toBe(MANIFEST);
+    expect(resolveDraftContent("integration", null, NEW_DOC)).toBe(NEW_DOC);
+    expect(resolveDraftContent("integration", "", NEW_DOC)).toBe(NEW_DOC);
+  });
+
+  it("KNOWN LIMIT: a stored doc that is one template block is still refreshed away", () => {
+    // `isManifestTextFallback("{{ tmpl }}")` is `true`, and the guard still
+    // asks whether the COLUMN is a fallback — it has to, or the row above
+    // (refresh a stale manifest copy) becomes impossible: an unconditional
+    // "manifest-shaped write is declined" freezes the fallback forever.
+    //
+    // So the two requirements are mutually exclusive under a `{`…`}` sniff, and
+    // this case is documented rather than fixed. Closing it needs a stronger
+    // predicate than a shape test — `JSON.parse` + a manifest-shaped check,
+    // which `isManifestTextFallback` deliberately avoids (the column can be
+    // tens of KB, and it has four readers). Asserted so the limit is a known
+    // fact with a name, not a surprise found again by the next reviewer.
+    const templateDoc = "{{ integration.display_name }}";
+    expect(resolveDraftContent("integration", templateDoc, MANIFEST)).toBe(MANIFEST);
+  });
+
+  it("never guards a REQUIRED entry — the editor is prompt.md / SKILL.md's only author", () => {
+    expect(resolveDraftContent("agent", "old prompt", "new prompt")).toBe("new prompt");
+    expect(resolveDraftContent("skill", "old skill", "new skill")).toBe("new skill");
+    // Including when the stored value is itself JSON-shaped: `required: true`
+    // means there is no fallback for it to be confused with.
+    expect(resolveDraftContent("agent", MANIFEST, "new prompt")).toBe("new prompt");
+  });
+
+  it("never guards mcp-server — its column is a manifest copy by definition", () => {
+    expect(resolveDraftContent("mcp-server", MANIFEST, "anything")).toBe("anything");
   });
 });
 

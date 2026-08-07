@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
 import { $api, client, type paths } from "../api/client";
+import { triggerBlobDownload } from "../lib/blob-download";
 import { invalidateRunDetails } from "../lib/query-keys";
 import { useOrgScope } from "./use-org-scope";
 
@@ -114,6 +115,10 @@ export function useKeepDocument() {
  * the org/app scoping headers are injected by the client middleware (a bare
  * anchor navigation cannot send them) and the `307` to a presigned URL is
  * followed transparently by fetch — the same pattern as the package download.
+ *
+ * Handing the bytes to `triggerBlobDownload` is what keeps the inert type on
+ * this path in particular: the content route echoes the stored `row.mime`,
+ * which is uploader-controlled and can be `text/html`.
  */
 export function useDocumentDownload() {
   const { t } = useTranslation("common");
@@ -124,14 +129,7 @@ export function useDocumentDownload() {
           params: { path: { id } },
           parseAs: "blob",
         });
-        const url = URL.createObjectURL(data!);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = name;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
+        triggerBlobDownload(data, name);
       } catch {
         toast.error(t("error.downloadFailed"));
       }
