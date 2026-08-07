@@ -1448,13 +1448,36 @@ function parseFileQuery<T extends z.ZodType>(c: Context<AppEnv>, schema: T): z.i
 }
 
 /**
- * Resolve the package a file-explorer request targets, or 404.
+ * Resolve the package a file-explorer request targets AND authorize the read —
+ * 404 when the package is not reachable, 403 when it is but the caller may not
+ * read it.
  *
- * `hasPackageAccess` IS the authorization gate here — it already excludes
- * ephemeral shadows and answers "system package OR installed in THIS
- * application", which is exactly the visibility rule the rest of the package
- * surface uses. The follow-up row read adds the org boundary (it does not
+ * Two gates that answer different questions, both required:
+ *
+ * - `hasPackageAccess` is VISIBILITY: "is this a system package, or installed
+ *   in THIS application?" (it also excludes ephemeral shadows). It says
+ *   nothing about what the caller is ALLOWED to do — a credential with
+ *   `scopes: []` passes it. Believing otherwise is exactly the mistake #1124
+ *   had to undo across the rest of the package surface.
+ * - `requirePackageReadPermission` is AUTHORIZATION: the resolved row's
+ *   `<type>:read` scope. Both file-explorer routes are registered on the
+ *   router ROOT, so the RBAC resource is not knowable from the path — only
+ *   from the row — which is why the guard runs here and not as route-level
+ *   middleware.
+ *
+ * The row read in between adds the org boundary (`hasPackageAccess` does not
  * filter `orgId`) and fetches the draft columns the overlay needs.
+ *
+ * Authorizing HERE rather than at each call site is what makes the ordering
+ * safe. Both handlers call this before they touch a validator, so no
+ * response — 200, 304 or 404 — is reachable without the permission check. A
+ * guard placed after the ETag short-circuit would still leave `/files/content`
+ * an oracle: replaying an `If-None-Match` would answer 304 and tell an
+ * unauthorized caller that this exact file exists with this exact content.
+ *
+ * 404-before-403 is forced, not a policy choice: the RBAC resource comes from
+ * the row, so visibility has to be settled first. Same order as
+ * `/{version}/download`.
  */
 async function loadFileExplorerPackage(c: Context<AppEnv>): Promise<PackageFileSource> {
   const packageId = getItemId(c);
@@ -1480,6 +1503,12 @@ async function loadFileExplorerPackage(c: Context<AppEnv>): Promise<PackageFileS
   if (!pkg) {
     throw notFound("Package not found");
   }
+
+  // The index lists every file and inlines text content; `/files/content`
+  // serves any byte of the artifact. Both are at least as sensitive as the
+  // detail route, so both need the same `<type>:read`.
+  await requirePackageReadPermission(c, pkg.type);
+
   return pkg;
 }
 
@@ -2165,6 +2194,8 @@ export function createPackagesRouter() {
   // GET /api/packages/:scope/:name/files — flat index of the artifact's files
   router.get(`/${SCOPED_PACKAGE_ROUTE}/files`, rateLimit(50), async (c) => {
     const { version } = parseFileQuery(c, fileIndexQuerySchema);
+    // Visibility + `<type>:read` are both settled inside this call, BEFORE any
+    // validator is resolved — nothing below can answer an unauthorized caller.
     const pkg = await loadFileExplorerPackage(c);
     const inm = c.req.header("if-none-match");
 
@@ -2199,6 +2230,9 @@ export function createPackagesRouter() {
   // inline budget stays previewable through here.
   router.get(`/${SCOPED_PACKAGE_ROUTE}/files/content`, rateLimit(50), async (c) => {
     const { version, path } = parseFileQuery(c, fileContentQuerySchema);
+    // Must stay ABOVE the validator: the 304 short-circuit below answers
+    // without reading the artifact, so a permission check placed after it
+    // would turn `If-None-Match` into a file-existence oracle.
     const pkg = await loadFileExplorerPackage(c);
     const inm = c.req.header("if-none-match");
 

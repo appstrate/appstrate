@@ -17732,6 +17732,7 @@ export interface operations {
             };
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             422: components["responses"]["PackageArchiveUnreadable"];
             429: components["responses"]["RateLimited"];
@@ -17816,6 +17817,7 @@ export interface operations {
             };
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             422: components["responses"]["PackageArchiveUnreadable"];
             429: components["responses"]["RateLimited"];
