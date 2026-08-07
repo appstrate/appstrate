@@ -20,7 +20,7 @@
  *
  * Everything rendered here is AUTHOR-CONTROLLED text. It reaches the screen as
  * JSX children and nothing else; the only string that becomes an `href` is one
- * `normalizeHttpUrl` accepted. See `components/test/package-files-render-sinks.test.ts`.
+ * `normalizeHttpUrl` accepted. Render tests cover both safe and rejected URLs.
  */
 
 import { useTranslation } from "react-i18next";
@@ -28,7 +28,6 @@ import { FileJson } from "lucide-react";
 import { Badge } from "@appstrate/ui/components/badge";
 import type { PackageType } from "@appstrate/core/validation";
 import {
-  isManifestOverviewEmpty,
   readIntegrationDetails,
   readManifestOverview,
   readMcpServerDetails,
@@ -53,9 +52,8 @@ export function ManifestOverview({ manifest, type }: ManifestOverviewProps) {
   const integration = type === "integration" ? readIntegrationDetails(manifest) : undefined;
   const mcpServer = type === "mcp-server" ? readMcpServerDetails(manifest) : undefined;
 
-  // Same verdict the detail page reads to pick its landing tab — shared so a
-  // page can never open on this tab and then be told there is nothing here.
-  if (isManifestOverviewEmpty(manifest, type)) {
+  const tailEmpty = integration?.isEmpty ?? mcpServer?.isEmpty ?? true;
+  if (overview.isEmpty && tailEmpty) {
     return <EmptyState icon={FileJson} message={t("manifest.empty")} compact />;
   }
 

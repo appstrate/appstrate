@@ -23,8 +23,8 @@ import {
   buildMinimalZip,
   uploadPackageZip,
   downloadVersionZip,
-  unzipAndNormalize,
 } from "../../../src/services/package-storage.ts";
+import { unzipPackageArchive } from "../../../src/services/package-archive.ts";
 import { computeIntegrity } from "@appstrate/core/integrity";
 import { zipArtifact, PACKAGE_ZIP_MAX_COMPRESSED_BYTES } from "@appstrate/core/zip";
 import { auditEvents, packages, packageDistTags, packageVersions } from "@appstrate/db/schema";
@@ -2822,7 +2822,7 @@ describe("Packages API", () => {
     async function artifactManifestText(packageId: string, version: string): Promise<string> {
       const zip = await downloadVersionZip(packageId, version);
       expect(zip).not.toBeNull();
-      const entries = unzipAndNormalize(zip!);
+      const entries = unzipPackageArchive(zip!);
       return new TextDecoder().decode(entries["manifest.json"]!);
     }
 

@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { $api, client } from "../../api/client";
 import { useOrgScope } from "../../hooks/use-org-scope";
 import { splitPackageRef } from "../../lib/package-paths";
-import { baseName, isPreviewable, type PackageFileEntry } from "../../lib/package-file-tree";
+import { baseName, previewBlockReason, type PackageFileEntry } from "../../lib/package-file-tree";
 
 /**
  * The text of a finished fetch, or `undefined` when there is not one yet.
@@ -49,7 +49,7 @@ export function usePackageFile(
   const scope = useOrgScope();
   // Only text files within the preview ceiling are ever fetched — a binary or
   // oversized entry renders a metadata card, never a body.
-  const needsFetch = isPreviewable(entry) && entry.inline === undefined;
+  const needsFetch = previewBlockReason(entry) === null && entry.inline === undefined;
 
   // `parseAs` is not in the generated init type, but it is not an escape hatch
   // either: openapi-react-query types init as `Init & { [key: string]: unknown }`

@@ -17,7 +17,6 @@
 
 import { normalizeHttpUrl } from "@appstrate/core/url";
 import { getMcpServerRuntime, type McpServerManifest } from "@appstrate/core/mcp-server-meta";
-import type { PackageType } from "@appstrate/core/validation";
 
 /** Any jsonb object. The manifest and every nested object share this shape. */
 export type ManifestObject = Record<string, unknown>;
@@ -395,25 +394,4 @@ export function readMcpServerDetails(manifest: unknown): McpServerManifestDetail
     userConfig,
     isEmpty: !manifestVersion && !server && tools.length === 0 && userConfig.length === 0,
   };
-}
-
-// ─── Whole-view verdict ─────────────────────────────────────────────
-
-/**
- * True when the manifest overview would render its empty state — the shared
- * block AND, for the two types that have one, the tail.
- *
- * ONE caller: `ManifestOverview`, which renders the empty state from it. It is
- * deliberately NOT what picks the landing tab — `unified-package-detail.tsx`
- * reads `primaryDisplayFile(type).source`, a structural fact about the package
- * type rather than a fullness threshold that shifts with how much metadata the
- * author happened to fill in. Keeping the verdict in one exported function is
- * still what stops the component restating the condition inline across its
- * five section branches.
- */
-export function isManifestOverviewEmpty(manifest: unknown, type: PackageType): boolean {
-  if (!readManifestOverview(manifest).isEmpty) return false;
-  if (type === "integration") return readIntegrationDetails(manifest).isEmpty;
-  if (type === "mcp-server") return readMcpServerDetails(manifest).isEmpty;
-  return true;
 }

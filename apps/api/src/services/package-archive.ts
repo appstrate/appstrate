@@ -17,9 +17,20 @@ import { logger } from "../lib/logger.ts";
  */
 export function unzipPackageArchive(bytes: Uint8Array): Record<string, Uint8Array> {
   try {
-    return unzipArtifact(bytes, {
+    const startedAt = performance.now();
+    const files = unzipArtifact(bytes, {
       maxDecompressedBytes: PACKAGE_ZIP_MAX_DECOMPRESSED_BYTES,
     });
+    const durationMs = performance.now() - startedAt;
+    let decompressedBytes = 0;
+    for (const file of Object.values(files)) decompressedBytes += file.byteLength;
+
+    logger.info("Package archive decompressed", {
+      compressedBytes: bytes.byteLength,
+      decompressedBytes,
+      durationMs: Math.round(durationMs),
+    });
+    return files;
   } catch (error) {
     if (!(error instanceof DecompressionLimitError) || error.reason === "corrupt-archive") {
       throw error;

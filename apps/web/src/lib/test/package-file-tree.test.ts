@@ -15,7 +15,6 @@ import {
   baseName,
   buildFileTree,
   flattenVisibleRows,
-  isPreviewable,
   languageForPath,
   nextTreeFocus,
   pickActiveEntry,
@@ -479,22 +478,6 @@ describe("previewBlockReason", () => {
         }),
       ),
     ).toBe("too_large");
-  });
-});
-
-describe("isPreviewable", () => {
-  it("is exactly `previewBlockReason() === null`", () => {
-    const cases = [
-      file("a.md", { size: 0 }),
-      file("a.md", { size: PACKAGE_FILE_INLINE_MAX_BYTES }),
-      file("a.md", { size: PACKAGE_FILE_INLINE_MAX_BYTES + 1 }),
-      file("logo.png", { media_kind: "binary" }),
-      file("logo.png", { media_kind: "binary", size: PACKAGE_FILE_INLINE_MAX_BYTES + 1 }),
-    ];
-    for (const entry of cases) {
-      expect(isPreviewable(entry)).toBe(previewBlockReason(entry) === null);
-    }
-    expect(cases.map(isPreviewable)).toEqual([true, true, false, false, false]);
   });
 });
 

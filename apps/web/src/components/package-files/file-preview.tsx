@@ -12,9 +12,9 @@
  * decides it:
  *
  *   - these bytes are author-controlled and are served from the platform
- *     origin, so any renderer added here has to be one with no HTML sink behind
- *     it (`components/test/package-files-render-sinks.test.ts` is what keeps
- *     that true, import by import);
+ *     origin, so the narrow source guard in
+ *     `components/test/package-file-preview-security.test.ts` pins this panel
+ *     to Monaco and the download to an inert blob;
  *   - and this surface exists to show what the artifact CONTAINS. A `SKILL.md`
  *     or a `prompt.md` is its YAML frontmatter and its exact whitespace —
  *     rendering it would hide precisely what an author or an auditor opened it

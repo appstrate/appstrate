@@ -78,7 +78,7 @@ import {
 import { LoadingState, ErrorState } from "../components/page-states";
 import { SharedHeader } from "../components/package-detail/shared-header";
 import { PackageActionsDropdown } from "../components/package-detail/package-actions-dropdown";
-import { SetupGuideSteps } from "../components/package-detail/integration-metadata";
+import { SetupGuideSteps } from "../components/package-detail/setup-guide-steps";
 import { VersionHistory } from "../components/version-history";
 import { ForkPackageModal } from "../components/fork-package-modal";
 import { ConfirmModal } from "../components/confirm-modal";
@@ -1460,47 +1460,49 @@ export function IntegrationDetailPage() {
         onValueChange={(v) => setTab(v as (typeof INTEGRATION_TABS)[number])}
         className="mt-2"
       >
-        <TabsList collapse overflowLabel={t("common:tabs.more")}>
-          <TabsTrigger value="connections" data-testid="tab-connections">
-            {t("integration.tabs.connections")}
-          </TabsTrigger>
-          {isAdmin && (
-            <TabsTrigger value="configuration" data-testid="tab-configuration">
-              {t("integration.tabs.configuration")}
+        <div className="max-w-full overflow-x-auto pb-1">
+          <TabsList className="w-max">
+            <TabsTrigger value="connections" data-testid="tab-connections">
+              {t("integration.tabs.connections")}
             </TabsTrigger>
-          )}
-          <TabsTrigger value="tools" data-testid="tab-tools">
-            {t("integration.tabs.tools")}
-            {detail.tool_catalog && detail.tool_catalog.length > 0 && (
-              <Badge variant="outline" className="ml-1.5 text-[0.65rem]">
-                {detail.tool_catalog.length}
-                {detail.allow_undeclared_tools ? "+" : ""}
-              </Badge>
+            {isAdmin && (
+              <TabsTrigger value="configuration" data-testid="tab-configuration">
+                {t("integration.tabs.configuration")}
+              </TabsTrigger>
             )}
-            {detail.tool_catalog &&
-              detail.tool_catalog.length === 0 &&
-              detail.allow_undeclared_tools && (
-                <Badge
-                  variant="outline"
-                  className="ml-1.5 text-[0.65rem]"
-                  data-testid="tab-tools-wildcard-badge"
-                >
-                  *
+            <TabsTrigger value="tools" data-testid="tab-tools">
+              {t("integration.tabs.tools")}
+              {detail.tool_catalog && detail.tool_catalog.length > 0 && (
+                <Badge variant="outline" className="ml-1.5 text-[0.65rem]">
+                  {detail.tool_catalog.length}
+                  {detail.allow_undeclared_tools ? "+" : ""}
                 </Badge>
               )}
-          </TabsTrigger>
-          <TabsTrigger value="about" data-testid="tab-about">
-            {t("integration.tabs.about")}
-          </TabsTrigger>
-          <TabsTrigger value="content" data-testid="tab-content">
-            {t("detail.tabFiles", { ns: "agents" })}
-          </TabsTrigger>
-          {!isBuiltIn && (
-            <TabsTrigger value="versions" data-testid="tab-versions">
-              {t("integration.tabs.versions")}
+              {detail.tool_catalog &&
+                detail.tool_catalog.length === 0 &&
+                detail.allow_undeclared_tools && (
+                  <Badge
+                    variant="outline"
+                    className="ml-1.5 text-[0.65rem]"
+                    data-testid="tab-tools-wildcard-badge"
+                  >
+                    *
+                  </Badge>
+                )}
             </TabsTrigger>
-          )}
-        </TabsList>
+            <TabsTrigger value="about" data-testid="tab-about">
+              {t("integration.tabs.about")}
+            </TabsTrigger>
+            <TabsTrigger value="content" data-testid="tab-content">
+              {t("detail.tabFiles", { ns: "agents" })}
+            </TabsTrigger>
+            {!isBuiltIn && (
+              <TabsTrigger value="versions" data-testid="tab-versions">
+                {t("integration.tabs.versions")}
+              </TabsTrigger>
+            )}
+          </TabsList>
+        </div>
 
         {/* ─── Connexions (per-auth connect CTA + accounts table) ─── */}
         <TabsContent value="connections" className="mt-4 space-y-4">

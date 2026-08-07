@@ -11,7 +11,6 @@
 
 import { describe, it, expect } from "bun:test";
 import {
-  isManifestOverviewEmpty,
   readIntegrationDetails,
   readIntegrationSource,
   readManifestOverview,
@@ -302,40 +301,6 @@ describe("readMcpServerDetails", () => {
 
       expect(details.server?.runtime).toBe("python");
     }
-  });
-});
-
-/**
- * The whole-view verdict `ManifestOverview` renders its empty state from —
- * the shared block AND the type tail, so the component never emits a card
- * containing nothing. It is deliberately NOT what picks the landing tab
- * (`pages/unified-package-detail.tsx` reads `primaryDisplayFile(type).source`,
- * a structural fact rather than a fullness threshold).
- */
-describe("isManifestOverviewEmpty", () => {
-  it("is empty for a manifest carrying only its required fields", () => {
-    // Legal per the AFPS schema — the case the empty state exists for.
-    expect(isManifestOverviewEmpty(MINIMAL, "skill")).toBe(true);
-    expect(isManifestOverviewEmpty(undefined, "skill")).toBe(true);
-  });
-
-  it("is not empty as soon as one shared field is declared", () => {
-    expect(isManifestOverviewEmpty({ ...MINIMAL, author: "Ada" }, "skill")).toBe(false);
-    expect(isManifestOverviewEmpty({ ...MINIMAL, keywords: ["tidy"] }, "skill")).toBe(false);
-  });
-
-  it("counts the type tails, which only the tailed types have", () => {
-    // A manifest whose ONLY content is its tail: empty as a skill (no tail is
-    // read), non-empty as its own type. Reading the shared block alone would
-    // make an mcp-server or an integration render an empty state while it had
-    // a server / auth block to show.
-    const mcp = { ...MINIMAL, type: "mcp-server", server: { type: "node" } };
-    expect(isManifestOverviewEmpty(mcp, "mcp-server")).toBe(false);
-    expect(isManifestOverviewEmpty(mcp, "skill")).toBe(true);
-
-    const integration = { ...MINIMAL, type: "integration", auths: { google: { type: "oauth2" } } };
-    expect(isManifestOverviewEmpty(integration, "integration")).toBe(false);
-    expect(isManifestOverviewEmpty(integration, "skill")).toBe(true);
   });
 });
 

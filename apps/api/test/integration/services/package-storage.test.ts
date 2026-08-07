@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect } from "bun:test";
-import { buildMinimalZip, unzipAndNormalize } from "../../../src/services/package-storage.ts";
+import { buildMinimalZip } from "../../../src/services/package-storage.ts";
+import { unzipPackageArchive } from "../../../src/services/package-archive.ts";
 
 describe("package-storage integration", () => {
   const sampleManifest = {
@@ -29,19 +30,19 @@ describe("package-storage integration", () => {
 
     it("includes manifest.json", () => {
       const zip = buildMinimalZip(sampleManifest, sampleContent);
-      const entries = unzipAndNormalize(zip);
+      const entries = unzipPackageArchive(zip);
       expect("manifest.json" in entries).toBe(true);
     });
 
     it("includes prompt.md by default", () => {
       const zip = buildMinimalZip(sampleManifest, sampleContent);
-      const entries = unzipAndNormalize(zip);
+      const entries = unzipPackageArchive(zip);
       expect("prompt.md" in entries).toBe(true);
     });
 
     it("supports custom contentFileName", () => {
       const zip = buildMinimalZip(sampleManifest, sampleContent, "SKILL.md");
-      const entries = unzipAndNormalize(zip);
+      const entries = unzipPackageArchive(zip);
       expect("SKILL.md" in entries).toBe(true);
       expect("prompt.md" in entries).toBe(false);
     });
@@ -50,41 +51,41 @@ describe("package-storage integration", () => {
       const unicodeContent =
         "Bonjour le monde! Cafe\u0301 \u2615 \u{1F600} \u00E9\u00E8\u00EA\u00EB";
       const zip = buildMinimalZip(sampleManifest, unicodeContent);
-      const entries = unzipAndNormalize(zip);
+      const entries = unzipPackageArchive(zip);
       const decoded = new TextDecoder().decode(entries["prompt.md"]);
       expect(decoded).toBe(unicodeContent);
     });
 
     it("handles empty content", () => {
       const zip = buildMinimalZip(sampleManifest, "");
-      const entries = unzipAndNormalize(zip);
+      const entries = unzipPackageArchive(zip);
       const decoded = new TextDecoder().decode(entries["prompt.md"]);
       expect(decoded).toBe("");
     });
   });
 
-  // ── unzipAndNormalize ────────────────────────────────────────
+  // ── unzipPackageArchive ──────────────────────────────────────
 
-  describe("unzipAndNormalize", () => {
+  describe("unzipPackageArchive", () => {
     it("parses a ZIP produced by buildMinimalZip", () => {
       const zip = buildMinimalZip(sampleManifest, sampleContent);
-      const entries = unzipAndNormalize(zip);
+      const entries = unzipPackageArchive(zip);
       expect(typeof entries).toBe("object");
       expect(Object.keys(entries).length).toBeGreaterThanOrEqual(2);
     });
 
     it("throws on invalid ZIP data", () => {
       const garbage = Buffer.from("this is not a zip file at all");
-      expect(() => unzipAndNormalize(garbage)).toThrow();
+      expect(() => unzipPackageArchive(garbage)).toThrow();
     });
   });
 
   // ── Round-trip ───────────────────────────────────────────────
 
-  describe("round-trip: buildMinimalZip -> unzipAndNormalize", () => {
+  describe("round-trip: buildMinimalZip -> unzipPackageArchive", () => {
     it("preserves manifest content", () => {
       const zip = buildMinimalZip(sampleManifest, sampleContent);
-      const entries = unzipAndNormalize(zip);
+      const entries = unzipPackageArchive(zip);
       const manifestRaw = new TextDecoder().decode(entries["manifest.json"]);
       const parsed = JSON.parse(manifestRaw);
       expect(parsed).toEqual(sampleManifest);
@@ -92,7 +93,7 @@ describe("package-storage integration", () => {
 
     it("preserves prompt content", () => {
       const zip = buildMinimalZip(sampleManifest, sampleContent);
-      const entries = unzipAndNormalize(zip);
+      const entries = unzipPackageArchive(zip);
       const promptRaw = new TextDecoder().decode(entries["prompt.md"]);
       expect(promptRaw).toBe(sampleContent);
     });

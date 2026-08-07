@@ -17,7 +17,6 @@ import { getErrorMessage } from "@appstrate/core/errors";
 import { RunPackageCatalog } from "./run-launcher/run-package-catalog.ts";
 import { loadAndVerifyBundle } from "./run-launcher/bundle-signature-policy.ts";
 import { AGENT_PACKAGES_BUCKET, versionZipKey } from "./package-storage-keys.ts";
-import { unzipPackageArchive } from "./package-archive.ts";
 
 // Bucket + key layout live in a LEAF module so the deletion outbox and the
 // orphan scanner can derive the exact same keys without importing this file's
@@ -234,15 +233,4 @@ export function buildMinimalZip(
     [contentFileName]: new TextEncoder().encode(content),
   };
   return Buffer.from(zipArtifact(entries, ZIP_COMPRESSION_LEVEL));
-}
-
-/**
- * Unzip a buffer and normalize (strip __MACOSX, directory entries).
- * Returns a map of path → content as Uint8Array.
- *
- * The shared package-archive helper applies the canonical decompression budget
- * and maps budget failures to the public 422 contract.
- */
-export function unzipAndNormalize(zipBuffer: Buffer): Record<string, Uint8Array> {
-  return unzipPackageArchive(zipBuffer);
 }

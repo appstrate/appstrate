@@ -14,7 +14,8 @@ import { uploadPackageFiles } from "./package-items/storage.ts";
 import { CONFIG_BY_TYPE, type PackageTypeConfig } from "./package-items/config.ts";
 
 import { getLatestVersionId, createVersionAndUpload } from "./package-versions.ts";
-import { downloadVersionZip, unzipAndNormalize } from "./package-storage.ts";
+import { downloadVersionZip } from "./package-storage.ts";
+import { unzipPackageArchive } from "./package-archive.ts";
 import { db } from "@appstrate/db/client";
 import { packageVersions } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
@@ -96,7 +97,7 @@ async function forkWithConfig(
   if (!sourceZip) return { code: "NO_PUBLISHED_VERSION" };
 
   // Extract content from the ZIP
-  const zipEntries = unzipAndNormalize(sourceZip);
+  const zipEntries = unzipPackageArchive(sourceZip);
   const decoder = new TextDecoder();
   const content = zipEntries["prompt.md"]
     ? decoder.decode(zipEntries["prompt.md"])

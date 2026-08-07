@@ -486,7 +486,6 @@ export function useForkPackage() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: agentsKeys.all });
       qc.invalidateQueries({ queryKey: packageKeys.all });
-      invalidatePackageFiles(qc);
     },
   });
 }

@@ -8,9 +8,9 @@ import {
   uploadPackageZip,
   downloadVersionZip,
   deleteVersionZip,
-  unzipAndNormalize,
   buildMinimalZip,
 } from "./package-storage.ts";
+import { unzipPackageArchive } from "./package-archive.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { computeIntegrity } from "@appstrate/core/integrity";
 import { extractDependencies, detectCycle, type DepEntry } from "@appstrate/core/dependencies";
@@ -350,7 +350,7 @@ export async function getVersionDetail(
   try {
     const zipBuffer = await downloadVersionZip(packageId, row.version);
     if (zipBuffer) {
-      const files = unzipAndNormalize(zipBuffer);
+      const files = unzipPackageArchive(zipBuffer);
       content = files;
       // Extract prompt.md from ZIP
       const promptData = files["prompt.md"];

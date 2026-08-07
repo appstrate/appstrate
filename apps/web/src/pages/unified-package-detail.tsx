@@ -487,13 +487,15 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
 
       {/* Tab bar */}
       <Tabs value={tab} onValueChange={(v) => setTab(v as DetailTab)} className="mb-4">
-        <TabsList collapse overflowLabel={t("common:tabs.more")}>
-          {tabDefs.map((td) => (
-            <TabsTrigger key={td.id} value={td.id}>
-              {td.label}
-            </TabsTrigger>
-          ))}
-        </TabsList>
+        <div className="max-w-full overflow-x-auto pb-1">
+          <TabsList className="w-max">
+            {tabDefs.map((td) => (
+              <TabsTrigger key={td.id} value={td.id}>
+                {td.label}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </div>
       </Tabs>
 
       {/* Tab content */}

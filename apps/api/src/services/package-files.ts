@@ -31,7 +31,8 @@
 import { logger } from "../lib/logger.ts";
 import { notFound } from "../lib/errors.ts";
 import { downloadPackageFiles } from "./package-items/storage.ts";
-import { downloadVersionZip, unzipAndNormalize } from "./package-storage.ts";
+import { downloadVersionZip } from "./package-storage.ts";
+import { unzipPackageArchive } from "./package-archive.ts";
 import { getVersionForDownload } from "./package-versions.ts";
 import { CONFIG_BY_TYPE, SYSTEM_STORAGE_NAMESPACE } from "./package-items/config.ts";
 import { VERSION_SELECTOR_DRAFT } from "./agent-version-resolver.ts";
@@ -63,8 +64,6 @@ export interface PackageFileSnapshot {
    * validators from it.
    */
   snapshotId: string;
-  /** True only for an exact, non-yanked published version. */
-  immutable: boolean;
 }
 
 /** The `packages` columns a snapshot read needs. */
@@ -72,7 +71,6 @@ export interface PackageFileSource {
   id: string;
   type: PackageType;
   orgId: string | null;
-  source: "local" | "system";
   draftManifest: unknown;
   draftContent: string | null;
 }
@@ -287,11 +285,11 @@ export function applyDraftOverlay(files: Record<string, Uint8Array>, pkg: Packag
  * `null` and the caller has to read before it can compare.
  */
 export type PackageFileValidator =
-  | { kind: "draft"; snapshotId: null; immutable: false; yanked: false }
+  | { kind: "draft"; snapshotId: null; freshCacheable: false; yanked: false }
   | {
       kind: "version";
       snapshotId: string;
-      immutable: boolean;
+      freshCacheable: boolean;
       yanked: boolean;
       version: string;
       integrity: string;
@@ -310,23 +308,18 @@ export async function resolvePackageFileValidator(
   version?: string,
 ): Promise<PackageFileValidator> {
   if (!version || version === VERSION_SELECTOR_DRAFT) {
-    return { kind: "draft", snapshotId: null, immutable: false, yanked: false };
+    return { kind: "draft", snapshotId: null, freshCacheable: false, yanked: false };
   }
   const ver = await getVersionForDownload(pkg.id, version);
   if (!ver) throw notFound("Version not found");
 
-  // `immutable` is a promise that THIS URL will never mean anything else, so
-  // it can only be made when the caller pinned the exact version. A dist-tag
-  // or a semver range is a MOVING target — `?version=latest` starts meaning
-  // 1.1.0 the moment it is published, and a year-long `immutable` would stop
-  // the client from ever finding out. A yank is the same problem in reverse:
-  // a client holding an immutable copy could never learn it was withdrawn.
-  // Both still get the honest content ETag, just with revalidation.
+  // Only exact, non-yanked selectors may be served fresh for a short window.
+  // Dist-tags, ranges and yanked versions must revalidate on every use.
   const exact = version === ver.version;
   return {
     kind: "version",
     snapshotId: `pv-${ver.integrity}`,
-    immutable: exact && !ver.yanked,
+    freshCacheable: exact && !ver.yanked,
     yanked: ver.yanked,
     version: ver.version,
     integrity: ver.integrity,
@@ -350,8 +343,6 @@ export async function readPackageSnapshot(
   pkg: PackageFileSource,
   validator: PackageFileValidator,
 ): Promise<PackageFileSnapshot> {
-  const startedAt = performance.now();
-
   let files: Record<string, Uint8Array>;
   let snapshotId: string;
 
@@ -378,14 +369,14 @@ export async function readPackageSnapshot(
     // the explorer the one place tampering goes unnoticed.
     const zip = await downloadVersionZip(pkg.id, validator.version, validator.integrity);
     if (!zip) throw notFound("Artifact not found in storage");
-    files = unzipAndNormalize(zip);
+    files = unzipPackageArchive(zip);
     snapshotId = validator.snapshotId;
   }
 
-  let decompressedBytes = 0;
+  let snapshotBytes = 0;
   let fileCount = 0;
   for (const key of Object.keys(files)) {
-    decompressedBytes += files[key]!.byteLength;
+    snapshotBytes += files[key]!.byteLength;
     fileCount++;
   }
 
@@ -395,11 +386,10 @@ export async function readPackageSnapshot(
     packageId: pkg.id,
     version: validator.kind === "version" ? validator.version : VERSION_SELECTOR_DRAFT,
     fileCount,
-    decompressedBytes,
-    durationMs: Math.round(performance.now() - startedAt),
+    snapshotBytes,
   });
 
-  return { files, snapshotId, immutable: validator.immutable };
+  return { files, snapshotId };
 }
 
 /**

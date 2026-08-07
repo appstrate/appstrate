@@ -36,7 +36,7 @@ import { CONFIG_BY_TYPE, type PackageTypeConfig } from "../services/package-item
 import { validateManifest, type PackageType } from "@appstrate/core/validation";
 import { SLUG_REGEX, attachmentDisposition } from "@appstrate/core/naming";
 import { ifNoneMatchSatisfied } from "../lib/if-none-match.ts";
-import { unzipAndNormalize } from "../services/package-storage.ts";
+import { unzipPackageArchive } from "../services/package-archive.ts";
 import { isValidVersion } from "@appstrate/core/semver";
 import {
   getVersionDetail,
@@ -286,7 +286,7 @@ async function parsePackageUpload(
     const archive = new Uint8Array(await file.arrayBuffer());
     let normalizedFiles: Record<string, Uint8Array>;
     try {
-      normalizedFiles = unzipAndNormalize(Buffer.from(archive));
+      normalizedFiles = unzipPackageArchive(archive);
     } catch {
       throw invalidRequest("Invalid ZIP file", "file");
     }
@@ -1493,7 +1493,6 @@ async function loadFileExplorerPackage(c: Context<AppEnv>): Promise<PackageFileS
       id: packages.id,
       type: packages.type,
       orgId: packages.orgId,
-      source: packages.source,
       draftManifest: packages.draftManifest,
       draftContent: packages.draftContent,
     })
@@ -1539,35 +1538,20 @@ async function loadFileExplorerPackage(c: Context<AppEnv>): Promise<PackageFileS
  */
 const EXACT_VERSION_MAX_AGE_SECONDS = 300;
 
-function fileCacheHeaders(etag: string, immutable: boolean): Record<string, string> {
-  return {
+function fileCacheHeaders(
+  etag: string,
+  freshCacheable: boolean,
+  yanked: boolean,
+): Record<string, string> {
+  const headers: Record<string, string> = {
     ETag: etag,
-    "Cache-Control": immutable
+    "Cache-Control": freshCacheable
       ? `private, max-age=${EXACT_VERSION_MAX_AGE_SECONDS}`
       : "private, no-cache",
     Vary: "X-Org-Id, X-Application-Id",
   };
-}
-
-/**
- * Same `X-Yanked: true` signal the version-download route emits. A yanked
- * version stays readable — the explorer is how someone inspects what they were
- * warned about — but the client has to be told.
- */
-function yankedHeader(headers: Record<string, string>, yanked: boolean): Record<string, string> {
   if (yanked) headers["X-Yanked"] = "true";
   return headers;
-}
-
-/**
- * `attachment` + a sanitized filename, built by the ONE builder every download
- * branch of the platform uses (`attachmentDisposition`, `@appstrate/core/naming`
- * — it exists precisely because per-call-site copies had drifted before). Only
- * the base name is handed to it: an explorer path is a directory path, and the
- * directories are not part of the file's name.
- */
-function fileAttachmentDisposition(path: string): string {
-  return attachmentDisposition(path.slice(path.lastIndexOf("/") + 1));
 }
 
 // ═══════════════════════════════════════════════
@@ -2208,17 +2192,14 @@ export function createPackagesRouter() {
       if (ifNoneMatchSatisfied(inm, etag)) {
         return new Response(null, {
           status: 304,
-          headers: yankedHeader(fileCacheHeaders(etag, validator.immutable), validator.yanked),
+          headers: fileCacheHeaders(etag, validator.freshCacheable, validator.yanked),
         });
       }
     }
 
     const snapshot = await readPackageSnapshot(pkg, validator);
     const etag = indexEtag(snapshot.snapshotId);
-    const headers = yankedHeader(
-      fileCacheHeaders(etag, snapshot.immutable),
-      validator.kind === "version" && validator.yanked,
-    );
+    const headers = fileCacheHeaders(etag, validator.freshCacheable, validator.yanked);
     if (ifNoneMatchSatisfied(inm, etag)) {
       return new Response(null, { status: 304, headers });
     }
@@ -2247,7 +2228,7 @@ export function createPackagesRouter() {
       if (ifNoneMatchSatisfied(inm, etag, { allowWildcard: false })) {
         return new Response(null, {
           status: 304,
-          headers: yankedHeader(fileCacheHeaders(etag, validator.immutable), validator.yanked),
+          headers: fileCacheHeaders(etag, validator.freshCacheable, validator.yanked),
         });
       }
     }
@@ -2263,10 +2244,7 @@ export function createPackagesRouter() {
     const bytes = snapshot.files[path]!;
 
     const etag = fileEtag(snapshot.snapshotId, path);
-    const headers = yankedHeader(
-      fileCacheHeaders(etag, snapshot.immutable),
-      validator.kind === "version" && validator.yanked,
-    );
+    const headers = fileCacheHeaders(etag, validator.freshCacheable, validator.yanked);
     // Existence is established, so `*` is now a legitimate match.
     if (ifNoneMatchSatisfied(inm, etag)) {
       return new Response(null, { status: 304, headers });
@@ -2285,7 +2263,7 @@ export function createPackagesRouter() {
         "X-Content-Type-Options": "nosniff",
         "Referrer-Policy": "no-referrer",
         "Cross-Origin-Resource-Policy": "same-origin",
-        "Content-Disposition": fileAttachmentDisposition(path),
+        "Content-Disposition": attachmentDisposition(path.slice(path.lastIndexOf("/") + 1)),
         "Content-Length": String(bytes.byteLength),
       },
     });

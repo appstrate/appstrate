@@ -29,7 +29,7 @@ function snapshot(files: Record<string, Uint8Array | string>): PackageFileSnapsh
   for (const [path, value] of Object.entries(files)) {
     normalized[path] = typeof value === "string" ? encoder.encode(value) : value;
   }
-  return { files: normalized, snapshotId: "test", immutable: false };
+  return { files: normalized, snapshotId: "test" };
 }
 
 function entryFor(files: Record<string, Uint8Array | string>, path: string) {
@@ -54,7 +54,6 @@ function overlay(
     id: "@t/pkg",
     type,
     orgId: "org",
-    source: "local",
     draftManifest: draft.draftManifest ?? null,
     draftContent: draft.draftContent ?? null,
   };

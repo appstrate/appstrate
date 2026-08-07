@@ -1,23 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Call-site coverage for the manifest-URL guard.
- *
- * Both blocks render publisher-authored AFPS manifest data. The server accepts
- * `repository` as a non-empty string, while the canonical AFPS schema validates
- * the `setup_guide` structure but leaves each optional URL as an unconstrained
- * string. Neither path constrains the scheme, so the navigation guard remains
- * the trust boundary before an `href`.
- *
- * Same harness as `components/test/plan-card.test.tsx`: no DOM, so components
- * are rendered with `renderToStaticMarkup` and asserted on their HTML.
+ * Call-site coverage for the publisher-controlled setup-guide URL boundary.
  */
 
 import { describe, it, expect } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { I18nextProvider } from "react-i18next";
 import i18n, { i18nReady } from "../../../i18n.ts";
-import { SetupGuideSteps } from "../integration-metadata.tsx";
+import { SetupGuideSteps } from "../setup-guide-steps.tsx";
 
 await i18nReady;
 await i18n.changeLanguage("fr");
@@ -43,7 +34,6 @@ describe("SetupGuideSteps step link", () => {
     const html = renderSteps([{ label: "Créer une app OAuth", url: XSS }]);
     expect(html).not.toContain("href");
     expect(html).not.toContain("<a ");
-    // The step instruction itself is never lost.
     expect(html).toContain("Créer une app OAuth");
   });
 

@@ -313,11 +313,6 @@ export function previewBlockReason(entry: PackageFileEntry): PreviewBlockReason 
   return null;
 }
 
-/** A file is previewable when nothing blocks it. */
-export function isPreviewable(entry: PackageFileEntry): boolean {
-  return previewBlockReason(entry) === null;
-}
-
 /**
  * Extension → Monaco language id. Deliberately a short map of what package
  * artifacts actually contain rather than a mime database; anything unlisted
