@@ -2320,7 +2320,7 @@ export const packagesPaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["manifest", "content", "lock_version"],
+              required: ["manifest", "lock_version"],
               properties: {
                 manifest: {
                   type: "object",
@@ -2445,7 +2445,7 @@ export const packagesPaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["manifest", "content", "lock_version"],
+              required: ["manifest", "lock_version"],
               properties: {
                 manifest: {
                   type: "object",

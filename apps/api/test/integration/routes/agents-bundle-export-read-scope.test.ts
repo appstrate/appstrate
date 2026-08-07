@@ -104,7 +104,7 @@ async function publish(
     "manifest.json": enc(JSON.stringify(manifest, null, 2)),
     ...companion,
   });
-  await storage.uploadFile(AGENT_PACKAGES_BUCKET, versionZipKey(id, version), Buffer.from(afps));
+  await storage.uploadFile(AGENT_PACKAGES_BUCKET, versionZipKey(id, version), afps);
   const pv = await seedPackageVersion({
     packageId: id,
     version,

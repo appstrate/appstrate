@@ -16086,7 +16086,7 @@ export interface operations {
                     manifest: {
                         [key: string]: unknown;
                     };
-                    content: string;
+                    content?: string;
                     /** @description Optimistic lock version */
                     lock_version: number;
                 };
@@ -16208,7 +16208,7 @@ export interface operations {
                     manifest: {
                         [key: string]: unknown;
                     };
-                    content: string;
+                    content?: string;
                     /** @description Optimistic lock version */
                     lock_version: number;
                 };

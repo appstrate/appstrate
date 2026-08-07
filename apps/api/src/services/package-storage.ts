@@ -112,7 +112,7 @@ export async function deleteVersionZip(packageId: string, version: string): Prom
 export async function uploadPackageZip(
   packageId: string,
   version: string,
-  zipBuffer: Buffer,
+  zipBuffer: Uint8Array,
 ): Promise<void> {
   const path = versionZipKey(packageId, version);
   try {

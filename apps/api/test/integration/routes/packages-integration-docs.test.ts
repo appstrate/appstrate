@@ -258,6 +258,27 @@ describe("integration INTEGRATION.md survives the manifest-shaped write paths", 
       expect(JSON.parse(content!)).toMatchObject({ version: "4.2.0" });
     });
 
+    it("REFRESHES the manifest-text fallback on a manifest-only PUT", async () => {
+      const res = await app.request(`/api/packages/integrations/${id}`, {
+        method: "PUT",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          manifest: integrationManifest(id, "4.3.0"),
+          lock_version: await lockVersionOf(ctx, id),
+        }),
+      });
+      expect(res.status).toBe(200);
+
+      const response = (await res.json()) as { content: string };
+      expect(JSON.parse(response.content)).toMatchObject({ version: "4.3.0" });
+
+      const content = await draftContentOf(id);
+      expect(JSON.parse(content!)).toMatchObject({ version: "4.3.0" });
+      expect(JSON.parse((await storedFile(ctx.orgId, id, "manifest.json"))!)).toMatchObject({
+        version: "4.3.0",
+      });
+    });
+
     it("reports no prompt doc — a manifest copy is not documentation", async () => {
       expect((await saveThroughEditor(ctx, id, integrationManifest(id, "1.1.0"))).status).toBe(200);
 
@@ -283,14 +304,12 @@ describe("integration INTEGRATION.md survives the manifest-shaped write paths", 
       });
       await seedInstalledPackage(ctx.defaultAppId, id);
 
-      const zip = Buffer.from(
-        zipArtifact(
-          {
-            "manifest.json": encoder.encode(JSON.stringify(integrationManifest(id), null, 2)),
-            "INTEGRATION.md": encoder.encode(VERSIONED_DOC),
-          },
-          6,
-        ),
+      const zip = zipArtifact(
+        {
+          "manifest.json": encoder.encode(JSON.stringify(integrationManifest(id), null, 2)),
+          "INTEGRATION.md": encoder.encode(VERSIONED_DOC),
+        },
+        6,
       );
       await uploadPackageZip(id, "1.0.0", zip);
       const row = await seedPackageVersion({

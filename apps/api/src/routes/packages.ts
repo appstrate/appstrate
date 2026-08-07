@@ -90,6 +90,7 @@ import {
   type ValidationFieldError,
 } from "../lib/errors.ts";
 import { parsePathMessages } from "../lib/field-errors.ts";
+import { isManifestTextFallback } from "../lib/manifest-utils.ts";
 
 function manifestErrorsToFieldErrors(errors: string[]): ValidationFieldError[] {
   return parsePathMessages(errors, {
@@ -942,6 +943,7 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
       orgId,
       authoredManifest ? "author" : "stored",
     );
+    const manifestText = JSON.stringify(validatedManifest, null, 2);
 
     // Ensure ID immutability (all types)
     const newScopedName = validatedManifest.name;
@@ -969,6 +971,18 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
       }
     }
 
+    // A manifest-only integration PUT has no authored `content`. When the
+    // overloaded column contains the manifest fallback (rather than a real
+    // INTEGRATION.md), refresh it from the validated manifest instead of
+    // carrying the old fallback forward. A real companion remains protected.
+    const entry = PACKAGE_CONTENT_ENTRY[rcfg.cfg.type];
+    const draftContentInput =
+      body.content === undefined &&
+      entry?.required === false &&
+      (!existing.content || isManifestTextFallback(existing.content))
+        ? manifestText
+        : content;
+
     // `content` feeds TWO sinks that are the same file for `agent`/`skill` and
     // different files for the manifest-backed types — see `storageFileName`.
     // `resolveDraftContent` guards the column; the storage write below is
@@ -978,7 +992,7 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
       itemId,
       {
         manifest: validatedManifest,
-        content: resolveDraftContent(rcfg.cfg.type, existing.content, content),
+        content: resolveDraftContent(rcfg.cfg.type, existing.content, draftContentInput),
       },
       body.lock_version,
     );
@@ -995,9 +1009,7 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
     // integration is its INTEGRATION.md. Echoing it would overwrite the
     // package's `manifest.json` with its documentation.
     const storageContent =
-      PACKAGE_CONTENT_ENTRY[rcfg.cfg.type]?.path === rcfg.storageFileName
-        ? content
-        : JSON.stringify(validatedManifest, null, 2);
+      PACKAGE_CONTENT_ENTRY[rcfg.cfg.type]?.path === rcfg.storageFileName ? content : manifestText;
 
     // Update storage files (merge with existing to preserve ancillary files)
     const existingFiles = await downloadPackageFiles(rcfg.cfg.storageFolder, orgId, itemId);

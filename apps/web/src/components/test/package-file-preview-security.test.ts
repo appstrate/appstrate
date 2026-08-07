@@ -195,8 +195,8 @@ describe("package file preview security", () => {
     expect(dense(primitiveCode)).toContain(dense("URL.revokeObjectURL(url)"));
 
     // The primitive downloads; it never navigates.
-    expect(dense(primitiveCode)).toContain(dense("a.download = filename"));
-    for (const sink of ["window.open(", "location.assign(", "location.replace(", "a.target"]) {
+    expect(dense(primitiveCode)).toContain(dense("anchor.download = filename"));
+    for (const sink of ["window.open(", "location.assign(", "location.replace(", "anchor.target"]) {
       expect(primitiveCode).not.toContain(sink);
     }
   });

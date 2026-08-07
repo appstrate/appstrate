@@ -36,11 +36,11 @@
  */
 export function triggerBlobDownload(data: BlobPart | undefined, filename: string): void {
   const url = URL.createObjectURL(new Blob([data ?? ""], { type: "application/octet-stream" }));
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  document.body.removeChild(anchor);
   URL.revokeObjectURL(url);
 }

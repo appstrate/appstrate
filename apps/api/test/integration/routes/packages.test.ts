@@ -3100,14 +3100,12 @@ describe("Packages API", () => {
           ? new TextDecoder().decode(companions["INTEGRATION.md"])
           : JSON.stringify(manifest, null, 2),
       });
-      const zip = Buffer.from(
-        zipArtifact(
-          {
-            "manifest.json": new TextEncoder().encode(JSON.stringify(manifest, null, 2)),
-            ...companions,
-          },
-          6,
-        ),
+      const zip = zipArtifact(
+        {
+          "manifest.json": new TextEncoder().encode(JSON.stringify(manifest, null, 2)),
+          ...companions,
+        },
+        6,
       );
       await uploadPackageZip(packageId, "0.1.0", zip);
       const row = await seedPackageVersion({
