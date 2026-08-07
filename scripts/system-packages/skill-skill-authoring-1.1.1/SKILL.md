@@ -175,8 +175,13 @@ Applique cette boucle à une skill existante avant de proposer sa publication :
    N'altère aucun autre paramètre entre A et B.
 4. **Observer.** Une fois les deux runs terminaux, lis leur ressource avec `getRun` pour les
    métadonnées de comparaison, puis leurs traces avec `getRunLogs`. Cet appel ne sert pas à attendre
-   une seconde fois. Compare le résultat, le statut, la durée, l'usage de tokens, les erreurs et
-   reprises d'outils, le chargement de la skill et chaque critère défini à l'étape 1.
+   une seconde fois. Vérifie d'abord `resolved_skill_versions` : le run A doit nommer la version
+   publiée exacte avec `source: "version"`, le run B doit porter `version: null` et
+   `source: "draft"`. Ne confonds pas ce snapshot avec `version_ref`, qui décrit l'agent exécuté.
+   Si le snapshot manque ou diverge, signale que la comparaison n'est pas prouvée au lieu de
+   l'inférer depuis `dependency_overrides`. Compare ensuite le résultat, le statut, la durée,
+   l'usage de tokens, les erreurs et reprises d'outils, le chargement de la skill et chaque critère
+   défini à l'étape 1.
 5. **Décider.** Garde le draft seulement s'il améliore les cas positifs sans faire déclencher le
    quasi-cas ni dégrader une contrainte existante. Sinon, corrige la cause précise et rejoue le plus
    petit sous-ensemble discriminant.
@@ -214,7 +219,8 @@ Vérifie chaque point avant d'appeler `createSkill` ou `updateSkill` :
 - le corps contient une section `Déclenchement` avec deux cas positifs et un quasi-cas, puis ces cas
   vérifient le déclenchement dans une conversation vierge ;
 - en amélioration, les runs publiée et draft ne diffèrent que par `dependency_overrides`, leurs logs
-  ont été comparés et leurs ids sont conservés dans le compte rendu ;
+  ont été comparés, `resolved_skill_versions` confirme les sélections et leurs ids sont conservés
+  dans le compte rendu ;
 - chaque ligne restante change une décision ou une action de l'agent.
 
 Le draft est prêt à être proposé quand les deux artefacts passent ce contrôle et que le prompt de

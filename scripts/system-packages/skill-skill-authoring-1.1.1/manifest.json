@@ -1,6 +1,6 @@
 {
   "name": "@appstrate/skill-authoring",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "type": "skill",
   "schema_version": "0.2",
   "display_name": "Création et amélioration d'une skill",
