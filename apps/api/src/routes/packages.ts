@@ -1542,6 +1542,58 @@ function fileAttachmentDisposition(path: string): string {
 }
 
 // ═══════════════════════════════════════════════
+// Read permission
+// ═══════════════════════════════════════════════
+
+type ReadGuard = (c: Context<AppEnv>, next: () => Promise<void>) => Promise<unknown>;
+
+/**
+ * `type` → the `*:read` guard for that type's RBAC resource.
+ *
+ * The per-type routes get their resource straight from the route path
+ * (`skills` → `skills:read`), but a route registered on the router ROOT
+ * (`/:scope/:name/...`, e.g. `/{version}/download`) does not name a type in
+ * its path — the resource is only knowable from the resolved package row.
+ * This map is what lets such a route reach the same guard, so downloading a
+ * skill's ZIP is gated on `skills:read` exactly like `GET /skills/@scope/name`.
+ *
+ * Built from `ROUTE_CONFIGS` rather than hand-written so a new package type
+ * cannot land with a per-type guard and no root-route guard.
+ */
+const READ_GUARD_BY_TYPE = new Map<PackageType, ReadGuard>(
+  Object.entries(ROUTE_CONFIGS).flatMap(([type, rcfg]) =>
+    rcfg
+      ? [
+          [
+            type as PackageType,
+            requirePermission(rcfg.path as import("../lib/permissions.ts").Resource, "read"),
+          ] as const,
+        ]
+      : [],
+  ),
+);
+
+/**
+ * Enforce the resolved package's `*:read` permission from INSIDE a handler.
+ *
+ * Route-level middleware cannot do this job on the router-root routes: the
+ * resource depends on the row, and the row is only read once the handler runs.
+ * Reusing the guard (rather than an inline `permissions.has()`) keeps the
+ * denial audit hook, the 403 shape, and the fail-closed semantics identical to
+ * every other RBAC call site.
+ *
+ * An unmapped type fails CLOSED — a package type with no route config has no
+ * read scope to satisfy, so nobody may read its bytes.
+ */
+async function requirePackageReadPermission(c: Context<AppEnv>, type: string): Promise<void> {
+  const guard = READ_GUARD_BY_TYPE.get(type as PackageType);
+  if (!guard) {
+    throw forbidden(`Insufficient permissions: no read scope is defined for type '${type}'`);
+  }
+  await guard(c, async () => {});
+}
+
+// ═══════════════════════════════════════════════
 // Router
 // ═══════════════════════════════════════════════
 
@@ -1554,15 +1606,29 @@ export function createPackagesRouter() {
     const { path } = rcfg;
     // Permission resource matches the route path (e.g. "skills", "agents", "integrations")
     const resource = path as import("../lib/permissions.ts").Resource;
+    const readGuard = requirePermission(resource, "read");
     const writeGuard = requirePermission(resource, "write");
     const deleteGuard = requirePermission(resource, "delete");
 
-    router.get(`/${path}`, makeListHandler(rcfg));
+    // `readGuard` on every GET: the install/system visibility check inside the
+    // handlers (`hasPackageAccess`) answers "is this package reachable from
+    // this application", never "may this caller read it". Without the guard a
+    // credential scoped without `<type>:read` still gets the manifest and, on
+    // the detail route, the full `content` (SKILL.md / prompt.md).
+    router.get(`/${path}`, readGuard, makeListHandler(rcfg));
     router.post(`/${path}`, writeGuard, makeCreateHandler(rcfg));
     // Version routes — must be registered before generic get to avoid conflict
-    router.get(`/${path}/${SCOPED_PACKAGE_ROUTE}/versions`, makeListVersionsHandler(rcfg));
+    router.get(
+      `/${path}/${SCOPED_PACKAGE_ROUTE}/versions`,
+      readGuard,
+      makeListVersionsHandler(rcfg),
+    );
     // Version info + create version + restore — BEFORE :version param to avoid matching
-    router.get(`/${path}/${SCOPED_PACKAGE_ROUTE}/versions/info`, makeVersionInfoHandler(rcfg));
+    router.get(
+      `/${path}/${SCOPED_PACKAGE_ROUTE}/versions/info`,
+      readGuard,
+      makeVersionInfoHandler(rcfg),
+    );
     router.post(
       `/${path}/${SCOPED_PACKAGE_ROUTE}/versions`,
       requirePackageInOrg(),
@@ -1583,10 +1649,15 @@ export function createPackagesRouter() {
     );
     router.get(
       `/${path}/${SCOPED_PACKAGE_ROUTE}/versions/:version`,
+      readGuard,
       makeVersionDetailHandler(rcfg),
     );
     // Scoped IDs (@scope/name) — must be registered before unscoped to match first
-    router.get(`/${path}/${SCOPED_PACKAGE_ROUTE}`, rcfg.getHandler ?? makeGetHandler(rcfg));
+    router.get(
+      `/${path}/${SCOPED_PACKAGE_ROUTE}`,
+      readGuard,
+      rcfg.getHandler ?? makeGetHandler(rcfg),
+    );
     router.put(
       `/${path}/${SCOPED_PACKAGE_ROUTE}`,
       requirePackageInOrg(),
@@ -1600,7 +1671,7 @@ export function createPackagesRouter() {
       makeDeleteHandler(rcfg),
     );
     // Unscoped IDs
-    router.get(`/${path}/:id`, rcfg.getHandler ?? makeGetHandler(rcfg));
+    router.get(`/${path}/:id`, readGuard, rcfg.getHandler ?? makeGetHandler(rcfg));
     router.put(`/${path}/:id`, requirePackageInOrg(), writeGuard, makeUpdateHandler(rcfg));
     router.delete(`/${path}/:id`, requirePackageInOrg(), deleteGuard, makeDeleteHandler(rcfg));
   }
@@ -2190,17 +2261,30 @@ export function createPackagesRouter() {
   router.get(`/${SCOPED_PACKAGE_ROUTE}/:version/download`, rateLimit(50), async (c) => {
     const packageId = getItemId(c);
     const orgId = c.get("orgId");
+    const applicationId = c.get("applicationId");
     const versionSpec = c.req.param("version")!;
+
+    // Visibility first — "system package OR installed in THIS application",
+    // the same gate the rest of the package surface applies. Without it this
+    // route served the artifact bytes of packages that are merely owned by the
+    // org and installed nowhere the caller can reach.
+    if (!(await hasPackageAccess({ orgId, applicationId }, packageId))) {
+      throw notFound("Package not found");
+    }
 
     // Verify org ownership (or system package). Ephemeral shadows are hidden.
     const [pkg] = await db
-      .select({ id: packages.id })
+      .select({ id: packages.id, type: packages.type })
       .from(packages)
       .where(and(eq(packages.id, packageId), orgOrSystemFilter(orgId), notEphemeralFilter()))
       .limit(1);
     if (!pkg) {
       throw notFound("Package not found");
     }
+
+    // The ZIP carries the manifest and every authored file, so it is at least
+    // as sensitive as the detail route — it needs the same `<type>:read`.
+    await requirePackageReadPermission(c, pkg.type);
 
     const ver = await getVersionForDownload(packageId, versionSpec);
     if (!ver) {
