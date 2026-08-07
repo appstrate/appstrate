@@ -20,13 +20,16 @@ was removed, so a **minor**.
 
 - **`@appstrate/core/package-files`** — `PACKAGE_FILE_INLINE_MAX_BYTES`, the
   inclusive size ceiling above which the file explorer neither inlines a file
-  server-side nor previews it client-side, and `PACKAGE_CONTENT_FILE`, the
-  archive entry holding each package type's primary content (`prompt.md`,
-  `SKILL.md`, `INTEGRATION.md`, and `null` for `mcp-server`, whose content
-  _is_ its manifest). Both facts previously had two independent declarations
-  kept in manual lockstep, where a drift would either erase a real file or
-  invent one the package does not ship. Free of value imports by design — the
-  SPA bundles it.
+  server-side nor previews it client-side, and `PACKAGE_CONTENT_ENTRY`, the
+  archive entry holding each package type's primary content: its `path`
+  (`prompt.md`, `SKILL.md`, `INTEGRATION.md`, and `null` for `mcp-server`,
+  whose content _is_ its manifest) together with whether that entry is
+  `required`. `PACKAGE_CONTENT_FILE` is the name-only projection of the same
+  table, derived rather than declared, so the two cannot drift; readers that
+  need only the filename keep using it unchanged. These facts previously had
+  independent declarations kept in manual lockstep, where a drift would either
+  erase a real file or invent one the package does not ship. Free of value
+  imports by design — the SPA bundles it.
 - **`@appstrate/core/mcp-server-meta`** — `MCP_SERVER_APPSTRATE_META_KEY`,
   `MCP_SERVER_RUNTIME_CAPABILITIES`, `MCP_SERVER_RUNTIMES`,
   `isMcpServerRuntime()`, `getMcpServerRuntime()` and the `McpServerRuntime`

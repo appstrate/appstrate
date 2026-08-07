@@ -65,11 +65,16 @@ function overlay(
 }
 
 /**
- * `packages.draft_content` holds a DIFFERENT file per type — `PACKAGE_CONTENT_FILE`
+ * `packages.draft_content` holds a DIFFERENT file per type — `PACKAGE_CONTENT_ENTRY`
  * (`@appstrate/core/package-files`), the same map `parsePackageZip` extracts the
  * column FROM. Overlaying it onto the wrong entry would either erase the
  * manifest or invent a file the package does not contain, so these cases pin
  * the whole matrix rather than trusting the shared declaration alone.
+ *
+ * The map's `required` flag decides the no-stored-ZIP case: a required entry is
+ * materialized from the column alone, an optional one only lands on top of a
+ * file that is already there. The table itself (every type present, each
+ * classified) is pinned in `packages/core/test/package-files.test.ts`.
  */
 describe("applyDraftOverlay — per-type draft_content target", () => {
   it("agent → prompt.md", () => {
