@@ -295,6 +295,10 @@ describe("formatCallerContext", () => {
     expect(out).toContain("## Assistant skills");
     expect(out).toContain("`@appstrate/copilot` — Copilote: Guide the user to a working agent.");
     expect(out).toContain('`operation_id: "getSkill"`');
+    expect(out).toContain("Choose the most specific guide");
+    expect(out).toContain("Load one guide at a time");
+    expect(out).toContain("If none clearly matches, load none");
+    expect(out).not.toContain("reference methods");
     // Distinct from the attach-to-agent skills index, which is absent here.
     expect(out).not.toContain("## Skills you can attach to an agent");
   });

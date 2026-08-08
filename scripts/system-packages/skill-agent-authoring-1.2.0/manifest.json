@@ -1,6 +1,6 @@
 {
   "name": "@appstrate/agent-authoring",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "type": "skill",
   "schema_version": "0.2",
   "display_name": "Création et amélioration d'un agent",

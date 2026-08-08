@@ -52,6 +52,9 @@ describe("buildServerInstructions — assistant skills index", () => {
     expect(section).toContain("Assembler, modifier ou valider un agent enregistré");
     expect(section).toContain("Créer ou améliorer une skill de méthode");
     expect(section).toContain('`operation_id: "getSkill"`');
+    expect(section).toContain("Choose the most specific guide");
+    expect(section).toContain("Load one guide at a time");
+    expect(section).toContain("If none clearly matches, load none");
     const indexedIds = Array.from(section.matchAll(/^- `([^`]+)`/gm), (match) => match[1]);
     expect(indexedIds).toEqual(EXPECTED_ASSISTANT_SKILLS);
     expect(section).not.toContain("`@appstrate/code-review`");

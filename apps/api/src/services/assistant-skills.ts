@@ -58,8 +58,10 @@ export function formatAssistantSkillsSection(skills: readonly AssistantSkillHint
   if (skills.length === 0) return "";
   const lines = [
     "## Assistant skills",
-    "Reusable instruction sets for recurring assistant situations. When one matches the " +
-      "situation, load it BEFORE " +
+    "Reusable instruction sets for recurring assistant situations. Choose the most specific " +
+      "guide that clearly matches the current decision. Load one guide at a time, and load " +
+      "another only when the first delegates that branch. If none clearly matches, load none. " +
+      "Load the selected guide BEFORE " +
       'acting: call `invoke_operation` with `operation_id: "getSkill"` and `path_params: ' +
       '{ "scope": "<@scope>", "name": "<name>" }` (split the skill\'s `@scope/name` id, KEEP the ' +
       "leading `@` on the scope), then read the returned `content` and follow the guide. " +
