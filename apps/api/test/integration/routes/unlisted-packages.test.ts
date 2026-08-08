@@ -8,7 +8,8 @@
  * routes, the library catalogue, and the chat/get_me hints — while staying
  * fully resolvable by exact id (detail GET). Also covers the assistant-skills
  * index exposed by `/api/me/context`, fed by the real `system-packages/`
- * archives (the shipped copilot / web-search / connector-choice / skill-authoring skills).
+ * archives (the shipped copilot / web-search / connector-choice / agent-authoring /
+ * skill-authoring skills).
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -142,7 +143,12 @@ describe("Unlisted package visibility", () => {
       expect(ids).toContain("@appstrate/copilot");
       expect(ids).toContain("@appstrate/web-search");
       expect(ids).toContain("@appstrate/connector-choice");
+      expect(ids).toContain("@appstrate/agent-authoring");
       expect(ids).toContain("@appstrate/skill-authoring");
+      expect(
+        body.assistant_skills.find((skill) => skill.package_id === "@appstrate/agent-authoring")
+          ?.description,
+      ).toContain("contrats courants depuis le MCP");
       expect(
         body.assistant_skills.find((skill) => skill.package_id === "@appstrate/skill-authoring")
           ?.description,
