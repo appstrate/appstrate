@@ -43,6 +43,7 @@
  */
 
 import type { AppstrateModule, ModelProviderDefinition } from "@appstrate/core/module";
+import { ANTHROPIC_GENERATION_CAPABILITIES_OVERRIDE } from "@appstrate/core/model-generation";
 import autoFeatured from "../../data/featured-models.json" with { type: "json" };
 
 /**
@@ -65,6 +66,9 @@ const anthropic: ModelProviderDefinition = {
   baseUrlOverridable: false,
   authMode: "api_key",
   featured: true,
+  // Keep LiteLLM's portable support facts, then apply Anthropic wire-level
+  // constraints (temperature with thinking, and minimal → low effort).
+  generationOverride: ANTHROPIC_GENERATION_CAPABILITIES_OVERRIDE,
   featuredModels: featured("anthropic"),
 };
 

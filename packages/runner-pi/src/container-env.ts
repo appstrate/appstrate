@@ -10,6 +10,11 @@
  * serialisation, boolean casing) on their own.
  */
 
+import type {
+  ModelNativeReasoningLevel,
+  ModelReasoningLevel,
+} from "@appstrate/core/model-generation";
+
 export interface RuntimePiModelConfig {
   /** Pi SDK `api` slug — e.g. `"anthropic-messages"`, `"openai-completions"`. */
   api: string;
@@ -25,11 +30,17 @@ export interface RuntimePiModelConfig {
   contextWindow?: number | null;
   maxTokens?: number | null;
   reasoning?: boolean | null;
+  reasoningLevelMap?: Partial<Record<ModelReasoningLevel, ModelNativeReasoningLevel>>;
   cost?: unknown | null;
 }
 
 export interface RuntimePiEnvOptions {
   model: RuntimePiModelConfig;
+  /** Effective model-generation controls resolved by the platform. */
+  generation?: {
+    temperature?: number | null;
+    reasoningLevel?: ModelReasoningLevel | null;
+  };
   /** Full enriched system prompt fed to the Pi SDK. */
   agentPrompt: string;
   /** Run identifier. Bundled tools + the entrypoint surface it in every emitted {@link RunEvent}. */
@@ -205,6 +216,15 @@ export function buildRuntimePiEnv(opts: RuntimePiEnvOptions): Record<string, str
   if (model.contextWindow != null) env.MODEL_CONTEXT_WINDOW = String(model.contextWindow);
   if (model.maxTokens != null) env.MODEL_MAX_TOKENS = String(model.maxTokens);
   if (model.reasoning != null) env.MODEL_REASONING = model.reasoning ? "true" : "false";
+  if (model.reasoningLevelMap && Object.keys(model.reasoningLevelMap).length > 0) {
+    env.MODEL_REASONING_LEVEL_MAP = JSON.stringify(model.reasoningLevelMap);
+  }
+  if (opts.generation?.temperature != null) {
+    env.MODEL_TEMPERATURE = String(opts.generation.temperature);
+  }
+  if (opts.generation?.reasoningLevel != null) {
+    env.MODEL_REASONING_LEVEL = opts.generation.reasoningLevel;
+  }
   if (model.cost !== undefined && model.cost !== null) {
     env.MODEL_COST = JSON.stringify(model.cost);
   }

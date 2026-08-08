@@ -12,6 +12,7 @@ import {
   normalizeToolName,
   TOOL_NAME_MAX_LEN,
   sanitizeFilename,
+  attachmentDisposition,
   MAX_FILENAME_LEN,
   encodeFilenameHeader,
   decodeFilenameHeader,
@@ -319,5 +320,41 @@ describe("encodeFilenameHeader / decodeFilenameHeader", () => {
 
   it("round-trips a name carrying `%` literally", () => {
     expect(decodeFilenameHeader(encodeFilenameHeader("100%-done.md"))).toBe("100%-done.md");
+  });
+});
+
+describe("attachmentDisposition", () => {
+  it("carries the real name in the RFC 8187 ext-value and a scrubbed ASCII fallback", () => {
+    expect(attachmentDisposition("rapport-été.md")).toBe(
+      "attachment; filename=\"rapport-_t_.md\"; filename*=UTF-8''rapport-%C3%A9t%C3%A9.md",
+    );
+  });
+
+  it("percent-encodes the four characters `encodeURIComponent` leaves outside attr-char", () => {
+    // `'` is the ext-value's own delimiter (RFC 8187 §3.2): charset and language
+    // are the first two apostrophes, so a raw third one invites a parser to
+    // split the value in the wrong place.
+    expect(attachmentDisposition("don't (final)*.md")).toBe(
+      "attachment; filename=\"don't (final)*.md\"; filename*=UTF-8''don%27t%20%28final%29%2A.md",
+    );
+  });
+
+  it("keeps `!` raw — it IS in attr-char", () => {
+    expect(attachmentDisposition("wow!.md")).toContain("filename*=UTF-8''wow!.md");
+  });
+
+  it("neutralises a quote or backslash in the ASCII fallback so the quoted-string cannot break out", () => {
+    expect(attachmentDisposition('we"ird\\name.txt')).toBe(
+      "attachment; filename=\"we_ird_name.txt\"; filename*=UTF-8''we%22ird%5Cname.txt",
+    );
+  });
+
+  it("falls back to `download` only when the ASCII form is EMPTY, not merely scrubbed", () => {
+    // A non-ASCII name still leaves one `_` per character, which is truthy — the
+    // fallback is for an empty input, and the ext-value stays authoritative.
+    expect(attachmentDisposition("中")).toBe(
+      "attachment; filename=\"_\"; filename*=UTF-8''%E4%B8%AD",
+    );
+    expect(attachmentDisposition("")).toBe("attachment; filename=\"download\"; filename*=UTF-8''");
   });
 });

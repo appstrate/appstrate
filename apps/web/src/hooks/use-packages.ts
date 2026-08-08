@@ -8,11 +8,12 @@ import { toast } from "sonner";
 import { stripScope } from "@appstrate/core/naming";
 import { asJSONSchemaObject } from "@appstrate/core/form";
 import { client, type components } from "../api/client";
+import { triggerBlobDownload } from "../lib/blob-download";
 import { splitPackageRef } from "../lib/package-paths";
 import { VERSION_DRAFT, isVersioned } from "../lib/version-selector";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentApplicationId } from "./use-current-application";
-import { packageKeys, agentsKeys } from "../lib/query-keys";
+import { packageKeys, agentsKeys, invalidatePackageFiles } from "../lib/query-keys";
 import type {
   OrgPackageItem,
   OrgPackageItemDetail,
@@ -101,7 +102,6 @@ function normalizePackageItemDetail(
     created_by_name: null,
     auto_installed: d.auto_installed,
     content: d.content,
-    source_code: d.source_code ?? null,
     manifest: d.manifest,
     agents: d.agents,
   };
@@ -280,14 +280,7 @@ export function usePackageDownload(scope: string | undefined, name: string | und
           params: { path: { scope, name, version } },
           parseAs: "blob",
         });
-        const url = URL.createObjectURL(data!);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `${stripScope(scope)}-${name}-${version}.afps`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
+        triggerBlobDownload(data, `${stripScope(scope)}-${name}-${version}.afps`);
       } catch {
         toast.error(t("error.downloadFailed"));
       }
@@ -299,9 +292,9 @@ export function usePackageDownload(scope: string | undefined, name: string | und
 /**
  * Export an agent as a multi-package `.afps-bundle` (its transitive
  * dependency graph in one self-contained archive). Triggers a browser
- * download via `URL.createObjectURL` + an invisible `<a>`. Optional
- * `version` pins the export to a specific release; defaults to the
- * version installed in the current application.
+ * download via the shared `triggerBlobDownload`. Optional `version` pins the
+ * export to a specific release; defaults to the version installed in the
+ * current application.
  */
 export function useAgentBundleExport(scope: string | undefined, name: string | undefined) {
   const { t } = useTranslation("common");
@@ -313,14 +306,7 @@ export function useAgentBundleExport(scope: string | undefined, name: string | u
           params: { path: { scope, name }, query: { version } },
           parseAs: "blob",
         });
-        const url = URL.createObjectURL(data!);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `${stripScope(scope)}-${name}.afps-bundle`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
+        triggerBlobDownload(data, `${stripScope(scope)}-${name}.afps-bundle`);
       } catch {
         toast.error(t("error.downloadFailed"));
       }
@@ -389,6 +375,9 @@ export function useCreateVersion(type: PackageType, packageId: string) {
       qc.invalidateQueries({ queryKey: ["version-info"] });
       qc.invalidateQueries({ queryKey: agentsKeys.all });
       qc.invalidateQueries({ queryKey: packageKeys.all });
+      // A published artifact appeared or vanished: a pinned Files tab and any
+      // dist-tag-resolved read of it are now wrong.
+      invalidatePackageFiles(qc);
     },
   });
 }
@@ -408,6 +397,9 @@ export function useDeleteVersion(type: PackageType, packageId: string) {
       qc.invalidateQueries({ queryKey: ["version-info"] });
       qc.invalidateQueries({ queryKey: agentsKeys.all });
       qc.invalidateQueries({ queryKey: packageKeys.all });
+      // A published artifact appeared or vanished: a pinned Files tab and any
+      // dist-tag-resolved read of it are now wrong.
+      invalidatePackageFiles(qc);
     },
   });
 }
@@ -435,6 +427,8 @@ export function useRestoreVersion(type: PackageType, packageId: string) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: agentsKeys.all });
       qc.invalidateQueries({ queryKey: packageKeys.all });
+      // A restore overwrites the DRAFT artifact wholesale.
+      invalidatePackageFiles(qc);
     },
   });
 }

@@ -29,6 +29,9 @@ describe("SYSTEM_PROMPT invariants", () => {
 
   it("keeps the run_and_wait grounding (result is the deliverable)", () => {
     expect(SYSTEM_PROMPT).toContain("run_and_wait");
+    expect(SYSTEM_PROMPT).toMatch(/prefer calling `run_and_wait` directly/);
+    expect(SYSTEM_PROMPT).toMatch(/runAgent.*runInline.*remain available/);
+    expect(SYSTEM_PROMPT).toContain("intentionally need fire-and-forget semantics");
     expect(SYSTEM_PROMPT).toContain("never fabricate it");
   });
 
@@ -40,11 +43,27 @@ describe("SYSTEM_PROMPT invariants", () => {
     expect(SYSTEM_PROMPT).not.toContain('"name": "@inline/one-shot"');
   });
 
+  it("keeps inline manifests concise while allowing exact complete overrides", () => {
+    expect(SYSTEM_PROMPT).toContain("PARTIAL canonical AFPS agent");
+    expect(SYSTEM_PROMPT).toMatch(/Defaults apply ONLY to absent top-level fields/);
+    expect(SYSTEM_PROMPT).toContain("runtime_tools: []");
+    expect(SYSTEM_PROMPT).toMatch(/override EVERY field/);
+    expect(SYSTEM_PROMPT).toContain("complete strict `output.schema`");
+  });
+
   it("keeps the fan-in-by-reference rule (context_documents, never a copy)", () => {
     expect(SYSTEM_PROMPT).toContain("context_documents");
     expect(SYSTEM_PROMPT).toMatch(/NEVER paste a previous run's content/);
     // The reason is load-bearing: a rule with a reason survives paraphrase.
     expect(SYSTEM_PROMPT).toMatch(/retyped by a model/);
+  });
+
+  it("reads document content directly before considering a run", () => {
+    expect(SYSTEM_PROMPT).toMatch(/call `read_document` first/);
+    expect(SYSTEM_PROMPT).toMatch(/answer directly from that content/);
+    expect(SYSTEM_PROMPT).toMatch(/do NOT launch a run merely to read or analyse it/);
+    expect(SYSTEM_PROMPT).toMatch(/metadata only or binary\/blob data/);
+    expect(SYSTEM_PROMPT).toMatch(/When a run is justified.*`context_documents`/s);
   });
 
   it("keeps the fan-out deliverable contract (file in outputs/ AND a short output)", () => {

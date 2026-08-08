@@ -18,6 +18,7 @@ import {
 import { sql } from "drizzle-orm";
 import type { TokenUsage } from "@appstrate/afps-shared/token-usage";
 import type { ModelCost } from "@appstrate/core/module";
+import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 import type { PricingStatus } from "../pricing-status.ts";
 import { runStatusEnum, llmUsageSourceEnum, runOriginEnum, credentialSourceEnum } from "./enums.ts";
 import { user } from "./auth.ts";
@@ -161,6 +162,10 @@ export const runs = pgTable(
     proxyLabel: text("proxy_label"),
     modelLabel: text("model_label"),
     modelSource: text("model_source"),
+    // Effective generation settings frozen at kickoff for reproducibility.
+    generationConfig: jsonb("generation_config").$type<ModelGenerationSettings>(),
+    // Raw invocation layer (manual run or schedule), before agent defaults.
+    generationConfigOverride: jsonb("generation_config_override").$type<ModelGenerationSettings>(),
     // Snapshot of the per-1M-token rates the run was LAUNCHED with — the exact
     // object the launcher serialises into the container's `MODEL_COST` env var.
     // It exists so the runner's ledger row can be classified SERVER-SIDE: the
@@ -809,6 +814,7 @@ export const schedules = pgTable(
     // Argo CronWorkflow inherit-with-override semantics.
     configOverride: jsonb("config_override").$type<Record<string, unknown>>(),
     modelIdOverride: text("model_id_override"),
+    generationConfigOverride: jsonb("generation_config_override").$type<ModelGenerationSettings>(),
     proxyIdOverride: text("proxy_id_override"),
     // Version pin. Either a literal label ("1.2.3") or a dist-tag
     // ("latest", "next"). Resolved at fire time the same way the run

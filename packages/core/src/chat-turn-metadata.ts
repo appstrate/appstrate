@@ -1,6 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 export type ChatTurnEngine = "ai-sdk" | "subscription";
+export type ChatTurnErrorCategory =
+  | "credential_unavailable"
+  | "rate_limited"
+  | "upstream_unavailable"
+  | "invalid_request"
+  | "unknown";
+
 /**
  * `deadline` is Appstrate's own reason (no provider emits it): the turn was cut
  * by the engine's wall-clock ceiling. It exists so a timed-out turn stops being
@@ -114,12 +121,14 @@ export function formatTurnBudgetNote(input: { remainingMs: number; stepsUsed: nu
 export interface AppstrateTurnMetadata {
   engine: ChatTurnEngine;
   finishReason?: ChatTurnFinishReason;
-  /**
-   * Client-safe failure message when `finishReason` is "error". Persisted with
-   * the turn (unlike the transient UI-stream `error` chunk) so a reloaded
-   * conversation can still show why the turn failed.
-   */
+  /** Legacy client-safe failure copy; new turns persist a category for localization. */
   errorText?: string;
+  /** Stable, provider-neutral class for retry UI + telemetry. */
+  errorCategory?: ChatTurnErrorCategory;
+  /** Whether retrying later may succeed without changing the request. */
+  errorRetryable?: boolean;
+  /** Public platform request id when the upstream envelope exposed one. */
+  requestId?: string;
   stepCount: number;
   maxSteps: number;
   toolStepBudget?: number;

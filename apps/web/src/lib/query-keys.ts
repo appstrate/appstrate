@@ -111,6 +111,22 @@ export const packageKeys = {
     ["packages", path, orgId, applicationId, id, version] as const,
 };
 
+/**
+ * The file explorer's two caches. Unlike everything else in this file these ARE
+ * openapi-react-query keys (`[method, path, init]`), listed here because they
+ * share the family's defining problem: they are produced by the explorer and
+ * must be invalidated from mutations that know nothing about it.
+ *
+ * Any write that changes the DRAFT artifact has to fire this. The index carries
+ * each text file's content in `inline`, so a stale entry does not merely lag —
+ * it renders the pre-edit source of a file the user just saved, and then heals
+ * itself when the query goes stale, which is what makes it hard to report.
+ */
+export function invalidatePackageFiles(qc: QueryClient) {
+  void qc.invalidateQueries({ queryKey: ["get", "/api/packages/{scope}/{name}/files"] });
+  void qc.invalidateQueries({ queryKey: ["get", "/api/packages/{scope}/{name}/files/content"] });
+}
+
 /** Agent catalog list (sidebar, agent list page). */
 export const agentsKeys = {
   /** Prefix — every agents query. */

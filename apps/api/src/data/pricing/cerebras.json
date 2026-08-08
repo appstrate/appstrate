@@ -7,6 +7,23 @@
       "text",
       "reasoning"
     ],
+    "generation": {
+      "temperature": "supported",
+      "reasoning": {
+        "supported": "supported",
+        "temperatureCompatible": "supported",
+        "adaptive": null,
+        "levels": {
+          "off": "supported",
+          "minimal": "supported",
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "supported",
+          "max": "supported"
+        }
+      }
+    },
     "cost": {
       "input": 0.35,
       "output": 0.75
@@ -19,6 +36,14 @@
     "capabilities": [
       "text"
     ],
+    "generation": {
+      "temperature": "supported",
+      "reasoning": {
+        "supported": "unknown",
+        "adaptive": null,
+        "levels": {}
+      }
+    },
     "cost": {
       "input": 0.85,
       "output": 1.2
@@ -31,6 +56,14 @@
     "capabilities": [
       "text"
     ],
+    "generation": {
+      "temperature": "supported",
+      "reasoning": {
+        "supported": "unknown",
+        "adaptive": null,
+        "levels": {}
+      }
+    },
     "cost": {
       "input": 0.6,
       "output": 0.6
@@ -43,6 +76,14 @@
     "capabilities": [
       "text"
     ],
+    "generation": {
+      "temperature": "supported",
+      "reasoning": {
+        "supported": "unknown",
+        "adaptive": null,
+        "levels": {}
+      }
+    },
     "cost": {
       "input": 0.1,
       "output": 0.1
@@ -56,6 +97,23 @@
       "text",
       "reasoning"
     ],
+    "generation": {
+      "temperature": "supported",
+      "reasoning": {
+        "supported": "supported",
+        "temperatureCompatible": "supported",
+        "adaptive": null,
+        "levels": {
+          "off": "supported",
+          "minimal": "supported",
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "supported",
+          "max": "supported"
+        }
+      }
+    },
     "cost": {
       "input": 0.4,
       "output": 0.8
@@ -69,6 +127,23 @@
       "text",
       "reasoning"
     ],
+    "generation": {
+      "temperature": "supported",
+      "reasoning": {
+        "supported": "supported",
+        "temperatureCompatible": "supported",
+        "adaptive": null,
+        "levels": {
+          "off": "supported",
+          "minimal": "supported",
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "supported",
+          "max": "supported"
+        }
+      }
+    },
     "cost": {
       "input": 2.25,
       "output": 2.75
@@ -82,6 +157,23 @@
       "text",
       "reasoning"
     ],
+    "generation": {
+      "temperature": "supported",
+      "reasoning": {
+        "supported": "supported",
+        "temperatureCompatible": "supported",
+        "adaptive": null,
+        "levels": {
+          "off": "supported",
+          "minimal": "supported",
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "supported",
+          "max": "supported"
+        }
+      }
+    },
     "cost": {
       "input": 2.25,
       "output": 2.75

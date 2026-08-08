@@ -576,7 +576,7 @@ function IntegrationEditorInner({
 
 // ─── Page Wrapper ───────────────────────────────────────────────────
 
-export function PackageEditorPage({ type }: { type: PackageType }) {
+export function PackageEditorPage({ type }: { type: Exclude<PackageType, "mcp-server"> }) {
   const { scope, name } = useParams<{ scope: string; name: string }>();
   const packageId = scope ? `${scope}/${name}` : undefined;
   const navigate = useNavigate();

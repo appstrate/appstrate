@@ -182,7 +182,8 @@ Error bodies are the standard RFC 9457 `application/problem+json` from the globa
 The platform MCP server (`apps/api/src/modules/mcp/`) surfaces documents to external clients (claude.ai, …) and to the in-process chat, all through the same forwarded-auth in-process dispatch as the other tools:
 
 - **`run_and_wait`** result carries one **`resource_link`** content block per document the run published (`{type:"resource_link", uri, name, mimeType, size, description}`, spec 2025-06-18), alongside the text payload (which also echoes `documents`, parity with the chat path). Reuses `fetchRunDocuments`, which lists the run's document container (`GET /api/documents?run_id=…&purpose=agent_output`) and then keeps only rows whose own `run_id` is that run — the container also holds the documents mounted as the run's INPUT, and a `document://` chained from an earlier run carries `purpose: 'agent_output'` too, so the purpose filter alone would surface a previous run's output as this one's.
-- **`resources/read`** on a `document://` URI: a textual document (`text/*`, JSON, XML, `+json`/`+xml`) ≤ 1 MiB that the caller may download is inlined as `text`; everything else (non-textual, oversized, not downloadable) returns metadata only. A foreign/unknown id is an MCP error. Documents are **not** listed under `resources/list` (per spec — links need not be enumerated).
+- **`read_document` / `resources/read`** on a `document://` URI: a textual document (`text/*`, JSON, XML, `+json`/`+xml`) ≤ 1 MiB that the caller may download is inlined as `text`; small binary documents are returned as MCP blobs and oversized or non-downloadable rows return capability-aware metadata. Both surfaces share the canonical ACL/resource provider. A foreign/unknown id is an MCP error. Documents are **not** listed under `resources/list` (per spec — links need not be enumerated).
+- **Package documents**: `validate_package_document` preflights a downloadable `.afps`, `.zip`, or `.afps-bundle` server-side without copying bytes through the model; `import_package_document` reuses the same bundle-import service and audit path. This lets an agent publish a package archive, keep its `document://` URI, validate it, and import it without base64 or a second client upload.
 - **`list_documents`** tool: the caller-visible documents (reuses `listDocumentsForActor`), filterable by `run_id` / `chat_session_id` / `purpose`, returning compact `{documents:[{id, uri, name, mime, size, run_id, package_id, created_at}], has_more}`. Exposed to chat too (both engines discover it dynamically), so the assistant can retrieve and re-inject a `document://` URI.
 
 ## Hardening
@@ -191,19 +192,19 @@ A cross-cutting summary of the guarantees the sections above rely on, and where 
 
 ### Hidden-file policy — implicit sweep filters, explicit tool does not
 
-The hidden-path filter (`runtime-pi/publish.ts`, any segment starting with `.`) is an **implicit-publish** control, not a containment boundary. It applies to the `outputs/` sweep and **deliberately does not apply to `publish_document`**; the tool publishes any regular file inside the workspace, dotfile or not (locked by a test in `runtime-pi/test/publish.test.ts`).
+The hidden-path filter (`runtime-pi/publish.ts`, any segment starting with `.`) is an **implicit-publish** control, not a containment boundary. It applies to the `outputs/` sweep and **deliberately does not apply to `publish_document`**; that explicit tool can publish regular files inside the workspace, dotfiles included.
 
 The split is drawn on intent, because that is the only place it buys anything:
 
 - The **sweep** publishes whatever happens to be in a directory — including a `.env` an unrelated tool dropped there, which the agent never meant as a deliverable. Filtering is the difference between a mistake and a durable, org-visible document.
-- The **tool** is a per-call decision with an explicit path. Refusing hidden paths there (outright, or unless a `name` is passed) removes **no capability** from a prompt-injected agent: `cp .env outputs/notes.txt` — or `publish_document({ path: "copy.txt" })` after the same copy — publishes the identical bytes under a non-hidden name. It would only cost a legitimate publish of a dotfile, and it is the kind of control that reads as a boundary while enforcing nothing.
+- The explicit **tool** is a per-call decision with an explicit path. Refusing hidden paths there removes **no capability** from a prompt-injected agent: `cp .env outputs/notes.txt` — or publishing that copy explicitly — surfaces the identical bytes under a non-hidden name. It would only cost a legitimate publish of a dotfile, and it is the kind of control that reads as a boundary while enforcing nothing.
 
-**Threat model, stated plainly.** An agent whose manifest enables `publish_document` can surface any workspace file it can read as an org-visible `agent_output` document — that is the tool's purpose, and prompt injection can aim it. What bounds the exposure is not the path shape:
+**Threat model, stated plainly.** An agent whose manifest enables `publish_document` can surface workspace files it can read as org-visible `agent_output` documents — that is the tool's purpose, and prompt injection can aim it. What bounds the exposure is not the path shape:
 
 - the document is attached to the run, so it inherits the run's container ACL (see "ACL") — never wider than who can already read the run;
 - reads are gated by `documents:read` and the capability matrix; preview goes through a short-lived signed token on a cookie-less route (see "Preview security").
 
-So the mitigation lives where the capability is granted (`manifest.runtime_tools` is opt-in per agent), not in a filename check. **Enable `publish_document` only on agents whose workspace you would accept seeing published.**
+So the mitigation lives where the capability is granted (`manifest.runtime_tools` is opt-in per named agent), not in a filename check. **Enable the publishing tool only on agents whose workspace you would accept seeing published.** Inline runs receive it by default because their orchestrator explicitly creates a short-lived producing agent and needs a durable hand-off surface.
 
 ### Identity model — display name vs workspace name (D-naming)
 

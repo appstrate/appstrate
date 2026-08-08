@@ -4,6 +4,8 @@ import type { z } from "zod";
 import type { ModelCost } from "@appstrate/core/module";
 import type { TokenUsage } from "@appstrate/core/token-usage";
 import type { ModelApiShape } from "@appstrate/core/sidecar-types";
+import type { ModelGenerationCapabilities } from "@appstrate/core/model-generation";
+import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 
 export {
   ASSIGNABLE_ORG_ROLES,
@@ -119,6 +121,9 @@ export interface RunWireDto {
   proxy_label: string | null;
   model_label: string | null;
   model_source: string | null;
+  /** Effective generation controls frozen at kickoff and raw override layer. */
+  generation: ModelGenerationSettings | null;
+  generation_override: ModelGenerationSettings | null;
   runner_name: string | null;
   runner_kind: string | null;
   agent_scope: string | null;
@@ -332,6 +337,7 @@ export interface ScheduleWireDto {
   timezone: string | null;
   input: Record<string, unknown> | null;
   config_override: Record<string, unknown> | null;
+  generation_config_override: ModelGenerationSettings | null;
   model_id_override: string | null;
   proxy_id_override: string | null;
   version_override: string | null;
@@ -348,6 +354,19 @@ export type EnrichedSchedule = ScheduleWireDto & {
   actor_name: string | null;
   /** Which actor kind owns the schedule run. Null for org/system-owned schedules. */
   actor_type: "user" | "end_user" | null;
+  /**
+   * Runs of this schedule currently in a non-terminal status (`pending` or
+   * `running`), across every run it ever produced.
+   */
+  running_runs: number;
+  /**
+   * Runs of this schedule whose notification is unread **by the caller**. Scoped
+   * to the requesting actor, like `EnrichedRun.unread` — a member and an
+   * end-user never observe each other's read state.
+   */
+  unread_count: number;
+  /** Highest `runNumber` this schedule ever produced; 0 when it never fired. */
+  last_run_number: number;
 };
 
 // --- Organization Types ---
@@ -552,8 +571,6 @@ export interface OrgPackageItem extends BasePackageListItem {
 export interface OrgPackageItemDetail extends Omit<OrgPackageItem, "used_by_agents"> {
   /** Present but nullable — the draft_content column is nullable. */
   content: string | null;
-  /** Secondary source file content (e.g. .ts for tools). */
-  source_code?: string | null;
   agents: { id: string; display_name: string }[];
   manifest?: Record<string, unknown>;
   manifest_name?: string | null;
@@ -587,8 +604,6 @@ export interface VersionListItem extends Omit<PackageVersionInfo, "createdAt"> {
 export interface VersionDetailResponse extends Omit<PackageVersionInfo, "createdAt"> {
   manifest: Record<string, unknown>;
   content?: string | null;
-  /** Secondary source file content (e.g. .ts for tools). */
-  source_code?: string | null;
   yanked_reason: string | null;
   createdAt: string | null;
   dist_tags: string[];
@@ -674,6 +689,8 @@ export interface ModelMetadata {
 
 export interface OrgModelInfo extends ModelMetadata {
   id: string;
+  /** Normalized request controls; aliases expose a fixed inherit-only contract. */
+  generation: ModelGenerationCapabilities | null;
   /** Always set — resolvers fall back to catalog label then modelId. */
   label: string;
   /**
@@ -822,6 +839,8 @@ export interface CatalogModelEntry {
   /** Provider-defined ceiling for the response. Null when unpublished. */
   maxTokens: number | null;
   capabilities: readonly string[];
+  /** Normalized generation controls derived from the pinned LiteLLM snapshot. */
+  generation?: ModelGenerationCapabilities;
   /** Per-1M-token pricing in USD. */
   cost: ModelCost;
 }
@@ -885,6 +904,7 @@ export interface ApplicationInfo {
 export interface InstalledPackage {
   packageId: string;
   config: Record<string, unknown>;
+  generationConfig: ModelGenerationSettings | null;
   modelId: string | null;
   proxyId: string | null;
   version_id: number | null;
@@ -905,6 +925,8 @@ export interface InstalledPackage {
  */
 export interface ResolvedRunConfig {
   config: Record<string, unknown>;
+  /** Optional for compatibility with older servers; current API always emits it. */
+  generation?: ModelGenerationSettings | null;
   modelId: string | null;
   proxyId: string | null;
   /** Pinned semver label (`1.2.3`), or null when the app uses the floating dist-tag. */

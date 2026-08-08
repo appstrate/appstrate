@@ -88,6 +88,73 @@ export const schemas = {
       },
     },
   },
+  ModelGenerationSettings: {
+    type: "object",
+    additionalProperties: false,
+    description:
+      "Optional model sampling and reasoning controls. Omitted properties inherit the next lower-precedence layer.",
+    properties: {
+      temperature: {
+        type: ["number", "null"],
+        minimum: 0,
+        maximum: 1,
+        description:
+          "Provider sampling temperature; null or omission inherits the runtime default.",
+      },
+      reasoningLevel: {
+        type: ["string", "null"],
+        enum: ["off", "minimal", "low", "medium", "high", "xhigh", "max", null],
+        description: "Portable reasoning effort normalized across providers.",
+      },
+    },
+  },
+  ModelGenerationCapabilities: {
+    type: "object",
+    additionalProperties: false,
+    required: ["temperature", "reasoning"],
+    description:
+      "Normalized support facts from Appstrate's pinned LiteLLM catalog snapshot, refined by stricter provider transport declarations. `unknown` keeps temperature forward-compatible, while reasoning levels are selectable only when explicitly supported; it remains distinct from an explicit upstream refusal.",
+    properties: {
+      temperature: { type: "string", enum: ["supported", "unsupported", "unknown"] },
+      reasoning: {
+        type: "object",
+        additionalProperties: false,
+        required: ["supported", "adaptive", "levels"],
+        properties: {
+          supported: { type: "string", enum: ["supported", "unsupported", "unknown"] },
+          temperatureCompatible: {
+            type: "string",
+            enum: ["supported", "unsupported", "unknown"],
+            description:
+              "Optional compatibility fact for combining a custom temperature with active reasoning. Omission means unknown.",
+          },
+          adaptive: { type: ["boolean", "null"] },
+          levels: {
+            type: "object",
+            additionalProperties: {
+              type: "string",
+              enum: ["supported", "unsupported", "unknown"],
+            },
+            propertyNames: {
+              enum: ["off", "minimal", "low", "medium", "high", "xhigh", "max"],
+            },
+          },
+          nativeLevels: {
+            type: "object",
+            description:
+              "Optional provider-native values for portable levels (for example off to none).",
+            additionalProperties: {
+              type: "string",
+              enum: ["none", "minimal", "low", "medium", "high", "xhigh", "max"],
+            },
+            propertyNames: {
+              enum: ["off", "minimal", "low", "medium", "high", "xhigh", "max"],
+            },
+          },
+        },
+      },
+    },
+  },
   User: {
     type: "object",
     // Better-Auth-owned shape: the platform documents the three fields it
@@ -127,6 +194,7 @@ export const schemas = {
     required: [
       "packageId",
       "config",
+      "generationConfig",
       "modelId",
       "proxyId",
       "version_id",
@@ -141,6 +209,9 @@ export const schemas = {
       object: { type: "string", enum: ["application_package"] },
       packageId: { type: "string", description: "Package ID from org catalog" },
       config: { type: "object", description: "Application-specific configuration" },
+      generationConfig: {
+        oneOf: [{ $ref: "#/components/schemas/ModelGenerationSettings" }, { type: "null" }],
+      },
       modelId: { type: ["string", "null"], description: "Model override for this app" },
       proxyId: { type: ["string", "null"], description: "Proxy override for this app" },
       version_id: { type: ["integer", "null"], description: "Pinned version (null = latest)" },
@@ -528,16 +599,47 @@ export const schemas = {
         type: ["string", "null"],
         description: "Primary content file extracted from the version ZIP",
       },
-      source_code: {
-        type: ["string", "null"],
-        description: "Secondary source file content (e.g. .ts), when present",
-      },
       yanked: { type: "boolean", description: "Whether this version has been yanked" },
       yanked_reason: { type: ["string", "null"] },
       integrity: { type: "string", description: "SRI integrity hash (sha256-...)" },
       artifact_size: { type: "integer", description: "Artifact ZIP size in bytes" },
       createdAt: { type: ["string", "null"], format: "date-time" },
       dist_tags: { type: "array", items: { type: "string" } },
+    },
+  },
+  // One real file in a package artifact. The index is FLAT — directories are
+  // not synthesized; a client derives the tree from the `path` values.
+  PackageFileEntry: {
+    type: "object",
+    required: ["path", "size", "media_kind"],
+    properties: {
+      path: {
+        type: "string",
+        description: "Path inside the artifact, relative and normalized (e.g. `skills/a/SKILL.md`)",
+      },
+      size: { type: "integer", description: "Uncompressed size in bytes" },
+      media_kind: {
+        type: "string",
+        enum: ["text", "binary"],
+        description:
+          "`text` when the file decodes as strict UTF-8 (files above the 1 MiB inline ceiling are classified by extension instead, since they can never be previewed).",
+      },
+      inline: {
+        type: "string",
+        description:
+          "Full decoded text, present only for `text` files at most 1 MiB that still fit the response's cumulative inline budget. NEVER truncated: when absent, fetch the file from `GET /api/packages/{scope}/{name}/files/content`.",
+      },
+    },
+  },
+  PackageFileIndex: {
+    type: "object",
+    required: ["entries"],
+    properties: {
+      entries: {
+        type: "array",
+        items: { $ref: "#/components/schemas/PackageFileEntry" },
+        description: "Files in the artifact, sorted by `path`.",
+      },
     },
   },
   Run: {
@@ -567,6 +669,8 @@ export const schemas = {
       "metadata",
       "config",
       "config_override",
+      "generation",
+      "generation_override",
       "started_at",
       "completed_at",
       "duration",
@@ -749,6 +853,14 @@ export const schemas = {
           "Per-run config delta — the raw object the caller sent in the request body. `config` is the resolved (deep-merged) snapshot; `config_override` is the raw delta that the dashboard uses to badge 'default vs override'. Null when the run used persisted defaults verbatim.",
         additionalProperties: true,
       },
+      generation: {
+        oneOf: [{ $ref: "#/components/schemas/ModelGenerationSettings" }, { type: "null" }],
+        description: "Effective generation controls resolved and frozen when the run was created.",
+      },
+      generation_override: {
+        oneOf: [{ $ref: "#/components/schemas/ModelGenerationSettings" }, { type: "null" }],
+        description: "Raw per-invocation generation layer, before agent defaults are applied.",
+      },
       user_name: {
         type: ["string", "null"],
         description:
@@ -929,6 +1041,7 @@ export const schemas = {
       "timezone",
       "input",
       "config_override",
+      "generation_config_override",
       "model_id_override",
       "proxy_id_override",
       "version_override",
@@ -940,6 +1053,9 @@ export const schemas = {
       "updatedAt",
       "actor_name",
       "actor_type",
+      "running_runs",
+      "unread_count",
+      "last_run_number",
     ],
     properties: {
       id: { type: "string" },
@@ -957,6 +1073,9 @@ export const schemas = {
       timezone: { type: ["string", "null"] },
       input: { type: ["object", "null"], additionalProperties: true },
       config_override: { type: ["object", "null"], additionalProperties: true },
+      generation_config_override: {
+        oneOf: [{ $ref: "#/components/schemas/ModelGenerationSettings" }, { type: "null" }],
+      },
       model_id_override: { type: ["string", "null"] },
       proxy_id_override: { type: ["string", "null"] },
       version_override: { type: ["string", "null"] },
@@ -978,6 +1097,22 @@ export const schemas = {
       updatedAt: { type: "string", format: "date-time" },
       actor_name: { type: ["string", "null"], description: "Display name of the schedule actor" },
       actor_type: { type: ["string", "null"], enum: ["user", "end_user", null] },
+      running_runs: {
+        type: "integer",
+        minimum: 0,
+        description: "Runs of this schedule currently pending or running.",
+      },
+      unread_count: {
+        type: "integer",
+        minimum: 0,
+        description:
+          "Runs of this schedule whose notification is unread by the CALLER. Scoped to the requesting actor, like `EnrichedRun.unread`.",
+      },
+      last_run_number: {
+        type: "integer",
+        minimum: 0,
+        description: "Highest run number this schedule ever produced; 0 when it never fired.",
+      },
     },
   },
   ApiKeyInfo: {
@@ -1079,10 +1214,6 @@ export const schemas = {
       name: { type: "string" }, // getPackageDisplayName always returns a string (falls back to id)
       description: { type: ["string", "null"] },
       content: { type: ["string", "null"], description: "Package item content" },
-      source_code: {
-        type: ["string", "null"],
-        description: "Secondary source file content (e.g. .ts for tools)",
-      },
       source: { type: "string", enum: ["system", "local"] },
       created_by: { type: ["string", "null"] },
       auto_installed: { type: "boolean" },
@@ -1173,6 +1304,7 @@ export const schemas = {
       "providerName",
       "baseUrl",
       "modelId",
+      "generation",
       "enabled",
       "is_default",
       "needs_reconnection",
@@ -1209,6 +1341,11 @@ export const schemas = {
       modelId: {
         type: ["string", "null"],
         description: "Upstream model id. `null` for managed models — not exposed.",
+      },
+      generation: {
+        oneOf: [{ $ref: "#/components/schemas/ModelGenerationCapabilities" }, { type: "null" }],
+        description:
+          "Generation controls supported by the backing model. Null for managed aliases whose binding is hidden.",
       },
       input: { type: ["array", "null"], items: { type: "string" } },
       contextWindow: { type: ["integer", "null"] },

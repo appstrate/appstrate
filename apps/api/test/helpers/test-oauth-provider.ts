@@ -146,6 +146,22 @@ export function registerTestOAuthProvider(): void {
       capabilities: ["text"],
       cost: { input: 0, output: 0 },
     },
+    "test-reasoning-model": {
+      label: "Test Reasoning Model",
+      contextWindow: 8192,
+      maxTokens: 4096,
+      capabilities: ["text", "reasoning"],
+      generation: {
+        temperature: "unsupported",
+        reasoning: {
+          supported: "supported",
+          adaptive: true,
+          levels: { xhigh: "supported" },
+          nativeLevels: { xhigh: "max" },
+        },
+      },
+      cost: { input: 0, output: 0 },
+    },
   });
   registered = true;
 }

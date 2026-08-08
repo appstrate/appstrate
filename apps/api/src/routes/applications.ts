@@ -2,6 +2,12 @@
 
 import { Hono } from "hono";
 import { z } from "zod";
+import {
+  ModelGenerationError,
+  modelGenerationSettingsSchema,
+  reconcileModelGenerationSettings,
+  resolveModelGenerationSettings,
+} from "@appstrate/core/model-generation";
 import type { AppEnv } from "../types/index.ts";
 import { logger } from "../lib/logger.ts";
 import { apiKeyAppScopeGuard } from "../middleware/guards.ts";
@@ -30,6 +36,7 @@ import { requirePermission } from "../middleware/require-permission.ts";
 import type { PackageType } from "@appstrate/core/validation";
 import { recordAuditFromContext } from "../services/audit.ts";
 import { SCOPED_PACKAGE_ROUTE } from "./scoped-package-route.ts";
+import { assertExplicitModelExists, resolveModel } from "../services/org-models.ts";
 
 /**
  * Project a Drizzle application row onto the wire shape. The DB column is
@@ -64,6 +71,7 @@ export const installPackageSchema = z.object({
 
 export const updatePackageSchema = z.object({
   config: z.record(z.string(), z.unknown()).optional(),
+  generationConfig: modelGenerationSettingsSchema.nullable().optional(),
   modelId: z.string().nullable().optional(),
   proxyId: z.string().nullable().optional(),
   version_id: z.number().int().nullable().optional(),
@@ -252,14 +260,57 @@ export function createApplicationsRouter() {
       const packageId = `${c.req.param("scope")!}/${c.req.param("name")!}`;
       const data = await readJsonBody(c, updatePackageSchema);
 
-      const { version_id, ...rest } = data;
+      const installed = await getInstalledPackage(scope, packageId);
+      let generationConfig = data.generationConfig;
+      if (installed && (data.modelId !== undefined || generationConfig !== undefined)) {
+        const effectiveModelId = data.modelId !== undefined ? data.modelId : installed.modelId;
+        const explicitModel =
+          data.modelId !== undefined ? await assertExplicitModelExists(orgId, data.modelId) : null;
+        const selectedModel =
+          explicitModel ?? (await resolveModel(orgId, packageId, effectiveModelId));
+
+        if (generationConfig && Object.keys(generationConfig).length > 0) {
+          if (!selectedModel) {
+            throw invalidRequest(
+              "A model must be configured before generation settings can be saved",
+            );
+          }
+          try {
+            generationConfig = resolveModelGenerationSettings({
+              capabilities: selectedModel.generation,
+              override: generationConfig,
+            });
+          } catch (error) {
+            if (error instanceof ModelGenerationError) {
+              throw invalidRequest(error.message, "generationConfig");
+            }
+            throw error;
+          }
+        } else if (
+          generationConfig === undefined &&
+          data.modelId !== undefined &&
+          installed.generationConfig
+        ) {
+          generationConfig = reconcileModelGenerationSettings(
+            installed.generationConfig,
+            selectedModel?.generation,
+          );
+        }
+      }
+
+      const { version_id, generationConfig: _generationConfig, ...rest } = data;
+      void _generationConfig;
       // `requireInstalled` — this route updates an EXISTING association; a
       // packageId that is not installed (or not visible to the org) is a 404,
       // never an implicit install via upsert.
       await updateInstalledPackage(
         scope,
         packageId,
-        { ...rest, versionId: version_id },
+        {
+          ...rest,
+          ...(generationConfig !== undefined ? { generationConfig } : {}),
+          versionId: version_id,
+        },
         { requireInstalled: true },
       );
       const updated = await getInstalledPackage(scope, packageId);

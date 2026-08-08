@@ -38,6 +38,11 @@ import {
 } from "./pi-sdk.ts";
 import { scheduleDeadlineNudges } from "./deadline-nudges.ts";
 import type { ModelApiShape } from "@appstrate/core/sidecar-types";
+import {
+  anthropicReasoningBudgetTokens,
+  type ModelNativeReasoningLevel,
+  type ModelReasoningLevel,
+} from "@appstrate/core/model-generation";
 import { deriveResponseReserveTokens } from "@appstrate/core/token-budget";
 import type { RunEvent, ExecutionContext } from "@appstrate/afps-runtime/types";
 import {
@@ -67,6 +72,79 @@ import {
  * Pi SDK type move.
  */
 export type PiModelConfig = Model<Api>;
+
+/**
+ * Pi treats `xhigh` as unsupported unless a model-level mapping exists and
+ * silently clamps it to `high`. Appstrate's catalog deliberately permits
+ * unknown capabilities so the provider can remain the final authority; add a
+ * pass-through mapping when no explicit model mapping exists so an attempted
+ * xhigh request reaches the provider instead of being silently weakened.
+ */
+export function preserveRequestedThinkingLevel(
+  model: PiModelConfig,
+  level: PiRunnerOptions["thinkingLevel"],
+): PiModelConfig {
+  if (level !== "xhigh" || !model.reasoning || model.thinkingLevelMap?.xhigh !== undefined) {
+    return model;
+  }
+  return {
+    ...model,
+    thinkingLevelMap: { ...model.thinkingLevelMap, xhigh: "xhigh" },
+  };
+}
+
+type PiThinkingLevel = Exclude<ModelReasoningLevel, "max">;
+type PiThinkingBudgetLevel = Exclude<PiThinkingLevel, "off" | "xhigh">;
+type PiThinkingBudgets = Partial<Record<PiThinkingBudgetLevel, number>>;
+
+function prepareAnthropicThinkingBudgets(
+  model: PiModelConfig,
+  level: ModelReasoningLevel,
+): PiThinkingBudgets | undefined {
+  if (model.api !== "anthropic-messages" || level === "off") return undefined;
+  const piLevel: PiThinkingBudgetLevel = level === "xhigh" || level === "max" ? "high" : level;
+  return { [piLevel]: anthropicReasoningBudgetTokens(level) };
+}
+
+/**
+ * Adapt Appstrate's complete LiteLLM vocabulary to Pi's six-level selector.
+ * Pi has no first-class `max` selector, but its `xhigh` slot can map to the
+ * provider-native `max` value. Classic Anthropic requests also receive a
+ * request-scoped token budget because Pi otherwise clamps both levels to its
+ * `high` budget. Models that support both values therefore stay distinct.
+ */
+export function prepareRequestedThinkingLevel(
+  model: PiModelConfig,
+  level: ModelReasoningLevel,
+): {
+  model: PiModelConfig;
+  thinkingLevel: PiThinkingLevel;
+  thinkingBudgets?: PiThinkingBudgets;
+} {
+  const thinkingBudgets = prepareAnthropicThinkingBudgets(model, level);
+  if (level !== "max") {
+    return {
+      model: preserveRequestedThinkingLevel(model, level),
+      thinkingLevel: level,
+      ...(thinkingBudgets ? { thinkingBudgets } : {}),
+    };
+  }
+
+  const levelMap = model.thinkingLevelMap as
+    Partial<Record<ModelReasoningLevel, ModelNativeReasoningLevel | null>> | undefined;
+  const nativeLevel = levelMap?.max ?? "max";
+  return {
+    model: {
+      ...model,
+      thinkingLevelMap: {
+        ...model.thinkingLevelMap,
+        xhigh: nativeLevel,
+      } as PiModelConfig["thinkingLevelMap"],
+    },
+    thinkingLevel: "xhigh",
+    ...(thinkingBudgets ? { thinkingBudgets } : {}),
+  };
+}
 
 export interface PiRunnerOptions {
   /** LLM model configuration passed to the Pi SDK. Required. */
@@ -112,7 +190,9 @@ export interface PiRunnerOptions {
   /** Path where the default auth store persists. Ignored if `authStorage` is set. */
   authStoragePath?: string;
   /** Pi SDK thinking level. Defaults to `"medium"`. */
-  thinkingLevel?: "low" | "medium" | "high";
+  thinkingLevel?: ModelReasoningLevel;
+  /** Provider sampling temperature. Omitted to preserve provider/Pi defaults. */
+  temperature?: number;
   /**
    * Preferred transport for providers that support multiple transports.
    * Providers that do not support this option ignore it. Defaults to `"auto"`.
@@ -405,7 +485,12 @@ export class PiRunner implements Runner {
     const { model, apiKey, systemPrompt, startMessage } = this.opts;
     const cwd = this.opts.cwd ?? process.cwd();
     const agentDir = this.opts.agentDir ?? "/tmp/pi-agent";
-    const thinkingLevel = this.opts.thinkingLevel ?? "medium";
+    const requestedThinkingLevel = this.opts.thinkingLevel ?? "medium";
+    const {
+      model: sessionModel,
+      thinkingLevel,
+      thinkingBudgets,
+    } = prepareRequestedThinkingLevel(model, requestedThinkingLevel);
 
     // Load the heavy Pi SDK value surface here (not at module top) so the
     // ~200ms `@mariozechner/pi-coding-agent` eval stays off the runtime's
@@ -450,12 +535,23 @@ export class PiRunner implements Runner {
     // from the one that sized this session's compaction pass.
     const budget = derivePiCompactionSettings(model, process.env);
 
+    const temperatureExtension: ExtensionFactory[] =
+      this.opts.temperature === undefined
+        ? []
+        : [
+            (pi) => {
+              pi.on("before_provider_request", (event) => {
+                if (!event.payload || typeof event.payload !== "object") return undefined;
+                return { ...event.payload, temperature: this.opts.temperature };
+              });
+            },
+          ];
     const resourceLoader = new DefaultResourceLoader({
       cwd,
       agentDir,
       settingsManager: SettingsManager.inMemory(),
-      extensionFactories: this.opts.extensionFactories ?? [],
-      noExtensions: (this.opts.extensionFactories ?? []).length === 0,
+      extensionFactories: [...(this.opts.extensionFactories ?? []), ...temperatureExtension],
+      noExtensions: (this.opts.extensionFactories ?? []).length + temperatureExtension.length === 0,
       noPromptTemplates: true,
       noThemes: true,
       systemPrompt,
@@ -465,7 +561,7 @@ export class PiRunner implements Runner {
     const { session } = await createAgentSession({
       cwd,
       agentDir,
-      model,
+      model: sessionModel,
       thinkingLevel,
       authStorage,
       modelRegistry,
@@ -473,6 +569,7 @@ export class PiRunner implements Runner {
       sessionManager: SessionManager.inMemory(),
       settingsManager: SettingsManager.inMemory({
         compaction: budget.compaction,
+        thinkingBudgets,
         transport: this.opts.transport ?? "auto",
         // Pi SDK's built-in retry (Retry-After honoring + jitter) covers
         // transient 429/5xx upstream — including OpenAI's mid-stream 5xx

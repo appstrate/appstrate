@@ -35,6 +35,7 @@ import { createUploadsRouter, createUploadContentRouter } from "./routes/uploads
 import { createDocumentsRouter, createDocumentPreviewRouter } from "./routes/documents.ts";
 import { createAdminStorageDeletionRouter } from "./routes/admin-storage-deletion.ts";
 import { createSpaFallbackHandler } from "./routes/spa.ts";
+import { staticCacheControl } from "./lib/static-cache.ts";
 import healthRouter, { bootGate, markServerReady } from "./routes/health.ts";
 import { createIntegrationsRouter } from "./routes/integrations.ts";
 import { createCredentialProxyRouter } from "./routes/credential-proxy.ts";
@@ -398,12 +399,19 @@ app.all("/api/*", (c) => {
   throw notFound(`API endpoint not found: ${c.req.method} ${pathname}`);
 });
 
-// Static files for UI (JS, CSS, images, fonts — skip index.html, served with config below)
+// Static files for UI (JS, CSS, images, fonts — skip index.html, served with config below).
+// `onFound` attaches the caching policy: Hono's static middleware emits no
+// `Cache-Control` and no validator of its own, so without it every asset is
+// re-downloaded in full on every visit (there is nothing to revalidate against,
+// so no `304` either). Policy + rationale: `lib/static-cache.ts`.
 app.use(
   "/*",
   serveStatic({
     root: "./apps/web/dist",
     rewriteRequestPath: (path) => (path === "/" || path === "/index.html" ? "/.noop" : path),
+    onFound: (path, c) => {
+      c.header("Cache-Control", staticCacheControl(path));
+    },
   }),
 );
 
@@ -435,8 +443,8 @@ logger.info("Server listening (starting up)", { port: env.PORT });
 // missing durable recovery channel can lose billable spend permanently.
 const bootStartedAt = Date.now();
 void bootBackground()
-  .then(() => {
-    markServerReady();
+  .then(({ agentsHealthy }) => {
+    markServerReady({ agentsHealthy });
     logger.info("Server ready", { port: env.PORT, startupMs: Date.now() - bootStartedAt });
     // Fire-and-forget reachability probe for USERCONTENT_URL (issue #1001).
     // Never awaited, never fatal; runs after readiness so it can't race the

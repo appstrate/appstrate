@@ -370,6 +370,236 @@ export const packagesPaths = {
       },
     },
   },
+  "/api/packages/{scope}/{name}/files": {
+    get: {
+      operationId: "listPackageFiles",
+      tags: ["Packages"],
+      summary: "List the files in a package artifact",
+      description:
+        "Flat index of every file in the package artifact — one entry per real file, sorted by `path`; " +
+        "directories are not synthesized. Text files up to 1 MiB carry their full content in `inline` " +
+        "while the response's cumulative inline budget lasts; `inline` is never a truncated prefix, so an " +
+        "entry without it must be fetched from `GET /api/packages/{scope}/{name}/files/content`. " +
+        "Read-only. Rate-limited to 50 requests/minute.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
+        {
+          name: "version",
+          in: "query",
+          required: false,
+          schema: { type: "string" },
+          description:
+            "Which snapshot to read: omitted (or `draft`) reads the live draft, where the stored artifact is overlaid with the authoritative `manifest.json` / primary content from the database. Any other value is resolved as a version spec (exact version, dist-tag, or semver range) and returns exactly the published bytes, with no overlay.",
+        },
+        {
+          name: "If-None-Match",
+          in: "header",
+          required: false,
+          description: "Entity-tag of a cached copy. A match yields `304 Not Modified`.",
+          schema: { type: "string" },
+        },
+      ],
+      responses: {
+        "200": {
+          description: "File index",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+            ETag: {
+              description:
+                'Strong entity-tag of this index representation (`"i-…"`), derived from the version artifact\'s integrity hash or from a content digest of the overlaid draft. It never matches a `files/content` tag.',
+              schema: { type: "string" },
+            },
+            "Cache-Control": {
+              description:
+                "Always `private, no-cache`, for every selector — draft, exact version pin, dist-tag, semver range, yanked. Always `private`: the response is tenant-scoped. Never a fresh window and never `immutable`: this index is RBAC-gated, and a copy the browser may serve without contacting the server would outlive a revoked `<type>:read`, an org removal, or the package being uninstalled from the application. `no-cache` still permits the `304` round-trip, which a version pin answers from a single database read.",
+              schema: { type: "string" },
+            },
+            Vary: {
+              description:
+                "Always `X-Org-Id, X-Application-Id` — access depends on both, so a cache must not reuse this body across organizations or applications.",
+              schema: { type: "string" },
+            },
+            "X-Yanked": {
+              description: "Present and set to `true` when the resolved version is yanked.",
+              schema: { type: "string" },
+            },
+          },
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/PackageFileIndex" },
+            },
+          },
+        },
+        "304": {
+          description: "Cached copy is still current (`If-None-Match` matched). No body.",
+          headers: {
+            ETag: {
+              description: "Strong entity-tag of this index representation.",
+              schema: { type: "string" },
+            },
+            "Cache-Control": {
+              description: "Always `private, no-cache`, as on the `200`.",
+              schema: { type: "string" },
+            },
+            Vary: {
+              description: "Always `X-Org-Id, X-Application-Id`, as on the `200`.",
+              schema: { type: "string" },
+            },
+            "X-Yanked": {
+              description: "Present and set to `true` when the resolved version is yanked.",
+              schema: { type: "string" },
+            },
+          },
+        },
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+        "422": { $ref: "#/components/responses/PackageArchiveUnreadable" },
+        "429": { $ref: "#/components/responses/RateLimited" },
+        "500": {
+          description:
+            "The artifact could not be read: integrity/signature verification failed (`INTEGRITY_MISMATCH`), or the stored bytes are not a readable ZIP. RFC 9457 problem+json.",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
+      },
+    },
+  },
+  "/api/packages/{scope}/{name}/files/content": {
+    get: {
+      operationId: "getPackageFileContent",
+      tags: ["Packages"],
+      summary: "Download one file from a package artifact",
+      description:
+        "Raw bytes of a single file from the package artifact — the fetch path for both preview and " +
+        "download. Always served as `application/octet-stream` with `nosniff` and `attachment`: package " +
+        "bytes are author-controlled and must never be rendered or executed in the platform origin. " +
+        "`path` must match an entry returned by `GET /api/packages/{scope}/{name}/files` exactly; " +
+        "anything else is a `404`. Read-only. Rate-limited to 50 requests/minute.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
+        {
+          name: "path",
+          in: "query",
+          required: true,
+          schema: { type: "string" },
+          description: "Exact `path` of an entry from the file index.",
+        },
+        {
+          name: "version",
+          in: "query",
+          required: false,
+          schema: { type: "string" },
+          description:
+            "Which snapshot to read from — same resolution as the file index: omitted (or `draft`) reads the live draft with the database overlay, any other value is an exact version, dist-tag, or semver range.",
+        },
+        {
+          name: "If-None-Match",
+          in: "header",
+          required: false,
+          description: "Entity-tag of a cached copy. A match yields `304 Not Modified`.",
+          schema: { type: "string" },
+        },
+      ],
+      responses: {
+        "200": {
+          description: "Raw file bytes",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+            ETag: {
+              description:
+                'Strong entity-tag of THIS FILE (`"f-…"`), folding in both the snapshot identity and the `path`. Per RFC 9110 §8.8.1 it identifies one representation: a tag obtained for another `path`, or from the file index, will not match.',
+              schema: { type: "string" },
+            },
+            "Cache-Control": {
+              description:
+                "Always `private, no-cache`, for every selector — draft, exact version pin, dist-tag, semver range, yanked. Never a fresh window and never `immutable`: these bytes are RBAC-gated, and a copy the browser may serve without contacting the server would outlive a revoked `<type>:read`, an org removal, or the package being uninstalled from the application.",
+              schema: { type: "string" },
+            },
+            Vary: {
+              description:
+                "Always `X-Org-Id, X-Application-Id` — access depends on both, so a cache must not reuse these bytes across organizations or applications.",
+              schema: { type: "string" },
+            },
+            "X-Yanked": {
+              description: "Present and set to `true` when the resolved version is yanked.",
+              schema: { type: "string" },
+            },
+            "Content-Disposition": {
+              description: "`attachment` with the file's sanitized base name.",
+              schema: { type: "string" },
+            },
+            "X-Content-Type-Options": {
+              description: "Always `nosniff`.",
+              schema: { type: "string" },
+            },
+            "Referrer-Policy": {
+              description: "Always `no-referrer`.",
+              schema: { type: "string" },
+            },
+            "Cross-Origin-Resource-Policy": {
+              description: "Always `same-origin`.",
+              schema: { type: "string" },
+            },
+          },
+          content: {
+            "application/octet-stream": {
+              schema: { type: "string", format: "binary" },
+            },
+          },
+        },
+        "304": {
+          description:
+            "Cached copy of THIS file is still current (`If-None-Match` matched its per-file tag). No body. A bare `If-None-Match: *` is deliberately NOT honoured before the artifact is read — it carries no path, so it cannot establish that the file exists.",
+          headers: {
+            ETag: {
+              description: "Strong entity-tag of this file representation.",
+              schema: { type: "string" },
+            },
+            "Cache-Control": {
+              description: "Always `private, no-cache`, as on the `200`.",
+              schema: { type: "string" },
+            },
+            Vary: {
+              description: "Always `X-Org-Id, X-Application-Id`, as on the `200`.",
+              schema: { type: "string" },
+            },
+            "X-Yanked": {
+              description: "Present and set to `true` when the resolved version is yanked.",
+              schema: { type: "string" },
+            },
+          },
+        },
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+        "422": { $ref: "#/components/responses/PackageArchiveUnreadable" },
+        "429": { $ref: "#/components/responses/RateLimited" },
+        "500": {
+          description:
+            "The artifact could not be read: integrity/signature verification failed (`INTEGRITY_MISMATCH`), or the stored bytes are not a readable ZIP. RFC 9457 problem+json.",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
+      },
+    },
+  },
   "/api/packages/{scope}/{name}/{version}/download": {
     get: {
       operationId: "downloadPackageVersion",
@@ -414,6 +644,7 @@ export const packagesPaths = {
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
         "429": { $ref: "#/components/responses/RateLimited" },
         "500": {
@@ -484,6 +715,7 @@ export const packagesPaths = {
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
       },
     },
     post: {
@@ -513,7 +745,6 @@ export const packagesPaths = {
                   type: "string",
                   description: "SKILL.md content (markdown with YAML frontmatter).",
                 },
-                source_code: { type: "string", description: "Optional source code payload." },
               },
             },
           },
@@ -572,6 +803,7 @@ export const packagesPaths = {
         },
         "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
       },
     },
@@ -611,6 +843,7 @@ export const packagesPaths = {
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
       },
     },
@@ -751,6 +984,7 @@ export const packagesPaths = {
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
       },
     },
@@ -806,6 +1040,7 @@ export const packagesPaths = {
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
       },
     },
@@ -932,6 +1167,7 @@ export const packagesPaths = {
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
       },
     },
     post: {
@@ -1012,6 +1248,7 @@ export const packagesPaths = {
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
       },
     },
@@ -1134,6 +1371,7 @@ export const packagesPaths = {
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
       },
     },
@@ -1173,6 +1411,7 @@ export const packagesPaths = {
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
       },
     },
@@ -1300,6 +1539,7 @@ export const packagesPaths = {
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
       },
     },
@@ -1406,6 +1646,23 @@ export const packagesPaths = {
         },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
+        // Same CONDITION as `#/components/responses/PackageArchiveUnreadable`,
+        // deliberately NOT `$ref`-ed: the shared component tells the caller to
+        // republish the package, which is impossible here (a fork's source is
+        // always a package the calling org does not own), and it cannot state
+        // that nothing was written. Both facts are specific to this boundary.
+        "422": {
+          description:
+            "The SOURCE package's published artifact expands past the platform's decompression ceiling and was refused (`package_archive_unreadable`). Nothing was written: the fork is rejected while reading the source, before the name-collision check and before any package or version row is created, so there is no partial copy to clean up. A fork always targets a package the calling organization does NOT own, so the caller cannot repair the source — report it to whoever publishes it (or to the platform operator if it is a system package). RFC 9457 problem+json.",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+          },
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
       },
     },
   },
@@ -1442,6 +1699,7 @@ export const packagesPaths = {
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
       },
     },
@@ -1570,6 +1828,7 @@ export const packagesPaths = {
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
       },
     },
@@ -1713,6 +1972,7 @@ export const packagesPaths = {
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
       },
     },
     post: {
@@ -1742,10 +2002,6 @@ export const packagesPaths = {
                 content: {
                   type: "string",
                   description: "Primary package file content (manifest document).",
-                },
-                source_code: {
-                  type: "string",
-                  description: "Optional source code payload for the integration runner.",
                 },
               },
             },
@@ -1805,6 +2061,7 @@ export const packagesPaths = {
         },
         "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
       },
     },
@@ -1844,6 +2101,7 @@ export const packagesPaths = {
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
       },
     },
@@ -1984,6 +2242,7 @@ export const packagesPaths = {
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
       },
     },
@@ -2039,6 +2298,7 @@ export const packagesPaths = {
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
       },
     },
@@ -2060,7 +2320,7 @@ export const packagesPaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["manifest", "content", "lock_version"],
+              required: ["manifest", "lock_version"],
               properties: {
                 manifest: {
                   type: "object",
@@ -2158,6 +2418,7 @@ export const packagesPaths = {
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
       },
     },
@@ -2184,7 +2445,7 @@ export const packagesPaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["manifest", "content", "lock_version"],
+              required: ["manifest", "lock_version"],
               properties: {
                 manifest: {
                   type: "object",
@@ -2297,6 +2558,7 @@ export const packagesPaths = {
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
       },
     },
     post: {
@@ -2312,7 +2574,7 @@ export const packagesPaths = {
       requestBody: {
         required: true,
         description:
-          "Upload a package ZIP (`multipart/form-data` with a `.afps`/`.zip` file — the package ID is derived from the file name, and the archive must contain a valid `manifest.json`), or post a JSON body carrying the manifest. Parsed by `parsePackageUpload`.",
+          "Upload a self-contained package archive (`multipart/form-data` with a `.afps`/`.zip` file). The package ID is derived from the file name. The archive must contain a valid `manifest.json` and the file referenced by `server.entry_point`; JSON manifest-only creation is refused with `415 archive_required`.",
         content: {
           "multipart/form-data": {
             schema: {
@@ -2324,30 +2586,6 @@ export const packagesPaths = {
                   format: "binary",
                   description:
                     "Package archive (`.afps` or `.zip`) containing a valid `manifest.json`. File name (sans extension) is the kebab-case package id.",
-                },
-              },
-            },
-          },
-          "application/json": {
-            schema: {
-              type: "object",
-              required: ["id", "content", "manifest"],
-              properties: {
-                id: { type: "string", description: "Kebab-case package id." },
-                content: { type: "string", description: "Primary package file content." },
-                name: {
-                  type: "string",
-                  description: "Display name. Auto-extracted from the manifest if omitted.",
-                },
-                description: {
-                  type: "string",
-                  description: "Package description. Auto-extracted from the manifest if omitted.",
-                },
-                manifest: {
-                  type: "object",
-                  additionalProperties: true,
-                  description:
-                    "Manifest object, validated against the AFPS mcp-server schema and stored as-is.",
                 },
               },
             },
@@ -2370,6 +2608,7 @@ export const packagesPaths = {
         "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" },
       },
     },
   },
@@ -2407,6 +2646,7 @@ export const packagesPaths = {
         },
         "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
       },
     },
@@ -2446,6 +2686,7 @@ export const packagesPaths = {
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
       },
     },
@@ -2586,6 +2827,7 @@ export const packagesPaths = {
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
       },
     },
@@ -2641,6 +2883,7 @@ export const packagesPaths = {
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
       },
     },
@@ -2760,6 +3003,7 @@ export const packagesPaths = {
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
       },
     },

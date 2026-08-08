@@ -7,8 +7,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [6.2.0] — 2026-08-07
+
+Additive release. Four export subpaths landed in `packages/core/src` after
+`6.1.0` without a version bump — `./package-files`, `./mcp-server-meta`,
+`./model-generation` and `./url`. The code is on `main`, but npm's `6.1.0`
+tarball does not carry them, so none of the four can resolve for a consumer
+that installs core from the registry, whatever range it declares. No export
+was removed, so a **minor**.
+
 ### Added
 
+- **`@appstrate/core/package-files`** — `PACKAGE_FILE_INLINE_MAX_BYTES`, the
+  inclusive size ceiling above which the file explorer neither inlines a file
+  server-side nor previews it client-side, and `PACKAGE_CONTENT_ENTRY`, the
+  archive entry holding each package type's primary content: its `path`
+  (`prompt.md`, `SKILL.md`, `INTEGRATION.md`, and `null` for `mcp-server`,
+  whose content _is_ its manifest) together with whether that entry is
+  `required`. `PACKAGE_CONTENT_FILE` is the name-only projection of the same
+  table, derived rather than declared, so the two cannot drift; readers that
+  need only the filename keep using it unchanged. These facts previously had
+  independent declarations kept in manual lockstep, where a drift would either
+  erase a real file or invent one the package does not ship. Free of value
+  imports by design — the SPA bundles it.
+- **`@appstrate/core/mcp-server-meta`** — `MCP_SERVER_APPSTRATE_META_KEY`,
+  `MCP_SERVER_RUNTIME_CAPABILITIES`, `MCP_SERVER_RUNTIMES`,
+  `isMcpServerRuntime()`, `getMcpServerRuntime()` and the `McpServerRuntime`
+  type. All of them are re-exported from `@appstrate/core/mcp-server`, so
+  backend callers are unaffected and each fact is still declared exactly once.
+  The split exists for bundlers: `./mcp-server` pulls in `@afps-spec/schema`,
+  which constructs an Ajv instance at module scope and ships no
+  `sideEffects: false`, costing the SPA 65 kB gzipped for what is only a
+  runtime label.
+- **`@appstrate/core/model-generation`** — temperature and reasoning settings
+  as a shared contract: `modelGenerationSettingsSchema`,
+  `modelGenerationCapabilitiesSchema`, `resolveModelGenerationSettings()`,
+  `reconcileModelGenerationSettings()`,
+  `applyModelGenerationCapabilitiesOverride()`,
+  `toNativeModelReasoningLevel()`, `anthropicReasoningBudgetTokens()`,
+  `ModelGenerationError` and the `MODEL_REASONING_LEVELS` catalog. Capability
+  support is tri-state (`supported | unsupported | unknown`) so a model whose
+  support cannot be established is not reported as unsupported.
+- **`@appstrate/core/url`** — `normalizeHttpUrl()`, which parses an absolute
+  URL and returns its WHATWG-normalized href when the protocol is `http:` or
+  `https:`, and `null` otherwise. It settles URL syntax and the protocol
+  allowlist and nothing else: it is deliberately NOT an origin-trust or SSRF
+  decision, and a caller with either requirement must still apply its own
+  policy on top.
 - `publish_document.presentation: "primary"` — lets an agent explicitly select
   the run's featured deliverable after writing its final bytes. The published
   document and `document.published` event carry the selected presentation. The
@@ -23,6 +68,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `@appstrate/core/run-and-wait-client` — inline `run_and_wait` accepts a
+  partial canonical AFPS manifest. It derives `name` from `display_name` and
+  fills omitted boilerplate, runtime tools, and an open output schema. The
+  materialization is deliberately shallow: every supplied top-level field is
+  preserved exactly, including nested deterministic schemas and
+  `runtime_tools: []`; no runtime capability is injected into an explicit
+  selection.
+
 - `@appstrate/core/run-and-wait-client` — `launchRunAndWait` forwards the new
   `connection_overrides` argument on BOTH kinds (`agent` and `inline`), and
   refuses it pre-dispatch whenever it is present but is not a plain object
@@ -35,8 +88,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `publish_document` now carries the complete conditional primary-selection rule in its shared
   tool descriptor, so named agents and inline runs receive identical guidance whenever the
-  capability is available. `run_and_wait` still equips inline manifests idempotently, but no
-  longer rewrites their prompts with a second copy of that policy.
+  capability is available. `run_and_wait` no longer rewrites prompts with a second copy of that
+  policy.
 
 - `@appstrate/core/run-and-wait-client` — `fetchRunDocuments` now returns only
   the documents the run itself produced. `GET /api/documents?run_id=…` answers

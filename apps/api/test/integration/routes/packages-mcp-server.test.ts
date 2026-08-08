@@ -20,12 +20,8 @@
  *   3. GET   — the server detail is fetchable by scope/name.
  *   4. Auth boundary on list + get.
  *   5. CREATE (`POST /api/packages/mcp-servers`) — the manifest gate of issue
- *      #987. This is the only route family reaching `parsePackageUpload`
- *      (`jsonBodyCreate: false`), which used to let a manifest through
- *      unvalidated (absent / malformed `manifest.json`, absent JSON-body
- *      `manifest`) and then let `createOrgItem` rewrite `type` after
- *      validation — both landing a manifest no AFPS schema accepts in the
- *      IMMUTABLE `package_versions.manifest` row.
+ *      #987. This route family requires a real multipart archive and validates
+ *      both its manifest and declared executable entrypoint before persistence.
  *   6. UPDATE (`PUT`) — the author/stored direction asymmetry that gate rests on.
  */
 
@@ -77,6 +73,17 @@ describe("mcp-server package routes", () => {
     await truncateAll();
     ctx = await createTestContext({ orgSlug: "pkgorg" });
   });
+
+  async function importExecutableServer(): Promise<void> {
+    const form = new FormData();
+    form.append("file", new Blob([buildMcpServerAfps(SERVER_ID)]), "server.afps");
+    const res = await app.request("/api/packages/import", {
+      method: "POST",
+      body: form,
+      headers: authHeaders(ctx),
+    });
+    expect(res.status).toBe(201);
+  }
 
   describe("POST /api/packages/import — mcp-server", () => {
     it("imports an mcp-server .afps: creates the package row (type mcp-server) + a version", async () => {
@@ -164,15 +171,7 @@ describe("mcp-server package routes", () => {
     });
 
     it("lists an installed mcp-server", async () => {
-      await seedPackage({
-        id: SERVER_ID,
-        orgId: ctx.orgId,
-        type: "mcp-server",
-        createdBy: ctx.user.id,
-        draftManifest: mcpServerManifest({ name: SERVER_ID, version: "1.0.0" }),
-        draftContent: JSON.stringify(mcpServerManifest({ name: SERVER_ID, version: "1.0.0" })),
-      });
-      await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, SERVER_ID);
+      await importExecutableServer();
 
       const res = await app.request("/api/packages/mcp-servers", { headers: authHeaders(ctx) });
       expect(res.status).toBe(200);
@@ -189,15 +188,7 @@ describe("mcp-server package routes", () => {
 
   describe("GET /api/packages/mcp-servers/:scope/:name", () => {
     it("returns the mcp-server detail", async () => {
-      await seedPackage({
-        id: SERVER_ID,
-        orgId: ctx.orgId,
-        type: "mcp-server",
-        createdBy: ctx.user.id,
-        draftManifest: mcpServerManifest({ name: SERVER_ID, version: "1.0.0" }),
-        draftContent: JSON.stringify(mcpServerManifest({ name: SERVER_ID, version: "1.0.0" })),
-      });
-      await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, SERVER_ID);
+      await importExecutableServer();
 
       const res = await app.request(`/api/packages/mcp-servers/${SERVER_ID}`, {
         headers: authHeaders(ctx),
@@ -236,6 +227,61 @@ describe("mcp-server package routes", () => {
     });
   });
 
+  describe("mcp-server install readiness", () => {
+    it("refuses a historical draft with no executable published archive", async () => {
+      await seedPackage({
+        id: SERVER_ID,
+        orgId: ctx.orgId,
+        type: "mcp-server",
+        createdBy: ctx.user.id,
+        draftManifest: mcpServerManifest({ name: SERVER_ID, version: "1.0.0" }),
+      });
+
+      await expect(
+        installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, SERVER_ID),
+      ).rejects.toMatchObject({ status: 422, code: "bundle_invalid" });
+    });
+
+    it("refuses to publish a draft whose new entry point is absent from stored files", async () => {
+      await importExecutableServer();
+      const [row] = await db
+        .select({ lockVersion: packages.lockVersion })
+        .from(packages)
+        .where(eq(packages.id, SERVER_ID))
+        .limit(1);
+      const manifest = mcpServerManifest({
+        name: SERVER_ID,
+        version: "1.1.0",
+        entryPoint: "missing.js",
+      });
+      const update = await app.request(`/api/packages/mcp-servers/${SERVER_ID}`, {
+        method: "PUT",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ manifest, lock_version: row!.lockVersion }),
+      });
+      expect(update.status).toBe(200);
+
+      const publish = await app.request(`/api/packages/mcp-servers/${SERVER_ID}/versions`, {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({}),
+      });
+      expect(publish.status).toBe(400);
+      const body = (await publish.json()) as { code: string; detail: string; param?: string };
+      expect(body).toMatchObject({
+        code: "invalid_request",
+        param: "manifest.server.entry_point",
+      });
+      expect(body.detail).toContain("missing.js");
+
+      const versions = await db
+        .select({ version: packageVersions.version })
+        .from(packageVersions)
+        .where(eq(packageVersions.packageId, SERVER_ID));
+      expect(versions.map((version) => version.version)).toEqual(["1.0.0"]);
+    });
+  });
+
   // ═══════════════════════════════════════════════
   // Issue #987 — `POST /api/packages/mcp-servers` is the ONLY create route
   // reaching `parsePackageUpload` (`jsonBodyCreate: false`). Three doors used
@@ -243,7 +289,7 @@ describe("mcp-server package routes", () => {
   // `package_versions.manifest` row:
   //   - a ZIP with no `manifest.json`      → parsed as `undefined`
   //   - a ZIP with malformed `manifest.json` → parsed as `undefined`
-  //   - a JSON body with no `manifest`     → optional in the Zod schema
+  //   - a JSON body with no archive        → accepted without executable bytes
   // …after which `validateManifest` was skipped (`if (parsed.manifest)`) and
   // `createOrgItem` synthesized a `{version, name, $schema, type}` stub. A
   // fourth door needed no absence at all: a VALID manifest of another type
@@ -432,31 +478,7 @@ describe("mcp-server package routes", () => {
 
     // ── JSON body ──────────────────────────────────
 
-    it("rejects a JSON body with no manifest", async () => {
-      const res = await postJson({ id: SLUG, content: "{}" });
-
-      expect(res.status).toBe(400);
-      const body = (await res.json()) as {
-        code: string;
-        errors?: { field: string }[];
-      };
-      expect(body.code).toBe("validation_failed");
-      expect(body.errors?.map((e) => e.field)).toContain("manifest");
-      await expectNothingPersisted();
-    });
-
-    it("rejects a JSON body carrying a VALID manifest of another type", async () => {
-      const manifest = validSkillManifest();
-      const res = await postJson({ id: SLUG, content: JSON.stringify(manifest), manifest });
-
-      expect(res.status).toBe(400);
-      const body = (await res.json()) as { code: string; errors?: { field: string }[] };
-      expect(body.code).toBe("validation_failed");
-      expect(body.errors?.map((e) => e.field)).toContain("manifest.type");
-      await expectNothingPersisted();
-    });
-
-    it("accepts a valid JSON body and stores a schema-valid manifest in the version row", async () => {
+    it("rejects every JSON manifest-only create with archive_required", async () => {
       const manifest = validManifest();
       const res = await postJson({
         id: SLUG,
@@ -464,10 +486,39 @@ describe("mcp-server package routes", () => {
         manifest,
       });
 
-      expect(res.status).toBe(201);
-      const body = (await res.json()) as { id: string };
-      expect(body.id).toBe(GATE_ID);
-      await expectStoredManifestsAreSchemaValid(GATE_ID);
+      expect(res.status).toBe(415);
+      const body = (await res.json()) as { code: string };
+      expect(body.code).toBe("archive_required");
+      await expectNothingPersisted();
+    });
+
+    it("rejects a schema-valid archive whose declared entry point is absent", async () => {
+      const res = await postZip({
+        "manifest.json": JSON.stringify(validManifest(), null, 2),
+        "not-main.js": "// wrong payload\n",
+      });
+
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { code: string; detail: string; param?: string };
+      expect(body.code).toBe("invalid_request");
+      expect(body.param).toBe("file");
+      expect(body.detail).toContain("main.js");
+      await expectNothingPersisted();
+    });
+
+    it("rejects an archive whose manifest identity differs from the upload name", async () => {
+      const manifest = validManifest();
+      manifest.name = "@pkgorg/another-server";
+      const res = await postZip({
+        "manifest.json": JSON.stringify(manifest, null, 2),
+        "main.js": "// server\n",
+      });
+
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { code: string; param?: string };
+      expect(body.code).toBe("invalid_request");
+      expect(body.param).toBe("manifest.name");
+      await expectNothingPersisted();
     });
   });
 

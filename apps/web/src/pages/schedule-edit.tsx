@@ -54,6 +54,7 @@ export function ScheduleEditPage() {
           input: schedule.input ?? {},
           config_override: schedule.config_override ?? null,
           model_id_override: schedule.model_id_override ?? null,
+          generation_config_override: schedule.generation_config_override ?? null,
           proxy_id_override: schedule.proxy_id_override ?? null,
           version_override: schedule.version_override ?? null,
           connection_overrides: schedule.connection_overrides ?? null,
@@ -73,6 +74,7 @@ export function ScheduleEditPage() {
         configSchema={deps?.configSchema}
         persistedConfig={deps?.persistedConfig ?? {}}
         persistedModelId={deps?.persistedModelId ?? null}
+        persistedGenerationConfig={deps?.persistedGenerationConfig ?? null}
         persistedProxyId={deps?.persistedProxyId ?? null}
         persistedVersion={deps?.persistedVersion ?? null}
         packageId={schedule.packageId}

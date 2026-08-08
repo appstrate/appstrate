@@ -74,12 +74,18 @@ import {
 } from "./run-workspace-storage.ts";
 import { assignWorkspaceNames } from "./run-document-naming.ts";
 import { getEnv } from "@appstrate/env";
+import {
+  modelGenerationSettingsSchema,
+  type ModelGenerationSettings,
+} from "@appstrate/core/model-generation";
 
 export interface ParsedInput {
   input?: Record<string, unknown>;
   uploadedFiles?: FileReference[];
   /** Per-run model override (wire field `modelId` on the request body). */
   modelIdOverride?: string;
+  /** Per-run sampling/reasoning override. */
+  generationConfigOverride?: ModelGenerationSettings;
   /** Per-run proxy override (wire field `proxyId` on the request body). */
   proxyIdOverride?: string;
   /**
@@ -143,6 +149,7 @@ interface RunRequestBody {
    */
   rerun_from?: string;
   modelId?: string;
+  generation?: ModelGenerationSettings;
   proxyId?: string;
   config?: Record<string, unknown>;
   connection_overrides?: Record<string, string>;
@@ -874,21 +881,30 @@ export async function parseRequestInput(
         // documents bucket into the run workspace (same path as uploads — the
         // runtime is unchanged). No re-materialization: the document already
         // exists and its bytes were validated when it was created.
-        const documentFiles: FileReference[] = [];
-        for (let j = 0; j < resolvedDocs.length; j++) {
-          const { ref, doc } = resolvedDocs[j]!;
-          const docName = documentWorkspaceNames[j]!;
-          const src = await streamDocumentContent(doc.storageKey);
-          if (!src) throw notFound(`Document '${doc.id}' content is missing`);
-          await streamRunDocument(runId, docName, src);
-          documentFiles.push({
-            fieldName: ref.fieldName,
-            name: doc.name,
-            workspaceName: docName,
-            type: doc.mime,
-            size: doc.size,
-          });
-        }
+        //
+        // Same bounded concurrency as the upload pass above, and for the same
+        // reason: each copy is store-bound, so a sequential loop paid the full
+        // round-trip once per referenced document while the memory floor stayed
+        // flat either way. `mapWithConcurrency` preserves input order in its
+        // result and aborts the remaining items on the first failure, so the
+        // rollback path below is unchanged.
+        const documentFiles: FileReference[] = await mapWithConcurrency(
+          resolvedDocs,
+          DOC_STREAM_CONCURRENCY,
+          async ({ ref, doc }, j) => {
+            const docName = documentWorkspaceNames[j]!;
+            const src = await streamDocumentContent(doc.storageKey);
+            if (!src) throw notFound(`Document '${doc.id}' content is missing`);
+            await streamRunDocument(runId, docName, src);
+            return {
+              fieldName: ref.fieldName,
+              name: doc.name,
+              workspaceName: docName,
+              type: doc.mime,
+              size: doc.size,
+            };
+          },
+        );
 
         // Strip the inline payloads from the input now that the bytes live in
         // the run workspace — the persisted run input (run record, prompt
@@ -1015,6 +1031,18 @@ export async function parseRequestInput(
       ? body.dependency_overrides
       : undefined;
 
+  const generationResult = modelGenerationSettingsSchema.safeParse(body.generation ?? {});
+  if (!generationResult.success) {
+    throw invalidRequest(
+      `Invalid generation settings: ${generationResult.error.issues[0]?.message ?? "validation failed"}`,
+      "generation",
+    );
+  }
+  const generationConfigOverride =
+    body.generation !== undefined && Object.keys(generationResult.data).length > 0
+      ? generationResult.data
+      : undefined;
+
   // An effectively-empty input (no fields, no files) carries no information —
   // collapse it to `undefined` so it persists as SQL NULL on `runs.input`,
   // keeping every trigger origin (agent route, inline run, schedule) on one
@@ -1032,6 +1060,7 @@ export async function parseRequestInput(
     pendingDocuments: pendingDocuments.length > 0 ? pendingDocuments : undefined,
     consumedDocumentIds: consumedDocumentIds.length > 0 ? consumedDocumentIds : undefined,
     modelIdOverride: body.modelId,
+    generationConfigOverride,
     proxyIdOverride: body.proxyId,
     configOverride: body.config,
     connectionOverrides: body.connection_overrides,

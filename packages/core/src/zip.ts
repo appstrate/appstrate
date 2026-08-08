@@ -21,6 +21,7 @@ import {
   DecompressionLimitError,
   type BoundedUnzipLimits,
 } from "@appstrate/afps-shared/unzip-bounded";
+import { PACKAGE_CONTENT_FILE } from "./package-files.ts";
 
 export type { Zippable };
 export { unzipBounded, DecompressionLimitError };
@@ -248,7 +249,20 @@ export class PackageZipError extends Error {
   }
 }
 
-const DEFAULT_MAX_SIZE = 10 * 1024 * 1024; // 10 MB
+/** Canonical compressed-size ceiling for one author-supplied package archive. */
+export const PACKAGE_ZIP_MAX_COMPRESSED_BYTES = 10 * 1024 * 1024; // 10 MB
+
+/**
+ * Canonical DECOMPRESSED ceiling for one package archive — the amplification
+ * budget that pairs with {@link PACKAGE_ZIP_MAX_COMPRESSED_BYTES}.
+ *
+ * Exported because the ceiling must be the SAME number on the way in and on the
+ * way back out. It used to be a function-local constant in `parsePackageZip`,
+ * so every path that re-read a stored artifact silently inherited
+ * `unzipArtifact`'s far looser 200 MB default and re-opened the amplification
+ * the import gate had just closed. One name, one value, both boundaries.
+ */
+export const PACKAGE_ZIP_MAX_DECOMPRESSED_BYTES = 50 * 1024 * 1024; // 50 MB
 
 /** Options for {@link parsePackageZip}. */
 export interface ParsePackageZipOptions {
@@ -293,7 +307,7 @@ export function parsePackageZip(
     typeof options === "number"
       ? { maxSize: options } // canonical-casing-exempt
       : (options ?? {});
-  const limit = opts.maxSize ?? DEFAULT_MAX_SIZE;
+  const limit = opts.maxSize ?? PACKAGE_ZIP_MAX_COMPRESSED_BYTES;
   if (zipBuffer.length > limit) {
     throw new PackageZipError(
       "FILE_TOO_LARGE",
@@ -303,10 +317,11 @@ export function parsePackageZip(
 
   // Zip bomb protection is now enforced DURING decompression (streaming budget)
   // rather than after full materialization — a bomb aborts mid-inflate.
-  const MAX_DECOMPRESSED = 50 * 1024 * 1024; // 50 MB
   let files: Record<string, Uint8Array>;
   try {
-    files = unzipArtifact(zipBuffer, { maxDecompressedBytes: MAX_DECOMPRESSED });
+    files = unzipArtifact(zipBuffer, {
+      maxDecompressedBytes: PACKAGE_ZIP_MAX_DECOMPRESSED_BYTES,
+    });
   } catch (err) {
     if (err instanceof DecompressionLimitError) {
       // A resource-exhaustion verdict → ZIP_BOMB; a structural one → ZIP_INVALID.
@@ -370,15 +385,17 @@ export function parsePackageZip(
   // Extract primary content based on type. Companion-file presence is
   // already guaranteed above; the switch below only reads the bytes the
   // caller wants surfaced as `content`.
+  //
+  // WHICH entry that is per type is not decided here: it comes from
+  // `PACKAGE_CONTENT_FILE`, because the platform's file explorer overlays the
+  // stored `content` back onto the same entry and the two must not disagree.
+  // What stays here is the per-type handling of its ABSENCE.
   let content: string;
 
   switch (type) {
-    case "agent": {
-      content = new TextDecoder().decode(files["prompt.md"]!);
-      break;
-    }
+    case "agent":
     case "skill": {
-      content = new TextDecoder().decode(files["SKILL.md"]!);
+      content = new TextDecoder().decode(files[PACKAGE_CONTENT_FILE[type]!]!);
       break;
     }
     case "integration": {
@@ -387,14 +404,15 @@ export function parsePackageZip(
       // agent-facing documentation companion. Vendored server code lives
       // under `server/` and is left untouched by this parser — the
       // runtime resolver (Phase 1.2a) consumes it directly.
-      const integrationRaw = files["INTEGRATION.md"];
+      const integrationRaw = files[PACKAGE_CONTENT_FILE.integration!];
       content = integrationRaw ? new TextDecoder().decode(integrationRaw) : manifestText;
       break;
     }
     case "mcp-server": {
       // mcp-server packages (AFPS §3.4) are MCPB bundles — manifest.json is
-      // authoritative; the server payload under `server.entry_point` is left
-      // untouched for the runtime to consume directly.
+      // authoritative (hence the `null` entry in `PACKAGE_CONTENT_FILE`); the
+      // server payload under `server.entry_point` is left untouched for the
+      // runtime to consume directly.
       content = manifestText;
       break;
     }

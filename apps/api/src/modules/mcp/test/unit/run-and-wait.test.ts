@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it } from "bun:test";
 import { ErrorCode, McpError, type CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { AppstrateRequestExtra } from "@appstrate/mcp-transport";
 import { resetCatalog } from "../../catalog.ts";
+import { buildServerInstructions } from "../../router.ts";
 import { buildMcpTools, type Dispatch } from "../../tools.ts";
 
 const noExtra = {} as AppstrateRequestExtra;
@@ -20,6 +21,17 @@ function jsonResponse(body: unknown, status = 200): Response {
     headers: { "content-type": "application/json" },
   });
 }
+
+const defaultInlineManifest = (overrides: Record<string, unknown>) => ({
+  $schema: "https://schemas.afps.dev/v0/agent.schema.json",
+  schema_version: "0.2",
+  type: "agent",
+  version: "1.0.0",
+  dependencies: {},
+  runtime_tools: ["log", "output", "publish_document"],
+  output: { schema: { type: "object", properties: {}, additionalProperties: true } },
+  ...overrides,
+});
 
 function makeRunAndWait(opts: {
   permissions?: string[];
@@ -82,14 +94,38 @@ describe("run_and_wait", () => {
     expect(tool.descriptor.inputSchema.required).toEqual(["kind"]);
   });
 
-  it("describes inline capability enrichment without duplicating primary-selection policy", () => {
+  it("describes inline defaults and exact manifest overrides", () => {
     const { tool } = makeRunAndWait({});
 
     expect(tool.descriptor.description).toContain("publish_document");
-    expect(tool.descriptor.description).toMatch(/automatically exposes/i);
+    expect(tool.descriptor.description).toContain("build a `.zip` or `.afps` archive");
+    expect(tool.descriptor.description).not.toContain("publish_archive");
+    expect(tool.descriptor.description).toMatch(/fields you omit/i);
+    expect(tool.descriptor.description).toContain("runtime_tools: []");
     expect(tool.descriptor.description).not.toMatch(/one main user-facing file/i);
     expect(tool.descriptor.description).not.toMatch(/several peer files/i);
     expect(tool.descriptor.inputSchema.properties).not.toHaveProperty("primary_deliverable");
+
+    const manifestSchema = (
+      tool.descriptor.inputSchema.properties as Record<string, Record<string, unknown>>
+    ).manifest!;
+    expect(manifestSchema.additionalProperties).toBe(true);
+    expect(manifestSchema).not.toHaveProperty("required");
+    expect(manifestSchema.properties).toEqual(
+      expect.objectContaining({
+        display_name: expect.any(Object),
+        runtime_tools: expect.any(Object),
+        output: expect.any(Object),
+      }),
+    );
+  });
+
+  it("describes package authoring with the remaining document publisher", () => {
+    const instructions = buildServerInstructions(new Set(["mcp:read"]));
+
+    expect(instructions).toContain("python3 -m zipfile -c package.afps");
+    expect(instructions).toContain("publish that archive with `publish_document`");
+    expect(instructions).not.toContain("publish_archive");
   });
 
   it("launches an agent run, then waits for the final result", async () => {
@@ -121,7 +157,7 @@ describe("run_and_wait", () => {
     expect(calls.find((c) => c.method === "GET")?.search).toBe("?wait=55");
   });
 
-  it("launches an inline run with publish_document without rewriting its prompt", async () => {
+  it("launches an inline run from a minimal manifest without rewriting its prompt", async () => {
     const { tool, calls } = makeRunAndWait({
       launch: () => jsonResponse({ id: "run_inline", status: "pending" }),
       getRun: [jsonResponse({ id: "run_inline", status: "success" })],
@@ -130,14 +166,14 @@ describe("run_and_wait", () => {
     await tool.handler(
       {
         kind: "inline",
-        manifest: { name: "tmp" },
+        manifest: { display_name: "Do it" },
         prompt: "do it",
       },
       noExtra,
     );
 
     expect(calls.find((c) => c.method === "POST")?.body).toEqual({
-      manifest: { name: "tmp", runtime_tools: ["publish_document"] },
+      manifest: defaultInlineManifest({ name: "@inline/do-it", display_name: "Do it" }),
       prompt: "do it",
     });
     expect(calls.some((c) => c.method === "GET")).toBe(true);
@@ -160,7 +196,7 @@ describe("run_and_wait", () => {
     );
 
     expect(calls.find((c) => c.method === "POST")?.body).toEqual({
-      manifest: { name: "tmp", runtime_tools: ["publish_document"] },
+      manifest: defaultInlineManifest({ name: "tmp" }),
       prompt: expect.stringContaining("do it"),
       input: { screenshot: "document://doc_abc12345" },
     });
@@ -208,7 +244,7 @@ describe("run_and_wait", () => {
       const post = calls.find((c) => c.method === "POST");
       expect(post?.path).toBe("/api/runs/inline");
       expect(post?.body).toEqual({
-        manifest: { name: "tmp", runtime_tools: ["publish_document"] },
+        manifest: defaultInlineManifest({ name: "tmp" }),
         prompt: expect.stringContaining("do it"),
         connection_overrides: { "@acme/gmail": "conn_abc" },
       });

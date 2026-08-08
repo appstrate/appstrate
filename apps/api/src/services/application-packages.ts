@@ -20,6 +20,11 @@ import type { PackageType } from "@appstrate/core/validation";
 import type { ResolvedRunConfig } from "@appstrate/shared-types";
 import type { AppScope } from "../lib/scope.ts";
 import { assertApplicationInScope } from "./applications.ts";
+import { ApiError } from "../lib/errors.ts";
+import { getErrorMessage } from "@appstrate/core/errors";
+import { parsePackageZip } from "@appstrate/core/zip";
+import { getVersionForDownload } from "./package-versions.ts";
+import { downloadVersionZip } from "./package-storage.ts";
 
 export type { ResolvedRunConfig };
 
@@ -27,12 +32,56 @@ export type { ResolvedRunConfig };
 // Install / Uninstall
 // ---------------------------------------------------------------------------
 
+/**
+ * Historical mcp-server drafts may predate companion-file validation. Refuse
+ * to install one unless the exact `latest` archive is present and passes the
+ * same parser used at authoring/import and runtime boot. System packages are
+ * boot-registry artifacts and do not have a package_versions row here.
+ */
+async function assertMcpServerInstallable(scope: AppScope, packageId: string): Promise<void> {
+  const [pkg] = await db
+    .select({ type: packages.type, source: packages.source })
+    .from(packages)
+    .where(and(eq(packages.id, packageId), orgOrSystemFilter(scope.orgId), notEphemeralFilter()))
+    .limit(1);
+  if (!pkg || pkg.type !== "mcp-server" || pkg.source === "system") return;
+
+  const version = await getVersionForDownload(packageId, "latest");
+  if (!version) {
+    throw new ApiError({
+      status: 422,
+      code: "bundle_invalid",
+      title: "Invalid MCP Server Bundle",
+      detail: `MCP-server package '${packageId}' has no installable published version.`,
+    });
+  }
+
+  try {
+    const bytes = await downloadVersionZip(packageId, version.version, version.integrity);
+    if (!bytes) throw new Error(`archive for ${packageId}@${version.version} is missing`);
+    const parsed = parsePackageZip(new Uint8Array(bytes), { retiredRuntimeTools: "drop" });
+    if (parsed.type !== "mcp-server" || parsed.packageId !== packageId) {
+      throw new Error(
+        `archive identity is ${parsed.packageId} (${parsed.type}), expected ${packageId} (mcp-server)`,
+      );
+    }
+  } catch (err) {
+    throw new ApiError({
+      status: 422,
+      code: "bundle_invalid",
+      title: "Invalid MCP Server Bundle",
+      detail: `MCP-server package '${packageId}@${version.version}' is not executable: ${getErrorMessage(err)}`,
+    });
+  }
+}
+
 export async function installPackage(
   scope: AppScope,
   packageId: string,
   config?: Record<string, unknown>,
 ) {
   await assertApplicationInScope(scope);
+  await assertMcpServerInstallable(scope, packageId);
 
   // The org-visibility check and the insert run in ONE transaction so the
   // tenant boundary is atomic with the write — a separate preflight would
@@ -106,6 +155,7 @@ export async function uninstallPackage(scope: AppScope, packageId: string): Prom
 const installedPackageSelect = {
   packageId: applicationPackages.packageId,
   config: applicationPackages.config,
+  generationConfig: applicationPackages.generationConfig,
   modelId: applicationPackages.modelId,
   proxyId: applicationPackages.proxyId,
   version_id: applicationPackages.versionId,
@@ -386,11 +436,13 @@ export async function getPackageConfig(
 ): Promise<{
   config: Record<string, unknown>;
   modelId: string | null;
+  generationConfig: import("@appstrate/core/model-generation").ModelGenerationSettings | null;
   proxyId: string | null;
 }> {
   const [row] = await db
     .select({
       config: applicationPackages.config,
+      generationConfig: applicationPackages.generationConfig,
       modelId: applicationPackages.modelId,
       proxyId: applicationPackages.proxyId,
     })
@@ -405,6 +457,7 @@ export async function getPackageConfig(
   return {
     config: asRecord(row?.config),
     modelId: row?.modelId ?? null,
+    generationConfig: row?.generationConfig ?? null,
     proxyId: row?.proxyId ?? null,
   };
 }
@@ -441,6 +494,7 @@ export async function getResolvedRunConfig(
   const [row] = await db
     .select({
       config: applicationPackages.config,
+      generationConfig: applicationPackages.generationConfig,
       modelId: applicationPackages.modelId,
       proxyId: applicationPackages.proxyId,
       versionId: applicationPackages.versionId,
@@ -474,6 +528,7 @@ export async function getResolvedRunConfig(
 
   return {
     config: asRecord(row.config),
+    generation: row.generationConfig ?? null,
     modelId: row.modelId ?? null,
     proxyId: row.proxyId ?? null,
     version_pin: versionPin,
@@ -506,6 +561,7 @@ export async function updateInstalledPackage(
   updates: {
     config?: Record<string, unknown>;
     modelId?: string | null;
+    generationConfig?: import("@appstrate/core/model-generation").ModelGenerationSettings | null;
     proxyId?: string | null;
     versionId?: number | null;
     enabled?: boolean;
@@ -516,12 +572,14 @@ export async function updateInstalledPackage(
     updatedAt: Date;
     config: Record<string, unknown>;
     modelId: string | null;
+    generationConfig: import("@appstrate/core/model-generation").ModelGenerationSettings | null;
     proxyId: string | null;
     versionId: number | null;
     enabled: boolean;
   }> = { updatedAt: new Date() };
   if (updates.config !== undefined) set.config = updates.config;
   if (updates.modelId !== undefined) set.modelId = updates.modelId;
+  if (updates.generationConfig !== undefined) set.generationConfig = updates.generationConfig;
   if (updates.proxyId !== undefined) set.proxyId = updates.proxyId;
   if (updates.versionId !== undefined) set.versionId = updates.versionId;
   if (updates.enabled !== undefined) set.enabled = updates.enabled;
@@ -562,6 +620,9 @@ export async function updateInstalledPackage(
         packageId,
         config: updates.config ?? {},
         ...(updates.modelId !== undefined ? { modelId: updates.modelId } : {}),
+        ...(updates.generationConfig !== undefined
+          ? { generationConfig: updates.generationConfig }
+          : {}),
         ...(updates.proxyId !== undefined ? { proxyId: updates.proxyId } : {}),
         ...(updates.versionId !== undefined ? { versionId: updates.versionId } : {}),
         ...(updates.enabled !== undefined ? { enabled: updates.enabled } : {}),

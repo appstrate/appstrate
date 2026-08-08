@@ -361,7 +361,7 @@ export async function buildAgentMap(
 
   const [schedules, declaredSkills, packageConfig, connectionReadiness, orgModelList] =
     await Promise.all([
-      listPackageSchedules(scope, agent.id),
+      listPackageSchedules(scope, agent.id, getActor(c)),
       resolveDeclaredSkills(agent.manifest, orgId),
       getPackageConfig(applicationId, agent.id),
       // Skipped entirely when nothing is declared — the resolver would fan out

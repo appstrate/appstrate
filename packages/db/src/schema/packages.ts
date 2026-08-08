@@ -19,6 +19,7 @@ import { packageTypeEnum, packageSourceEnum } from "./enums.ts";
 import { user } from "./auth.ts";
 import { organizations } from "./organizations.ts";
 import { applications } from "./applications.ts";
+import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 
 export const applicationPackages = pgTable(
   "application_packages",
@@ -34,6 +35,7 @@ export const applicationPackages = pgTable(
     }),
     config: jsonb("config").notNull().default({}),
     modelId: text("model_id"),
+    generationConfig: jsonb("generation_config").$type<ModelGenerationSettings>(),
     proxyId: text("proxy_id"),
     // Per-(application, integration) admin lock. Only meaningful for
     // integration packages — set true to refuse user/end-user attempts

@@ -58,6 +58,10 @@ import { detachOrDeleteContainedDocuments } from "../documents.ts";
 import { normalizeScope } from "@appstrate/core/naming";
 import type { LlmUsageLedgerRow, ModelCost } from "@appstrate/core/module";
 import type { AppScope, OrgScope } from "../../lib/scope.ts";
+import {
+  modelGenerationSettingsSchema,
+  type ModelGenerationSettings,
+} from "@appstrate/core/model-generation";
 import type {
   RunWireDto,
   EnrichedRun,
@@ -126,9 +130,74 @@ import { toISO } from "../../lib/date-helpers.ts";
  * `schedules`/`packages` — extracted here to keep the JOIN list inline
  * (Drizzle's query-builder types don't compose well through a helper).
  */
+/**
+ * The `runs` columns an enriched read actually needs — every column the wire
+ * DTO projects, plus `resolvedConnections` (projected into `connections_used`)
+ * and `input` (scanned for `document://` ids).
+ *
+ * Named explicitly rather than passing the whole `runs` table because the row
+ * is WIDER than the DTO: `modelCost`, `resolvedIntegrationVersions`,
+ * `chatSessionId`, `sinkSecretEncrypted`, `sinkExpiresAt`, `sinkClosedAt`,
+ * `lastEventSequence` and `lastHeartbeatAt` are never read by `mapEnrichedRun`,
+ * so selecting them made every list read carry (and every list page transfer
+ * from Postgres) bytes nobody looks at — `sinkSecretEncrypted` being an
+ * AES-256-GCM credential ciphertext, which is now not even loaded into the API
+ * process on a list read.
+ *
+ * The DTO mapper derives its parameter type from THIS object (`RunProjection`),
+ * so a column dropped here without dropping it from the DTO fails typecheck
+ * rather than turning into `undefined` on the wire.
+ */
+const enrichedRunColumns = {
+  id: runs.id,
+  packageId: runs.packageId,
+  userId: runs.userId,
+  endUserId: runs.endUserId,
+  apiKeyId: runs.apiKeyId,
+  orgId: runs.orgId,
+  applicationId: runs.applicationId,
+  scheduleId: runs.scheduleId,
+  status: runs.status,
+  input: runs.input,
+  result: runs.result,
+  artifacts: runs.artifacts,
+  checkpoint: runs.checkpoint,
+  error: runs.error,
+  metadata: runs.metadata,
+  config: runs.config,
+  configOverride: runs.configOverride,
+  startedAt: runs.startedAt,
+  completedAt: runs.completedAt,
+  duration: runs.duration,
+  cost: runs.cost,
+  costPricingStatus: runs.costPricingStatus,
+  runNumber: runs.runNumber,
+  tokenUsage: runs.tokenUsage,
+  versionLabel: runs.versionLabel,
+  versionRef: runs.versionRef,
+  proxyLabel: runs.proxyLabel,
+  modelLabel: runs.modelLabel,
+  modelSource: runs.modelSource,
+  generationConfig: runs.generationConfig,
+  generationConfigOverride: runs.generationConfigOverride,
+  runnerName: runs.runnerName,
+  runnerKind: runs.runnerKind,
+  agentScope: runs.agentScope,
+  agentName: runs.agentName,
+  runOrigin: runs.runOrigin,
+  contextSnapshot: runs.contextSnapshot,
+  modelCredentialId: runs.modelCredentialId,
+  connectionOverrides: runs.connectionOverrides,
+  dependencyOverrides: runs.dependencyOverrides,
+  resolvedConnections: runs.resolvedConnections,
+} as const;
+
+/** Row shape produced by `enrichedRunColumns` — a strict subset of a `runs` row. */
+type RunProjection = Pick<typeof runs.$inferSelect, keyof typeof enrichedRunColumns>;
+
 function enrichedRunSelect(actor: Actor | null) {
   return {
-    run: runs,
+    run: enrichedRunColumns,
     userName: profiles.displayName,
     endUserName: sql<string | null>`coalesce(${endUsers.name}, ${endUsers.externalId})`,
     apiKeyName: apiKeys.name,
@@ -191,7 +260,7 @@ function unreadForActor(actor: Actor | null): SQL<boolean> {
  * call this instead of inlining the same mapping six lines six times.
  */
 type EnrichedRunRow = {
-  run: typeof runs.$inferSelect;
+  run: RunProjection;
   userName: string | null;
   endUserName: string | null;
   apiKeyName: string | null;
@@ -211,7 +280,9 @@ type EnrichedRunRow = {
  *  1. Date → ISO string conversion happens HERE (`d?.toISOString() ?? null`)
  *     so the returned value's TS type matches the wire shape end-to-end
  *     instead of being erased at Hono's untyped `c.json()` boundary.
- *  2. DB-only columns are intentionally NOT projected. In particular
+ *  2. DB-only columns are intentionally NOT projected — and, since the read
+ *     itself selects `enrichedRunColumns` rather than the whole table, are no
+ *     longer even fetched from Postgres. In particular
  *     `sinkSecretEncrypted` (an AES-256-GCM credential ciphertext),
  *     `sinkExpiresAt`, `sinkClosedAt`, `lastHeartbeatAt`, `lastEventSequence`
  *     (an internal ordering counter for the signed-event ingestion path —
@@ -226,7 +297,7 @@ type EnrichedRunRow = {
 // if the mapper produces a field not on the wire DTO (the original bug leaked
 // `sinkSecretEncrypted` via a spread) or the wrong type for one. A new runs
 // column is only exposed if it is added here AND to `RunWireDto` deliberately.
-function runRowToWireDto(row: typeof runs.$inferSelect): RunWireDto {
+function runRowToWireDto(row: RunProjection): RunWireDto {
   return {
     id: row.id,
     packageId: row.packageId,
@@ -257,6 +328,8 @@ function runRowToWireDto(row: typeof runs.$inferSelect): RunWireDto {
     proxy_label: row.proxyLabel,
     model_label: row.modelLabel,
     model_source: row.modelSource,
+    generation: row.generationConfig,
+    generation_override: row.generationConfigOverride,
     runner_name: row.runnerName,
     runner_kind: row.runnerKind,
     // Stored bare on historical rows; emitted with the `@` sigil so every
@@ -428,6 +501,9 @@ interface CreateRunParams {
    * container's word. Absent/null = the model resolved no pricing.
    */
   modelCost?: ModelCost | null;
+  /** Effective generation controls and the raw invocation layer. */
+  generationConfig?: ModelGenerationSettings | null;
+  generationConfigOverride?: ModelGenerationSettings | null;
   apiKeyId?: string;
   /** Snapshot of the agent's @scope (e.g. "@acme") at run creation. */
   agentScope?: string | null;
@@ -560,6 +636,14 @@ export async function createRun(scope: AppScope, params: CreateRunParams): Promi
       modelLabel: params.modelLabel,
       modelSource: params.modelSource,
       modelCost: params.modelCost ?? null,
+      generationConfig:
+        params.generationConfig == null
+          ? null
+          : modelGenerationSettingsSchema.parse(params.generationConfig),
+      generationConfigOverride:
+        params.generationConfigOverride == null
+          ? null
+          : modelGenerationSettingsSchema.parse(params.generationConfigOverride),
       applicationId: scope.applicationId,
       apiKeyId: params.apiKeyId,
       runNumber,

@@ -6,6 +6,68 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Security
+
+- **The agent bundle export now requires each dependency type's read scope** —
+  `GET /api/agents/{scope}/{name}/bundle` gated on `agents:read` alone. That
+  covers the root agent, whose files the export narrows to `manifest.json` +
+  `prompt.md`, but a dependency goes into the archive as its ENTIRE stored file
+  map: a bundle carrying a skill hands out exactly the bytes
+  `GET /api/packages/skills/{id}/files[/content]` serves, which #1123/#1124
+  settled need `skills:read`. This route was the last looser door to the same
+  content — a credential `403`'d on the file explorer was served the identical
+  bytes here. The guard now runs against the ASSEMBLED bundle rather than the
+  root manifest, so transitive dependencies are covered by construction and an
+  unrecognised type fails closed. It gates on SCOPE, not visibility:
+  dependency resolution stays org-scoped, so a bundle can still reach a skill
+  that is not installed in the calling application, exactly like the run it
+  mirrors.
+
+  **Behaviour change for scoped credentials.** A credential holding
+  `agents:read` but NOT `skills:read` now gets `403` where it used to get
+  `200`, on both `?source=draft` and the published export, whenever the agent
+  declares a skill dependency. In practice that is a scoped API key or OIDC
+  token — every org role (owner, admin, member, viewer) carries both scopes, so
+  no dashboard user is affected. An agent with no skill dependency is still
+  exported to an `agents:read`-only key. Audit the scopes of any key that
+  exports bundles from CI before upgrading.
+
+- **Package file responses are never served from a fresh browser cache** —
+  `Cache-Control: private, max-age=300` on the file explorer routes let a
+  browser serve authenticated, tenant-scoped, RBAC-gated artifact bytes for
+  five minutes with zero server contact. A revoked `<type>:read`, a member
+  removed from the org, or a package uninstalled from the application all left
+  the cached `200` being handed out until it expired, and `Vary` cannot rescue
+  that — revocation changes no request header. Every response on both routes is
+  now `private, no-cache`, which was already the behaviour for drafts,
+  dist-tags, semver ranges and yanked versions. `no-cache` still permits the
+  304 round-trip; it only forbids serving without one, and forcing that
+  round-trip re-runs `hasPackageAccess` and the read-permission guard on every
+  hit. **The trade**: a repeat view of the same file now pays a conditional
+  request instead of reading the local cache. That revalidation answers a
+  version's 304 from one DB read, with no storage GET and no unzip.
+
+- **Package `GET` routes now enforce a read permission (#1123)** — every
+  `GET` under `/api/packages` was gated on `hasPackageAccess` alone, which
+  answers "is this package installed in this application, or a system
+  package?" and nothing about what the caller may do. An API key scoped
+  **without** `skills:read` could read a skill's manifest and its full
+  `SKILL.md` (the detail route serves the authored `content`), and pull the
+  published ZIP through `/{scope}/{name}/{version}/download`. Every `GET`
+  on the router now requires the matching `agents:read` / `skills:read` /
+  `integrations:read` / `mcp-servers:read`, and `/{version}/download`
+  additionally goes through `hasPackageAccess` like the rest of the surface —
+  it previously served artifact bytes for packages not installed in the
+  calling application.
+
+  **The read-permission change is breaking for API keys.** No org role loses
+  access through the new RBAC guard (every role, down to `viewer`, holds all
+  four read scopes), but a key minted without the matching `*:read` scope now
+  gets `403` where it used to get `200`. Separately, the download visibility
+  fix affects every caller: a package not installed in the calling application
+  now returns `404`, including for org-role sessions. Audit issued key scopes
+  before upgrading.
+
 ### Added
 
 - **Opt-in observability module (#847)** — OpenTelemetry moves out of core
@@ -13,7 +75,62 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `@appstrate/module-observability`. Core ships zero OTel footprint; add the
   module to `MODULES` and set `OTEL_ENABLED` to activate tracing/metrics.
 
+### Changed
+
+- **`@appstrate/core` released as 6.2.0** — 6.1.0 was already published to npm,
+  so the four export subpaths added since (`./package-files` and
+  `./mcp-server-meta` from #1118, `./model-generation` from #1099, `./url` from
+  #1122) could not be resolved by out-of-tree consumers installing from npm,
+  even though the code ships in the tarball. Additive only, so a minor;
+  `CORE_VERSION` moves with it. **Maintainers**: bump `cloud` and
+  `connect-helper` to `^6.2.0` right after the `core@6.2.0` tag is pushed —
+  leaving them at 6.1.0 makes the next core release compute a delta of 2 and
+  hard-fail the lockstep gate.
+
+- **Inline `run_and_wait` manifests are concise without becoming limited** —
+  callers may omit AFPS boilerplate and provide only a task-specific
+  `display_name`; the shared client derives the canonical name and fills
+  runtime/output defaults before the existing full validation boundary. Any
+  supplied field remains an exact override, including `runtime_tools: []` and
+  complete deterministic schemas. The chat prompt prefers `run_and_wait` for
+  launch-and-wait flows while keeping the fire-and-forget `runInline` and
+  `runAgent` operations fully discoverable and invokable.
+
+### Removed
+
+- **`source_code` from the package create/update contract** — the
+  `sourceFileName` plumbing behind it has been unreachable since the `tool`
+  package type was dropped: no route config declared it, so `source_code` was
+  never on the wire and sending one in a request body was already a no-op (such
+  a body is still accepted, now stripped by non-strict Zod instead of parsed
+  and ignored). No runtime behaviour changes — the published OpenAPI spec
+  simply stops advertising a field that never existed at runtime, which
+  `detect:breaking` reports as 27 response-field removals.
+
 ### Fixed
+
+- **Saving an integration destroyed its `INTEGRATION.md`** — `draft_content` is
+  overloaded for integrations: the importer stores the bundle's
+  `INTEGRATION.md` when it ships one and the manifest text when it does not,
+  with nothing on the row saying which. The package editor authors a manifest
+  and has no documentation field, so it always wrote the manifest form —
+  opening a documented integration and pressing Save, with no edit, replaced
+  its documentation with its own manifest JSON. The integration then stopped
+  contributing its agent-facing docs to every agent's platform prompt, and the
+  file explorer served that manifest under the name `INTEGRATION.md`, the entry
+  it pre-selects. Version restore and package fork produced the same corruption
+  by other routes. All four write paths now agree on which entry the column
+  mirrors, and the explorer declines to show a manifest copy over a real
+  stored file.
+
+  **Operators: existing rows are not repaired automatically.** The file
+  explorer is fixed at read time — the real `INTEGRATION.md` is still intact in
+  object storage and is served again immediately. The platform prompt is not:
+  an integration whose column was already clobbered keeps contributing no
+  documentation to agent runs until its row is repaired. Re-importing the
+  integration's AFPS archive, or restoring a published version that ships the
+  doc, rewrites the column correctly. No backfill migration ships with this
+  release.
 
 - **`POST /api/packages/import-bundle` skipped agent integration validation
   entirely** — bytes `POST /api/packages/import` refused imported cleanly

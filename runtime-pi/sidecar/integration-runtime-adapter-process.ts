@@ -17,6 +17,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
 import { SubprocessTransport } from "@appstrate/mcp-transport";
+import { isMcpServerRuntime, type McpServerRuntime } from "@appstrate/core/mcp-server";
 
 import { logger } from "./logger.ts";
 import type { IntegrationSpawnSpec } from "./integrations-boot.ts";
@@ -38,7 +39,10 @@ import {
  * RUNNER_IMAGE_BY_TYPE in the docker adapter — adding a new runtime
  * requires updating both.
  */
-const HOST_INTERPRETER_BY_TYPE: Record<string, { command: string; argsBefore: string[] }> = {
+const HOST_INTERPRETER_BY_TYPE: Record<
+  McpServerRuntime,
+  { command: string; argsBefore: string[] }
+> = {
   node: { command: "node", argsBefore: [] },
   // `bun` runs the entry directly (`.ts` / `.js`) — the sidecar's own
   // runtime, always on PATH in process mode. In docker mode the docker
@@ -72,12 +76,12 @@ function planSubprocess(spec: IntegrationSpawnSpec, bundleRoot: string): Subproc
       "integration-runtime-adapter-process: server.type required for local-source spawn",
     );
   }
-  const cfg = HOST_INTERPRETER_BY_TYPE[t];
-  if (!cfg) {
+  if (!isMcpServerRuntime(t)) {
     throw new Error(
       `integration-runtime-adapter-process: server.type "${t}" has no host-interpreter mapping`,
     );
   }
+  const cfg = HOST_INTERPRETER_BY_TYPE[t];
   const entry = server.entry_point;
   if (!entry) {
     throw new Error(

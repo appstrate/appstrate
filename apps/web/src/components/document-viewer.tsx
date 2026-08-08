@@ -81,12 +81,12 @@ function MarkdownPreview({ id, unavailable }: { id: string; unavailable: string 
     let cancelled = false;
     void (async () => {
       try {
-        const { data, error } = await client.GET("/api/documents/{id}/content", {
+        const { data } = await client.GET("/api/documents/{id}/content", {
           params: { path: { id } },
           parseAs: "text",
         });
         if (cancelled) return;
-        if (error || data === undefined) setState({ failed: true });
+        if (data === undefined) setState({ failed: true });
         else setState({ text: data });
       } catch {
         if (!cancelled) setState({ failed: true });

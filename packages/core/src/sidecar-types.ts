@@ -10,6 +10,7 @@
  */
 
 import type { IntegrationManifest } from "./integration.ts";
+import type { ModelNativeReasoningLevel } from "./model-generation.ts";
 
 /**
  * Manifest `auths.{key}.delivery.http` block — the header-render config the
@@ -541,12 +542,23 @@ export type ModelApiShape =
  * Matching is by exact value at the known JSON locations (top-level `model`,
  * and `message.model` for Anthropic `message_start`), never a blind string
  * replace — so a model id mentioned inside generated content is never clobbered.
+ * For an adaptive Anthropic backing, the private descriptor can also restore
+ * the adaptive `thinking` shape that Pi cannot infer from the public alias.
  */
 export interface ModelSwap {
   /** Public alias id the agent sends (its `MODEL_ID`). */
   alias: string;
   /** Real upstream model id forwarded to the provider. */
   real: string;
+  /**
+   * Request-scoped Anthropic transport correction for an adaptive backing.
+   * Pi cannot infer adaptive support from a hidden alias id, so the sidecar
+   * restores the catalogued request shape without exposing this fact to the
+   * agent container.
+   */
+  anthropicAdaptiveReasoning?: {
+    effort: Exclude<ModelNativeReasoningLevel, "none">;
+  };
 }
 
 export interface LlmProxyApiKeyConfig {

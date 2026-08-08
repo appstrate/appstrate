@@ -16,7 +16,9 @@ import {
   runKeys,
   paginatedRunsKeys,
   persistenceKeys,
+  invalidatePackageFiles,
 } from "../lib/query-keys";
+import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 
 // NOTE on query keys: run-cache keys (["runs"], ["paginated-runs"], ["run"])
 // are PINNED legacy keys — use-global-run-sync.ts patches them from SSE
@@ -73,6 +75,8 @@ export interface RunAgentParams {
   modelId?: string;
   /** Per-run proxy id override (wire `proxyId`). From the run-with-options modal. */
   proxyId?: string;
+  /** Per-run temperature/reasoning override (wire `generation`). */
+  generation?: ModelGenerationSettings;
   /** Per-run config delta, deep-merged with the persisted config (wire `config`). */
   config?: Record<string, unknown>;
   /**
@@ -88,8 +92,16 @@ export function useRunAgent(packageId: string) {
   const navigate = useNavigate();
   return useMutation({
     mutationFn: async (params?: RunAgentParams) => {
-      const { input, version, connectionOverrides, modelId, proxyId, config, dependencyOverrides } =
-        params ?? {};
+      const {
+        input,
+        version,
+        connectionOverrides,
+        modelId,
+        proxyId,
+        generation,
+        config,
+        dependencyOverrides,
+      } = params ?? {};
       const { data } = await client.POST("/api/agents/{scope}/{name}/run", {
         params: {
           path: splitPackageRef(packageId),
@@ -109,6 +121,7 @@ export function useRunAgent(packageId: string) {
             ? { connection_overrides: connectionOverrides }
             : {}),
           ...(modelId !== undefined ? { modelId } : {}),
+          ...(generation !== undefined ? { generation } : {}),
           ...(proxyId !== undefined ? { proxyId } : {}),
           ...(config !== undefined ? { config } : {}),
           ...(dependencyOverrides !== undefined
@@ -170,6 +183,11 @@ export function useImportPackage() {
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: agentsKeys.all });
       qc.invalidateQueries({ queryKey: packageKeys.all });
+      // An import REPLACES the draft artifact, and this mutation navigates
+      // straight to the detail page — without this the explorer renders the
+      // pre-import index and the pre-import `inline` bodies until the query
+      // goes stale.
+      invalidatePackageFiles(qc);
       // Non-blocking install-time warnings (AFPS §7.7) —
       // surface each one as a sonner warning toast so publishers see them
       // immediately after a successful import.
@@ -195,6 +213,8 @@ export function useImportFromGithub() {
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: agentsKeys.all });
       qc.invalidateQueries({ queryKey: packageKeys.all });
+      // Same reason as `useImportPackage`: the draft artifact was replaced.
+      invalidatePackageFiles(qc);
       navigate(`/${data.type === "agent" ? "agent" : data.type}s/${data.packageId}`);
     },
     onError: onMutationError,
@@ -290,7 +310,7 @@ export function useDeleteAllMemories(packageId: string) {
 
 // --- Package (skill/tool) create/update mutations ---
 
-export function useCreatePackage(type: PackageType) {
+export function useCreatePackage(type: Exclude<PackageType, "mcp-server">) {
   const qc = useQueryClient();
   const navigate = useNavigate();
   return useMutation({
@@ -298,7 +318,6 @@ export function useCreatePackage(type: PackageType) {
       id?: string;
       manifest: Record<string, unknown>;
       content: string;
-      source_code?: string;
     }): Promise<{ id: string }> => {
       // 201 → the created package resource, bare (issue #657).
       switch (type) {
@@ -323,14 +342,6 @@ export function useCreatePackage(type: PackageType) {
         }
         case "integration": {
           const { data } = await client.POST("/api/packages/integrations", { body });
-          return { id: data!.id };
-        }
-        case "mcp-server": {
-          const { data } = await client.POST("/api/packages/mcp-servers", {
-            // The JSON create variant requires an explicit kebab-case id —
-            // the editor always supplies one for MCP-server packages.
-            body: { ...body, id: body.id! },
-          });
           return { id: data!.id };
         }
       }
@@ -365,15 +376,14 @@ export function useUpdatePackage(
     mutationFn: async (body: {
       manifest: Record<string, unknown>;
       content: string;
-      source_code?: string;
       lock_version: number;
     }): Promise<{ id: string; lock_version: number }> => {
       const { data } = await client.PUT(`/api/packages/${cfg.path}/{scope}/{name}`, {
         params: { path: splitPackageRef(packageId) },
         // No cast needed: the body's explicit `{manifest, content,
-        // source_code?, lock_version}` keys satisfy the skill/integration/
-        // mcp-server update operations (generic-object manifest) in the
-        // dynamic-path union, so the assignment typechecks directly.
+        // lock_version}` keys satisfy the skill/integration/mcp-server update
+        // operations (generic-object manifest) in the dynamic-path union, so
+        // the assignment typechecks directly.
         body,
       });
       // 200 → the updated package resource, bare (issue #657). The resource
@@ -382,6 +392,8 @@ export function useUpdatePackage(
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: packageKeys.all });
+      // The saved bytes ARE what the Files tab shows.
+      invalidatePackageFiles(qc);
       if (type === "agent") qc.invalidateQueries({ queryKey: agentsKeys.all });
       // An agent's tools drive the required OAuth scopes, so editing them
       // changes the per-integration agent-resolution verdict (e.g. a connection

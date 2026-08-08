@@ -15,6 +15,7 @@
  *     "contextWindow": 200000,
  *     "maxTokens": 64000,
  *     "capabilities": ["text","image","reasoning"],
+ *     "generation": { "temperature": "supported", "reasoning": { … } },
  *     "cost": { "input": 1.0, "output": 5.0, "cacheRead": 0.1, "cacheWrite": 1.25 }
  *   }
  *
@@ -25,22 +26,29 @@
  *     branch on upstream schema drift — that risk is contained here.
  *
  * Two modes:
- *   - **dry run** (default): downloads, diffs against the local files,
- *     prints a summary, exits 1 on drift. CI weekly workflow consumes this.
- *   - **apply** (`--apply`): writes the new content.
+ *   - **dry run** (default): diffs a normalized exporter artifact against the
+ *     local files, prints a summary, exits 1 on drift.
+ *   - **apply** (`--apply`): writes the new content from a normalized exporter artifact.
  *
  * Usage:
- *   bun scripts/refresh-pricing-catalog.ts          # dry run
- *   bun scripts/refresh-pricing-catalog.ts --apply  # write to disk
+ *   LITELLM_CATALOG_PATH=/path/to/export.json \
+ *     bun scripts/refresh-pricing-catalog.ts         # dry run
+ *   LITELLM_CATALOG_PATH=/path/to/export.json \
+ *     bun scripts/refresh-pricing-catalog.ts --apply
  */
 
 import { resolve } from "node:path";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import type {
+  ModelCapabilitySupport,
+  ModelGenerationCapabilities,
+  ModelNativeReasoningLevel,
+  ModelReasoningLevel,
+} from "@appstrate/core/model-generation";
 
-const UPSTREAM_URL =
-  "https://raw.githubusercontent.com/BerriAI/litellm/main/litellm/model_prices_and_context_window_backup.json";
 const REPO_ROOT = new URL("..", import.meta.url).pathname;
 const DATA_DIR = resolve(REPO_ROOT, "apps/api/src/data/pricing");
+const LITELLM_LOCK_PATH = resolve(REPO_ROOT, "scripts/litellm-catalog.lock.json");
 
 /**
  * LiteLLM `litellm_provider` slug → our vendored-file basename.
@@ -140,6 +148,7 @@ interface CompactEntry {
   contextWindow: number;
   maxTokens: number | null;
   capabilities: string[];
+  generation: ModelGenerationCapabilities;
   cost: {
     input: number;
     output: number;
@@ -159,7 +168,85 @@ interface LiteLLMEntry {
   cache_read_input_token_cost?: number;
   cache_creation_input_token_cost?: number;
   supports_vision?: boolean;
-  supports_reasoning?: boolean;
+  /** Effective value-level contract computed by the pinned LiteLLM adapters. */
+  _appstrate_generation?: {
+    temperature: ModelCapabilitySupport;
+    reasoning: {
+      supported: ModelCapabilitySupport;
+      temperatureCompatible?: ModelCapabilitySupport;
+      adaptive: boolean | null;
+      levels: Partial<Record<ModelNativeReasoningLevel, ModelCapabilitySupport>>;
+    };
+  };
+}
+
+const NATIVE_REASONING_LEVELS: readonly ModelNativeReasoningLevel[] = [
+  "none",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+];
+const CAPABILITY_SUPPORT_VALUES: readonly ModelCapabilitySupport[] = [
+  "supported",
+  "unsupported",
+  "unknown",
+];
+
+/** Fail closed when a pinned exporter artifact lacks its normalized contract. */
+function assertNormalizedGenerationCatalog(data: Record<string, LiteLLMEntry>): void {
+  const vendoredProviders = new Set(Object.keys(LITELLM_TO_OURS));
+  const isSupport = (value: unknown): value is ModelCapabilitySupport =>
+    CAPABILITY_SUPPORT_VALUES.includes(value as ModelCapabilitySupport);
+  let vendoredChatEntries = 0;
+
+  for (const [modelId, entry] of Object.entries(data)) {
+    if (entry.mode !== "chat" || !vendoredProviders.has(entry.litellm_provider ?? "")) continue;
+    vendoredChatEntries += 1;
+
+    const generation = entry._appstrate_generation;
+    const levels = generation?.reasoning?.levels;
+    const validLevels =
+      levels != null &&
+      Object.keys(levels).length === NATIVE_REASONING_LEVELS.length &&
+      NATIVE_REASONING_LEVELS.every((level) => isSupport(levels[level]));
+    const valid =
+      generation != null &&
+      isSupport(generation.temperature) &&
+      isSupport(generation.reasoning?.supported) &&
+      (generation.reasoning?.temperatureCompatible === undefined ||
+        isSupport(generation.reasoning.temperatureCompatible)) &&
+      (generation.reasoning?.adaptive === null ||
+        typeof generation.reasoning?.adaptive === "boolean") &&
+      validLevels;
+
+    if (!valid) {
+      throw new Error(
+        `LiteLLM model ${modelId} has an invalid or missing _appstrate_generation contract`,
+      );
+    }
+  }
+
+  if (vendoredChatEntries === 0) {
+    throw new Error("LiteLLM artifact contains no vendored chat entries");
+  }
+}
+
+/** Verify that the artifact is the exact normalized output recorded by the lock. */
+function assertNormalizedCatalogDigest(serialized: string, expectedDigest: unknown): void {
+  if (typeof expectedDigest !== "string" || !/^sha256:[0-9a-f]{64}$/.test(expectedDigest)) {
+    throw new Error("LiteLLM lock is missing a valid normalizedDigest");
+  }
+  const hasher = new Bun.CryptoHasher("sha256");
+  hasher.update(serialized);
+  const actualDigest = `sha256:${hasher.digest("hex")}`;
+  if (actualDigest !== expectedDigest) {
+    throw new Error(
+      `LiteLLM normalized artifact digest mismatch: expected ${expectedDigest}, got ${actualDigest}`,
+    );
+  }
 }
 
 interface Summary {
@@ -314,6 +401,36 @@ function deriveLabel(id: string): string {
     .join(" ");
 }
 
+function projectGenerationCapabilities(entry: LiteLLMEntry): ModelGenerationCapabilities {
+  const exported = entry._appstrate_generation;
+  if (!exported) {
+    throw new Error("LiteLLM entry is missing its normalized generation contract");
+  }
+
+  // The normalized artifact remains exhaustive for validation and review. The
+  // runtime projection is sparse: omission already means "not confirmed", so
+  // persisting thousands of explicit `unknown` values only creates catalog
+  // churn without changing resolution or UI behaviour.
+  const levels: Partial<Record<ModelReasoningLevel, ModelCapabilitySupport>> = {};
+  for (const nativeLevel of NATIVE_REASONING_LEVELS) {
+    const capability = exported.reasoning.levels[nativeLevel];
+    if (capability === "unknown" || capability === undefined) continue;
+    levels[nativeLevel === "none" ? "off" : nativeLevel] = capability;
+  }
+
+  return {
+    temperature: exported.temperature,
+    reasoning: {
+      supported: exported.reasoning.supported,
+      ...(exported.reasoning.temperatureCompatible !== undefined
+        ? { temperatureCompatible: exported.reasoning.temperatureCompatible }
+        : {}),
+      adaptive: exported.reasoning.adaptive,
+      levels,
+    },
+  };
+}
+
 /**
  * Convert one LiteLLM entry to our compact shape. Returns null when the
  * entry has no usable pricing (e.g. embeddings, deprecated entries) —
@@ -327,9 +444,10 @@ function projectEntry(id: string, entry: LiteLLMEntry): CompactEntry | null {
   ) {
     return null;
   }
+  const generation = projectGenerationCapabilities(entry);
   const caps: string[] = ["text"];
   if (entry.supports_vision) caps.push("image");
-  if (entry.supports_reasoning) caps.push("reasoning");
+  if (generation.reasoning.supported === "supported") caps.push("reasoning");
 
   // LiteLLM stores USD/token; our `ModelCost` is USD per 1M tokens.
   // Round to 6 decimals (parts-per-million precision = $1 per trillion
@@ -366,6 +484,7 @@ function projectEntry(id: string, entry: LiteLLMEntry): CompactEntry | null {
     contextWindow,
     maxTokens,
     capabilities: caps,
+    generation,
     cost,
   };
 }
@@ -488,10 +607,18 @@ function buildFeatured(
   return ranked.filter((id) => !excluded.has(id)).slice(0, FEATURED_COUNT);
 }
 
-async function fetchUpstream(): Promise<Record<string, LiteLLMEntry>> {
-  const res = await fetch(UPSTREAM_URL);
-  if (!res.ok) throw new Error(`fetch ${UPSTREAM_URL} → HTTP ${res.status}`);
-  const data = (await res.json()) as Record<string, LiteLLMEntry>;
+function readNormalizedCatalog(): Record<string, LiteLLMEntry> {
+  const artifactPath = process.env.LITELLM_CATALOG_PATH;
+  if (!artifactPath) {
+    throw new Error("LITELLM_CATALOG_PATH is required; use the pinned LiteLLM exporter artifact");
+  }
+  const artifactContents = readFileSync(artifactPath, "utf8");
+  const data = JSON.parse(artifactContents) as Record<string, LiteLLMEntry>;
+  const lock = JSON.parse(readFileSync(LITELLM_LOCK_PATH, "utf8")) as {
+    normalizedDigest?: unknown;
+  };
+  assertNormalizedCatalogDigest(artifactContents, lock.normalizedDigest);
+  assertNormalizedGenerationCatalog(data);
   // Remove LiteLLM's `sample_spec` synthetic top-level entry — it documents
   // the schema, not a real model.
   delete data.sample_spec;
@@ -562,7 +689,8 @@ async function main(): Promise<void> {
     mkdirSync(DATA_DIR, { recursive: true });
   }
 
-  const [upstream, modelsDev] = await Promise.all([fetchUpstream(), fetchModelsDev()]);
+  const upstream = readNormalizedCatalog();
+  const modelsDev = await fetchModelsDev();
   const summaries: Summary[] = [];
   const snapshots: Record<string, Record<string, CompactEntry>> = {};
   const coverageRows: CoverageRow[] = [];
@@ -717,5 +845,15 @@ if (import.meta.main) {
   await main();
 }
 
-export { aliasedBackings, buildFeatured, countCacheRates, coverageRow, formatCoverageSummary };
+export {
+  aliasedBackings,
+  assertNormalizedCatalogDigest,
+  assertNormalizedGenerationCatalog,
+  buildFeatured,
+  countCacheRates,
+  coverageRow,
+  projectGenerationCapabilities,
+  formatCoverageSummary,
+  projectEntry,
+};
 export type { CoverageRow };

@@ -132,10 +132,14 @@ test.describe("MCP over an API key (full stack)", () => {
     expect(names).toEqual([
       "describe_operation",
       "get_me",
+      "get_runtime_capabilities",
+      "import_package_document",
       "invoke_operation",
       "list_documents",
+      "read_document",
       "run_and_wait",
       "search_operations",
+      "validate_package_document",
     ]);
 
     const search = await mcpRpc(request, url, headers, {

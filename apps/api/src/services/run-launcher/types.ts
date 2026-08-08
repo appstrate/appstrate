@@ -8,6 +8,7 @@ import type { JSONSchemaObject } from "@appstrate/core/form";
 import type { Bundle } from "@appstrate/afps-runtime/bundle";
 import type { ResolvedModel } from "../org-models.ts";
 import type { ResolvedAgentResources } from "../run-limits.ts";
+import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 
 export type { ToolMeta, TokenUsage, ResolvedModel };
 export { modelCostSchema, tokenUsageSchema };
@@ -68,6 +69,8 @@ export interface AppstrateRunPlan {
    * through here verbatim — the executor only reads the inference fields.
    */
   llmConfig: ResolvedModel;
+  /** Effective agent/run generation controls, already capability-validated. */
+  generationConfig?: ModelGenerationSettings;
 
   // --- Platform wiring ---
   /**

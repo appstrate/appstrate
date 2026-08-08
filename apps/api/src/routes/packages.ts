@@ -11,8 +11,7 @@ import { packages, profiles } from "@appstrate/db/schema";
 import { db } from "@appstrate/db/client";
 import { listResponse } from "../lib/list-response.ts";
 import { postInstallPackage } from "../services/post-install-package.ts";
-import { handleImportBundle } from "../services/bundle-import.ts";
-import { parsePackageIdentity } from "@appstrate/afps-runtime/bundle";
+import { bundleImportAuditRecords, handleImportBundle } from "../services/bundle-import.ts";
 import { installPackage, hasPackageAccess } from "../services/application-packages.ts";
 import { resolveIntegrationActivations } from "../services/integration-connections.ts";
 import { parseManifestFromFiles } from "../lib/manifest-parser.ts";
@@ -35,8 +34,9 @@ import { getErrorMessage } from "@appstrate/core/errors";
 import { uploadPackageFiles, downloadPackageFiles } from "../services/package-items/storage.ts";
 import { CONFIG_BY_TYPE, type PackageTypeConfig } from "../services/package-items/config.ts";
 import { validateManifest, type PackageType } from "@appstrate/core/validation";
-import { SLUG_REGEX } from "@appstrate/core/naming";
-import { unzipAndNormalize } from "../services/package-storage.ts";
+import { SLUG_REGEX, attachmentDisposition } from "@appstrate/core/naming";
+import { ifNoneMatchSatisfied } from "../lib/if-none-match.ts";
+import { unzipPackageArchive } from "../services/package-archive.ts";
 import { isValidVersion } from "@appstrate/core/semver";
 import {
   getVersionDetail,
@@ -65,6 +65,16 @@ import { fetchGithubDirectory, GithubImportError } from "../services/github-impo
 import { validateAgentIntegrationSelections } from "../services/integration-scope-validation.ts";
 import { SCOPED_PACKAGE_ROUTE } from "./scoped-package-route.ts";
 import {
+  resolvePackageFileValidator,
+  readPackageSnapshot,
+  resolveDraftContent,
+  buildFileIndex,
+  indexEtag,
+  fileEtag,
+  type PackageFileSource,
+} from "../services/package-files.ts";
+import { PACKAGE_CONTENT_ENTRY } from "@appstrate/core/package-files";
+import {
   collectConnectLoginWarnings,
   collectMetaWarnings,
 } from "../services/integration-install-warnings.ts";
@@ -80,6 +90,7 @@ import {
   type ValidationFieldError,
 } from "../lib/errors.ts";
 import { parsePathMessages } from "../lib/field-errors.ts";
+import { isManifestTextFallback } from "../lib/manifest-utils.ts";
 
 function manifestErrorsToFieldErrors(errors: string[]): ValidationFieldError[] {
   return parsePathMessages(errors, {
@@ -193,20 +204,21 @@ export const forkSchema = z.object({
 /**
  * JSON-body create/update payloads for the manifest-driven package types
  * (agent). `manifest` is validated structurally here (must be an object) and
- * then deeply by `validateManifest`. Bodies with wrong-typed `content` /
- * `source_code` (e.g. `content: 1`) are now rejected as a 400 instead of
- * blowing up downstream as a 500.
+ * then deeply by `validateManifest`. Bodies with a wrong-typed `content`
+ * (e.g. `content: 1`) are rejected as a 400 instead of blowing up downstream
+ * as a 500.
+ *
+ * Both objects are non-strict, so an unknown key (a client still sending the
+ * retired `source_code`, say) is silently stripped rather than rejected.
  */
 const packageJsonCreateSchema = z.object({
   manifest: z.record(z.string(), z.unknown()),
   content: z.string().optional(),
-  source_code: z.string().optional(),
 });
 
 const packageJsonUpdateSchema = z.object({
   manifest: z.record(z.string(), z.unknown()).optional(),
   content: z.string().optional(),
-  source_code: z.string().optional(),
   lock_version: z.number().optional(),
 });
 
@@ -240,16 +252,9 @@ interface ParsedUpload {
   normalizedFiles?: Record<string, Uint8Array>;
   /** Full parsed manifest.json from the ZIP — stored as-is (like the registry). */
   manifest: Record<string, unknown>;
+  /** Original archive bytes, retained for the canonical AFPS preflight. */
+  archive: Uint8Array;
 }
-
-/** JSON body shape for the non-multipart package upload branch. */
-const jsonUploadSchema = z.object({
-  id: z.string().min(1),
-  content: z.string().min(1),
-  manifest: z.record(z.string(), z.unknown()),
-  name: z.string().optional(),
-  description: z.string().optional(),
-});
 
 /**
  * Parse a package item upload from a Hono context (multipart ZIP or JSON body).
@@ -282,9 +287,10 @@ async function parsePackageUpload(
       throw invalidRequest("Invalid file name (kebab-case slug required)", "file");
     }
 
+    const archive = new Uint8Array(await file.arrayBuffer());
     let normalizedFiles: Record<string, Uint8Array>;
     try {
-      normalizedFiles = unzipAndNormalize(Buffer.from(await file.arrayBuffer()));
+      normalizedFiles = unzipPackageArchive(archive);
     } catch {
       throw invalidRequest("Invalid ZIP file", "file");
     }
@@ -332,32 +338,19 @@ async function parsePackageUpload(
     if (formName) name = formName;
     if (formDesc) description = formDesc;
 
-    return { id, name, description, content, normalizedFiles, manifest };
+    return { id, name, description, content, normalizedFiles, manifest, archive };
   }
 
-  // JSON body
-  const body = await readJsonBody(c, jsonUploadSchema);
-
-  if (!SLUG_REGEX.test(body.id)) {
-    throw invalidRequest("Invalid id (kebab-case slug required)", "id");
-  }
-
-  const { name, description } = body;
-
-  // Synthesize normalizedFiles so the ZIP is uploaded to storage (same as multipart path)
-  const encoded = new TextEncoder().encode(body.content);
-  const fileName =
-    opts.requiredFile ?? (opts.contentFileExt ? `${body.id}${opts.contentFileExt}` : "content");
-  const normalizedFiles: Record<string, Uint8Array> = { [fileName]: encoded };
-
-  return {
-    id: body.id,
-    name,
-    description,
-    content: body.content,
-    normalizedFiles,
-    manifest: body.manifest,
-  };
+  // Executable MCP packages are self-contained archives. A JSON manifest can
+  // describe an entry point but cannot carry it; synthesising a fake `content`
+  // file here created packages that validated, versioned and auto-installed,
+  // then failed only when the sidecar tried to boot the missing entry point.
+  throw new ApiError({
+    status: 415,
+    code: "archive_required",
+    title: "Archive Required",
+    detail: "MCP-server packages must be uploaded as a multipart .afps or .zip archive.",
+  });
 }
 
 /** Create a version snapshot from files + manifest (non-fatal on error).
@@ -380,13 +373,13 @@ async function createVersionSafe(params: {
   userId: string;
   manifest: Record<string, unknown>;
   normalizedFiles: Record<string, Uint8Array>;
-}): Promise<void> {
+}): Promise<boolean> {
   const version = params.manifest.version as string | undefined;
   if (!version || !isValidVersion(version)) {
     logger.warn("Skipping version creation: missing or invalid version in manifest", {
       packageId: params.packageId,
     });
-    return;
+    return false;
   }
   const gateErrors = await validateAgentIntegrationSelections({
     manifest: params.manifest,
@@ -398,7 +391,7 @@ async function createVersionSafe(params: {
       packageId: params.packageId,
       codes: gateErrors.map((e) => e.code),
     });
-    return;
+    return false;
   }
   try {
     const manifestToStore = params.manifest;
@@ -413,8 +406,10 @@ async function createVersionSafe(params: {
       zipBuffer,
       manifest: manifestToStore,
     });
+    return true;
   } catch (error) {
     logger.warn("Version upload failed (non-fatal)", { packageId: params.packageId, error });
+    return false;
   }
 }
 
@@ -429,11 +424,31 @@ interface PackageRouteConfig {
     contentFileExt: string | null;
   };
   validateContent?: (content: string) => { valid: boolean; errors: string[]; warnings: string[] };
-  /** Validates the secondary source file (e.g. .ts for tools). */
-  validateSource?: (source: string) => { valid: boolean; errors: string[]; warnings: string[] };
-  storageFileName: (id: string) => string;
-  /** Secondary source file name (e.g. {name}.ts for tools). */
-  sourceFileName?: (id: string) => string;
+  /**
+   * Which storage file this type's editor `content` is written to — a per-type
+   * editor-wiring fact.
+   *
+   * It answers a DIFFERENT question from `PACKAGE_CONTENT_FILE`
+   * (`@appstrate/core/package-files`), which names the archive entry
+   * `draft_content` mirrors. Both are right where they differ: for
+   * `integration` the SPA editor deliberately sends the manifest JSON as
+   * `content` (`toWireBody`, `apps/web/src/pages/package-editor.tsx`), so
+   * `manifest.json` is exactly where that `content` belongs.
+   *
+   * Do NOT "reconcile" the two maps. Pointing `integration` at
+   * `INTEGRATION.md` would write manifest JSON into the docs file, strand the
+   * real `manifest.json` (nothing refreshes it afterwards), and — because
+   * `createVersionFromDraft` spreads the stored files into the artifact — mint
+   * immutable, integrity-pinned published ZIPs whose `INTEGRATION.md` is
+   * manifest JSON. Unfixable once published.
+   *
+   * Their DISAGREEMENT is load-bearing, not merely tolerated: it is what tells
+   * the update / restore handlers that this type's `content` is a manifest
+   * copy, so they must not put it in `packages.draft_content` (that column's
+   * `INTEGRATION.md` is nobody's editor field) and must rebuild the storage
+   * file from the manifest instead of echoing a carried-forward `content`.
+   */
+  storageFileName: string;
   /** Hook called after a new package is created. */
   afterCreate?: (params: {
     packageId: string;
@@ -478,7 +493,7 @@ const ROUTE_CONFIGS: Partial<Record<PackageType, PackageRouteConfig>> = {
     cfg: CONFIG_BY_TYPE.skill,
     path: "skills",
     parseOpts: { requiredFile: "SKILL.md", contentFileExt: null },
-    storageFileName: () => "SKILL.md",
+    storageFileName: "SKILL.md",
     jsonBodyCreate: true,
     requireContent: true,
   },
@@ -486,7 +501,7 @@ const ROUTE_CONFIGS: Partial<Record<PackageType, PackageRouteConfig>> = {
     cfg: CONFIG_BY_TYPE.agent,
     path: "agents",
     parseOpts: { requiredFile: null, contentFileExt: null },
-    storageFileName: () => "prompt.md",
+    storageFileName: "prompt.md",
     jsonBodyCreate: true,
     requireContent: true,
     requireMutableForVersionOps: true,
@@ -507,7 +522,7 @@ const ROUTE_CONFIGS: Partial<Record<PackageType, PackageRouteConfig>> = {
     cfg: CONFIG_BY_TYPE.integration,
     path: "integrations",
     parseOpts: { requiredFile: null, contentFileExt: null },
-    storageFileName: () => "manifest.json",
+    storageFileName: "manifest.json",
     jsonBodyCreate: true,
   },
   // AFPS §3.4 — standalone mcp-server packages. Import-only like
@@ -519,7 +534,7 @@ const ROUTE_CONFIGS: Partial<Record<PackageType, PackageRouteConfig>> = {
     cfg: CONFIG_BY_TYPE["mcp-server"],
     path: "mcp-servers",
     parseOpts: { requiredFile: null, contentFileExt: null },
-    storageFileName: () => "manifest.json",
+    storageFileName: "manifest.json",
     jsonBodyCreate: false,
   },
 };
@@ -568,7 +583,6 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
 
       const manifest = body.manifest;
       const content = body.content ?? "";
-      const sourceCode = body.source_code ?? "";
 
       const validatedManifest = await validateManifestForRoute(
         manifest,
@@ -589,24 +603,6 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
               field: "content",
               code: "invalid_content",
               title: "Invalid Content",
-              message,
-            })),
-          );
-        }
-      }
-
-      if (rcfg.sourceFileName && !sourceCode.trim()) {
-        throw invalidRequest("Source is required", "source_code");
-      }
-
-      if (rcfg.validateSource && sourceCode) {
-        const validation = rcfg.validateSource(sourceCode);
-        if (!validation.valid) {
-          throw validationFailed(
-            validation.errors.map((message) => ({
-              field: "source_code",
-              code: "invalid_source",
-              title: "Invalid Source",
               message,
             })),
           );
@@ -660,11 +656,8 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
 
       // Upload files to S3 storage
       const normalizedFiles: Record<string, Uint8Array> = {
-        [rcfg.storageFileName(packageId)]: new TextEncoder().encode(content),
+        [rcfg.storageFileName]: new TextEncoder().encode(content),
       };
-      if (rcfg.sourceFileName && sourceCode) {
-        normalizedFiles[rcfg.sourceFileName(packageId)] = new TextEncoder().encode(sourceCode);
-      }
       await uploadPackageFiles(rcfg.cfg.storageFolder, orgId, packageId, normalizedFiles);
 
       // Create initial version (non-fatal). Snapshot the STORED draft
@@ -674,7 +667,7 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
       // never match a later rebuild from the draft. That byte drift defeated
       // the publish dedup and, before #896, made every create-then-republish
       // silently overwrite the artifact while keeping the stale integrity row.
-      await createVersionSafe({
+      const versionCreated = await createVersionSafe({
         packageId,
         orgId,
         userId: user.id,
@@ -684,7 +677,7 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
 
       // Auto-install in the current application (non-fatal)
       const applicationId = c.get("applicationId");
-      if (applicationId) {
+      if (applicationId && versionCreated) {
         await installPackage({ orgId, applicationId }, packageId).catch((e: unknown) =>
           logger.debug("auto-install skipped", { packageId, applicationId, err: String(e) }),
         );
@@ -708,7 +701,7 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
       return c.json(detail, 201);
     }
 
-    // Import-only create (mcp-server) — uses parsePackageUpload (ZIP or JSON body)
+    // Import-only create (mcp-server) — archive-only by construction.
     const parsed = await parsePackageUpload(c, rcfg.parseOpts);
 
     if (isSystemPackage(parsed.id)) {
@@ -718,6 +711,27 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
     }
 
     await validateManifestForRoute(parsed.manifest, rcfg.cfg.type, orgId, "author");
+
+    // Run the canonical AFPS archive parser before the first write. It shares
+    // companion-file enforcement with the runtime bundle loader, so a missing
+    // `server.entry_point` payload is rejected here rather than at sidecar boot.
+    let canonical;
+    try {
+      canonical = parsePackageZip(parsed.archive);
+    } catch (err) {
+      if (err instanceof PackageZipError) throw invalidRequest(err.message, "file");
+      throw err;
+    }
+    const expectedPackageId = `@${orgSlug}/${parsed.id}`;
+    if (canonical.packageId !== expectedPackageId) {
+      throw invalidRequest(
+        `Archive manifest name '${canonical.packageId}' must match upload package id '${expectedPackageId}'.`,
+        "manifest.name",
+      );
+    }
+    parsed.manifest = canonical.manifest as Record<string, unknown>;
+    parsed.content = canonical.content;
+    parsed.normalizedFiles = canonical.files;
 
     if (rcfg.validateContent) {
       const validation = rcfg.validateContent(parsed.content);
@@ -771,7 +785,7 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
 
     // Create initial version (non-fatal)
     const finalManifest = asRecord(item.draftManifest);
-    await createVersionSafe({
+    const versionCreated = await createVersionSafe({
       packageId: item.id,
       orgId,
       userId: user.id,
@@ -781,7 +795,7 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
 
     // Auto-install in the current application (non-fatal)
     const applicationId = c.get("applicationId");
-    if (applicationId) {
+    if (applicationId && versionCreated) {
       await installPackage({ orgId, applicationId }, item.id).catch((e: unknown) =>
         logger.debug("auto-install skipped", { packageId: item.id, applicationId, err: String(e) }),
       );
@@ -834,19 +848,8 @@ async function buildPackageDetailDto(
 
   if (!item) return null;
 
-  // Extract secondary source file from S3 storage (e.g. .ts for tools)
-  let sourceText: string | null = null;
-  if (rcfg.sourceFileName) {
-    const files = await downloadPackageFiles(rcfg.cfg.storageFolder, orgId, itemId);
-    const sourceData = files?.[rcfg.sourceFileName(itemId)];
-    if (sourceData) {
-      sourceText = new TextDecoder().decode(sourceData);
-    }
-  }
-
   return {
     ...item,
-    ...(sourceText != null ? { source_code: sourceText } : {}),
     version_count: versionCount,
     has_unarchived_changes: computeHasUnpublishedChanges(
       item.source,
@@ -926,7 +929,6 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
     const manifest =
       authoredManifest ?? (existing as { manifest?: Record<string, unknown> }).manifest ?? {};
     const content = body.content ?? existing.content ?? "";
-    const sourceCode = body.source_code;
 
     // Everything downstream — the persisted row, the after-update hook, the
     // id-immutability check — reads the VALIDATED manifest, never the raw one.
@@ -941,6 +943,7 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
       orgId,
       authoredManifest ? "author" : "stored",
     );
+    const manifestText = JSON.stringify(validatedManifest, null, 2);
 
     // Ensure ID immutability (all types)
     const newScopedName = validatedManifest.name;
@@ -968,30 +971,29 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
       }
     }
 
-    // Source validation (tools)
-    if (rcfg.sourceFileName && sourceCode !== undefined) {
-      if (!sourceCode.trim()) {
-        throw invalidRequest("Source cannot be empty", "source_code");
-      }
-      if (rcfg.validateSource) {
-        const validation = rcfg.validateSource(sourceCode);
-        if (!validation.valid) {
-          throw validationFailed(
-            validation.errors.map((message) => ({
-              field: "source_code",
-              code: "invalid_source",
-              title: "Invalid Source",
-              message,
-            })),
-          );
-        }
-      }
-    }
+    // A manifest-only integration PUT has no authored `content`. When the
+    // overloaded column contains the manifest fallback (rather than a real
+    // INTEGRATION.md), refresh it from the validated manifest instead of
+    // carrying the old fallback forward. A real companion remains protected.
+    const entry = PACKAGE_CONTENT_ENTRY[rcfg.cfg.type];
+    const draftContentInput =
+      body.content === undefined &&
+      entry?.required === false &&
+      (!existing.content || isManifestTextFallback(existing.content))
+        ? manifestText
+        : content;
 
+    // `content` feeds TWO sinks that are the same file for `agent`/`skill` and
+    // different files for the manifest-backed types — see `storageFileName`.
+    // `resolveDraftContent` guards the column; the storage write below is
+    // resolved on its own terms.
     const updated = await updateOrgItem(
       orgId,
       itemId,
-      { manifest: validatedManifest, content },
+      {
+        manifest: validatedManifest,
+        content: resolveDraftContent(rcfg.cfg.type, existing.content, draftContentInput),
+      },
       body.lock_version,
     );
 
@@ -999,15 +1001,22 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
       throw conflict("conflict", `${label} was modified concurrently. Reload and try again.`);
     }
 
+    // Bytes for `rcfg.storageFileName`. When that file is NOT the type's
+    // content entry it is the manifest (integration, mcp-server), and it is
+    // rebuilt from the VALIDATED manifest rather than echoing `content`: this
+    // route accepts a manifest-only PUT, and the `existing.content`
+    // carried forward above is `packages.draft_content` — which for an
+    // integration is its INTEGRATION.md. Echoing it would overwrite the
+    // package's `manifest.json` with its documentation.
+    const storageContent =
+      PACKAGE_CONTENT_ENTRY[rcfg.cfg.type]?.path === rcfg.storageFileName ? content : manifestText;
+
     // Update storage files (merge with existing to preserve ancillary files)
     const existingFiles = await downloadPackageFiles(rcfg.cfg.storageFolder, orgId, itemId);
     const updatedFiles: Record<string, Uint8Array> = {
       ...(existingFiles ?? {}),
-      [rcfg.storageFileName(itemId)]: new TextEncoder().encode(content),
+      [rcfg.storageFileName]: new TextEncoder().encode(storageContent),
     };
-    if (rcfg.sourceFileName && sourceCode !== undefined) {
-      updatedFiles[rcfg.sourceFileName(itemId)] = new TextEncoder().encode(sourceCode);
-    }
     await uploadPackageFiles(rcfg.cfg.storageFolder, orgId, itemId, updatedFiles);
 
     // After-update hook (e.g. agent junction table sync)
@@ -1126,18 +1135,10 @@ async function buildVersionDetailDto(
 
   // Extract primary content file from the ZIP
   let content: string | null = null;
-  let sourceText: string | null = null;
   if (detail.content) {
-    const fileName = rcfg.storageFileName(itemId);
-    const fileData = detail.content[fileName];
+    const fileData = detail.content[rcfg.storageFileName];
     if (fileData) {
       content = new TextDecoder().decode(fileData);
-    }
-    if (rcfg.sourceFileName) {
-      const sourceData = detail.content[rcfg.sourceFileName(itemId)];
-      if (sourceData) {
-        sourceText = new TextDecoder().decode(sourceData);
-      }
     }
   }
 
@@ -1146,7 +1147,6 @@ async function buildVersionDetailDto(
     version: detail.version,
     manifest: detail.manifest,
     content,
-    ...(sourceText != null ? { source_code: sourceText } : {}),
     yanked: detail.yanked,
     yanked_reason: detail.yankedReason,
     integrity: detail.integrity,
@@ -1254,6 +1254,12 @@ function makeCreateVersionHandler(rcfg: PackageRouteConfig) {
           "This version is already published and immutable — bump the version to publish the changed content",
         );
       }
+      if (result.error === "invalid_bundle") {
+        throw invalidRequest(
+          result.detail ?? "MCP-server package archive is not executable",
+          "manifest.server.entry_point",
+        );
+      }
       throw invalidRequest("Failed to create version (invalid or duplicate)");
     }
 
@@ -1300,11 +1306,24 @@ function makeRestoreVersionHandler(rcfg: PackageRouteConfig) {
       throw notFound(`${label} '${itemId}' not found`);
     }
 
-    // Extract content from version ZIP
+    // Extract `packages.draft_content` from the version ZIP.
+    //
+    // The column mirrors the archive's CONTENT ENTRY (`PACKAGE_CONTENT_ENTRY`),
+    // NOT the file this type's editor `content` is stored under
+    // (`rcfg.storageFileName`). The two names agree for `agent`/`skill` and
+    // DIVERGE for `integration`, whose column holds the optional
+    // `INTEGRATION.md` while its editor content is `manifest.json` — reading
+    // the storage name restored a manifest copy over the docs, the exact
+    // overload `parsePackageZip` avoids. Falling back to the storage name
+    // reproduces that parser's own manifest-text fallback for a bundle that
+    // ships no companion, and is a no-op for the three types whose two names
+    // already coincide.
+    const contentEntryPath = PACKAGE_CONTENT_ENTRY[rcfg.cfg.type]?.path;
     let content = detail.prompt ?? "";
     if (detail.content) {
-      const fileName = rcfg.storageFileName(itemId);
-      const fileData = detail.content[fileName];
+      const fileData =
+        (contentEntryPath ? detail.content[contentEntryPath] : undefined) ??
+        detail.content[rcfg.storageFileName];
       if (fileData) {
         content = new TextDecoder().decode(fileData);
       }
@@ -1406,6 +1425,180 @@ function makeDeleteVersionHandler(rcfg: PackageRouteConfig) {
 }
 
 // ═══════════════════════════════════════════════
+// File explorer (read-only)
+// ═══════════════════════════════════════════════
+
+const fileIndexQuerySchema = z.object({
+  version: z.string().trim().min(1).optional(),
+});
+const fileContentQuerySchema = z.object({
+  version: z.string().trim().min(1).optional(),
+  // NOT trimmed: `unzipArtifact` preserves leading/trailing spaces in ZIP entry
+  // names, so an entry the index advertises as `"notes .md "` must stay
+  // fetchable by that exact key. Trimming would make it permanently 404.
+  path: z.string().min(1),
+});
+
+function parseFileQuery<T extends z.ZodType>(c: Context<AppEnv>, schema: T): z.infer<T> {
+  const parsed = schema.safeParse(c.req.query());
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0];
+    throw invalidRequest(issue?.message ?? "Invalid query", issue?.path.join(".") || undefined);
+  }
+  return parsed.data;
+}
+
+/**
+ * Resolve the package a file-explorer request targets AND authorize the read —
+ * 404 when the package is not reachable, 403 when it is but the caller may not
+ * read it.
+ *
+ * Two gates that answer different questions, both required:
+ *
+ * - `hasPackageAccess` is VISIBILITY: "is this a system package, or installed
+ *   in THIS application?" (it also excludes ephemeral shadows). It says
+ *   nothing about what the caller is ALLOWED to do — a credential with
+ *   `scopes: []` passes it. Believing otherwise is exactly the mistake #1124
+ *   had to undo across the rest of the package surface.
+ * - `requirePackageReadPermission` is AUTHORIZATION: the resolved row's
+ *   `<type>:read` scope. Both file-explorer routes are registered on the
+ *   router ROOT, so the RBAC resource is not knowable from the path — only
+ *   from the row — which is why the guard runs here and not as route-level
+ *   middleware.
+ *
+ * The row read in between adds the org boundary (`hasPackageAccess` does not
+ * filter `orgId`) and fetches the draft columns the overlay needs.
+ *
+ * Authorizing HERE rather than at each call site is what makes the ordering
+ * safe. Both handlers call this before they touch a validator, so no
+ * response — 200, 304 or 404 — is reachable without the permission check. A
+ * guard placed after the ETag short-circuit would still leave `/files/content`
+ * an oracle: replaying an `If-None-Match` would answer 304 and tell an
+ * unauthorized caller that this exact file exists with this exact content.
+ *
+ * 404-before-403 is forced, not a policy choice: the RBAC resource comes from
+ * the row, so visibility has to be settled first. Same order as
+ * `/{version}/download`.
+ */
+async function loadFileExplorerPackage(c: Context<AppEnv>): Promise<PackageFileSource> {
+  const packageId = getItemId(c);
+  const orgId = c.get("orgId");
+  const applicationId = c.get("applicationId");
+
+  if (!(await hasPackageAccess({ orgId, applicationId }, packageId))) {
+    throw notFound("Package not found");
+  }
+
+  const [pkg] = await db
+    .select({
+      id: packages.id,
+      type: packages.type,
+      orgId: packages.orgId,
+      draftManifest: packages.draftManifest,
+      draftContent: packages.draftContent,
+    })
+    .from(packages)
+    .where(and(eq(packages.id, packageId), orgOrSystemFilter(orgId), notEphemeralFilter()))
+    .limit(1);
+  if (!pkg) {
+    throw notFound("Package not found");
+  }
+
+  // The index lists every file and inlines text content; `/files/content`
+  // serves any byte of the artifact. Both are at least as sensitive as the
+  // detail route, so both need the same `<type>:read`.
+  await requirePackageReadPermission(c, pkg.type);
+
+  return pkg;
+}
+
+/**
+ * One policy for every response on both routes: `private, no-cache`.
+ *
+ * `private` is mandatory: these are authenticated, tenant-scoped bytes and a
+ * shared cache must never hold them. `no-cache` is mandatory for the same
+ * reason — it still allows the 304 round-trip, it only forbids serving without
+ * one, and that round-trip is what keeps authorization live. Any fresh window,
+ * however short, is served by the browser with ZERO server contact: revoke
+ * `<type>:read`, remove the member from the org, or uninstall the package from
+ * the application, and the cached 200 keeps being handed out until it expires.
+ * `Vary` cannot rescue that — revocation changes no request header. Forcing the
+ * round-trip re-enters `loadFileExplorerPackage`, so `hasPackageAccess` and
+ * `requirePackageReadPermission` run on every hit.
+ *
+ * The revalidation this costs is nearly free: `resolvePackageFileValidator`
+ * answers a version's 304 from one DB read, with no storage GET and no unzip.
+ * That is the entire reason it is split out from `readPackageSnapshot`.
+ *
+ * `Vary` is NOT optional here. The response body depends on `X-Org-Id` /
+ * `X-Application-Id` (via `hasPackageAccess`) while the URL does not mention
+ * either. Without it, switching applications in the SPA re-issues an identical
+ * URL and the browser answers from cache — showing application B an artifact
+ * that is only installed in application A.
+ */
+function fileCacheHeaders(etag: string, yanked: boolean): Record<string, string> {
+  const headers: Record<string, string> = {
+    ETag: etag,
+    "Cache-Control": "private, no-cache",
+    Vary: "X-Org-Id, X-Application-Id",
+  };
+  if (yanked) headers["X-Yanked"] = "true";
+  return headers;
+}
+
+// ═══════════════════════════════════════════════
+// Read permission
+// ═══════════════════════════════════════════════
+
+type ReadGuard = (c: Context<AppEnv>, next: () => Promise<void>) => Promise<unknown>;
+
+/**
+ * `type` → the `*:read` guard for that type's RBAC resource.
+ *
+ * The per-type routes get their resource straight from the route path
+ * (`skills` → `skills:read`), but a route registered on the router ROOT
+ * (`/:scope/:name/...`, e.g. `/{version}/download`) does not name a type in
+ * its path — the resource is only knowable from the resolved package row.
+ * This map is what lets such a route reach the same guard, so downloading a
+ * skill's ZIP is gated on `skills:read` exactly like `GET /skills/@scope/name`.
+ *
+ * Built from `ROUTE_CONFIGS` rather than hand-written so a new package type
+ * cannot land with a per-type guard and no root-route guard.
+ */
+const READ_GUARD_BY_TYPE = new Map<PackageType, ReadGuard>(
+  Object.entries(ROUTE_CONFIGS).flatMap(([type, rcfg]) =>
+    rcfg
+      ? [
+          [
+            type as PackageType,
+            requirePermission(rcfg.path as import("../lib/permissions.ts").Resource, "read"),
+          ] as const,
+        ]
+      : [],
+  ),
+);
+
+/**
+ * Enforce the resolved package's `*:read` permission from INSIDE a handler.
+ *
+ * Route-level middleware cannot do this job on the router-root routes: the
+ * resource depends on the row, and the row is only read once the handler runs.
+ * Reusing the guard (rather than an inline `permissions.has()`) keeps the
+ * denial audit hook, the 403 shape, and the fail-closed semantics identical to
+ * every other RBAC call site.
+ *
+ * An unmapped type fails CLOSED — a package type with no route config has no
+ * read scope to satisfy, so nobody may read its bytes.
+ */
+async function requirePackageReadPermission(c: Context<AppEnv>, type: string): Promise<void> {
+  const guard = READ_GUARD_BY_TYPE.get(type as PackageType);
+  if (!guard) {
+    throw forbidden(`Insufficient permissions: no read scope is defined for type '${type}'`);
+  }
+  await guard(c, async () => {});
+}
+
+// ═══════════════════════════════════════════════
 // Router
 // ═══════════════════════════════════════════════
 
@@ -1418,15 +1611,29 @@ export function createPackagesRouter() {
     const { path } = rcfg;
     // Permission resource matches the route path (e.g. "skills", "agents", "integrations")
     const resource = path as import("../lib/permissions.ts").Resource;
+    const readGuard = requirePermission(resource, "read");
     const writeGuard = requirePermission(resource, "write");
     const deleteGuard = requirePermission(resource, "delete");
 
-    router.get(`/${path}`, makeListHandler(rcfg));
+    // `readGuard` on every GET: the install/system visibility check inside the
+    // handlers (`hasPackageAccess`) answers "is this package reachable from
+    // this application", never "may this caller read it". Without the guard a
+    // credential scoped without `<type>:read` still gets the manifest and, on
+    // the detail route, the full `content` (SKILL.md / prompt.md).
+    router.get(`/${path}`, readGuard, makeListHandler(rcfg));
     router.post(`/${path}`, writeGuard, makeCreateHandler(rcfg));
     // Version routes — must be registered before generic get to avoid conflict
-    router.get(`/${path}/${SCOPED_PACKAGE_ROUTE}/versions`, makeListVersionsHandler(rcfg));
+    router.get(
+      `/${path}/${SCOPED_PACKAGE_ROUTE}/versions`,
+      readGuard,
+      makeListVersionsHandler(rcfg),
+    );
     // Version info + create version + restore — BEFORE :version param to avoid matching
-    router.get(`/${path}/${SCOPED_PACKAGE_ROUTE}/versions/info`, makeVersionInfoHandler(rcfg));
+    router.get(
+      `/${path}/${SCOPED_PACKAGE_ROUTE}/versions/info`,
+      readGuard,
+      makeVersionInfoHandler(rcfg),
+    );
     router.post(
       `/${path}/${SCOPED_PACKAGE_ROUTE}/versions`,
       requirePackageInOrg(),
@@ -1447,10 +1654,15 @@ export function createPackagesRouter() {
     );
     router.get(
       `/${path}/${SCOPED_PACKAGE_ROUTE}/versions/:version`,
+      readGuard,
       makeVersionDetailHandler(rcfg),
     );
     // Scoped IDs (@scope/name) — must be registered before unscoped to match first
-    router.get(`/${path}/${SCOPED_PACKAGE_ROUTE}`, rcfg.getHandler ?? makeGetHandler(rcfg));
+    router.get(
+      `/${path}/${SCOPED_PACKAGE_ROUTE}`,
+      readGuard,
+      rcfg.getHandler ?? makeGetHandler(rcfg),
+    );
     router.put(
       `/${path}/${SCOPED_PACKAGE_ROUTE}`,
       requirePackageInOrg(),
@@ -1464,7 +1676,7 @@ export function createPackagesRouter() {
       makeDeleteHandler(rcfg),
     );
     // Unscoped IDs
-    router.get(`/${path}/:id`, rcfg.getHandler ?? makeGetHandler(rcfg));
+    router.get(`/${path}/:id`, readGuard, rcfg.getHandler ?? makeGetHandler(rcfg));
     router.put(`/${path}/:id`, requirePackageInOrg(), writeGuard, makeUpdateHandler(rcfg));
     router.delete(`/${path}/:id`, requirePackageInOrg(), deleteGuard, makeDeleteHandler(rcfg));
   }
@@ -1890,19 +2102,12 @@ export function createPackagesRouter() {
     }
     // One audit event per package version actually written — "reused"
     // entries changed no state. `recordAudit*` never throws.
-    for (const entry of result.imported) {
-      if (entry.status !== "inserted") continue;
-      const identity = parsePackageIdentity(entry.identity);
+    for (const audit of bundleImportAuditRecords(result, { via: "import:bundle" })) {
       await recordAuditFromContext(c, {
         action: "package.version_created",
         resourceType: "package",
-        resourceId: identity?.packageId ?? entry.identity,
-        after: {
-          type: entry.type ?? null,
-          version: identity?.version ?? null,
-          via: "import:bundle",
-          root: entry.identity === `${result.root_package_id}@${result.root_version}`,
-        },
+        resourceId: audit.resourceId,
+        after: audit.after,
       });
     }
     return c.json(result, 201);
@@ -1958,21 +2163,132 @@ export function createPackagesRouter() {
     return handleImport(c, parsed, artifact, false, "github");
   });
 
+  // --- File explorer (read-only) ---
+  // Registered BEFORE `/:version/download` so the literal `files` segment can
+  // never be captured as a version spec.
+
+  // GET /api/packages/:scope/:name/files — flat index of the artifact's files
+  router.get(`/${SCOPED_PACKAGE_ROUTE}/files`, rateLimit(50), async (c) => {
+    const { version } = parseFileQuery(c, fileIndexQuerySchema);
+    // Visibility + `<type>:read` are both settled inside this call, BEFORE any
+    // validator is resolved — nothing below can answer an unauthorized caller.
+    const pkg = await loadFileExplorerPackage(c);
+    const inm = c.req.header("if-none-match");
+
+    // Resolve the validator FIRST. A published version's snapshot id comes
+    // straight from the `integrity` column, so a hit here answers the request
+    // for one query — no storage GET, no unzip, no SRI pass.
+    const validator = await resolvePackageFileValidator(pkg, version);
+    if (validator.snapshotId !== null) {
+      const etag = indexEtag(validator.snapshotId);
+      if (ifNoneMatchSatisfied(inm, etag)) {
+        return new Response(null, {
+          status: 304,
+          headers: fileCacheHeaders(etag, validator.yanked),
+        });
+      }
+    }
+
+    const snapshot = await readPackageSnapshot(pkg, validator);
+    const etag = indexEtag(snapshot.snapshotId);
+    const headers = fileCacheHeaders(etag, validator.yanked);
+    if (ifNoneMatchSatisfied(inm, etag)) {
+      return new Response(null, { status: 304, headers });
+    }
+    return c.json({ entries: buildFileIndex(snapshot) }, 200, headers);
+  });
+
+  // GET /api/packages/:scope/:name/files/content — raw bytes of ONE file.
+  // Serves preview AND download: a small text file that fell past the index's
+  // inline budget stays previewable through here.
+  router.get(`/${SCOPED_PACKAGE_ROUTE}/files/content`, rateLimit(50), async (c) => {
+    const { version, path } = parseFileQuery(c, fileContentQuerySchema);
+    // Must stay ABOVE the validator: the 304 short-circuit below answers
+    // without reading the artifact, so a permission check placed after it
+    // would turn `If-None-Match` into a file-existence oracle.
+    const pkg = await loadFileExplorerPackage(c);
+    const inm = c.req.header("if-none-match");
+
+    // Same short-circuit as the index, but the tag folds in the PATH: a
+    // matching tag proves the client previously got a 200 for THIS file, which
+    // is what makes answering before the read sound. `*` is refused here — it
+    // says nothing about which path, so it cannot establish that the file
+    // exists.
+    const validator = await resolvePackageFileValidator(pkg, version);
+    if (validator.snapshotId !== null) {
+      const etag = fileEtag(validator.snapshotId, path);
+      if (ifNoneMatchSatisfied(inm, etag, { allowWildcard: false })) {
+        return new Response(null, {
+          status: 304,
+          headers: fileCacheHeaders(etag, validator.yanked),
+        });
+      }
+    }
+
+    const snapshot = await readPackageSnapshot(pkg, validator);
+
+    // Plain own-key lookup on the already-sanitized map — no filesystem, no
+    // `..` resolution. `Object.hasOwn` keeps a `__proto__`/`toString` probe
+    // from resolving to something off the prototype chain.
+    if (!Object.hasOwn(snapshot.files, path)) {
+      throw notFound("File not found");
+    }
+    const bytes = snapshot.files[path]!;
+
+    const etag = fileEtag(snapshot.snapshotId, path);
+    const headers = fileCacheHeaders(etag, validator.yanked);
+    // Existence is established, so `*` is now a legitimate match.
+    if (ifNoneMatchSatisfied(inm, etag)) {
+      return new Response(null, { status: 304, headers });
+    }
+
+    // Always octet-stream + nosniff + attachment: package bytes are
+    // author-controlled, so no response from here may be something a browser
+    // decides to execute or render in this origin. `Referrer-Policy` +
+    // `Cross-Origin-Resource-Policy` mirror what `routes/documents.ts` applies
+    // to comparable authenticated tenant bytes.
+    return new Response(new Uint8Array(bytes), {
+      status: 200,
+      headers: {
+        ...headers,
+        "Content-Type": "application/octet-stream",
+        "X-Content-Type-Options": "nosniff",
+        "Referrer-Policy": "no-referrer",
+        "Cross-Origin-Resource-Policy": "same-origin",
+        "Content-Disposition": attachmentDisposition(path.slice(path.lastIndexOf("/") + 1)),
+        "Content-Length": String(bytes.byteLength),
+      },
+    });
+  });
+
   // GET /api/packages/:scope/:name/:version/download — download a versioned package ZIP
   router.get(`/${SCOPED_PACKAGE_ROUTE}/:version/download`, rateLimit(50), async (c) => {
     const packageId = getItemId(c);
     const orgId = c.get("orgId");
+    const applicationId = c.get("applicationId");
     const versionSpec = c.req.param("version")!;
+
+    // Visibility first — "system package OR installed in THIS application",
+    // the same gate the rest of the package surface applies. Without it this
+    // route served the artifact bytes of packages that are merely owned by the
+    // org and installed nowhere the caller can reach.
+    if (!(await hasPackageAccess({ orgId, applicationId }, packageId))) {
+      throw notFound("Package not found");
+    }
 
     // Verify org ownership (or system package). Ephemeral shadows are hidden.
     const [pkg] = await db
-      .select({ id: packages.id })
+      .select({ id: packages.id, type: packages.type })
       .from(packages)
       .where(and(eq(packages.id, packageId), orgOrSystemFilter(orgId), notEphemeralFilter()))
       .limit(1);
     if (!pkg) {
       throw notFound("Package not found");
     }
+
+    // The ZIP carries the manifest and every authored file, so it is at least
+    // as sensitive as the detail route — it needs the same `<type>:read`.
+    await requirePackageReadPermission(c, pkg.type);
 
     const ver = await getVersionForDownload(packageId, versionSpec);
     if (!ver) {

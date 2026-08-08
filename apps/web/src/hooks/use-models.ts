@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { $api, client, type components } from "../api/client";
 import { splitPackageRef } from "../lib/package-paths";
 import { useCurrentOrgId } from "./use-org";
@@ -13,6 +13,7 @@ import {
   useModelProviderCredentials,
 } from "./use-model-provider-credentials";
 import { agentModelKeys, packageKeys } from "../lib/query-keys";
+import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 
 /** Wire shape from the OpenAPI spec (components.schemas.OrgModel). */
 export type OrgModelInfo = components["schemas"]["OrgModel"];
@@ -33,6 +34,14 @@ function useInvalidateModels() {
   return () => {
     void qc.invalidateQueries({ queryKey: ["get", "/api/models"] });
   };
+}
+
+/** A saved OAuth model test may rotate or terminally flag its backing credential. */
+export async function invalidateModelConnectionTestQueries(qc: QueryClient): Promise<void> {
+  await Promise.all([
+    qc.invalidateQueries({ queryKey: ["get", "/api/models"] }),
+    qc.invalidateQueries({ queryKey: ["get", "/api/model-provider-credentials"] }),
+  ]);
 }
 
 function useCreateModel() {
@@ -56,7 +65,10 @@ export function useSetDefaultModel() {
 }
 
 export function useTestModel() {
-  return $api.useMutation("post", "/api/models/{id}/test");
+  const qc = useQueryClient();
+  return $api.useMutation("post", "/api/models/{id}/test", {
+    onSuccess: () => invalidateModelConnectionTestQueries(qc),
+  });
 }
 
 export interface OpenRouterModel {
@@ -122,10 +134,14 @@ export function useAgentModel(packageId: string | undefined) {
 export function useSetAgentModel(packageId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (modelId: string | null) => {
+    mutationFn: async (
+      input:
+        string | null | { modelId: string | null; generation?: ModelGenerationSettings | null },
+    ) => {
+      const body = typeof input === "object" && input !== null ? input : { modelId: input };
       const { data } = await client.PUT("/api/agents/{scope}/{name}/model", {
         params: { path: splitPackageRef(packageId) },
-        body: { modelId },
+        body,
       });
       return data;
     },

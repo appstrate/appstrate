@@ -39,6 +39,22 @@ describe("splitConnectPayload", () => {
     expect(offer).toBeNull();
   });
 
+  it("normalizes a parsed HTTP(S) offer before exposing it to the UI", () => {
+    const { redacted, offer } = splitConnectPayload({
+      connect_url: "HTTPS://EXAMPLE.COM/Connect",
+    });
+    expect((redacted as { connect_url: string }).connect_url).toBe(REDACTED_CONNECT_LINK);
+    expect(offer).toEqual({ connect_url: "https://example.com/Connect" });
+  });
+
+  it("redacts malformed and non-HTTP(S) values without offering them", () => {
+    for (const connect_url of ["https://", "javascript:alert(1)", "//evil.example/connect"]) {
+      const { redacted, offer } = splitConnectPayload({ connect_url });
+      expect((redacted as { connect_url: string }).connect_url).toBe(REDACTED_CONNECT_LINK);
+      expect(offer).toBeNull();
+    }
+  });
+
   it("returns the same reference and no offer when nothing matches", () => {
     const payload = { ok: true, nested: { a: [1, 2] } };
     const { redacted, offer } = splitConnectPayload(payload);
@@ -114,9 +130,17 @@ describe("readConnectOffer", () => {
     expect(readConnectOffer({ output: { connectOffer: offer } })).toEqual(offer);
   });
 
+  it("normalizes a persisted HTTP(S) offer before returning it", () => {
+    expect(
+      readConnectOffer({ connectOffer: { connect_url: "HTTPS://EXAMPLE.COM/Connect" } }),
+    ).toEqual({ connect_url: "https://example.com/Connect" });
+  });
+
   it("rejects malformed or placeholder-bearing offers", () => {
     expect(readConnectOffer({ connectOffer: { connect_url: REDACTED_CONNECT_LINK } })).toBeNull();
     expect(readConnectOffer({ connectOffer: { connect_url: 42 } })).toBeNull();
+    expect(readConnectOffer({ connectOffer: { connect_url: "https://" } })).toBeNull();
+    expect(readConnectOffer({ connectOffer: { connect_url: "javascript:alert(1)" } })).toBeNull();
     expect(readConnectOffer({ connectOffer: "https://x/y" })).toBeNull();
     expect(readConnectOffer(null)).toBeNull();
   });

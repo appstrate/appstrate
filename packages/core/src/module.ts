@@ -23,6 +23,7 @@ import type {
   SubscriptionChatResolution,
 } from "./chat-contract.ts";
 import type { OrchestratorRegistration } from "./platform-types.ts";
+import type { ModelGenerationCapabilitiesOverride } from "./model-generation.ts";
 
 // ---------------------------------------------------------------------------
 // Module contract
@@ -38,7 +39,7 @@ import type { OrchestratorRegistration } from "./platform-types.ts";
  * attributes, bundler support). `packages/core/test/core-version.test.ts`
  * asserts it equals the published `version` field, so it cannot drift.
  */
-export const CORE_VERSION = "6.1.0";
+export const CORE_VERSION = "6.2.0";
 
 /** Metadata describing a module. */
 export interface ModuleManifest {
@@ -829,6 +830,13 @@ export interface ModelProviderDefinition {
    * `"openai"`, `claude-code` → `"anthropic"`).
    */
   catalogProviderId?: string;
+
+  /**
+   * Provider-transport restrictions applied after catalog lookup. Use this
+   * when a wrapper reuses vendor metadata but its execution backend is
+   * stricter (for example, ChatGPT Codex vs the OpenAI API).
+   */
+  generationOverride?: ModelGenerationCapabilitiesOverride;
 
   /**
    * Catalog model ids to surface in the picker's "Featured" section AND

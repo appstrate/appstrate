@@ -6,6 +6,14 @@
     "capabilities": [
       "text"
     ],
+    "generation": {
+      "temperature": "supported",
+      "reasoning": {
+        "supported": "unknown",
+        "adaptive": null,
+        "levels": {}
+      }
+    },
     "cost": {
       "input": 0.6,
       "output": 2.5,
@@ -19,6 +27,14 @@
     "capabilities": [
       "text"
     ],
+    "generation": {
+      "temperature": "supported",
+      "reasoning": {
+        "supported": "unknown",
+        "adaptive": null,
+        "levels": {}
+      }
+    },
     "cost": {
       "input": 0.6,
       "output": 2.5,
@@ -30,9 +46,24 @@
     "contextWindow": 262144,
     "maxTokens": null,
     "capabilities": [
-      "text",
-      "reasoning"
+      "text"
     ],
+    "generation": {
+      "temperature": "supported",
+      "reasoning": {
+        "supported": "unsupported",
+        "adaptive": null,
+        "levels": {
+          "off": "unsupported",
+          "minimal": "unsupported",
+          "low": "unsupported",
+          "medium": "unsupported",
+          "high": "unsupported",
+          "xhigh": "unsupported",
+          "max": "unsupported"
+        }
+      }
+    },
     "cost": {
       "input": 0.6,
       "output": 2.5,
@@ -44,9 +75,24 @@
     "contextWindow": 262144,
     "maxTokens": null,
     "capabilities": [
-      "text",
-      "reasoning"
+      "text"
     ],
+    "generation": {
+      "temperature": "supported",
+      "reasoning": {
+        "supported": "unsupported",
+        "adaptive": null,
+        "levels": {
+          "off": "unsupported",
+          "minimal": "unsupported",
+          "low": "unsupported",
+          "medium": "unsupported",
+          "high": "unsupported",
+          "xhigh": "unsupported",
+          "max": "unsupported"
+        }
+      }
+    },
     "cost": {
       "input": 1.15,
       "output": 8,
@@ -60,6 +106,14 @@
     "capabilities": [
       "text"
     ],
+    "generation": {
+      "temperature": "supported",
+      "reasoning": {
+        "supported": "unknown",
+        "adaptive": null,
+        "levels": {}
+      }
+    },
     "cost": {
       "input": 1.15,
       "output": 8,
@@ -72,9 +126,24 @@
     "maxTokens": null,
     "capabilities": [
       "text",
-      "image",
-      "reasoning"
+      "image"
     ],
+    "generation": {
+      "temperature": "supported",
+      "reasoning": {
+        "supported": "unsupported",
+        "adaptive": null,
+        "levels": {
+          "off": "unsupported",
+          "minimal": "unsupported",
+          "low": "unsupported",
+          "medium": "unsupported",
+          "high": "unsupported",
+          "xhigh": "unsupported",
+          "max": "unsupported"
+        }
+      }
+    },
     "cost": {
       "input": 0.6,
       "output": 3,
@@ -87,9 +156,24 @@
     "maxTokens": null,
     "capabilities": [
       "text",
-      "image",
-      "reasoning"
+      "image"
     ],
+    "generation": {
+      "temperature": "supported",
+      "reasoning": {
+        "supported": "unsupported",
+        "adaptive": null,
+        "levels": {
+          "off": "unsupported",
+          "minimal": "unsupported",
+          "low": "unsupported",
+          "medium": "unsupported",
+          "high": "unsupported",
+          "xhigh": "unsupported",
+          "max": "unsupported"
+        }
+      }
+    },
     "cost": {
       "input": 0.95,
       "output": 4,
@@ -104,6 +188,14 @@
       "text",
       "image"
     ],
+    "generation": {
+      "temperature": "supported",
+      "reasoning": {
+        "supported": "unknown",
+        "adaptive": null,
+        "levels": {}
+      }
+    },
     "cost": {
       "input": 2,
       "output": 5,
@@ -118,6 +210,14 @@
       "text",
       "image"
     ],
+    "generation": {
+      "temperature": "supported",
+      "reasoning": {
+        "supported": "unknown",
+        "adaptive": null,
+        "levels": {}
+      }
+    },
     "cost": {
       "input": 2,
       "output": 5,
@@ -132,6 +232,14 @@
       "text",
       "image"
     ],
+    "generation": {
+      "temperature": "supported",
+      "reasoning": {
+        "supported": "unknown",
+        "adaptive": null,
+        "levels": {}
+      }
+    },
     "cost": {
       "input": 1,
       "output": 3,
@@ -146,6 +254,14 @@
       "text",
       "image"
     ],
+    "generation": {
+      "temperature": "supported",
+      "reasoning": {
+        "supported": "unknown",
+        "adaptive": null,
+        "levels": {}
+      }
+    },
     "cost": {
       "input": 0.2,
       "output": 2,
@@ -160,6 +276,14 @@
       "text",
       "image"
     ],
+    "generation": {
+      "temperature": "supported",
+      "reasoning": {
+        "supported": "unknown",
+        "adaptive": null,
+        "levels": {}
+      }
+    },
     "cost": {
       "input": 0.6,
       "output": 2.5,
@@ -173,6 +297,14 @@
     "capabilities": [
       "text"
     ],
+    "generation": {
+      "temperature": "supported",
+      "reasoning": {
+        "supported": "unknown",
+        "adaptive": null,
+        "levels": {}
+      }
+    },
     "cost": {
       "input": 2,
       "output": 5
@@ -185,6 +317,14 @@
     "capabilities": [
       "text"
     ],
+    "generation": {
+      "temperature": "supported",
+      "reasoning": {
+        "supported": "unknown",
+        "adaptive": null,
+        "levels": {}
+      }
+    },
     "cost": {
       "input": 2,
       "output": 5
@@ -198,6 +338,14 @@
       "text",
       "image"
     ],
+    "generation": {
+      "temperature": "supported",
+      "reasoning": {
+        "supported": "unknown",
+        "adaptive": null,
+        "levels": {}
+      }
+    },
     "cost": {
       "input": 2,
       "output": 5
@@ -210,6 +358,14 @@
     "capabilities": [
       "text"
     ],
+    "generation": {
+      "temperature": "supported",
+      "reasoning": {
+        "supported": "unknown",
+        "adaptive": null,
+        "levels": {}
+      }
+    },
     "cost": {
       "input": 1,
       "output": 3
@@ -222,6 +378,14 @@
     "capabilities": [
       "text"
     ],
+    "generation": {
+      "temperature": "supported",
+      "reasoning": {
+        "supported": "unknown",
+        "adaptive": null,
+        "levels": {}
+      }
+    },
     "cost": {
       "input": 1,
       "output": 3
@@ -235,6 +399,14 @@
       "text",
       "image"
     ],
+    "generation": {
+      "temperature": "supported",
+      "reasoning": {
+        "supported": "unknown",
+        "adaptive": null,
+        "levels": {}
+      }
+    },
     "cost": {
       "input": 1,
       "output": 3
@@ -247,6 +419,14 @@
     "capabilities": [
       "text"
     ],
+    "generation": {
+      "temperature": "supported",
+      "reasoning": {
+        "supported": "unknown",
+        "adaptive": null,
+        "levels": {}
+      }
+    },
     "cost": {
       "input": 0.2,
       "output": 2
@@ -259,6 +439,14 @@
     "capabilities": [
       "text"
     ],
+    "generation": {
+      "temperature": "supported",
+      "reasoning": {
+        "supported": "unknown",
+        "adaptive": null,
+        "levels": {}
+      }
+    },
     "cost": {
       "input": 0.2,
       "output": 2
@@ -272,6 +460,14 @@
       "text",
       "image"
     ],
+    "generation": {
+      "temperature": "supported",
+      "reasoning": {
+        "supported": "unknown",
+        "adaptive": null,
+        "levels": {}
+      }
+    },
     "cost": {
       "input": 0.2,
       "output": 2
@@ -284,6 +480,14 @@
     "capabilities": [
       "text"
     ],
+    "generation": {
+      "temperature": "supported",
+      "reasoning": {
+        "supported": "unknown",
+        "adaptive": null,
+        "levels": {}
+      }
+    },
     "cost": {
       "input": 2,
       "output": 5

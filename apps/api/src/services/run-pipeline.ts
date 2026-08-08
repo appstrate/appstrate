@@ -39,6 +39,10 @@ import type { FileReference } from "./run-launcher/types.ts";
 import { runPreflightGates } from "./run-preflight-gates.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { runWithSpan } from "@appstrate/core/telemetry";
+import {
+  ModelGenerationError,
+  type ModelGenerationSettings,
+} from "@appstrate/core/model-generation";
 
 /**
  * Extract the denormalized @scope and display-name snapshot for a loaded
@@ -98,6 +102,10 @@ export interface RunPipelineParams {
    */
   configOverride?: Record<string, unknown> | null;
   modelId?: string | null;
+  /** Persisted agent defaults resolved by preflight. */
+  generationConfig?: ModelGenerationSettings | null;
+  /** Raw manual/schedule invocation layer. */
+  generationConfigOverride?: ModelGenerationSettings | null;
   proxyId?: string | null;
   overrideVersionLabel?: string;
   /**
@@ -166,6 +174,7 @@ export interface RunPipelineSuccess {
 export interface PreflightResult {
   config: Record<string, unknown>;
   modelId: string | null;
+  generationConfig: ModelGenerationSettings | null;
   proxyId: string | null;
 }
 
@@ -213,6 +222,7 @@ export async function resolveRunPreflight(params: {
   return {
     config: packageConfig.config,
     modelId: packageConfig.modelId,
+    generationConfig: packageConfig.generationConfig,
     proxyId: packageConfig.proxyId,
   };
 }
@@ -452,6 +462,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
   let modelLabel: string | null;
   let modelSource: string | null;
   let modelCost: ModelCost | null;
+  let generationConfig: ModelGenerationSettings;
   let contextMs: number;
   const contextStart = Date.now();
   try {
@@ -465,6 +476,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
       modelLabel,
       modelSource,
       modelCost,
+      generationConfig,
     } = await runWithSpan("appstrate.run.context", { attributes: spanAttributes }, () =>
       buildRunContext({
         runId,
@@ -476,6 +488,8 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
         files,
         config,
         modelId,
+        generationConfig: params.generationConfig,
+        generationConfigOverride: params.generationConfigOverride,
         proxyId,
         overrideVersionLabel,
         dependencyOverrides: params.dependencyOverrides ?? null,
@@ -499,6 +513,14 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
         status: 400,
         code: "model_credential_missing",
         title: "Bad Request",
+        detail: err.message,
+      });
+    }
+    if (err instanceof ModelGenerationError) {
+      throw new ApiError({
+        status: 400,
+        code: err.code,
+        title: "Unsupported Model Setting",
         detail: err.message,
       });
     }
@@ -553,6 +575,8 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
         // the run row so the runner's ledger row (whose cost the container
         // computes) can be classified without trusting the container.
         modelCost,
+        generationConfig,
+        generationConfigOverride: params.generationConfigOverride ?? null,
         apiKeyId,
         agentScope: agentDenorm.scope,
         agentName: agentDenorm.name,

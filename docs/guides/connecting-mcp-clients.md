@@ -138,21 +138,32 @@ past any client's tool budget). Three of them are the progressive-disclosure
 triple over the whole API; the other three are shortcuts for the things clients
 otherwise get wrong.
 
-| Tool                 | Permission   | What it does                                                                                                                                        |
-| -------------------- | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `get_me`             | `mcp:read`   | Caller identity, org role, and already-connected integrations. **Call this first** — it grounds everything below.                                   |
-| `search_operations`  | `mcp:read`   | Find operations by keyword/tag → operationIds. A keyword search also returns `best_match` with its full input schema.                               |
-| `describe_operation` | `mcp:read`   | Full input schema for one operation (only needed when `best_match` didn't cover it).                                                                |
-| `invoke_operation`   | `mcp:invoke` | Execute one operation (validated + authorized exactly as the equivalent REST call).                                                                 |
-| `run_and_wait`       | `mcp:invoke` | **The way to launch a run.** Starts an agent run (`kind:"agent"`) or an inline run (`kind:"inline"`) and returns when it reaches a terminal status. |
-| `list_documents`     | `mcp:read`   | List documents visible to the caller (uploads + agent outputs), each with a `document://` URI.                                                      |
+| Tool                 | Permission   | What it does                                                                                                                                |
+| -------------------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `get_me`             | `mcp:read`   | Caller identity, org role, and already-connected integrations. **Call this first** — it grounds everything below.                           |
+| `search_operations`  | `mcp:read`   | Find operations by keyword/tag → operationIds. A keyword search also returns `best_match` with its full input schema.                       |
+| `describe_operation` | `mcp:read`   | Full input schema for one operation (only needed when `best_match` didn't cover it).                                                        |
+| `invoke_operation`   | `mcp:invoke` | Execute one operation (validated + authorized exactly as the equivalent REST call).                                                         |
+| `run_and_wait`       | `mcp:invoke` | **Launch and wait.** Starts an agent run (`kind:"agent"`) or an inline run (`kind:"inline"`) and returns when it reaches a terminal status. |
+| `list_documents`     | `mcp:read`   | List documents visible to the caller (uploads + agent outputs), each with a `document://` URI.                                              |
 
-**Do not launch runs through `invoke_operation`.** `runAgent` / `runInline` are
-fire-and-forget (`202 { runId }`) — a client that calls them then polls `getRun`
-is reimplementing, badly, what `run_and_wait` already does in one call, and it
-loses the in-chat progress surface and the `resource_link` deliverables that
-`run_and_wait` returns. Reach for the REST operations only when you deliberately
-want to start a run and _not_ wait for it.
+Prefer `run_and_wait` when you need a newly launched run's progress or terminal
+result. `runAgent` / `runInline` remain fully discoverable and invokable for
+intentional fire-and-forget flows (`202 { runId }`). Calling either and then
+polling `getRun` merely reimplements what `run_and_wait` already does, without
+its in-chat progress surface or `resource_link` deliverables.
+
+For `kind:"inline"`, `manifest` is a partial canonical AFPS manifest. A normal
+call can provide only a task-specific `display_name` plus its dependencies and
+integration configuration; `run_and_wait` derives `name` and defaults the
+omitted AFPS boilerplate, `runtime_tools` (`log`, `output`,
+`publish_document`), and an open object output schema. Defaults fill absent top-level
+fields only. Every supplied field is preserved as an exact
+replacement—arrays and nested objects are not merged, and
+`runtime_tools: []` remains empty. Clients can therefore provide a complete
+deterministic manifest and override every field, including a strict
+`output.schema` (which requires `output` in an explicitly overridden
+`runtime_tools`).
 
 Streaming/SSE operations (live logs, realtime) cannot be called through
 `invoke_operation` — use `run_and_wait`, fetch logs, or poll instead.

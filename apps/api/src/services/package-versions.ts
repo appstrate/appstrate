@@ -8,9 +8,9 @@ import {
   uploadPackageZip,
   downloadVersionZip,
   deleteVersionZip,
-  unzipAndNormalize,
   buildMinimalZip,
 } from "./package-storage.ts";
+import { unzipPackageArchive } from "./package-archive.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { computeIntegrity } from "@appstrate/core/integrity";
 import { extractDependencies, detectCycle, type DepEntry } from "@appstrate/core/dependencies";
@@ -26,7 +26,7 @@ import { planCreateVersionOutcome, planTagReassignment } from "@appstrate/core/v
 
 import { parseScopedName } from "@appstrate/core/naming";
 import { dropRetiredRuntimeTools } from "@appstrate/core/validation";
-import { zipArtifact } from "@appstrate/core/zip";
+import { parsePackageZip, zipArtifact } from "@appstrate/core/zip";
 import { asRecord, asRecordOrNull } from "@appstrate/core/safe-json";
 import { downloadPackageFiles } from "./package-items/storage.ts";
 import { storageFolderForType } from "./package-items/config.ts";
@@ -350,7 +350,7 @@ export async function getVersionDetail(
   try {
     const zipBuffer = await downloadVersionZip(packageId, row.version);
     if (zipBuffer) {
-      const files = unzipAndNormalize(zipBuffer);
+      const files = unzipPackageArchive(zipBuffer);
       content = files;
       // Extract prompt.md from ZIP
       const promptData = files["prompt.md"];
@@ -564,8 +564,9 @@ async function getLatestVersionIntegrity(packageId: string): Promise<string | nu
   return row?.integrity ?? null;
 }
 
-type CreateVersionError = "invalid_version" | "no_changes" | "version_exists";
-type CreateVersionResult = { id: number; version: string } | { error: CreateVersionError };
+type CreateVersionError = "invalid_version" | "invalid_bundle" | "no_changes" | "version_exists";
+type CreateVersionResult =
+  { id: number; version: string } | { error: CreateVersionError; detail?: string };
 
 /** Create an immutable version snapshot from the current draft (packages table).
  *  Uses manifest.version as-is — no auto-bump. Returns an error object if version is missing,
@@ -677,6 +678,19 @@ export async function createVersionFromDraft(params: {
     const entries: Record<string, Uint8Array> = { ...files };
     entries["manifest.json"] = new TextEncoder().encode(JSON.stringify(finalManifest, null, 2));
     zipBuffer = Buffer.from(zipArtifact(entries, 6));
+  }
+
+  // A schema-valid mcp-server draft can still point at a companion file that
+  // is absent from the stored payload. Reparse the exact bytes about to become
+  // immutable so publish enforces the same executable-archive invariant as
+  // create/import/install. Legacy rows whose stored manifest drifted to another
+  // package type retain their established publish compatibility path.
+  if (pkg.type === "mcp-server" && finalManifest.type === "mcp-server") {
+    try {
+      parsePackageZip(new Uint8Array(zipBuffer), { retiredRuntimeTools: "drop" });
+    } catch (err) {
+      return { error: "invalid_bundle", detail: getErrorMessage(err) };
+    }
   }
 
   // Check for duplicate content — reject if identical to the latest version

@@ -110,6 +110,11 @@ export const schedulesPaths = {
                   description:
                     "Per-schedule config delta. Deep-merged with the application's persisted `config` every time the schedule fires.",
                 },
+                generation_config_override: {
+                  $ref: "#/components/schemas/ModelGenerationSettings",
+                  description:
+                    "Temperature/reasoning overrides applied to every run fired by this schedule.",
+                },
                 model_id_override: {
                   type: "string",
                   description:
@@ -175,6 +180,7 @@ export const schedulesPaths = {
                 timezone: "Europe/Paris",
                 input: { folder: "inbox", maxEmails: 50 },
                 config_override: null,
+                generation_config_override: null,
                 model_id_override: null,
                 proxy_id_override: null,
                 version_override: null,
@@ -239,6 +245,7 @@ export const schedulesPaths = {
                 timezone: "Europe/Paris",
                 input: { folder: "inbox", maxEmails: 50 },
                 config_override: null,
+                generation_config_override: null,
                 model_id_override: null,
                 proxy_id_override: null,
                 version_override: "1.2.0",
@@ -283,6 +290,14 @@ export const schedulesPaths = {
                 config_override: {
                   type: ["object", "null"],
                   description: "Per-schedule config delta. Pass `null` to clear the override.",
+                },
+                generation_config_override: {
+                  oneOf: [
+                    { $ref: "#/components/schemas/ModelGenerationSettings" },
+                    { type: "null" },
+                  ],
+                  description:
+                    "Temperature/reasoning overrides for scheduled runs. Pass null to clear.",
                 },
                 model_id_override: { type: ["string", "null"] },
                 proxy_id_override: { type: ["string", "null"] },

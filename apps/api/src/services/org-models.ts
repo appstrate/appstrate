@@ -30,6 +30,12 @@ import {
 } from "../lib/db-helpers.ts";
 import { mapFetchErrorToTestResult } from "../lib/network-error.ts";
 import { getModelProvider } from "./model-providers/registry.ts";
+import { resolveOAuthTokenForSidecar } from "./model-providers/token-resolver.ts";
+import {
+  applyModelGenerationCapabilitiesOverride,
+  UNKNOWN_MODEL_GENERATION_CAPABILITIES,
+  type ModelGenerationCapabilities,
+} from "@appstrate/core/model-generation";
 
 // --- Metadata projection ---
 
@@ -85,10 +91,12 @@ const defaultModel = createDefaultPointer({
  * surface. For `aliased` entries the public `id`/`label` survive (the user
  * selected the alias) but the backing — provider/protocol (`apiShape`),
  * endpoint (`baseUrl`), upstream id (`modelId`), credential, and every
- * capability/cost field — is nulled. Capability/cost are dropped too (not just
- * the ids): the unstripped values are catalog-derived from the *real* model and
- * would themselves identify it (a distinctive context window or price reveals
- * the backing). Non-aliased models pass through untouched.
+ * capability/cost field — is nulled. Backing-derived capability/cost fields are
+ * dropped too (not just the ids): a distinctive context window or price could
+ * identify the real model. The exception is the normalized, portable generation
+ * contract required to render safe temperature/reasoning controls. Provider-
+ * native mappings and adaptive transport details remain private. Non-aliased
+ * models pass through.
  *
  * Applied at the user-facing read boundary (`GET /api/models`, the effective-
  * default response) — NOT inside {@link listOrgModels}, so the operator
@@ -96,6 +104,38 @@ const defaultModel = createDefaultPointer({
  * the full resource they just configured. Resolution (`resolveModel` /
  * `loadModel`) is unaffected — the run executor always gets the real binding.
  */
+function projectAliasedGenerationCapabilities(
+  capabilities: ModelGenerationCapabilities | null,
+): ModelGenerationCapabilities {
+  const levels = Object.fromEntries(
+    Object.entries(capabilities?.reasoning.levels ?? {}).filter(
+      ([, support]) => support === "supported",
+    ),
+  ) as ModelGenerationCapabilities["reasoning"]["levels"];
+  const temperatureSupported = capabilities?.temperature === "supported";
+  const reasoningSupported = capabilities?.reasoning.supported === "supported";
+
+  // Alias callers cannot inspect the backing model to compensate for an
+  // unknown capability. Expose only catalog-confirmed support and fail closed
+  // for unknowns. The runtime still resolves the full, unprojected contract.
+  return {
+    temperature: temperatureSupported ? "supported" : "unsupported",
+    reasoning: {
+      supported: reasoningSupported ? "supported" : "unsupported",
+      ...(temperatureSupported && reasoningSupported
+        ? {
+            temperatureCompatible:
+              capabilities?.reasoning.temperatureCompatible === "supported"
+                ? "supported"
+                : "unsupported",
+          }
+        : {}),
+      adaptive: null,
+      levels: reasoningSupported ? { ...levels } : {},
+    },
+  };
+}
+
 export function projectAliasedModel(model: OrgModelInfo): OrgModelInfo {
   if (!model.aliased) return model;
   // Allowlist, NOT a denylist (`{ ...model, field: null }`): build the public
@@ -134,13 +174,15 @@ export function projectAliasedModel(model: OrgModelInfo): OrgModelInfo {
     baseUrl: null,
     modelId: null,
     credentialId: null,
-    // Capability/cost — catalog-derived from the REAL model, so they
-    // fingerprint it; drop them too.
+    // Capability/cost — identifying catalog metadata stays private. Generation
+    // exposes only the portable support vector needed by the controls; native
+    // mappings and adaptive transport semantics stay on the resolved model.
     contextWindow: null,
     maxTokens: null,
     input: null,
     reasoning: null,
     cost: null,
+    generation: projectAliasedGenerationCapabilities(model.generation),
   };
 }
 
@@ -214,6 +256,9 @@ export async function listOrgModels(orgId: string): Promise<OrgModelInfo[]> {
         def.modelId,
         resolveCatalogDefaults(def.providerId, def.modelId),
       ),
+      generation:
+        resolveCatalogDefaults(def.providerId, def.modelId).generation ??
+        UNKNOWN_MODEL_GENERATION_CAPABILITIES,
       apiShape: def.apiShape,
       providerId: def.providerId,
       providerName: getModelProvider(def.providerId)?.displayName ?? null,
@@ -241,6 +286,9 @@ export async function listOrgModels(orgId: string): Promise<OrgModelInfo[]> {
           row.modelId,
           resolveCatalogDefaults(creds.providerId, row.modelId),
         ),
+        generation:
+          resolveCatalogDefaults(creds.providerId, row.modelId).generation ??
+          UNKNOWN_MODEL_GENERATION_CAPABILITIES,
         apiShape: creds.apiShape,
         providerId: creds.providerId,
         providerName: getModelProvider(creds.providerId)?.displayName ?? null,
@@ -576,6 +624,8 @@ export interface ResolvedModel extends Pick<
   | "reasoning"
   | "cost"
 > {
+  /** Request controls supported by the backing model in the vendored catalog. */
+  generation?: ModelGenerationCapabilities;
   /**
    * Always set — the builders fall back to the catalog and finally `modelId`
    * so callers can read it as a plain string even when the env entry or DB
@@ -651,13 +701,23 @@ export interface CatalogDefaults {
   maxTokens?: number | null;
   reasoning?: boolean;
   cost?: ModelCost;
+  generation?: ModelGenerationCapabilities;
 }
 
 export function resolveCatalogDefaults(providerId: string, modelId: string): CatalogDefaults {
   const provider = getModelProvider(providerId);
   const catalogKey = provider?.catalogProviderId ?? providerId;
   const entry = lookupCatalogModel(catalogKey, modelId);
-  if (!entry) return {};
+  if (!entry) {
+    return provider?.generationOverride
+      ? {
+          generation: applyModelGenerationCapabilitiesOverride(
+            UNKNOWN_MODEL_GENERATION_CAPABILITIES,
+            provider.generationOverride,
+          ),
+        }
+      : {};
+  }
   return {
     label: entry.label,
     input: entry.capabilities.filter((c): c is "text" | "image" => c === "text" || c === "image"),
@@ -665,18 +725,24 @@ export function resolveCatalogDefaults(providerId: string, modelId: string): Cat
     maxTokens: entry.maxTokens,
     reasoning: entry.capabilities.includes("reasoning"),
     cost: entry.cost,
+    generation: applyModelGenerationCapabilitiesOverride(
+      entry.generation ?? UNKNOWN_MODEL_GENERATION_CAPABILITIES,
+      provider?.generationOverride,
+    ),
   };
 }
 
 /** Build a `ResolvedModel` from a system `ModelDefinition` (env-driven). */
 function buildSystemResolvedModel(def: ModelDefinition): ResolvedModel {
+  const defaults = resolveCatalogDefaults(def.providerId, def.modelId);
   return {
     providerId: def.providerId,
     apiShape: def.apiShape,
     baseUrl: def.baseUrl,
     modelId: def.modelId,
     apiKey: def.apiKey,
-    ...resolveModelMetadata(def, def.modelId, resolveCatalogDefaults(def.providerId, def.modelId)),
+    ...resolveModelMetadata(def, def.modelId, defaults),
+    generation: defaults.generation ?? UNKNOWN_MODEL_GENERATION_CAPABILITIES,
     isSystemModel: true,
     aliased: def.aliased === true,
     aliasId: def.id,
@@ -693,6 +759,7 @@ function buildSystemResolvedModel(def: ModelDefinition): ResolvedModel {
  * rows.
  */
 function buildDbResolvedModel(row: DbOrgModelRow, creds: DbModelCredentials): ResolvedModel {
+  const defaults = resolveCatalogDefaults(creds.providerId, row.modelId);
   return {
     providerId: creds.providerId,
     apiShape: creds.apiShape,
@@ -702,8 +769,9 @@ function buildDbResolvedModel(row: DbOrgModelRow, creds: DbModelCredentials): Re
     ...resolveModelMetadata(
       { ...row, input: row.input as string[] | null, cost: row.cost as ModelCost | null },
       row.modelId,
-      resolveCatalogDefaults(creds.providerId, row.modelId),
+      defaults,
     ),
+    generation: defaults.generation ?? UNKNOWN_MODEL_GENERATION_CAPABILITIES,
     isSystemModel: false,
     aliased: row.aliased,
     aliasId: row.id,
@@ -868,12 +936,13 @@ export async function modelNeedsReconnection(orgId: string, modelDbId: string): 
 export async function assertExplicitModelExists(
   orgId: string,
   modelId: string | null | undefined,
-): Promise<void> {
-  if (!modelId) return;
+): Promise<ResolvedModel | null> {
+  if (!modelId) return null;
   const model = await loadModel(orgId, modelId);
   if (!model) {
     throw notFound(`Model '${modelId}' not found — expected a model UUID or a system model key`);
   }
+  return model;
 }
 
 // --- Connection test ---
@@ -1038,6 +1107,16 @@ export async function testModelConfig(config: {
 }
 
 /** Test a saved model by ID (loads from DB/system registry then delegates to testModelConfig). */
+function needsReconnectionTestResult(): TestResult {
+  return {
+    ok: false,
+    latency: 0,
+    error: "NEEDS_RECONNECTION",
+    message:
+      "This model's provider credential must be reconnected before it can be tested. Reconnect it in the Model Provider Keys tab.",
+  };
+}
+
 export async function testModelConnection(orgId: string, modelDbId: string): Promise<TestResult> {
   const model = await loadModel(orgId, modelDbId);
   if (!model) {
@@ -1048,15 +1127,33 @@ export async function testModelConnection(orgId: string, modelDbId: string): Pro
     // `MODEL_NOT_FOUND` into a 404, and "Model not found" is the one thing
     // that is demonstrably untrue here.
     if (await modelNeedsReconnection(orgId, modelDbId)) {
-      return {
-        ok: false,
-        latency: 0,
-        error: "NEEDS_RECONNECTION",
-        message:
-          "This model's provider credential must be reconnected before it can be tested. Reconnect it in the Model Provider Keys tab.",
-      };
+      return needsReconnectionTestResult();
     }
     return { ok: false, latency: 0, error: "MODEL_NOT_FOUND", message: "Model not found" };
+  }
+
+  // An expired OAuth access token is not terminal while its refresh token may
+  // still work. Saved models carry a credential id, so use the canonical
+  // resolver before the provider's offline validation; it rotates recoverable
+  // tokens and persists needsReconnection on missing/revoked refresh tokens.
+  if (model.credentialId && getModelProvider(model.providerId)?.authMode === "oauth2") {
+    try {
+      const token = await resolveOAuthTokenForSidecar(model.credentialId, orgId);
+      return testModelConfig({
+        ...model,
+        apiKey: token.accessToken,
+        accountId: token.accountId ?? model.accountId,
+        expiresAt: token.expiresAt,
+      });
+    } catch (err) {
+      // The resolver owns the terminal/non-terminal policy. Read its persisted
+      // verdict instead of coupling this surface to every terminal error code;
+      // this also catches a transient-failure streak that just escalated.
+      if (await modelNeedsReconnection(orgId, modelDbId)) {
+        return needsReconnectionTestResult();
+      }
+      throw err;
+    }
   }
 
   return testModelConfig(model);

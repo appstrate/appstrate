@@ -11,6 +11,7 @@
  */
 
 import type { SidecarLaunchSpec } from "./sidecar-types.ts";
+import type { ModelGenerationSettings } from "./model-generation.ts";
 
 // Re-export sidecar config types from the dedicated module for convenience.
 export type { SidecarConfig, SidecarLaunchSpec, LlmProxyConfig } from "./sidecar-types.ts";
@@ -300,6 +301,7 @@ export interface InlineRunBody {
   input?: Record<string, unknown>;
   config?: Record<string, unknown>;
   modelId?: string | null;
+  generation?: ModelGenerationSettings;
   proxyId?: string | null;
   /**
    * Per-integration connection picks for THIS run (flat map:

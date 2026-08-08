@@ -253,9 +253,15 @@ export function useGlobalRunSync() {
       }
 
       // The protocol is signal-only: frames emitted while the stream was down
-      // are lost forever. Reconcile the chat list on every (re)connect instead
-      // of leaving a missed `chat_session_update` to the 60s safety net.
+      // are lost forever. Reconcile on every (re)connect instead of leaving a
+      // missed frame to a polling safety net.
       handleChatSessionUpdate(qcRef.current);
+      // Same reconciliation for the notification badges. This is what lets
+      // their `refetchInterval` be a 5-minute backstop instead of a 30-second
+      // poll: a terminal run seen live invalidates them (below), and a terminal
+      // run MISSED while the stream was down is caught here, on reconnect —
+      // seconds after connectivity returns, not at the next poll tick.
+      invalidateNotificationQueries(qcRef.current);
 
       const reader = res.body.getReader();
       const decoder = new TextDecoder();

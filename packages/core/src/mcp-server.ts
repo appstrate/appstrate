@@ -21,11 +21,35 @@
 
 import { z } from "zod";
 import {
+  MCP_SERVER_APPSTRATE_META_KEY,
+  MCP_SERVER_RUNTIME_CAPABILITIES,
+  MCP_SERVER_RUNTIMES,
+  isMcpServerRuntime,
+} from "./mcp-server-meta.ts";
+import {
   mcpServerManifestSchema as afpsMcpServerManifestSchema,
   type McpServerManifest,
 } from "@afps-spec/schema";
 
 export type { McpServerManifest };
+
+// Re-exported so `@appstrate/core/mcp-server` stays the one place backend code
+// imports mcp-server facts from. They LIVE in `./mcp-server-meta.ts` because
+// this module pulls `@afps-spec/schema`, which instantiates AJV at module
+// scope and declares no `sideEffects: false` — so a browser consumer that only
+// needs the runtime hint cannot tree-shake it away. Measured: +65 kB gzipped
+// on the integration detail page.
+export {
+  MCP_SERVER_APPSTRATE_META_KEY,
+  MCP_SERVER_RUNTIME_CAPABILITIES,
+  MCP_SERVER_RUNTIMES,
+  isMcpServerRuntime,
+  getMcpServerRuntime,
+} from "./mcp-server-meta.ts";
+export type { McpServerRuntime } from "./mcp-server-meta.ts";
+
+/** The `_meta` key carrying the shared-workspace opt-in declaration. */
+export const MCP_SERVER_WORKSPACE_META_KEY = "dev.appstrate/workspace";
 
 /**
  * MCPB `user_config` entry shape (Appendix C / MCPB spec). Upstream
@@ -85,13 +109,31 @@ export const mcpServerManifestSchema = afpsMcpServerManifestSchema.superRefine((
       message: err instanceof Error ? err.message : String(err),
     });
   }
+
+  const meta = (m as { _meta?: Record<string, unknown> })._meta;
+  const appstrateRuntime = meta?.[MCP_SERVER_APPSTRATE_META_KEY] as
+    { runtime?: unknown } | undefined;
+  if (appstrateRuntime?.runtime !== undefined && !isMcpServerRuntime(appstrateRuntime.runtime)) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["_meta", MCP_SERVER_APPSTRATE_META_KEY, "runtime"],
+      message:
+        `Unsupported MCP server runtime ${JSON.stringify(appstrateRuntime.runtime)}. ` +
+        `Expected one of: ${MCP_SERVER_RUNTIMES.join(", ")}.`,
+    });
+  } else if (appstrateRuntime?.runtime !== undefined) {
+    const serverType = (m as { server?: { type?: unknown } }).server?.type;
+    const compatibleType =
+      MCP_SERVER_RUNTIME_CAPABILITIES[appstrateRuntime.runtime].manifestServerType;
+    if (serverType !== compatibleType) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["_meta", MCP_SERVER_APPSTRATE_META_KEY, "runtime"],
+        message: `Runtime '${appstrateRuntime.runtime}' requires server.type '${compatibleType}'.`,
+      });
+    }
+  }
 });
-
-/** The `_meta` key carrying Appstrate-specific mcp-server runtime hints. */
-export const MCP_SERVER_APPSTRATE_META_KEY = "dev.appstrate/mcp-server";
-
-/** The `_meta` key carrying the shared-workspace opt-in declaration. */
-export const MCP_SERVER_WORKSPACE_META_KEY = "dev.appstrate/workspace";
 
 /**
  * Per-run shared workspace declaration parsed from an mcp-server
@@ -226,20 +268,6 @@ export function getMcpServerWorkspaceMount(
   }
 
   return { mount, access };
-}
-
-/**
- * Read the Appstrate runtime override from `_meta["dev.appstrate/mcp-server"]
- * .runtime`. MCPB's `server.type` enum is `node|python|binary|uv` — it has no
- * `bun`. A bun-native server therefore keeps an MCPB-vocabulary
- * `server.type: "node"` (with `mcp_config.command: "bun"`) and declares `bun`
- * here so the platform's runner picks the bun interpreter/image. Returns
- * `undefined` when absent, in which case callers fall back to `server.type`.
- */
-export function getMcpServerRuntime(manifest: McpServerManifest): string | undefined {
-  const meta = (manifest as { _meta?: Record<string, unknown> })._meta;
-  const appstrate = meta?.[MCP_SERVER_APPSTRATE_META_KEY] as { runtime?: unknown } | undefined;
-  return typeof appstrate?.runtime === "string" ? appstrate.runtime : undefined;
 }
 
 /**

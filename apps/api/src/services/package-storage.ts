@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { zipArtifact, unzipArtifact, type Zippable } from "@appstrate/core/zip";
+import { zipArtifact, type Zippable } from "@appstrate/core/zip";
 import { verifyArtifactIntegrity } from "@appstrate/core/integrity";
 import * as storage from "@appstrate/db/storage";
 import { logger } from "../lib/logger.ts";
@@ -112,7 +112,7 @@ export async function deleteVersionZip(packageId: string, version: string): Prom
 export async function uploadPackageZip(
   packageId: string,
   version: string,
-  zipBuffer: Buffer,
+  zipBuffer: Uint8Array,
 ): Promise<void> {
   const path = versionZipKey(packageId, version);
   try {
@@ -233,12 +233,4 @@ export function buildMinimalZip(
     [contentFileName]: new TextEncoder().encode(content),
   };
   return Buffer.from(zipArtifact(entries, ZIP_COMPRESSION_LEVEL));
-}
-
-/**
- * Unzip a buffer and normalize (strip __MACOSX, directory entries).
- * Returns a map of path → content as Uint8Array.
- */
-export function unzipAndNormalize(zipBuffer: Buffer): Record<string, Uint8Array> {
-  return unzipArtifact(new Uint8Array(zipBuffer));
 }

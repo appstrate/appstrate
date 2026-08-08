@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Hono } from "hono";
+import type { Context } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import { listResponse } from "../lib/list-response.ts";
 import { getRunningRunCounts } from "../services/state/runs.ts";
@@ -30,24 +31,33 @@ import { getActor } from "../lib/actor.ts";
 import { parseScopedName } from "@appstrate/core/naming";
 import { computeIntegrity } from "@appstrate/core/integrity";
 import { z } from "zod";
-import { ApiError, invalidRequest, notFound } from "../lib/errors.ts";
+import { ApiError, forbidden, invalidRequest, notFound } from "../lib/errors.ts";
 import { readJsonBody } from "../lib/request-body.ts";
 import { asJSONSchemaObject, mergeWithDefaults } from "@appstrate/core/form";
 import { getAppScope } from "../lib/scope.ts";
 import { resolveAgentConnectionReadiness } from "../services/integration-pins-service.ts";
-import { assertExplicitModelExists } from "../services/org-models.ts";
+import { assertExplicitModelExists, resolveModel } from "../services/org-models.ts";
 import {
   buildBundleForAgentExport,
   buildBundleFromAgentDraft,
   resolveExportVersion,
 } from "../services/bundle-assembly.ts";
-import { writeBundleToBuffer } from "@appstrate/afps-runtime/bundle";
+import { writeBundleToBuffer, type Bundle } from "@appstrate/afps-runtime/bundle";
 import { toBundleApiError } from "../services/run-launcher/bundle-error-mapping.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 import { SCOPED_PACKAGE_ROUTE } from "./scoped-package-route.ts";
+import {
+  ModelGenerationError,
+  modelGenerationSettingsSchema,
+  reconcileModelGenerationSettings,
+  resolveModelGenerationSettings,
+} from "@appstrate/core/model-generation";
 export const proxyIdSchema = z.object({ proxyId: z.string().nullable() });
-export const modelIdSchema = z.object({ modelId: z.string().nullable() });
+export const modelIdSchema = z.object({
+  modelId: z.string().nullable(),
+  generation: modelGenerationSettingsSchema.nullable().optional(),
+});
 
 /**
  * Parse the `actor_type` / `actor_id` query-param pair shared by the
@@ -69,6 +79,66 @@ function scopeFromQueryParams(
     return { type: "end_user", id: actorIdParam };
   }
   throw invalidRequest("Invalid actor_type / actor_id combination");
+}
+
+/**
+ * Read guards for the package types a bundle can carry BEYOND its root.
+ *
+ * Both export paths walk `depTypes: ["skills"]`, so `skill` is the only type
+ * that can appear today. Anything else fails CLOSED — an archive must never
+ * ship bytes whose read scope this route does not name.
+ */
+const BUNDLE_DEPENDENCY_READ_GUARDS = new Map<string, ReturnType<typeof requirePermission>>([
+  ["skill", requirePermission("skills", "read")],
+]);
+
+/**
+ * Authorize the DEPENDENCY bytes an export is about to hand out.
+ *
+ * `agents:read` covers the root agent, whose files the export narrows to
+ * `manifest.json` + `prompt.md`. Dependencies are a different surface: both
+ * catalogs put a dependency's ENTIRE stored file map into the archive
+ * (`DraftPackageCatalog.fetch` reads `downloadPackageFiles` whole,
+ * `DbPackageCatalog.fetch` extracts the whole published artifact). A bundle
+ * carrying a skill therefore hands out exactly the bytes
+ * `GET /api/packages/skills/{id}/files[/content]` serves — and #1123/#1124
+ * settled that those need `skills:read`, resolved per package TYPE rather than
+ * one blanket scope. Without this guard the export is a looser door to the same
+ * bytes: an `agents:read`-only credential is 403'd on the file explorer and
+ * served the identical content here.
+ *
+ * Checked against the ASSEMBLED bundle, not the root manifest, so transitive
+ * deps and any future widening of `depTypes` are covered by construction.
+ *
+ * Visibility is deliberately NOT re-derived here. Dependency resolution is
+ * org-scoped in every catalog, which is what lets a run reach a skill that is
+ * not installed in the current application; re-checking `hasPackageAccess` over
+ * the dep set would make the export stricter than the run it mirrors and break
+ * `appstrate run @scope/agent` where clicking Run in the dashboard succeeds.
+ * Scope, not visibility, is what this route was missing.
+ */
+async function requireBundleDependencyReadPermissions(
+  c: Context<AppEnv>,
+  bundle: Bundle,
+): Promise<void> {
+  const checked = new Set<string>();
+  for (const [identity, pkg] of bundle.packages) {
+    if (identity === bundle.root) continue;
+    const rawType = asRecord(pkg.manifest).type;
+    const type = typeof rawType === "string" ? rawType : "";
+    if (checked.has(type)) continue;
+    checked.add(type);
+    const guard = BUNDLE_DEPENDENCY_READ_GUARDS.get(type);
+    if (!guard) {
+      throw forbidden(
+        `Insufficient permissions: the bundle carries a '${type || "unknown"}' dependency and no read scope is defined for that type`,
+      );
+    }
+    // `requirePermission` is middleware; invoking it with a no-op `next`
+    // reuses the same 403 shape, denial audit hook, and fail-closed semantics
+    // as every route-level RBAC call site.
+    await guard(c, async () => {});
+  }
 }
 
 export function createAgentsRouter() {
@@ -211,9 +281,9 @@ export function createAgentsRouter() {
   router.get(`/${SCOPED_PACKAGE_ROUTE}/model`, requireAgent(), async (c) => {
     const agent = c.get("package");
     const applicationId = c.get("applicationId");
-    const { modelId } = await getPackageConfig(applicationId, agent.id);
+    const { modelId, generationConfig } = await getPackageConfig(applicationId, agent.id);
 
-    return c.json({ modelId });
+    return c.json({ modelId, generation: generationConfig });
   });
 
   // PUT /api/agents/:scope/:name/model — set agent model override (admin-only)
@@ -227,21 +297,51 @@ export function createAgentsRouter() {
       const data = await readJsonBody(c, modelIdSchema);
 
       // Reject unknown/cross-org ids like run and schedule overrides do (#960); null clears.
-      await assertExplicitModelExists(scope.orgId, data.modelId);
+      const current = await getPackageConfig(scope.applicationId, agent.id);
+      const explicitModel = await assertExplicitModelExists(scope.orgId, data.modelId);
+      const selectedModel =
+        explicitModel ?? (await resolveModel(scope.orgId, agent.id, data.modelId));
+      let generation = data.generation;
+      if (generation && Object.keys(generation).length > 0) {
+        if (!selectedModel) {
+          throw invalidRequest(
+            "A model must be configured before generation settings can be saved",
+          );
+        }
+        try {
+          generation = resolveModelGenerationSettings({
+            capabilities: selectedModel.generation,
+            override: generation,
+          });
+        } catch (error) {
+          if (error instanceof ModelGenerationError) {
+            throw invalidRequest(error.message, "generation");
+          }
+          throw error;
+        }
+      } else if (generation === undefined && current.generationConfig) {
+        generation = reconcileModelGenerationSettings(
+          current.generationConfig,
+          selectedModel?.generation,
+        );
+      }
 
-      await updateInstalledPackage(scope, agent.id, { modelId: data.modelId });
+      await updateInstalledPackage(scope, agent.id, {
+        modelId: data.modelId,
+        ...(generation !== undefined ? { generationConfig: generation } : {}),
+      });
 
       await recordAuditFromContext(c, {
         action: "agent.model_updated",
         resourceType: "agent",
         resourceId: agent.id,
-        after: { modelId: data.modelId },
+        after: { modelId: data.modelId, generation },
       });
 
       // Return the bare model-setting resource — same shape and read path
       // (`getPackageConfig`) as GET /agents/:scope/:name/model (#657).
-      const { modelId } = await getPackageConfig(scope.applicationId, agent.id);
-      return c.json({ modelId });
+      const { modelId, generationConfig } = await getPackageConfig(scope.applicationId, agent.id);
+      return c.json({ modelId, generation: generationConfig });
     },
   );
 
@@ -521,6 +621,11 @@ export function createAgentsRouter() {
             metadata: { builder: "appstrate-platform" },
           });
         }
+        // The archive carries every dependency's full stored file map, which
+        // `agents:read` does not authorize. Gate on the read scope of each
+        // dependency TYPE before any bytes are serialised, so this route is not
+        // a looser door to the same content the package file explorer guards.
+        await requireBundleDependencyReadPermissions(c, bundle);
         // Serialization stays inside the try: `writeBundleToBuffer` re-validates
         // the assembled map and raises the same `BundleError` family, so leaving
         // it outside would keep that throw on the untyped path.
@@ -534,7 +639,8 @@ export function createAgentsRouter() {
         //
         // Anything the mapper does not own returns null and rethrows untouched,
         // keeping its own status — the 404s from `resolveExportVersion`, the 400
-        // from an invalid draft manifest.
+        // from an invalid draft manifest, the 403 from the dependency read-scope
+        // guard above.
         const mapped = toBundleApiError(err);
         if (mapped) throw mapped;
         throw err;

@@ -18,6 +18,12 @@ import { badGateway, invalidRequest } from "@appstrate/core/api-errors";
 import { CHAT_USABLE_FAMILIES } from "./chat-families.ts";
 import { isModelLive } from "./model-liveness.ts";
 import { logger } from "./logger.ts";
+import {
+  anthropicReasoningBudgetTokens,
+  toNativeModelReasoningLevel,
+  type ModelGenerationCapabilities,
+  type ModelGenerationSettings,
+} from "@appstrate/core/model-generation";
 
 const LLM_PROXY_PATH = "/api/llm-proxy";
 
@@ -38,6 +44,7 @@ export interface OrgModel {
    * convention as {@link is_default}.
    */
   needs_reconnection?: boolean;
+  generation?: ModelGenerationCapabilities | null;
 }
 
 export async function listModels(
@@ -98,6 +105,42 @@ export function pickModel(models: OrgModel[], modelId?: string): OrgModel {
 
 type ProxyKind = "anthropic" | "openai-compatible";
 
+/** Pure provider-body adapter for chat reasoning controls. */
+export function applyGenerationToProxyBody(
+  body: BodyInit | null | undefined,
+  model: Pick<OrgModel, "apiShape" | "generation">,
+  generation: ModelGenerationSettings,
+): BodyInit | null | undefined {
+  if (generation.reasoningLevel == null || typeof body !== "string") return body;
+  try {
+    const payload = JSON.parse(body) as Record<string, unknown>;
+    const nativeReasoningLevel = toNativeModelReasoningLevel(
+      generation.reasoningLevel,
+      model.generation,
+    );
+    if (model.apiShape === "anthropic-messages") {
+      if (generation.reasoningLevel === "off") {
+        delete payload.thinking;
+        delete payload.output_config;
+      } else if (model.generation?.reasoning.adaptive) {
+        payload.thinking = { type: "adaptive" };
+        payload.output_config = { effort: nativeReasoningLevel };
+      } else {
+        payload.thinking = {
+          type: "enabled",
+          budget_tokens: anthropicReasoningBudgetTokens(generation.reasoningLevel),
+        };
+      }
+    } else {
+      payload.reasoning_effort = nativeReasoningLevel;
+    }
+    return JSON.stringify(payload);
+  } catch {
+    // Preserve the provider SDK body; it will surface its own parse error.
+    return body;
+  }
+}
+
 /**
  * Map a proxy family to its AI SDK provider kind and the baseURL suffix under
  * `/api/llm-proxy`. Each suffix mirrors the upstream SDK's own path convention
@@ -143,6 +186,7 @@ export function modelFromFamily(
   headers: Record<string, string>,
   mintAuth: () => string,
   platformFetch: typeof fetch,
+  generation: ModelGenerationSettings = {},
 ): LanguageModel | null {
   const target = proxyTarget(model.apiShape);
   if (!target) return null;
@@ -155,7 +199,8 @@ export function modelFromFamily(
   const fetchImpl = (async (input, init) => {
     const h = new Headers(init?.headers);
     h.set("authorization", `Bearer ${mintAuth()}`);
-    return platformFetch(input, { ...init, headers: h });
+    const body = applyGenerationToProxyBody(init?.body, model, generation);
+    return platformFetch(input, { ...init, body, headers: h });
   }) as typeof fetch;
 
   // The proxy resolves `body.model` as the Appstrate **preset id** (the org

@@ -5,8 +5,9 @@
  *
  * Shares the unified package layout (SharedHeader + PackageActionsDropdown)
  * with agents and skills. The activate/deactivate toggle lives in the header
- * (left action); manifest view / download / fork / delete live in the actions
- * dropdown. Integrations are import-only — there is no in-app editor.
+ * (left action); download / fork / delete live in the actions dropdown. The
+ * manifest's metadata is rendered by the À propos tab. Integrations are
+ * import-only — there is no in-app editor.
  *
  * Tabs:
  *   - Connexions — per-auth connect CTA (always the resolved default client —
@@ -23,6 +24,10 @@
  *     primitives). Per-tool description + required scopes + URL patterns.
  *   - À propos — metadata (version, author, license, repo, …), privacy policy,
  *     keywords.
+ *   - Contenu — the artifact's own files, read-only, opening on
+ *     INTEGRATION.md. This is where `manifest.json` is readable verbatim: an
+ *     admin auditing a third-party integration before granting it OAuth scopes
+ *     must not have to download the `.afps` and unzip it.
  *   - Versions — read-only release history (non-system packages only).
  *
  * Connect drives a popup through the hosted connect portal (issue #769) —
@@ -33,9 +38,20 @@
 
 import { useState } from "react";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
+import { ManifestOverview } from "../components/package-manifest/manifest-overview";
+import { FileExplorer } from "../components/package-files/file-explorer";
 
-/** Tab ids, also the URL fragments that select them. */
-const INTEGRATION_TABS = ["connections", "configuration", "tools", "about", "versions"] as const;
+/** Tab ids, also the URL fragments that select them. `content` is the same id
+ *  the unified package page uses for its file explorer, so a deep link reads
+ *  the same on either page. */
+const INTEGRATION_TABS = [
+  "connections",
+  "configuration",
+  "tools",
+  "about",
+  "content",
+  "versions",
+] as const;
 import { useTranslation } from "react-i18next";
 import { useParams } from "react-router-dom";
 import { toast } from "sonner";
@@ -62,6 +78,7 @@ import {
 import { LoadingState, ErrorState } from "../components/page-states";
 import { SharedHeader } from "../components/package-detail/shared-header";
 import { PackageActionsDropdown } from "../components/package-detail/package-actions-dropdown";
+import { SetupGuideSteps } from "../components/package-detail/setup-guide-steps";
 import { VersionHistory } from "../components/version-history";
 import { ForkPackageModal } from "../components/fork-package-modal";
 import { ConfirmModal } from "../components/confirm-modal";
@@ -93,15 +110,18 @@ import {
   type IntegrationAuthType,
   type IntegrationClient,
   type IntegrationConnection,
-  type IntegrationManifestView,
   type IntegrationManifestAuth,
 } from "../hooks/use-integrations";
 import { useIntegrations } from "../hooks/use-integrations";
 import { useDisconnectIntegrationConnection } from "../hooks/use-me-connections";
 import { useCurrentOrgId } from "../hooks/use-org";
+import { useAuth } from "../hooks/use-auth";
 import { useCurrentApplicationId } from "../hooks/use-current-application";
 import { InlineConnectButton } from "../components/integration-connect/inline-connect-button";
-import { connectionDisplayLabel } from "../components/integration-connect/connection-label";
+import {
+  connectionDisplayLabel,
+  isConnectionOwnedBy,
+} from "../components/integration-connect/connection-label";
 import { isOauthAuthConnectable } from "../components/integration-connect/connectable-auth-keys";
 import { ConnectionStatusBadge } from "../components/integration-connect/connection-status-badge";
 
@@ -492,10 +512,18 @@ function ConnectAuthBlock({
   isAdmin: boolean;
 }) {
   const { t } = useTranslation("settings");
+  const { user } = useAuth();
   const isOAuth = status.type === "oauth2";
   // Connectable when a client is usable: org-registered, shared system client,
   // or auto-provisioned at connect time (remote MCP CIMD/DCR). Shared gate.
   const clientMissing = isOAuth && !isOauthAuthConnectable(status);
+  // `status.connections` is the own ∪ org-shared union, but "force the IdP's
+  // account chooser" is about the CALLER's own accounts — it exists so a second
+  // connect can't silently re-pick the account already signed in on this
+  // browser. Someone else's shared connection says nothing about that.
+  const ownConnectionCount = status.connections.filter((c) =>
+    isConnectionOwnedBy(c, user?.id),
+  ).length;
 
   return (
     <div className="bg-card rounded-lg border p-4" data-testid={`auth-section-${status.auth_key}`}>
@@ -518,7 +546,7 @@ function ConnectAuthBlock({
             authKey={status.auth_key}
             intent="connect"
             label={t("integration.auth.addAccount")}
-            forceAccountSelect={status.connections.length > 0}
+            forceAccountSelect={ownConnectionCount > 0}
             lockToAuthKey
           />
         ) : null}
@@ -703,6 +731,19 @@ function BlockUserConnectionsToggle({
  * overrides it. `enforce` locks members; otherwise it's a soft default a
  * member can still override with their own pick.
  */
+/**
+ * Option label for the two admin pickers (org default, pins). Those lists
+ * are org-wide — since the connections endpoint returns shared connections
+ * owned by other members, an admin choosing a cross-agent default is picking
+ * between rows whose labels can collide ("Connexion 1" for two members), so
+ * the owner is part of the identity here. The per-row table carries the same
+ * information as a badge instead, where a suffix would fight the rename UI.
+ */
+function connectionOptionLabel(c: IntegrationConnection): string {
+  const base = connectionDisplayLabel(c);
+  return c.owner_name ? `${base} — ${c.owner_name}` : base;
+}
+
 function OrgDefaultSection({ packageId }: { packageId: string }) {
   const { t } = useTranslation("settings");
   const { data: orgDefault } = useIntegrationOrgDefault(packageId);
@@ -714,7 +755,7 @@ function OrgDefaultSection({ packageId }: { packageId: string }) {
   const connectionDisplay = (id: string): string => {
     const c = (connections ?? []).find((x) => x.id === id);
     if (!c) return id;
-    return connectionDisplayLabel(c);
+    return connectionOptionLabel(c);
   };
 
   const [connectionId, setConnectionId] = useState("");
@@ -829,7 +870,7 @@ function PinManagementSection({ packageId }: { packageId: string }) {
   const connectionDisplay = (id: string): string => {
     const c = (connections ?? []).find((x) => x.id === id);
     if (!c) return id;
-    return connectionDisplayLabel(c);
+    return connectionOptionLabel(c);
   };
 
   const onSubmitNewPin = () => {
@@ -1062,6 +1103,8 @@ function ConnectionTableRow({
   const disconnect = useDisconnectIntegrationConnection();
   const orgId = useCurrentOrgId();
   const applicationId = useCurrentApplicationId();
+  const { user } = useAuth();
+  const { isAdmin } = usePermissions();
   const [editing, setEditing] = useState(false);
   const [draftLabel, setDraftLabel] = useState(connection.label ?? "");
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -1069,6 +1112,16 @@ function ConnectionTableRow({
   // "Connexion N"); render it verbatim.
   const name = connectionDisplayLabel(connection);
   const isShared = connection.shared_with_org === true;
+  // The list now returns org-shared connections owned by OTHER members, so
+  // every per-row control has to be gated on the same rule the API enforces —
+  // otherwise the button renders and the request comes back 403:
+  //   - delete  → `DELETE /api/me/connections/:id`, strictly owner-scoped
+  //               (`routes/me.ts`), no admin escape hatch by design;
+  //   - share   → owner-only, because sharing is the owner's consent
+  //               (`routes/integrations.ts`, `shared_with_org` branch);
+  //   - rename  → owner OR org admin (same route, label branch).
+  const isOwn = isConnectionOwnedBy(connection, user?.id);
+  const canRename = isOwn || isAdmin;
   const startEdit = () => {
     setDraftLabel(connection.label ?? "");
     setEditing(true);
@@ -1139,16 +1192,29 @@ function ConnectionTableRow({
           ) : (
             <div className="flex items-center gap-1">
               <span className="truncate font-medium">{name}</span>
-              <Button
-                size="icon"
-                variant="ghost"
-                className="size-6"
-                onClick={startEdit}
-                title={t("integration.connection.labelEdit")}
-                data-testid={`label-edit-${connection.id}`}
-              >
-                <Pencil className="size-3" />
-              </Button>
+              {!isOwn && (
+                <Badge
+                  variant="secondary"
+                  className="text-[0.6rem]"
+                  data-testid={`connection-owner-${connection.id}`}
+                >
+                  {connection.owner_name
+                    ? t("integration.connection.sharedByOwner", { owner: connection.owner_name })
+                    : t("integration.connection.sharedByUnknown")}
+                </Badge>
+              )}
+              {canRename && (
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="size-6"
+                  onClick={startEdit}
+                  title={t("integration.connection.labelEdit")}
+                  data-testid={`label-edit-${connection.id}`}
+                >
+                  <Pencil className="size-3" />
+                </Button>
+              )}
             </div>
           )}
         </TableCell>
@@ -1162,7 +1228,12 @@ function ConnectionTableRow({
                   <ConnectionStatusBadge tone="needsReconnection">
                     {t("integration.auth.needsReconnection")}
                   </ConnectionStatusBadge>
-                  {canRenew && authType === "oauth2" && (
+                  {/* Owner-only: the reconnect writes through
+                      `persistCredentialBundle` kind `update-owned`, whose WHERE
+                      carries the actor identity — a non-owner reconnect 404s.
+                      Only the owner can re-authenticate their own credential,
+                      so others see the state without a dead CTA. */}
+                  {isOwn && canRenew && authType === "oauth2" && (
                     <InlineConnectButton
                       packageId={packageId}
                       authKey={authKey}
@@ -1207,41 +1278,51 @@ function ConnectionTableRow({
           )}
         </TableCell>
 
-        {/* Org-share toggle */}
+        {/* Org-share toggle — owner-only (sharing is the owner's consent) */}
         <TableCell>
-          <label
-            className="flex items-center gap-1.5 text-xs"
-            title={t("integration.connection.shareWithOrg.help")}
-          >
-            <input
-              type="checkbox"
-              checked={isShared}
-              disabled={updateConnection.isPending}
-              onChange={(e) =>
-                updateConnection.mutate({
-                  params: { path: { packageId, connectionId: connection.id } },
-                  body: { shared_with_org: e.target.checked },
-                })
-              }
-              data-testid={`share-toggle-${connection.id}`}
-            />
-            {t("integration.connection.shareWithOrg.label")}
-          </label>
+          {isOwn ? (
+            <label
+              className="flex items-center gap-1.5 text-xs"
+              title={t("integration.connection.shareWithOrg.help")}
+            >
+              <input
+                type="checkbox"
+                checked={isShared}
+                disabled={updateConnection.isPending}
+                onChange={(e) =>
+                  updateConnection.mutate({
+                    params: { path: { packageId, connectionId: connection.id } },
+                    body: { shared_with_org: e.target.checked },
+                  })
+                }
+                data-testid={`share-toggle-${connection.id}`}
+              />
+              {t("integration.connection.shareWithOrg.label")}
+            </label>
+          ) : (
+            <span className="text-muted-foreground text-xs">
+              {t("integration.connection.shareWithOrg.label")}
+            </span>
+          )}
         </TableCell>
 
-        {/* Disconnect */}
+        {/* Disconnect — owner-only: the endpoint is `/api/me/connections` */}
         <TableCell className="text-right">
-          <Button
-            size="icon"
-            variant="ghost"
-            className="size-7"
-            onClick={onDelete}
-            disabled={disconnect.isPending}
-            title={t("integration.connection.delete")}
-            data-testid={`connection-delete-${connection.id}`}
-          >
-            <Trash2 className="text-destructive size-3.5" />
-          </Button>
+          {isOwn ? (
+            <Button
+              size="icon"
+              variant="ghost"
+              className="size-7"
+              onClick={onDelete}
+              disabled={disconnect.isPending}
+              title={t("integration.connection.delete")}
+              data-testid={`connection-delete-${connection.id}`}
+            >
+              <Trash2 className="text-destructive size-3.5" />
+            </Button>
+          ) : (
+            <span className="text-muted-foreground text-xs">—</span>
+          )}
         </TableCell>
       </TableRow>
       <ConfirmModal
@@ -1258,113 +1339,6 @@ function ConnectionTableRow({
         }
       />
     </>
-  );
-}
-
-// ─────────────────────────────────────────────
-// Setup guide (admin-only)
-// ─────────────────────────────────────────────
-
-/**
- * AFPS §7.10 — `setup_guide.steps` is the canonical place for integration
- * publishers to describe IdP-side prerequisites (create an OAuth app, add a
- * redirect URI, …). Rendered as an ordered list on the admin view next to
- * the OAuth client form so the operator has the publisher's instructions at
- * eye level. Each step is `{ label: string, url?: string }`; the `url`
- * surfaces as a clickable link when present.
- */
-function SetupGuideSteps({ steps }: { steps: ReadonlyArray<{ label: string; url?: string }> }) {
-  const { t } = useTranslation("settings");
-  if (steps.length === 0) return null;
-  return (
-    <section
-      className="bg-muted/20 mb-4 rounded-md border p-4"
-      data-testid="setup-guide-steps"
-      aria-label={t("integration.setup_guide.step_label")}
-    >
-      <h3 className="mb-2 text-sm font-semibold">{t("integration.setup_guide.title")}</h3>
-      <ol className="text-muted-foreground list-decimal space-y-1 pl-5 text-xs">
-        {steps.map((step, i) => (
-          <li key={i} data-testid={`setup-guide-step-${i}`}>
-            {step.url ? (
-              <a
-                href={step.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-primary underline"
-              >
-                {step.label}
-              </a>
-            ) : (
-              <span>{step.label}</span>
-            )}
-          </li>
-        ))}
-      </ol>
-    </section>
-  );
-}
-
-// ─────────────────────────────────────────────
-// About + metadata blocks
-// ─────────────────────────────────────────────
-
-function MetadataBlock({ manifest }: { manifest: IntegrationManifestView }) {
-  const { t } = useTranslation("settings");
-  const authorRaw = (manifest as { author?: unknown }).author;
-  const author =
-    typeof authorRaw === "string"
-      ? authorRaw
-      : authorRaw && typeof authorRaw === "object" && "name" in authorRaw
-        ? (((authorRaw as { name?: unknown }).name as string | undefined) ?? "")
-        : "";
-  const repoRaw = (manifest as { repository?: unknown }).repository;
-  const repo =
-    typeof repoRaw === "string"
-      ? repoRaw
-      : repoRaw && typeof repoRaw === "object" && "url" in repoRaw
-        ? (((repoRaw as { url?: unknown }).url as string | undefined) ?? "")
-        : "";
-  const sourceKind = manifest.source?.kind ?? "api";
-  const rows: Array<[string, React.ReactNode]> = [
-    [t("integration.field.version"), <span className="font-mono">{manifest.version}</span>],
-    [t("integration.field.author"), author || "—"],
-    [t("integration.field.license"), manifest.license ?? "—"],
-    [
-      t("integration.field.repository"),
-      repo ? (
-        <a href={repo} target="_blank" rel="noopener noreferrer" className="text-primary underline">
-          {repo}
-        </a>
-      ) : (
-        "—"
-      ),
-    ],
-    [t("integration.field.serverType"), <span className="font-mono">{sourceKind}</span>],
-    ...(manifest.allow_undeclared_tools === true
-      ? ([
-          [
-            t("integration.field.allowUndeclaredTools"),
-            <Badge
-              variant="outline"
-              className="text-[0.65rem]"
-              data-testid="integration-meta-wildcard-badge"
-            >
-              {t("integration.field.allowUndeclaredToolsBadge")}
-            </Badge>,
-          ],
-        ] as Array<[string, React.ReactNode]>)
-      : []),
-  ];
-  return (
-    <dl className="grid grid-cols-1 gap-y-2 text-sm sm:grid-cols-[max-content_1fr] sm:gap-x-4">
-      {rows.map(([k, v]) => (
-        <div key={k} className="contents">
-          <dt className="text-muted-foreground">{k}</dt>
-          <dd>{v}</dd>
-        </div>
-      ))}
-    </dl>
   );
 }
 
@@ -1393,7 +1367,7 @@ function ActivationHint({ onActivate, pending }: { onActivate: () => void; pendi
 }
 
 export function IntegrationDetailPage() {
-  const { t } = useTranslation(["settings", "common"]);
+  const { t } = useTranslation(["settings", "common", "agents"]);
   const { scope, name } = useParams<{ scope: string; name: string }>();
   const packageId = scope && name ? `${scope}/${name}` : "";
   const { data: detail, isLoading, error } = useIntegrationDetail(packageId || undefined);
@@ -1465,7 +1439,6 @@ export function IntegrationDetailPage() {
             <PackageActionsDropdown
               packageId={packageId}
               type="integration"
-              manifest={m}
               isOwned={isOwned}
               isBuiltIn={isBuiltIn}
               isHistoricalVersion={false}
@@ -1487,44 +1460,49 @@ export function IntegrationDetailPage() {
         onValueChange={(v) => setTab(v as (typeof INTEGRATION_TABS)[number])}
         className="mt-2"
       >
-        <TabsList>
-          <TabsTrigger value="connections" data-testid="tab-connections">
-            {t("integration.tabs.connections")}
-          </TabsTrigger>
-          {isAdmin && (
-            <TabsTrigger value="configuration" data-testid="tab-configuration">
-              {t("integration.tabs.configuration")}
+        <div className="max-w-full overflow-x-auto pb-1">
+          <TabsList className="w-max">
+            <TabsTrigger value="connections" data-testid="tab-connections">
+              {t("integration.tabs.connections")}
             </TabsTrigger>
-          )}
-          <TabsTrigger value="tools" data-testid="tab-tools">
-            {t("integration.tabs.tools")}
-            {detail.tool_catalog && detail.tool_catalog.length > 0 && (
-              <Badge variant="outline" className="ml-1.5 text-[0.65rem]">
-                {detail.tool_catalog.length}
-                {detail.allow_undeclared_tools ? "+" : ""}
-              </Badge>
+            {isAdmin && (
+              <TabsTrigger value="configuration" data-testid="tab-configuration">
+                {t("integration.tabs.configuration")}
+              </TabsTrigger>
             )}
-            {detail.tool_catalog &&
-              detail.tool_catalog.length === 0 &&
-              detail.allow_undeclared_tools && (
-                <Badge
-                  variant="outline"
-                  className="ml-1.5 text-[0.65rem]"
-                  data-testid="tab-tools-wildcard-badge"
-                >
-                  *
+            <TabsTrigger value="tools" data-testid="tab-tools">
+              {t("integration.tabs.tools")}
+              {detail.tool_catalog && detail.tool_catalog.length > 0 && (
+                <Badge variant="outline" className="ml-1.5 text-[0.65rem]">
+                  {detail.tool_catalog.length}
+                  {detail.allow_undeclared_tools ? "+" : ""}
                 </Badge>
               )}
-          </TabsTrigger>
-          <TabsTrigger value="about" data-testid="tab-about">
-            {t("integration.tabs.about")}
-          </TabsTrigger>
-          {!isBuiltIn && (
-            <TabsTrigger value="versions" data-testid="tab-versions">
-              {t("integration.tabs.versions")}
+              {detail.tool_catalog &&
+                detail.tool_catalog.length === 0 &&
+                detail.allow_undeclared_tools && (
+                  <Badge
+                    variant="outline"
+                    className="ml-1.5 text-[0.65rem]"
+                    data-testid="tab-tools-wildcard-badge"
+                  >
+                    *
+                  </Badge>
+                )}
             </TabsTrigger>
-          )}
-        </TabsList>
+            <TabsTrigger value="about" data-testid="tab-about">
+              {t("integration.tabs.about")}
+            </TabsTrigger>
+            <TabsTrigger value="content" data-testid="tab-content">
+              {t("detail.tabFiles", { ns: "agents" })}
+            </TabsTrigger>
+            {!isBuiltIn && (
+              <TabsTrigger value="versions" data-testid="tab-versions">
+                {t("integration.tabs.versions")}
+              </TabsTrigger>
+            )}
+          </TabsList>
+        </div>
 
         {/* ─── Connexions (per-auth connect CTA + accounts table) ─── */}
         <TabsContent value="connections" className="mt-4 space-y-4">
@@ -1656,20 +1634,26 @@ export function IntegrationDetailPage() {
           </div>
         </TabsContent>
 
-        {/* ─── À propos (metadata) ─── */}
+        {/* ─── À propos (manifest, rendered) ───
+            The same component the Aperçu tab of the unified package page
+            mounts. It replaced a local metadata block that built
+            `<a href={manifest.repository}>` with no protocol check — a
+            published integration carrying `"repository": "javascript:…"` ran
+            on the platform origin as soon as someone clicked it. The href is
+            now gated on `normalizeHttpUrl`. */}
         <TabsContent value="about" className="mt-4">
-          <div className="max-w-2xl space-y-4">
-            <MetadataBlock manifest={m} />
-            {m.keywords && m.keywords.length > 0 && (
-              <div className="flex flex-wrap gap-1">
-                {m.keywords.map((k) => (
-                  <Badge key={k} variant="outline" className="text-[0.65rem]">
-                    {k}
-                  </Badge>
-                ))}
-              </div>
-            )}
+          <div className="max-w-2xl">
+            <ManifestOverview manifest={m} type="integration" />
           </div>
+        </TabsContent>
+
+        {/* ─── Contenu (the artifact's own files, read-only) ───
+            Same generic explorer the unified package page mounts; the type
+            only decides which file opens first (INTEGRATION.md here). No
+            `version` prop: this page has no historical-version view, so the
+            explorer reads the live draft. */}
+        <TabsContent value="content" className="mt-4">
+          <FileExplorer packageId={packageId} type="integration" />
         </TabsContent>
 
         {/* ─── Versions (read-only history; non-system only) ─── */}

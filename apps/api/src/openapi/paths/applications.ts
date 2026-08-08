@@ -396,6 +396,12 @@ export const applicationsPaths = {
               type: "object",
               properties: {
                 config: { type: "object" },
+                generationConfig: {
+                  oneOf: [
+                    { $ref: "#/components/schemas/ModelGenerationSettings" },
+                    { type: "null" },
+                  ],
+                },
                 modelId: { type: ["string", "null"] },
                 proxyId: { type: ["string", "null"] },
                 version_id: { type: ["integer", "null"] },
@@ -461,9 +467,15 @@ export const applicationsPaths = {
             "application/json": {
               schema: {
                 type: "object",
-                required: ["config", "modelId", "proxyId", "version_pin"],
+                required: ["config", "generation", "modelId", "proxyId", "version_pin"],
                 properties: {
                   config: { type: "object" },
+                  generation: {
+                    oneOf: [
+                      { $ref: "#/components/schemas/ModelGenerationSettings" },
+                      { type: "null" },
+                    ],
+                  },
                   modelId: { type: ["string", "null"] },
                   proxyId: { type: ["string", "null"] },
                   version_pin: { type: ["string", "null"] },
@@ -471,6 +483,7 @@ export const applicationsPaths = {
               },
               example: {
                 config: { dryRun: true },
+                generation: { temperature: 0.2, reasoningLevel: "high" },
                 modelId: "claude-sonnet-4-6",
                 proxyId: null,
                 version_pin: "1.2.3",

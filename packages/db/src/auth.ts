@@ -746,15 +746,27 @@ function buildAuth(extraPlugins: BetterAuthPluginList = []) {
       // 24h and keeps stolen-cookie damage bounded — a cookie older than a
       // day can't unlink providers without a fresh step-up sign-in.
       freshAge: 60 * 60 * 24, // 24h (BA default, made explicit)
-      // Disabled to work around BA 1.6 issue #7607 — when `session_data`
-      // expires (at `maxAge`), BA fails to regenerate it from the still-valid
-      // `session_token` under certain plugin configurations, logging the
-      // user out at the next request. Still open in 1.6.3.
-      // Re-enable once the upstream bug is fixed. Cost of disabling: one
-      // extra DB query per authenticated request (negligible at our scale).
-      // Verified none of our plugins (`@better-auth/oauth-provider`, `jwt`)
-      // depend on `session_data` — only `email-otp` does, which we don't use.
-      cookieCache: { enabled: false },
+      // OFF by default, opt-in per deployment via
+      // `AUTH_SESSION_COOKIE_CACHE_SECONDS` (0 = off).
+      //
+      // History: this was hardcoded off to work around BA issue #7607 — when
+      // `session_data` expired, BA was reported to fail regenerating it from
+      // the still-valid `session_token` under some plugin configurations,
+      // logging the user out on the next request. That issue is now closed
+      // "not planned", which is NOT evidence of a fix, so the behavior was
+      // measured directly against this repo's Better Auth version and plugin
+      // set instead: `test/integration/auth/session-cookie-cache.test.ts`
+      // drives expiry-then-request, logout, cross-device revocation, the
+      // freshness gate and the realm guard with the cache enabled.
+      //
+      // What enabling it buys: one fewer DB read per authenticated request.
+      // What it costs: a revoked session keeps working until the cached copy
+      // expires — a real revocation delay, bounded by the configured TTL. The
+      // trade is a deployment decision, so it is a knob, not a constant.
+      cookieCache:
+        env.AUTH_SESSION_COOKIE_CACHE_SECONDS > 0
+          ? { enabled: true, maxAge: env.AUTH_SESSION_COOKIE_CACHE_SECONDS }
+          : { enabled: false },
       additionalFields: {
         // Denormalized from `user.realm` by `databaseHooks.session.create.before`.
         // Same reason as `user.additionalFields.realm`: BA's adapter strips

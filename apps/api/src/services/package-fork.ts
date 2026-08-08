@@ -9,12 +9,14 @@ import {
 import { logger } from "../lib/logger.ts";
 
 import { zipArtifact } from "@appstrate/core/zip";
+import { PACKAGE_CONTENT_ENTRY } from "@appstrate/core/package-files";
 import { getPackageById, createOrgItem } from "./package-items/crud.ts";
 import { uploadPackageFiles } from "./package-items/storage.ts";
 import { CONFIG_BY_TYPE, type PackageTypeConfig } from "./package-items/config.ts";
 
 import { getLatestVersionId, createVersionAndUpload } from "./package-versions.ts";
-import { downloadVersionZip, unzipAndNormalize } from "./package-storage.ts";
+import { downloadVersionZip } from "./package-storage.ts";
+import { unzipPackageArchive } from "./package-archive.ts";
 import { db } from "@appstrate/db/client";
 import { packageVersions } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
@@ -95,14 +97,7 @@ async function forkWithConfig(
   const sourceZip = await downloadVersionZip(sourcePackageId, versionRow.version);
   if (!sourceZip) return { code: "NO_PUBLISHED_VERSION" };
 
-  // Extract content from the ZIP
-  const zipEntries = unzipAndNormalize(sourceZip);
-  const decoder = new TextDecoder();
-  const content = zipEntries["prompt.md"]
-    ? decoder.decode(zipEntries["prompt.md"])
-    : zipEntries["SKILL.md"]
-      ? decoder.decode(zipEntries["SKILL.md"])
-      : "";
+  const zipEntries = unzipPackageArchive(sourceZip);
 
   // Build target packageId
   const targetId = `@${orgSlug}/${sourceName}`;
@@ -186,6 +181,34 @@ async function forkWithConfig(
     updatedManifest.type = cfg.type;
   }
 
+  // `packages.draft_content` of the fork, read from the SAME declaration every
+  // other writer of that column reads (`PACKAGE_CONTENT_ENTRY`) rather than
+  // from a hardcoded `prompt.md`/`SKILL.md` pair. That pair covered two of the
+  // four types: an integration forked to `""` even when its bundle shipped a
+  // real `INTEGRATION.md`, and an mcp-server always did — a column NO import of
+  // the same bytes would ever produce, which then read back as a 0-byte
+  // `INTEGRATION.md` in the file explorer and as "ships no doc" to
+  // `fetchIntegrationPromptDocs`, while `?version=…` still served the file.
+  //
+  // The absence branch reproduces `parsePackageZip`'s own manifest-text
+  // fallback, so the fork's column is byte-identical to what importing the
+  // fork's bytes would have stored — INCLUDING the rewrite: the manifest text
+  // is the fork's OWN manifest (renamed, normalized), the exact bytes written
+  // to `manifest.json` in both draft storage and the published ZIP below.
+  //
+  // A REQUIRED entry missing from the archive gets no fallback, because the
+  // parser has none either (`checkCompanionFiles` rejects such a bundle at
+  // import). Storing the manifest there would make `applyDraftOverlay`
+  // materialize manifest JSON AS the agent's `prompt.md`.
+  const manifestText = JSON.stringify(updatedManifest, null, 2);
+  const contentEntry = PACKAGE_CONTENT_ENTRY[cfg.type];
+  const contentBytes = contentEntry ? zipEntries[contentEntry.path] : undefined;
+  const content = contentBytes
+    ? new TextDecoder().decode(contentBytes)
+    : contentEntry?.required
+      ? ""
+      : manifestText;
+
   // Create the fork package (draft)
   const newPkg = await createOrgItem(
     orgId,
@@ -209,7 +232,10 @@ async function forkWithConfig(
     if (path === "manifest.json") continue;
     draftFiles[path] = data;
   }
-  draftFiles["manifest.json"] = new TextEncoder().encode(JSON.stringify(updatedManifest, null, 2));
+  // The SAME `manifestText` the content fallback above may have been stored
+  // from, so "the column equals this package's manifest.json" is structural
+  // rather than two serializations that happen to agree today.
+  draftFiles["manifest.json"] = new TextEncoder().encode(manifestText);
   await uploadPackageFiles(cfg.storageFolder, orgId, newPkg.id, draftFiles);
 
   const newZipBuffer = Buffer.from(zipArtifact(draftFiles, 6));

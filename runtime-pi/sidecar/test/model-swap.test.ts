@@ -75,6 +75,46 @@ describe("swapRequestModel (alias→real)", () => {
   it("passes non-JSON through unchanged", () => {
     expect(swapRequestModel("not json", swap)).toBe("not json");
   });
+
+  it("restores adaptive Anthropic reasoning for a hidden backing model", () => {
+    const adaptiveSwap = {
+      ...swap,
+      anthropicAdaptiveReasoning: { effort: "max" as const },
+    };
+    const out = swapRequestModel(
+      JSON.stringify({
+        model: "appstrate-medium",
+        thinking: { type: "enabled", budget_tokens: 32_768, display: "summarized" },
+      }),
+      adaptiveSwap,
+    );
+
+    expect(JSON.parse(out)).toMatchObject({
+      model: "deepseek-chat",
+      thinking: { type: "adaptive", display: "summarized" },
+      output_config: { effort: "max" },
+    });
+    expect(out).not.toContain("budget_tokens");
+  });
+
+  it("forwards portable minimal as Anthropic's native low effort for an alias", () => {
+    const out = swapRequestModel(
+      JSON.stringify({
+        model: "appstrate-medium",
+        thinking: { type: "enabled", budget_tokens: 1024 },
+      }),
+      {
+        ...swap,
+        anthropicAdaptiveReasoning: { effort: "low" },
+      },
+    );
+
+    expect(JSON.parse(out)).toMatchObject({
+      model: "deepseek-chat",
+      thinking: { type: "adaptive" },
+      output_config: { effort: "low" },
+    });
+  });
 });
 
 describe("swapResponseModelJson (real→alias)", () => {

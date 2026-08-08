@@ -57,6 +57,7 @@ import {
   type McpObserver,
 } from "./tools.ts";
 import { buildOperationIndex } from "./catalog.ts";
+import { canImportPackageDocuments } from "./package-document-tools.ts";
 
 const MCP_SERVER_VERSION = "1.0.0";
 /** Path prefix owning the per-org sub-tree. `:org` is the organization id. */
@@ -131,9 +132,10 @@ const MCP_RATE_LIMIT_PER_MIN = 120;
  * surface grows without editing this text. describe_operation (or
  * search_operations' best_match) remains the source of truth for input schemas.
  */
-function buildServerInstructions(
+export function buildServerInstructions(
   permissions?: ReadonlySet<string>,
   contextInjected = false,
+  packageImportAvailable = false,
 ): string {
   // A `contextInjected` caller (the chat module) already injects the get_me
   // payload into its own system prompt and we drop the get_me tool for it, so
@@ -142,7 +144,10 @@ function buildServerInstructions(
   const grounding = contextInjected
     ? "Your caller context — who you are acting for, your role in this organization, and which integrations are already connected (prefer those when building or configuring an agent) — is already provided to you; there is no get_me tool, do not look for one."
     : "Start by calling get_me to learn who you are acting for, your role in this organization, and which integrations are already connected (prefer those when building or configuring an agent).";
-  return `Appstrate runs autonomous AI agents in sandboxed Docker containers. The tools here let you discover and call any operation of the Appstrate REST API — their own descriptions tell you how. ${grounding} The operation index at the end of these instructions lists the operations available to your role by tag; it is your primary way to find an operation. Default to picking an operationId straight from that index, then call describe_operation for its input schema and invoke_operation to run it. Reach for search_operations only when the index is genuinely ambiguous or a capability you expect isn't listed — not as a routine first step. Never guess an operationId or body shape: describe_operation (or search_operations' best_match) is the source of truth for the input schema. Exception: when you need to launch or wait on an agent run, do not call runAgent, runInline, or getRun through invoke_operation; use the run_and_wait tool directly.
+  const packageImportGuidance = packageImportAvailable
+    ? "Call `import_package_document` only when validation returns BOTH `valid: true` AND `importable: true`, and the user asked to add/install the package."
+    : "Package import is not available to this caller. If validation succeeds, report the result without claiming you can install it.";
+  return `Appstrate runs autonomous AI agents in sandboxed Docker containers. The tools here let you discover and call any operation of the Appstrate REST API — their own descriptions tell you how. ${grounding} The operation index at the end of these instructions lists the operations available to your role by tag; it is your primary way to find an operation. Default to picking an operationId straight from that index, then call describe_operation for its input schema and invoke_operation to run it. Reach for search_operations only when the index is genuinely ambiguous or a capability you expect isn't listed — not as a routine first step. Never guess an operationId or body shape: describe_operation (or search_operations' best_match) is the source of truth for the input schema. When you need a newly launched run's progress or result, prefer the run_and_wait tool directly; it already owns launch plus waiting and declares its own schema. The runAgent and runInline operations remain available through describe_operation and invoke_operation for intentionally fire-and-forget runs.
 
 ## Core model
 Organization → Applications (id \`app_…\`, one default) → Agents → Runs. End-users (\`eu_…\`) are external identities for embedded use. Packages (agents, integrations, skills…) are identified as \`@scope/name\` (e.g. \`@appstrate/my-agent\`). Depending on the operation this is passed either as a single \`packageId\` param or split into separate \`scope\` and \`name\` params — describe_operation shows which; always keep the \`@\`, and the \`/\` when it's a single param.
@@ -151,8 +156,9 @@ Organization → Applications (id \`app_…\`, one default) → Agents → Runs.
 This MCP server is scoped to ONE organization — the one this endpoint serves — and every operation runs against it plus its default application; you never send those ids per call. To act in another organization, connect that organization's own MCP server (its URL carries its id). Within the org, operations use the default application unless an operation takes an explicit application id.
 
 ## Beyond the per-operation schemas
-- Runs are asynchronous: triggering one returns the created run resource (use its \`id\`), then it moves pending→running→success|failed|timeout|cancelled. For runs you are launching now, use \`run_and_wait\` instead of manually composing \`runAgent\`/\`runInline\` plus \`getRun\`; it handles launch and waiting in one call. Use \`getRun\` with \`query: { wait: true }\` only when you are inspecting or waiting on an existing run that was not launched through \`run_and_wait\` in this turn.
-- Shortcut — \`run_and_wait\` launches a run, exposes the created run to chat for live progress, then waits internally and returns \`{ id, packageId, status, done:true, result?, error? }\` once the run is terminal. This is the only tool you should use to launch agent runs. Do NOT call \`invoke_operation\` with \`runAgent\` or \`runInline\`, do NOT call \`describe_operation\` just to learn launch schemas, and do NOT call \`getRun\` after \`run_and_wait\` just to wait for completion. For every inline run, set \`manifest.display_name\` to a concise, task-specific human title in the user's language and \`manifest.name\` to a matching descriptive \`@inline/<kebab-case-slug>\`; never expose an id or use a generic label such as \`one-shot\` or \`inline-agent\`. The chat shows ONLY lines the run emits via the \`log\` runtime tool — so for an inline run you MUST include \`"log"\` in \`runtime_tools\` and instruct it (in the \`prompt\`) to call \`log\` at each meaningful step, or the in-chat run progress component stays empty.
+- Runs are asynchronous: triggering one returns the created run resource (use its \`id\`), then it moves pending→running→success|failed|timeout|cancelled. When you need the result of a run you are launching now, prefer \`run_and_wait\` over manually composing \`runAgent\`/\`runInline\` plus \`getRun\`; it handles launch and waiting in one call. Use \`getRun\` with \`query: { wait: true }\` when you are inspecting or waiting on an existing run that was not launched through \`run_and_wait\` in this turn.
+- Shortcut — \`run_and_wait\` launches a run, exposes the created run to chat for live progress, then waits internally and returns \`{ id, packageId, status, done:true, result?, error? }\` once the run is terminal. Prefer it for launch-and-wait flows; use the fully discoverable \`runAgent\` or \`runInline\` operations when you deliberately want to launch without waiting. Do not call \`getRun\` after \`run_and_wait\` merely to wait again. For an inline run, pass a PARTIAL canonical AFPS \`manifest\`: normally set a concise task-specific \`display_name\` plus the dependencies/configuration needed for the task. The platform derives \`name\` and defaults omitted boilerplate, \`runtime_tools\` (log, output, publish_document), and an open object output schema. Every provided field replaces its default exactly; arrays and nested objects are never merged, so \`runtime_tools: []\` stays empty. You may override every field with a complete deterministic manifest; a strict \`output.schema\` requires an explicit runtime tool selection containing \`output\`. The chat shows ONLY lines the run emits via \`log\`, so instruct it in the top-level \`prompt\` to log meaningful steps whenever that tool is selected.
+- MCP package authoring — call \`get_runtime_capabilities\` first, have one inline run create the manifest + executable files, package them from the package root with the available shell tools (for example \`python3 -m zipfile -c package.afps manifest.json <entry-point> ...\`), then publish that archive with \`publish_document\` and pass the returned \`document://\` URI to \`validate_package_document\`. ${packageImportGuidance} If conflicts make it non-importable, report them instead of attempting a doomed mutation. Archive bytes stay server-side throughout.
 - Streaming/SSE operations (live logs, realtime) cannot be called through this server; fetch logs or poll instead.
 - Wire JSON is snake_case, except universal id/timestamp fields (id, createdAt…) which stay camelCase.
 - Heavy list responses — list operations paginate with \`query: { limit, offset }\`, and some (e.g. \`listIntegrations\`) also take a \`fields\` selector (comma-separated projection; describe_operation shows it when available). On heavy lists request only the fields you need — e.g. \`fields: "id,active,block_user_connections"\` on \`listIntegrations\` — and read a single row's detail operation when you need its full \`manifest\`.
@@ -395,7 +401,14 @@ export function createMcpRouter(): Hono<AppEnv> {
     const server = createMcpServer(
       tools,
       { name: "appstrate", version: MCP_SERVER_VERSION },
-      { instructions: buildServerInstructions(permissions, contextInjected), resources },
+      {
+        instructions: buildServerInstructions(
+          permissions,
+          contextInjected,
+          canImportPackageDocuments({ permissions, actor }),
+        ),
+        resources,
+      },
     );
     const transport = new WebStandardStreamableHTTPServerTransport({
       sessionIdGenerator: undefined,

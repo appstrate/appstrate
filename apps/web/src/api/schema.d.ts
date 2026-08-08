@@ -308,12 +308,12 @@ export interface paths {
         };
         /**
          * Get agent model configuration
-         * @description Returns the LLM model override for an agent (null if using org default).
+         * @description Returns the LLM model override and persisted generation defaults for an agent (null values inherit organization/runtime defaults).
          */
         get: operations["getAgentModel"];
         /**
          * Set agent model override
-         * @description Set a model override for this agent. Pass a model ID or null to revert to org default. The model ID must name a system model preset or an org model owned by the organization — unknown or cross-org IDs are rejected with 404.
+         * @description Set a model override and optional generation defaults for this agent. Pass a model ID or null to revert to org default; null generation settings inherit runtime defaults. The model ID must name a system model preset or an org model owned by the organization — unknown or cross-org IDs are rejected with 404.
          */
         put: operations["setAgentModel"];
         post?: never;
@@ -1696,7 +1696,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List the caller's connections for an integration */
+        /**
+         * List the connections the caller can use for an integration
+         * @description Returns the caller's own connections **plus** every connection in the application opted into org-wide sharing (`shared_with_org: true`), whoever owns it — the same set the runtime resolver picks from. Rows the caller does not own carry `owner_name` and have `identity_claims` redacted to `null`.
+         */
         get: operations["listIntegrationConnections"];
         put?: never;
         post?: never;
@@ -3583,6 +3586,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/packages/{scope}/{name}/files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the files in a package artifact
+         * @description Flat index of every file in the package artifact — one entry per real file, sorted by `path`; directories are not synthesized. Text files up to 1 MiB carry their full content in `inline` while the response's cumulative inline budget lasts; `inline` is never a truncated prefix, so an entry without it must be fetched from `GET /api/packages/{scope}/{name}/files/content`. Read-only. Rate-limited to 50 requests/minute.
+         */
+        get: operations["listPackageFiles"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/packages/{scope}/{name}/files/content": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Download one file from a package artifact
+         * @description Raw bytes of a single file from the package artifact — the fetch path for both preview and download. Always served as `application/octet-stream` with `nosniff` and `attachment`: package bytes are author-controlled and must never be rendered or executed in the platform origin. `path` must match an entry returned by `GET /api/packages/{scope}/{name}/files` exactly; anything else is a `404`. Read-only. Rate-limited to 50 requests/minute.
+         */
+        get: operations["getPackageFileContent"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/packages/{scope}/{name}/fork": {
         parameters: {
             query?: never;
@@ -5010,6 +5053,7 @@ export interface components {
             packageId: string;
             /** @description Application-specific configuration */
             config: Record<string, never>;
+            generationConfig: components["schemas"]["ModelGenerationSettings"] | null;
             /** @description Model override for this app */
             modelId: string | null;
             /** @description Proxy override for this app */
@@ -5170,6 +5214,38 @@ export interface components {
             /** @description Application ids (`app_…`) belonging to the caller's org where this package is installed. */
             installed_in: string[];
         }[];
+        /** @description Normalized support facts from Appstrate's pinned LiteLLM catalog snapshot, refined by stricter provider transport declarations. `unknown` keeps temperature forward-compatible, while reasoning levels are selectable only when explicitly supported; it remains distinct from an explicit upstream refusal. */
+        ModelGenerationCapabilities: {
+            /** @enum {string} */
+            temperature: "supported" | "unsupported" | "unknown";
+            reasoning: {
+                /** @enum {string} */
+                supported: "supported" | "unsupported" | "unknown";
+                /**
+                 * @description Optional compatibility fact for combining a custom temperature with active reasoning. Omission means unknown.
+                 * @enum {string}
+                 */
+                temperatureCompatible?: "supported" | "unsupported" | "unknown";
+                adaptive: boolean | null;
+                levels: {
+                    [key: string]: "supported" | "unsupported" | "unknown";
+                };
+                /** @description Optional provider-native values for portable levels (for example off to none). */
+                nativeLevels?: {
+                    [key: string]: "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+                };
+            };
+        };
+        /** @description Optional model sampling and reasoning controls. Omitted properties inherit the next lower-precedence layer. */
+        ModelGenerationSettings: {
+            /** @description Provider sampling temperature; null or omission inherits the runtime default. */
+            temperature?: number | null;
+            /**
+             * @description Portable reasoning effort normalized across providers.
+             * @enum {string|null}
+             */
+            reasoningLevel?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" | null;
+        };
         ModelProviderCredential: {
             id: string;
             label: string;
@@ -5291,6 +5367,8 @@ export interface components {
             baseUrl: string | null;
             /** @description Upstream model id. `null` for managed models — not exposed. */
             modelId: string | null;
+            /** @description Generation controls supported by the backing model. Null for managed aliases whose binding is hidden. */
+            generation: components["schemas"]["ModelGenerationCapabilities"] | null;
             input?: string[] | null;
             contextWindow?: number | null;
             maxTokens?: number | null;
@@ -5349,8 +5427,6 @@ export interface components {
             description: string | null;
             /** @description Package item content */
             content: string | null;
-            /** @description Secondary source file content (e.g. .ts for tools) */
-            source_code?: string | null;
             /** @enum {string} */
             source: "system" | "local";
             created_by: string | null;
@@ -5412,6 +5488,23 @@ export interface components {
              */
             createdAt: string;
         };
+        PackageFileEntry: {
+            /** @description Path inside the artifact, relative and normalized (e.g. `skills/a/SKILL.md`) */
+            path: string;
+            /** @description Uncompressed size in bytes */
+            size: number;
+            /**
+             * @description `text` when the file decodes as strict UTF-8 (files above the 1 MiB inline ceiling are classified by extension instead, since they can never be previewed).
+             * @enum {string}
+             */
+            media_kind: "text" | "binary";
+            /** @description Full decoded text, present only for `text` files at most 1 MiB that still fit the response's cumulative inline budget. NEVER truncated: when absent, fetch the file from `GET /api/packages/{scope}/{name}/files/content`. */
+            inline?: string;
+        };
+        PackageFileIndex: {
+            /** @description Files in the artifact, sorted by `path`. */
+            entries: components["schemas"]["PackageFileEntry"][];
+        };
         PackageVersionDetail: {
             /** @description Version row id */
             id: number;
@@ -5423,8 +5516,6 @@ export interface components {
             };
             /** @description Primary content file extracted from the version ZIP */
             content?: string | null;
-            /** @description Secondary source file content (e.g. .ts), when present */
-            source_code?: string | null;
             /** @description Whether this version has been yanked */
             yanked: boolean;
             yanked_reason: string | null;
@@ -5581,6 +5672,10 @@ export interface components {
             config_override: {
                 [key: string]: unknown;
             } | null;
+            /** @description Effective generation controls resolved and frozen when the run was created. */
+            generation: components["schemas"]["ModelGenerationSettings"] | null;
+            /** @description Raw per-invocation generation layer, before agent defaults are applied. */
+            generation_override: components["schemas"]["ModelGenerationSettings"] | null;
             /** @description Display name of the dashboard user who triggered the run (from profiles table) */
             user_name: string | null;
             /** @description Display name of the end-user (name or externalId fallback) */
@@ -5681,6 +5776,7 @@ export interface components {
             config_override: {
                 [key: string]: unknown;
             } | null;
+            generation_config_override: components["schemas"]["ModelGenerationSettings"] | null;
             model_id_override: string | null;
             proxy_id_override: string | null;
             version_override: string | null;
@@ -5704,6 +5800,12 @@ export interface components {
             actor_name: string | null;
             /** @enum {string|null} */
             actor_type: "user" | "end_user" | null;
+            /** @description Runs of this schedule currently pending or running. */
+            running_runs: number;
+            /** @description Runs of this schedule whose notification is unread by the CALLER. Scoped to the requesting actor, like `EnrichedRun.unread`. */
+            unread_count: number;
+            /** @description Highest run number this schedule ever produced; 0 when it never fired. */
+            last_run_number: number;
         };
         SmtpConfigView: {
             applicationId: string;
@@ -5860,6 +5962,25 @@ export interface components {
                 "application/problem+json": components["schemas"]["ProblemDetail"];
             };
         };
+        /** @description The endpoint requires a different request media type */
+        UnsupportedMediaType: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                /**
+                 * @example {
+                 *       "type": "https://docs.appstrate.dev/errors/archive-required",
+                 *       "title": "Archive Required",
+                 *       "status": 415,
+                 *       "detail": "MCP-server packages must be uploaded as a multipart .afps or .zip archive.",
+                 *       "code": "archive_required",
+                 *       "requestId": "req_abc123"
+                 *     }
+                 */
+                "application/problem+json": components["schemas"]["ProblemDetail"];
+            };
+        };
         /** @description Too many requests */
         RateLimited: {
             headers: {
@@ -5917,6 +6038,26 @@ export interface components {
                  *       "status": 500,
                  *       "detail": "An unexpected error occurred. Please try again or contact support.",
                  *       "code": "internal_error",
+                 *       "requestId": "req_abc123"
+                 *     }
+                 */
+                "application/problem+json": components["schemas"]["ProblemDetail"];
+            };
+        };
+        /** @description The stored artifact expands past the package decompression ceiling and was refused (`package_archive_unreadable`). This is the SAME ceiling the import gate applies, so reaching it means the archive is a bomb or was stored before the gate covered this path — republish the package. RFC 9457 problem+json. */
+        PackageArchiveUnreadable: {
+            headers: {
+                "Request-Id": components["headers"]["RequestId"];
+                [name: string]: unknown;
+            };
+            content: {
+                /**
+                 * @example {
+                 *       "type": "https://docs.appstrate.dev/errors/package-archive-unreadable",
+                 *       "title": "Package Archive Unreadable",
+                 *       "status": 422,
+                 *       "detail": "The package archive expands past the 50 MB decompression limit and was refused (decompressed-budget-exceeded). Republish the package from bytes that fit the limit.",
+                 *       "code": "package_archive_unreadable",
                  *       "requestId": "req_abc123"
                  *     }
                  */
@@ -6624,7 +6765,8 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        modelId?: string | null;
+                        modelId: string | null;
+                        generation: components["schemas"]["ModelGenerationSettings"] | null;
                     };
                 };
             };
@@ -6654,6 +6796,7 @@ export interface operations {
                 "application/json": {
                     /** @description Model ID or null to use org default */
                     modelId: string | null;
+                    generation?: components["schemas"]["ModelGenerationSettings"] | null;
                 };
             };
         };
@@ -6668,6 +6811,7 @@ export interface operations {
                 content: {
                     "application/json": {
                         modelId: string | null;
+                        generation: components["schemas"]["ModelGenerationSettings"] | null;
                     };
                 };
             };
@@ -6989,6 +7133,8 @@ export interface operations {
                     rerun_from?: string;
                     /** @description Model ID override for this run — a system model key or an org-model UUID. Pins THIS run to that model, taking priority over the full resolution cascade (request `modelId` > agent model setting > org default model > system default). Without it, the org default is resolved at run creation — not ahead of time — so changing the org default between triggers silently changes the model used by subsequent runs. Returns 404 when the referenced model does not exist. The response echoes the resolved `model_label` + `model_source` so callers can verify which model the run actually uses. */
                     modelId?: string;
+                    /** @description Per-run temperature/reasoning override. A custom temperature is rejected only when explicitly unsupported; a reasoning level is accepted only when explicitly supported. Omitted properties inherit the agent defaults. */
+                    generation?: components["schemas"]["ModelGenerationSettings"];
                     /** @description Proxy ID override for this run, or "none" to disable proxying. Takes priority over agent and org defaults. */
                     proxyId?: string;
                     /** @description Per-run config override. Deep-merged with the per-application persisted config (`application_packages.config`): override leaves replace, plain-object children merge recursively, arrays are replaced wholesale, `null` at a leaf sets the value to null (validated as missing for required string fields), missing keys fall through. Re-validated against the manifest config schema after the merge — a 400 `invalid_config` is returned if the merged result violates the schema. Top-level `null` is rejected (returns 400) — omit the field to inherit persisted defaults, send `{}` for an explicit empty override. Mirrors the OpenAPI Assistants `runs.create { instructions, model, tools }` and Argo Workflows `submitOptions.parameters` SOTA — every client (UI, CLI, SDK) reaches the same resolved config for the same `(persisted, override)` pair. */
@@ -7043,10 +7189,19 @@ export interface operations {
                      *       "config_override": {
                      *         "dryRun": true
                      *       },
+                     *       "generation": {
+                     *         "temperature": 0.2,
+                     *         "reasoningLevel": "high"
+                     *       },
+                     *       "generation_override": {
+                     *         "temperature": 0.2,
+                     *         "reasoningLevel": "high"
+                     *       },
                      *       "started_at": "2026-01-15T10:30:00Z",
                      *       "completed_at": null,
                      *       "duration": null,
                      *       "cost": null,
+                     *       "cost_pricing_status": null,
                      *       "unread": false,
                      *       "runNumber": 17,
                      *       "token_usage": null,
@@ -7329,6 +7484,8 @@ export interface operations {
                     input?: Record<string, never>;
                     /** @description Per-schedule config delta. Deep-merged with the application's persisted `config` every time the schedule fires. */
                     config_override?: Record<string, never>;
+                    /** @description Temperature/reasoning overrides applied to every run fired by this schedule. */
+                    generation_config_override?: components["schemas"]["ModelGenerationSettings"];
                     /** @description Override the persisted model on every run triggered by this schedule. */
                     model_id_override?: string;
                     /** @description Override the persisted proxy on every run triggered by this schedule. */
@@ -7377,6 +7534,7 @@ export interface operations {
                      *         "maxEmails": 50
                      *       },
                      *       "config_override": null,
+                     *       "generation_config_override": null,
                      *       "model_id_override": null,
                      *       "proxy_id_override": null,
                      *       "version_override": null,
@@ -7921,6 +8079,7 @@ export interface operations {
             content: {
                 "application/json": {
                     config?: Record<string, never>;
+                    generationConfig?: components["schemas"]["ModelGenerationSettings"] | null;
                     modelId?: string | null;
                     proxyId?: string | null;
                     version_id?: number | null;
@@ -8005,6 +8164,10 @@ export interface operations {
                      *       "config": {
                      *         "dryRun": true
                      *       },
+                     *       "generation": {
+                     *         "temperature": 0.2,
+                     *         "reasoningLevel": "high"
+                     *       },
                      *       "modelId": "claude-sonnet-4-6",
                      *       "proxyId": null,
                      *       "version_pin": "1.2.3"
@@ -8012,6 +8175,7 @@ export interface operations {
                      */
                     "application/json": {
                         config: Record<string, never>;
+                        generation: components["schemas"]["ModelGenerationSettings"] | null;
                         modelId: string | null;
                         proxyId: string | null;
                         version_pin: string | null;
@@ -9133,6 +9297,7 @@ export interface operations {
                 "application/json": {
                     messages: Record<string, never>[];
                     modelId?: string;
+                    generation?: components["schemas"]["ModelGenerationSettings"];
                     /** @description Session id (the assistant-ui thread id) */
                     id?: string;
                 };
@@ -10829,6 +10994,8 @@ export interface operations {
                             /** @enum {string} */
                             owner_type: "user" | "end_user";
                             owner_id: string;
+                            /** @description Display name of the connection's owner (member name, or end-user name falling back to its external id); null when the owner row was deleted. Returned by the list surfaces, which include org-shared connections owned by other members; absent from the single-connection write responses, where the row is the caller's own. */
+                            owner_name?: string | null;
                             label?: string | null;
                             shared_with_org?: boolean;
                             /** @description The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting. */
@@ -10901,6 +11068,8 @@ export interface operations {
                                 /** @enum {string} */
                                 owner_type: "user" | "end_user";
                                 owner_id: string;
+                                /** @description Display name of the connection's owner (member name, or end-user name falling back to its external id); null when the owner row was deleted. Returned by the list surfaces, which include org-shared connections owned by other members; absent from the single-connection write responses, where the row is the caller's own. */
+                                owner_name?: string | null;
                                 label?: string | null;
                                 shared_with_org?: boolean;
                                 /** @description The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting. */
@@ -11007,6 +11176,8 @@ export interface operations {
                                 /** @enum {string} */
                                 owner_type: "user" | "end_user";
                                 owner_id: string;
+                                /** @description Display name of the connection's owner (member name, or end-user name falling back to its external id); null when the owner row was deleted. Returned by the list surfaces, which include org-shared connections owned by other members; absent from the single-connection write responses, where the row is the caller's own. */
+                                owner_name?: string | null;
                                 label?: string | null;
                                 shared_with_org?: boolean;
                                 /** @description The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting. */
@@ -11158,6 +11329,8 @@ export interface operations {
                         /** @enum {string} */
                         owner_type: "user" | "end_user";
                         owner_id: string;
+                        /** @description Display name of the connection's owner (member name, or end-user name falling back to its external id); null when the owner row was deleted. Returned by the list surfaces, which include org-shared connections owned by other members; absent from the single-connection write responses, where the row is the caller's own. */
+                        owner_name?: string | null;
                         label?: string | null;
                         shared_with_org?: boolean;
                         /** @description The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting. */
@@ -11436,6 +11609,8 @@ export interface operations {
                             /** @enum {string} */
                             owner_type: "user" | "end_user";
                             owner_id: string;
+                            /** @description Display name of the connection's owner (member name, or end-user name falling back to its external id); null when the owner row was deleted. Returned by the list surfaces, which include org-shared connections owned by other members; absent from the single-connection write responses, where the row is the caller's own. */
+                            owner_name?: string | null;
                             label?: string | null;
                             shared_with_org?: boolean;
                             /** @description The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting. */
@@ -11502,6 +11677,8 @@ export interface operations {
                         /** @enum {string} */
                         owner_type: "user" | "end_user";
                         owner_id: string;
+                        /** @description Display name of the connection's owner (member name, or end-user name falling back to its external id); null when the owner row was deleted. Returned by the list surfaces, which include org-shared connections owned by other members; absent from the single-connection write responses, where the row is the caller's own. */
+                        owner_name?: string | null;
                         label?: string | null;
                         shared_with_org?: boolean;
                         /** @description The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting. */
@@ -12004,6 +12181,8 @@ export interface operations {
                                 /** @enum {string} */
                                 owner_type: "user" | "end_user";
                                 owner_id: string;
+                                /** @description Display name of the connection's owner (member name, or end-user name falling back to its external id); null when the owner row was deleted. Returned by the list surfaces, which include org-shared connections owned by other members; absent from the single-connection write responses, where the row is the caller's own. */
+                                owner_name?: string | null;
                                 label?: string | null;
                                 shared_with_org?: boolean;
                                 /** @description The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting. */
@@ -12607,7 +12786,7 @@ export interface operations {
                             /** @description AFPS §4.4 — tool(s) an agent inherits when it declares this integration without an `integrations_configuration.<id>.tools` selection. Absent or `[]` means an agent that declares this integration without its own selection ends up with nothing callable, which publish/import reject and the run aborts on — such an agent must select a tool explicitly. To use any other tool, inspect the full `tool_catalog` via GET /api/integrations/{packageId}. */
                             default_tools?: string[] | "*";
                         }[];
-                        /** @description Agents the caller can run in the current application (capped). Only present when the caller holds the `agents:run` permission; empty otherwise. When `agents_truncated` is true, the long tail is reachable via the MCP `search_operations` tool. */
+                        /** @description Agents the caller can run in the current application (capped). Only present when the caller holds the `agents:run` permission; empty otherwise. When `agents_truncated` is true, the full list is reachable via the `listAgents` operation. */
                         agents: {
                             /** @description Invokable identifier, e.g. "@appstrate/triage". */
                             package_id: string;
@@ -12620,11 +12799,11 @@ export interface operations {
                             /** @enum {string} */
                             source: "system" | "local";
                         }[];
-                        /** @description True when the agent list was capped (more via search_operations). */
+                        /** @description True when the agent list was capped (full list via `listAgents`). */
                         agents_truncated: boolean;
                         /** @description Total runnable agents before the cap. */
                         agents_total: number;
-                        /** @description Skills the caller could attach to an agent in the current application (capped). Only present when the caller holds the `agents:run` permission; empty otherwise. Skills are not run directly — declare them under an agent manifest's `dependencies.skills`. When `skills_truncated` is true, the long tail is reachable via the MCP `search_operations` tool. */
+                        /** @description Skills the caller could attach to an agent in the current application (capped). Only present when the caller holds the `agents:run` permission; empty otherwise. Skills are not run directly — declare them under an agent manifest's `dependencies.skills`. When `skills_truncated` is true, the full list is reachable via the `listSkills` operation. */
                         skills: {
                             /** @description Attachable identifier, e.g. "@appstrate/web-research". Declare under dependencies.skills. */
                             package_id: string;
@@ -12637,7 +12816,7 @@ export interface operations {
                             /** @enum {string} */
                             source: "system" | "local";
                         }[];
-                        /** @description True when the skill list was capped (more via search_operations). */
+                        /** @description True when the skill list was capped (full list via `listSkills`). */
                         skills_truncated: boolean;
                         /** @description Total installed skills before the cap. */
                         skills_total: number;
@@ -12984,6 +13163,7 @@ export interface operations {
                                 contextWindow: number;
                                 maxTokens?: number | null;
                                 capabilities: string[];
+                                generation?: components["schemas"]["ModelGenerationCapabilities"];
                                 /** @description Per-1M-token cost (USD). */
                                 cost: {
                                     input?: number;
@@ -13429,6 +13609,14 @@ export interface operations {
                      *           "apiShape": "openai-responses",
                      *           "baseUrl": "https://api.openai.com/v1",
                      *           "modelId": "gpt-4o",
+                     *           "generation": {
+                     *             "temperature": "supported",
+                     *             "reasoning": {
+                     *               "supported": "unsupported",
+                     *               "adaptive": null,
+                     *               "levels": {}
+                     *             }
+                     *           },
                      *           "iconUrl": "openai",
                      *           "source": "built-in",
                      *           "enabled": true,
@@ -15107,6 +15295,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
         };
     };
     createAgent: {
@@ -15176,6 +15365,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -15304,6 +15494,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -15435,6 +15626,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -15523,6 +15715,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -15558,6 +15751,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -15901,6 +16095,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
         };
     };
     createIntegrationPackage: {
@@ -15924,8 +16119,6 @@ export interface operations {
                     };
                     /** @description Primary package file content (manifest document). */
                     content?: string;
-                    /** @description Optional source code payload for the integration runner. */
-                    source_code?: string;
                 };
             };
         };
@@ -15975,6 +16168,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -16000,7 +16194,7 @@ export interface operations {
                     manifest: {
                         [key: string]: unknown;
                     };
-                    content: string;
+                    content?: string;
                     /** @description Optimistic lock version */
                     lock_version: number;
                 };
@@ -16094,6 +16288,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -16121,7 +16316,7 @@ export interface operations {
                     manifest: {
                         [key: string]: unknown;
                     };
-                    content: string;
+                    content?: string;
                     /** @description Optimistic lock version */
                     lock_version: number;
                 };
@@ -16219,6 +16414,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -16308,6 +16504,7 @@ export interface operations {
             };
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -16344,6 +16541,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -16460,6 +16658,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
         };
     };
     createMcpServerPackage: {
@@ -16474,7 +16673,7 @@ export interface operations {
             path?: never;
             cookie?: never;
         };
-        /** @description Upload a package ZIP (`multipart/form-data` with a `.afps`/`.zip` file — the package ID is derived from the file name, and the archive must contain a valid `manifest.json`), or post a JSON body carrying the manifest. Parsed by `parsePackageUpload`. */
+        /** @description Upload a self-contained package archive (`multipart/form-data` with a `.afps`/`.zip` file). The package ID is derived from the file name. The archive must contain a valid `manifest.json` and the file referenced by `server.entry_point`; JSON manifest-only creation is refused with `415 archive_required`. */
         requestBody: {
             content: {
                 "multipart/form-data": {
@@ -16483,20 +16682,6 @@ export interface operations {
                      * @description Package archive (`.afps` or `.zip`) containing a valid `manifest.json`. File name (sans extension) is the kebab-case package id.
                      */
                     file: Blob;
-                };
-                "application/json": {
-                    /** @description Kebab-case package id. */
-                    id: string;
-                    /** @description Primary package file content. */
-                    content: string;
-                    /** @description Display name. Auto-extracted from the manifest if omitted. */
-                    name?: string;
-                    /** @description Package description. Auto-extracted from the manifest if omitted. */
-                    description?: string;
-                    /** @description Manifest object, validated against the AFPS mcp-server schema and stored as-is. */
-                    manifest: {
-                        [key: string]: unknown;
-                    };
                 };
             };
         };
@@ -16515,6 +16700,7 @@ export interface operations {
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            415: components["responses"]["UnsupportedMediaType"];
         };
     };
     getMcpServerPackageById: {
@@ -16546,6 +16732,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -16665,6 +16852,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -16790,6 +16978,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -16879,6 +17068,7 @@ export interface operations {
             };
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -16915,6 +17105,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -17052,6 +17243,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
         };
     };
     createSkill: {
@@ -17075,8 +17267,6 @@ export interface operations {
                     };
                     /** @description SKILL.md content (markdown with YAML frontmatter). */
                     content?: string;
-                    /** @description Optional source code payload. */
-                    source_code?: string;
                 };
             };
         };
@@ -17126,6 +17316,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -17245,6 +17436,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -17370,6 +17562,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -17459,6 +17652,7 @@ export interface operations {
             };
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -17495,6 +17689,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -17577,6 +17772,166 @@ export interface operations {
             };
         };
     };
+    listPackageFiles: {
+        parameters: {
+            query?: {
+                /** @description Which snapshot to read: omitted (or `draft`) reads the live draft, where the stored artifact is overlaid with the authoritative `manifest.json` / primary content from the database. Any other value is resolved as a version spec (exact version, dist-tag, or semver range) and returns exactly the published bytes, with no overlay. */
+                version?: string;
+            };
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
+                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Entity-tag of a cached copy. A match yields `304 Not Modified`. */
+                "If-None-Match"?: string;
+            };
+            path: {
+                /** @description Package scope (e.g. @myorg) */
+                scope: components["parameters"]["PackageScope"];
+                /** @description Package name */
+                name: components["parameters"]["PackageName"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description File index */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    /** @description Strong entity-tag of this index representation (`"i-…"`), derived from the version artifact's integrity hash or from a content digest of the overlaid draft. It never matches a `files/content` tag. */
+                    ETag?: string;
+                    /** @description Always `private, no-cache`, for every selector — draft, exact version pin, dist-tag, semver range, yanked. Always `private`: the response is tenant-scoped. Never a fresh window and never `immutable`: this index is RBAC-gated, and a copy the browser may serve without contacting the server would outlive a revoked `<type>:read`, an org removal, or the package being uninstalled from the application. `no-cache` still permits the `304` round-trip, which a version pin answers from a single database read. */
+                    "Cache-Control"?: string;
+                    /** @description Always `X-Org-Id, X-Application-Id` — access depends on both, so a cache must not reuse this body across organizations or applications. */
+                    Vary?: string;
+                    /** @description Present and set to `true` when the resolved version is yanked. */
+                    "X-Yanked"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PackageFileIndex"];
+                };
+            };
+            /** @description Cached copy is still current (`If-None-Match` matched). No body. */
+            304: {
+                headers: {
+                    /** @description Strong entity-tag of this index representation. */
+                    ETag?: string;
+                    /** @description Always `private, no-cache`, as on the `200`. */
+                    "Cache-Control"?: string;
+                    /** @description Always `X-Org-Id, X-Application-Id`, as on the `200`. */
+                    Vary?: string;
+                    /** @description Present and set to `true` when the resolved version is yanked. */
+                    "X-Yanked"?: string;
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["PackageArchiveUnreadable"];
+            429: components["responses"]["RateLimited"];
+            /** @description The artifact could not be read: integrity/signature verification failed (`INTEGRITY_MISMATCH`), or the stored bytes are not a readable ZIP. RFC 9457 problem+json. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    getPackageFileContent: {
+        parameters: {
+            query: {
+                /** @description Exact `path` of an entry from the file index. */
+                path: string;
+                /** @description Which snapshot to read from — same resolution as the file index: omitted (or `draft`) reads the live draft with the database overlay, any other value is an exact version, dist-tag, or semver range. */
+                version?: string;
+            };
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
+                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Entity-tag of a cached copy. A match yields `304 Not Modified`. */
+                "If-None-Match"?: string;
+            };
+            path: {
+                /** @description Package scope (e.g. @myorg) */
+                scope: components["parameters"]["PackageScope"];
+                /** @description Package name */
+                name: components["parameters"]["PackageName"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Raw file bytes */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    /** @description Strong entity-tag of THIS FILE (`"f-…"`), folding in both the snapshot identity and the `path`. Per RFC 9110 §8.8.1 it identifies one representation: a tag obtained for another `path`, or from the file index, will not match. */
+                    ETag?: string;
+                    /** @description Always `private, no-cache`, for every selector — draft, exact version pin, dist-tag, semver range, yanked. Never a fresh window and never `immutable`: these bytes are RBAC-gated, and a copy the browser may serve without contacting the server would outlive a revoked `<type>:read`, an org removal, or the package being uninstalled from the application. */
+                    "Cache-Control"?: string;
+                    /** @description Always `X-Org-Id, X-Application-Id` — access depends on both, so a cache must not reuse these bytes across organizations or applications. */
+                    Vary?: string;
+                    /** @description Present and set to `true` when the resolved version is yanked. */
+                    "X-Yanked"?: string;
+                    /** @description `attachment` with the file's sanitized base name. */
+                    "Content-Disposition"?: string;
+                    /** @description Always `nosniff`. */
+                    "X-Content-Type-Options"?: string;
+                    /** @description Always `no-referrer`. */
+                    "Referrer-Policy"?: string;
+                    /** @description Always `same-origin`. */
+                    "Cross-Origin-Resource-Policy"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/octet-stream": Blob;
+                };
+            };
+            /** @description Cached copy of THIS file is still current (`If-None-Match` matched its per-file tag). No body. A bare `If-None-Match: *` is deliberately NOT honoured before the artifact is read — it carries no path, so it cannot establish that the file exists. */
+            304: {
+                headers: {
+                    /** @description Strong entity-tag of this file representation. */
+                    ETag?: string;
+                    /** @description Always `private, no-cache`, as on the `200`. */
+                    "Cache-Control"?: string;
+                    /** @description Always `X-Org-Id, X-Application-Id`, as on the `200`. */
+                    Vary?: string;
+                    /** @description Present and set to `true` when the resolved version is yanked. */
+                    "X-Yanked"?: string;
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["PackageArchiveUnreadable"];
+            429: components["responses"]["RateLimited"];
+            /** @description The artifact could not be read: integrity/signature verification failed (`INTEGRITY_MISMATCH`), or the stored bytes are not a readable ZIP. RFC 9457 problem+json. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
     forkPackage: {
         parameters: {
             query?: never;
@@ -17626,6 +17981,16 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            /** @description The SOURCE package's published artifact expands past the platform's decompression ceiling and was refused (`package_archive_unreadable`). Nothing was written: the fork is rejected while reading the source, before the name-collision check and before any package or version row is created, so there is no partial copy to clean up. A fork always targets a package the calling organization does NOT own, so the caller cannot repair the source — report it to whoever publishes it (or to the platform operator if it is a system package). RFC 9457 problem+json. */
+            422: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
         };
     };
     downloadPackageVersion: {
@@ -17665,6 +18030,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             429: components["responses"]["RateLimited"];
             /** @description Integrity check failed */
@@ -18391,10 +18757,13 @@ export interface operations {
                      *       "metadata": null,
                      *       "config": null,
                      *       "config_override": null,
+                     *       "generation": null,
+                     *       "generation_override": null,
                      *       "started_at": "2026-01-15T10:30:00Z",
                      *       "completed_at": null,
                      *       "duration": null,
                      *       "cost": null,
+                     *       "cost_pricing_status": null,
                      *       "unread": false,
                      *       "runNumber": 1,
                      *       "token_usage": null,
@@ -18758,10 +19127,15 @@ export interface operations {
                      *         "folder": "inbox"
                      *       },
                      *       "config_override": null,
+                     *       "generation": {
+                     *         "reasoningLevel": "medium"
+                     *       },
+                     *       "generation_override": null,
                      *       "started_at": "2026-01-15T10:30:00Z",
                      *       "completed_at": "2026-01-15T10:31:12Z",
                      *       "duration": 72000,
                      *       "cost": 0.0034,
+                     *       "cost_pricing_status": "priced",
                      *       "unread": true,
                      *       "runNumber": 17,
                      *       "token_usage": {
@@ -18869,10 +19243,13 @@ export interface operations {
                      *       "metadata": null,
                      *       "config": null,
                      *       "config_override": null,
+                     *       "generation": null,
+                     *       "generation_override": null,
                      *       "started_at": "2026-01-15T10:30:00Z",
                      *       "completed_at": "2026-01-15T10:30:45Z",
                      *       "duration": 45000,
                      *       "cost": 0.0012,
+                     *       "cost_pricing_status": "priced",
                      *       "unread": false,
                      *       "runNumber": 18,
                      *       "token_usage": null,
@@ -19588,6 +19965,7 @@ export interface operations {
                      *         "maxEmails": 50
                      *       },
                      *       "config_override": null,
+                     *       "generation_config_override": null,
                      *       "model_id_override": null,
                      *       "proxy_id_override": null,
                      *       "version_override": "1.2.0",
@@ -19632,6 +20010,8 @@ export interface operations {
                     input?: Record<string, never>;
                     /** @description Per-schedule config delta. Pass `null` to clear the override. */
                     config_override?: Record<string, never> | null;
+                    /** @description Temperature/reasoning overrides for scheduled runs. Pass null to clear. */
+                    generation_config_override?: components["schemas"]["ModelGenerationSettings"] | null;
                     model_id_override?: string | null;
                     proxy_id_override?: string | null;
                     /** @description Version selector (`draft` | `published` | version spec). Pass `null` to clear (falls back to the default `published` — latest published version; the working copy is opt-in via `draft` only). */
@@ -20448,6 +20828,7 @@ export interface operations {
                                 status?: "healthy" | "unhealthy";
                                 latency_ms?: number;
                             };
+                            /** @description Agent runtime readiness established during platform boot. */
                             agents?: {
                                 /** @enum {string} */
                                 status?: "healthy" | "degraded";

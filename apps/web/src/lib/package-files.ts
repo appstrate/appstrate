@@ -1,8 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { PACKAGE_CONTENT_FILE } from "@appstrate/core/package-files";
 import type { PackageType } from "@appstrate/core/validation";
 
-/** A file surfaced in the package UI (content tab label, diff sub-tab). */
+/**
+ * A file surfaced in the package UI: the editor's content tab label, the diff
+ * sub-tab, and the file the explorer pre-selects for a package type.
+ */
 export interface DisplayFile {
   /** File name, shown verbatim as a tab label (filenames are not translated). */
   name: string;
@@ -15,38 +19,34 @@ export interface DisplayFile {
   source: "manifest" | "content";
 }
 
-/**
- * Files surfaced per package type. The first entry is the **primary** file
- * shown in the content tab. A `"content"`-sourced entry also doubles as the
- * **diff companion** (diffed alongside the manifest in the diff tab).
- *
- * Most types follow the shape `manifest + one content file`, where the content
- * file is both the primary display file and the diff companion. `mcp-server`
- * breaks that shape: it has no content file at all — `manifest.json` IS its
- * only required file (AFPS §3.4) — so its primary file is manifest-sourced and
- * it has no diff companion.
- *
- * Non-empty tuple type so `DISPLAY_FILES[type][0]` is known-defined under
- * `noUncheckedIndexedAccess`.
- */
-const DISPLAY_FILES: Record<PackageType, [DisplayFile, ...DisplayFile[]]> = {
-  agent: [{ name: "prompt.md", source: "content" }],
-  skill: [{ name: "SKILL.md", source: "content" }],
-  "mcp-server": [{ name: "manifest.json", source: "manifest" }],
-  // INTEGRATION.md is the optional agent-facing doc; the authoritative spec
-  // still lives in the manifest (diffed in the manifest sub-tab).
-  integration: [{ name: "INTEGRATION.md", source: "content" }],
-};
+const MANIFEST_FILE = "manifest.json";
 
-/** Primary file shown in the content tab for a package type. */
+/**
+ * Primary file of a package type — the editor's content tab, and the entry the
+ * file explorer opens on when the artifact carries it.
+ *
+ * Derived from `PACKAGE_CONTENT_FILE` rather than restated: which file a type's
+ * content lives in is one AFPS fact, and it is the fact the ZIP parser and the
+ * draft overlay already read from that map. A local copy here is how the four
+ * declarations that preceded it drifted apart.
+ *
+ * Most types follow the shape `manifest + one content file`. `mcp-server`
+ * breaks it: it has no content file at all — `manifest.json` IS its only
+ * required file (AFPS §3.4) — which the map records as `null`.
+ */
 export function primaryDisplayFile(type: PackageType): DisplayFile {
-  return DISPLAY_FILES[type][0];
+  const content = PACKAGE_CONTENT_FILE[type];
+  return content === null
+    ? { name: MANIFEST_FILE, source: "manifest" }
+    : { name: content, source: "content" };
 }
 
 /**
  * The content-sourced file diffed alongside the manifest, if the type has one.
- * `undefined` for types whose only file is the manifest (e.g. mcp-server).
+ * `undefined` for types whose only file is the manifest (e.g. mcp-server) —
+ * there is nothing to diff beside it.
  */
 export function companionDisplayFile(type: PackageType): DisplayFile | undefined {
-  return DISPLAY_FILES[type].find((f) => f.source === "content");
+  const primary = primaryDisplayFile(type);
+  return primary.source === "content" ? primary : undefined;
 }

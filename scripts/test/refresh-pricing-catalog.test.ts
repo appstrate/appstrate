@@ -11,10 +11,14 @@
 import { describe, it, expect, afterEach } from "bun:test";
 import {
   aliasedBackings,
+  assertNormalizedGenerationCatalog,
+  assertNormalizedCatalogDigest,
   buildFeatured,
   countCacheRates,
   coverageRow,
   formatCoverageSummary,
+  projectGenerationCapabilities,
+  projectEntry,
   type CoverageRow,
 } from "../refresh-pricing-catalog.ts";
 
@@ -229,5 +233,221 @@ describe("formatCoverageSummary", () => {
     ]);
     expect(md).toContain("| `new` | 0 | · | — | · | — | · |");
     expect(md).not.toContain("NaN");
+  });
+});
+
+describe("generation capabilities", () => {
+  const normalizedGeneration = {
+    temperature: "supported",
+    reasoning: {
+      supported: "supported",
+      temperatureCompatible: "unsupported",
+      adaptive: null,
+      levels: {
+        none: "supported",
+        minimal: "unsupported",
+        low: "supported",
+        medium: "supported",
+        high: "supported",
+        xhigh: "supported",
+        max: "supported",
+      },
+    },
+  } as const;
+
+  it("accepts a complete normalized generation contract for vendored chat entries", () => {
+    expect(() =>
+      assertNormalizedGenerationCatalog({
+        model: {
+          litellm_provider: "openai",
+          mode: "chat",
+          _appstrate_generation: normalizedGeneration,
+        },
+      }),
+    ).not.toThrow();
+  });
+
+  it("accepts an omitted pair fact when LiteLLM is inconclusive", () => {
+    const { temperatureCompatible: _temperatureCompatible, ...reasoning } =
+      normalizedGeneration.reasoning;
+    void _temperatureCompatible;
+
+    expect(() =>
+      assertNormalizedGenerationCatalog({
+        model: {
+          litellm_provider: "openai",
+          mode: "chat",
+          _appstrate_generation: { ...normalizedGeneration, reasoning },
+        },
+      }),
+    ).not.toThrow();
+  });
+
+  it("rejects a vendored chat entry without the normalized generation contract", () => {
+    expect(() =>
+      assertNormalizedGenerationCatalog({
+        model: { litellm_provider: "openai", mode: "chat" },
+      }),
+    ).toThrow(/model.*_appstrate_generation/);
+  });
+
+  it("rejects an artifact with no vendored chat entries", () => {
+    expect(() =>
+      assertNormalizedGenerationCatalog({
+        embedding: { litellm_provider: "openai", mode: "embedding" },
+      }),
+    ).toThrow(/no vendored chat entries/);
+  });
+
+  it("rejects malformed normalized generation values", () => {
+    expect(() =>
+      assertNormalizedGenerationCatalog({
+        model: {
+          litellm_provider: "anthropic",
+          mode: "chat",
+          _appstrate_generation: {
+            ...normalizedGeneration,
+            temperature: "maybe",
+          },
+        } as never,
+      }),
+    ).toThrow(/model.*_appstrate_generation/);
+  });
+
+  it("rejects a malformed optional pair fact", () => {
+    expect(() =>
+      assertNormalizedGenerationCatalog({
+        model: {
+          litellm_provider: "openai",
+          mode: "chat",
+          _appstrate_generation: {
+            ...normalizedGeneration,
+            reasoning: {
+              ...normalizedGeneration.reasoning,
+              temperatureCompatible: "maybe",
+            },
+          },
+        } as never,
+      }),
+    ).toThrow(/model.*_appstrate_generation/);
+  });
+
+  it("projects LiteLLM's effective value-level contract without re-deriving it", () => {
+    expect(
+      projectGenerationCapabilities({
+        _appstrate_generation: {
+          temperature: "supported",
+          reasoning: {
+            supported: "supported",
+            temperatureCompatible: "unsupported",
+            adaptive: null,
+            levels: {
+              none: "supported",
+              minimal: "unsupported",
+              low: "supported",
+              medium: "supported",
+              high: "supported",
+              xhigh: "supported",
+              max: "supported",
+            },
+          },
+        },
+      }),
+    ).toEqual({
+      temperature: "supported",
+      reasoning: {
+        supported: "supported",
+        temperatureCompatible: "unsupported",
+        adaptive: null,
+        levels: {
+          off: "supported",
+          minimal: "unsupported",
+          low: "supported",
+          medium: "supported",
+          high: "supported",
+          xhigh: "supported",
+          max: "supported",
+        },
+      },
+    });
+  });
+
+  it("omits unknown levels from the runtime projection", () => {
+    expect(
+      projectGenerationCapabilities({
+        _appstrate_generation: {
+          temperature: "unknown",
+          reasoning: {
+            supported: "unknown",
+            adaptive: null,
+            levels: {
+              none: "unsupported",
+              minimal: "unknown",
+              low: "supported",
+              medium: "unknown",
+              high: "unknown",
+              xhigh: "unknown",
+              max: "unsupported",
+            },
+          },
+        },
+      }),
+    ).toEqual({
+      temperature: "unknown",
+      reasoning: {
+        supported: "unknown",
+        adaptive: null,
+        levels: {
+          off: "unsupported",
+          low: "supported",
+          max: "unsupported",
+        },
+      },
+    });
+  });
+
+  it("rejects an entry without the normalized source contract", () => {
+    expect(() => projectGenerationCapabilities({})).toThrow(/normalized generation contract/);
+  });
+
+  it("vendors the normalized generation block with pricing", () => {
+    const projected = projectEntry("reasoner", {
+      input_cost_per_token: 0.000001,
+      output_cost_per_token: 0.000002,
+      max_input_tokens: 10_000,
+      _appstrate_generation: normalizedGeneration,
+    });
+    expect(projected?.generation.temperature).toBe("supported");
+    expect(projected?.generation.reasoning.supported).toBe("supported");
+  });
+
+  it("keeps the legacy runtime reasoning flag aligned with the normalized source", () => {
+    const projected = projectEntry("reasoner", {
+      input_cost_per_token: 0.000001,
+      output_cost_per_token: 0.000002,
+      max_input_tokens: 10_000,
+      _appstrate_generation: normalizedGeneration,
+    });
+    expect(projected?.generation.reasoning.supported).toBe("supported");
+    expect(projected?.capabilities).toContain("reasoning");
+  });
+});
+
+describe("normalized artifact provenance", () => {
+  const artifact = '{"model":{"mode":"chat"}}\n';
+  const digest = "sha256:780b6be6695be8ea016ce4e2b957c03570cddef06e87a64b7695e2b248e09e08";
+
+  it("accepts the exact normalized output recorded in the lock", () => {
+    expect(() => assertNormalizedCatalogDigest(artifact, digest)).not.toThrow();
+  });
+
+  it("rejects a stale or handcrafted normalized output", () => {
+    expect(() => assertNormalizedCatalogDigest(`${artifact} `, digest)).toThrow(
+      /normalized artifact digest mismatch/,
+    );
+  });
+
+  it("rejects a lock without a normalized output digest", () => {
+    expect(() => assertNormalizedCatalogDigest(artifact, undefined)).toThrow(/normalizedDigest/);
   });
 });

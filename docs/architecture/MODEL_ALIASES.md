@@ -29,15 +29,27 @@ The alias **is** the registry `id`. Resolution (`org-models.ts`
 `resolveModel`/`loadModel`) always returns the _real_ binding to the executor;
 the alias never reaches upstream. Two layers hide the backing from users:
 
-1. **Read projection** (`projectAliasedModel`) — strips the binding + every
-   catalog-derived capability/cost field (they fingerprint the real model) from
-   user-facing reads. The operator create/update responses keep the full shape.
+1. **Read projection** (`projectAliasedModel`) — strips the binding, pricing,
+   context window, provider-native generation mappings, and every other
+   identifying catalog field from user-facing reads. It keeps only the
+   normalized portable generation support vector required for safe UI controls;
+   unknown support is projected as unsupported. This vector can narrow the set
+   of possible backing models, an accepted limitation of making aliases
+   configurable without revealing their exact binding. The operator
+   create/update responses keep the full shape.
 2. **Inference-path swap** (`@appstrate/core/model-swap`) — rewrites the `model`
    field alias→real on the request and real→alias on the response, on **both**
    inference paths:
    - the in-container **sidecar** proxy (agent runs), and
    - the platform **LLM gateway** `/api/llm-proxy/*` (direct API/dashboard
      calls).
+
+For an adaptive Anthropic backing, an agent-side Pi session cannot infer the
+transport from the public alias id. The run launcher therefore adds only the
+catalogued native effort to the sidecar's private swap descriptor; the sidecar
+restores `thinking.type: "adaptive"` and `output_config.effort` while swapping
+the request model. Neither the backing id nor the adaptive flag enters the
+agent container.
 
 The usage ledger (`llm_usage`) keeps the real id privately in `real_model` for
 billing/audit; the module-facing service accessor (`listLlmUsage`, exposed as

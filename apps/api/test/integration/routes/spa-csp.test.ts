@@ -135,6 +135,26 @@ describe("SPA document CSP", () => {
     }
   });
 
+  // The shell is the ONE response that must never be reused without asking the
+  // server: it embeds a per-request `window.__APP_CONFIG__` (`bootstrapTokenPending`
+  // flips the moment an unattended install is claimed) and names the current
+  // build's hashed asset URLs, which the hashed assets' own year-long
+  // `immutable` policy then depends on being fresh.
+  it("declares the document non-reusable without revalidation", async () => {
+    await withUsercontentUrl(undefined, async () => {
+      const res = await fetchSpa();
+      expect(res.headers.get("Cache-Control")).toBe("no-cache");
+    });
+  });
+
+  it("never pins the shell — no max-age, no immutable", async () => {
+    await withUsercontentUrl(undefined, async () => {
+      const cacheControl = (await fetchSpa("/agents")).headers.get("Cache-Control") ?? "";
+      expect(cacheControl).not.toContain("immutable");
+      expect(cacheControl).not.toMatch(/max-age=[1-9]/);
+    });
+  });
+
   it("still injects window.__APP_CONFIG__ into the shell", async () => {
     await withUsercontentUrl(undefined, async () => {
       const body = await (await fetchSpa()).text();

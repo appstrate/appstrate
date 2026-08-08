@@ -7,6 +7,7 @@ import {
   runAndWaitSteps,
   runAndWaitStepsWithDocuments,
 } from "../src/run-and-wait-client.ts";
+import { agentManifestSchema } from "../src/validation.ts";
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -385,6 +386,17 @@ describe("run_and_wait client", () => {
 });
 
 describe("launchRunAndWait launch body", () => {
+  const defaultInlineManifest = (overrides: Record<string, unknown>) => ({
+    $schema: "https://schemas.afps.dev/v0/agent.schema.json",
+    schema_version: "0.2",
+    type: "agent",
+    version: "1.0.0",
+    dependencies: {},
+    runtime_tools: ["log", "output", "publish_document"],
+    output: { schema: { type: "object", properties: {}, additionalProperties: true } },
+    ...overrides,
+  });
+
   function captureLaunch(): {
     fetchImpl: typeof fetch;
     captured: () => { url: string; method: string; body: unknown } | undefined;
@@ -401,13 +413,13 @@ describe("launchRunAndWait launch body", () => {
     return { fetchImpl, captured: () => seen };
   }
 
-  it("kind:inline forwards manifest, prompt, input, and config", async () => {
+  it("kind:inline materializes a minimal manifest and forwards prompt, input, and config", async () => {
     const { fetchImpl, captured } = captureLaunch();
 
     const result = await launchRunAndWait(
       {
         kind: "inline",
-        manifest: { name: "tmp" },
+        manifest: { display_name: "Analyse café" },
         prompt: "do it",
         input: { screenshot: "document://doc_abc12345" },
         config: { model: "x" },
@@ -420,33 +432,94 @@ describe("launchRunAndWait launch body", () => {
       url: "https://test.local/api/runs/inline",
       method: "POST",
       body: {
-        manifest: { name: "tmp", runtime_tools: ["publish_document"] },
+        manifest: defaultInlineManifest({
+          name: "@inline/analyse-cafe",
+          display_name: "Analyse café",
+        }),
         prompt: expect.stringContaining("do it"),
         input: { screenshot: "document://doc_abc12345" },
         config: { model: "x" },
       },
     });
+    const body = captured()?.body as { manifest?: unknown } | undefined;
+    expect(agentManifestSchema.safeParse(body?.manifest).success).toBe(true);
   });
 
-  it("kind:inline equips publish_document without rewriting the agent prompt", async () => {
+  it("kind:inline preserves every field of a complete deterministic manifest", async () => {
     const { fetchImpl, captured } = captureLaunch();
+
+    const manifest = {
+      $schema: "https://example.test/custom-agent.schema.json",
+      schema_version: "0.1",
+      name: "@custom/deterministic-report",
+      display_name: "Rapport déterministe",
+      type: "agent",
+      version: "7.3.1",
+      description: "Exact caller-owned contract",
+      timeout: 42,
+      dependencies: { integrations: { "@appstrate/gmail": "^1.2.0" } },
+      integrations_configuration: { "@appstrate/gmail": { tools: ["api_call"] } },
+      runtime_tools: ["output"],
+      output: {
+        schema: {
+          type: "object",
+          additionalProperties: false,
+          required: ["count"],
+          properties: { count: { type: "integer" } },
+        },
+        property_order: ["count"],
+      },
+      _meta: { "example.test/mode": "strict" },
+    };
 
     const result = await launchRunAndWait(
       {
         kind: "inline",
-        manifest: { name: "tmp", runtime_tools: ["log", "output"] },
+        manifest,
         prompt: "Write the requested report to outputs/report.html.",
       },
       { origin: "https://test.local", headers: {}, fetch: fetchImpl },
     );
 
     expect(result.ok).toBe(true);
-    expect(captured()?.body).toMatchObject({
-      manifest: { runtime_tools: ["log", "output", "publish_document"] },
-    });
+    expect((captured()?.body as { manifest?: unknown } | undefined)?.manifest).toEqual(manifest);
     expect((captured()?.body as { prompt?: string } | undefined)?.prompt).toBe(
       "Write the requested report to outputs/report.html.",
     );
+  });
+
+  it("kind:inline preserves an explicit empty runtime_tools override", async () => {
+    const { fetchImpl, captured } = captureLaunch();
+
+    const result = await launchRunAndWait(
+      {
+        kind: "inline",
+        manifest: { display_name: "Effet sans outil", runtime_tools: [] },
+        prompt: "Perform the side effect.",
+      },
+      { origin: "https://test.local", headers: {}, fetch: fetchImpl },
+    );
+
+    expect(result.ok).toBe(true);
+    const manifest = (captured()?.body as { manifest?: Record<string, unknown> } | undefined)
+      ?.manifest;
+    expect(manifest?.runtime_tools).toEqual([]);
+    expect(manifest).not.toHaveProperty("output");
+  });
+
+  it("kind:inline rejects a minimal manifest with no usable identity before dispatch", async () => {
+    const { fetchImpl, captured } = captureLaunch();
+
+    const result = await launchRunAndWait(
+      { kind: "inline", manifest: { dependencies: {} }, prompt: "do it" },
+      { origin: "https://test.local", headers: {}, fetch: fetchImpl },
+    );
+
+    expect(result.ok).toBe(false);
+    expect(
+      String((result as { step: { payload: { error?: string } } }).step.payload.error),
+    ).toMatch(/display_name.*name/);
+    expect(captured()).toBeUndefined();
   });
 
   it("kind:inline omits input when none is provided", async () => {
@@ -458,7 +531,7 @@ describe("launchRunAndWait launch body", () => {
     );
 
     expect(captured()?.body).toEqual({
-      manifest: { name: "tmp", runtime_tools: ["publish_document"] },
+      manifest: defaultInlineManifest({ name: "tmp" }),
       prompt: expect.stringContaining("do it"),
     });
   });
@@ -513,7 +586,7 @@ describe("launchRunAndWait launch body", () => {
     );
 
     expect(captured()?.body).toEqual({
-      manifest: { name: "tmp", runtime_tools: ["publish_document"] },
+      manifest: defaultInlineManifest({ name: "tmp" }),
       prompt: expect.stringContaining("do it"),
     });
   });

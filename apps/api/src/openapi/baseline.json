@@ -186,6 +186,7 @@
                         },
                         "agents": {
                           "type": "object",
+                          "description": "Agent runtime readiness established during platform boot.",
                           "properties": {
                             "status": {
                               "type": "string",
@@ -1284,7 +1285,7 @@
         "operationId": "getAgentModel",
         "tags": ["Agents"],
         "summary": "Get agent model configuration",
-        "description": "Returns the LLM model override for an agent (null if using org default).",
+        "description": "Returns the LLM model override and persisted generation defaults for an agent (null values inherit organization/runtime defaults).",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -1314,9 +1315,20 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "required": ["modelId", "generation"],
                   "properties": {
                     "modelId": {
                       "type": ["string", "null"]
+                    },
+                    "generation": {
+                      "oneOf": [
+                        {
+                          "$ref": "#/components/schemas/ModelGenerationSettings"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     }
                   }
                 }
@@ -1335,7 +1347,7 @@
         "operationId": "setAgentModel",
         "tags": ["Agents"],
         "summary": "Set agent model override",
-        "description": "Set a model override for this agent. Pass a model ID or null to revert to org default. The model ID must name a system model preset or an org model owned by the organization — unknown or cross-org IDs are rejected with 404.",
+        "description": "Set a model override and optional generation defaults for this agent. Pass a model ID or null to revert to org default; null generation settings inherit runtime defaults. The model ID must name a system model preset or an org model owned by the organization — unknown or cross-org IDs are rejected with 404.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -1361,6 +1373,16 @@
                   "modelId": {
                     "type": ["string", "null"],
                     "description": "Model ID or null to use org default"
+                  },
+                  "generation": {
+                    "oneOf": [
+                      {
+                        "$ref": "#/components/schemas/ModelGenerationSettings"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
                   }
                 }
               }
@@ -1382,10 +1404,20 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["modelId"],
+                  "required": ["modelId", "generation"],
                   "properties": {
                     "modelId": {
                       "type": ["string", "null"]
+                    },
+                    "generation": {
+                      "oneOf": [
+                        {
+                          "$ref": "#/components/schemas/ModelGenerationSettings"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     }
                   }
                 }
@@ -1497,7 +1529,7 @@
         "operationId": "exportAgentBundle",
         "tags": ["Agents"],
         "summary": "Export an agent as an .afps-bundle",
-        "description": "Streams a canonical multi-package .afps-bundle archive containing the agent and all its transitive dependencies. The archive is deterministic (byte-identical across calls with the same inputs) and carries per-file RECORD hashes plus a bundle-level SRI digest (also echoed in the `X-Bundle-Integrity` response header). Two modes: `?source=published` (default) exports the version installed for this application (falls back to the `latest` dist-tag, or pass `?version=` to pin); `?source=draft` bundles the agent's current draft state — used by the CLI's run-by-id flow to mirror the dashboard Run button on never-published agents. `?source=draft` cannot be combined with `?version=`.",
+        "description": "Streams a canonical multi-package .afps-bundle archive containing the agent and all its transitive dependencies. The archive is deterministic (byte-identical across calls with the same inputs) and carries per-file RECORD hashes plus a bundle-level SRI digest (also echoed in the `X-Bundle-Integrity` response header). Two modes: `?source=published` (default) exports the version installed for this application (falls back to the `latest` dist-tag, or pass `?version=` to pin); `?source=draft` bundles the agent's current draft state — used by the CLI's run-by-id flow to mirror the dashboard Run button on never-published agents. `?source=draft` cannot be combined with `?version=`. Assembly reads the same stored artifacts a run does, so it reports the same coded bundle failures — see the 422 and 500 responses.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -1581,8 +1613,33 @@
           "404": {
             "$ref": "#/components/responses/NotFound"
           },
+          "422": {
+            "description": "The bundle cannot be assembled from stored artifacts. `dependency_unresolved`: a declared dependency resolves to no published version, or it resolved but its artifact is absent from storage or out of this organization's scope — the detail names the dependency. `bundle_invalid`: a stored archive or manifest is malformed or exceeds an archive limit (for example an archive with no `manifest.json` at its root); the package must be republished. `bundle_signature_invalid`: rejected by `AFPS_SIGNATURE_POLICY`",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
           "429": {
             "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "description": "Unexpected server error (`internal_error`), or a dependency artifact's bytes no longer match the integrity hash recorded when that version was published (`bundle_integrity_mismatch`) — corruption or tampering at rest; retrying will not help, republish the named dependency or contact the operator",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           }
         }
       }
@@ -1642,6 +1699,10 @@
                   "modelId": {
                     "type": "string",
                     "description": "Model ID override for this run — a system model key or an org-model UUID. Pins THIS run to that model, taking priority over the full resolution cascade (request `modelId` > agent model setting > org default model > system default). Without it, the org default is resolved at run creation — not ahead of time — so changing the org default between triggers silently changes the model used by subsequent runs. Returns 404 when the referenced model does not exist. The response echoes the resolved `model_label` + `model_source` so callers can verify which model the run actually uses."
+                  },
+                  "generation": {
+                    "$ref": "#/components/schemas/ModelGenerationSettings",
+                    "description": "Per-run temperature/reasoning override. A custom temperature is rejected only when explicitly unsupported; a reasoning level is accepted only when explicitly supported. Omitted properties inherit the agent defaults."
                   },
                   "proxyId": {
                     "type": "string",
@@ -1731,10 +1792,19 @@
                   "config_override": {
                     "dryRun": true
                   },
+                  "generation": {
+                    "temperature": 0.2,
+                    "reasoningLevel": "high"
+                  },
+                  "generation_override": {
+                    "temperature": 0.2,
+                    "reasoningLevel": "high"
+                  },
                   "started_at": "2026-01-15T10:30:00Z",
                   "completed_at": null,
                   "duration": null,
                   "cost": null,
+                  "cost_pricing_status": null,
                   "unread": false,
                   "runNumber": 17,
                   "token_usage": null,
@@ -2076,7 +2146,7 @@
                 "properties": {
                   "manifest": {
                     "type": "object",
-                    "description": "Full AFPS manifest (agent type). All referenced skills/integrations must already exist in the org or system catalog — registry-only dependencies."
+                    "description": "Full AFPS manifest (agent type). Give each inline run a concise, task-specific `display_name` in the user's language and a matching descriptive `@inline/<kebab-case-slug>` name — never an id or a generic label such as `one-shot`. All referenced skills/integrations must already exist in the org or system catalog — registry-only dependencies."
                   },
                   "prompt": {
                     "type": "string",
@@ -2097,6 +2167,13 @@
                     },
                     "description": "`document://doc_xxx` URIs to mount read-only into the run's `documents/` directory — fan-in by reference, without declaring a file field in the manifest. The platform declares a reserved `_context_documents` input field for them, so they go through the same ACL, byte/count caps and `document_links` chaining as any other document input, and are announced to the agent in its prompt. A manifest (or `input`) that already declares `_context_documents` is rejected with a `400` — the name is reserved."
                   },
+                  "connection_overrides": {
+                    "type": "object",
+                    "description": "Per-integration connection picks for THIS run (flat-connections mechanism #2). Flat map: `{ \"@scope/integration\": \"<connection_id>\" }` — one connection per integration; the chosen connection carries its own authKey. Loses to admin pins (mechanism #1), beats the schedule-frozen layer (#3) and the actor-fallback (#4). Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same pick. Returns 412 `missing_integration_connection` if the chosen id is not accessible to the actor.",
+                    "additionalProperties": {
+                      "type": "string"
+                    }
+                  },
                   "modelId": {
                     "type": ["string", "null"]
                   },
@@ -2108,8 +2185,8 @@
               "example": {
                 "manifest": {
                   "$schema": "https://schemas.afps.dev/v0/agent.schema.json",
-                  "name": "@inline/one-shot",
-                  "display_name": "One-shot summary",
+                  "name": "@inline/summarize-attached-document",
+                  "display_name": "Summarize attached document",
                   "version": "0.0.0",
                   "type": "agent",
                   "schema_version": "0.1",
@@ -2169,10 +2246,13 @@
                   "metadata": null,
                   "config": null,
                   "config_override": null,
+                  "generation": null,
+                  "generation_override": null,
                   "started_at": "2026-01-15T10:30:00Z",
                   "completed_at": null,
                   "duration": null,
                   "cost": null,
+                  "cost_pricing_status": null,
                   "unread": false,
                   "runNumber": 1,
                   "token_usage": null,
@@ -2184,7 +2264,7 @@
                   "runner_name": null,
                   "runner_kind": null,
                   "agent_scope": "@inline",
-                  "agent_name": "one-shot",
+                  "agent_name": "Summarize attached document",
                   "runOrigin": "platform",
                   "contextSnapshot": null,
                   "modelCredentialId": "mpc_8h2k4m6n",
@@ -2203,8 +2283,8 @@
                   "primary_document_id": null,
                   "inline_manifest": {
                     "$schema": "https://schemas.afps.dev/v0/agent.schema.json",
-                    "name": "@inline/one-shot",
-                    "display_name": "One-shot summary",
+                    "name": "@inline/summarize-attached-document",
+                    "display_name": "Summarize attached document",
                     "version": "0.0.0",
                     "type": "agent",
                     "schema_version": "0.1",
@@ -2329,7 +2409,8 @@
                 "required": ["manifest", "prompt"],
                 "properties": {
                   "manifest": {
-                    "type": "object"
+                    "type": "object",
+                    "description": "Full AFPS manifest, with the same task-specific `display_name` and descriptive `@inline/<kebab-case-slug>` naming guidance as `POST /api/runs/inline`."
                   },
                   "prompt": {
                     "type": "string"
@@ -2346,6 +2427,13 @@
                       "type": "string"
                     },
                     "description": "Same field as `POST /api/runs/inline` — validated here for shape and for the reserved `_context_documents` name collision, never mounted."
+                  },
+                  "connection_overrides": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "string"
+                    },
+                    "description": "Same field as `POST /api/runs/inline` — applied to the integration readiness check so a pick that clears `must_choose_connection` here clears it on the real launch too. Never persisted; no run is created."
                   },
                   "modelId": {
                     "type": ["string", "null"]
@@ -2424,7 +2512,7 @@
         "operationId": "listRuns",
         "tags": ["Runs"],
         "summary": "List runs across the application (global view)",
-        "description": "Org + application scoped paginated list. Supports filtering by `user=me` (self-owned, also implicit for end-user impersonation), `kind` (all, package, inline), `status`, and a date range. Inline runs surface via `package_ephemeral: true` on each row. Note: `kind`, `status`, and date filters are ignored when `user=me` (self-view uses a simpler path).",
+        "description": "Org + application scoped paginated list. Supports filtering by `user=me` (self-owned, also implicit for end-user impersonation), `kind` (all, package, inline), `status`, a date range, and the chat session that launched the run. Inline runs surface via `package_ephemeral: true` on each row. Note: global filters are ignored when `user=me` (self-view uses a simpler path).",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -2496,6 +2584,14 @@
               "type": "string",
               "format": "date-time"
             }
+          },
+          {
+            "name": "chat_session_id",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Return only runs launched from this chat session."
           }
         ],
         "responses": {
@@ -2647,10 +2743,15 @@
                     "folder": "inbox"
                   },
                   "config_override": null,
+                  "generation": {
+                    "reasoningLevel": "medium"
+                  },
+                  "generation_override": null,
                   "started_at": "2026-01-15T10:30:00Z",
                   "completed_at": "2026-01-15T10:31:12Z",
                   "duration": 72000,
                   "cost": 0.0034,
+                  "cost_pricing_status": "priced",
                   "unread": true,
                   "runNumber": 17,
                   "token_usage": {
@@ -2886,10 +2987,13 @@
                   "metadata": null,
                   "config": null,
                   "config_override": null,
+                  "generation": null,
+                  "generation_override": null,
                   "started_at": "2026-01-15T10:30:00Z",
                   "completed_at": "2026-01-15T10:30:45Z",
                   "duration": 45000,
                   "cost": 0.0012,
+                  "cost_pricing_status": "priced",
                   "unread": false,
                   "runNumber": 18,
                   "token_usage": null,
@@ -4370,6 +4474,10 @@
                     "type": "object",
                     "description": "Per-schedule config delta. Deep-merged with the application's persisted `config` every time the schedule fires."
                   },
+                  "generation_config_override": {
+                    "$ref": "#/components/schemas/ModelGenerationSettings",
+                    "description": "Temperature/reasoning overrides applied to every run fired by this schedule."
+                  },
                   "model_id_override": {
                     "type": "string",
                     "description": "Override the persisted model on every run triggered by this schedule."
@@ -4453,6 +4561,7 @@
                     "maxEmails": 50
                   },
                   "config_override": null,
+                  "generation_config_override": null,
                   "model_id_override": null,
                   "proxy_id_override": null,
                   "version_override": null,
@@ -4544,6 +4653,7 @@
                     "maxEmails": 50
                   },
                   "config_override": null,
+                  "generation_config_override": null,
                   "model_id_override": null,
                   "proxy_id_override": null,
                   "version_override": "1.2.0",
@@ -4613,6 +4723,17 @@
                   "config_override": {
                     "type": ["object", "null"],
                     "description": "Per-schedule config delta. Pass `null` to clear the override."
+                  },
+                  "generation_config_override": {
+                    "oneOf": [
+                      {
+                        "$ref": "#/components/schemas/ModelGenerationSettings"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "Temperature/reasoning overrides for scheduled runs. Pass null to clear."
                   },
                   "model_id_override": {
                     "type": ["string", "null"]
@@ -5140,6 +5261,10 @@
                                 "owner_id": {
                                   "type": "string"
                                 },
+                                "owner_name": {
+                                  "type": ["string", "null"],
+                                  "description": "Display name of the connection's owner (member name, or end-user name falling back to its external id); null when the owner row was deleted. Returned by the list surfaces, which include org-shared connections owned by other members; absent from the single-connection write responses, where the row is the caller's own."
+                                },
                                 "label": {
                                   "type": ["string", "null"]
                                 },
@@ -5411,6 +5536,10 @@
                                 },
                                 "owner_id": {
                                   "type": "string"
+                                },
+                                "owner_name": {
+                                  "type": ["string", "null"],
+                                  "description": "Display name of the connection's owner (member name, or end-user name falling back to its external id); null when the owner row was deleted. Returned by the list surfaces, which include org-shared connections owned by other members; absent from the single-connection write responses, where the row is the caller's own."
                                 },
                                 "label": {
                                   "type": ["string", "null"]
@@ -6270,6 +6399,10 @@
                     "owner_id": {
                       "type": "string"
                     },
+                    "owner_name": {
+                      "type": ["string", "null"],
+                      "description": "Display name of the connection's owner (member name, or end-user name falling back to its external id); null when the owner row was deleted. Returned by the list surfaces, which include org-shared connections owned by other members; absent from the single-connection write responses, where the row is the caller's own."
+                    },
                     "label": {
                       "type": ["string", "null"]
                     },
@@ -6708,6 +6841,10 @@
                         "owner_id": {
                           "type": "string"
                         },
+                        "owner_name": {
+                          "type": ["string", "null"],
+                          "description": "Display name of the connection's owner (member name, or end-user name falling back to its external id); null when the owner row was deleted. Returned by the list surfaces, which include org-shared connections owned by other members; absent from the single-connection write responses, where the row is the caller's own."
+                        },
                         "label": {
                           "type": ["string", "null"]
                         },
@@ -6746,7 +6883,8 @@
       "get": {
         "operationId": "listIntegrationConnections",
         "tags": ["Integrations"],
-        "summary": "List the caller's connections for an integration",
+        "summary": "List the connections the caller can use for an integration",
+        "description": "Returns the caller's own connections **plus** every connection in the application opted into org-wide sharing (`shared_with_org: true`), whoever owns it — the same set the runtime resolver picks from. Rows the caller does not own carry `owner_name` and have `identity_claims` redacted to `null`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -6842,6 +6980,10 @@
                           },
                           "owner_id": {
                             "type": "string"
+                          },
+                          "owner_name": {
+                            "type": ["string", "null"],
+                            "description": "Display name of the connection's owner (member name, or end-user name falling back to its external id); null when the owner row was deleted. Returned by the list surfaces, which include org-shared connections owned by other members; absent from the single-connection write responses, where the row is the caller's own."
                           },
                           "label": {
                             "type": ["string", "null"]
@@ -6997,6 +7139,10 @@
                     },
                     "owner_id": {
                       "type": "string"
+                    },
+                    "owner_name": {
+                      "type": ["string", "null"],
+                      "description": "Display name of the connection's owner (member name, or end-user name falling back to its external id); null when the owner row was deleted. Returned by the list surfaces, which include org-shared connections owned by other members; absent from the single-connection write responses, where the row is the caller's own."
                     },
                     "label": {
                       "type": ["string", "null"]
@@ -7212,6 +7358,10 @@
                                 },
                                 "owner_id": {
                                   "type": "string"
+                                },
+                                "owner_name": {
+                                  "type": ["string", "null"],
+                                  "description": "Display name of the connection's owner (member name, or end-user name falling back to its external id); null when the owner row was deleted. Returned by the list surfaces, which include org-shared connections owned by other members; absent from the single-connection write responses, where the row is the caller's own."
                                 },
                                 "label": {
                                   "type": ["string", "null"]
@@ -7881,6 +8031,14 @@
                       "apiShape": "openai-responses",
                       "baseUrl": "https://api.openai.com/v1",
                       "modelId": "gpt-4o",
+                      "generation": {
+                        "temperature": "supported",
+                        "reasoning": {
+                          "supported": "unsupported",
+                          "adaptive": null,
+                          "levels": {}
+                        }
+                      },
                       "iconUrl": "openai",
                       "source": "built-in",
                       "enabled": true,
@@ -8779,6 +8937,9 @@
                                     "type": "string"
                                   }
                                 },
+                                "generation": {
+                                  "$ref": "#/components/schemas/ModelGenerationCapabilities"
+                                },
                                 "cost": {
                                   "type": "object",
                                   "description": "Per-1M-token cost (USD).",
@@ -9338,7 +9499,7 @@
         "operationId": "createOAuthModelProviderPairing",
         "tags": ["Model Provider Credentials"],
         "summary": "Mint a one-shot pairing token for the connect helper",
-        "description": "Creates a single-use pairing token surfaced in the dashboard as a `npx @appstrate/connect-helper <token>` command. The user runs the command on their machine; the helper completes the loopback OAuth dance against the provider's authorization server, then POSTs the resulting credentials back to `/api/model-providers-oauth/pair/redeem` using this token as Bearer credentials. The plaintext token is returned exactly once — only its SHA-256 hash is persisted. Org-scoped: only `X-Org-Id` is required (no `X-Application-Id` — the resulting credential lives in `model_provider_credentials`, which has no app affinity).",
+        "description": "Creates a single-use pairing token surfaced in the dashboard as a `npx @appstrate/connect-helper <token>` command. The user runs the command on their machine; the helper completes the loopback OAuth dance against the provider's authorization server, then POSTs the resulting credentials back to `/api/model-providers-oauth/pair/redeem` using this token as Bearer credentials. Pass `credentialId` to reconnect that exact org credential in place; omit it to create a new connection. The plaintext token is returned exactly once — only its SHA-256 hash is persisted. Org-scoped: only `X-Org-Id` is required (no `X-Application-Id` — the resulting credential lives in `model_provider_credentials`, which has no app affinity).",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -9356,6 +9517,11 @@
                     "type": "string",
                     "pattern": "^[a-z0-9-]+$",
                     "description": "Canonical provider id. Must resolve to an OAuth provider registered by a loaded module (discoverable via `GET /api/model-provider-credentials/registry`). Unknown/unregistered ids → 400 (validation error). The enum is intentionally open: OAuth providers ship as modules, so the platform spec stays model-agnostic."
+                  },
+                  "credentialId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "description": "Existing OAuth credential to reconnect in place. It must belong to the current organization and match `providerId`; omit it when connecting a new account."
                   }
                 }
               }
@@ -9524,7 +9690,7 @@
         "operationId": "redeemOAuthModelProviderPairing",
         "tags": ["Model Provider Credentials"],
         "summary": "Redeem a pairing token: post the OAuth credential bundle back to the platform",
-        "description": "Canonical pairing-redeem route used by `@appstrate/connect-helper`. Bearer-only — authenticated by the pairing token previously minted via `POST /api/model-providers-oauth/pairing` (carry as `Authorization: Bearer appp_<token>`). The pairing's `userId` / `orgId` / `providerId` are pinned at mint time and override anything the request body claims, so a tampered helper cannot redirect the redeem to a different org or provider. Cookie/API-key requests 401. Server-side this re-derives identity slots defensively via the provider's `extractTokenIdentity` hook before persisting into `model_provider_credentials`.",
+        "description": "Canonical pairing-redeem route used by `@appstrate/connect-helper`. Bearer-only — authenticated by the pairing token previously minted via `POST /api/model-providers-oauth/pairing` (carry as `Authorization: Bearer appp_<token>`). The pairing's `userId` / `orgId` / `providerId` and optional reconnect target are pinned at mint time, so a tampered helper cannot redirect the redeem to a different org, provider, or credential. Cookie/API-key requests 401. Server-side this re-derives identity slots defensively via the provider's `extractTokenIdentity` hook before creating or updating `model_provider_credentials`.",
         "requestBody": {
           "required": true,
           "content": {
@@ -9575,7 +9741,7 @@
         },
         "responses": {
           "200": {
-            "description": "Credential persisted in model_provider_credentials. Deliberate operation-result shape (NOT the credential resource — flow-completion exception to the bare-resource rule, #657): the helper's bearer is single-use and consumed by this very request, so it cannot fetch anything afterwards, so the models the helper prints in its terminal summary have to travel back in this response. `availableModelIds` is therefore a projection of the credential's own servable set — byte-for-byte what `available_model_ids` reports for this `credentialId` on `GET /api/model-provider-credentials`, resolved through the same accessor, so the terminal and the dashboard can never disagree. For subscription providers (`codex`, `claude-code`) that set is derived from the provider definition ∩ the pricing catalog with no upstream call; for probe-validated providers it is the empirically discovered list, which is empty here because nothing has been probed yet (the model form's `Refresh models` fills it in). The dashboard obtains the created credential via `GET /pairing/{id}` polling (`credentialId`) + the credentials list.",
+            "description": "Credential created or reconnected in model_provider_credentials. Deliberate operation-result shape (NOT the credential resource — flow-completion exception to the bare-resource rule, #657): the helper's bearer is single-use and consumed by this very request, so it cannot fetch anything afterwards, so the models the helper prints in its terminal summary have to travel back in this response. `availableModelIds` is therefore a projection of the credential's own servable set — byte-for-byte what `available_model_ids` reports for this `credentialId` on `GET /api/model-provider-credentials`, resolved through the same accessor, so the terminal and the dashboard can never disagree. For subscription providers (`codex`, `claude-code`) that set is derived from the provider definition ∩ the pricing catalog with no upstream call; for probe-validated providers a reconnect preserves the credential's empirically discovered list. The dashboard obtains the resulting credential via `GET /pairing/{id}` polling (`credentialId`) + the credentials list.",
             "content": {
               "application/json": {
                 "schema": {
@@ -10730,7 +10896,7 @@
         "operationId": "changeMemberRole",
         "tags": ["Organizations"],
         "summary": "Change member role",
-        "description": "Change a member's role within the organization. Owner only.",
+        "description": "Change a member's role. Owners can manage any non-owner; admins can manage viewers and members.",
         "parameters": [
           {
             "name": "orgId",
@@ -10858,7 +11024,7 @@
         "operationId": "changeInvitationRole",
         "tags": ["Organizations"],
         "summary": "Change invitation role",
-        "description": "Change the role assigned to a pending invitation. Owner only.",
+        "description": "Change the role assigned to a pending invitation. Admin or owner required.",
         "parameters": [
           {
             "name": "orgId",
@@ -11951,7 +12117,7 @@
                             "description": "The integration package's own manifest version, when known. Use it to pin a satisfiable dependencies.integrations range."
                           },
                           "default_tools": {
-                            "description": "AFPS §4.4 — tool(s) an agent inherits when it declares this integration without an `integrations_configuration.<id>.tools` selection. Absent when none declared; `[]` means the integration is inert. To use any other tool, inspect the full `tool_catalog` via GET /api/integrations/{packageId}.",
+                            "description": "AFPS §4.4 — tool(s) an agent inherits when it declares this integration without an `integrations_configuration.<id>.tools` selection. Absent or `[]` means an agent that declares this integration without its own selection ends up with nothing callable, which publish/import reject and the run aborts on — such an agent must select a tool explicitly. To use any other tool, inspect the full `tool_catalog` via GET /api/integrations/{packageId}.",
                             "oneOf": [
                               {
                                 "type": "array",
@@ -11970,7 +12136,7 @@
                     },
                     "agents": {
                       "type": "array",
-                      "description": "Agents the caller can run in the current application (capped). Only present when the caller holds the `agents:run` permission; empty otherwise. When `agents_truncated` is true, the long tail is reachable via the MCP `search_operations` tool.",
+                      "description": "Agents the caller can run in the current application (capped). Only present when the caller holds the `agents:run` permission; empty otherwise. When `agents_truncated` is true, the full list is reachable via the `listAgents` operation.",
                       "items": {
                         "type": "object",
                         "required": [
@@ -12009,7 +12175,7 @@
                     },
                     "agents_truncated": {
                       "type": "boolean",
-                      "description": "True when the agent list was capped (more via search_operations)."
+                      "description": "True when the agent list was capped (full list via `listAgents`)."
                     },
                     "agents_total": {
                       "type": "integer",
@@ -12017,7 +12183,7 @@
                     },
                     "skills": {
                       "type": "array",
-                      "description": "Skills the caller could attach to an agent in the current application (capped). Only present when the caller holds the `agents:run` permission; empty otherwise. Skills are not run directly — declare them under an agent manifest's `dependencies.skills`. When `skills_truncated` is true, the long tail is reachable via the MCP `search_operations` tool.",
+                      "description": "Skills the caller could attach to an agent in the current application (capped). Only present when the caller holds the `agents:run` permission; empty otherwise. Skills are not run directly — declare them under an agent manifest's `dependencies.skills`. When `skills_truncated` is true, the full list is reachable via the `listSkills` operation.",
                       "items": {
                         "type": "object",
                         "required": [
@@ -12056,7 +12222,7 @@
                     },
                     "skills_truncated": {
                       "type": "boolean",
-                      "description": "True when the skill list was capped (more via search_operations)."
+                      "description": "True when the skill list was capped (full list via `listSkills`)."
                     },
                     "skills_total": {
                       "type": "integer",
@@ -13476,7 +13642,7 @@
                       "items": {
                         "type": "string"
                       },
-                      "description": "Non-blocking install-time warnings (AFPS §7.7) — e.g. `connect.login` selector/criteria patterns the runtime engine cannot evaluate. Empty when nothing is degraded."
+                      "description": "Non-blocking install-time warnings (AFPS §7.7) — e.g. `connect.login` selector/criteria patterns the runtime engine cannot evaluate, or an agent `timeout` above this deployment's ceiling. Empty when nothing is degraded."
                     }
                   }
                 }
@@ -13590,7 +13756,7 @@
                       "items": {
                         "type": "string"
                       },
-                      "description": "Non-blocking install warnings (e.g. connect.login engine-subset or _meta soft-fails). Present only when warnings were emitted."
+                      "description": "Non-blocking install warnings (e.g. connect.login engine-subset, _meta soft-fails, or an agent `timeout` above this deployment's ceiling). Present only when warnings were emitted."
                     }
                   }
                 },
@@ -13699,7 +13865,7 @@
                       "items": {
                         "type": "string"
                       },
-                      "description": "Non-blocking install warnings (e.g. connect.login engine-subset or _meta soft-fails). Present only when warnings were emitted."
+                      "description": "Non-blocking install warnings (e.g. connect.login engine-subset, _meta soft-fails, or an agent `timeout` above this deployment's ceiling). Present only when warnings were emitted."
                     }
                   }
                 }
@@ -13734,6 +13900,322 @@
           },
           "429": {
             "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/api/packages/{scope}/{name}/files": {
+      "get": {
+        "operationId": "listPackageFiles",
+        "tags": ["Packages"],
+        "summary": "List the files in a package artifact",
+        "description": "Flat index of every file in the package artifact — one entry per real file, sorted by `path`; directories are not synthesized. Text files up to 1 MiB carry their full content in `inline` while the response's cumulative inline budget lasts; `inline` is never a truncated prefix, so an entry without it must be fetched from `GET /api/packages/{scope}/{name}/files/content`. Read-only. Rate-limited to 50 requests/minute.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XAppId"
+          },
+          {
+            "$ref": "#/components/parameters/PackageScope"
+          },
+          {
+            "$ref": "#/components/parameters/PackageName"
+          },
+          {
+            "name": "version",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Which snapshot to read: omitted (or `draft`) reads the live draft, where the stored artifact is overlaid with the authoritative `manifest.json` / primary content from the database. Any other value is resolved as a version spec (exact version, dist-tag, or semver range) and returns exactly the published bytes, with no overlay."
+          },
+          {
+            "name": "If-None-Match",
+            "in": "header",
+            "required": false,
+            "description": "Entity-tag of a cached copy. A match yields `304 Not Modified`.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "File index",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              },
+              "ETag": {
+                "description": "Strong entity-tag of this index representation (`\"i-…\"`), derived from the version artifact's integrity hash or from a content digest of the overlaid draft. It never matches a `files/content` tag.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "description": "Always `private, no-cache`, for every selector — draft, exact version pin, dist-tag, semver range, yanked. Always `private`: the response is tenant-scoped. Never a fresh window and never `immutable`: this index is RBAC-gated, and a copy the browser may serve without contacting the server would outlive a revoked `<type>:read`, an org removal, or the package being uninstalled from the application. `no-cache` still permits the `304` round-trip, which a version pin answers from a single database read.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always `X-Org-Id, X-Application-Id` — access depends on both, so a cache must not reuse this body across organizations or applications.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Yanked": {
+                "description": "Present and set to `true` when the resolved version is yanked.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PackageFileIndex"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "Cached copy is still current (`If-None-Match` matched). No body.",
+            "headers": {
+              "ETag": {
+                "description": "Strong entity-tag of this index representation.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "description": "Always `private, no-cache`, as on the `200`.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always `X-Org-Id, X-Application-Id`, as on the `200`.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Yanked": {
+                "description": "Present and set to `true` when the resolved version is yanked.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/PackageArchiveUnreadable"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "description": "The artifact could not be read: integrity/signature verification failed (`INTEGRITY_MISMATCH`), or the stored bytes are not a readable ZIP. RFC 9457 problem+json.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/packages/{scope}/{name}/files/content": {
+      "get": {
+        "operationId": "getPackageFileContent",
+        "tags": ["Packages"],
+        "summary": "Download one file from a package artifact",
+        "description": "Raw bytes of a single file from the package artifact — the fetch path for both preview and download. Always served as `application/octet-stream` with `nosniff` and `attachment`: package bytes are author-controlled and must never be rendered or executed in the platform origin. `path` must match an entry returned by `GET /api/packages/{scope}/{name}/files` exactly; anything else is a `404`. Read-only. Rate-limited to 50 requests/minute.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XAppId"
+          },
+          {
+            "$ref": "#/components/parameters/PackageScope"
+          },
+          {
+            "$ref": "#/components/parameters/PackageName"
+          },
+          {
+            "name": "path",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Exact `path` of an entry from the file index."
+          },
+          {
+            "name": "version",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Which snapshot to read from — same resolution as the file index: omitted (or `draft`) reads the live draft with the database overlay, any other value is an exact version, dist-tag, or semver range."
+          },
+          {
+            "name": "If-None-Match",
+            "in": "header",
+            "required": false,
+            "description": "Entity-tag of a cached copy. A match yields `304 Not Modified`.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Raw file bytes",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              },
+              "ETag": {
+                "description": "Strong entity-tag of THIS FILE (`\"f-…\"`), folding in both the snapshot identity and the `path`. Per RFC 9110 §8.8.1 it identifies one representation: a tag obtained for another `path`, or from the file index, will not match.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "description": "Always `private, no-cache`, for every selector — draft, exact version pin, dist-tag, semver range, yanked. Never a fresh window and never `immutable`: these bytes are RBAC-gated, and a copy the browser may serve without contacting the server would outlive a revoked `<type>:read`, an org removal, or the package being uninstalled from the application.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always `X-Org-Id, X-Application-Id` — access depends on both, so a cache must not reuse these bytes across organizations or applications.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Yanked": {
+                "description": "Present and set to `true` when the resolved version is yanked.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Disposition": {
+                "description": "`attachment` with the file's sanitized base name.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Content-Type-Options": {
+                "description": "Always `nosniff`.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Referrer-Policy": {
+                "description": "Always `no-referrer`.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cross-Origin-Resource-Policy": {
+                "description": "Always `same-origin`.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "Cached copy of THIS file is still current (`If-None-Match` matched its per-file tag). No body. A bare `If-None-Match: *` is deliberately NOT honoured before the artifact is read — it carries no path, so it cannot establish that the file exists.",
+            "headers": {
+              "ETag": {
+                "description": "Strong entity-tag of this file representation.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "description": "Always `private, no-cache`, as on the `200`.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always `X-Org-Id, X-Application-Id`, as on the `200`.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Yanked": {
+                "description": "Present and set to `true` when the resolved version is yanked.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/PackageArchiveUnreadable"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "description": "The artifact could not be read: integrity/signature verification failed (`INTEGRITY_MISMATCH`), or the stored bytes are not a readable ZIP. RFC 9457 problem+json.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           }
         }
       }
@@ -13802,6 +14284,9 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "404": {
             "$ref": "#/components/responses/NotFound"
           },
@@ -13826,7 +14311,7 @@
         "operationId": "listSkills",
         "tags": ["Packages"],
         "summary": "List skills",
-        "description": "List all skills (system + org) in the organization.",
+        "description": "List the skills available to the current application (`X-Application-Id`): system packages, plus organization packages installed in this application. Organization packages that exist but are not installed here are NOT returned — for the organization-wide catalogue with per-application install state, use `GET /api/library`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -13894,6 +14379,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           }
         }
       },
@@ -13926,10 +14414,6 @@
                   "content": {
                     "type": "string",
                     "description": "SKILL.md content (markdown with YAML frontmatter)."
-                  },
-                  "source_code": {
-                    "type": "string",
-                    "description": "Optional source code payload."
                   }
                 }
               }
@@ -14021,6 +14505,9 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "404": {
             "$ref": "#/components/responses/NotFound"
           }
@@ -14077,6 +14564,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -14282,6 +14772,9 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "404": {
             "$ref": "#/components/responses/NotFound"
           }
@@ -14376,6 +14869,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -14515,7 +15011,7 @@
         "operationId": "listAgentPackages",
         "tags": ["Packages"],
         "summary": "List agent packages",
-        "description": "List all agent packages (system + org) in the organization.",
+        "description": "List the agent packages available to the current application (`X-Application-Id`): system packages, plus organization packages installed in this application. Organization packages that exist but are not installed here are NOT returned — for the organization-wide catalogue with per-application install state, use `GET /api/library`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -14564,6 +15060,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           }
         }
       },
@@ -14682,6 +15181,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -14874,6 +15376,9 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "404": {
             "$ref": "#/components/responses/NotFound"
           }
@@ -14930,6 +15435,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -15133,6 +15641,9 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "404": {
             "$ref": "#/components/responses/NotFound"
           }
@@ -15278,6 +15789,21 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "description": "The SOURCE package's published artifact expands past the platform's decompression ceiling and was refused (`package_archive_unreadable`). Nothing was written: the fork is rejected while reading the source, before the name-collision check and before any package or version row is created, so there is no partial copy to clean up. A fork always targets a package the calling organization does NOT own, so the caller cannot repair the source — report it to whoever publishes it (or to the platform operator if it is a system package). RFC 9457 problem+json.",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           }
         }
       }
@@ -15326,6 +15852,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -15511,6 +16040,9 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "404": {
             "$ref": "#/components/responses/NotFound"
           }
@@ -15663,7 +16195,7 @@
         "operationId": "listIntegrationPackages",
         "tags": ["Packages"],
         "summary": "List integration packages",
-        "description": "List all integration packages (system + org) in the organization.",
+        "description": "List the integration packages available to the current application (`X-Application-Id`): system packages, plus organization packages installed in this application. Organization packages that exist but are not installed here are NOT returned — for the organization-wide catalogue with per-application install state, use `GET /api/library`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -15712,14 +16244,17 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           }
         }
       },
       "post": {
         "operationId": "createIntegrationPackage",
         "tags": ["Packages"],
-        "summary": "Create an integration package",
-        "description": "Create a new integration package in the organization packages.",
+        "summary": "Create an integration package, including a remote MCP",
+        "description": "Create a new integration package in the organization packages. An upstream-hosted MCP endpoint belongs here as an integration with `source.kind: \"remote\"`; use an MCP-server package only for a local executable referenced by `source.kind: \"local\"`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -15744,10 +16279,6 @@
                   "content": {
                     "type": "string",
                     "description": "Primary package file content (manifest document)."
-                  },
-                  "source_code": {
-                    "type": "string",
-                    "description": "Optional source code payload for the integration runner."
                   }
                 }
               }
@@ -15839,6 +16370,9 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "404": {
             "$ref": "#/components/responses/NotFound"
           }
@@ -15895,6 +16429,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -16100,6 +16637,9 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "404": {
             "$ref": "#/components/responses/NotFound"
           }
@@ -16194,6 +16734,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -16373,6 +16916,9 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "404": {
             "$ref": "#/components/responses/NotFound"
           }
@@ -16517,7 +17063,7 @@
         "operationId": "listMcpServerPackages",
         "tags": ["Packages"],
         "summary": "List MCP-server packages",
-        "description": "List all MCP-server packages (system + org) in the organization.",
+        "description": "List the MCP-server packages available to the current application (`X-Application-Id`): system packages, plus organization packages installed in this application. Organization packages that exist but are not installed here are NOT returned — for the organization-wide catalogue with per-application install state, use `GET /api/library`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -16566,14 +17112,17 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           }
         }
       },
       "post": {
         "operationId": "createMcpServerPackage",
         "tags": ["Packages"],
-        "summary": "Create an MCP-server package",
-        "description": "Create a new MCP-server package in the organization packages.",
+        "summary": "Create a local MCP-server executable package",
+        "description": "Create a local executable MCP-server package referenced by an integration with `source.kind: \"local\"`. For an upstream-hosted MCP endpoint, create an integration package with `source.kind: \"remote\"` instead.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -16584,7 +17133,7 @@
         ],
         "requestBody": {
           "required": true,
-          "description": "Upload a package ZIP (`multipart/form-data` with a `.afps`/`.zip` file — the package ID is derived from the file name, and the archive must contain a valid `manifest.json`), or post a JSON body carrying the manifest. Parsed by `parsePackageUpload`.",
+          "description": "Upload a self-contained package archive (`multipart/form-data` with a `.afps`/`.zip` file). The package ID is derived from the file name. The archive must contain a valid `manifest.json` and the file referenced by `server.entry_point`; JSON manifest-only creation is refused with `415 archive_required`.",
           "content": {
             "multipart/form-data": {
               "schema": {
@@ -16595,35 +17144,6 @@
                     "type": "string",
                     "format": "binary",
                     "description": "Package archive (`.afps` or `.zip`) containing a valid `manifest.json`. File name (sans extension) is the kebab-case package id."
-                  }
-                }
-              }
-            },
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "required": ["id", "content", "manifest"],
-                "properties": {
-                  "id": {
-                    "type": "string",
-                    "description": "Kebab-case package id."
-                  },
-                  "content": {
-                    "type": "string",
-                    "description": "Primary package file content."
-                  },
-                  "name": {
-                    "type": "string",
-                    "description": "Display name. Auto-extracted from the manifest if omitted."
-                  },
-                  "description": {
-                    "type": "string",
-                    "description": "Package description. Auto-extracted from the manifest if omitted."
-                  },
-                  "manifest": {
-                    "type": "object",
-                    "additionalProperties": true,
-                    "description": "Manifest object, validated against the AFPS mcp-server schema and stored as-is."
                   }
                 }
               }
@@ -16658,6 +17178,9 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
           }
         }
       }
@@ -16715,6 +17238,9 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "404": {
             "$ref": "#/components/responses/NotFound"
           }
@@ -16771,6 +17297,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -16976,6 +17505,9 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "404": {
             "$ref": "#/components/responses/NotFound"
           }
@@ -17070,6 +17602,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -17248,6 +17783,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -17968,6 +18506,16 @@
                   "config": {
                     "type": "object"
                   },
+                  "generationConfig": {
+                    "oneOf": [
+                      {
+                        "$ref": "#/components/schemas/ModelGenerationSettings"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
                   "modelId": {
                     "type": ["string", "null"]
                   },
@@ -18092,10 +18640,20 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["config", "modelId", "proxyId", "version_pin"],
+                  "required": ["config", "generation", "modelId", "proxyId", "version_pin"],
                   "properties": {
                     "config": {
                       "type": "object"
+                    },
+                    "generation": {
+                      "oneOf": [
+                        {
+                          "$ref": "#/components/schemas/ModelGenerationSettings"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     },
                     "modelId": {
                       "type": ["string", "null"]
@@ -18111,6 +18669,10 @@
                 "example": {
                   "config": {
                     "dryRun": true
+                  },
+                  "generation": {
+                    "temperature": 0.2,
+                    "reasoningLevel": "high"
                   },
                   "modelId": "claude-sonnet-4-6",
                   "proxyId": null,
@@ -18920,7 +19482,7 @@
         "operationId": "listDocuments",
         "tags": ["Documents"],
         "summary": "List documents",
-        "description": "List the documents visible to the caller in the current application. Requires the `documents:read` permission (the family gate — mirrors `runs:read`); on top of it, each row is filtered by its own container ACL, so members see their own documents (and system-owned ones) and end-users see only their own. Filter by `purpose`, `run_id`, `packageId`, or `chat_session_id`; paginate with `startingAfter` + `limit`.",
+        "description": "List the documents visible to the caller in the current application. Requires the `documents:read` permission (the family gate — mirrors `runs:read`); on top of it, each row is filtered by its own container ACL, so members see their own documents (and system-owned ones) and end-users see only their own. Filter by `purpose`, `run_id`, `packageId`, `chat_session_id`, or a chat session's complete context; paginate with `startingAfter` + `limit`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -18964,6 +19526,15 @@
               "type": "string"
             },
             "description": "Filter to documents anchored to this chat session."
+          },
+          {
+            "name": "context_chat_session_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Filter to the private conversation context: direct attachments plus documents produced or consumed by runs launched from the session."
           },
           {
             "name": "startingAfter",
@@ -21435,7 +22006,7 @@
         "name": "active",
         "in": "query",
         "required": false,
-        "description": "When `true`, narrows the list to packages installed and enabled in the current application.",
+        "description": "When `true`, narrows the list to packages installed and enabled in the current application — system packages with no install row drop out. Integrations are the one exception: they are filtered on effective activation, so an environment-provided system integration stays listed even though it has no install row.",
         "schema": {
           "type": "string",
           "enum": ["true"]
@@ -21603,6 +22174,76 @@
           }
         }
       },
+      "ModelGenerationSettings": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Optional model sampling and reasoning controls. Omitted properties inherit the next lower-precedence layer.",
+        "properties": {
+          "temperature": {
+            "type": ["number", "null"],
+            "minimum": 0,
+            "maximum": 1,
+            "description": "Provider sampling temperature; null or omission inherits the runtime default."
+          },
+          "reasoningLevel": {
+            "type": ["string", "null"],
+            "enum": ["off", "minimal", "low", "medium", "high", "xhigh", "max", null],
+            "description": "Portable reasoning effort normalized across providers."
+          }
+        }
+      },
+      "ModelGenerationCapabilities": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["temperature", "reasoning"],
+        "description": "Normalized support facts from Appstrate's pinned LiteLLM catalog snapshot, refined by stricter provider transport declarations. `unknown` keeps temperature forward-compatible, while reasoning levels are selectable only when explicitly supported; it remains distinct from an explicit upstream refusal.",
+        "properties": {
+          "temperature": {
+            "type": "string",
+            "enum": ["supported", "unsupported", "unknown"]
+          },
+          "reasoning": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["supported", "adaptive", "levels"],
+            "properties": {
+              "supported": {
+                "type": "string",
+                "enum": ["supported", "unsupported", "unknown"]
+              },
+              "temperatureCompatible": {
+                "type": "string",
+                "enum": ["supported", "unsupported", "unknown"],
+                "description": "Optional compatibility fact for combining a custom temperature with active reasoning. Omission means unknown."
+              },
+              "adaptive": {
+                "type": ["boolean", "null"]
+              },
+              "levels": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string",
+                  "enum": ["supported", "unsupported", "unknown"]
+                },
+                "propertyNames": {
+                  "enum": ["off", "minimal", "low", "medium", "high", "xhigh", "max"]
+                }
+              },
+              "nativeLevels": {
+                "type": "object",
+                "description": "Optional provider-native values for portable levels (for example off to none).",
+                "additionalProperties": {
+                  "type": "string",
+                  "enum": ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+                },
+                "propertyNames": {
+                  "enum": ["off", "minimal", "low", "medium", "high", "xhigh", "max"]
+                }
+              }
+            }
+          }
+        }
+      },
       "User": {
         "type": "object",
         "additionalProperties": true,
@@ -21625,6 +22266,7 @@
         "required": [
           "packageId",
           "config",
+          "generationConfig",
           "modelId",
           "proxyId",
           "version_id",
@@ -21647,6 +22289,16 @@
           "config": {
             "type": "object",
             "description": "Application-specific configuration"
+          },
+          "generationConfig": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ModelGenerationSettings"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "modelId": {
             "type": ["string", "null"],
@@ -21966,7 +22618,8 @@
           "config",
           "running_runs",
           "last_run",
-          "forked_from"
+          "forked_from",
+          "effective_timeout_seconds"
         ],
         "properties": {
           "id": {
@@ -22178,6 +22831,10 @@
           "has_unarchived_changes": {
             "type": "boolean",
             "description": "Whether the active version has changes not yet archived as a version"
+          },
+          "effective_timeout_seconds": {
+            "type": "integer",
+            "description": "Run timeout that will actually be enforced, in seconds: the manifest's `timeout` (or the platform default when it declares none) clamped to this deployment's `PLATFORM_RUN_LIMITS.timeout_ceiling_seconds`. Compare with `manifest.timeout` to detect a capped declaration. Emitted for system agents too, which do not expose `manifest`."
           }
         }
       },
@@ -22255,10 +22912,6 @@
             "type": ["string", "null"],
             "description": "Primary content file extracted from the version ZIP"
           },
-          "source_code": {
-            "type": ["string", "null"],
-            "description": "Secondary source file content (e.g. .ts), when present"
-          },
           "yanked": {
             "type": "boolean",
             "description": "Whether this version has been yanked"
@@ -22286,6 +22939,42 @@
           }
         }
       },
+      "PackageFileEntry": {
+        "type": "object",
+        "required": ["path", "size", "media_kind"],
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Path inside the artifact, relative and normalized (e.g. `skills/a/SKILL.md`)"
+          },
+          "size": {
+            "type": "integer",
+            "description": "Uncompressed size in bytes"
+          },
+          "media_kind": {
+            "type": "string",
+            "enum": ["text", "binary"],
+            "description": "`text` when the file decodes as strict UTF-8 (files above the 1 MiB inline ceiling are classified by extension instead, since they can never be previewed)."
+          },
+          "inline": {
+            "type": "string",
+            "description": "Full decoded text, present only for `text` files at most 1 MiB that still fit the response's cumulative inline budget. NEVER truncated: when absent, fetch the file from `GET /api/packages/{scope}/{name}/files/content`."
+          }
+        }
+      },
+      "PackageFileIndex": {
+        "type": "object",
+        "required": ["entries"],
+        "properties": {
+          "entries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PackageFileEntry"
+            },
+            "description": "Files in the artifact, sorted by `path`."
+          }
+        }
+      },
       "Run": {
         "type": "object",
         "required": [
@@ -22306,6 +22995,8 @@
           "metadata",
           "config",
           "config_override",
+          "generation",
+          "generation_override",
           "started_at",
           "completed_at",
           "duration",
@@ -22370,7 +23061,7 @@
               "text": {
                 "type": "string",
                 "deprecated": true,
-                "description": "HISTORICAL ONLY. Markdown left by the removed `report` runtime tool. The platform no longer writes this field — it is served verbatim on runs finalized before the removal. Agent reports are markdown documents now (`outputs/report.md`)."
+                "description": "HISTORICAL ONLY. Markdown left by the removed `report` runtime tool. The platform no longer writes this field — it is served verbatim on runs finalized before the removal. Agent reports are descriptively named markdown documents now (`outputs/<task-specific-name>.md`)."
               },
               "text_truncated": {
                 "type": "boolean",
@@ -22513,6 +23204,28 @@
             "type": ["object", "null"],
             "description": "Per-run config delta — the raw object the caller sent in the request body. `config` is the resolved (deep-merged) snapshot; `config_override` is the raw delta that the dashboard uses to badge 'default vs override'. Null when the run used persisted defaults verbatim.",
             "additionalProperties": true
+          },
+          "generation": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ModelGenerationSettings"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Effective generation controls resolved and frozen when the run was created."
+          },
+          "generation_override": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ModelGenerationSettings"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Raw per-invocation generation layer, before agent defaults are applied."
           },
           "user_name": {
             "type": ["string", "null"],
@@ -22691,6 +23404,7 @@
           "timezone",
           "input",
           "config_override",
+          "generation_config_override",
           "model_id_override",
           "proxy_id_override",
           "version_override",
@@ -22701,7 +23415,10 @@
           "createdAt",
           "updatedAt",
           "actor_name",
-          "actor_type"
+          "actor_type",
+          "running_runs",
+          "unread_count",
+          "last_run_number"
         ],
         "properties": {
           "id": {
@@ -22744,6 +23461,16 @@
           "config_override": {
             "type": ["object", "null"],
             "additionalProperties": true
+          },
+          "generation_config_override": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ModelGenerationSettings"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "model_id_override": {
             "type": ["string", "null"]
@@ -22791,6 +23518,21 @@
           "actor_type": {
             "type": ["string", "null"],
             "enum": ["user", "end_user", null]
+          },
+          "running_runs": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Runs of this schedule currently pending or running."
+          },
+          "unread_count": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Runs of this schedule whose notification is unread by the CALLER. Scoped to the requesting actor, like `EnrichedRun.unread`."
+          },
+          "last_run_number": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Highest run number this schedule ever produced; 0 when it never fired."
           }
         }
       },
@@ -22946,10 +23688,6 @@
             "type": ["string", "null"],
             "description": "Package item content"
           },
-          "source_code": {
-            "type": ["string", "null"],
-            "description": "Secondary source file content (e.g. .ts for tools)"
-          },
           "source": {
             "type": "string",
             "enum": ["system", "local"]
@@ -23089,6 +23827,7 @@
           "providerName",
           "baseUrl",
           "modelId",
+          "generation",
           "enabled",
           "is_default",
           "needs_reconnection",
@@ -23126,6 +23865,17 @@
           "modelId": {
             "type": ["string", "null"],
             "description": "Upstream model id. `null` for managed models — not exposed."
+          },
+          "generation": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ModelGenerationCapabilities"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Generation controls supported by the backing model. Null for managed aliases whose binding is hidden."
           },
           "input": {
             "type": ["array", "null"],
@@ -23874,6 +24624,24 @@
           }
         }
       },
+      "UnsupportedMediaType": {
+        "description": "The endpoint requires a different request media type",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetail"
+            },
+            "example": {
+              "type": "https://docs.appstrate.dev/errors/archive-required",
+              "title": "Archive Required",
+              "status": 415,
+              "detail": "MCP-server packages must be uploaded as a multipart .afps or .zip archive.",
+              "code": "archive_required",
+              "requestId": "req_abc123"
+            }
+          }
+        }
+      },
       "RateLimited": {
         "description": "Too many requests",
         "headers": {
@@ -23943,6 +24711,29 @@
               "status": 500,
               "detail": "An unexpected error occurred. Please try again or contact support.",
               "code": "internal_error",
+              "requestId": "req_abc123"
+            }
+          }
+        }
+      },
+      "PackageArchiveUnreadable": {
+        "description": "The stored artifact expands past the package decompression ceiling and was refused (`package_archive_unreadable`). This is the SAME ceiling the import gate applies, so reaching it means the archive is a bomb or was stored before the gate covered this path — republish the package. RFC 9457 problem+json.",
+        "headers": {
+          "Request-Id": {
+            "$ref": "#/components/headers/RequestId"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetail"
+            },
+            "example": {
+              "type": "https://docs.appstrate.dev/errors/package-archive-unreadable",
+              "title": "Package Archive Unreadable",
+              "status": 422,
+              "detail": "The package archive expands past the 50 MB decompression limit and was refused (decompressed-budget-exceeded). Republish the package from bytes that fit the limit.",
+              "code": "package_archive_unreadable",
               "requestId": "req_abc123"
             }
           }

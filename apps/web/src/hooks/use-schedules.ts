@@ -12,27 +12,19 @@ import { useCurrentOrgId } from "./use-org";
 import { useCurrentApplicationId } from "./use-current-application";
 import { usePackageDetail } from "./use-packages";
 import { useAgentModel } from "./use-models";
+import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 import { useAgentProxy } from "./use-proxies";
 import { onMutationError } from "./use-mutations";
 import { scheduleKeys } from "../lib/query-keys";
-import type { ScheduleWireDto, EnrichedSchedule, EnrichedRun } from "@appstrate/shared-types";
+import type { ScheduleWireDto, EnrichedSchedule } from "@appstrate/shared-types";
 
-export function useScheduleRuns(scheduleId: string | undefined) {
-  const orgId = useCurrentOrgId();
-  const applicationId = useCurrentApplicationId();
-  return useQuery({
-    // Key pinned to the legacy shape: use-global-run-sync invalidates
-    // ["schedule-runs", orgId, applicationId, scheduleId] on SSE events.
-    queryKey: scheduleKeys.runs(orgId, applicationId, scheduleId),
-    queryFn: async (): Promise<EnrichedRun[]> => {
-      const { data } = await client.GET("/api/schedules/{id}/runs", {
-        params: { path: { id: scheduleId! } },
-      });
-      return data?.data ?? [];
-    },
-    enabled: !!scheduleId && !!applicationId,
-  });
-}
+// `useScheduleRuns` used to live here: the schedule CARD fetched a schedule's
+// runs purely to count active/unread/last-number, once per card. Those three
+// counters now ride on the schedule itself (`EnrichedSchedule.running_runs` /
+// `unread_count` / `last_run_number`), and the only remaining consumer of the
+// endpoint is `<RunList scheduleId>` on the schedule-detail page, which fetches
+// it through `usePaginatedRuns`. The `scheduleKeys.runs` cache key is still
+// invalidated by `use-global-run-sync` for that list.
 
 export function useAllSchedules() {
   const orgId = useCurrentOrgId();
@@ -105,6 +97,7 @@ export function useCreateSchedule(packageId: string) {
       input?: Record<string, unknown>;
       config_override?: Record<string, unknown> | null;
       model_id_override?: string | null;
+      generation_config_override?: ModelGenerationSettings | null;
       proxy_id_override?: string | null;
       version_override?: string | null;
       connection_overrides?: Record<string, string> | null;
@@ -138,6 +131,7 @@ export function useUpdateSchedule() {
       enabled?: boolean;
       config_override?: Record<string, unknown> | null;
       model_id_override?: string | null;
+      generation_config_override?: ModelGenerationSettings | null;
       proxy_id_override?: string | null;
       version_override?: string | null;
       connection_overrides?: Record<string, string> | null;
@@ -177,6 +171,7 @@ export interface ScheduleFormDeps {
   configSchema: JSONSchemaObject | undefined;
   persistedConfig: Record<string, unknown>;
   persistedModelId: string | null;
+  persistedGenerationConfig: ModelGenerationSettings | null;
   persistedProxyId: string | null;
   persistedVersion: string | null;
   hasFileInputs: boolean;
@@ -228,6 +223,7 @@ export function useScheduleFormDeps(
     configSchema: agentDetail?.config?.schema ?? undefined,
     persistedConfig: agentDetail?.config?.current ?? {},
     persistedModelId: agentModel?.modelId ?? null,
+    persistedGenerationConfig: agentModel?.generation ?? null,
     persistedProxyId: agentProxy?.proxyId ?? null,
     persistedVersion: agentDetail?.version ?? null,
     hasFileInputs: schemaHasFileFields(inputSchema),

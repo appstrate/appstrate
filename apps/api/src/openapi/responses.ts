@@ -97,6 +97,22 @@ export const responses = {
       },
     },
   },
+  UnsupportedMediaType: {
+    description: "The endpoint requires a different request media type",
+    content: {
+      "application/problem+json": {
+        schema: { $ref: "#/components/schemas/ProblemDetail" },
+        example: {
+          type: "https://docs.appstrate.dev/errors/archive-required",
+          title: "Archive Required",
+          status: 415,
+          detail: "MCP-server packages must be uploaded as a multipart .afps or .zip archive.",
+          code: "archive_required",
+          requestId: "req_abc123",
+        },
+      },
+    },
+  },
   RateLimited: {
     description: "Too many requests",
     headers: {
@@ -151,6 +167,39 @@ export const responses = {
           status: 500,
           detail: "An unexpected error occurred. Please try again or contact support.",
           code: "internal_error",
+          requestId: "req_abc123",
+        },
+      },
+    },
+  },
+  /**
+   * A STORED package artifact could not be expanded within the platform's
+   * decompression ceiling. Shared by the package file-explorer operations,
+   * which all read the caller's own package and share one remedy (republish).
+   *
+   * `POST .../fork` deliberately does NOT `$ref` this: its 422 carries two
+   * facts true only on that boundary — nothing was written, and the source
+   * belongs to another organization so the caller cannot republish it.
+   */
+  PackageArchiveUnreadable: {
+    description:
+      "The stored artifact expands past the package decompression ceiling and was refused " +
+      "(`package_archive_unreadable`). This is the SAME ceiling the import gate applies, so " +
+      "reaching it means the archive is a bomb or was stored before the gate covered this path " +
+      "— republish the package. RFC 9457 problem+json.",
+    headers: {
+      "Request-Id": { $ref: "#/components/headers/RequestId" },
+    },
+    content: {
+      "application/problem+json": {
+        schema: { $ref: "#/components/schemas/ProblemDetail" },
+        example: {
+          type: "https://docs.appstrate.dev/errors/package-archive-unreadable",
+          title: "Package Archive Unreadable",
+          status: 422,
+          detail:
+            "The package archive expands past the 50 MB decompression limit and was refused (decompressed-budget-exceeded). Republish the package from bytes that fit the limit.",
+          code: "package_archive_unreadable",
           requestId: "req_abc123",
         },
       },

@@ -18,16 +18,14 @@
  * already has the role.
  */
 
-import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { db, toRows } from "@appstrate/db/client";
 import {
   applicationPackages,
-  endUsers,
   integrationConnections,
   integrationPins,
   integrationOrgDefaults,
   packages,
-  user,
 } from "@appstrate/db/schema";
 import type {
   IntegrationConnectionRow as ConnectionRow,
@@ -50,12 +48,13 @@ import { parseManifestIntegrations } from "@appstrate/core/dependencies";
 import { isSystemIntegration } from "./integration-client-registry.ts";
 import { conflict, notFound, invalidRequest } from "../lib/errors.ts";
 import type { AppScope } from "../lib/scope.ts";
-import type { Actor } from "../lib/actor.ts";
+import { actorOrSharedFilter, type Actor } from "../lib/actor.ts";
 import type { ValidationFieldError } from "../lib/errors.ts";
 import { getPackage } from "./package-catalog.ts";
 import { resolveAgentRunVersion } from "./agent-version-resolver.ts";
 import { fetchIntegrationManifest } from "./integration-service.ts";
 import { getOrgDefault } from "./integration-org-defaults-service.ts";
+import { resolveConnectionOwnerNames } from "./integration-connection-owner-names.ts";
 import {
   resolveConnectionsForRun,
   translateResolutionError,
@@ -66,7 +65,6 @@ import {
 // hook and OpenAPI spec can't drift from the service. Local aliases keep
 // the existing call sites readable.
 export type PinSummary = IntegrationPin;
-export type SharedConnectionSummary = AccessibleIntegrationConnection;
 export type { ConsumingAgentSummary };
 
 // ─────────────────────────── block_user_connections toggle ────────────────────
@@ -542,72 +540,39 @@ export async function loadConnectionOwnership(connectionId: string): Promise<{
  * List the connections an actor can pick from for a given
  * (application, integration). Used by the UI picker:
  * own + shared, with caller-facing labels.
+ *
+ * Same set — and now the same predicate — as `listIntegrationConnections`
+ * on the settings surface; only the projected DTO differs (this one carries
+ * `owner_name` and the split owner ids the picker keys on, the other the
+ * full connection summary). Both go through `actorOrSharedFilter`, so the
+ * two surfaces cannot drift on what "accessible" means.
  */
 export async function listAccessibleConnections(
   scope: AppScope,
   integrationId: string,
-  actorFilter: { userId?: string; endUserId?: string },
-): Promise<SharedConnectionSummary[]> {
-  const baseConditions = [
-    eq(integrationConnections.applicationId, scope.applicationId),
-    eq(integrationConnections.integrationId, integrationId),
-  ];
-
-  const [own, shared] = await Promise.all([
-    actorFilter.userId || actorFilter.endUserId
-      ? db
-          .select()
-          .from(integrationConnections)
-          .where(
-            and(
-              ...baseConditions,
-              actorFilter.userId
-                ? eq(integrationConnections.userId, actorFilter.userId)
-                : eq(integrationConnections.endUserId, actorFilter.endUserId!),
-            ),
-          )
-      : Promise.resolve([] as ConnectionRow[]),
-    db
-      .select()
-      .from(integrationConnections)
-      .where(and(...baseConditions, eq(integrationConnections.sharedWithOrg, true))),
-  ]);
-  const seen = new Set<string>();
-  const merged: ConnectionRow[] = [];
-  for (const r of [...own, ...shared]) {
-    if (seen.has(r.id)) continue;
-    seen.add(r.id);
-    merged.push(r);
-  }
-  return attachOwnerNames(merged);
+  actor: Actor,
+): Promise<AccessibleIntegrationConnection[]> {
+  const rows = await db
+    .select()
+    .from(integrationConnections)
+    .where(
+      and(
+        eq(integrationConnections.applicationId, scope.applicationId),
+        eq(integrationConnections.integrationId, integrationId),
+        actorOrSharedFilter(actor, integrationConnections),
+      ),
+    );
+  return attachOwnerNames(rows);
 }
 
 /**
- * Resolve owner display names in two batched lookups (user + end_users)
- * and project the connection rows into picker summaries. Keeps the dual
- * own/shared query path untouched — names are a post-pass over whatever
- * rows survived the merge.
+ * Project the connection rows into picker summaries, resolving owner
+ * display names via the shared batched lookup. Keeps the dual own/shared
+ * query path untouched — names are a post-pass over whatever rows
+ * survived the merge.
  */
-async function attachOwnerNames(rows: ConnectionRow[]): Promise<SharedConnectionSummary[]> {
-  const userIds = [...new Set(rows.map((r) => r.userId).filter((v): v is string => v !== null))];
-  const endUserIds = [
-    ...new Set(rows.map((r) => r.endUserId).filter((v): v is string => v !== null)),
-  ];
-
-  const [userRows, endUserRows] = await Promise.all([
-    userIds.length
-      ? db.select({ id: user.id, name: user.name }).from(user).where(inArray(user.id, userIds))
-      : Promise.resolve([] as { id: string; name: string }[]),
-    endUserIds.length
-      ? db
-          .select({ id: endUsers.id, name: endUsers.name, externalId: endUsers.externalId })
-          .from(endUsers)
-          .where(inArray(endUsers.id, endUserIds))
-      : Promise.resolve([] as { id: string; name: string | null; externalId: string | null }[]),
-  ]);
-
-  const userNames = new Map(userRows.map((u) => [u.id, u.name]));
-  const endUserNames = new Map(endUserRows.map((e) => [e.id, e.name ?? e.externalId]));
+async function attachOwnerNames(rows: ConnectionRow[]): Promise<AccessibleIntegrationConnection[]> {
+  const ownerName = await resolveConnectionOwnerNames(rows);
 
   return rows.map((row) => ({
     id: row.id,
@@ -616,11 +581,7 @@ async function attachOwnerNames(rows: ConnectionRow[]): Promise<SharedConnection
     label: row.label,
     owner_user_id: row.userId,
     owner_end_user_id: row.endUserId,
-    owner_name: row.userId
-      ? (userNames.get(row.userId) ?? null)
-      : row.endUserId
-        ? (endUserNames.get(row.endUserId) ?? null)
-        : null,
+    owner_name: ownerName(row),
     scopes_granted: row.scopesGranted ?? [],
     shared_with_org: row.sharedWithOrg,
     needs_reconnection: row.needsReconnection,
@@ -676,12 +637,11 @@ export async function resolveAgentIntegrationPick(args: {
   const manifestRes = await fetchIntegrationManifest(integrationId);
   const manifest = manifestRes.ok ? manifestRes.manifest : null;
 
-  const actorFilter = actor.type === "user" ? { userId: actor.id } : { endUserId: actor.id };
   const userId = actor.type === "user" ? actor.id : null;
 
   const [candidatesRaw, adminPins, memberPins, blocked, orgDefault, resolution] = await Promise.all(
     [
-      listAccessibleConnections(scope, integrationId, actorFilter),
+      listAccessibleConnections(scope, integrationId, actor),
       listIntegrationPins(scope, integrationId),
       userId
         ? listMemberPinsForAgent(scope, agentPackageId, userId)

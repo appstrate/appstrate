@@ -11,12 +11,16 @@ import {
   seedApplication,
   seedOrgModel,
   seedOrgModelProviderKey,
+  seedOrgModelProviderOAuth,
 } from "../../helpers/seed.ts";
 import {
   getSystemModels,
   initSystemModelProviderKeys,
 } from "../../../src/services/model-registry.ts";
-import { installPackage } from "../../../src/services/application-packages.ts";
+import {
+  installPackage,
+  updateInstalledPackage,
+} from "../../../src/services/application-packages.ts";
 import { createVersionFromDraft } from "../../../src/services/package-versions.ts";
 import { assertDbCount } from "../../helpers/assertions.ts";
 import { packages, runs } from "@appstrate/db/schema";
@@ -846,6 +850,56 @@ describe("Agents API", () => {
       });
       const body = (await get.json()) as { modelId: string | null };
       expect(body.modelId).toBeNull();
+    });
+
+    it("rejects generation settings unsupported by the selected provider", async () => {
+      await seedModelAgent();
+      const credential = await seedOrgModelProviderOAuth({
+        orgId: ctx.orgId,
+        providerId: "codex",
+      });
+      const model = await seedOrgModel({
+        orgId: ctx.orgId,
+        credentialId: credential.id,
+        modelId: "gpt-5.6-luna",
+      });
+
+      const res = await app.request("/api/agents/@myorg/model-agent/model", {
+        method: "PUT",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ modelId: model.id, generation: { temperature: 0.4 } }),
+      });
+
+      expect(res.status).toBe(400);
+      expect(await res.json()).toMatchObject({ code: "invalid_request", param: "generation" });
+
+      const get = await app.request("/api/agents/@myorg/model-agent/model", {
+        headers: authHeaders(ctx),
+      });
+      expect(await get.json()).toMatchObject({ modelId: null, generation: null });
+    });
+
+    it("reconciles persisted generation defaults when the model changes", async () => {
+      await seedModelAgent();
+      await updateInstalledPackage(
+        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        "@myorg/model-agent",
+        { generationConfig: { temperature: 0.7 } },
+      );
+      const credential = await seedOrgModelProviderOAuth({
+        orgId: ctx.orgId,
+        providerId: "codex",
+      });
+      const model = await seedOrgModel({
+        orgId: ctx.orgId,
+        credentialId: credential.id,
+        modelId: "gpt-5.6-luna",
+      });
+
+      const res = await putModel(model.id);
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toMatchObject({ modelId: model.id, generation: {} });
     });
 
     it("rejects a model UUID owned by another org (#960)", async () => {

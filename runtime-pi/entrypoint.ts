@@ -729,6 +729,7 @@ const model: Model<Api> = {
   provider: deriveProviderFromApi(api),
   baseUrl: env.modelBaseUrl ?? "",
   reasoning: env.modelReasoning,
+  ...(env.modelReasoningLevelMap ? { thinkingLevelMap: env.modelReasoningLevelMap } : {}),
   input: [...env.modelInput],
   cost: env.modelCost,
   contextWindow: env.modelContextWindow,
@@ -838,6 +839,8 @@ function buildPiRunner(): PiRunner {
     model,
     apiKey: env.modelApiKey,
     systemPrompt,
+    ...(env.modelTemperature !== undefined ? { temperature: env.modelTemperature } : {}),
+    ...(env.modelReasoningLevel !== undefined ? { thinkingLevel: env.modelReasoningLevel } : {}),
     cwd: WORKSPACE,
     agentDir: "/tmp/pi-agent",
     extensionFactories,
@@ -858,14 +861,16 @@ const DEFAULT_DOCUMENT_MAX_FILE_BYTES = 100 * 1024 * 1024;
  * keeps the two in lockstep — an operator who raises the platform cap no longer
  * sees large deliverables silently skipped here.
  */
-const OUTPUTS_SWEEP_MAX_FILE_BYTES = ((): number => {
+function resolveDocumentMaxFileBytes(): number {
   const raw = process.env.DOCUMENT_MAX_FILE_BYTES;
   if (raw !== undefined && raw !== "") {
     const parsed = Number(raw);
     if (Number.isFinite(parsed) && parsed > 0) return parsed;
   }
   return DEFAULT_DOCUMENT_MAX_FILE_BYTES;
-})();
+}
+
+const OUTPUTS_SWEEP_MAX_FILE_BYTES = resolveDocumentMaxFileBytes();
 
 /**
  * Auto-publish everything under `workspace/outputs/` that was not already

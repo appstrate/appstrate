@@ -73,6 +73,38 @@ export function RunRowDetails({ run }: { run: EnrichedRun }) {
   );
 }
 
+/** Seconds-with-one-decimal, the format both the live and the final figure use. */
+function formatDuration(ms: number): string {
+  return `${(ms / 1000).toFixed(1)}s`;
+}
+
+/**
+ * Live elapsed time of a running run, ticking at 10 Hz.
+ *
+ * A LEAF on purpose: the interval used to live in `RunRow`, so every tick
+ * re-rendered the whole row — badges, trigger, popover, links — ten times a
+ * second, per running run on screen. Here the state that changes is owned by
+ * the only node that displays it, so a tick re-renders one `<span>`.
+ *
+ * Exported for the unit test, which asserts exactly that isolation.
+ */
+export function ElapsedDuration({ startedAt }: { startedAt: string }) {
+  const [elapsed, setElapsed] = useState(() => Date.now() - new Date(startedAt).getTime());
+
+  useEffect(() => {
+    const start = new Date(startedAt).getTime();
+    const tick = () => setElapsed(Date.now() - start);
+    tick();
+    const id = setInterval(tick, 100);
+    return () => clearInterval(id);
+  }, [startedAt]);
+
+  // Mirrors the pre-split behaviour: a run that has not measurably started yet
+  // renders nothing rather than a flickering `0.0s`.
+  if (!elapsed) return null;
+  return <span className="text-muted-foreground font-mono text-xs">{formatDuration(elapsed)}</span>;
+}
+
 export function RunRow({
   run,
   agentName,
@@ -95,19 +127,11 @@ export function RunRow({
   // badge so users understand why "Re-run" / agent-config links are gone.
   const isOrphaned = run.packageId == null && !isInline;
 
-  // Live elapsed timer while running
-  const [elapsed, setElapsed] = useState(0);
-  useEffect(() => {
-    if (!isRunning || !run.started_at) return;
-    const start = new Date(run.started_at).getTime();
-    const tick = () => setElapsed(Date.now() - start);
-    tick();
-    const id = setInterval(tick, 100);
-    return () => clearInterval(id);
-  }, [isRunning, run.started_at]);
-
-  const time = isRunning ? elapsed : run.duration;
-  const duration = time ? `${(time / 1000).toFixed(1)}s` : "";
+  // While the run is live the elapsed time ticks inside `<ElapsedDuration>`;
+  // once it is over the row renders the frozen `duration` itself. Neither path
+  // re-renders this component on a timer.
+  const isLive = isRunning && run.started_at != null;
+  const finalDuration = run.duration ? formatDuration(run.duration) : "";
 
   // `document_counts` is a non-optional field of the run DTO — every list and
   // detail endpoint computes it — so read it straight.
@@ -178,7 +202,13 @@ export function RunRow({
         )}
         {/* How long the run took is a primary figure, not a wide-viewport
             bonus — it stays visible at every breakpoint (#1046). */}
-        {duration && <span className="text-muted-foreground font-mono text-xs">{duration}</span>}
+        {isLive ? (
+          <ElapsedDuration startedAt={run.started_at!} />
+        ) : (
+          finalDuration && (
+            <span className="text-muted-foreground font-mono text-xs">{finalDuration}</span>
+          )
+        )}
         {!isDetail && <span className="text-muted-foreground text-xs">{date}</span>}
         {isDetail && (
           <Popover>

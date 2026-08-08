@@ -197,6 +197,10 @@ export const EXEMPT_SCHEMAS: Record<string, string> = {
   // Error + auth/credential wire with no SPA shared-type consumer.
   ProblemDetail: "RFC 9457 error envelope; never read through a shared-type",
   ResolutionFieldError: "ProblemDetail.errors[] item; never read through a shared-type",
+  ModelGenerationSettings:
+    "embedded request/response value object; canonical runtime type lives in @appstrate/core",
+  ModelGenerationCapabilities:
+    "embedded model-catalog value object; canonical runtime type lives in @appstrate/core",
   AgentConnectionReadiness:
     "bulk agent connection-readiness envelope; SPA uses the generated spec type (integrations[].resolution is the registered IntegrationAgentResolution)",
   // AgentMap / AgentMapNode / AgentMapDiagnostic (agent-map) and
@@ -223,6 +227,12 @@ export const EXEMPT_SCHEMAS: Record<string, string> = {
   ChatSession:
     "module-chat wire DTO; ISO timestamps, no shared-type (UI uses the generated spec type)",
   ChatMessage: "module-chat opaque history-node wire DTO; no shared-type",
+  // File-explorer wire DTOs. Derived from ZIP entries, not from any table, so
+  // there is no Drizzle shared-type to compare against; the canonical TS shape
+  // lives in apps/api/src/services/package-files.ts and the SPA reads the
+  // generated spec type.
+  PackageFileEntry: "artifact file-index item derived from ZIP entries; no shared-type",
+  PackageFileIndex: "artifact file-index envelope; SPA uses the generated spec type",
 };
 
 /**
