@@ -17,12 +17,39 @@ import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage, seedInstalledPackage } from "../../helpers/seed.ts";
-import { initSystemPackages } from "../../../src/services/system-packages.ts";
+import {
+  getSystemPackages,
+  initSystemPackages,
+  syncSystemPackagesToDb,
+} from "../../../src/services/system-packages.ts";
 import { VISIBILITY_META_NAMESPACE } from "../../../src/lib/package-visibility.ts";
 
 const app = getTestApp();
 
 const UNLISTED_META = { [VISIBILITY_META_NAMESPACE]: { level: "unlisted" } };
+const EXPECTED_ASSISTANT_SKILLS = [
+  "@appstrate/agent-authoring",
+  "@appstrate/connector-choice",
+  "@appstrate/copilot",
+  "@appstrate/skill-authoring",
+  "@appstrate/web-search",
+];
+const SKILL_AUTHORING_REFERENCES = [
+  "references/code-review.md",
+  "references/content-writing.md",
+  "references/crm-update.md",
+  "references/customer-research.md",
+  "references/data-analysis.md",
+  "references/doc-extraction.md",
+  "references/email-reply.md",
+  "references/incremental-digest.md",
+  "references/meeting-prep.md",
+  "references/minutes-actions.md",
+  "references/sourced-rag.md",
+  "references/sourced-research.md",
+  "references/sprint-report.md",
+  "references/triage-sentiment.md",
+];
 
 function skillManifest(id: string, extra?: Record<string, unknown>) {
   return {
@@ -140,11 +167,7 @@ describe("Unlisted package visibility", () => {
         assistant_skills: Array<{ package_id: string; display_name: string; description: string }>;
       };
       const ids = body.assistant_skills.map((s) => s.package_id);
-      expect(ids).toContain("@appstrate/copilot");
-      expect(ids).toContain("@appstrate/web-search");
-      expect(ids).toContain("@appstrate/connector-choice");
-      expect(ids).toContain("@appstrate/agent-authoring");
-      expect(ids).toContain("@appstrate/skill-authoring");
+      expect(ids).toEqual(EXPECTED_ASSISTANT_SKILLS);
       expect(
         body.assistant_skills.find((skill) => skill.package_id === "@appstrate/agent-authoring")
           ?.description,
@@ -158,6 +181,31 @@ describe("Unlisted package visibility", () => {
       }
       // Listed system skills never leak into the assistant index.
       expect(ids).not.toContain("@system/listed-skill");
+
+      const skillAuthoring = getSystemPackages().get("@appstrate/skill-authoring");
+      expect(skillAuthoring).toBeDefined();
+      await syncSystemPackagesToDb(new Map([[skillAuthoring!.packageId, skillAuthoring!]]), [
+        skillAuthoring!,
+      ]);
+
+      const filesRes = await app.request("/api/packages/@appstrate/skill-authoring/files", {
+        headers: authHeaders(ctx),
+      });
+      expect(filesRes.status).toBe(200);
+      const filesBody = (await filesRes.json()) as {
+        entries: Array<{ path: string; inline?: string }>;
+      };
+      const referenceEntries = filesBody.entries.filter((entry) =>
+        entry.path.startsWith("references/"),
+      );
+      expect(referenceEntries.map((entry) => entry.path)).toEqual(SKILL_AUTHORING_REFERENCES);
+      expect(filesBody.entries.map((entry) => entry.path)).not.toContain("references/INDEX.md");
+      expect(filesBody.entries.find((entry) => entry.path === "SKILL.md")?.inline).toContain(
+        "[triage et sentiment](references/triage-sentiment.md)",
+      );
+      expect(
+        referenceEntries.find((entry) => entry.path === "references/triage-sentiment.md")?.inline,
+      ).toContain("# Triage et classification de tickets");
     });
   });
 });

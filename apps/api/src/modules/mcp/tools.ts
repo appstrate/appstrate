@@ -190,6 +190,55 @@ const PROTECTED_HEADERS = new Set<string>([
 // Cap the buffered response body so a large list endpoint can't dump
 // unbounded text into the model context. Truncation is flagged in the result.
 const MAX_RESPONSE_CHARS = 100_000;
+const TEXT_ATTACHMENT_EXTENSIONS = new Set([
+  ".md",
+  ".markdown",
+  ".txt",
+  ".json",
+  ".jsonl",
+  ".yaml",
+  ".yml",
+  ".toml",
+  ".ini",
+  ".csv",
+  ".tsv",
+  ".xml",
+  ".html",
+  ".css",
+  ".js",
+  ".jsx",
+  ".mjs",
+  ".cjs",
+  ".ts",
+  ".tsx",
+  ".py",
+  ".sh",
+  ".sql",
+  ".log",
+]);
+
+/** Return the RFC 5987 filename of an attachment when it names a text-shaped file. */
+function textAttachmentName(response: Response): string | undefined {
+  const disposition = response.headers.get("content-disposition");
+  if (!disposition?.toLowerCase().startsWith("attachment;")) return undefined;
+
+  const encoded = /filename\*=UTF-8''([^;]+)/i.exec(disposition)?.[1];
+  const fallback = /filename="([^"]+)"/i.exec(disposition)?.[1];
+  let filename = fallback;
+  if (encoded) {
+    try {
+      filename = decodeURIComponent(encoded);
+    } catch {
+      return undefined;
+    }
+  }
+  if (!filename) return undefined;
+
+  const base = filename.slice(filename.lastIndexOf("/") + 1).toLowerCase();
+  const dot = base.lastIndexOf(".");
+  const extension = dot >= 0 ? base.slice(dot) : "";
+  return TEXT_ATTACHMENT_EXTENSIONS.has(extension) ? filename : undefined;
+}
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   return typeof value === "object" && value !== null && !Array.isArray(value)
@@ -491,7 +540,8 @@ function interpolatePath(op: CatalogOperation, pathParams: Record<string, unknow
  *  - Streaming (`text/event-stream`) bodies are refused, NOT buffered —
  *    `.text()` on an open SSE stream never resolves and would hang the
  *    server promise (the platform exposes SSE GET operations).
- *  - Non-text bodies (downloads, tarballs) are summarised, not decoded.
+ *  - Small UTF-8 text attachments are decoded for the model while other
+ *    non-text bodies (downloads, tarballs) are summarised.
  *  - Text bodies are capped to bound context size.
  */
 export async function readResponse(response: Response): Promise<CallToolResult> {
@@ -513,12 +563,44 @@ export async function readResponse(response: Response): Promise<CallToolResult> 
     contentType.includes("json") || contentType.startsWith("text/") || contentType === "";
   if (!isTextual) {
     const len = response.headers.get("content-length");
+    const byteLength = len ? Number(len) : null;
+    const attachmentName = textAttachmentName(response);
+    if (
+      attachmentName &&
+      byteLength !== null &&
+      Number.isSafeInteger(byteLength) &&
+      byteLength >= 0 &&
+      byteLength <= MAX_RESPONSE_CHARS
+    ) {
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      if (bytes.byteLength <= MAX_RESPONSE_CHARS) {
+        try {
+          const body = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+          return textResult(
+            { status: response.status, body, attachment_name: attachmentName },
+            isError,
+          );
+        } catch {
+          // A text-shaped filename does not prove its bytes are UTF-8. Keep the
+          // same safe binary summary as any other attachment.
+        }
+      }
+      return textResult(
+        {
+          status: response.status,
+          note: "Non-text response body omitted.",
+          content_type: contentType,
+          bytes: bytes.byteLength,
+        },
+        isError,
+      );
+    }
     return textResult(
       {
         status: response.status,
         note: "Non-text response body omitted.",
         content_type: contentType,
-        bytes: len ? Number(len) : null,
+        bytes: byteLength,
       },
       isError,
     );

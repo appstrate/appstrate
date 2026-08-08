@@ -1,0 +1,12 @@
+{
+  "name": "@appstrate/agent-authoring",
+  "version": "1.1.0",
+  "type": "skill",
+  "schema_version": "0.2",
+  "display_name": "Création et amélioration d'un agent",
+  "description": "Assembler, modifier ou valider un agent enregistré Appstrate. Charge ce guide après avoir choisi cette forme et avant toute mutation du package agent. Il résout les dépendances, sépare méthode et instance, applique le minimum de privilèges et exige un run réel comme preuve. Il délègue le contenu d'une méthode à @appstrate/skill-authoring et relit toujours les contrats courants depuis le MCP.",
+  "license": "Apache-2.0",
+  "_meta": {
+    "dev.appstrate/visibility": { "level": "unlisted" }
+  }
+}

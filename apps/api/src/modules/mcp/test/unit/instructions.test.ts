@@ -16,6 +16,13 @@ import { initSystemPackages } from "../../../../services/system-packages.ts";
 import { buildServerInstructions } from "../../router.ts";
 
 const SKILLS_HEADING = "## Assistant skills";
+const EXPECTED_ASSISTANT_SKILLS = [
+  "@appstrate/agent-authoring",
+  "@appstrate/connector-choice",
+  "@appstrate/copilot",
+  "@appstrate/skill-authoring",
+  "@appstrate/web-search",
+];
 
 describe("buildServerInstructions — assistant skills index", () => {
   beforeAll(async () => {
@@ -45,5 +52,9 @@ describe("buildServerInstructions — assistant skills index", () => {
     expect(section).toContain("Assembler, modifier ou valider un agent enregistré");
     expect(section).toContain("Créer ou améliorer une skill de méthode");
     expect(section).toContain('`operation_id: "getSkill"`');
+    const indexedIds = Array.from(section.matchAll(/^- `([^`]+)`/gm), (match) => match[1]);
+    expect(indexedIds).toEqual(EXPECTED_ASSISTANT_SKILLS);
+    expect(section).not.toContain("`@appstrate/code-review`");
+    expect(section).not.toContain("plus reference methods");
   });
 });
