@@ -73,9 +73,19 @@ describe("SYSTEM_PROMPT invariants", () => {
     expect(SYSTEM_PROMPT).toMatch(/When a run is justified.*`context_documents`/s);
   });
 
-  it("keeps the fan-out deliverable contract (file in outputs/ AND a short output)", () => {
-    expect(SYSTEM_PROMPT).toContain("outputs/<topic>.md");
-    expect(SYSTEM_PROMPT).toMatch(/short summary naming that file/);
+  it("keeps the fan-out deliverable contract (run document AND a short output)", () => {
+    expect(SYSTEM_PROMPT).toMatch(/publish its full findings as a durable run document/);
+    expect(SYSTEM_PROMPT).toMatch(/short summary naming that document/);
+  });
+
+  it("owns the document outcome while delegating publication mechanics to the runtime", () => {
+    expect(SYSTEM_PROMPT).toContain("requires a durable document attached to the run");
+    expect(SYSTEM_PROMPT).toContain(
+      "The run runtime and live tool descriptions own the current publication mechanics",
+    );
+    expect(SYSTEM_PROMPT).toContain("returned `documents` list");
+    expect(SYSTEM_PROMPT).not.toContain("outputs/<topic>.md");
+    expect(SYSTEM_PROMPT).not.toContain("Everything under `outputs/`");
   });
 
   it("requires descriptive filenames that survive outside the run context", () => {
