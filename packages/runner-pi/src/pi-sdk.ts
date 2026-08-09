@@ -29,6 +29,7 @@ export type {
   Model,
   Transport,
   Context,
+  Message,
   SimpleStreamOptions,
   AssistantMessageEventStream,
 } from "@mariozechner/pi-ai";

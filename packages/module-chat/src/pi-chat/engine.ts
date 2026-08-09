@@ -23,7 +23,12 @@
  * consumes from the ai-sdk path — one client contract, two loops.
  */
 
-import { createUIMessageStream, createUIMessageStreamResponse, type UIMessageChunk } from "ai";
+import {
+  createUIMessageStream,
+  createUIMessageStreamResponse,
+  type UIMessage,
+  type UIMessageChunk,
+} from "ai";
 import {
   loadPiCodingAgentSdk,
   derivePiCompactionSettings,
@@ -51,6 +56,7 @@ import {
   subscriptionFailureChunks,
 } from "./subscription-turn-closure.ts";
 import type { ResolvedPiChatModelBinding } from "./model-binding.ts";
+import { buildStructuredPiTurn, reconstructPiSession } from "./structured-session.ts";
 
 /**
  * Wall-clock ceiling for a single chat turn. A turn fans out into up to
@@ -72,8 +78,8 @@ export interface PiSubscriptionChatInput {
   userId: string;
   /** Chat session the turn belongs to (null for an ephemeral, unpersisted turn). */
   chatSessionId: string | null;
-  /** Pre-assembled transcript prompt for this turn. */
-  prompt: string;
+  /** Canonical active UIMessage branch, including the current user head. */
+  messages: UIMessage[];
   /** Base system persona (+ caller context) — MCP instructions are appended here. */
   system: string;
   generation: ModelGenerationSettings;
@@ -169,6 +175,21 @@ export function runPiSubscriptionChat(input: PiSubscriptionChatInput): Response 
           thinkingLevel,
           thinkingBudgets,
         } = prepareRequestedThinkingLevel(piModel, requestedThinkingLevel);
+        const projectedTurn = buildStructuredPiTurn(input.messages, {
+          api: sessionModel.api,
+          provider: sessionModel.provider,
+          model: sessionModel.id,
+        });
+        const sessionManager = reconstructPiSession(SessionManager, projectedTurn.history);
+        logger.info("Pi chat session reconstructed", {
+          chatSessionId: input.chatSessionId,
+          branchHeadId: projectedTurn.branchHeadId,
+          modelId: sessionModel.id,
+          sourceMessageCount: projectedTurn.sourceMessageCount,
+          toolCallCount: projectedTurn.toolCallCount,
+          toolResultCount: projectedTurn.toolResultCount,
+          sessionFile: sessionManager.getSessionFile() ?? null,
+        });
 
         // OAuth uses the real access token in memory. Proxy-routed models use
         // only the inert `proxy` placeholder and replace the stream below.
@@ -215,7 +236,7 @@ export function runPiSubscriptionChat(input: PiSubscriptionChatInput): Response 
           authStorage,
           modelRegistry,
           resourceLoader,
-          sessionManager: SessionManager.inMemory(),
+          sessionManager,
           settingsManager: SettingsManager.inMemory({
             compaction: derivePiCompactionSettings(piModel).compaction,
             thinkingBudgets,
@@ -258,7 +279,7 @@ export function runPiSubscriptionChat(input: PiSubscriptionChatInput): Response 
         });
 
         try {
-          await Promise.race([typedSession.prompt(input.prompt), abortPromise]);
+          await Promise.race([typedSession.prompt(projectedTurn.prompt), abortPromise]);
           // Early-stopping generate: the tool loop was cut at
           // CHAT_TOOL_STEP_BUDGET, so spend the last step on ONE tool-less model
           // call — the user gets a synthesis of the work already done instead of

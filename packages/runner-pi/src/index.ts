@@ -28,6 +28,7 @@ export type {
   Model,
   Transport,
   Context,
+  Message,
   SimpleStreamOptions,
   AssistantMessageEventStream,
   AuthStorage,
