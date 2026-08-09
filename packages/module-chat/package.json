@@ -8,6 +8,7 @@
   "module": null,
   "exports": {
     ".": "./src/index.ts",
+    "./prompt": "./src/prompt.ts",
     "./ui": "./src/ui/index.tsx",
     "./unread": "./src/ui/use-sessions.ts"
   },

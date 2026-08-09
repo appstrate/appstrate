@@ -6,6 +6,7 @@ import { splitPackageRef } from "../lib/package-paths";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentApplicationId } from "./use-current-application";
 import { paginatedRunsKeys } from "../lib/query-keys";
+import { normalizeRunResolvedSkillVersions } from "../lib/run-wire";
 import type { EnrichedRun, ListEnvelope, RunStatus } from "@appstrate/shared-types";
 
 export type RunKindFilter = "all" | "package" | "inline";
@@ -64,21 +65,21 @@ export function usePaginatedRuns({
         const { data } = await client.GET("/api/schedules/{id}/runs", {
           params: { path: { id: scheduleId }, query: { limit, offset } },
         });
-        return data!;
+        return { ...data!, data: data!.data.map(normalizeRunResolvedSkillVersions) };
       }
       if (packageId) {
         const { scope, name } = splitPackageRef(packageId);
         const { data } = await client.GET("/api/agents/{scope}/{name}/runs", {
           params: { path: { scope, name }, query: { limit, offset } },
         });
-        return data!;
+        return { ...data!, data: data!.data.map(normalizeRunResolvedSkillVersions) };
       }
       const { data } = await client.GET("/api/runs", {
         params: {
           query: { limit, offset, user, kind: kind && kind !== "all" ? kind : undefined, status },
         },
       });
-      return data!;
+      return { ...data!, data: data!.data.map(normalizeRunResolvedSkillVersions) };
     },
     placeholderData: (prev) => prev,
     enabled: !!applicationId && (scheduleId ? !!scheduleId : packageId ? !!packageId : true),

@@ -1,0 +1,13 @@
+{
+  "name": "@appstrate/skill-authoring",
+  "version": "1.3.2",
+  "type": "skill",
+  "schema_version": "0.2",
+  "display_name": "Création et amélioration d'une skill",
+  "description": "Créer ou améliorer une méthode réutilisable de l'organisation. Charge ce guide quand une méthode manque, déclenche mal, guide mal l'exécution ou doit être simplifiée, y compris sur délégation de @appstrate/agent-authoring.",
+  "license": "Apache-2.0 AND MIT",
+  "_meta": {
+    "dev.appstrate/visibility": { "level": "unlisted" },
+    "dev.appstrate/assistant-skill": { "enabled": true }
+  }
+}

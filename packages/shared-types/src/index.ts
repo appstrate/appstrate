@@ -40,9 +40,9 @@ export type { UserProfile, RunLog } from "@appstrate/db/schema";
 import type { PackageType } from "@appstrate/core/validation";
 export type { PackageType };
 
-export type { Run } from "@appstrate/db/schema";
+export type { Run, ResolvedSkillVersion, ResolvedSkillVersionMap } from "@appstrate/db/schema";
 export type { RunArtifactsSummary } from "@appstrate/db/schema";
-import type { RunArtifactsSummary } from "@appstrate/db/schema";
+import type { ResolvedSkillVersionMap, RunArtifactsSummary } from "@appstrate/db/schema";
 
 /**
  * Stripe-canonical list envelope for HTTP list responses.
@@ -150,10 +150,7 @@ export interface RunWireDto {
    */
   dependency_overrides: unknown;
   /** Concrete skill dependency selections frozen into this run's bundle. */
-  resolved_skill_versions: Record<
-    string,
-    { version: string | null; source: "version" | "draft" }
-  > | null;
+  resolved_skill_versions: ResolvedSkillVersionMap | null;
 }
 
 /**

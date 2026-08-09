@@ -51,6 +51,9 @@ import {
 import { DbPackageCatalog } from "./db-package-catalog.ts";
 import { DraftPackageCatalog } from "./draft-package-catalog.ts";
 import { VERSION_SELECTOR_DRAFT } from "../agent-version-resolver.ts";
+import type { ResolvedSkillVersionMap } from "@appstrate/db/schema";
+
+export type { ResolvedSkillVersionMap } from "@appstrate/db/schema";
 
 export interface RunPackageCatalogOptions {
   /** Org whose packages are visible (plus system packages, `orgId IS NULL`). */
@@ -73,11 +76,6 @@ export interface RunPackageCatalogOptions {
     makeDraft?: () => PackageCatalog;
   };
 }
-
-export type ResolvedSkillVersionMap = Record<
-  string,
-  { version: string | null; source: "version" | "draft" }
->;
 
 export class RunPackageCatalog implements PackageCatalog {
   private readonly db: PackageCatalog;
@@ -120,8 +118,13 @@ export class RunPackageCatalog implements PackageCatalog {
     if (resolved) {
       this.owners.set(resolved.identity, this.db);
       const parsed = parsePackageIdentity(resolved.identity);
+      if (!parsed?.version) {
+        throw new Error(
+          `RunPackageCatalog: published dependency '${name}' resolved to an invalid identity`,
+        );
+      }
       this.resolvedSkillVersions[name] = {
-        version: parsed?.version ?? null,
+        version: parsed.version,
         source: "version",
       };
     }

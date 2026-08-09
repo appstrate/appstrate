@@ -67,6 +67,13 @@ export type RunArtifactsSummary = {
   failed: Array<{ name: string; code: string }>;
 };
 
+/** One concrete skill dependency selection frozen into a run bundle. */
+export type ResolvedSkillVersion =
+  { source: "version"; version: string } | { source: "draft"; version: null };
+
+/** Package id to the exact skill selection consumed by a run. */
+export type ResolvedSkillVersionMap = Record<string, ResolvedSkillVersion>;
+
 /**
  * Pricing provenance of a recorded `cost_usd` — see {@link PricingStatus}. Both
  * the type and its literal tuple live in the import-free `../pricing-status.ts`
@@ -247,10 +254,7 @@ export const runs = pgTable(
     // dependencies carry their concrete semver; mutable working copies carry
     // `source: "draft"` with no version so they cannot be mistaken for a
     // reproducible artifact.
-    resolvedSkillVersions:
-      jsonb("resolved_skill_versions").$type<
-        Record<string, { version: string | null; source: "version" | "draft" }>
-      >(),
+    resolvedSkillVersions: jsonb("resolved_skill_versions").$type<ResolvedSkillVersionMap>(),
     // Snapshot of the agent's @scope/name at run creation time. Survives
     // package rename, delete, or inline-run compaction (where manifest is
     // NULLed). Read by global /api/runs view and UI to display agent name

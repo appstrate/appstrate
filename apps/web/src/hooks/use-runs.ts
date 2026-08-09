@@ -6,6 +6,7 @@ import { splitPackageRef } from "../lib/package-paths";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentApplicationId } from "./use-current-application";
 import { runsKeys, runKeys } from "../lib/query-keys";
+import { normalizeRunResolvedSkillVersions } from "../lib/run-wire";
 import type { EnrichedRun } from "@appstrate/shared-types";
 
 /**
@@ -26,7 +27,7 @@ export function useRuns(packageId: string | undefined) {
       const { data } = await client.GET("/api/agents/{scope}/{name}/runs", {
         params: { path: { scope, name } },
       });
-      return data?.data ?? [];
+      return (data?.data ?? []).map(normalizeRunResolvedSkillVersions);
     },
     enabled: !!packageId && !!applicationId,
   });
@@ -44,7 +45,7 @@ export function useRun(runId: string | undefined) {
         params: { path: { id: runId! } },
       });
       // Non-2xx throws via the client middleware, so `data` is defined here.
-      return data!;
+      return normalizeRunResolvedSkillVersions(data!);
     },
     enabled: !!runId && !!applicationId,
   });

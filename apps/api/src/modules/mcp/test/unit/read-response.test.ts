@@ -151,6 +151,31 @@ describe("readResponse — non-text bodies", () => {
     expect(body.bytes).toBe(100_001);
     expect(body.body).toBeUndefined();
   });
+
+  it("cancels a misdeclared attachment stream as soon as the byte cap is crossed", async () => {
+    let cancelled = false;
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        controller.enqueue(new Uint8Array(60_000));
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    const response = new Response(stream, {
+      status: 200,
+      headers: {
+        "content-type": "application/octet-stream",
+        "content-length": "1",
+        "content-disposition": 'attachment; filename="reference.md"',
+      },
+    });
+
+    const body = parse(await readResponse(response));
+    expect(body.note).toBe("Non-text response body omitted.");
+    expect(body.bytes).toBe(100_001);
+    expect(cancelled).toBe(true);
+  });
 });
 
 describe("readResponse — text bodies", () => {

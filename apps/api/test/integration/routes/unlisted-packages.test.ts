@@ -6,10 +6,8 @@
  * A package carrying `_meta["dev.appstrate/visibility"].level = "unlisted"`
  * must be excluded from every LISTING surface — the per-type package list
  * routes, the library catalogue, and the chat/get_me hints — while staying
- * fully resolvable by exact id (detail GET). Also covers the assistant-skills
- * index exposed by `/api/me/context`, fed by the real `system-packages/`
- * archives (the shipped copilot / web-search / connector-choice / agent-authoring /
- * skill-authoring skills).
+ * fully resolvable by exact id (detail GET). Also covers the five shipped
+ * assistant-skill archives and the progressively disclosed authoring references.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -22,7 +20,8 @@ import {
   initSystemPackages,
   syncSystemPackagesToDb,
 } from "../../../src/services/system-packages.ts";
-import { VISIBILITY_META_NAMESPACE } from "../../../src/lib/package-visibility.ts";
+import { VISIBILITY_META_NAMESPACE, isUnlisted } from "../../../src/lib/package-visibility.ts";
+import { isAssistantSkill } from "../../../src/services/assistant-skills.ts";
 
 const app = getTestApp();
 
@@ -155,32 +154,20 @@ describe("Unlisted package visibility", () => {
     });
   });
 
-  describe("assistant skills (/api/me/context)", () => {
-    it("exposes the shipped unlisted system skills, ungated", async () => {
-      // Load the REAL system-packages/ archives — this doubles as a conformance
-      // check that the shipped assistant skills carry the unlisted flag.
+  describe("shipped assistant skills", () => {
+    it("marks exactly five system skills independently from visibility", async () => {
+      // Load the real archives. Assistant role and unlisted visibility are two
+      // separate assertions so one metadata concern cannot stand in for the other.
       await initSystemPackages();
-
-      const res = await app.request("/api/me/context", { headers: authHeaders(ctx) });
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as {
-        assistant_skills: Array<{ package_id: string; display_name: string; description: string }>;
-      };
-      const ids = body.assistant_skills.map((s) => s.package_id);
+      const assistants = [...getSystemPackages().values()]
+        .filter((entry) => entry.type === "skill" && isAssistantSkill(entry.manifest))
+        .sort((a, b) => a.packageId.localeCompare(b.packageId));
+      const ids = assistants.map((entry) => entry.packageId);
       expect(ids).toEqual(EXPECTED_ASSISTANT_SKILLS);
-      expect(
-        body.assistant_skills.find((skill) => skill.package_id === "@appstrate/agent-authoring")
-          ?.description,
-      ).toContain("contrats courants depuis le MCP");
-      expect(
-        body.assistant_skills.find((skill) => skill.package_id === "@appstrate/skill-authoring")
-          ?.description,
-      ).toContain("améliorer");
-      for (const s of body.assistant_skills) {
-        expect(s.description.length).toBeGreaterThan(0);
+      for (const entry of assistants) {
+        expect(isUnlisted(entry.manifest)).toBe(true);
+        expect(String(entry.manifest.description ?? "").length).toBeGreaterThan(0);
       }
-      // Listed system skills never leak into the assistant index.
-      expect(ids).not.toContain("@system/listed-skill");
 
       const skillAuthoring = getSystemPackages().get("@appstrate/skill-authoring");
       expect(skillAuthoring).toBeDefined();
@@ -206,6 +193,12 @@ describe("Unlisted package visibility", () => {
       expect(
         referenceEntries.find((entry) => entry.path === "references/triage-sentiment.md")?.inline,
       ).toContain("# Triage et classification de tickets");
+      for (const entry of referenceEntries) {
+        expect(entry.inline?.length ?? 0).toBeGreaterThan(1_500);
+      }
+      expect(
+        referenceEntries.find((entry) => entry.path === "references/triage-sentiment.md")?.inline,
+      ).not.toContain("FAQ pure");
     });
   });
 });

@@ -138,7 +138,8 @@ export function buildServerInstructions(
   contextInjected = false,
   packageImportAvailable = false,
 ): string {
-  // Assistant skills (unlisted system skills) — indexed BEFORE the operation
+  // Explicitly marked assistant skills, currently unlisted system packages,
+  // are indexed BEFORE the operation
   // index so the section survives `applyOperationIndexPolicy`, which trims
   // everything from the operation-index heading onward for providers without a
   // prompt cache. "" when none are loaded.

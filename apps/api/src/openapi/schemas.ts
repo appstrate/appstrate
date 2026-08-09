@@ -988,13 +988,26 @@ export const schemas = {
         description:
           'Exact skill dependency selections frozen into the run bundle. Published artifacts expose `{ "version": "<semver>", "source": "version" }`; mutable working copies expose `{ "version": null, "source": "draft" }`.',
         additionalProperties: {
-          type: "object",
-          required: ["version", "source"],
-          properties: {
-            version: { type: ["string", "null"] },
-            source: { type: "string", enum: ["version", "draft"] },
-          },
-          additionalProperties: false,
+          oneOf: [
+            {
+              type: "object",
+              required: ["version", "source"],
+              properties: {
+                version: { type: "string" },
+                source: { type: "string", const: "version" },
+              },
+              additionalProperties: false,
+            },
+            {
+              type: "object",
+              required: ["version", "source"],
+              properties: {
+                version: { type: "null" },
+                source: { type: "string", const: "draft" },
+              },
+              additionalProperties: false,
+            },
+          ],
         },
       },
       connections_used: {

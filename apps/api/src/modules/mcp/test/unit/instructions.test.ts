@@ -13,7 +13,9 @@
 import { describe, it, expect, beforeAll } from "bun:test";
 import { OPERATION_INDEX_HEADING } from "@appstrate/core/chat-contract";
 import { initSystemPackages } from "../../../../services/system-packages.ts";
+import { isAssistantSkill } from "../../../../services/assistant-skills.ts";
 import { buildServerInstructions } from "../../router.ts";
+import { SYSTEM_PROMPT, formatCallerContext } from "@appstrate/module-chat/prompt";
 
 const SKILLS_HEADING = "## Assistant skills";
 const EXPECTED_ASSISTANT_SKILLS = [
@@ -50,7 +52,7 @@ describe("buildServerInstructions — assistant skills index", () => {
     expect(section).toContain("`@appstrate/agent-authoring`");
     expect(section).toContain("`@appstrate/skill-authoring`");
     expect(section).toContain("Assembler, modifier ou valider un agent enregistré");
-    expect(section).toContain("Créer ou améliorer une skill de méthode");
+    expect(section).toContain("Créer ou améliorer une méthode réutilisable");
     expect(section).toContain('`operation_id: "getSkill"`');
     expect(section).toContain("Choose the most specific guide");
     expect(section).toContain("Load one guide at a time");
@@ -59,5 +61,27 @@ describe("buildServerInstructions — assistant skills index", () => {
     expect(indexedIds).toEqual(EXPECTED_ASSISTANT_SKILLS);
     expect(section).not.toContain("`@appstrate/code-review`");
     expect(section).not.toContain("plus reference methods");
+  });
+
+  it("uses an explicit assistant role independent from package visibility", () => {
+    expect(
+      isAssistantSkill({
+        _meta: { "dev.appstrate/assistant-skill": { enabled: true } },
+      }),
+    ).toBe(true);
+    expect(
+      isAssistantSkill({
+        _meta: { "dev.appstrate/visibility": { level: "unlisted" } },
+      }),
+    ).toBe(false);
+  });
+
+  it("injects exactly one assistant index in the composed chat preamble", () => {
+    const composed = [
+      SYSTEM_PROMPT,
+      buildServerInstructions(),
+      formatCallerContext({ user: { name: "Ada" }, org: { role: "member" } }),
+    ].join("\n\n");
+    expect(composed.match(/^## Assistant skills$/gm)).toHaveLength(1);
   });
 });

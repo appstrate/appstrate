@@ -1,21 +1,28 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Assistant skills: UNLISTED system skill packages that carry know-how for the
- * chat assistant, such as the copilot interview, web search recipe and connector choice.
+ * Assistant skills: system skill packages explicitly marked as guides for the
+ * chat assistant, such as the copilot interview and connector choice.
  *
  * They are ordinary `.afps` skill packages in `system-packages/`, synced at
- * boot like every system package, but marked unlisted via the
- * `_meta["dev.appstrate/visibility"]` extension so they never surface in the
- * package catalogue or the "attach to an agent" hints. The assistant discovers
- * them through two dedicated indexes — the platform MCP server instructions and
- * the chat caller-context block — and loads a skill's full instructions on
- * demand by exact id (`invoke_operation` → `getSkill`), the same progressive
- * disclosure the detail route already provides for any system package.
+ * boot like every system package. Their assistant role is declared separately
+ * from visibility via `_meta["dev.appstrate/assistant-skill"]`; the five shipped
+ * guides are also unlisted so they stay out of attachable-skill catalogues. The
+ * assistant discovers them once through the platform MCP server instructions
+ * and loads a guide on demand by exact id (`invoke_operation` → `getSkill`).
  */
 
 import { getSystemPackagesByType } from "./system-packages.ts";
-import { isUnlisted } from "../lib/package-visibility.ts";
+import { asRecord } from "@appstrate/core/safe-json";
+
+/** Vendor extension declaring that a system skill guides the chat assistant. */
+export const ASSISTANT_SKILL_META_NAMESPACE = "dev.appstrate/assistant-skill";
+
+/** Visibility and assistant role are orthogonal. Only this marker grants the role. */
+export function isAssistantSkill(manifest: Record<string, unknown> | null | undefined): boolean {
+  const meta = asRecord(asRecord(manifest?._meta)[ASSISTANT_SKILL_META_NAMESPACE]);
+  return meta.enabled === true;
+}
 
 /** One assistant-skill entry for the MCP-instructions / chat-context indexes. */
 export interface AssistantSkillHint {
@@ -27,14 +34,14 @@ export interface AssistantSkillHint {
 }
 
 /**
- * List the assistant skills known to this instance: system skills marked
- * unlisted. Reads the in-memory system-package registry (loaded once at boot),
+ * List the assistant skills known to this instance: system skills carrying the
+ * explicit assistant marker. Reads the in-memory registry (loaded once at boot),
  * so it is synchronous and free — safe on the get_me / MCP-initialize hot
  * paths. Sorted by id for deterministic prompt output.
  */
 export function listAssistantSkills(): AssistantSkillHint[] {
   return getSystemPackagesByType("skill")
-    .filter((entry) => isUnlisted(entry.manifest))
+    .filter((entry) => isAssistantSkill(entry.manifest))
     .map((entry) => {
       const manifest = entry.manifest;
       return {
@@ -77,8 +84,8 @@ export function formatAssistantSkillsSection(skills: readonly AssistantSkillHint
 }
 
 /**
- * The `## Assistant skills` section for the platform MCP server instructions —
- * injected BEFORE the operation index so it survives the chat's per-provider
+ * The single `## Assistant skills` index, owned by the platform MCP server
+ * instructions. It is injected BEFORE the operation index so it survives the chat's per-provider
  * index trim (`applyOperationIndexPolicy`). "" when no assistant skill is
  * loaded (e.g. a deployment that stripped them from `system-packages/`).
  */

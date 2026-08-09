@@ -190,6 +190,7 @@ const PROTECTED_HEADERS = new Set<string>([
 // Cap the buffered response body so a large list endpoint can't dump
 // unbounded text into the model context. Truncation is flagged in the result.
 const MAX_RESPONSE_CHARS = 100_000;
+const MAX_TEXT_ATTACHMENT_BYTES = 100_000;
 const TEXT_ATTACHMENT_EXTENSIONS = new Set([
   ".md",
   ".markdown",
@@ -238,6 +239,48 @@ function textAttachmentName(response: Response): string | undefined {
   const dot = base.lastIndexOf(".");
   const extension = dot >= 0 ? base.slice(dot) : "";
   return TEXT_ATTACHMENT_EXTENSIONS.has(extension) ? filename : undefined;
+}
+
+/**
+ * Read at most `maxBytes + 1` bytes, then cancel the source stream. The extra
+ * byte distinguishes an exact-limit body from an oversized one without ever
+ * accumulating the rest of a misdeclared attachment in memory.
+ */
+async function readBodyBounded(
+  response: Response,
+  maxBytes: number,
+): Promise<{ bytes: Uint8Array; exceeded: boolean }> {
+  const reader = response.body?.getReader();
+  if (!reader) return { bytes: new Uint8Array(), exceeded: false };
+
+  const chunks: Uint8Array[] = [];
+  let kept = 0;
+  try {
+    while (kept <= maxBytes) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value.byteLength === 0) continue;
+
+      const remaining = maxBytes + 1 - kept;
+      const chunk = value.byteLength > remaining ? value.subarray(0, remaining) : value;
+      chunks.push(chunk);
+      kept += chunk.byteLength;
+      if (kept > maxBytes) {
+        await reader.cancel("text attachment exceeds MCP response limit").catch(() => undefined);
+        break;
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  const bytes = new Uint8Array(kept);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return { bytes, exceeded: kept > maxBytes };
 }
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
@@ -570,10 +613,10 @@ export async function readResponse(response: Response): Promise<CallToolResult> 
       byteLength !== null &&
       Number.isSafeInteger(byteLength) &&
       byteLength >= 0 &&
-      byteLength <= MAX_RESPONSE_CHARS
+      byteLength <= MAX_TEXT_ATTACHMENT_BYTES
     ) {
-      const bytes = new Uint8Array(await response.arrayBuffer());
-      if (bytes.byteLength <= MAX_RESPONSE_CHARS) {
+      const { bytes, exceeded } = await readBodyBounded(response, MAX_TEXT_ATTACHMENT_BYTES);
+      if (!exceeded) {
         try {
           const body = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
           return textResult(
