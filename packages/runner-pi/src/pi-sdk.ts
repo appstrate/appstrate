@@ -23,7 +23,15 @@ export { streamSimple, Type } from "@mariozechner/pi-ai";
 
 // --- types (erased at runtime) ---
 export type { AuthStorage, ExtensionAPI, ExtensionFactory } from "@mariozechner/pi-coding-agent";
-export type { Api, KnownApi, Model, Transport } from "@mariozechner/pi-ai";
+export type {
+  Api,
+  KnownApi,
+  Model,
+  Transport,
+  Context,
+  SimpleStreamOptions,
+  AssistantMessageEventStream,
+} from "@mariozechner/pi-ai";
 
 // --- heavy value surface (pi-coding-agent, ~200ms) behind a dynamic import ---
 // `@mariozechner/pi-coding-agent` is the single most expensive module to

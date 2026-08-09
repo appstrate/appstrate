@@ -21,12 +21,15 @@ export { deriveProviderFromApi, PROVIDER_BY_API } from "./provider-map.ts";
 // (Model/Api/Transport/ExtensionFactory/ExtensionAPI/AuthStorage) rides through here so
 // consumers (e.g. the chat module's Pi engine) never import the vendor SDK
 // directly — the single-import-surface guard is the barrel.
-export { Type, loadPiCodingAgentSdk, type PiCodingAgentSdk } from "./pi-sdk.ts";
+export { Type, streamSimple, loadPiCodingAgentSdk, type PiCodingAgentSdk } from "./pi-sdk.ts";
 export type {
   Api,
   KnownApi,
   Model,
   Transport,
+  Context,
+  SimpleStreamOptions,
+  AssistantMessageEventStream,
   AuthStorage,
   ExtensionAPI,
   ExtensionFactory,

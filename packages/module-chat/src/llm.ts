@@ -24,6 +24,7 @@ import {
   type ModelGenerationCapabilities,
   type ModelGenerationSettings,
 } from "@appstrate/core/model-generation";
+import type { ModelCost } from "@appstrate/core/module";
 
 const LLM_PROXY_PATH = "/api/llm-proxy";
 
@@ -45,6 +46,11 @@ export interface OrgModel {
    */
   needs_reconnection?: boolean;
   generation?: ModelGenerationCapabilities | null;
+  input?: string[] | null;
+  contextWindow?: number | null;
+  maxTokens?: number | null;
+  reasoning?: boolean | null;
+  cost?: ModelCost | null;
 }
 
 export async function listModels(

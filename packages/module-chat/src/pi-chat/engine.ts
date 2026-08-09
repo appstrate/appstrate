@@ -27,13 +27,10 @@ import { createUIMessageStream, createUIMessageStreamResponse, type UIMessageChu
 import {
   loadPiCodingAgentSdk,
   derivePiCompactionSettings,
-  deriveProviderFromApi,
   prepareRequestedThinkingLevel,
-  type Api,
-  type Model,
 } from "@appstrate/runner-pi";
 import { CHAT_TOOL_STEP_BUDGET, CHAT_TURN_DEADLINE_MS } from "@appstrate/core/chat-turn-metadata";
-import type { SubscriptionChatModel, ChatUsageRecord } from "@appstrate/core/chat-contract";
+import type { ChatUsageRecord } from "@appstrate/core/chat-contract";
 import { applyOperationIndexPolicy } from "../operation-index.ts";
 import { logger } from "../logger.ts";
 import { PiChatUiStreamMapper } from "./ui-stream-mapper.ts";
@@ -53,6 +50,7 @@ import {
   buildSubscriptionTurnMetadata,
   subscriptionFailureChunks,
 } from "./subscription-turn-closure.ts";
+import type { ResolvedPiChatModelBinding } from "./model-binding.ts";
 
 /**
  * Wall-clock ceiling for a single chat turn. A turn fans out into up to
@@ -66,8 +64,8 @@ import {
  */
 
 export interface PiSubscriptionChatInput {
-  /** Resolved subscription model + fresh real access token. */
-  model: SubscriptionChatModel;
+  /** Resolved Pi model, authentication transport and metering ownership. */
+  modelBinding: ResolvedPiChatModelBinding;
   /** Appstrate preset id (org model row id) — stored as `llm_usage.model`. */
   presetId: string;
   orgId: string;
@@ -97,7 +95,8 @@ export function runPiSubscriptionChat(input: PiSubscriptionChatInput): Response 
   const slot = acquirePiChatSlot();
   if (!slot) return chatCapacityResponse();
 
-  const { model, platformMcp, abortSignal, onError } = input;
+  const { modelBinding, platformMcp, abortSignal, onError } = input;
+  const model = modelBinding.model;
   const mapper = new PiChatUiStreamMapper();
   const startedAt = Date.now();
 
@@ -163,20 +162,7 @@ export function runPiSubscriptionChat(input: PiSubscriptionChatInput): Response 
           SettingsManager,
         } = await loadPiCodingAgentSdk();
 
-        const provider = deriveProviderFromApi(model.apiShape as Api);
-        const piModel: Model<Api> = {
-          id: model.modelId,
-          name: model.modelId,
-          api: model.apiShape as Api,
-          provider,
-          baseUrl: model.baseUrl,
-          reasoning: model.reasoning,
-          ...(model.reasoningLevelMap ? { thinkingLevelMap: model.reasoningLevelMap } : {}),
-          input: (model.input ?? ["text"]) as Model<Api>["input"],
-          cost: (model.cost ?? { input: 0, output: 0 }) as Model<Api>["cost"],
-          contextWindow: model.contextWindow ?? undefined,
-          maxTokens: model.maxTokens ?? undefined,
-        } as Model<Api>;
+        const piModel = model;
         const requestedThinkingLevel = input.generation.reasoningLevel ?? "medium";
         const {
           model: sessionModel,
@@ -184,10 +170,10 @@ export function runPiSubscriptionChat(input: PiSubscriptionChatInput): Response 
           thinkingBudgets,
         } = prepareRequestedThinkingLevel(piModel, requestedThinkingLevel);
 
-        // Real subscription token in-memory only — pi-ai emits the OAuth request
-        // shape from it natively (never persisted, never sent to the client).
+        // OAuth uses the real access token in memory. Proxy-routed models use
+        // only the inert `proxy` placeholder and replace the stream below.
         const authStorage = AuthStorage.inMemory();
-        authStorage.setRuntimeApiKey(provider, model.accessToken);
+        authStorage.setRuntimeApiKey(modelBinding.provider, modelBinding.runtimeApiKey);
         const modelRegistry = ModelRegistry.create(authStorage);
 
         // MCP server usage guidance is appended to the system prompt, then the
@@ -196,7 +182,7 @@ export function runPiSubscriptionChat(input: PiSubscriptionChatInput): Response 
         let system = mcpTools.instructions
           ? `${input.system}\n\n${mcpTools.instructions}`
           : input.system;
-        system = applyOperationIndexPolicy(system, model.apiShape);
+        system = applyOperationIndexPolicy(system, model.api);
 
         const generationExtensions =
           input.generation.temperature === undefined
@@ -244,6 +230,10 @@ export function runPiSubscriptionChat(input: PiSubscriptionChatInput): Response 
           // only the platform MCP meta-tools (extension tools stay enabled).
           noTools: "builtin",
         });
+
+        if (modelBinding.authMode === "proxy") {
+          session.agent.streamFn = modelBinding.stream;
+        }
 
         write(mapper.startChunk(crypto.randomUUID()));
 
@@ -340,20 +330,22 @@ export function runPiSubscriptionChat(input: PiSubscriptionChatInput): Response 
         // seam the token counts + the model's catalog rates and let it compute
         // the equivalent cost with the shared formula (consistent with the
         // proxy/runner paths) rather than forwarding pi-ai's own `meta.costUsd`.
-        input.recordUsage({
-          orgId: input.orgId,
-          userId: input.userId,
-          chatSessionId: input.chatSessionId,
-          presetId: input.presetId,
-          modelId: model.modelId,
-          apiShape: model.apiShape,
-          inputTokens: meta.usage.input,
-          outputTokens: meta.usage.output,
-          cacheReadTokens: meta.usage.cacheRead,
-          cacheWriteTokens: meta.usage.cacheWrite,
-          cost: model.cost,
-          durationMs: Date.now() - startedAt,
-        });
+        if (modelBinding.metering.kind === "inline") {
+          input.recordUsage({
+            orgId: input.orgId,
+            userId: input.userId,
+            chatSessionId: input.chatSessionId,
+            presetId: input.presetId,
+            modelId: model.id,
+            apiShape: model.api as ChatUsageRecord["apiShape"],
+            inputTokens: meta.usage.input,
+            outputTokens: meta.usage.output,
+            cacheReadTokens: meta.usage.cacheRead,
+            cacheWriteTokens: meta.usage.cacheWrite,
+            cost: modelBinding.metering.cost,
+            durationMs: Date.now() - startedAt,
+          });
+        }
       } catch (err) {
         // `createUIMessageStream` turns an escaped exception into a transient
         // error chunk. Without a start + finish boundary there is no assistant

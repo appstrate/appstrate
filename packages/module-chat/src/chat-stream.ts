@@ -41,6 +41,7 @@ import { mintLoopbackToken, mintMcpLoopbackToken } from "./loopback-auth.ts";
 import { buildTranscriptPrompt } from "./transcript.ts";
 import { materializeUserAttachments, messagesWithAttachmentsAsText } from "./attachments.ts";
 import { runPiSubscriptionChat } from "./pi-chat/engine.ts";
+import { resolvePiChatModelBinding } from "./pi-chat/model-binding.ts";
 import { SYSTEM_PROMPT, buildCallerContextBlock, type ChatEnv } from "./prompt.ts";
 export type { ChatEnv } from "./prompt.ts";
 import { finalizeChatStream } from "./finalize-stream.ts";
@@ -563,7 +564,16 @@ export async function handleChatStream(
   // a fresh access token (or a reconnect signal). Token resolution (decrypt +
   // possible refresh) happens here in the preamble, alongside the other reads.
   const subscription = await deps.resolveSubscriptionChatModel(orgId, chosen.id);
-  const isSubscription = subscription.subscription;
+  const modelBindingResolution = resolvePiChatModelBinding({
+    model: chosen,
+    subscription,
+    origin,
+    mintBearer: mintInferenceAuth,
+  });
+  const isSubscription =
+    modelBindingResolution.status === "needs-reconnection" ||
+    (modelBindingResolution.status === "ready" &&
+      modelBindingResolution.binding.authMode === "oauth2");
 
   // Admission gate — EVERY turn, whichever engine serves it. The platform
   // resolves system-provided vs. org-owned server-side and dispatches
@@ -756,12 +766,19 @@ export async function handleChatStream(
   // Subscription path — the generic in-process Pi engine drives the turn with
   // the real access token resolved above; the token stays in this process's
   // memory (in-memory AuthStorage, never persisted, never sent to the client).
-  if (subscription.subscription) {
-    if ("needsReconnection" in subscription) {
+  if (isSubscription) {
+    if (modelBindingResolution.status === "needs-reconnection") {
       // The oauth credential is dead → tell the client to reconnect rather than
       // launching a session that would 401 upstream.
       await failCleanup();
       return subscriptionReconnectResponse();
+    }
+    if (
+      modelBindingResolution.status !== "ready" ||
+      modelBindingResolution.binding.authMode !== "oauth2"
+    ) {
+      await failCleanup();
+      throw invalidRequest(`Model family "${chosen.apiShape}" is not supported by Pi chat.`);
     }
     // The Pi session opens its OWN platform MCP connection (`/api/mcp/o/:org`),
     // and run_and_wait hits platform run routes with these headers. It must NEVER
@@ -788,7 +805,7 @@ export async function handleChatStream(
     try {
       return await finalize(
         runPiSubscriptionChat({
-          model: subscription.model,
+          modelBinding: modelBindingResolution.binding,
           presetId: chosen.id,
           orgId,
           userId: user.id,
@@ -815,6 +832,10 @@ export async function handleChatStream(
   }
 
   // ai-sdk path — API-key providers only, bound to the llm-proxy.
+  if (modelBindingResolution.status !== "ready") {
+    await failCleanup();
+    throw invalidRequest(`Model family "${chosen.apiShape}" is not supported by the chat.`);
+  }
   const model = modelFromFamily(
     chosen,
     origin,
