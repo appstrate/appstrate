@@ -16,8 +16,8 @@ import {
   type ClientTurnError,
 } from "../turn-error.ts";
 
-/** Build the persisted terminal metadata shared by every subscription exit path. */
-export function buildSubscriptionTurnMetadata(input: {
+/** Build the persisted terminal metadata shared by every Pi exit path. */
+export function buildPiTurnMetadata(input: {
   finishReason: ChatTurnFinishReason;
   clientError?: ClientTurnError;
   stepCount: number;
@@ -25,7 +25,7 @@ export function buildSubscriptionTurnMetadata(input: {
   lastToolName?: string;
 }): ChatMessageMetadata {
   return mergeTurnMetadata(undefined, {
-    engine: "subscription",
+    engine: "pi",
     finishReason: input.finishReason,
     ...(input.clientError
       ? {
@@ -43,8 +43,8 @@ export function buildSubscriptionTurnMetadata(input: {
   });
 }
 
-/** Close a subscription turn whose setup or prompt escaped with an exception. */
-export function subscriptionFailureChunks(input: {
+/** Close a Pi turn whose setup or prompt escaped with an exception. */
+export function piFailureChunks(input: {
   error: unknown;
   streamStarted: boolean;
   aborted: boolean;
@@ -72,7 +72,7 @@ export function subscriptionFailureChunks(input: {
   }
   chunks.push({
     type: "finish",
-    messageMetadata: buildSubscriptionTurnMetadata({
+    messageMetadata: buildPiTurnMetadata({
       finishReason: closure.finishReason,
       ...(clientError ? { clientError } : {}),
       stepCount: input.stepCount,

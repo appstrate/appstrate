@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Step-cap control for the Pi subscription chat engine — the ONE guard that is
+ * Step-cap control for the Pi chat engine — the ONE guard that is
  * genuinely Pi-specific.
  *
  * **Step cap ("early-stopping generate").** `CHAT_MAX_STEPS` used to be reported

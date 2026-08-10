@@ -1,26 +1,26 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * `runPiSubscriptionChat` — the SINGLE in-process chat engine for every
- * oauth-subscription provider (claude-code, codex).
+ * `runPiChat` is the single in-process server engine for Pi-selected chat turns.
  *
  * Runs a `@mariozechner/pi-coding-agent` session in the `apps/api` process,
  * driven by the Pi SDK (`@mariozechner/pi-ai`), which natively emits each
- * provider's subscription request shape from the real access token — the
+ * provider's request shape from either a real OAuth token or the llm-proxy
+ * transport. OAuth examples include the
  * Anthropic OAuth fingerprint (`sk-ant-oat…` → beta + claude-cli UA + system
- * prelude) or the codex-responses headers (`chatgpt-account-id` decoded from the
+ * prelude) and the codex-responses headers (`chatgpt-account-id` decoded from the
  * token JWT). The platform forges nothing; request-shape fidelity is delegated
- * to Pi. There is no per-provider chat engine or handler seam — every
- * subscription provider rides this one loop.
+ * to Pi. API-key providers keep their secret behind llm-proxy. Every selected
+ * provider rides this one loop.
  *
- * The chat runs server-side, so the real subscription token is registered
+ * The chat runs server-side, so a real OAuth token is registered
  * directly in an in-memory {@link AuthStorage} (never persisted, never handed to
  * the client) — no sidecar/gateway bearer-swap is needed (that only exists for
  * containerised RUNS, where the token must stay out of the agent container).
  *
  * The Pi session's event stream is mapped onto the AI-SDK UI-message-stream
  * ({@link PiChatUiStreamMapper}), the exact protocol the chat client already
- * consumes from the ai-sdk path — one client contract, two loops.
+ * consumes from the AI SDK path, with one client contract for both loops.
  */
 
 import {
@@ -51,10 +51,7 @@ import {
 } from "../turn-closure.ts";
 import { classifyClientTurnError, clientTurnErrorMarker } from "../turn-error.ts";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
-import {
-  buildSubscriptionTurnMetadata,
-  subscriptionFailureChunks,
-} from "./subscription-turn-closure.ts";
+import { buildPiTurnMetadata, piFailureChunks } from "./pi-turn-closure.ts";
 import type { ResolvedPiChatModelBinding } from "./model-binding.ts";
 import { buildStructuredPiTurn, reconstructPiSession } from "./structured-session.ts";
 
@@ -69,7 +66,7 @@ import { buildStructuredPiTurn, reconstructPiSession } from "./structured-sessio
  * `run_and_wait` can no longer be granted more time than the turn hosting it.
  */
 
-export interface PiSubscriptionChatInput {
+export interface PiChatInput {
   /** Resolved Pi model, authentication transport and metering ownership. */
   modelBinding: ResolvedPiChatModelBinding;
   /** Appstrate preset id (org model row id) — stored as `llm_usage.model`. */
@@ -94,10 +91,10 @@ export interface PiSubscriptionChatInput {
 }
 
 /**
- * Drive one subscription chat turn and return the UI-message-stream `Response`.
+ * Drive one Pi chat turn and return the UI-message-stream `Response`.
  * Returns a 429 immediately when the in-process session cap is saturated.
  */
-export function runPiSubscriptionChat(input: PiSubscriptionChatInput): Response {
+export function runPiChat(input: PiChatInput): Response {
   const slot = acquirePiChatSlot();
   if (!slot) return chatCapacityResponse();
 
@@ -335,7 +332,7 @@ export function runPiSubscriptionChat(input: PiSubscriptionChatInput): Response 
 
         write({
           type: "finish",
-          messageMetadata: buildSubscriptionTurnMetadata({
+          messageMetadata: buildPiTurnMetadata({
             finishReason: closure.finishReason,
             ...(clientError ? { clientError } : {}),
             stepCount,
@@ -372,13 +369,13 @@ export function runPiSubscriptionChat(input: PiSubscriptionChatInput): Response 
         // error chunk. Without a start + finish boundary there is no assistant
         // message for the persistence drain to reconstruct after a reload.
         if (streamFinished) {
-          logger.error("subscription chat failed after its finish chunk", { err: String(err) });
+          logger.error("Pi chat failed after its finish chunk", { err: String(err) });
         } else {
-          logger.error("subscription chat turn failed", {
+          logger.error("Pi chat turn failed", {
             err: String(err),
             chatSessionId: input.chatSessionId,
           });
-          for (const chunk of subscriptionFailureChunks({
+          for (const chunk of piFailureChunks({
             error: err,
             streamStarted,
             aborted: turnAbort.signal.aborted,

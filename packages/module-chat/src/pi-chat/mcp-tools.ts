@@ -286,7 +286,7 @@ function makeRunAndWaitExtension(
           signal: execSignal ?? ctx.signal,
           budget: {
             turnDeadlineAt: ctx.turnBudget.deadlineAt,
-            engine: "subscription",
+            engine: "pi",
             chatSessionId: ctx.turnBudget.chatSessionId,
             ...(ctx.turnBudget.orgId ? { orgId: ctx.turnBudget.orgId } : {}),
             ...(ctx.turnBudget.now ? { now: ctx.turnBudget.now } : {}),

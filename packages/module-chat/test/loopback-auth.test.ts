@@ -46,7 +46,7 @@ describe("mintLoopbackToken + chatLoopbackStrategy round-trip", () => {
   });
 });
 
-describe("mintMcpLoopbackToken (subscription-engine platform-MCP bearer)", () => {
+describe("mintMcpLoopbackToken (Pi-engine platform-MCP bearer)", () => {
   const callerPermissions = ["mcp:read", "agents:read", "runs:write"];
 
   it("resolves back to EXACTLY the caller's forwarded permission set (RBAC fidelity, no amplification)", async () => {
@@ -58,7 +58,7 @@ describe("mintMcpLoopbackToken (subscription-engine platform-MCP bearer)", () =>
     expect(res!.orgId).toBe("org_1");
   });
 
-  it("does NOT grant first-party-loopback — the MCP bearer can never reach the subscription LLM gateway", async () => {
+  it("does NOT grant first-party-loopback — the MCP bearer can never reach the LLM gateway", async () => {
     const token = mintMcpLoopbackToken({ ...claims, permissions: callerPermissions });
     const res = await chatLoopbackStrategy.authenticate({ headers: authHeaders(token) } as never);
     // Falsy (unset or false) so `if (resolution.firstPartyLoopback)` in the

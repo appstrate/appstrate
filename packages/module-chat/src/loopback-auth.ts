@@ -24,7 +24,7 @@
  *     `llm-proxy:call` + `models:read`, `firstPartyLoopback: true` (the
  *     llm-proxy accepts a loopback caller without an API key).
  *   - `mintMcpLoopbackToken` — the platform-MCP bearer handed to the
- *     in-process Pi subscription engine. Scope is the caller's own already-
+ *     in-process Pi engine. Scope is the caller's own already-
  *     resolved permission set (RBAC fidelity, no amplification) and
  *     `firstPartyLoopback: false` — it authorizes the MCP meta-tools but
  *     can NEVER be replayed against the inference proxy.
@@ -130,7 +130,7 @@ export function mintLoopbackToken(
 
 /**
  * Mint the platform-MCP loopback bearer handed to the in-process Pi
- * subscription engine for its own `/api/mcp/o/:org` connection.
+ * Pi engine for its own `/api/mcp/o/:org` connection.
  *
  * `permissions` MUST be the caller's already-resolved permission set (from
  * `c.get("permissions")`): the MCP meta-tools re-enter the platform in-process

@@ -3,7 +3,7 @@
 /**
  * Shared system-prompt policy for the trailing operation index (fenced by
  * {@link OPERATION_INDEX_HEADING}) — used by BOTH chat engines (ai-sdk and the
- * in-process Pi subscription engine) so the two can never drift.
+ * in-process Pi engine) so the two can never drift.
  */
 
 import { OPERATION_INDEX_HEADING } from "@appstrate/core/chat-contract";

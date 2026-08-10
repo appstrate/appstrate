@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Bounded in-process concurrency for the Pi subscription chat engine.
+ * Bounded in-process concurrency for the Pi chat engine.
  *
- * Each subscription chat turn drives a `@mariozechner/pi-coding-agent` session
+ * Each Pi chat turn drives a `@mariozechner/pi-coding-agent` session
  * in-process inside the single `apps/api` process — which also serves runs,
  * auth, and everything else. Without a ceiling a burst of concurrent chats would
  * spin up an unbounded number of Pi sessions (each holding an upstream inference

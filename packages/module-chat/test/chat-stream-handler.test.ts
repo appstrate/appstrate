@@ -34,7 +34,7 @@ import { db } from "@appstrate/db/client";
 import { chatMessages, chatSessions } from "@appstrate/db/schema";
 import { truncateAll } from "../../../apps/api/test/helpers/db.ts";
 import { createTestContext, type TestContext } from "../../../apps/api/test/helpers/auth.ts";
-import { handleChatStream, type ChatEnv } from "../src/chat-stream.ts";
+import { handleChatStream, type ChatEngineRuntime, type ChatEnv } from "../src/chat-stream.ts";
 import { mintSessionId } from "../src/session-id.ts";
 import { buildChatPlatformDeps } from "../src/platform-services.ts";
 import { buildModuleInitContext } from "../../../apps/api/src/lib/modules/registry.ts";
@@ -218,7 +218,7 @@ async function collectUiChunks(
   return chunks;
 }
 
-describe("handleChatStream (ai-sdk path)", () => {
+describe("handleChatStream engine routing", () => {
   let ctx: TestContext;
 
   beforeEach(async () => {
@@ -227,7 +227,10 @@ describe("handleChatStream (ai-sdk path)", () => {
   });
 
   /** A `Hono<ChatEnv>` app mirroring what the platform auth pipeline sets. */
-  function buildApp(deps: ReturnType<typeof buildChatPlatformDeps>) {
+  function buildApp(
+    deps: ReturnType<typeof buildChatPlatformDeps>,
+    engineRuntime?: ChatEngineRuntime,
+  ) {
     const app = new Hono<ChatEnv>();
     // Mirror production's RFC 9457 error boundary so invalid client input is
     // asserted at the HTTP contract, not as an uncaught handler exception.
@@ -239,7 +242,7 @@ describe("handleChatStream (ai-sdk path)", () => {
       c.set("orgName", ctx.org.name);
       c.set("orgSlug", ctx.org.slug);
       c.set("permissions", new Set<string>());
-      return handleChatStream(c, deps);
+      return handleChatStream(c, deps, engineRuntime);
     });
     return app;
   }
@@ -247,12 +250,13 @@ describe("handleChatStream (ai-sdk path)", () => {
   async function postChat(
     sessionId: string,
     generation?: { temperature?: number; reasoningLevel?: string },
+    engineRuntime?: ChatEngineRuntime,
   ): Promise<Response> {
     const { dispatch, capture } = scriptedDispatch();
     // Real platform deps (the same context `init()` gets), with dispatch
     // overridden by the scripted one so no request leaves this process.
     const deps = { ...buildChatPlatformDeps(buildModuleInitContext()), dispatch };
-    const app = buildApp(deps);
+    const app = buildApp(deps, engineRuntime);
     const res = await app.request("/api/chat", {
       method: "POST",
       headers: {
@@ -276,6 +280,27 @@ describe("handleChatStream (ai-sdk path)", () => {
 
     expect(res.status).toBe(400);
     expect(res.capture.inferenceBody).toBeNull();
+  });
+
+  it("never falls back to AI SDK when a Pi-selected API-key turn fails", async () => {
+    const sessionId = mintSessionId();
+    const res = (await postChat(sessionId, undefined, {
+      configuredPiOrgIds: () => ctx.orgId,
+      runPiChat: () => {
+        throw new Error("forced Pi engine failure");
+      },
+    })) as Response & { capture: DispatchCapture };
+
+    expect(res.status).toBe(500);
+    expect(res.capture.inferenceBody).toBeNull();
+    expect(res.capture.inferenceUrl).toBeNull();
+
+    const [session] = await db
+      .select({ activeStreamId: chatSessions.activeStreamId })
+      .from(chatSessions)
+      .where(and(eq(chatSessions.id, sessionId), eq(chatSessions.orgId, ctx.orgId)))
+      .limit(1);
+    expect(session?.activeStreamId).toBeNull();
   });
 
   it("streams start → text → finish with no error and persists the assistant turn", async () => {

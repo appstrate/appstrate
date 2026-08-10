@@ -85,7 +85,7 @@ describe("decideRunAndWaitBudget", () => {
     const decision = decideRunAndWaitBudget(
       {
         turnDeadlineAt: NOW + 2 * 60_000 + CHAT_TURN_SAFETY_MARGIN_MS,
-        engine: "subscription",
+        engine: "pi",
         chatSessionId: "chs_1",
         now: () => NOW,
       },
@@ -99,7 +99,7 @@ describe("decideRunAndWaitBudget", () => {
     const { log, warnings } = captureLogger();
     // The audited incident: 22 s left on the turn.
     const decision = decideRunAndWaitBudget(
-      { turnDeadlineAt: NOW + 22_000, engine: "subscription", now: () => NOW },
+      { turnDeadlineAt: NOW + 22_000, engine: "pi", now: () => NOW },
       log,
     );
     expect(decision.launch).toBe(false);
@@ -205,7 +205,7 @@ describe("runAndWaitStepsWithinTurnBudget", () => {
         origin: "https://test.local",
         headers: {},
         fetch: fetchImpl,
-        budget: { turnDeadlineAt: NOW + 1_000, engine: "subscription", now: () => NOW },
+        budget: { turnDeadlineAt: NOW + 1_000, engine: "pi", now: () => NOW },
       },
     )) {
       steps.push(step);

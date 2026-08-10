@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
-export type ChatTurnEngine = "ai-sdk" | "subscription";
+/** `subscription` is retained only to read messages persisted before Pi was generalized. */
+export type ChatTurnEngine = "ai-sdk" | "pi" | "subscription";
 export type ChatTurnErrorCategory =
   | "credential_unavailable"
   | "rate_limited"
@@ -173,7 +174,9 @@ export function turnMetadataFromMessage(message: unknown): AppstrateTurnMetadata
   const appstrate = metadata && isRecord(metadata.appstrate) ? metadata.appstrate : null;
   const turn = appstrate && isRecord(appstrate.turn) ? appstrate.turn : null;
   if (!turn) return null;
-  if (turn.engine !== "ai-sdk" && turn.engine !== "subscription") return null;
+  if (turn.engine !== "ai-sdk" && turn.engine !== "pi" && turn.engine !== "subscription") {
+    return null;
+  }
   if (typeof turn.stepCount !== "number") return null;
   if (typeof turn.maxSteps !== "number") return null;
   if (typeof turn.maxStepsReached !== "boolean") return null;
