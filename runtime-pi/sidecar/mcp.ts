@@ -1466,7 +1466,18 @@ async function responseToToolResult(
   };
 
   const ct = res.headers.get("content-type") ?? "";
-  const isText = ct.startsWith("text/") || ct.includes("json") || ct.includes("xml");
+  // Match media types, never arbitrary substrings. OOXML formats such as
+  // `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet` are
+  // ZIP binaries despite containing "xml" in the subtype; treating them as
+  // text replaces invalid UTF-8 bytes with U+FFFD before responseMode.toFile
+  // can write them to the workspace.
+  const mediaType = ct.split(";", 1)[0]?.trim().toLowerCase() ?? "";
+  const isText =
+    mediaType.startsWith("text/") ||
+    mediaType === "application/json" ||
+    mediaType.endsWith("+json") ||
+    mediaType === "application/xml" ||
+    mediaType.endsWith("+xml");
 
   if (!isText) {
     if (!options.blobStore) {

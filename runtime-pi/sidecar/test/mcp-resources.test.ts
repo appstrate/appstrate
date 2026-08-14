@@ -131,6 +131,45 @@ describe("POST /mcp — api_call resource spillover", () => {
     expect(result.content[0]!.uri).toMatch(/^appstrate:\/\/api-response\/run-test\/[A-Z0-9]{26}$/);
   });
 
+  it("treats OOXML media types as binary even though their subtype contains xml", async () => {
+    // Drive serves .xlsx as this MIME type. It is a ZIP container, not XML
+    // text: decoding its invalid UTF-8 bytes turns them into U+FFFD and makes
+    // a responseMode.toFile download irreversibly corrupt.
+    const xlsxBytes = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0xff, 0x80, 0xc3, 0x28, 0x00]);
+    const fetchFn = mock(
+      async () =>
+        new Response(xlsxBytes, {
+          status: 200,
+          headers: {
+            "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          },
+        }),
+    );
+    const app = await makeResourcesApp({ fetchFn: fetchFn as unknown as typeof fetch });
+    const callRes = await rpc(app, {
+      method: "tools/call",
+      params: {
+        name: "test__api_call",
+        arguments: { target: "https://api.example.com/book.xlsx" },
+      },
+    });
+    const callResult = callRes.json.result as {
+      content: Array<{ type: string; uri?: string; mimeType?: string }>;
+    };
+    expect(callResult.content[0]!.type).toBe("resource_link");
+    expect(callResult.content[0]!.mimeType).toBe(
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    );
+
+    const readRes = await rpc(app, {
+      method: "resources/read",
+      params: { uri: callResult.content[0]!.uri! },
+    });
+    const readResult = readRes.json.result as { contents: Array<{ blob?: string }> };
+    const actual = Uint8Array.from(atob(readResult.contents[0]!.blob!), (c) => c.charCodeAt(0));
+    expect(actual).toEqual(xlsxBytes);
+  });
+
   it("spills oversized text responses to a resource_link", async () => {
     // Generate a JSON body well above the 32 KB inline threshold.
     const big = JSON.stringify({ data: "x".repeat(40 * 1024) });
