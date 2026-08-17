@@ -13,15 +13,17 @@
  * (see {@link chatCapacityResponse}) and the client backs off instead of piling
  * on more sessions.
  *
- * The cap is read from `CHAT_PI_MAX_CONCURRENCY` (positive integer, default 6) —
- * an opt-in module knob read straight from `process.env`, not a core env-schema
- * field (the chat module runs without the platform env surface in tests/OSS
- * standalone wiring).
+ * The cap is read from `CHAT_PI_MAX_CONCURRENCY` (positive integer, default 64).
+ * The default is a process safety ceiling, not a product quota: two local load
+ * profiles completed 60 concurrent turns below it. Deployments with a smaller
+ * memory budget can lower it through the existing module knob, read straight
+ * from `process.env` because the chat module also runs without the platform env
+ * surface in tests and standalone OSS wiring.
  */
 
 import { logger } from "../logger.ts";
 
-const DEFAULT_MAX_CONCURRENCY = 6;
+const DEFAULT_MAX_CONCURRENCY = 64;
 const ENV_VAR = "CHAT_PI_MAX_CONCURRENCY";
 
 /** A reserved session slot. `release()` is idempotent (safe to call twice). */
