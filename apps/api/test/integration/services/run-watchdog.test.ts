@@ -22,6 +22,11 @@
  *      orchestrator (same route as user cancel) — a stalled runner is
  *      not necessarily dead, and a remote microVM left running keeps
  *      executing and billing.
+ *   6. The startup phase: a run still being provisioned (no runner event
+ *      yet, heartbeat kept fresh by the platform's boot attestation) is
+ *      NOT killed by the stall predicate, but IS killed once it blows
+ *      `boot_deadline_at` — with an error naming provisioning rather than
+ *      blaming a runner that never got to exist.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -58,6 +63,9 @@ async function seedRun(
     lastHeartbeatAt?: Date;
     sinkClosedAt?: Date | null;
     sinkExpiresAt?: Date | null;
+    bootDeadlineAt?: Date | null;
+    lastEventSequence?: number;
+    startedAt?: Date;
   } = {},
 ): Promise<string> {
   const runId = `run_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
@@ -76,8 +84,14 @@ async function seedRun(
     sinkSecretEncrypted: encrypt(RUN_SECRET),
     sinkExpiresAt,
     sinkClosedAt: overrides.sinkClosedAt ?? null,
-    startedAt: new Date(),
+    startedAt: overrides.startedAt ?? new Date(),
     lastHeartbeatAt: overrides.lastHeartbeatAt ?? new Date(),
+    // Mirrors production: a row with an open sink always carries a
+    // provisioning ceiling. Explicit `in` check so a test can exercise the
+    // pre-migration NULL case.
+    bootDeadlineAt:
+      "bootDeadlineAt" in overrides ? overrides.bootDeadlineAt : new Date(Date.now() + 300_000),
+    lastEventSequence: overrides.lastEventSequence ?? 1,
     tokenUsage: { input_tokens: 100, output_tokens: 50 } as unknown as Record<string, number>,
   });
   return runId;
@@ -346,6 +360,154 @@ describe("run watchdog — unified stall detection", () => {
     } finally {
       _setOrchestratorForTesting(null);
     }
+  });
+
+  // ── Startup phase (the second predicate) ────────────────────────────
+  //
+  // Between run creation and the runner's first event the platform is
+  // provisioning: pulling images, creating the boundary, booting the
+  // workload. No runner exists to heartbeat, so the platform attests
+  // liveness on its behalf and the stall predicate must NOT fire — the
+  // boot deadline is what bounds that window instead.
+
+  it("leaves a still-provisioning run alone while its heartbeat is fresh", async () => {
+    // What a slow-but-healthy cold boot looks like: no runner event yet,
+    // deadline still ahead, boot pump keeping the heartbeat fresh. This is
+    // the regression: before the split, a cold image pull outrunning the
+    // 60s stall threshold killed this run and blamed the runner.
+    const runId = await seedRun(ctx, "@test/watchdog-agent", {
+      status: "pending",
+      lastEventSequence: 0,
+      lastHeartbeatAt: new Date(),
+      bootDeadlineAt: new Date(Date.now() + 240_000),
+    });
+
+    const finalizedCount = await runWatchdogTick({
+      intervalSeconds: 30,
+      stallThresholdSeconds: 60,
+      maxFinalizesPerTick: 100,
+    });
+
+    expect(finalizedCount).toBe(0);
+    const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+    expect(row?.status).toBe("pending");
+  });
+
+  it("fails a run that blew its provisioning deadline, with a provisioning error", async () => {
+    const runId = await seedRun(ctx, "@test/watchdog-agent", {
+      status: "pending",
+      lastEventSequence: 0,
+      // Fresh heartbeat: the pump was still vouching for it right up to the
+      // ceiling, so ONLY the boot-deadline predicate can catch this row.
+      lastHeartbeatAt: new Date(),
+      startedAt: new Date(Date.now() - 310_000),
+      bootDeadlineAt: new Date(Date.now() - 10_000),
+    });
+
+    const finalizedCount = await runWatchdogTick({
+      intervalSeconds: 30,
+      stallThresholdSeconds: 60,
+      maxFinalizesPerTick: 100,
+    });
+
+    expect(finalizedCount).toBe(1);
+    const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+    expect(row?.status).toBe("failed");
+    expect(row?.sinkClosedAt).not.toBeNull();
+    // The error must describe what actually happened — the whole point of
+    // the split. "Runner stopped reporting" would be a lie here: no runner
+    // ever reported anything.
+    expect(row?.error).toContain("never started executing");
+    expect(row?.error).not.toContain("Runner stopped reporting");
+    // Budget is derived per-row (deadline − started_at), so the message
+    // stays true for rows created under a different env setting.
+    expect(row?.error).toContain("300s");
+  });
+
+  it("still reports a stall (not a boot failure) once the runner has reported", async () => {
+    const runId = await seedRun(ctx, "@test/watchdog-agent", {
+      status: "running",
+      lastEventSequence: 4,
+      lastHeartbeatAt: new Date(Date.now() - 300_000),
+      // Deadline long past too — irrelevant once the runner has spoken.
+      bootDeadlineAt: new Date(Date.now() - 200_000),
+    });
+
+    const finalizedCount = await runWatchdogTick({
+      intervalSeconds: 30,
+      stallThresholdSeconds: 60,
+      maxFinalizesPerTick: 100,
+    });
+
+    expect(finalizedCount).toBe(1);
+    const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+    expect(row?.error).toContain("Runner stopped reporting");
+  });
+
+  it("keeps the stall predicate for pre-migration rows with no boot deadline", async () => {
+    const runId = await seedRun(ctx, "@test/watchdog-agent", {
+      status: "pending",
+      lastEventSequence: 0,
+      bootDeadlineAt: null,
+      lastHeartbeatAt: new Date(Date.now() - 300_000),
+    });
+
+    const finalizedCount = await runWatchdogTick({
+      intervalSeconds: 30,
+      stallThresholdSeconds: 60,
+      maxFinalizesPerTick: 100,
+    });
+
+    expect(finalizedCount).toBe(1);
+    const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+    expect(row?.status).toBe("failed");
+    expect(row?.error).toContain("Runner stopped reporting");
+  });
+
+  it("stops the workload of a run that blew its provisioning deadline", async () => {
+    // Same credential-exposure reasoning as the stall path: a run stuck in
+    // provisioning may have a live sandbox holding credentials.
+    const stoppedRunIds: string[] = [];
+    _setOrchestratorForTesting(createRecordingOrchestrator(stoppedRunIds));
+    try {
+      const runId = await seedRun(ctx, "@test/watchdog-agent", {
+        status: "pending",
+        lastEventSequence: 0,
+        lastHeartbeatAt: new Date(),
+        bootDeadlineAt: new Date(Date.now() - 10_000),
+      });
+
+      const finalizedCount = await runWatchdogTick({
+        intervalSeconds: 30,
+        stallThresholdSeconds: 60,
+        maxFinalizesPerTick: 100,
+      });
+
+      expect(finalizedCount).toBe(1);
+      expect(stoppedRunIds).toEqual([runId]);
+    } finally {
+      _setOrchestratorForTesting(null);
+    }
+  });
+
+  it("ignores a blown deadline on a run whose sink is already closed", async () => {
+    const runId = await seedRun(ctx, "@test/watchdog-agent", {
+      status: "success",
+      lastEventSequence: 0,
+      lastHeartbeatAt: new Date(),
+      bootDeadlineAt: new Date(Date.now() - 10_000),
+      sinkClosedAt: new Date(),
+    });
+
+    const finalizedCount = await runWatchdogTick({
+      intervalSeconds: 30,
+      stallThresholdSeconds: 60,
+      maxFinalizesPerTick: 100,
+    });
+
+    expect(finalizedCount).toBe(0);
+    const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+    expect(row?.status).toBe("success");
   });
 });
 

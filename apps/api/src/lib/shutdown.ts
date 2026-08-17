@@ -16,6 +16,7 @@ import { shutdownOAuthModelRefreshWorker } from "../services/model-providers/ref
 import { shutdownPairingCleanupWorker } from "../services/model-providers/pairing-cleanup-worker.ts";
 import { shutdownLlmUsageRetryWorker } from "../services/llm-usage-retry.ts";
 import { stopRunWatchdog } from "../services/run-watchdog.ts";
+import { stopRuntimeImageWarmer } from "../services/orchestrator/runtime-image-warmer.ts";
 import { getOrchestrator } from "../services/orchestrator/index.ts";
 import { stopUploadGc } from "../services/uploads.ts";
 import { stopDocumentGc } from "../services/documents.ts";
@@ -89,6 +90,10 @@ export function createShutdownHandler(setShuttingDown: () => void): () => Promis
 
     logger.info("Stopping run watchdog...");
     await stopRunWatchdog();
+
+    // The pin containers themselves are durable and deliberately survive
+    // this process — only the sweep timer stops.
+    stopRuntimeImageWarmer();
 
     logger.info("Shutting down schedule worker...");
     await shutdownScheduleWorker();

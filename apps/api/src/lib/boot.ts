@@ -46,6 +46,8 @@ import { initPairingCleanupWorker } from "../services/model-providers/pairing-cl
 import { initLlmUsageRetryWorker } from "../services/llm-usage-retry.ts";
 import { initCancelSubscriber } from "../services/run-tracker.ts";
 import { startRunWatchdog } from "../services/run-watchdog.ts";
+import { startRuntimeImageWarmer } from "../services/orchestrator/runtime-image-warmer.ts";
+import { getExecutionMode } from "../infra/mode.ts";
 import { getOrchestrator } from "../services/orchestrator/index.ts";
 import { ensureBucket } from "@appstrate/db/storage";
 import { logInfraMode } from "../infra/index.ts";
@@ -398,6 +400,21 @@ export async function bootBackground(): Promise<{ agentsHealthy: boolean }> {
     }).catch((err) => {
       logger.warn("Could not start run watchdog", {
         error: getErrorMessage(err),
+      });
+    }),
+    // Keep the runtime images warm + pinned on the Docker host. Docker-only:
+    // it reconciles Docker images and containers, and every other backend
+    // owns its own artifact locality. `initialize()` above pre-pulls once;
+    // this is what keeps that true against host-level image pruning between
+    // runs (see services/orchestrator/runtime-image-warmer.ts).
+    Promise.resolve().then(() => {
+      if (getExecutionMode() !== "docker") return;
+      startRuntimeImageWarmer({
+        intervalSeconds: env.RUNTIME_IMAGE_RECONCILE_INTERVAL_SECONDS,
+        images: () => [
+          { image: env.PI_IMAGE, slot: "pi" },
+          { image: env.SIDECAR_IMAGE, slot: "sidecar" },
+        ],
       });
     }),
     expireOldInvitations()

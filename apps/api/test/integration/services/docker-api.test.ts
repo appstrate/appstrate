@@ -22,6 +22,8 @@ import {
   removeVolume,
   runEphemeralCommand,
   WORKSPACE_VOLUME_PREFIX,
+  ensureImagePin,
+  IMAGE_PIN_PREFIX,
 } from "../../../src/services/docker.ts";
 
 // ─── Constants ──────────────────────────────────────────────
@@ -855,6 +857,96 @@ describeRequiresDocker("runEphemeralCommand", () => {
       const out: string[] = [];
       for await (const line of streamLogs(probeId)) out.push(line);
       expect(out.join("").trim()).toContain("1001:1001");
+    },
+    TIMEOUT,
+  );
+});
+
+// ─── ensureImagePin ─────────────────────────────────────────
+//
+// Pin containers are what stop a host-level `docker image prune -a` from
+// deleting the runtime images between runs (the deletion that puts a
+// multi-hundred-MB pull back on the run-boot critical path). Two invariants
+// matter and are both load-bearing:
+//   1. the pin converges — same image is a no-op, a drifted image is replaced
+//      (releases bump the tag, pins must follow or they protect nothing);
+//   2. the pin is NOT reaped by the per-run orphan sweep — it is durable
+//      infra, and the sweep force-removes everything labelled
+//      `appstrate.managed=true`.
+
+describeRequiresDocker("ensureImagePin", () => {
+  const SLOT = `test-${uid()}`;
+  const PIN_NAME = `${IMAGE_PIN_PREFIX}${SLOT}`;
+  const OTHER_IMAGE = "busybox:1.37";
+
+  async function inspectPin(): Promise<{
+    running: boolean;
+    labels: Record<string, string>;
+  } | null> {
+    const res = await fetch(`${DOCKER_URL}/containers/${PIN_NAME}/json`);
+    if (res.status === 404) return null;
+    const data = (await res.json()) as {
+      State?: { Running?: boolean };
+      Config?: { Labels?: Record<string, string> };
+    };
+    return { running: data.State?.Running === true, labels: data.Config?.Labels ?? {} };
+  }
+
+  afterEach(async () => {
+    const res = await fetch(`${DOCKER_URL}/containers/${PIN_NAME}?force=true`, {
+      method: "DELETE",
+    });
+    void res;
+  });
+
+  it(
+    "creates a running pin holding the image, and is idempotent",
+    async () => {
+      await pullImage(IMAGE);
+
+      expect(await ensureImagePin(IMAGE, SLOT)).toBe("created");
+      const pin = await inspectPin();
+      expect(pin?.running).toBe(true);
+      expect(pin?.labels["appstrate.pin.image"]).toBe(IMAGE);
+      // Durable infra must not carry the per-run reaper's label.
+      expect(pin?.labels["appstrate.managed"]).toBeUndefined();
+
+      // Converged — a second pass must not churn the container.
+      expect(await ensureImagePin(IMAGE, SLOT)).toBe("unchanged");
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "replaces a pin whose image reference drifted",
+    async () => {
+      await pullImage(IMAGE);
+      await pullImage(OTHER_IMAGE);
+      await ensureImagePin(IMAGE, SLOT);
+
+      // What a release bump looks like: PI_IMAGE now points elsewhere and the
+      // old pin protects an image nothing launches any more.
+      expect(await ensureImagePin(OTHER_IMAGE, SLOT)).toBe("replaced");
+      const pin = await inspectPin();
+      expect(pin?.labels["appstrate.pin.image"]).toBe(OTHER_IMAGE);
+      expect(pin?.running).toBe(true);
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "survives the orphaned-container sweep",
+    async () => {
+      await pullImage(IMAGE);
+      await ensureImagePin(IMAGE, SLOT);
+
+      await cleanupOrphanedContainers();
+
+      // Still there: the sweep only reaps `appstrate.managed=true`. If this
+      // ever fails, every API boot silently unpins the runtime images.
+      const pin = await inspectPin();
+      expect(pin).not.toBeNull();
+      expect(pin?.running).toBe(true);
     },
     TIMEOUT,
   );

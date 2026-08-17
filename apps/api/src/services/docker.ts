@@ -151,6 +151,133 @@ export async function ensureImage(image: string): Promise<void> {
   await pullImage(image);
 }
 
+/** Public probe — the image-warmer needs to distinguish "present" from "pulled". */
+export async function hasImageLocally(image: string): Promise<boolean> {
+  return imageExists(image);
+}
+
+/**
+ * Naming prefix for runtime-image **pin** containers — long-lived, do-nothing
+ * holders whose only job is to be a container that references a runtime image.
+ *
+ * `docker image prune -a` (and every janitor built on it: Coolify's automated
+ * cleanup, `docker system prune`, disk-pressure sweeps) deletes any image no
+ * container references. Runtime images are referenced only WHILE a run is in
+ * flight, so on an idle host they are prune bait — and the next run then pays
+ * a multi-hundred-MB pull on its boot critical path, which is exactly what
+ * blows the provisioning budget.
+ *
+ * This is the Docker-engine equivalent of containerd's
+ * `io.cri-containerd.pinned` image label (moby has no image-pin concept, and
+ * prune filters are set by whoever invokes prune — not by us — so a label on
+ * the image would not help). A referencing container is the one thing every
+ * prune implementation respects.
+ *
+ * Deliberately NOT labelled `appstrate.managed=true`: that label means "per-run
+ * resource, safe to reap" and {@link cleanupOrphanedContainers} force-removes
+ * everything carrying it at boot. Pins are durable infra, same class as
+ * {@link EGRESS_NETWORK_NAME}.
+ */
+export const IMAGE_PIN_PREFIX = "appstrate-imagepin-";
+
+/** Label carrying the image reference a pin container currently holds. */
+const IMAGE_PIN_IMAGE_LABEL = "appstrate.pin.image";
+
+interface PinInspectResult {
+  id: string;
+  image: string;
+  running: boolean;
+}
+
+async function inspectPinContainer(name: string): Promise<PinInspectResult | null> {
+  const res = await dockerFetch(`/containers/${encodeURIComponent(name)}/json`);
+  if (res.status === 404) return null;
+  await assertDockerOk(res, `inspect pin container ${name}`);
+  const data = (await res.json()) as {
+    Id: string;
+    State?: { Running?: boolean };
+    Config?: { Labels?: Record<string, string> };
+  };
+  return {
+    id: data.Id,
+    // Read the pin's own label, not `Config.Image`: Docker rewrites the
+    // latter to a digest in some versions, which would make every reconcile
+    // pass think the pin drifted and recreate it forever.
+    image: data.Config?.Labels?.[IMAGE_PIN_IMAGE_LABEL] ?? "",
+    running: data.State?.Running === true,
+  };
+}
+
+/**
+ * Reconcile one pin container for `image` under the stable slot name
+ * `${IMAGE_PIN_PREFIX}${slot}`. Idempotent and convergent: a pin already
+ * holding this exact reference and running is left alone; one holding a stale
+ * reference (the usual case — a release bumped the image tag) is replaced, so
+ * pins can never drift behind the images the platform actually launches.
+ *
+ * Returns what the pass did, for the caller's log line.
+ */
+export async function ensureImagePin(
+  image: string,
+  slot: string,
+): Promise<"unchanged" | "created" | "replaced"> {
+  const name = `${IMAGE_PIN_PREFIX}${slot}`;
+  const existing = await inspectPinContainer(name);
+
+  if (existing && existing.image === image && existing.running) return "unchanged";
+
+  if (existing) {
+    // Wrong image, or right image but not running. Not-running still pins the
+    // image against `image prune`, but NOT against `container prune`, which
+    // reaps stopped containers wholesale — so converge on "running" either way.
+    await removeContainer(existing.id).catch(() => {});
+  }
+
+  const body = {
+    Image: image,
+    // Override whatever the image declares — a pin must never run the real
+    // runtime. `sleep infinity` is available in every runtime image we ship
+    // (busybox/coreutils); a pin that fails to start still holds the image
+    // reference, so a missing `sleep` degrades rather than breaks.
+    Entrypoint: ["sleep"],
+    Cmd: ["infinity"],
+    HostConfig: {
+      // No network, no privileges, minimal resources: this process must be
+      // incapable of doing anything except existing.
+      NetworkMode: "none",
+      Memory: 32 * 1024 * 1024,
+      PidsLimit: 8,
+      SecurityOpt: ["no-new-privileges"],
+      CapDrop: ["ALL"],
+      AutoRemove: false,
+      // Survive daemon/host restarts — an unpinned window after a reboot is
+      // exactly when a nightly janitor would strike.
+      RestartPolicy: { Name: "unless-stopped" },
+    },
+    Labels: {
+      "appstrate.role": "image-pin",
+      "appstrate.pin.slot": slot,
+      [IMAGE_PIN_IMAGE_LABEL]: image,
+    },
+  };
+
+  const res = await createContainerWithImagePull(
+    () =>
+      dockerFetch(`/containers/create?name=${encodeURIComponent(name)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }),
+    () => pullImage(image),
+    { warn: (msg, data) => logger.warn(msg, { ...data, image, pin: name }) },
+  );
+  await assertDockerOk(res, `create image pin ${name}`);
+  const created = (await res.json()) as { Id: string };
+  await startContainer(created.Id);
+
+  return existing ? "replaced" : "created";
+}
+
 export interface CreateContainerOptions {
   image: string;
   adapterName: string;

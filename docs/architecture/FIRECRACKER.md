@@ -621,10 +621,18 @@ uptimeMs }`. `reason` is derived from the call path: `finalize` (run
   event, so the platform records a **synthetic** heartbeat on the same
   column every 15 s during the boot window — but only while the daemon
   confirms the VMM is alive (`POST /v1/workloads/status`). It stops the
-  instant real events flow (`last_event_sequence > 0`), the sink closes, or
-  the daemon reports the VMM dead — so a genuinely hung or dead VM is never
-  masked. This removes the historical "watchdog kills a healthy,
-  slow-booting run" class (see the Lima `RUN_STALL_THRESHOLD=300` workaround).
+  instant real events flow (`last_event_sequence > 0`), the sink closes, the
+  run blows its `boot_deadline_at` ceiling, or the daemon reports the VMM
+  dead — so a genuinely hung or dead VM is never masked. This removes the
+  historical "watchdog kills a healthy, slow-booting run" class (see the Lima
+  `RUN_STALL_THRESHOLD=300` workaround).
+  The pump itself is no longer Firecracker-specific: it lives in
+  `services/run-boot-heartbeat.ts` and is shared with the Docker platform
+  path (which hit the same class of failure on cold image pulls). This
+  backend only supplies its own liveness probe. The `boot_deadline_at`
+  ceiling (`RUN_BOOT_DEADLINE_SECONDS`, default 300 s) is what keeps the
+  attestation falsifiable, and gives the watchdog a second predicate whose
+  error names provisioning instead of blaming the runner.
 - **Boot-time guest-path self-verification.** Immediately after the orphan
   sweep and _before_ the port opens, the daemon probes whether a guest could
   actually reach `FIRECRACKER_RUNNER_PLATFORM_URL` through the freshly-applied

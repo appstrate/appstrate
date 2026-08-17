@@ -276,6 +276,19 @@ export const runs = pgTable(
     // `failed` (same convergence point as natural termination and
     // container-exit synthesis — identical for platform + remote runners).
     lastHeartbeatAt: timestamp("last_heartbeat_at", { withTimezone: true }).defaultNow().notNull(),
+    // Startup-phase ceiling — the wall-clock instant past which a run that
+    // has STILL not posted its first event is declared failed to provision.
+    // Set at creation alongside the sink (`RUN_BOOT_DEADLINE_SECONDS`).
+    //
+    // Split rationale (mirrors Kubernetes `startupProbe` vs `livenessProbe`):
+    // between run creation and the runner's first event the run is being
+    // provisioned BY THE PLATFORM — image pull, boundary create, container
+    // boot — and no runner exists yet to heartbeat. The provisioner attests
+    // liveness on its behalf (`recordBootHeartbeat`), which would otherwise
+    // let a wedged provisioner keep a run alive forever; this column is the
+    // ceiling on that attestation. After the first event the ordinary
+    // `last_heartbeat_at` stall rule owns liveness and this column is inert.
+    bootDeadlineAt: timestamp("boot_deadline_at", { withTimezone: true }),
     // CLI-provided execution environment metadata (os, cli version, git sha,
     // ...). Capped at 16 KiB by the route Zod schema.
     contextSnapshot: jsonb("context_snapshot").$type<Record<string, unknown>>(),
@@ -368,6 +381,14 @@ export const runs = pgTable(
     index("idx_runs_stall_sweep")
       .on(table.lastHeartbeatAt)
       .where(sql`${table.sinkClosedAt} IS NULL AND ${table.sinkExpiresAt} IS NOT NULL`),
+    // Startup-deadline sweep — the second watchdog predicate. Narrower than
+    // the stall index: only rows still in the pre-first-event boot window
+    // can ever match, and that set is bounded by concurrent run starts.
+    index("idx_runs_boot_deadline_sweep")
+      .on(table.bootDeadlineAt)
+      .where(
+        sql`${table.bootDeadlineAt} IS NOT NULL AND ${table.sinkClosedAt} IS NULL AND ${table.lastEventSequence} = 0`,
+      ),
     // Tenant-integrity FK for the launching conversation. The live migration
     // uses PostgreSQL's column-list `SET NULL (chat_session_id)` so deleting a
     // session detaches the run without trying to null the NOT-NULL org_id.

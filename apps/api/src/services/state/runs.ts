@@ -138,7 +138,7 @@ import { toISO } from "../../lib/date-helpers.ts";
  * Named explicitly rather than passing the whole `runs` table because the row
  * is WIDER than the DTO: `modelCost`, `resolvedIntegrationVersions`,
  * `chatSessionId`, `sinkSecretEncrypted`, `sinkExpiresAt`, `sinkClosedAt`,
- * `lastEventSequence` and `lastHeartbeatAt` are never read by `mapEnrichedRun`,
+ * `lastEventSequence`, `lastHeartbeatAt` and `bootDeadlineAt` are never read by `mapEnrichedRun`,
  * so selecting them made every list read carry (and every list page transfer
  * from Postgres) bytes nobody looks at — `sinkSecretEncrypted` being an
  * AES-256-GCM credential ciphertext, which is now not even loaded into the API
@@ -659,6 +659,14 @@ export async function createRun(scope: AppScope, params: CreateRunParams): Promi
         ? { sinkSecretEncrypted: params.sinkSecretEncrypted }
         : {}),
       ...(params.sinkExpiresAt !== undefined ? { sinkExpiresAt: params.sinkExpiresAt } : {}),
+      // Startup-phase ceiling, stamped wherever a sink is opened — the
+      // watchdog's two predicates are keyed off the same row, so the
+      // deadline must exist for every row the sweep can reach. Derived
+      // (not caller-supplied) so no creation path can forget it or widen
+      // it: one env knob, one meaning, every topology.
+      ...(params.sinkExpiresAt !== undefined
+        ? { bootDeadlineAt: new Date(Date.now() + getEnv().RUN_BOOT_DEADLINE_SECONDS * 1000) }
+        : {}),
       ...(params.contextSnapshot !== undefined ? { contextSnapshot: params.contextSnapshot } : {}),
       runnerName: params.runnerName ?? null,
       runnerKind: params.runnerKind ?? null,
@@ -1149,44 +1157,67 @@ export async function appendRunLog(
 
 /**
  * Outcome of a boot-phase synthetic heartbeat.
- * - `bumped`       — the run is still booting (no guest events yet, sink
- *                    open); `last_heartbeat_at` was advanced.
- * - `guest-active` — the guest has emitted at least one event; real
- *                    liveness has taken over, stop synthesising.
- * - `closed`       — the sink is closed (run finalised) or the run is gone.
+ * - `bumped`         — the run is still booting (no guest events yet, sink
+ *                      open, boot deadline not reached); `last_heartbeat_at`
+ *                      was advanced.
+ * - `guest-active`   — the guest has emitted at least one event; real
+ *                      liveness has taken over, stop synthesising.
+ * - `closed`         — the sink is closed (run finalised) or the run is gone.
+ * - `deadline-passed`— the run blew its `boot_deadline_at` ceiling; the
+ *                      attestation is over and the watchdog now owns this
+ *                      row. Stop synthesising (continuing would keep a
+ *                      wedged provisioning attempt alive forever).
  */
-export type BootHeartbeatOutcome = "bumped" | "guest-active" | "closed";
+export type BootHeartbeatOutcome = "bumped" | "guest-active" | "closed" | "deadline-passed";
 
 /**
- * Synthetic keep-alive for a run whose guest has not yet posted its first
- * sink event — the boot-window liveness signal the Firecracker remote
- * backend uses so the stall watchdog does not kill a slow-booting microVM
- * before it reports.
+ * Synthetic keep-alive for a run whose runner has not yet posted its first
+ * sink event — the boot-window liveness signal every isolating backend uses
+ * so the stall watchdog does not kill a slow-provisioning run before its
+ * runner can report.
  *
  * Reuses the EXACT mechanism the watchdog reads: it bumps
  * `runs.last_heartbeat_at` on an OPEN-sink row (`sink_closed_at IS NULL`),
  * the same column `POST /events/heartbeat`, `PATCH /sink/extend` and event
  * ingestion touch. It is gated to `last_event_sequence = 0` so it only
- * fires during the pre-first-event boot window — once the guest reports,
+ * fires during the pre-first-event boot window — once the runner reports,
  * real events keep the run alive and this returns `guest-active` to stop
  * the pump.
+ *
+ * The `boot_deadline_at` gate is what keeps the attestation honest: the
+ * platform vouching for a run it is still provisioning must not be able to
+ * vouch forever (a wedged Docker daemon, a daemon call that never returns).
+ * Past the deadline the bump is refused and the startup-deadline predicate
+ * in the watchdog finalises the row with an accurate error. Rows with a
+ * NULL deadline (pre-migration runs) keep the old unbounded behaviour —
+ * they are still bounded by the sink expiry.
  */
 export async function recordBootHeartbeat(runId: string): Promise<BootHeartbeatOutcome> {
+  const now = new Date();
   const bumped = await db
     .update(runs)
-    .set({ lastHeartbeatAt: new Date() })
-    .where(and(eq(runs.id, runId), isNull(runs.sinkClosedAt), eq(runs.lastEventSequence, 0)))
+    .set({ lastHeartbeatAt: now })
+    .where(
+      and(
+        eq(runs.id, runId),
+        isNull(runs.sinkClosedAt),
+        eq(runs.lastEventSequence, 0),
+        or(isNull(runs.bootDeadlineAt), gt(runs.bootDeadlineAt, now)),
+      ),
+    )
     .returning({ id: runs.id });
   if (bumped.length > 0) return "bumped";
 
-  // Nothing bumped — distinguish "guest is now reporting" from "run closed
-  // / gone" so the caller knows whether to keep the pump alive.
+  // Nothing bumped — distinguish "runner is now reporting" from "deadline
+  // blown" from "run closed / gone" so the caller knows whether to keep the
+  // pump alive.
   const [row] = await db
     .select({ closed: runs.sinkClosedAt, seq: runs.lastEventSequence })
     .from(runs)
     .where(eq(runs.id, runId))
     .limit(1);
   if (!row || row.closed !== null) return "closed";
+  if (row.seq === 0) return "deadline-passed";
   return "guest-active";
 }
 
