@@ -20,6 +20,10 @@ duplicating the detail.
 - [**MODEL_ALIASES.md**](./MODEL_ALIASES.md) — LLM-gateway model-alias pattern (masking real model ids across the two inference paths).
 - [**SUBSCRIPTION_COMPLIANCE.md**](./SUBSCRIPTION_COMPLIANCE.md) — Subscription credential compliance posture for the opt-in codex / claude-code provider modules.
 
+## Chat
+
+- [**CHAT_PI_PERFORMANCE_VALIDATION.md**](./CHAT_PI_PERFORMANCE_VALIDATION.md) : protocole A/B à exécuter avant le canary Unified Pi Chat, notamment pour les tests à 60 et 100 conversations et le dimensionnement Appstrate Cloud.
+
 ## Platform posture
 
 - [**OBSERVABILITY.md**](./OBSERVABILITY.md) — OpenTelemetry traces, metrics, and logs.
