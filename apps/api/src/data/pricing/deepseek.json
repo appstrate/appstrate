@@ -186,7 +186,7 @@
   "deepseek-v4-flash": {
     "label": "Deepseek V4 Flash",
     "contextWindow": 1000000,
-    "maxTokens": 8192,
+    "maxTokens": 393216,
     "capabilities": [
       "text",
       "reasoning"
@@ -218,7 +218,7 @@
   "deepseek-v4-pro": {
     "label": "Deepseek V4 Pro",
     "contextWindow": 1000000,
-    "maxTokens": 8192,
+    "maxTokens": 393216,
     "capabilities": [
       "text",
       "reasoning"
