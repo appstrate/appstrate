@@ -12,8 +12,12 @@
  * `test/integration/services/docker-api.test.ts`.)
  */
 
-import { describe, it, expect } from "bun:test";
-import { reconcileRuntimeImages } from "../../../src/services/orchestrator/runtime-image-warmer.ts";
+import { describe, it, expect, afterEach } from "bun:test";
+import {
+  reconcileRuntimeImages,
+  startRuntimeImageWarmer,
+  stopRuntimeImageWarmer,
+} from "../../../src/services/orchestrator/runtime-image-warmer.ts";
 
 const IMAGES = [
   { image: "ghcr.io/appstrate/appstrate-pi:1.0.0", slot: "pi" },
@@ -60,5 +64,72 @@ describe("runtime image warmer", () => {
     // not throw: it runs on a timer with no caller to catch it.
     expect(pinned).toEqual(["sidecar"]);
     expect(report.pinned).toEqual(["sidecar"]);
+  });
+});
+
+describe("runtime image warmer loop", () => {
+  // The loop keeps module-level timer state — always retire it, or a leaked
+  // timer keeps firing into the next test's assertions.
+  afterEach(() => stopRuntimeImageWarmer());
+
+  /** Wait until `predicate` holds or the budget expires (keeps tests fast). */
+  async function waitFor(predicate: () => boolean, budgetMs = 500): Promise<void> {
+    const deadline = Date.now() + budgetMs;
+    while (Date.now() < deadline) {
+      if (predicate()) return;
+      await Bun.sleep(1);
+    }
+  }
+
+  it("does nothing at all when the interval disables it", async () => {
+    // `0` is the documented opt-out for operators who manage image lifetime
+    // themselves — it must create no pin containers, not just skip the timer.
+    let passes = 0;
+    startRuntimeImageWarmer({
+      intervalSeconds: 0,
+      images: IMAGES,
+      ensureImagePin: async () => {
+        passes++;
+        return "unchanged";
+      },
+    });
+
+    await Bun.sleep(30);
+    expect(passes).toBe(0);
+  });
+
+  it("sweeps immediately and then keeps sweeping", async () => {
+    // Immediately: a process that just booted may already be racing a prune
+    // that happened while it was down.
+    let passes = 0;
+    startRuntimeImageWarmer({
+      intervalSeconds: 0.01,
+      images: [IMAGES[0]!],
+      ensureImagePin: async () => {
+        passes++;
+        return "unchanged";
+      },
+    });
+
+    await waitFor(() => passes >= 3);
+    expect(passes).toBeGreaterThanOrEqual(3);
+  });
+
+  it("stops sweeping once stopped", async () => {
+    let passes = 0;
+    startRuntimeImageWarmer({
+      intervalSeconds: 0.01,
+      images: [IMAGES[0]!],
+      ensureImagePin: async () => {
+        passes++;
+        return "unchanged";
+      },
+    });
+
+    await waitFor(() => passes >= 1);
+    stopRuntimeImageWarmer();
+    const settled = passes;
+    await Bun.sleep(50);
+    expect(passes).toBe(settled);
   });
 });
