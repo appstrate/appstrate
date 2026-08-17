@@ -1,0 +1,2 @@
+ALTER TABLE "runs" ADD COLUMN "boot_deadline_at" timestamp with time zone;--> statement-breakpoint
+CREATE INDEX "idx_runs_boot_deadline_sweep" ON "runs" USING btree ("boot_deadline_at") WHERE "runs"."boot_deadline_at" IS NOT NULL AND "runs"."sink_closed_at" IS NULL AND "runs"."last_event_sequence" = 0;

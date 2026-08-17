@@ -43,6 +43,7 @@ import { getErrorMessage } from "@appstrate/core/errors";
 import type { ExecutionContext } from "@appstrate/afps-runtime/types";
 import type { SinkCredentials } from "../../lib/mint-sink-credentials.ts";
 import { uploadRunBundle, deleteRunWorkspace } from "../run-workspace-storage.ts";
+import { startBootHeartbeat } from "../run-boot-heartbeat.ts";
 import { runWithSpan, currentTraceparent, recordContainerSpawn } from "@appstrate/core/telemetry";
 
 import { getEnv } from "@appstrate/env";
@@ -60,8 +61,16 @@ import { toNativeModelReasoningLevel } from "@appstrate/core/model-generation";
  * pull, workspace init, MCP handshake) so a slow boot does not trip the net
  * before the runner has had its full budget. When it does fire,
  * `execute-background` synthesises the `timeout` terminal.
+ *
+ * Derived from `RUN_BOOT_DEADLINE_SECONDS` rather than being a third
+ * independent number: that env var IS the platform's answer to "how long may
+ * provisioning take", and the watchdog refuses to keep a run alive past it.
+ * A grace shorter than the deadline would let a boot the watchdog considers
+ * legitimate eat into the agent's execution budget.
  */
-const PLATFORM_TIMEOUT_BOOT_GRACE_MS = 90_000;
+function platformTimeoutBootGraceMs(): number {
+  return getEnv().RUN_BOOT_DEADLINE_SECONDS * 1000;
+}
 
 /** Terminal state reported back to the caller once the container has exited. */
 export interface PlatformContainerResult {
@@ -93,7 +102,7 @@ export interface RunPlatformContainerInput {
   deleteWorkspace?: typeof deleteRunWorkspace;
   /**
    * Grace (ms) added to `plan.timeout` for the platform's safety-net
-   * container watchdog. Defaults to {@link PLATFORM_TIMEOUT_BOOT_GRACE_MS}.
+   * container watchdog. Defaults to {@link platformTimeoutBootGraceMs}.
    * Tests that exercise the net directly (no real runner to self-terminate)
    * set it to `0` so the net fires at the budget itself.
    */
@@ -157,6 +166,11 @@ async function runPlatformContainerImpl(
   let boundary: IsolationBoundary | undefined;
   let sidecarHandle: WorkloadHandle | undefined;
   let agentHandle: WorkloadHandle | undefined;
+  // Stops the boot-phase liveness pump. Hoisted so the `finally` can retire
+  // it on every exit path — the pump self-retires the instant the runner
+  // posts its first event, so this only matters when provisioning failed or
+  // the run ended without one.
+  let stopBootHeartbeat: (() => void) | undefined;
 
   // Hoisted out of the try so the spawn-failure metric path (catch) can read
   // it. Assigned below once the run's sidecar policy is resolved.
@@ -213,6 +227,21 @@ async function runPlatformContainerImpl(
       !isOauthCredential &&
       !plan.proxyUrl &&
       !llmConfig.aliased;
+
+    // Boot-phase liveness (see services/run-boot-heartbeat.ts). From here to
+    // the runner's first event the platform — not the runner — owns this
+    // run's liveness: it is pulling images, creating the boundary and
+    // booting the container, and a cold image pull alone can outlast
+    // RUN_STALL_THRESHOLD_SECONDS. Without this attestation the stall
+    // watchdog kills the run mid-provision and blames a runner that never
+    // got to exist. Started BEFORE the first orchestrator call so the whole
+    // provisioning span is covered; bounded by `runs.boot_deadline_at`, so a
+    // wedged daemon call still terminates the run (with an accurate error).
+    stopBootHeartbeat = startBootHeartbeat({
+      runId,
+      intervalMs: getEnv().RUN_HEARTBEAT_INTERVAL_SECONDS * 1000,
+      backend: "platform",
+    });
 
     // Resolved BEFORE the boundary so port-allocating backends don't
     // reserve a sidecar port this run will never bind.
@@ -427,7 +456,7 @@ async function runPlatformContainerImpl(
           // stop can no longer reach the workload.
           maxLifetimeSeconds:
             plan.timeout +
-            Math.ceil((input.timeoutBootGraceMs ?? PLATFORM_TIMEOUT_BOOT_GRACE_MS) / 1000) +
+            Math.ceil((input.timeoutBootGraceMs ?? platformTimeoutBootGraceMs()) / 1000) +
             600,
         },
         boundary,
@@ -445,7 +474,7 @@ async function runPlatformContainerImpl(
       sidecar,
       plan.timeout,
       signal,
-      input.timeoutBootGraceMs ?? PLATFORM_TIMEOUT_BOOT_GRACE_MS,
+      input.timeoutBootGraceMs ?? platformTimeoutBootGraceMs(),
     );
     return lifecycle;
   } catch (err) {
@@ -462,6 +491,7 @@ async function runPlatformContainerImpl(
     }
     throw err;
   } finally {
+    stopBootHeartbeat?.();
     // Cleanup order: sidecar → agent → network boundary.
     // Removing the network boundary before its members are gone is an
     // error on Docker's side, so the finally chain must be strict.
@@ -497,7 +527,7 @@ async function runPlatformContainerImpl(
 
 /**
  * Drive the agent container lifecycle: start, enforce the SAFETY-NET timeout
- * (`timeoutSeconds` + {@link PLATFORM_TIMEOUT_BOOT_GRACE_MS} — the runner owns
+ * (`timeoutSeconds` + {@link platformTimeoutBootGraceMs} — the runner owns
  * the primary, boot-excluded budget), propagate cancellation, wait for exit.
  * Sidecar is stopped alongside the agent on any terminal condition so neither
  * lingers after the run has ended.

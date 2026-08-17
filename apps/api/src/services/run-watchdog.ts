@@ -11,8 +11,30 @@
  * Both touch the same column; neither introduces a branch based on
  * `run_origin`, so liveness stays protocol-symmetric.
  *
- * This service sweeps open-sink rows whose heartbeat slipped past the
- * stall threshold, and routes each one through the same
+ * ## Two phases, two questions
+ *
+ * The sweep answers two DIFFERENT questions, and conflating them is what
+ * used to make it kill healthy runs:
+ *
+ *   1. **stall** — "the runner went quiet": `last_heartbeat_at` slipped past
+ *      `stallThresholdSeconds`. Aggressive, because a live runner beats
+ *      every `RUN_HEARTBEAT_INTERVAL_SECONDS`.
+ *   2. **boot deadline** — "the runner never showed up": the run still has
+ *      `last_event_sequence = 0` and blew its `boot_deadline_at`. Generous,
+ *      because provisioning (image pull, boundary create, container boot)
+ *      legitimately takes tens of seconds and no runner exists yet to beat.
+ *
+ * During phase 1 the platform attests liveness on the runner's behalf
+ * (`services/run-boot-heartbeat.ts`), so predicate (1) alone would never
+ * fire while provisioning is genuinely in progress — and predicate (2) is
+ * what stops that attestation from becoming unfalsifiable. Same split as
+ * Kubernetes `startupProbe` (generous, gates the rest) vs `livenessProbe`
+ * (aggressive, owns steady state). Each predicate finalises with its own
+ * error message, so the run detail says what actually happened instead of
+ * blaming a runner that never got to exist.
+ *
+ * This service sweeps open-sink rows matching either predicate, and routes
+ * each one through the same
  * {@link finalizeRun} used by natural termination and container-exit
  * synthesis. Each stalled run's workload is also stopped through the
  * orchestrator (same route as user cancel) — fire-and-forget, so a
@@ -39,7 +61,7 @@
  * is single-process by definition.
  */
 
-import { and, isNotNull, isNull, lt, sql } from "drizzle-orm";
+import { and, eq, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
 import { db, isEmbeddedDb } from "@appstrate/db/client";
 import { runs } from "@appstrate/db/schema";
 import { logger } from "../lib/logger.ts";
@@ -123,9 +145,9 @@ export async function runWatchdogTick(config: RunWatchdogConfig): Promise<number
   // `sink_closed_at IS NULL` inside finalizeRun is the ultimate
   // exactly-once guarantee — the advisory lock is belt-and-suspenders
   // to keep multi-replica log volume sane.
-  let candidateIds: string[];
+  let candidates: WatchdogCandidate[];
   try {
-    candidateIds = await collectCandidates(config);
+    candidates = await collectCandidates(config);
   } catch (err) {
     logger.error("run watchdog sweep failed", {
       error: getErrorMessage(err),
@@ -133,16 +155,17 @@ export async function runWatchdogTick(config: RunWatchdogConfig): Promise<number
     return 0;
   }
 
-  if (candidateIds.length === 0) return 0;
+  if (candidates.length === 0) return 0;
 
   let finalized = 0;
-  for (const id of candidateIds) {
+  for (const candidate of candidates) {
     try {
-      await finalizeStalledRun(id, config.stallThresholdSeconds);
+      await finalizeStalledRun(candidate, config.stallThresholdSeconds);
       finalized++;
     } catch (err) {
       logger.error("run watchdog failed to finalize stalled run", {
-        runId: id,
+        runId: candidate.id,
+        reason: candidate.reason,
         error: getErrorMessage(err),
       });
     }
@@ -157,28 +180,75 @@ export async function runWatchdogTick(config: RunWatchdogConfig): Promise<number
   return finalized;
 }
 
-async function collectCandidates(config: RunWatchdogConfig): Promise<string[]> {
-  const cutoff = new Date(Date.now() - config.stallThresholdSeconds * 1000);
+/** Which predicate matched — decides the error the run is finalised with. */
+type WatchdogReason = "stall" | "boot-deadline";
 
-  const selectCandidates = (executor: {
+interface WatchdogCandidate {
+  readonly id: string;
+  readonly reason: WatchdogReason;
+  /**
+   * Provisioning budget the run was given, in seconds — derived per-row
+   * (`boot_deadline_at - started_at`) rather than read from the current env
+   * so the message stays true for rows created under an older setting.
+   * Only set for `boot-deadline` candidates.
+   */
+  readonly bootBudgetSeconds?: number;
+}
+
+async function collectCandidates(config: RunWatchdogConfig): Promise<WatchdogCandidate[]> {
+  const now = new Date();
+  const cutoff = new Date(now.getTime() - config.stallThresholdSeconds * 1000);
+
+  // Both predicates in ONE scan: a run can only ever match one of them in
+  // practice (the boot pump keeps `last_heartbeat_at` fresh exactly while
+  // `last_event_sequence = 0`), but `stall` wins the classification if both
+  // somehow hold — a row that has been silent past the stall threshold AND
+  // blew its deadline is, from the operator's point of view, a run whose
+  // runner went quiet. Each predicate is served by its own partial index.
+  const where = and(
+    isNull(runs.sinkClosedAt),
+    isNotNull(runs.sinkExpiresAt),
+    or(
+      lt(runs.lastHeartbeatAt, cutoff),
+      and(
+        eq(runs.lastEventSequence, 0),
+        isNotNull(runs.bootDeadlineAt),
+        lt(runs.bootDeadlineAt, now),
+      ),
+    ),
+  );
+
+  // One query, one classification — the embedded and locked paths differ
+  // ONLY in which executor runs it. Keeping the chain in a single place is
+  // what stops the two branches from drifting into different predicates.
+  const fetchCandidates = async (executor: {
     select: typeof db.select;
-  }): ReturnType<typeof db.select> => {
-    return executor.select({ id: runs.id });
+  }): Promise<WatchdogCandidate[]> => {
+    const rows = await executor
+      .select({
+        id: runs.id,
+        lastHeartbeatAt: runs.lastHeartbeatAt,
+        startedAt: runs.startedAt,
+        bootDeadlineAt: runs.bootDeadlineAt,
+      })
+      .from(runs)
+      .where(where)
+      .limit(config.maxFinalizesPerTick);
+
+    return rows.map((row) => {
+      if (row.lastHeartbeatAt.getTime() < cutoff.getTime()) {
+        return { id: row.id, reason: "stall" as const };
+      }
+      const budgetMs = (row.bootDeadlineAt?.getTime() ?? 0) - row.startedAt.getTime();
+      return {
+        id: row.id,
+        reason: "boot-deadline" as const,
+        bootBudgetSeconds: Math.max(1, Math.round(budgetMs / 1000)),
+      };
+    });
   };
 
-  if (isEmbeddedDb) {
-    const rows = await selectCandidates(db)
-      .from(runs)
-      .where(
-        and(
-          isNull(runs.sinkClosedAt),
-          isNotNull(runs.sinkExpiresAt),
-          lt(runs.lastHeartbeatAt, cutoff),
-        ),
-      )
-      .limit(config.maxFinalizesPerTick);
-    return rows.map((r) => (r as { id: string }).id);
-  }
+  if (isEmbeddedDb) return fetchCandidates(db);
 
   return await db.transaction(async (tx) => {
     const raw = await tx.execute(
@@ -187,21 +257,15 @@ async function collectCandidates(config: RunWatchdogConfig): Promise<string[]> {
     const lockRows = raw as unknown as Array<{ acquired: boolean }>;
     if (!lockRows[0]?.acquired) return [];
 
-    const rows = await selectCandidates(tx)
-      .from(runs)
-      .where(
-        and(
-          isNull(runs.sinkClosedAt),
-          isNotNull(runs.sinkExpiresAt),
-          lt(runs.lastHeartbeatAt, cutoff),
-        ),
-      )
-      .limit(config.maxFinalizesPerTick);
-    return rows.map((r) => (r as { id: string }).id);
+    return fetchCandidates(tx);
   });
 }
 
-async function finalizeStalledRun(runId: string, stallThresholdSeconds: number): Promise<void> {
+async function finalizeStalledRun(
+  candidate: WatchdogCandidate,
+  stallThresholdSeconds: number,
+): Promise<void> {
+  const runId = candidate.id;
   const run = await getRunSinkContext(runId);
   if (!run) return;
   // A run that was finalized between the SELECT and this point is
@@ -212,7 +276,10 @@ async function finalizeStalledRun(runId: string, stallThresholdSeconds: number):
   const result = emptyRunResult();
   result.status = "failed";
   result.error = {
-    message: `Runner stopped reporting — no heartbeat for ${stallThresholdSeconds}s. The runner process may have crashed or lost network connectivity.`,
+    message:
+      candidate.reason === "boot-deadline"
+        ? `Run never started executing — the runner posted no event within its ${candidate.bootBudgetSeconds}s provisioning budget. The runtime image pull, container boot, or sandbox provisioning did not finish in time.`
+        : `Runner stopped reporting — no heartbeat for ${stallThresholdSeconds}s. The runner process may have crashed or lost network connectivity.`,
   };
 
   // Stop the workload and WAIT (bounded) for the stop to ack before

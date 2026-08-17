@@ -32,6 +32,7 @@ import type {
 import { getErrorMessage } from "@appstrate/core/errors";
 import { logger } from "../../lib/logger.ts";
 import type { BootHeartbeatOutcome } from "../../services/state/runs.ts";
+import { startBootHeartbeat as startBootHeartbeatPump } from "../../services/run-boot-heartbeat.ts";
 import { getRemoteEnv, type RemoteRunnerEnv } from "./remote-env.ts";
 import {
   RUNNER_ROUTES,
@@ -409,53 +410,23 @@ export class RemoteFirecrackerOrchestrator implements RunOrchestrator {
 
   /**
    * Start the boot-phase synthetic-heartbeat pump for a run. Returns a stop
-   * function (idempotent). Each tick: confirm the VMM is alive with the
-   * daemon, and only then record a heartbeat — until the guest starts
-   * reporting real events, the sink closes, or the VMM dies. A no-op when
+   * function (idempotent). The pump itself is the shared, topology-agnostic
+   * one in `services/run-boot-heartbeat.ts` — this only supplies the
+   * Firecracker-specific liveness probe (ask the daemon whether the VMM is
+   * still alive), so a dead VM is never masked. A no-op when
    * `recordBootHeartbeat` is not wired.
    */
   private startBootHeartbeat(handle: WorkloadHandle): () => void {
     const record = this.recordBootHeartbeat;
     if (!record) return () => {};
 
-    let stopped = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const stop = (): void => {
-      stopped = true;
-      if (timer) clearTimeout(timer);
-    };
-    const schedule = (): void => {
-      if (!stopped) timer = setTimeout(tick, this.heartbeatIntervalMs);
-    };
-    const tick = (): void => {
-      void (async () => {
-        if (stopped) return;
-        const alive = await this.workloadIsAlive(handle);
-        if (stopped) return;
-        // VMM confirmed dead — stop so the watchdog can catch a genuinely
-        // hung run instead of us masking it. (waitForExit will resolve too.)
-        if (alive === false) return stop();
-        // Liveness unknown (daemon blip / older daemon without the probe) —
-        // skip this beat rather than assume alive, and retry next tick.
-        if (alive === null) return schedule();
-        let outcome: BootHeartbeatOutcome;
-        try {
-          outcome = await record(handle.runId);
-        } catch (err) {
-          logger.warn("firecracker: boot heartbeat write failed — retrying", {
-            runId: handle.runId,
-            error: getErrorMessage(err),
-          });
-          return schedule();
-        }
-        if (stopped) return;
-        // Guest now reporting or run closed — real liveness takes over.
-        if (outcome !== "bumped") return stop();
-        schedule();
-      })();
-    };
-    schedule();
-    return stop;
+    return startBootHeartbeatPump({
+      runId: handle.runId,
+      intervalMs: this.heartbeatIntervalMs,
+      isAlive: () => this.workloadIsAlive(handle),
+      record,
+      backend: "firecracker",
+    });
   }
 
   /**

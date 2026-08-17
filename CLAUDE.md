@@ -90,7 +90,9 @@ User Browser (BrowserRouter SPA)  Platform (Bun + Hono :3000)
      |   └────────────────────────────────────────────────────┘
 ```
 
-Sidecar + agent setup run in parallel (`Promise.all`). Images pre-pulled at boot (`ensureImage`) to amortise cold pull. Full sidecar protocol: `docs/architecture/SIDECAR.md`.
+Sidecar + agent setup run in parallel (`Promise.all`). Images pre-pulled at boot (`ensureImage`) and kept warm afterwards by the runtime-image warmer (`services/orchestrator/runtime-image-warmer.ts`: reconciles one `appstrate-imagepin-*` holder container per image, so host-level `docker image prune -a` can't put a cold pull back on the run-boot path). Full sidecar protocol: `docs/architecture/SIDECAR.md`.
+
+**Run liveness is two-phase** (`services/run-watchdog.ts`, same split as Kubernetes `startupProbe` vs `livenessProbe`): until the runner's first event the platform is provisioning and attests liveness on its behalf (`services/run-boot-heartbeat.ts`), bounded by `runs.boot_deadline_at` (`RUN_BOOT_DEADLINE_SECONDS`, default 300s); after it, the runner's own heartbeat owns liveness (`RUN_STALL_THRESHOLD_SECONDS`, default 60s). Each predicate finalises with its own error.
 
 ## Key Conventions & Gotchas
 

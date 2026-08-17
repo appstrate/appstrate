@@ -336,6 +336,22 @@ const envSchema = z
     RUN_STALL_THRESHOLD_SECONDS: z.coerce.number().int().positive().default(60),
     RUN_WATCHDOG_INTERVAL_SECONDS: z.coerce.number().int().positive().default(15),
 
+    // Startup-phase ceiling, the second half of the split above. The stall
+    // threshold answers "the runner went quiet"; this answers "the runner
+    // never showed up". They are different questions with different budgets:
+    // provisioning legitimately takes tens of seconds (image pull on a cold
+    // host, boundary create, container boot) and no runner exists yet to
+    // heartbeat, so the platform attests liveness on its behalf during that
+    // window. This is the ceiling on that attestation — past it the run is
+    // failed with an accurate "never finished provisioning" error instead of
+    // a misleading "runner stopped reporting".
+    //
+    // Same shape as a Kubernetes `startupProbe`: generous budget for the
+    // boot window, aggressive `livenessProbe` (RUN_STALL_THRESHOLD_SECONDS)
+    // once the workload reports. 300s absorbs a full cold image pull with
+    // margin while still bounding a wedged provisioner.
+    RUN_BOOT_DEADLINE_SECONDS: z.coerce.number().int().positive().default(300),
+
     // OAuth Model Provider refresh worker — proactively refreshes credentials
     // whose access_token is within the lead window so the next agent run
     // doesn't pay a 401-retry on the hot path. Off by default: the sidecar's
@@ -475,6 +491,25 @@ const envSchema = z
     // Docker images (override for GHCR / custom registries)
     PI_IMAGE: z.string().default("appstrate-pi:latest"),
     SIDECAR_IMAGE: z.string().default("appstrate-sidecar:latest"),
+
+    // Runtime-image warm-keeping sweep (Docker orchestrator only). Every
+    // tick: re-pull PI_IMAGE/SIDECAR_IMAGE if they went missing, and
+    // reconcile one holder ("pin") container per image so a host-level
+    // `docker image prune -a` cannot delete them between runs.
+    //
+    // Why both halves: pulling once at boot is not durable — any external
+    // janitor (Coolify's nightly cleanup, a cron `docker system prune`, a
+    // disk-pressure sweep) deletes images no container references, and the
+    // next run then pays a multi-hundred-MB pull ON the run-boot critical
+    // path. The pin container is the Docker-engine equivalent of
+    // containerd's `io.cri-containerd.pinned` label (moby has no such
+    // label, but prune never touches an image a container references); the
+    // re-pull sweep is the equivalent of a Kubernetes image pre-puller
+    // DaemonSet, and heals hosts where the pin was removed anyway.
+    //
+    // 0 disables the sweep entirely (no re-pull, no pin containers) for
+    // operators who manage image lifetime themselves.
+    RUNTIME_IMAGE_WARM_INTERVAL_SECONDS: z.coerce.number().int().min(0).default(300),
 
     // Per-run workspace volume init image. A minimal image (~5 MB) used
     // once per run to chown the freshly created Docker volume to UID
