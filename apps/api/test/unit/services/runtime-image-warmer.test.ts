@@ -22,8 +22,8 @@ describe("runtime image warmer", () => {
   it("does not pull images that are already on the host", async () => {
     const pulls: string[] = [];
     const report = await reconcileRuntimeImages({
-      images: () => IMAGES,
-      hasImageLocally: async () => true,
+      images: IMAGES,
+      imageExists: async () => true,
       pullImage: async (image) => {
         pulls.push(image);
       },
@@ -38,9 +38,9 @@ describe("runtime image warmer", () => {
   it("re-pulls an image a host janitor deleted, off the run path", async () => {
     const pulls: string[] = [];
     const report = await reconcileRuntimeImages({
-      images: () => IMAGES,
+      images: IMAGES,
       // The pi image vanished (nightly `docker image prune -a`).
-      hasImageLocally: async (image) => !image.includes("appstrate-pi"),
+      imageExists: async (image) => !image.includes("appstrate-pi"),
       pullImage: async (image) => {
         pulls.push(image);
       },
@@ -54,8 +54,8 @@ describe("runtime image warmer", () => {
   it("reconciles a pin whose image reference drifted (the release-bump case)", async () => {
     const pinned: Array<{ image: string; slot: string }> = [];
     const report = await reconcileRuntimeImages({
-      images: () => IMAGES,
-      hasImageLocally: async () => true,
+      images: IMAGES,
+      imageExists: async () => true,
       pullImage: async () => {},
       ensureImagePin: async (image, slot) => {
         pinned.push({ image, slot });
@@ -71,8 +71,8 @@ describe("runtime image warmer", () => {
   it("pins an image it had to pull first", async () => {
     const order: string[] = [];
     await reconcileRuntimeImages({
-      images: () => [IMAGES[0]!],
-      hasImageLocally: async () => false,
+      images: [IMAGES[0]!],
+      imageExists: async () => false,
       pullImage: async () => {
         order.push("pull");
       },
@@ -89,8 +89,8 @@ describe("runtime image warmer", () => {
   it("keeps sweeping the other images when one fails", async () => {
     const pinned: string[] = [];
     const report = await reconcileRuntimeImages({
-      images: () => IMAGES,
-      hasImageLocally: async (image) => {
+      images: IMAGES,
+      imageExists: async (image) => {
         if (image.includes("appstrate-pi")) throw new Error("docker daemon unreachable");
         return true;
       },

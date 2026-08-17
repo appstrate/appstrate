@@ -43,9 +43,9 @@ import { logger } from "../../lib/logger.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 
 export interface RuntimeImageWarmerDeps {
-  /** Image references to keep warm, resolved per pass (env may be re-read). */
-  readonly images: () => readonly { image: string; slot: string }[];
-  readonly hasImageLocally?: (image: string) => Promise<boolean>;
+  /** Image references to keep warm, one pin slot each. */
+  readonly images: readonly { image: string; slot: string }[];
+  readonly imageExists?: (image: string) => Promise<boolean>;
   readonly pullImage?: (image: string) => Promise<void>;
   readonly ensureImagePin?: (
     image: string,
@@ -68,16 +68,16 @@ export interface RuntimeImageWarmerReport {
 export async function reconcileRuntimeImages(
   deps: RuntimeImageWarmerDeps,
 ): Promise<RuntimeImageWarmerReport> {
-  const hasImageLocally = deps.hasImageLocally ?? docker.hasImageLocally;
+  const imageExists = deps.imageExists ?? docker.imageExists;
   const pullImage = deps.pullImage ?? docker.pullImage;
   const ensureImagePin = deps.ensureImagePin ?? docker.ensureImagePin;
 
   const pulled: string[] = [];
   const pinned: string[] = [];
 
-  for (const { image, slot } of deps.images()) {
+  for (const { image, slot } of deps.images) {
     try {
-      if (!(await hasImageLocally(image))) {
+      if (!(await imageExists(image))) {
         // Deliberately loud: an image vanishing between runs means something
         // on this host is pruning them, and that is worth an operator's
         // attention — silent self-healing here would hide a recurring

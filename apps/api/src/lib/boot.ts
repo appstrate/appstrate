@@ -411,7 +411,7 @@ export async function bootBackground(): Promise<{ agentsHealthy: boolean }> {
       if (getExecutionMode() !== "docker") return;
       startRuntimeImageWarmer({
         intervalSeconds: env.RUNTIME_IMAGE_RECONCILE_INTERVAL_SECONDS,
-        images: () => [
+        images: [
           { image: env.PI_IMAGE, slot: "pi" },
           { image: env.SIDECAR_IMAGE, slot: "sidecar" },
         ],

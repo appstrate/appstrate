@@ -658,14 +658,16 @@ export async function createRun(scope: AppScope, params: CreateRunParams): Promi
       ...(params.sinkSecretEncrypted !== undefined
         ? { sinkSecretEncrypted: params.sinkSecretEncrypted }
         : {}),
-      ...(params.sinkExpiresAt !== undefined ? { sinkExpiresAt: params.sinkExpiresAt } : {}),
-      // Startup-phase ceiling, stamped wherever a sink is opened — the
-      // watchdog's two predicates are keyed off the same row, so the
-      // deadline must exist for every row the sweep can reach. Derived
-      // (not caller-supplied) so no creation path can forget it or widen
-      // it: one env knob, one meaning, every topology.
+      // The startup-phase ceiling rides with the sink: the watchdog's two
+      // predicates read the same row, so every row the sweep can reach must
+      // carry a deadline. Derived here (not caller-supplied) so no creation
+      // path can forget it or widen it — one env knob, one meaning, every
+      // topology.
       ...(params.sinkExpiresAt !== undefined
-        ? { bootDeadlineAt: new Date(Date.now() + getEnv().RUN_BOOT_DEADLINE_SECONDS * 1000) }
+        ? {
+            sinkExpiresAt: params.sinkExpiresAt,
+            bootDeadlineAt: new Date(Date.now() + getEnv().RUN_BOOT_DEADLINE_SECONDS * 1000),
+          }
         : {}),
       ...(params.contextSnapshot !== undefined ? { contextSnapshot: params.contextSnapshot } : {}),
       runnerName: params.runnerName ?? null,

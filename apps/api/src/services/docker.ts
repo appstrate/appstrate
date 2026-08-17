@@ -77,9 +77,10 @@ async function dockerFetch(
 }
 
 /**
- * Check if an image exists locally.
+ * Check if an image exists locally. One inspect, never a pull — the warmer
+ * needs "present or not" as a distinct answer from `ensureImage`.
  */
-async function imageExists(image: string): Promise<boolean> {
+export async function imageExists(image: string): Promise<boolean> {
   const res = await dockerFetch(`/images/${encodeURIComponent(image)}/json`);
   return res.ok;
 }
@@ -149,11 +150,6 @@ async function pullImageUncoalesced(image: string): Promise<void> {
 export async function ensureImage(image: string): Promise<void> {
   if (await imageExists(image)) return;
   await pullImage(image);
-}
-
-/** Public probe — the image-warmer needs to distinguish "present" from "pulled". */
-export async function hasImageLocally(image: string): Promise<boolean> {
-  return imageExists(image);
 }
 
 /**
