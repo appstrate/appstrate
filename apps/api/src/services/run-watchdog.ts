@@ -218,26 +218,24 @@ async function collectCandidates(config: RunWatchdogConfig): Promise<WatchdogCan
     ),
   );
 
-  const selectCandidates = (executor: {
+  // One query, one classification — the embedded and locked paths differ
+  // ONLY in which executor runs it. Keeping the chain in a single place is
+  // what stops the two branches from drifting into different predicates.
+  const fetchCandidates = async (executor: {
     select: typeof db.select;
-  }): ReturnType<typeof db.select> => {
-    return executor.select({
-      id: runs.id,
-      lastHeartbeatAt: runs.lastHeartbeatAt,
-      startedAt: runs.startedAt,
-      bootDeadlineAt: runs.bootDeadlineAt,
-    });
-  };
+  }): Promise<WatchdogCandidate[]> => {
+    const rows = await executor
+      .select({
+        id: runs.id,
+        lastHeartbeatAt: runs.lastHeartbeatAt,
+        startedAt: runs.startedAt,
+        bootDeadlineAt: runs.bootDeadlineAt,
+      })
+      .from(runs)
+      .where(where)
+      .limit(config.maxFinalizesPerTick);
 
-  type CandidateRow = {
-    id: string;
-    lastHeartbeatAt: Date;
-    startedAt: Date;
-    bootDeadlineAt: Date | null;
-  };
-
-  const classify = (rows: unknown[]): WatchdogCandidate[] =>
-    (rows as CandidateRow[]).map((row) => {
+    return rows.map((row) => {
       if (row.lastHeartbeatAt.getTime() < cutoff.getTime()) {
         return { id: row.id, reason: "stall" as const };
       }
@@ -248,14 +246,9 @@ async function collectCandidates(config: RunWatchdogConfig): Promise<WatchdogCan
         bootBudgetSeconds: Math.max(1, Math.round(budgetMs / 1000)),
       };
     });
+  };
 
-  if (isEmbeddedDb) {
-    const rows = await selectCandidates(db)
-      .from(runs)
-      .where(where)
-      .limit(config.maxFinalizesPerTick);
-    return classify(rows);
-  }
+  if (isEmbeddedDb) return fetchCandidates(db);
 
   return await db.transaction(async (tx) => {
     const raw = await tx.execute(
@@ -264,11 +257,7 @@ async function collectCandidates(config: RunWatchdogConfig): Promise<WatchdogCan
     const lockRows = raw as unknown as Array<{ acquired: boolean }>;
     if (!lockRows[0]?.acquired) return [];
 
-    const rows = await selectCandidates(tx)
-      .from(runs)
-      .where(where)
-      .limit(config.maxFinalizesPerTick);
-    return classify(rows);
+    return fetchCandidates(tx);
   });
 }
 

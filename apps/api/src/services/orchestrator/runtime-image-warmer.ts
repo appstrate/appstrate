@@ -17,20 +17,24 @@
  * 404 by pulling inline, mid-run, and hundreds of MB later the run has burnt
  * its provisioning budget).
  *
- * Two mechanisms, deliberately both:
+ * One mechanism does both jobs: reconcile a **pin container** per image
+ * ({@link ensureImagePin}), the Docker-engine equivalent of containerd's
+ * pinned-image label.
  *
- *  - **re-pull sweep** — restores an image that went missing, off the run
- *    path. Equivalent of a Kubernetes image pre-puller DaemonSet. Also makes
- *    the orchestrator's "verified" cache true again without invalidation
- *    plumbing: the cache says the image is present, and after the pull it is.
- *  - **pin containers** — stop the deletion happening at all
- *    ({@link ensureImagePin}). Equivalent of containerd's pinned-image label.
+ *  - It PREVENTS the deletion: prune never touches an image a container
+ *    references, so a running pin keeps the image out of the janitor's reach.
+ *  - It REPAIRS after one: a pin that is missing (fresh host, `container
+ *    prune`, operator cleanup) gets recreated, and creating it pulls the
+ *    image if the host no longer has it — off the run path.
  *
- * The pin is the fix; the sweep is what makes the fix self-healing on hosts
- * where the pin was removed anyway (operator cleanup, `container prune`,
- * fresh host). Neither is load-bearing for correctness — a missing image
- * still heals inline — they exist to keep boot latency inside the
- * provisioning budget.
+ * So "pin converged" already implies "image present", which is why this
+ * sweep does not separately probe and pull the image: that check could only
+ * ever fire for an image force-removed (`docker rmi -f`) out from under a
+ * running container, a case the run path's inline 404 heal already covers.
+ *
+ * Nothing here is load-bearing for correctness — a missing image still heals
+ * inline mid-run — it exists to keep boot latency inside the provisioning
+ * budget.
  *
  * Docker-specific by construction: it manipulates images and containers on a
  * Docker daemon. Other backends manage image locality themselves (the
@@ -45,8 +49,7 @@ import { getErrorMessage } from "@appstrate/core/errors";
 export interface RuntimeImageWarmerDeps {
   /** Image references to keep warm, one pin slot each. */
   readonly images: readonly { image: string; slot: string }[];
-  readonly imageExists?: (image: string) => Promise<boolean>;
-  readonly pullImage?: (image: string) => Promise<void>;
+  /** Injection seam for tests. Defaults to the real Docker call. */
   readonly ensureImagePin?: (
     image: string,
     slot: string,
@@ -54,45 +57,31 @@ export interface RuntimeImageWarmerDeps {
 }
 
 export interface RuntimeImageWarmerReport {
-  /** Images that were missing and got re-pulled by this pass. */
-  readonly pulled: string[];
   /** Slots whose pin container was created or replaced by this pass. */
   readonly pinned: string[];
 }
 
 /**
- * One reconcile pass. Exported for tests and for the boot-time invocation;
- * never throws — a Docker hiccup must not take down the API, and the next
- * tick retries.
+ * One reconcile pass, driven by {@link startRuntimeImageWarmer}. Exported for
+ * tests; never throws — a Docker hiccup must not take down the API, and the
+ * next tick retries.
  */
 export async function reconcileRuntimeImages(
   deps: RuntimeImageWarmerDeps,
 ): Promise<RuntimeImageWarmerReport> {
-  const imageExists = deps.imageExists ?? docker.imageExists;
-  const pullImage = deps.pullImage ?? docker.pullImage;
   const ensureImagePin = deps.ensureImagePin ?? docker.ensureImagePin;
 
-  const pulled: string[] = [];
   const pinned: string[] = [];
 
   for (const { image, slot } of deps.images) {
     try {
-      if (!(await imageExists(image))) {
-        // Deliberately loud: an image vanishing between runs means something
-        // on this host is pruning them, and that is worth an operator's
-        // attention — silent self-healing here would hide a recurring
-        // multi-hundred-MB pull that only shows up as slow runs.
-        logger.warn("runtime image missing from host — re-pulling off the run path", {
-          image,
-          slot,
-        });
-        await pullImage(image);
-        pulled.push(image);
-      }
-
-      const pinOutcome = await ensureImagePin(image, slot);
-      if (pinOutcome !== "unchanged") {
-        logger.info("runtime image pin reconciled", { image, slot, outcome: pinOutcome });
+      const outcome = await ensureImagePin(image, slot);
+      if (outcome !== "unchanged") {
+        // Deliberately loud: a converged pin is the steady state, so a pass
+        // that had to create or replace one means something on this host
+        // removed it — the very janitor whose invisible nightly re-pull this
+        // module exists to stop. Silent self-healing would hide it again.
+        logger.warn("runtime image pin was missing — recreated", { image, slot, outcome });
         pinned.push(slot);
       }
     } catch (err) {
@@ -104,7 +93,7 @@ export async function reconcileRuntimeImages(
     }
   }
 
-  return { pulled, pinned };
+  return { pinned };
 }
 
 let warmerTimer: ReturnType<typeof setTimeout> | null = null;
