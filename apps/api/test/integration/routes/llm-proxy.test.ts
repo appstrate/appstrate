@@ -211,6 +211,45 @@ describe("POST /api/llm-proxy/openai-completions/v1/chat/completions", () => {
     expect(row!.costUsd).toBeCloseTo(0.00098, 6);
   });
 
+  it("propagates caller cancellation to the upstream provider request", async () => {
+    const h = await buildHarness();
+    const caller = new AbortController();
+    let enteredUpstream!: (signal: AbortSignal) => void;
+    const upstreamEntered = new Promise<AbortSignal>((resolve) => {
+      enteredUpstream = resolve;
+    });
+
+    mockUpstream(async (_input, init) => {
+      const upstreamSignal = init?.signal;
+      if (!upstreamSignal) {
+        throw new Error("Expected the proxy to forward an abort signal");
+      }
+      enteredUpstream(upstreamSignal);
+      return await new Promise<Response>((_resolve, reject) => {
+        upstreamSignal.addEventListener(
+          "abort",
+          () => reject(upstreamSignal.reason ?? new Error("upstream aborted")),
+          { once: true },
+        );
+      });
+    });
+
+    const pending = app.request("/api/llm-proxy/openai-completions/v1/chat/completions", {
+      method: "POST",
+      headers: authHeaders(h),
+      body: JSON.stringify({
+        model: h.presetId,
+        messages: [{ role: "user", content: "hi" }],
+      }),
+      signal: caller.signal,
+    });
+
+    const upstreamSignal = await upstreamEntered;
+    caller.abort(new Error("chat stopped"));
+    await Promise.resolve(pending).catch(() => undefined);
+    expect(upstreamSignal.aborted).toBe(true);
+  });
+
   it("forces stream_options.include_usage on an ORG-owned preset too", async () => {
     // Usage reporting is opt-in on this wire. Forcing it only for SYSTEM presets
     // left every org-owned streaming call unpriced whenever the caller SDK

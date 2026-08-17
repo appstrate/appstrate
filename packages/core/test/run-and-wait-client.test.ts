@@ -551,6 +551,27 @@ describe("launchRunAndWait launch body", () => {
     });
   });
 
+  it("forwards the top-level modelId override for either run kind", async () => {
+    const inline = captureLaunch();
+    await launchRunAndWait(
+      {
+        kind: "inline",
+        manifest: { name: "tmp" },
+        prompt: "do it",
+        modelId: "model_mistral",
+      },
+      { origin: "https://test.local", headers: {}, fetch: inline.fetchImpl },
+    );
+    expect(inline.captured()?.body).toMatchObject({ modelId: "model_mistral" });
+
+    const agent = captureLaunch();
+    await launchRunAndWait(
+      { kind: "agent", scope: "@acme", name: "writer", modelId: "model_mistral" },
+      { origin: "https://test.local", headers: {}, fetch: agent.fetchImpl },
+    );
+    expect(agent.captured()?.body).toMatchObject({ modelId: "model_mistral" });
+  });
+
   // Fan-in by reference: the tool argument has to survive body construction,
   // otherwise the model is told the documents were delivered and nothing is
   // mounted — the silent failure this feature exists to remove.

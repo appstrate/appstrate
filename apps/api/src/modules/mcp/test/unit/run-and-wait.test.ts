@@ -92,6 +92,7 @@ describe("run_and_wait", () => {
     const { tool } = makeRunAndWait({});
     expect(tool.descriptor.name).toBe("run_and_wait");
     expect(tool.descriptor.inputSchema.required).toEqual(["kind"]);
+    expect(tool.descriptor.inputSchema.properties).toHaveProperty("modelId");
   });
 
   it("describes inline defaults and exact manifest overrides", () => {

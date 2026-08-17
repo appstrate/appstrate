@@ -50,6 +50,8 @@ export interface ProxyCallInputs {
   upstreamPath: string;
   incomingHeaders: Headers;
   rawBody: Uint8Array;
+  /** Abort the upstream provider request when this proxy caller goes away. */
+  signal?: AbortSignal;
   /**
    * Injected for tests; production omits it. The upstream call always goes
    * through `egressGuardedFetch` — when this seam is injected, the guard
@@ -254,6 +256,7 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
         method: "POST",
         headers: upstreamHeaders,
         body: rewrittenBody,
+        signal: inputs.signal,
       },
       {
         maxRedirects: 0,

@@ -41,7 +41,7 @@ import { logger } from "../logger.ts";
 import { PiChatUiStreamMapper } from "./ui-stream-mapper.ts";
 import type { AgentSessionEvent } from "./pi-events.ts";
 import { buildPlatformMcpTools } from "./mcp-tools.ts";
-import { acquirePiChatSlot, chatCapacityResponse, releaseOnClose } from "./concurrency.ts";
+import { releaseOnClose, type PiChatSlot } from "./concurrency.ts";
 import { createStepCapController, type PiChatSession } from "./turn-control.ts";
 import {
   ChatTurnDeadlineError,
@@ -67,6 +67,8 @@ import { buildStructuredPiTurn, reconstructPiSession } from "./structured-sessio
  */
 
 export interface PiChatInput {
+  /** Capacity reserved by the route before it persists the user turn. */
+  slot: PiChatSlot;
   /** Resolved Pi model, authentication transport and metering ownership. */
   modelBinding: ResolvedPiChatModelBinding;
   /** Appstrate preset id (org model row id) — stored as `llm_usage.model`. */
@@ -91,13 +93,9 @@ export interface PiChatInput {
 }
 
 /**
- * Drive one Pi chat turn and return the UI-message-stream `Response`.
- * Returns a 429 immediately when the in-process session cap is saturated.
+ * Drive one admitted Pi chat turn and return the UI-message-stream `Response`.
  */
 export function runPiChat(input: PiChatInput): Response {
-  const slot = acquirePiChatSlot();
-  if (!slot) return chatCapacityResponse();
-
   const { modelBinding, platformMcp, abortSignal, onError } = input;
   const model = modelBinding.model;
   const mapper = new PiChatUiStreamMapper();
@@ -399,6 +397,6 @@ export function runPiChat(input: PiChatInput): Response {
   // been cancelled/errored) — it streams from `stream`, so the slot must
   // outlive the producer function.
   return createUIMessageStreamResponse({
-    stream: releaseOnClose<UIMessageChunk>(stream, () => slot.release()),
+    stream: releaseOnClose<UIMessageChunk>(stream, () => input.slot.release()),
   });
 }

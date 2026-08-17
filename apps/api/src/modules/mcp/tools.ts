@@ -907,6 +907,12 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
           description: "Per-run config override (either kind).",
           additionalProperties: true,
         },
+        modelId: {
+          type: "string",
+          description:
+            "Explicit Appstrate model preset id for this run (either kind). Top-level argument, " +
+            "not a field inside config.",
+        },
         connection_overrides: {
           type: "object",
           additionalProperties: { type: "string" },

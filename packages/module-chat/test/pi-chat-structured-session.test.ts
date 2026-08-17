@@ -133,6 +133,34 @@ describe("structured Pi session reconstruction", () => {
     expect(projectedB).not.toContain("secret-alpha");
   });
 
+  it("does not replay a stopped, unanswered user request into the next turn", () => {
+    const stoppedThread: UIMessage[] = [
+      { id: "u-stop", role: "user", parts: [{ type: "text", text: "Écris 5000 mots" }] },
+      {
+        id: "a-stop",
+        role: "assistant",
+        parts: [{ type: "step-start" }],
+        metadata: {
+          appstrate: {
+            turn: {
+              engine: "pi",
+              finishReason: "stop",
+              stepCount: 0,
+              maxSteps: 16,
+              maxStepsReached: false,
+            },
+          },
+        },
+      } as UIMessage,
+      { id: "u-next", role: "user", parts: [{ type: "text", text: "Nouvelle demande" }] },
+    ];
+
+    const turn = buildStructuredPiTurn(stoppedThread, MODEL);
+    expect(turn.prompt).toBe("Nouvelle demande");
+    expect(JSON.stringify(turn.history)).not.toContain("Écris 5000 mots");
+    expect(turn.sourceMessageCount).toBe(2);
+  });
+
   it("reprojects history for the currently selected model instead of caching an old version", () => {
     const first = buildStructuredPiTurn(toolThread, MODEL);
     const changed = buildStructuredPiTurn(toolThread, {

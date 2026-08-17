@@ -12,6 +12,7 @@ import type { Api, Message } from "@appstrate/runner-pi";
 import { messagesWithAttachmentsAsText } from "../attachments.ts";
 import { redactConnectPayload, splitJsonText } from "../connect-offer.ts";
 import { uiMessageText } from "../message-text.ts";
+import { turnMetadataFromMessage } from "@appstrate/core/chat-turn-metadata";
 
 export interface PiHistoryModel {
   api: Api;
@@ -184,6 +185,24 @@ function assistantMessages(
   return { messages: output, toolCallCount, toolResultCount };
 }
 
+/**
+ * A stopped turn with no model output must not leave two consecutive user
+ * instructions in the next provider request. The product journal keeps both
+ * nodes, but the disposable Pi history drops the unanswered request together
+ * with its empty stop marker.
+ */
+function isEmptyStoppedAssistant(message: UIMessage): boolean {
+  if (message.role !== "assistant") return false;
+  const turn = turnMetadataFromMessage(message);
+  if (turn?.finishReason !== "stop" || turn.stepCount !== 0) return false;
+  return !message.parts.some(
+    (part) =>
+      (part.type === "text" && part.text.length > 0) ||
+      (part.type === "reasoning" && part.text.length > 0) ||
+      isToolUIPart(part),
+  );
+}
+
 /** Convert the active branch history and keep its final user message as the new prompt. */
 export function buildStructuredPiTurn(input: UIMessage[], model: PiHistoryModel): StructuredPiTurn {
   const messages = messagesWithAttachmentsAsText(input);
@@ -195,7 +214,11 @@ export function buildStructuredPiTurn(input: UIMessage[], model: PiHistoryModel)
   const history: Message[] = [];
   let toolCallCount = 0;
   let toolResultCount = 0;
-  for (const [index, message] of messages.slice(0, -1).entries()) {
+  const historicalMessages = messages.slice(0, -1);
+  for (const [index, message] of historicalMessages.entries()) {
+    const next = historicalMessages[index + 1];
+    if (message.role === "user" && next && isEmptyStoppedAssistant(next)) continue;
+    if (isEmptyStoppedAssistant(message)) continue;
     if (message.role === "user") {
       const converted = userMessage(message, index + 1);
       if (converted) history.push(converted);

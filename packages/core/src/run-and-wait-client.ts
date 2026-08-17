@@ -511,6 +511,12 @@ export async function launchRunAndWait(
     };
   }
 
+  // Both launch routes expose the same explicit per-run model override. Keep it
+  // top-level: `config.modelId` is agent configuration and does not select the
+  // run model.
+  const modelId = asString(args.modelId);
+  if (modelId) launchBody = { ...launchBody, modelId };
+
   // Both run bodies carry the same field, so one forward covers both kinds.
   if (connectionOverrides.overrides) {
     launchBody = { ...launchBody, connection_overrides: connectionOverrides.overrides };

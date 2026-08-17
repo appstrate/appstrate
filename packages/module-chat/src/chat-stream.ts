@@ -41,7 +41,11 @@ import { mintLoopbackToken, mintMcpLoopbackToken } from "./loopback-auth.ts";
 import { materializeUserAttachments, messagesWithAttachmentsAsText } from "./attachments.ts";
 import { runPiChat, type PiChatInput } from "./pi-chat/engine.ts";
 import { PI_CHAT_ENGINE_ORG_IDS_ENV, selectChatEngine } from "./pi-chat/engine-selection.ts";
-import { resolvePiChatModelBinding } from "./pi-chat/model-binding.ts";
+import {
+  resolvePiChatModelBinding,
+  type ResolvedPiChatModelBinding,
+} from "./pi-chat/model-binding.ts";
+import { acquirePiChatSlot, chatCapacityResponse, type PiChatSlot } from "./pi-chat/concurrency.ts";
 import { SYSTEM_PROMPT, buildCallerContextBlock, type ChatEnv } from "./prompt.ts";
 export type { ChatEnv } from "./prompt.ts";
 import { finalizeChatStream } from "./finalize-stream.ts";
@@ -698,6 +702,27 @@ export async function handleChatStream(
     hasTools: usePiEngine || Boolean(mcp),
   });
 
+  // Reject invalid Pi bindings and saturated capacity before the user message
+  // or active-stream marker is written. Once acquired, the slot is transferred
+  // to `runPiChat`, which releases it when the response stream closes.
+  let piAdmission: { slot: PiChatSlot; binding: ResolvedPiChatModelBinding } | undefined;
+  if (usePiEngine) {
+    if (modelBindingResolution.status === "needs-reconnection") {
+      await closeMcp();
+      return subscriptionReconnectResponse();
+    }
+    if (modelBindingResolution.status !== "ready") {
+      await closeMcp();
+      throw invalidRequest(`Model family "${chosen.apiShape}" is not supported by Pi chat.`);
+    }
+    const slot = acquirePiChatSlot();
+    if (!slot) {
+      await closeMcp();
+      return chatCapacityResponse();
+    }
+    piAdmission = { slot, binding: modelBindingResolution.binding };
+  }
+
   // ── Server-authoritative persistence + resumable streaming ───────────────
   // Persist the user turn BEFORE inference; the assistant turn is persisted when
   // the stream finalizes (in `finalize` below). Generation runs through a
@@ -724,6 +749,7 @@ export async function handleChatStream(
       // would leak per failed turn. Close it on this error path before
       // rethrowing. Credential headers are untouched — this is purely the
       // leak-on-error cleanup.
+      piAdmission?.slot.release();
       await closeMcp();
       throw err;
     }
@@ -785,17 +811,7 @@ export async function handleChatStream(
   // Pi path. OAuth tokens stay in memory; API-key bindings carry only the inert
   // proxy key and mint a fresh loopback bearer for every llm-proxy call. A Pi
   // failure exits this branch and is never retried through AI SDK.
-  if (usePiEngine) {
-    if (modelBindingResolution.status === "needs-reconnection") {
-      // The oauth credential is dead → tell the client to reconnect rather than
-      // launching a session that would 401 upstream.
-      await failCleanup();
-      return subscriptionReconnectResponse();
-    }
-    if (modelBindingResolution.status !== "ready") {
-      await failCleanup();
-      throw invalidRequest(`Model family "${chosen.apiShape}" is not supported by Pi chat.`);
-    }
+  if (piAdmission) {
     // The Pi session opens its OWN platform MCP connection (`/api/mcp/o/:org`),
     // and run_and_wait hits platform run routes with these headers. It must NEVER
     // receive the caller's raw cookie/Authorization (reusable far beyond chat).
@@ -821,7 +837,8 @@ export async function handleChatStream(
     try {
       return await finalize(
         engineRuntime.runPiChat({
-          modelBinding: modelBindingResolution.binding,
+          slot: piAdmission.slot,
+          modelBinding: piAdmission.binding,
           presetId: chosen.id,
           orgId,
           userId: user.id,
@@ -842,6 +859,7 @@ export async function handleChatStream(
         }),
       );
     } catch (err) {
+      piAdmission.slot.release();
       await failCleanup();
       throw err;
     }

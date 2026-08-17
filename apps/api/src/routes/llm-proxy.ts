@@ -243,6 +243,7 @@ async function handleProxy(
       upstreamPath,
       incomingHeaders: c.req.raw.headers,
       rawBody,
+      signal: c.req.raw.signal,
       maxRequestBytes: limits.max_request_bytes,
       beforeUpstream: (resolved) => enforceSystemProxyAdmission({ orgId, resolved, usageContext }),
     });

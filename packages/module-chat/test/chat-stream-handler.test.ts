@@ -36,6 +36,7 @@ import { truncateAll } from "../../../apps/api/test/helpers/db.ts";
 import { createTestContext, type TestContext } from "../../../apps/api/test/helpers/auth.ts";
 import { handleChatStream, type ChatEngineRuntime, type ChatEnv } from "../src/chat-stream.ts";
 import { mintSessionId } from "../src/session-id.ts";
+import { acquirePiChatSlot } from "../src/pi-chat/concurrency.ts";
 import { buildChatPlatformDeps } from "../src/platform-services.ts";
 import { buildModuleInitContext } from "../../../apps/api/src/lib/modules/registry.ts";
 import { errorHandler } from "../../../apps/api/src/middleware/error-handler.ts";
@@ -301,6 +302,38 @@ describe("handleChatStream engine routing", () => {
       .where(and(eq(chatSessions.id, sessionId), eq(chatSessions.orgId, ctx.orgId)))
       .limit(1);
     expect(session?.activeStreamId).toBeNull();
+  });
+
+  it("rejects a saturated Pi turn before persisting its user message", async () => {
+    const previousCap = process.env.CHAT_PI_MAX_CONCURRENCY;
+    process.env.CHAT_PI_MAX_CONCURRENCY = "1";
+    const heldSlot = acquirePiChatSlot();
+    expect(heldSlot).not.toBeNull();
+
+    const sessionId = mintSessionId();
+    let engineCalls = 0;
+    try {
+      const res = await postChat(sessionId, undefined, {
+        configuredPiOrgIds: () => ctx.orgId,
+        runPiChat: () => {
+          engineCalls += 1;
+          throw new Error("Pi engine must not start while capacity is saturated");
+        },
+      });
+
+      expect(res.status).toBe(429);
+      expect(engineCalls).toBe(0);
+
+      const rows = await db
+        .select()
+        .from(chatMessages)
+        .where(eq(chatMessages.sessionId, sessionId));
+      expect(rows).toEqual([]);
+    } finally {
+      heldSlot?.release();
+      if (previousCap === undefined) delete process.env.CHAT_PI_MAX_CONCURRENCY;
+      else process.env.CHAT_PI_MAX_CONCURRENCY = previousCap;
+    }
   });
 
   it("streams start → text → finish with no error and persists the assistant turn", async () => {

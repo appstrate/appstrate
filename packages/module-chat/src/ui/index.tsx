@@ -58,6 +58,7 @@ import {
   markSessionRead,
   mintSessionId,
   SESSIONS_QUERY_KEY,
+  stopSession,
   type SessionSummary,
 } from "./sessions.ts";
 import { useSessions } from "./use-sessions.ts";
@@ -474,7 +475,18 @@ function ConversationInner({
     onConversationChange?.(id);
   }, [chat.messages.length, id, onConversationChange]);
 
-  const runtime = useAISDKRuntime(chat, { adapters: { attachments } });
+  // assistant-ui's cancel action only aborts the browser fetch. Chat producers
+  // intentionally survive disconnects so reload can resume them, therefore a
+  // real user stop must also hit the dedicated server endpoint. Start that
+  // independent request before aborting the local stream so it cannot be
+  // mistaken for an ordinary disconnect.
+  const stop = useCallback(() => {
+    void stopSession(getHeaders, id).catch(() => {});
+    return chat.stop();
+  }, [chat, getHeaders, id]);
+  const chatWithServerStop = useMemo(() => ({ ...chat, stop }), [chat, stop]);
+
+  const runtime = useAISDKRuntime(chatWithServerStop, { adapters: { attachments } });
 
   return (
     <AssistantRuntimeProvider runtime={runtime}>
