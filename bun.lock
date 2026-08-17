@@ -18,7 +18,7 @@
         "@commitlint/config-conventional": "^21.2.0",
         "@eslint/js": "^10.0.1",
         "@mariozechner/pi-ai": "0.73.1",
-        "@readme/openapi-parser": "^6.3.1",
+        "@readme/openapi-parser": "^7.0.1",
         "@redocly/openapi-core": "^2.43.2",
         "@types/bun": "latest",
         "@types/json-schema": "7.0.15",
@@ -1179,7 +1179,7 @@
 
     "@readme/better-ajv-errors": ["@readme/better-ajv-errors@2.4.0", "", { "dependencies": { "@babel/code-frame": "^7.22.5", "@babel/runtime": "^7.22.5", "@humanwhocodes/momoa": "^2.0.3", "jsonpointer": "^5.0.0", "leven": "^3.1.0", "picocolors": "^1.1.1" }, "peerDependencies": { "ajv": "4.11.8 - 8" } }, "sha512-9WODaOAKSl/mU+MYNZ2aHCrkoRSvmQ+1YkLj589OEqqjOAhbn8j7Z+ilYoiTu/he6X63/clsxxAB4qny9/dDzg=="],
 
-    "@readme/openapi-parser": ["@readme/openapi-parser@6.3.1", "", { "dependencies": { "@apidevtools/json-schema-ref-parser": "^15.5.1", "@readme/better-ajv-errors": "^2.3.2", "@readme/openapi-schemas": "^4.0.0", "@types/json-schema": "^7.0.15", "ajv": "^8.20.0", "ajv-draft-04": "^1.0.0" }, "peerDependencies": { "openapi-types": ">=7" } }, "sha512-p+V6/KdKZ4GmSB5t2O5MGSXBnu15cSx0Q0ydmceETP4R4YIotYFj7IPGHDQkXCh0RFAVQRJ+dxLyQXsIqenwIQ=="],
+    "@readme/openapi-parser": ["@readme/openapi-parser@7.0.1", "", { "dependencies": { "@apidevtools/json-schema-ref-parser": "^15.5.1", "@readme/better-ajv-errors": "^2.3.2", "@readme/openapi-schemas": "^4.0.0", "@types/json-schema": "^7.0.15", "ajv": "^8.20.0", "ajv-draft-04": "^1.0.0" }, "peerDependencies": { "openapi-types": ">=7" } }, "sha512-FW+qN1TGlCVKK4xE6pKCS6QdR0EBaC95LC2pnmY3+oVK0tDJ1iAIOmK1SYiDAayId7WInnYyemwBImpvmBV2xQ=="],
 
     "@readme/openapi-schemas": ["@readme/openapi-schemas@4.0.0", "", { "dependencies": { "@types/json-schema": "^7.0.15" } }, "sha512-hrG//9/+RpOZTrUDirU4OzfMqaxCdY5BMpr3YuLf3Rje9rfNsydQJsH9iCPTie9ZRu9xe+0OUD4fHe0JmGwa2w=="],
 
