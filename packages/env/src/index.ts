@@ -509,7 +509,7 @@ const envSchema = z
     //
     // 0 disables the sweep entirely (no re-pull, no pin containers) for
     // operators who manage image lifetime themselves.
-    RUNTIME_IMAGE_RECONCILE_INTERVAL_SECONDS: z.coerce.number().int().min(0).default(300),
+    RUNTIME_IMAGE_WARM_INTERVAL_SECONDS: z.coerce.number().int().min(0).default(300),
 
     // Per-run workspace volume init image. A minimal image (~5 MB) used
     // once per run to chown the freshly created Docker volume to UID

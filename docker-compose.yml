@@ -360,7 +360,7 @@ services:
       - RUN_STALL_THRESHOLD_SECONDS
       - RUN_WATCHDOG_INTERVAL_SECONDS
       - RUN_BOOT_DEADLINE_SECONDS
-      - RUNTIME_IMAGE_RECONCILE_INTERVAL_SECONDS
+      - RUNTIME_IMAGE_WARM_INTERVAL_SECONDS
       # ── Run limits (optional; validated by apps/api/src/services/run-limits.ts) ──
       - PLATFORM_RUN_LIMITS=${PLATFORM_RUN_LIMITS:-{}}
       - INLINE_RUN_LIMITS=${INLINE_RUN_LIMITS:-{}}
