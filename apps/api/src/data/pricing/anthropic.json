@@ -242,6 +242,69 @@
       "cacheWrite": 1.25
     }
   },
+  "claude-mythos-5": {
+    "label": "Claude Mythos 5",
+    "contextWindow": 1000000,
+    "maxTokens": 128000,
+    "capabilities": [
+      "text",
+      "image",
+      "reasoning"
+    ],
+    "generation": {
+      "temperature": "unsupported",
+      "reasoning": {
+        "supported": "supported",
+        "adaptive": true,
+        "levels": {
+          "off": "supported",
+          "minimal": "supported",
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "supported",
+          "max": "supported"
+        }
+      }
+    },
+    "cost": {
+      "input": 10,
+      "output": 50,
+      "cacheRead": 1,
+      "cacheWrite": 12.5
+    }
+  },
+  "claude-mythos-preview": {
+    "label": "Claude Mythos Preview",
+    "contextWindow": 1000000,
+    "maxTokens": 128000,
+    "capabilities": [
+      "text",
+      "image"
+    ],
+    "generation": {
+      "temperature": "unsupported",
+      "reasoning": {
+        "supported": "unsupported",
+        "adaptive": true,
+        "levels": {
+          "off": "unsupported",
+          "minimal": "unsupported",
+          "low": "unsupported",
+          "medium": "unsupported",
+          "high": "unsupported",
+          "xhigh": "unsupported",
+          "max": "unsupported"
+        }
+      }
+    },
+    "cost": {
+      "input": 10,
+      "output": 50,
+      "cacheRead": 1,
+      "cacheWrite": 12.5
+    }
+  },
   "claude-opus-4-1": {
     "label": "Claude Opus 4 1",
     "contextWindow": 200000,

@@ -691,6 +691,36 @@
       "cacheRead": 0.15
     }
   },
+  "gemini-3.7-flash": {
+    "label": "Gemini 3.7 Flash",
+    "contextWindow": 1048576,
+    "maxTokens": 65536,
+    "capabilities": [
+      "text",
+      "image"
+    ],
+    "generation": {
+      "temperature": "supported",
+      "reasoning": {
+        "supported": "unsupported",
+        "adaptive": null,
+        "levels": {
+          "off": "unsupported",
+          "minimal": "unsupported",
+          "low": "unsupported",
+          "medium": "unsupported",
+          "high": "unsupported",
+          "xhigh": "unsupported",
+          "max": "unsupported"
+        }
+      }
+    },
+    "cost": {
+      "input": 0.75,
+      "output": 3.75,
+      "cacheRead": 0.075
+    }
+  },
   "gemini-exp-1114": {
     "label": "Gemini Exp 1114",
     "contextWindow": 1048576,
@@ -909,19 +939,21 @@
     "maxTokens": 65536,
     "capabilities": [
       "text",
-      "image"
+      "image",
+      "reasoning"
     ],
     "generation": {
       "temperature": "supported",
       "reasoning": {
-        "supported": "unsupported",
+        "supported": "supported",
+        "temperatureCompatible": "supported",
         "adaptive": null,
         "levels": {
-          "off": "unsupported",
-          "minimal": "unsupported",
-          "low": "unsupported",
-          "medium": "unsupported",
-          "high": "unsupported",
+          "off": "supported",
+          "minimal": "supported",
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
           "xhigh": "unsupported",
           "max": "unsupported"
         }
@@ -938,19 +970,21 @@
     "maxTokens": 65536,
     "capabilities": [
       "text",
-      "image"
+      "image",
+      "reasoning"
     ],
     "generation": {
       "temperature": "supported",
       "reasoning": {
-        "supported": "unsupported",
+        "supported": "supported",
+        "temperatureCompatible": "supported",
         "adaptive": null,
         "levels": {
-          "off": "unsupported",
-          "minimal": "unsupported",
-          "low": "unsupported",
-          "medium": "unsupported",
-          "high": "unsupported",
+          "off": "supported",
+          "minimal": "supported",
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
           "xhigh": "unsupported",
           "max": "unsupported"
         }

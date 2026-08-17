@@ -239,6 +239,26 @@
       "output": 0.3
     }
   },
+  "labs-leanstral-1-5": {
+    "label": "Labs Leanstral 1 5",
+    "contextWindow": 262144,
+    "maxTokens": 131072,
+    "capabilities": [
+      "text"
+    ],
+    "generation": {
+      "temperature": "supported",
+      "reasoning": {
+        "supported": "unknown",
+        "adaptive": null,
+        "levels": {}
+      }
+    },
+    "cost": {
+      "input": 0,
+      "output": 0
+    }
+  },
   "magistral-medium-1-2-2509": {
     "label": "Magistral Medium 1 2 2509",
     "contextWindow": 40000,
@@ -884,6 +904,34 @@
     "cost": {
       "input": 0.1,
       "output": 0.3
+    }
+  },
+  "mistral-small-2603": {
+    "label": "Mistral Small 2603",
+    "contextWindow": 262144,
+    "maxTokens": null,
+    "capabilities": [
+      "text"
+    ],
+    "generation": {
+      "temperature": "supported",
+      "reasoning": {
+        "supported": "unsupported",
+        "adaptive": null,
+        "levels": {
+          "off": "unsupported",
+          "minimal": "unsupported",
+          "low": "unsupported",
+          "medium": "unsupported",
+          "high": "unsupported",
+          "xhigh": "unsupported",
+          "max": "unsupported"
+        }
+      }
+    },
+    "cost": {
+      "input": 0.15,
+      "output": 0.6
     }
   },
   "mistral-small-3-2-2506": {
