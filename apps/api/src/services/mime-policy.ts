@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * MIME policy — the ONE module that normalizes a MIME string, decides whether it
- * is text-shaped, and compares a declaration against sniffed magic bytes. Shared
- * by every path that handles a MIME so the rules cannot drift between them:
+ * MIME policy — the ONE module that compares a MIME declaration against sniffed
+ * magic bytes and decides what a path should do about a mismatch. Normalization
+ * and text-shape classification come from `@appstrate/core/mime` (re-exported
+ * below) because the runtime layers ask the same question. Shared by every path
+ * that handles a MIME so the rules cannot drift between them:
  *
  *  - Staged-upload consume (`services/uploads.ts` → run workspace / durable doc)
  *  - Proxy-upload sink (`routes/uploads.ts` — signed-vs-declared Content-Type)
@@ -26,54 +28,17 @@
  *    so the label stays honest and the preview/kind logic downstream stays safe.
  */
 
-/** Strip charset / boundary / other parameters from a MIME string and lowercase it. */
-export function normalizeMime(mime: string): string {
-  return mime.split(";")[0]?.trim().toLowerCase() ?? "";
-}
-
 /**
- * Is this MIME text-shaped — i.e. does the format carry its payload as text
- * rather than as a binary container (plain text, JSON, CSV, XML source, YAML,
- * JS, …)?
- *
- * ONE predicate, two consumers, because they ask the same question:
- *
- *  - **Sniff enforcement** ({@link shouldEnforceSniffedMime}): text-shaped
- *    formats have no magic bytes, so `file-type` can never confirm them — the
- *    strict declared-vs-sniffed check is skipped and the declared mime trusted.
- *    Callers that need strict binary validation should declare a concrete binary
- *    MIME (application/pdf, image/*, …) which `file-type` can identify.
- *  - **MCP `resources/read`** (`modules/mcp/tools.ts`): text-shaped bytes are
- *    inlined as a `text` block; anything else goes out as a base64 `blob`.
- *
- * The two used to carry separate lists and drifted: the MCP copy did not know
- * about the YAML family (`application/x-yaml`, `+yaml`), so a YAML document was
- * base64-blobbed instead of being handed to the model as readable text.
+ * {@link normalizeMime} and {@link isTextShapedMime} are re-exported from
+ * `@appstrate/core/mime`, NOT defined here. The "is this text or an opaque
+ * binary?" question is also asked by the AFPS runtime (`http-call-core.ts`) and
+ * by the sidecar (`runtime-pi/sidecar/mcp.ts`), neither of which can import
+ * from `apps/api` — core sits below all three. Every copy that lived at a call
+ * site drifted from the others and shipped a bug; add a format in core, not
+ * here.
  */
-export function isTextShapedMime(mime: string): boolean {
-  if (mime.startsWith("text/")) return true;
-  // Structured text payloads with no reliable magic signature.
-  const textShaped = new Set([
-    "application/json",
-    "application/x-ndjson",
-    "application/ld+json",
-    "application/xml",
-    "application/x-yaml",
-    "application/yaml",
-    "application/csv",
-    "application/javascript",
-    "application/ecmascript",
-    "application/x-sh",
-    "application/x-httpd-php",
-    "application/x-www-form-urlencoded",
-    "image/svg+xml", // XML-based, file-type never matches it
-  ]);
-  if (textShaped.has(mime)) return true;
-  // Structured-suffix convention (RFC 6839) — `+json`, `+xml`, `+yaml`.
-  // Anything in these families is text-shaped and cannot be magic-sniffed.
-  if (mime.endsWith("+json") || mime.endsWith("+xml") || mime.endsWith("+yaml")) return true;
-  return false;
-}
+export { normalizeMime, isTextShapedMime } from "@appstrate/core/mime";
+import { isTextShapedMime, normalizeMime } from "@appstrate/core/mime";
 
 /**
  * MIMEs whose on-disk format is a ZIP container. `file-type` samples only the

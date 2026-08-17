@@ -53,6 +53,7 @@ import {
   type DocumentCapabilities,
 } from "../../services/documents.ts";
 import { isTextShapedMime, normalizeMime } from "../../services/mime-policy.ts";
+import { isTextShapedContentType } from "@appstrate/core/mime";
 import { asString, textResult } from "./tool-results.ts";
 import { buildPackageDocumentTools } from "./package-document-tools.ts";
 
@@ -509,8 +510,13 @@ export async function readResponse(response: Response): Promise<CallToolResult> 
     );
   }
 
-  const isTextual =
-    contentType.includes("json") || contentType.startsWith("text/") || contentType === "";
+  // Same predicate as every other text/binary decision in the platform
+  // (`@appstrate/core/mime`) — a package download served as OOXML must be
+  // summarised, never decoded. An ABSENT Content-Type stays textual here, which
+  // the shared predicate deliberately refuses: this path only ever reads our own
+  // API, whose bodiless 204s carry no type and must not be reported as an
+  // omitted binary.
+  const isTextual = contentType === "" || isTextShapedContentType(contentType);
   if (!isTextual) {
     const len = response.headers.get("content-length");
     return textResult(

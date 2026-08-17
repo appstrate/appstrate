@@ -1236,25 +1236,67 @@ function toArrayBufferUint8(source: Uint8Array): Uint8Array<ArrayBuffer> {
  * the bug fix at the heart of issues #149 / #151. `application/octet-stream`
  * with a body that happens to be ASCII MUST come back as inline bytes,
  * not text.
+ *
+ * CANONICAL LIST: `@appstrate/core/mime` (`isTextShapedMime`), which the
+ * platform MIME policy and the sidecar's `api_call` classifier both delegate
+ * to. This copy is NOT free-form — it is the same policy, kept local only
+ * because `afps-runtime` deliberately carries no dependency on core (it is a
+ * portable bundle runner and a standalone `afps` CLI; core sits beside it, not
+ * below it, so importing it would pull the whole platform surface into the
+ * runtime's install). `test/resolvers/http-call-core-mime-parity.test.ts`
+ * asserts the two agree, so a format added to core cannot silently skip this
+ * path. Add formats in core FIRST, then mirror them here.
+ *
+ * Every rule below matches an exact media type or an RFC 6839 structured
+ * suffix — never a substring. `contentType.includes("xml")` classifies
+ * `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet` (an XLSX,
+ * i.e. a ZIP binary) as text and corrupts it on decode; that is the bug this
+ * predicate exists to prevent.
  */
-function isTextLikeMimeType(contentType: string | null | undefined): boolean {
+export function isTextLikeMimeType(contentType: string | null | undefined): boolean {
   if (!contentType) return false;
   const ct = contentType.toLowerCase();
   if (ct.startsWith("text/")) return true;
-  // Charset suffix is a strong signal regardless of base type.
+  // Charset parameter is a strong signal regardless of base type — the one
+  // rule specific to this path (an upstream that bothers to declare a charset
+  // is telling us the body is text).
   if (/;\s*charset=/.test(ct)) return true;
-  // Structured-syntax suffixes for JSON/XML (RFC 6839) — `+json`, `+xml`.
-  // These must come before the general substring tests so e.g.
-  // `application/vnd.api+json` is treated as text.
-  if (/\+json(\s*;|$)/.test(ct)) return true;
-  if (/\+xml(\s*;|$)/.test(ct)) return true;
-  // Common base types.
-  if (ct.startsWith("application/json")) return true;
-  if (ct.startsWith("application/xml")) return true;
-  if (ct.startsWith("application/javascript")) return true;
-  if (ct.startsWith("application/ecmascript")) return true;
-  return false;
+  const mediaType = ct.split(";", 1)[0]!.trim();
+  // Structured-syntax suffixes (RFC 6839) — `+json`, `+xml`, `+yaml`.
+  if (mediaType.endsWith("+json") || mediaType.endsWith("+xml") || mediaType.endsWith("+yaml")) {
+    return true;
+  }
+  return TEXT_LIKE_MEDIA_TYPES.has(mediaType);
 }
+
+/**
+ * Mirror of the media-type set in `@appstrate/core/mime`. Kept in sync by
+ * `http-call-core-mime-parity.test.ts` — do not edit one without the other.
+ */
+export const TEXT_LIKE_MEDIA_TYPES: ReadonlySet<string> = new Set([
+  // JSON family
+  "application/json",
+  "application/ld+json",
+  "application/x-ndjson",
+  "application/jsonl",
+  "application/json-seq",
+  // XML family
+  "application/xml",
+  "application/xml-dtd",
+  "application/xml-external-parsed-entity", // RFC 7303
+  "image/svg+xml",
+  // YAML family
+  "application/yaml",
+  "application/x-yaml",
+  // Scripting / tabular / form encodings with no magic signature
+  "application/javascript",
+  "application/x-javascript",
+  "application/ecmascript",
+  "application/csv",
+  "application/x-sh",
+  "application/x-httpd-php",
+  "application/x-www-form-urlencoded",
+]);
 
 function parseMimeType(contentType: string | null | undefined): string {
   if (!contentType) return "application/octet-stream";

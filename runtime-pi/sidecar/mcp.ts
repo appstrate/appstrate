@@ -61,6 +61,7 @@ import {
   type Resource,
 } from "@appstrate/mcp-transport";
 import { getErrorMessage } from "@appstrate/core/errors";
+import { isTextShapedContentType } from "@appstrate/core/mime";
 import {
   RUN_HISTORY_INJECTED_TOOL,
   RECALL_MEMORY_INJECTED_TOOL,
@@ -1279,7 +1280,11 @@ function buildBlobResourceProvider(blobStore: BlobStore) {
         // is the closest match for "URI doesn't resolve" per spec.
         throw new McpError(ErrorCode.InvalidParams, `Resource not found: ${uri}`);
       }
-      const isText = record.mimeType.startsWith("text/") || record.mimeType.includes("json");
+      // Same predicate as the spill decision in `responseToToolResult` — a body
+      // stored as text must read back as text. These were two separate lists
+      // and disagreed on the XML family: an `application/xml` body spilled from
+      // the text path came back base64-encoded.
+      const isText = isTextShapedContentType(record.mimeType);
       if (isText) {
         return {
           contents: [
@@ -1466,7 +1471,15 @@ async function responseToToolResult(
   };
 
   const ct = res.headers.get("content-type") ?? "";
-  const isText = ct.startsWith("text/") || ct.includes("json") || ct.includes("xml");
+  // Media-type match, never a substring test, and never a list local to this
+  // file. `contentType.includes("xml")` classified
+  // `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet` (an
+  // XLSX — a ZIP binary) as text: the lossy UTF-8 decode below replaced invalid
+  // bytes with U+FFFD and the re-encode on the spill path wrote that corruption
+  // to the workspace, destroying every OOXML file downloaded through
+  // `responseMode.toFile`. The shared predicate is the fix AND the guard
+  // against the next such format.
+  const isText = isTextShapedContentType(ct);
 
   if (!isText) {
     if (!options.blobStore) {
