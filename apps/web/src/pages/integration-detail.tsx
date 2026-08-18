@@ -260,17 +260,18 @@ function OAuthClientModal({
             value={redirectUri}
             onChange={(e) => setRedirectUri(e.target.value)}
           />
-          {/* The redirect_uri this instance actually sends when the field is
-              left empty. Providers compare it byte-for-byte and reject a
-              mismatch with an opaque error, so the admin is shown the exact
-              string to register rather than left to reconstruct it from the
-              browser's origin (which is NOT authoritative — `APP_URL` is). */}
+          {/* The redirect_uri connect will send for THIS client: the override
+              typed above when it is set, else the platform callback. Providers
+              compare it byte-for-byte and reject a mismatch with an opaque
+              error, so the admin is shown the exact string to register rather
+              than left to reconstruct it from the browser's origin (which is
+              NOT authoritative — `APP_URL` is). */}
           <div className="space-y-1">
             <p className="text-muted-foreground text-[0.7rem]">
               {t("integration.oauthClient.platformRedirectUri")}
             </p>
             <CopyableUrl
-              value={platformRedirectUri}
+              value={redirectUri.trim() || platformRedirectUri}
               testId={`platform-redirect-uri-modal-${authKey}`}
             />
           </div>
@@ -353,6 +354,13 @@ function ClientsTable({
   const [showManual, setShowManual] = useState(false);
 
   const rows = clients ?? [];
+  // What connect will ACTUALLY send. A registered client may carry its own
+  // `redirect_uri`, and `OAuth2Strategy.begin` prefers it over the platform
+  // callback (`clientRedirectUri ?? redirectUri`) — so showing the platform
+  // value unconditionally would hand the admin the wrong string to register in
+  // exactly the setup this display exists to get right. New connections always
+  // use the default client, so that client's override is the one that decides.
+  const effectiveRedirectUri = rows.find((c) => c.is_default)?.redirect_uri || platformRedirectUri;
   // Choosing a default only matters when more than one client can mint connections.
   const canChooseDefault = rows.length > 1;
   const hasAutoClient = rows.some((c) => c.auto_provisioned);
@@ -362,6 +370,18 @@ function ClientsTable({
 
   return (
     <div className="mb-3" data-testid={`oauth-clients-list-${authKey}`}>
+      {/* Registering this exact string on the provider's OAuth app is a
+          prerequisite to the FIRST connect attempt, so it is shown before the
+          clients table rather than only inside the registration modal — an
+          admin setting the app up at the provider needs it before there is any
+          client to register. */}
+      <div className="mb-3 space-y-1">
+        <p className="text-muted-foreground text-xs font-semibold">
+          {t("integration.oauthClient.platformRedirectUri")}
+        </p>
+        <CopyableUrl value={effectiveRedirectUri} testId={`platform-redirect-uri-${authKey}`} />
+      </div>
+
       <div className="mb-2 flex items-center justify-between gap-2">
         <h4 className="text-muted-foreground text-xs font-semibold">
           {t("integration.clients.title")}
@@ -671,22 +691,6 @@ function ConfigAuthBlock({
               </span>
             </p>
           )}
-        </div>
-      )}
-
-      {/* Registering this exact string on the provider's OAuth app is a
-          prerequisite to the FIRST connect attempt, so it is shown here rather
-          than only inside the registration modal — an admin setting the app up
-          at the provider needs it before there is any client to register. */}
-      {isOAuth && (
-        <div className="mb-3 space-y-1">
-          <p className="text-muted-foreground text-xs font-semibold">
-            {t("integration.oauthClient.platformRedirectUri")}
-          </p>
-          <CopyableUrl
-            value={platformRedirectUri}
-            testId={`platform-redirect-uri-${status.auth_key}`}
-          />
         </div>
       )}
 

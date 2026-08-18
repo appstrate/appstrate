@@ -2306,13 +2306,17 @@ export async function getIntegrationAuthStatuses(
    */
   block_user_connections: boolean;
   /**
-   * The `redirect_uri` this instance sends to every authorization server for
-   * this integration — the exact string an admin must register on their BYO
-   * OAuth app at the provider. Served from the same helper the connect
-   * strategy uses, so the displayed value cannot drift from the sent one.
-   * A `redirect_uri` mismatch is the most common connect failure and providers
-   * reject it with an opaque error, so the UI shows the truth rather than
-   * leaving the admin to reconstruct it.
+   * The platform's own OAuth callback — what connect sends when the resolved
+   * client declares no `redirect_uri` of its own. Served from the same helper
+   * the connect strategy uses, so this value cannot drift from the sent one.
+   *
+   * NOT unconditionally the effective redirect: `OAuth2Strategy.begin` prefers
+   * a registered client's stored override (`clientRedirectUri ?? redirectUri`).
+   * A consumer telling an admin which string to register at the provider must
+   * resolve the override of the client that will actually be used — the
+   * default one, for new connections — and fall back to this. A `redirect_uri`
+   * mismatch is the most common connect failure and providers reject it with
+   * an opaque error, so showing the wrong one is worse than showing none.
    */
   platform_redirect_uri: string;
 }> {

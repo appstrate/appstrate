@@ -7,7 +7,7 @@ import { diffToolSets } from "./tool-diff.ts";
 import { resolveToken, resolveAccessToken, credentialedCount, _resetCredsCache } from "./creds.ts";
 import { remoteUrl, toolsPolicyKeys, allowsUndeclared } from "./remote-parity.ts";
 import { applyAuth, checkAuthLiveness } from "./auth-live.ts";
-import { metadataCandidates, compareAuth } from "./oauth-metadata.ts";
+import { metadataCandidates, compareAuth, issuerBinds } from "./oauth-metadata.ts";
 import { listAllTools } from "./mcp-list.ts";
 import { snapshotSlug, writeSnapshot, readSnapshot } from "./snapshot.ts";
 import { rm, mkdtemp } from "node:fs/promises";
@@ -440,16 +440,45 @@ describe("snapshot", () => {
 describe("oauth-metadata — candidate discovery", () => {
   it("builds both well-known paths from a declared issuer, issuer-trusted", () => {
     const candidates = metadataCandidates({ type: "oauth2", issuer: "https://auth.example.com" });
-    expect(candidates.map((c) => c.url)).toEqual([
-      "https://auth.example.com/.well-known/openid-configuration",
-      "https://auth.example.com/.well-known/oauth-authorization-server",
-    ]);
+    expect(new Set(candidates.map((c) => c.url))).toEqual(
+      new Set([
+        "https://auth.example.com/.well-known/oauth-authorization-server",
+        "https://auth.example.com/.well-known/openid-configuration",
+      ]),
+    );
     expect(candidates.every((c) => c.trust === "issuer")).toBe(true);
   });
 
-  it("strips a trailing slash from the issuer before appending the well-known path", () => {
-    const candidates = metadataCandidates({ type: "oauth2", issuer: "https://auth.example.com/" });
-    expect(candidates[0]!.url).toBe("https://auth.example.com/.well-known/openid-configuration");
+  it("strips a trailing slash from the issuer before building the well-known paths", () => {
+    const urls = metadataCandidates({ type: "oauth2", issuer: "https://auth.example.com/" }).map(
+      (c) => c.url,
+    );
+    expect(urls).not.toContain("https://auth.example.com//.well-known/openid-configuration");
+    expect(urls).toContain("https://auth.example.com/.well-known/openid-configuration");
+  });
+
+  // RFC 8414 §3.1 inserts the well-known segment between host and issuer path;
+  // OIDC Discovery §4 appends it. A multi-tenant AS is served at one location
+  // and 404s at the other, so probing only the appended form would report
+  // "publishes nothing" for a server that publishes plenty.
+  it("probes both the RFC 8414 inserted and the OIDC appended form for a path-bearing issuer", () => {
+    const urls = metadataCandidates({ type: "oauth2", issuer: "https://example.com/tenant" }).map(
+      (c) => c.url,
+    );
+    expect(urls).toContain("https://example.com/.well-known/oauth-authorization-server/tenant");
+    expect(urls).toContain("https://example.com/tenant/.well-known/openid-configuration");
+    expect(urls).toContain("https://example.com/tenant/.well-known/oauth-authorization-server");
+  });
+
+  it("emits no duplicate when the two forms coincide (path-less issuer)", () => {
+    const urls = metadataCandidates({ type: "oauth2", issuer: "https://auth.example.com" }).map(
+      (c) => c.url,
+    );
+    expect(new Set(urls).size).toBe(urls.length);
+  });
+
+  it("ignores a malformed issuer instead of throwing", () => {
+    expect(metadataCandidates({ type: "oauth2", issuer: "not a url" })).toEqual([]);
   });
 
   // Without an issuer the origin is a guess: it may host an unrelated
@@ -614,5 +643,31 @@ describe("oauth-metadata — manifest vs published metadata", () => {
       "issuer",
     );
     expect(findings).toEqual([]);
+  });
+});
+
+describe("oauth-metadata — issuer binding", () => {
+  it("binds a document whose issuer claim matches the declared one", () => {
+    expect(issuerBinds("https://auth.example.com", "https://auth.example.com")).toBe(true);
+  });
+
+  it("ignores a trailing slash on either side", () => {
+    expect(issuerBinds("https://auth.example.com/", "https://auth.example.com")).toBe(true);
+    expect(issuerBinds("https://auth.example.com", "https://auth.example.com/")).toBe(true);
+  });
+
+  it("refuses a document describing a different issuer", () => {
+    expect(issuerBinds("https://other.example.com", "https://auth.example.com")).toBe(false);
+  });
+
+  // RFC 8414 §3.2 makes `issuer` REQUIRED. Accepting a document that omits it
+  // would let an unrelated or malformed file be treated as authoritative — and
+  // issuer trust is exactly what turns a contradiction into a `fail` that opens
+  // an issue against a manifest that may well be correct.
+  it("refuses a document with no issuer claim at all", () => {
+    expect(issuerBinds(undefined, "https://auth.example.com")).toBe(false);
+    expect(issuerBinds("", "https://auth.example.com")).toBe(false);
+    expect(issuerBinds(null, "https://auth.example.com")).toBe(false);
+    expect(issuerBinds(42, "https://auth.example.com")).toBe(false);
   });
 });

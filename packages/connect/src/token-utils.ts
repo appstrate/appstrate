@@ -79,9 +79,11 @@ export interface ParsedTokenResponse {
  * Classified outcome of a non-2xx OAuth2 token endpoint response.
  *
  * Per RFC 6749 §5.2, a dead authorization code or refresh token is signaled by
- * `HTTP 400` + body `{ "error": "invalid_grant" }`. Any other failure (network,
- * 5xx, non-JSON body, other 4xx, other OAuth error codes) is treated as transient
- * because the credential might still be valid.
+ * `{ "error": "invalid_grant" }` on `HTTP 400` — or on `HTTP 401`, which the
+ * same section mandates whenever the client authenticated through the
+ * `Authorization` header. Any other failure (network, 5xx, non-JSON body, other
+ * 4xx, other OAuth error codes) is treated as transient because the credential
+ * might still be valid.
  *
  * Both the initial token exchange (oauth.ts) and the refresh flow (token-refresh.ts)
  * MUST classify errors through this helper so that revocation handling stays

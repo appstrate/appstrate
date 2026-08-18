@@ -110,26 +110,60 @@ type Trust = "issuer" | "probed";
  */
 export function metadataCandidates(auth: OAuthAuth): Array<{ url: string; trust: Trust }> {
   const out: Array<{ url: string; trust: Trust }> = [];
-  const push = (base: string, trust: Trust): void => {
-    for (const path of [
-      "/.well-known/openid-configuration",
-      "/.well-known/oauth-authorization-server",
-    ]) {
-      const url = `${base}${path}`;
-      if (!out.some((c) => c.url === url)) out.push({ url, trust });
-    }
+  const add = (url: string, trust: Trust): void => {
+    if (!out.some((c) => c.url === url)) out.push({ url, trust });
   };
+
   const issuer = str(auth.issuer);
-  if (issuer) push(issuer.replace(/\/+$/, ""), "issuer");
+  if (issuer) {
+    try {
+      const url = new URL(issuer);
+      const path = url.pathname.replace(/\/+$/, "");
+      // RFC 8414 §3.1 INSERTS the well-known segment between host and issuer
+      // path (`https://host/.well-known/oauth-authorization-server/tenant`),
+      // while OIDC Discovery §4 APPENDS it
+      // (`https://host/tenant/.well-known/openid-configuration`). A
+      // path-bearing issuer — every multi-tenant authorization server — is
+      // served at one location and 404s at the other, so probing only the
+      // appended form reports "publishes nothing" for a server that publishes
+      // plenty. Both forms are tried; they coincide when the issuer carries no
+      // path, and `add` drops the duplicate.
+      add(`${url.origin}/.well-known/oauth-authorization-server${path}`, "issuer");
+      add(`${url.origin}${path}/.well-known/openid-configuration`, "issuer");
+      add(`${url.origin}${path}/.well-known/oauth-authorization-server`, "issuer");
+    } catch {
+      // A malformed issuer is the schema's problem, not this check's.
+    }
+  }
+
   const tokenEndpoint = str(auth.token_endpoint);
   if (tokenEndpoint) {
     try {
-      push(new URL(tokenEndpoint).origin, "probed");
+      const origin = new URL(tokenEndpoint).origin;
+      add(`${origin}/.well-known/openid-configuration`, "probed");
+      add(`${origin}/.well-known/oauth-authorization-server`, "probed");
     } catch {
       // A malformed token_endpoint is the schema's problem, not this check's.
     }
   }
   return out;
+}
+
+/**
+ * Whether a metadata document may be treated as describing `declaredIssuer`.
+ *
+ * RFC 8414 §3.2 makes `issuer` REQUIRED in the document and §3.3 makes the
+ * client reject any document whose `issuer` does not match the one it asked
+ * about. A MISSING claim is refused for the same reason a mismatched one is:
+ * without it nothing ties the document to this authorization server, and
+ * issuer trust is exactly what promotes a contradiction from a warning to a
+ * `fail` that opens an issue against a manifest that may well be correct.
+ */
+export function issuerBinds(published: unknown, declaredIssuer: string): boolean {
+  const value = str(published);
+  if (!value) return false;
+  const normalize = (v: string): string => v.replace(/\/+$/, "");
+  return normalize(value) === normalize(declaredIssuer);
 }
 
 /**
@@ -155,10 +189,8 @@ async function fetchMetadata(
       const body: unknown = await res.json();
       if (!body || typeof body !== "object") continue;
       const metadata = body as AsMetadata;
-      if (trust === "issuer" && declaredIssuer) {
-        const published = str(metadata.issuer);
-        const normalize = (v: string): string => v.replace(/\/+$/, "");
-        if (published && normalize(published) !== normalize(declaredIssuer)) continue;
+      if (trust === "issuer" && declaredIssuer && !issuerBinds(metadata.issuer, declaredIssuer)) {
+        continue;
       }
       return { url, trust, metadata };
     } catch {
