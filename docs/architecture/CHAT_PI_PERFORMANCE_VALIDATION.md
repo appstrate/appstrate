@@ -350,3 +350,21 @@ les scripts reproductibles sont versionnés.
 
 Ce plan ne lance pas le canary, ne modifie pas le trafic de production et ne supprime pas le moteur
 AI SDK serveur.
+
+## 15. État de l'exécution locale au 18 août 2026
+
+Le banc contrôlé S est terminé à 1, 10, 30, 60, 64 et 100, avec cinq répétitions pour les profils
+froid et chaud. Le banc H est terminé à 60, 64 et 100 dans les mêmes conditions. Les récupérations
+à 30, 60 et 120 secondes ont été relevées sur S à 60, 64 et 100. Le coût fixe du chargement Pi a été
+mesuré séparément sur dix processus frais.
+
+Les invariants fonctionnels passent, mais Pi échoue aux seuils locaux de latence et de débit. La
+décision locale est donc NO GO avant canary. La pente mémoire locale reste non concluante et aucune
+capacité cloud n'est déduite de ces données.
+
+Le comparatif Mistral reste en attente d'une clé `MISTRAL_API_KEY`. Les essais Codex et Claude Code
+restent en attente d'une validation Chrome Beta disponible. Ils seront rapportés comme essais Pi
+complémentaires, jamais comme comparaison directe avec AI SDK.
+
+Le rapport, les commandes, le journal de décision prêt à reporter et les artifacts versionnés se
+trouvent dans [CHAT_PI_PERFORMANCE_REPORT.md](./CHAT_PI_PERFORMANCE_REPORT.md).
