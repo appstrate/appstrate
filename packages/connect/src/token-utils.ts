@@ -79,9 +79,11 @@ export interface ParsedTokenResponse {
  * Classified outcome of a non-2xx OAuth2 token endpoint response.
  *
  * Per RFC 6749 §5.2, a dead authorization code or refresh token is signaled by
- * `HTTP 400` + body `{ "error": "invalid_grant" }`. Any other failure (network,
- * 5xx, non-JSON body, other 4xx, other OAuth error codes) is treated as transient
- * because the credential might still be valid.
+ * `{ "error": "invalid_grant" }` on `HTTP 400` — or on `HTTP 401`, which the
+ * same section mandates whenever the client authenticated through the
+ * `Authorization` header. Any other failure (network, 5xx, non-JSON body, other
+ * 4xx, other OAuth error codes) is treated as transient because the credential
+ * might still be valid.
  *
  * Both the initial token exchange (oauth.ts) and the refresh flow (token-refresh.ts)
  * MUST classify errors through this helper so that revocation handling stays
@@ -124,11 +126,28 @@ export function redactErrorDescription(description: string): string {
 /**
  * Classify an HTTP error response from an OAuth2 token endpoint.
  *
+ * Both 400 and 401 bodies are parsed. RFC 6749 §5.2 lets an authorization
+ * server answer `invalid_client` with EITHER status ("If the client attempted
+ * to authenticate via the Authorization request header field, the
+ * authorization server MUST respond with an HTTP 401"), and providers split
+ * roughly evenly on which they pick. Parsing only 400 dropped the error code
+ * of every 401 on the floor, which is exactly the client-authentication
+ * failure an operator most needs named: a wrong
+ * `token_endpoint_auth_method` in a manifest surfaces as `invalid_client`,
+ * and without the code the whole class is indistinguishable from a network
+ * blip in the logs.
+ *
+ * Only `invalid_grant` maps to `"revoked"` — a dead authorization code or
+ * refresh token, where retrying is pointless and the stored PKCE state should
+ * be dropped. `invalid_client` stays `"transient"`: the grant is untouched, it
+ * is the client credentials that are wrong, and an operator fixing the
+ * registration makes the same connect attempt work.
+ *
  * @param status - HTTP status code of the response
  * @param body - Raw response body (text)
  */
 export function parseTokenErrorResponse(status: number, body: string): TokenErrorClassification {
-  if (status !== 400) {
+  if (status !== 400 && status !== 401) {
     return { kind: "transient" };
   }
   try {

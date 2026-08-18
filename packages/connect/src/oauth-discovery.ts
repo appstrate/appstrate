@@ -94,10 +94,27 @@ function trimTrailingSlash(url: string): string {
 }
 
 /**
- * Build the three probe URLs per AFPS §7.3 from a configured issuer.
- * Exported for tests; callers should use `resolveOAuthEndpoints`.
+ * AFPS §7.3 line 803 / RFC 8414 §3.3 — whether a discovery document may be
+ * trusted as describing `configuredIssuer`.
+ *
+ * A MISSING `issuer` member fails just like a mismatched one: RFC 8414 §3.2
+ * makes the member REQUIRED, and without it nothing ties the document to the
+ * authorization server that was asked about. Shared with the conformance
+ * harness so the rule that gates the runtime is the same rule that gates the
+ * offline check.
  */
-function buildDiscoveryProbes(issuer: string): string[] {
+export function discoveryIssuerMatches(docIssuer: unknown, configuredIssuer: string): boolean {
+  if (typeof docIssuer !== "string" || docIssuer === "") return false;
+  return trimTrailingSlash(docIssuer) === trimTrailingSlash(configuredIssuer);
+}
+
+/**
+ * Build the three probe URLs per AFPS §7.3 from a configured issuer.
+ * Exported so the system-package conformance harness probes the SAME URLs the
+ * connect engine does. Callers resolving endpoints should use
+ * `resolveOAuthEndpoints`; this is for tooling that needs the raw document.
+ */
+export function buildDiscoveryProbes(issuer: string): string[] {
   // Parse to split origin (base) from path component. Fall back to a flat
   // root-style join if the URL doesn't parse — we still try the two
   // well-known suffixes (and the third probe collapses onto the second).
@@ -222,7 +239,7 @@ export async function resolveOAuthEndpoints(
     // AFPS §7.3 line 803: validate that the document's `issuer` matches the
     // configured issuer string. Reject + try the next probe on mismatch.
     // This MUST happen before any field is trusted from the document.
-    if (typeof doc.issuer !== "string" || trimTrailingSlash(doc.issuer) !== configuredIssuer) {
+    if (!discoveryIssuerMatches(doc.issuer, configuredIssuer)) {
       // Discovery is best-effort — reject + try the next probe on mismatch.
       continue;
     }

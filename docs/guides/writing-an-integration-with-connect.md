@@ -222,6 +222,50 @@ provider's `.well-known/openid-configuration` can be copy-pasted.
 > `audience`. Send it for forward compatibility even when the AS is known to ignore
 > it; the resource server validates the token audience independently.
 
+### `identity_claims` — naming the connected account
+
+`identity_claims` maps AFPS keys onto accessors into the identity payload. The
+platform reads it to derive an **account key**, which is both the connection's
+display label and the value that distinguishes two accounts of the same
+provider. Resolution, in order:
+
+1. the `accountId` (or `account_id`) key of your `identity_claims` map;
+2. a top-level `email`, `account_email` or `sub` in the payload;
+3. the literal `"default"`.
+
+Landing on `"default"` is not an error and nothing is logged: the connection is
+simply labelled `Connexion 1`, `Connexion 2`, … and every connection on that
+provider shares one account key, so a member holding two accounts cannot tell
+them apart. **Declare `accountId` explicitly.** Choose the most human-readable
+value that is _unique per account_ — email, else a unique handle, else an opaque
+id. A display name that two accounts can share is the wrong choice even though
+it reads better.
+
+Accessors are `$.`-prefixed dotted paths (`$.data.email`,
+`$.identity.email_address`). A numeric segment indexes an array, which is how a
+provider that answers with a single-element list is read: `$.data.0.primaryEmail`.
+A path that matches nothing yields `""` and falls through to the chain above —
+so a typo degrades silently. `apps/api/test/unit/services/system-package-identity-claims.test.ts`
+pins every shipped mapping against a payload taken from the provider's docs for
+exactly that reason.
+
+The payload is assembled from three layers, earlier layers winning:
+
+1. the token response body;
+2. `id_token` claims, when the provider returns one (requesting the `openid`
+   scope is often enough — no extra request is made);
+3. the body of a `GET` on `userinfo_endpoint`.
+
+Layer 3 is a plain `GET` with `Authorization: Bearer <access_token>` and
+`Accept: application/json`. It sends no other header, no request body and no
+other method, and it ignores the auth's `delivery` block. A provider whose
+identity endpoint needs a `POST` (Dropbox, Slack's `auth.test`), a custom header
+(Notion's `Notion-Version`), a non-`Bearer` prefix (Mailchimp's `OAuth`,
+Zoho's `Zoho-oauthtoken`) or GraphQL (Linear, monday.com) therefore cannot be
+served by layer 3 — declare no `userinfo_endpoint` for those and rely on layers
+1–2, or accept `"default"`. A failing userinfo call is best-effort: it warns
+server-side and falls through, it never fails the connection.
+
 ### `scope_catalog` + `implies`
 
 `scope_catalog` is the AFPS-authoritative scope list — `scopes_supported` from RFC 8414
@@ -631,6 +675,19 @@ UI-side substitution the dashboard performs when rendering the hint):
 
 The top-level `setup_guide.callback_url_hint` from earlier drafts is deprecated;
 consumers MUST keep accepting it as a fallback.
+
+The dashboard substitutes `{{callback_url}}` with the callback it will actually send for
+the client being configured — the client's own `redirect_uri` override when it has one,
+else the platform callback. Substitution is raw, with no percent-encoding, because a hint
+is prose as often as it is a deep link; in the deep-link form the value lands in a query
+parameter, where RFC 3986 §3.4 already permits the `:` and `/` an unencoded URL
+contributes. A hint that resolves to a whole `http(s)` URL is rendered as a link, anything
+else as text — the string is publisher-controlled, so it never becomes a navigation sink.
+
+Write the hint to name the screen and field, not to restate the URL: the dashboard already
+shows the callback with a copy button right above the form. A hint that omits
+`{{callback_url}}` is something the UI could have hard-coded, and a conformance test
+rejects it.
 
 ---
 

@@ -293,6 +293,7 @@ const integrationDetailSchema = {
     "allow_undeclared_tools",
     "active",
     "block_user_connections",
+    "platform_redirect_uri",
   ],
   properties: {
     manifest: { type: "object", additionalProperties: true },
@@ -325,6 +326,12 @@ const integrationDetailSchema = {
     // Admin gate (`block_user_connections`): when `true`, only org admins
     // may create personal connections. `false` when not activated.
     block_user_connections: { type: "boolean" },
+    // The platform's own OAuth callback — what connect sends when the resolved
+    // client declares no `redirect_uri` override of its own. Same helper the
+    // connect strategy uses, so this value cannot drift from the sent one; a
+    // consumer showing "the URI to register at the provider" must still prefer
+    // the default client's override when it has one.
+    platform_redirect_uri: { type: "string", format: "uri" },
   },
 } as const;
 

@@ -1,41 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useTranslation } from "react-i18next";
-import { Check, Copy, ExternalLink } from "lucide-react";
+import { ExternalLink } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
-import { useCopyToClipboard } from "../../hooks/use-copy-to-clipboard";
+import { CopyBlock } from "../copy-block";
 import { buildMcpClientConfig } from "../../lib/mcp-client-config";
 
 interface McpClientConnectProps {
   serverName: string;
   url: string;
-}
-
-/** A single copy-to-clipboard code block. */
-function CopyBlock({ value, multiline = false }: { value: string; multiline?: boolean }) {
-  const { t } = useTranslation("common");
-  const { copied, copy } = useCopyToClipboard();
-  return (
-    <div className="border-border bg-muted/50 relative rounded-md border">
-      <code
-        className={`text-foreground block px-3 py-2 pr-12 font-mono text-xs select-all ${
-          multiline ? "overflow-x-auto whitespace-pre" : "break-all"
-        }`}
-      >
-        {value}
-      </code>
-      <Button
-        variant="ghost"
-        size="icon"
-        className="text-muted-foreground hover:text-foreground absolute top-1 right-1 h-7 w-7"
-        aria-label={t("btn.copy")}
-        onClick={() => copy(value)}
-      >
-        {copied ? <Check className="text-primary" /> : <Copy />}
-      </Button>
-    </div>
-  );
 }
 
 /** A row pairing a one-click deeplink button with its JSON fallback. */

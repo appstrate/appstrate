@@ -38,8 +38,10 @@
 
 import { useState } from "react";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
+import { CopyBlock } from "../components/copy-block";
 import { ManifestOverview } from "../components/package-manifest/manifest-overview";
 import { FileExplorer } from "../components/package-files/file-explorer";
+import { CallbackUrlHint } from "../components/package-detail/callback-url-hint";
 
 /** Tab ids, also the URL fragments that select them. `content` is the same id
  *  the unified package page uses for its file explorer, so a deep link reads
@@ -142,6 +144,7 @@ function OAuthClientModal({
   authDecl,
   mode,
   existing,
+  platformRedirectUri,
   onClose,
 }: {
   packageId: string;
@@ -149,6 +152,7 @@ function OAuthClientModal({
   authDecl?: IntegrationManifestAuth;
   mode: "create" | "rotate";
   existing?: IntegrationClient;
+  platformRedirectUri: string;
   onClose: () => void;
 }) {
   const { t } = useTranslation("settings");
@@ -158,6 +162,10 @@ function OAuthClientModal({
   const [clientId, setClientId] = useState(existing?.client_id ?? "");
   const [clientSecret, setClientSecret] = useState("");
   const [redirectUri, setRedirectUri] = useState(existing?.redirect_uri ?? "");
+  // What connect will send for THIS client. Named once: the copy block and the
+  // publisher hint below must agree, and they diverge the moment the same
+  // expression is spelled out twice.
+  const effectiveRedirectUri = redirectUri.trim() || platformRedirectUri;
   const [publicClient, setPublicClient] = useState(existing ? !existing.has_client_secret : false);
 
   const submit = (e: React.FormEvent) => {
@@ -227,16 +235,32 @@ function OAuthClientModal({
             value={redirectUri}
             onChange={(e) => setRedirectUri(e.target.value)}
           />
-          {/* AFPS §7.10 — surface `auths.<key>.callback_url_hint`. Read-only
-              display; the actual redirectUri value lives in the input above. */}
-          {authDecl?.callback_url_hint && (
-            <p
-              className="text-muted-foreground text-[0.7rem]"
-              data-testid={`callback-url-hint-${authKey}`}
-            >
-              <span className="font-semibold">{t("integration.oauthClient.callbackUrlHint")}:</span>{" "}
-              <span className="font-mono">{authDecl.callback_url_hint}</span>
+          {/* The redirect_uri connect will send for THIS client: the override
+              typed above when it is set, else the platform callback. Providers
+              compare it byte-for-byte and reject a mismatch with an opaque
+              error, so the admin is shown the exact string to register rather
+              than left to reconstruct it from the browser's origin (which is
+              NOT authoritative — `APP_URL` is). */}
+          <div className="space-y-1">
+            <p className="text-muted-foreground text-[0.7rem]">
+              {t("integration.oauthClient.platformRedirectUri")}
             </p>
+            <CopyBlock
+              value={effectiveRedirectUri}
+              dense
+              testId={`platform-redirect-uri-modal-${authKey}`}
+            />
+          </div>
+          {/* AFPS §7.10 — surface `auths.<key>.callback_url_hint`, with its
+              `{{callback_url}}` placeholder resolved against the SAME value
+              shown above. Read-only display; the editable override lives in
+              the input. */}
+          {authDecl?.callback_url_hint && (
+            <CallbackUrlHint
+              hint={authDecl.callback_url_hint}
+              callbackUrl={effectiveRedirectUri}
+              authKey={authKey}
+            />
           )}
         </div>
         <label className="flex items-center gap-2 text-sm sm:col-span-2">
@@ -291,6 +315,11 @@ function ClientsTable({
 }) {
   const { t } = useTranslation("settings");
   const { data: clients } = useIntegrationClients(packageId, authKey);
+  // Read from the same query key the page already holds, rather than threading
+  // the value down through `ConfigAuthBlock`, which would carry a prop it never
+  // reads. React Query dedupes, so this costs no request.
+  const { data: detail } = useIntegrationDetail(packageId);
+  const platformRedirectUri = detail?.platform_redirect_uri ?? "";
   const setDefault = useSetDefaultIntegrationClient();
   const del = useDeleteIntegrationOAuthClient();
   const [modal, setModal] = useState<
@@ -304,6 +333,13 @@ function ClientsTable({
   const [showManual, setShowManual] = useState(false);
 
   const rows = clients ?? [];
+  // What connect will ACTUALLY send. A registered client may carry its own
+  // `redirect_uri`, and `OAuth2Strategy.begin` prefers it over the platform
+  // callback (`clientRedirectUri ?? redirectUri`) — so showing the platform
+  // value unconditionally would hand the admin the wrong string to register in
+  // exactly the setup this display exists to get right. New connections always
+  // use the default client, so that client's override is the one that decides.
+  const effectiveRedirectUri = rows.find((c) => c.is_default)?.redirect_uri || platformRedirectUri;
   // Choosing a default only matters when more than one client can mint connections.
   const canChooseDefault = rows.length > 1;
   const hasAutoClient = rows.some((c) => c.auto_provisioned);
@@ -313,6 +349,18 @@ function ClientsTable({
 
   return (
     <div className="mb-3" data-testid={`oauth-clients-list-${authKey}`}>
+      {/* Registering this exact string on the provider's OAuth app is a
+          prerequisite to the FIRST connect attempt, so it is shown before the
+          clients table rather than only inside the registration modal — an
+          admin setting the app up at the provider needs it before there is any
+          client to register. */}
+      <div className="mb-3 space-y-1">
+        <p className="text-muted-foreground text-xs font-semibold">
+          {t("integration.oauthClient.platformRedirectUri")}
+        </p>
+        <CopyBlock value={effectiveRedirectUri} testId={`platform-redirect-uri-${authKey}`} />
+      </div>
+
       <div className="mb-2 flex items-center justify-between gap-2">
         <h4 className="text-muted-foreground text-xs font-semibold">
           {t("integration.clients.title")}
@@ -446,6 +494,7 @@ function ClientsTable({
           authDecl={authDecl}
           mode={modal.mode}
           existing={modal.mode === "rotate" ? modal.client : undefined}
+          platformRedirectUri={platformRedirectUri}
           onClose={() => setModal(null)}
         />
       )}

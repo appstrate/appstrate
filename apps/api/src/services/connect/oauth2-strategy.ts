@@ -17,7 +17,6 @@
  * Behaviour is unchanged from the inline route logic it replaces.
  */
 
-import { getEnv } from "@appstrate/env";
 import { decodeJwtPayload } from "@appstrate/core/jwt";
 import {
   initiateIntegrationOAuth,
@@ -26,6 +25,7 @@ import {
   SsrfBlockedError,
 } from "@appstrate/connect";
 import { invalidRequest } from "../../lib/errors.ts";
+import { integrationCallbackUrl } from "../../lib/integration-callback-url.ts";
 import { logger } from "../../lib/logger.ts";
 import { oauthStateStore } from "./oauth-state-store.ts";
 import { toSupportedTokenEndpointAuthMethod } from "../integration-manifest-helpers.ts";
@@ -46,6 +46,13 @@ import type {
   ConnectCompleteInput,
   IntegrationConnectStrategy,
 } from "./strategy.ts";
+
+/**
+ * Ceiling for the identity (`userinfo`) request. Deliberately tighter than the
+ * 30s token-exchange budget: by the time this runs the credential is already
+ * in hand, so waiting longer trades a saved connection for a nicer label.
+ */
+const USERINFO_TIMEOUT_MS = 10_000;
 
 export class OAuth2Strategy implements IntegrationConnectStrategy {
   async begin(ctx: ConnectContext, opts: BeginOptions): Promise<BeginResult> {
@@ -75,8 +82,11 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
       );
     }
     // Same callback for every integration flow. Computed before client
-    // resolution so auto-DCR registers exactly this redirect URI.
-    const redirectUri = `${getEnv().APP_URL}/api/integrations/callback`;
+    // resolution so auto-DCR registers exactly this redirect URI. Shared
+    // helper, not an inline template: the admin UI displays the very same
+    // string (integration detail `platform_redirect_uri`) so what an admin
+    // registers at the provider cannot drift from what we send.
+    const redirectUri = integrationCallbackUrl();
     // Resolve the client (auto-registering via DCR for remote MCP integrations
     // when unregistered) and the connect endpoints/resource (discovered for
     // MCP, else manifest).
@@ -207,6 +217,15 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
             Accept: "application/json",
             "User-Agent": "Appstrate",
           },
+          // Bounded on purpose — `oauthEgressFetch` imposes no deadline of its
+          // own. This call runs INSIDE the OAuth callback, after the token
+          // exchange has already succeeded, so a provider that accepts the
+          // exchange and then stalls its userinfo endpoint would hold the
+          // callback open and leave the connection unsaved, losing a
+          // credential the user already granted. Identity is best-effort
+          // enrichment (a timeout degrades to accountId "default"); it must
+          // never decide whether the connection persists.
+          signal: AbortSignal.timeout(USERINFO_TIMEOUT_MS),
         });
         if (res.ok) {
           const body = (await res.json()) as unknown;

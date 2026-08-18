@@ -53,6 +53,7 @@ import { notFound, conflict, invalidRequest, forbidden } from "../lib/errors.ts"
 import type { ActorScope, AppScope } from "../lib/scope.ts";
 import { actorInsert, actorFilter, actorOrSharedFilter } from "../lib/actor.ts";
 import { getPackageDisplayName } from "../lib/package-helpers.ts";
+import { integrationCallbackUrl } from "../lib/integration-callback-url.ts";
 import type { Actor } from "@appstrate/connect";
 import {
   resolveIntegrationToolCatalog,
@@ -2304,6 +2305,20 @@ export async function getIntegrationAuthStatuses(
    * integration is not activated. Same source as the list endpoint.
    */
   block_user_connections: boolean;
+  /**
+   * The platform's own OAuth callback — what connect sends when the resolved
+   * client declares no `redirect_uri` of its own. Served from the same helper
+   * the connect strategy uses, so this value cannot drift from the sent one.
+   *
+   * NOT unconditionally the effective redirect: `OAuth2Strategy.begin` prefers
+   * a registered client's stored override (`clientRedirectUri ?? redirectUri`).
+   * A consumer telling an admin which string to register at the provider must
+   * resolve the override of the client that will actually be used — the
+   * default one, for new connections — and fall back to this. A `redirect_uri`
+   * mismatch is the most common connect failure and providers reject it with
+   * an opaque error, so showing the wrong one is worse than showing none.
+   */
+  platform_redirect_uri: string;
 }> {
   await assertApplicationInScope(scope);
   const manifest = await loadManifestOrThrow(scope, packageId);
@@ -2405,6 +2420,7 @@ export async function getIntegrationAuthStatuses(
       (manifest as { allow_undeclared_tools?: boolean }).allow_undeclared_tools === true,
     active: activation.active,
     block_user_connections: activation.blockUserConnections,
+    platform_redirect_uri: integrationCallbackUrl(),
   };
 }
 
