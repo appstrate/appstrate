@@ -357,7 +357,9 @@ Le banc contrôlé S est terminé à 1, 10, 30, 60, 64 et 100, avec cinq répét
 froid et chaud. Les bancs H et T sont terminés à 60, 64 et 100 dans les mêmes conditions. T effectue
 un appel MCP réel et deux appels modèle par conversation. Les récupérations à 30, 60 et 120 secondes
 ont été relevées sur S à 60, 64 et 100. Le coût fixe du chargement Pi a été mesuré séparément sur dix
-processus frais.
+processus frais. Les distributions à 100 chats, 100 organisations par un chat, 10 organisations par
+dix chats et une organisation par cent chats, sont également terminées. Le banc de politique à 100
+avec plafond 64 a produit les 64 admissions et 36 refus 429 attendus, sans message orphelin.
 
 Les invariants fonctionnels passent, mais Pi échoue aux seuils locaux de latence et de débit. La
 décision locale est donc NO GO avant canary. La pente mémoire locale reste non concluante et aucune

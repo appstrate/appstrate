@@ -35,6 +35,8 @@ interface WorkerConfig {
   form: ConversationForm;
   profile: Profile;
   concurrency: number;
+  organizations: number;
+  piMaxConcurrency: number;
   repetition: number;
   recoveryMs: number;
   outputFile: string;
@@ -88,6 +90,8 @@ async function runController(args: string[]): Promise<void> {
     .map(Number)
     .filter((value) => Number.isInteger(value) && value > 0);
   const repetitions = numberOption(args, "repetitions", 5);
+  const organizationsOption = numberOption(args, "organizations", 0);
+  const piMaxConcurrency = numberOption(args, "pi-cap", 128);
   const recoveryMs = numberOption(args, "recovery-ms", 120_000);
   const cellTimeoutMs = numberOption(args, "cell-timeout-ms", 15 * 60_000);
   const outputDir = stringOption(args, "output", `artifacts/chat-engine-performance/${command}`);
@@ -112,7 +116,18 @@ async function runController(args: string[]): Promise<void> {
       for (let repetition = 1; repetition <= repetitions; repetition += 1) {
         for (const profile of profiles) {
           for (const engine of engines) {
-            const id = [engine, form, profile, `c${concurrency}`, `r${repetition}`].join("-");
+            const organizations = organizationsOption || concurrency;
+            if (organizations > concurrency || concurrency % organizations !== 0) {
+              throw new Error("organizations must divide concurrency and cannot exceed it");
+            }
+            const id = [
+              engine,
+              form,
+              profile,
+              `c${concurrency}`,
+              `o${organizations}`,
+              `r${repetition}`,
+            ].join("-");
             const outputFile = `${outputDir}/${id}.json`;
             const databaseDir = `${outputDir}/databases/${id}`;
             await $`mkdir -p ${databaseDir}`.quiet();
@@ -124,6 +139,8 @@ async function runController(args: string[]): Promise<void> {
                 CHAT_PERF_FORM: form,
                 CHAT_PERF_PROFILE: profile,
                 CHAT_PERF_CONCURRENCY: String(concurrency),
+                CHAT_PERF_ORGANIZATIONS: String(organizations),
+                CHAT_PERF_PI_MAX_CONCURRENCY: String(piMaxConcurrency),
                 CHAT_PERF_REPETITION: String(repetition),
                 CHAT_PERF_RECOVERY_MS: String(recoveryMs),
                 CHAT_PERF_OUTPUT_FILE: outputFile,
@@ -141,6 +158,7 @@ async function runController(args: string[]): Promise<void> {
               outcomes: {
                 requested: number;
                 completed: number;
+                rateLimited: number;
                 incompleteStreams: number;
                 markerFailures: number;
               };
@@ -152,24 +170,34 @@ async function runController(args: string[]): Promise<void> {
                 inputTokens: number;
                 outputTokens: number;
               };
+              persistence: { bySession: Record<string, number> };
+              turns: Array<{ sessionId: string; status: number }>;
             };
+            const expectedCompleted =
+              engine === "pi" ? Math.min(concurrency, piMaxConcurrency) : concurrency;
+            const expectedRateLimited = concurrency - expectedCompleted;
             const expectedUsage =
               form === "T"
                 ? {
-                    modelCalls: concurrency * 2,
-                    toolCalls: concurrency,
-                    inputTokens: concurrency * 288,
-                    outputTokens: concurrency * 48,
+                    modelCalls: expectedCompleted * 2,
+                    toolCalls: expectedCompleted,
+                    inputTokens: expectedCompleted * 288,
+                    outputTokens: expectedCompleted * 48,
                   }
                 : {
-                    modelCalls: concurrency,
+                    modelCalls: expectedCompleted,
                     toolCalls: 0,
-                    inputTokens: concurrency * 128,
-                    outputTokens: concurrency * 32,
+                    inputTokens: expectedCompleted * 128,
+                    outputTokens: expectedCompleted * 32,
                   };
+            const rejectedMessagePersisted = observation.turns.some(
+              (turn) =>
+                turn.status === 429 && (observation.persistence.bySession[turn.sessionId] ?? 0) > 0,
+            );
             if (
               benchmark === "controlled" &&
-              (observation.outcomes.completed !== observation.outcomes.requested ||
+              (observation.outcomes.completed !== expectedCompleted ||
+                observation.outcomes.rateLimited !== expectedRateLimited ||
                 observation.outcomes.incompleteStreams !== 0 ||
                 observation.outcomes.markerFailures !== 0 ||
                 !observation.isolation.foreignSessionRejected ||
@@ -178,7 +206,8 @@ async function runController(args: string[]): Promise<void> {
                 observation.usage.modelCalls !== expectedUsage.modelCalls ||
                 observation.usage.toolCalls !== expectedUsage.toolCalls ||
                 observation.usage.inputTokens !== expectedUsage.inputTokens ||
-                observation.usage.outputTokens !== expectedUsage.outputTokens)
+                observation.usage.outputTokens !== expectedUsage.outputTokens ||
+                rejectedMessagePersisted)
             ) {
               throw new Error(`Controlled benchmark invariants failed for ${id}`);
             }
@@ -203,6 +232,8 @@ async function runController(args: string[]): Promise<void> {
       profiles,
       concurrencies,
       repetitions,
+      organizations: organizationsOption || "one-per-chat",
+      piMaxConcurrency,
       recoveryMs,
       cellTimeoutMs,
       provider: command === "mistral" ? "mistral-api-key" : "deterministic",
@@ -260,7 +291,13 @@ async function runWorker(config: WorkerConfig): Promise<void> {
     import("../apps/api/src/middleware/error-handler.ts"),
   ]);
   const { db } = dbModule;
-  const identities = await seedIdentities(db, schema, config.concurrency);
+  const identities = await seedIdentities(
+    db,
+    schema,
+    config.concurrency,
+    "perf",
+    config.organizations,
+  );
   const sessionByMarker = new Map(
     identities.map((identity) => [identity.marker, identity.sessionId] as const),
   );
@@ -339,7 +376,9 @@ async function runWorker(config: WorkerConfig): Promise<void> {
   const app = new Hono<ChatEnv>();
   app.onError((error, context) => errorModule.errorHandler(error, context as never));
   app.post("/api/chat/:orgId", (context) => {
-    const identity = identityByOrg.get(context.req.param("orgId"));
+    const identity =
+      identityByMarker.get(context.req.header("x-performance-marker") ?? "") ??
+      identityByOrg.get(context.req.param("orgId"));
     if (!identity) return new Response("unknown synthetic organization", { status: 404 });
     context.set("orgId", identity.orgId);
     context.set("user", identity.user);
@@ -362,6 +401,7 @@ async function runWorker(config: WorkerConfig): Promise<void> {
           "content-type": "application/json",
           "x-application-id": identity.appId,
           "x-org-id": identity.orgId,
+          "x-performance-marker": identity.marker,
         },
         body: JSON.stringify({ id: identity.sessionId, messages }),
       });
@@ -409,7 +449,11 @@ async function runWorker(config: WorkerConfig): Promise<void> {
   const turns = await Promise.all(identities.map((identity) => runTurn(identity)));
   await Promise.all(providerUsageTasks);
   await Promise.all(
-    identities.map((identity) => waitForPersistence(db, schema, identity.sessionId, 2)),
+    identities.map((identity, index) =>
+      turns[index]?.status === 200
+        ? waitForPersistence(db, schema, identity.sessionId, 2)
+        : Promise.resolve(),
+    ),
   );
   const waveEndedAtMs = performance.now() - processStartedAt;
 
@@ -441,11 +485,13 @@ async function runWorker(config: WorkerConfig): Promise<void> {
   const persistence = await verifyPersistence(db, schema, identities);
   let foreignSessionRejected = false;
   if (identities.length > 1) {
+    const foreignIdentity =
+      identities.find((identity) => identity.orgId !== identities[0]!.orgId) ?? identities[1]!;
     try {
       await persistenceModule.ensureSession(
         identities[0]!.sessionId,
-        identities[1]!.orgId,
-        identities[1]!.user.id,
+        foreignIdentity.orgId,
+        foreignIdentity.user.id,
       );
     } catch {
       foreignSessionRejected = true;
@@ -476,6 +522,7 @@ async function runWorker(config: WorkerConfig): Promise<void> {
       config.form,
       config.profile,
       `c${config.concurrency}`,
+      `o${config.organizations}`,
       `r${config.repetition}`,
     ].join("-"),
     environment: {
@@ -492,7 +539,7 @@ async function runWorker(config: WorkerConfig): Promise<void> {
       profile: config.profile,
       concurrency: config.concurrency,
       repetition: config.repetition,
-      distribution: `${config.concurrency}-organizations-x-1-chat`,
+      distribution: `${config.organizations}-organizations-x-${config.concurrency / config.organizations}-chats`,
     },
     timing: { waveStartedAtMs, waveEndedAtMs, recoveryMs: config.recoveryMs },
     memory: memoryCheckpoints(samples, { waveStartedAtMs, waveEndedAtMs }),
@@ -509,8 +556,8 @@ async function runWorker(config: WorkerConfig): Promise<void> {
       completed: completed.length,
       rateLimited: turns.filter((turn) => turn.status === 429).length,
       serverErrors: turns.filter((turn) => turn.status >= 500 || turn.status === 0).length,
-      incompleteStreams: turns.filter((turn) => !turn.complete).length,
-      markerFailures: turns.filter((turn) => !turn.markerValid).length,
+      incompleteStreams: turns.filter((turn) => turn.status === 200 && !turn.complete).length,
+      markerFailures: turns.filter((turn) => turn.status === 200 && !turn.markerValid).length,
     },
     usage: {
       modelCalls: counters.waveModelCalls,
@@ -553,7 +600,7 @@ function configureIsolatedEnvironment(config: WorkerConfig): void {
   process.env.APP_URL = "http://chat-pi-unified-engine-phase4.localhost:3400";
   process.env.TRUSTED_ORIGINS = process.env.APP_URL;
   process.env.CHAT_SELF_ORIGIN = "http://127.0.0.1:3400";
-  process.env.CHAT_PI_MAX_CONCURRENCY = "128";
+  process.env.CHAT_PI_MAX_CONCURRENCY = String(config.piMaxConcurrency);
   process.env.LOG_LEVEL = "error";
 }
 
@@ -1015,18 +1062,30 @@ async function seedIdentities(
   schema: any,
   count: number,
   prefix = "perf",
+  organizationCount = count,
 ): Promise<SyntheticIdentity[]> {
+  if (organizationCount > count || count % organizationCount !== 0) {
+    throw new Error("organizationCount must divide count and cannot exceed it");
+  }
+  const chatsPerOrganization = count / organizationCount;
+  const organizations = Array.from({ length: organizationCount }, (_, index) => ({
+    id: crypto.randomUUID(),
+    name: `Synthetic Org ${index + 1}`,
+    slug: `${prefix}-org-${String(index + 1).padStart(4, "0")}-${crypto.randomUUID().slice(0, 8)}`,
+    appId: `app_${crypto.randomUUID().replaceAll("-", "").slice(0, 16)}`,
+  }));
   const identities = Array.from({ length: count }, (_, index) => {
+    const organizationIndex = Math.floor(index / chatsPerOrganization);
+    const organization = organizations[organizationIndex]!;
     const suffix = `${prefix}-${String(index + 1).padStart(4, "0")}-${crypto.randomUUID().slice(0, 8)}`;
     const userId = `usr-${suffix}`;
-    const orgId = crypto.randomUUID();
     return {
-      marker: `ORG${String(index + 1).padStart(4, "0")}_USER${String(index + 1).padStart(4, "0")}`,
+      marker: `ORG${String(organizationIndex + 1).padStart(4, "0")}_USER${String(index + 1).padStart(4, "0")}`,
       user: { id: userId, email: `${suffix}@example.test`, name: `Synthetic ${index + 1}` },
-      orgId,
-      orgName: `Synthetic Org ${index + 1}`,
-      orgSlug: suffix,
-      appId: `app_${crypto.randomUUID().replaceAll("-", "").slice(0, 16)}`,
+      orgId: organization.id,
+      orgName: organization.name,
+      orgSlug: organization.slug,
+      appId: organization.appId,
       sessionId: `chs_${crypto.randomUUID().replaceAll("-", "")}`,
     };
   });
@@ -1040,11 +1099,11 @@ async function seedIdentities(
     })),
   );
   await db.insert(schema.organizations).values(
-    identities.map((identity) => ({
-      id: identity.orgId,
-      name: identity.orgName,
-      slug: identity.orgSlug,
-      createdBy: identity.user.id,
+    organizations.map((organization, index) => ({
+      id: organization.id,
+      name: organization.name,
+      slug: organization.slug,
+      createdBy: identities[index * chatsPerOrganization]!.user.id,
     })),
   );
   await db.insert(schema.organizationMembers).values(
@@ -1055,12 +1114,12 @@ async function seedIdentities(
     })),
   );
   await db.insert(schema.applications).values(
-    identities.map((identity) => ({
-      id: identity.appId,
-      orgId: identity.orgId,
+    organizations.map((organization, index) => ({
+      id: organization.appId,
+      orgId: organization.id,
       name: "Synthetic Default",
       isDefault: true,
-      createdBy: identity.user.id,
+      createdBy: identities[index * chatsPerOrganization]!.user.id,
     })),
   );
   return identities;
@@ -1135,6 +1194,8 @@ function workerConfigFromEnvironment(): WorkerConfig {
     form: required("CHAT_PERF_FORM") as ConversationForm,
     profile: required("CHAT_PERF_PROFILE") as Profile,
     concurrency: Number(required("CHAT_PERF_CONCURRENCY")),
+    organizations: Number(required("CHAT_PERF_ORGANIZATIONS")),
+    piMaxConcurrency: Number(required("CHAT_PERF_PI_MAX_CONCURRENCY")),
     repetition: Number(required("CHAT_PERF_REPETITION")),
     recoveryMs: Number(required("CHAT_PERF_RECOVERY_MS")),
     outputFile: required("CHAT_PERF_OUTPUT_FILE"),

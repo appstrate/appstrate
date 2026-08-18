@@ -45,6 +45,17 @@ describe("chat engine performance report", () => {
       rssBytesPerChat: { estimate: 1.5 },
     });
   });
+
+  it("does not merge distinct organization distributions", () => {
+    const onePerOrg = observation("pi", 100, 1, 100);
+    const tenPerOrg = observation("pi", 100, 2, 100);
+    (onePerOrg.value.cell as { distribution?: string }).distribution =
+      "100-organizations-x-1-chats";
+    (tenPerOrg.value.cell as { distribution?: string }).distribution =
+      "10-organizations-x-10-chats";
+
+    expect(aggregatePerformanceObservations([onePerOrg, tenPerOrg]).groups).toHaveLength(2);
+  });
 });
 
 function observation(

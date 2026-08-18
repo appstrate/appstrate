@@ -21,6 +21,7 @@ export interface ObservationValue {
     profile: string;
     concurrency: number;
     repetition: number;
+    distribution?: string;
   };
   memory: {
     initial: MemoryValue;
@@ -111,6 +112,7 @@ export function aggregatePerformanceObservations(observations: readonly ReportOb
       value.cell.form,
       value.cell.profile,
       value.cell.concurrency,
+      value.cell.distribution ?? "unspecified",
     ].join("|"),
   );
   const groups = [...grouped.values()]
@@ -128,6 +130,7 @@ export function aggregatePerformanceObservations(observations: readonly ReportOb
         form: first.cell.form,
         profile: first.cell.profile,
         concurrency: first.cell.concurrency,
+        distribution: first.cell.distribution ?? "unspecified",
         repetitions: items.length,
         observations: items.map(({ source }) => source).sort(),
         metrics: {
@@ -161,7 +164,13 @@ export function aggregatePerformanceObservations(observations: readonly ReportOb
     .sort(compareGroups);
 
   const slopeFamilies = Map.groupBy(observations, ({ value }) =>
-    [value.benchmark, value.cell.engine, value.cell.form, value.cell.profile].join("|"),
+    [
+      value.benchmark,
+      value.cell.engine,
+      value.cell.form,
+      value.cell.profile,
+      distributionFamily(value),
+    ].join("|"),
   );
   const memorySlopes = [...slopeFamilies.values()]
     .flatMap((items) => memorySlope(items) ?? [])
@@ -225,6 +234,7 @@ function memorySlope(items: readonly ReportObservation[]) {
     engine: first.cell.engine,
     form: first.cell.form,
     profile: first.cell.profile,
+    distribution: distributionFamily(first),
     fromConcurrency,
     toConcurrency,
     pairedRepetitions: slopes.length,
@@ -267,6 +277,15 @@ function sumCounters(values: readonly ObservationValue[]) {
   );
 }
 
+function distributionFamily(value: ObservationValue): string {
+  const distribution = value.cell.distribution ?? "unspecified";
+  const match = distribution.match(/^(\d+)-organizations-x-(\d+)-chats?$/);
+  if (!match) return distribution;
+  if (Number(match[2]) === 1) return "one-organization-per-chat";
+  if (Number(match[1]) === 1) return "single-organization";
+  return `${match[1]}-organizations`;
+}
+
 function median(values: readonly number[]): number {
   const sorted = [...values].sort((a, b) => a - b);
   const middle = Math.floor(sorted.length / 2);
@@ -274,13 +293,26 @@ function median(values: readonly number[]): number {
 }
 
 function compareGroups(
-  left: { form: string; profile: string; engine: string; concurrency?: number },
-  right: { form: string; profile: string; engine: string; concurrency?: number },
+  left: {
+    form: string;
+    profile: string;
+    engine: string;
+    concurrency?: number;
+    distribution?: string;
+  },
+  right: {
+    form: string;
+    profile: string;
+    engine: string;
+    concurrency?: number;
+    distribution?: string;
+  },
 ): number {
   return (
     left.form.localeCompare(right.form) ||
     left.profile.localeCompare(right.profile) ||
     (left.concurrency ?? 0) - (right.concurrency ?? 0) ||
+    (left.distribution ?? "").localeCompare(right.distribution ?? "") ||
     left.engine.localeCompare(right.engine)
   );
 }
