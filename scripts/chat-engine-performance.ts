@@ -255,6 +255,7 @@ async function runWorker(config: WorkerConfig): Promise<void> {
     statuses: { ok: 0, rateLimited: 0, serverError: 0 },
     providerStatuses: { ok: 0, rateLimited: 0, serverError: 0, otherError: 0 },
   };
+  const providerUsageTasks: Promise<void>[] = [];
 
   const originalFetch = globalThis.fetch;
   const sharedDispatchOptions = {
@@ -277,6 +278,8 @@ async function runWorker(config: WorkerConfig): Promise<void> {
           apiKey: await loadProviderKey(config),
           modelId: config.providerModelId,
           upstreamFetch: originalFetch.bind(globalThis),
+          usageTasks: providerUsageTasks,
+          isMeasuredWave: () => phase === "wave",
           onProviderStatus: (status) => {
             if (phase !== "wave") return;
             if (status >= 200 && status < 300) counters.providerStatuses.ok += 1;
@@ -376,6 +379,7 @@ async function runWorker(config: WorkerConfig): Promise<void> {
   phase = "wave";
   const waveStartedAtMs = performance.now() - processStartedAt;
   const turns = await Promise.all(identities.map((identity) => runTurn(identity)));
+  await Promise.all(providerUsageTasks);
   await Promise.all(
     identities.map((identity) => waitForPersistence(db, schema, identity.sessionId, 2)),
   );
@@ -397,6 +401,7 @@ async function runWorker(config: WorkerConfig): Promise<void> {
     },
   ]);
   await waitForPersistence(db, schema, continuityIdentity.sessionId, 4);
+  await Promise.all(providerUsageTasks);
 
   const recoveryDeadline = performance.now() + config.recoveryMs;
   while (performance.now() < recoveryDeadline) {
@@ -611,6 +616,8 @@ function createMistralDispatch(options: {
   apiKey: string;
   modelId: string;
   upstreamFetch: FetchLike;
+  usageTasks: Promise<void>[];
+  isMeasuredWave(): boolean;
   onInference(usage: { inputTokens: number; outputTokens: number }): void;
   onProviderStatus(status: number): void;
 }): FetchLike {
@@ -640,54 +647,48 @@ function createMistralDispatch(options: {
     );
     if (!marker) return new Response("missing synthetic marker", { status: 400 });
     const startedAt = performance.now();
+    const measuredWave = options.isMeasuredWave();
     const upstream = await forwardMistralChatCompletion(request, {
       apiKey: options.apiKey,
       modelId: options.modelId,
       fetch: options.upstreamFetch,
     });
-    options.onProviderStatus(upstream.status);
+    if (measuredWave) options.onProviderStatus(upstream.status);
     if (!upstream.body || !upstream.ok) {
-      options.onInference({ inputTokens: 0, outputTokens: 0 });
+      if (measuredWave) options.onInference({ inputTokens: 0, outputTokens: 0 });
       return upstream;
     }
 
     const identity = options.identityByMarker.get(marker)!;
     const sessionId = options.sessionByMarker.get(marker)!;
-    const decoder = new TextDecoder();
-    let captured = "";
-    const tapped = upstream.body.pipeThrough(
-      new TransformStream<Uint8Array, Uint8Array>({
-        transform(chunk, controller) {
-          captured += decoder.decode(chunk, { stream: true });
-          controller.enqueue(chunk);
-        },
-        async flush() {
-          captured += decoder.decode();
-          const usage = parseOpenAiSseUsage(captured);
-          options.onInference(usage ?? { inputTokens: 0, outputTokens: 0 });
-          if (!usage) return;
-          await options.db.insert(options.schema.llmUsage).values({
-            source: "proxy",
-            orgId: identity.orgId,
-            userId: identity.user.id,
-            chatSessionId: sessionId,
-            model: "mistral-benchmark-preset",
-            realModel: options.modelId,
-            api: "openai-completions",
-            credentialSource: "org",
-            inputTokens: usage.inputTokens,
-            outputTokens: usage.outputTokens,
-            cacheReadTokens: 0,
-            cacheWriteTokens: 0,
-            costUsd: 0,
-            pricingStatus: "unpriced",
-            durationMs: Math.round(performance.now() - startedAt),
-            requestId: crypto.randomUUID(),
-          });
-        },
-      }),
+    const [clientBody, meteringBody] = upstream.body.tee();
+    options.usageTasks.push(
+      (async () => {
+        const captured = await new Response(meteringBody).text();
+        const usage = parseOpenAiSseUsage(captured);
+        if (measuredWave) options.onInference(usage ?? { inputTokens: 0, outputTokens: 0 });
+        if (!usage) return;
+        await options.db.insert(options.schema.llmUsage).values({
+          source: "proxy",
+          orgId: identity.orgId,
+          userId: identity.user.id,
+          chatSessionId: sessionId,
+          model: "mistral-benchmark-preset",
+          realModel: options.modelId,
+          api: "openai-completions",
+          credentialSource: "org",
+          inputTokens: usage.inputTokens,
+          outputTokens: usage.outputTokens,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          costUsd: 0,
+          pricingStatus: "unpriced",
+          durationMs: Math.round(performance.now() - startedAt),
+          requestId: crypto.randomUUID(),
+        });
+      })(),
     );
-    return new Response(tapped, {
+    return new Response(clientBody, {
       status: upstream.status,
       statusText: upstream.statusText,
       headers: upstream.headers,
