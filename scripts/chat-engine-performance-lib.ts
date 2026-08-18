@@ -28,6 +28,45 @@ export interface ComparisonCounters {
   outputTokens: number;
 }
 
+export interface BenchmarkWorker {
+  exited: Promise<number>;
+  kill(signal: number): void;
+}
+
+/** Wait for a worker and guarantee that a timed-out process cannot survive its controller. */
+export async function waitForWorkerExit(
+  worker: BenchmarkWorker,
+  timeoutMs: number,
+  gracefulShutdownMs = 1_000,
+): Promise<number> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const timedOut = new Promise<"timeout">((resolve) => {
+    timeout = setTimeout(() => resolve("timeout"), timeoutMs);
+  });
+  const first = await Promise.race([
+    worker.exited.then((exitCode) => ({ kind: "exit" as const, exitCode })),
+    timedOut.then(() => ({ kind: "timeout" as const })),
+  ]);
+  if (timeout) clearTimeout(timeout);
+  if (first.kind === "exit") return first.exitCode;
+
+  worker.kill(15);
+  let graceTimer: ReturnType<typeof setTimeout> | undefined;
+  const graceExpired = new Promise<"expired">((resolve) => {
+    graceTimer = setTimeout(() => resolve("expired"), gracefulShutdownMs);
+  });
+  const graceful = await Promise.race([
+    worker.exited.then((exitCode) => ({ kind: "exit" as const, exitCode })),
+    graceExpired.then(() => ({ kind: "expired" as const })),
+  ]);
+  if (graceTimer) clearTimeout(graceTimer);
+  if (graceful.kind === "expired") {
+    worker.kill(9);
+    await worker.exited;
+  }
+  throw new Error(`benchmark worker exceeded ${timeoutMs} ms`);
+}
+
 /** Normalize both fetch call shapes before the controlled dispatch inspects the request. */
 export function normalizeFetchRequest(input: string | URL | Request, init?: RequestInit): Request {
   return input instanceof Request && init === undefined ? input : new Request(input, init);

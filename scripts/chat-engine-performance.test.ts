@@ -7,6 +7,7 @@ import {
   normalizeFetchRequest,
   percentile,
   summarizeDurations,
+  waitForWorkerExit,
   type MemorySample,
 } from "./chat-engine-performance-lib.ts";
 
@@ -64,6 +65,24 @@ describe("chat engine performance observation helpers", () => {
     expect(request.url).toBe("http://127.0.0.1:3400/api/mcp/o/org_1");
     expect(request.method).toBe("POST");
     expect(request.headers.get("x-org-id")).toBe("org_1");
+  });
+
+  it("force-stops a benchmark worker that ignores graceful timeout shutdown", async () => {
+    let resolveExit!: (code: number) => void;
+    const exited = new Promise<number>((resolve) => {
+      resolveExit = resolve;
+    });
+    const signals: number[] = [];
+    const worker = {
+      exited,
+      kill(signal: number) {
+        signals.push(signal);
+        if (signal === 9) resolveExit(137);
+      },
+    };
+
+    await expect(waitForWorkerExit(worker, 5, 5)).rejects.toThrow("benchmark worker exceeded 5 ms");
+    expect(signals).toEqual([15, 9]);
   });
 });
 

@@ -16,6 +16,7 @@ import {
   normalizeFetchRequest,
   percentile,
   summarizeDurations,
+  waitForWorkerExit,
   type MemorySample,
 } from "./chat-engine-performance-lib.ts";
 import type { ChatEnv } from "../packages/module-chat/src/prompt.ts";
@@ -80,6 +81,7 @@ async function runController(args: string[]): Promise<void> {
     .filter((value) => Number.isInteger(value) && value > 0);
   const repetitions = numberOption(args, "repetitions", 5);
   const recoveryMs = numberOption(args, "recovery-ms", 120_000);
+  const cellTimeoutMs = numberOption(args, "cell-timeout-ms", 15 * 60_000);
   const outputDir = stringOption(args, "output", "artifacts/chat-engine-performance/controlled");
 
   await $`mkdir -p ${outputDir}`.quiet();
@@ -111,7 +113,7 @@ async function runController(args: string[]): Promise<void> {
               stdout: "inherit",
               stderr: "inherit",
             });
-            const exitCode = await child.exited;
+            const exitCode = await waitForWorkerExit(child, cellTimeoutMs);
             if (exitCode !== 0) throw new Error(`Benchmark worker failed for ${id}`);
             const observation = (await Bun.file(outputFile).json()) as {
               outcomes: {
@@ -148,7 +150,15 @@ async function runController(args: string[]): Promise<void> {
     commit,
     bunVersion: Bun.version,
     command: Bun.argv.join(" "),
-    parameters: { engines, forms, profiles, concurrencies, repetitions, recoveryMs },
+    parameters: {
+      engines,
+      forms,
+      profiles,
+      concurrencies,
+      repetitions,
+      recoveryMs,
+      cellTimeoutMs,
+    },
     observations: files,
   };
   await Bun.write(`${outputDir}/manifest.json`, `${JSON.stringify(manifest, null, 2)}\n`);
@@ -200,7 +210,7 @@ async function runWorker(config: WorkerConfig): Promise<void> {
     import("../packages/module-chat/src/persistence.ts"),
     import("../apps/api/src/middleware/error-handler.ts"),
   ]);
-  const { db, closeDb } = dbModule;
+  const { db } = dbModule;
   const identities = await seedIdentities(db, schema, config.concurrency);
   const sessionByMarker = new Map(
     identities.map((identity) => [identity.marker, identity.sessionId] as const),
@@ -378,6 +388,8 @@ async function runWorker(config: WorkerConfig): Promise<void> {
     }
   }
 
+  globalThis.fetch = originalFetch;
+
   const completed = turns.filter((turn) => turn.status === 200 && turn.complete);
   const observation = {
     schemaVersion: CHAT_PERFORMANCE_OBSERVATION_VERSION,
@@ -454,12 +466,12 @@ async function runWorker(config: WorkerConfig): Promise<void> {
       persistedMessageCount: persistence.bySession[continuityIdentity.sessionId] ?? 0,
     },
     isolation: { foreignSessionRejected },
+    teardown: { databaseRelease: "process-exit-after-verification" },
     turns,
     samples,
   };
   await Bun.write(config.outputFile, `${JSON.stringify(observation, null, 2)}\n`);
-  globalThis.fetch = originalFetch;
-  await closeDb();
+  process.exit(0);
 }
 
 function configureIsolatedEnvironment(config: WorkerConfig): void {
