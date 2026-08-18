@@ -299,6 +299,10 @@ Comparatif Mistral, lorsque la clé sera disponible :
 bun scripts/chat-engine-performance.ts mistral --env-file=/chemin/absolu/mistral.env --model=mistral-small-2603 --forms=S,H --profiles=cold,warm --concurrency=60,64,100 --repetitions=3 --recovery-ms=120000 --output=artifacts/chat-engine-performance/mistral-real
 ```
 
+Le modèle épinglé `mistral-small-2603` correspond à Mistral Small 4 v26.03 et expose officiellement
+Chat Completions et Function Calling, voir la
+[fiche modèle Mistral](https://docs.mistral.ai/models/model-cards/mistral-small-4-0-26-03).
+
 Le fichier d'environnement doit contenir uniquement la clé attendue ou, au minimum, le harness ne
 lit explicitement que `MISTRAL_API_KEY`. La clé n'est jamais copiée dans les observations.
 
