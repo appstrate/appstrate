@@ -8,6 +8,30 @@ const ORG_ROLES = [...orgRoleEnum.enumValues];
  * All OpenAPI schema definitions (components/schemas).
  */
 export const schemas = {
+  /**
+   * Outcome of a slot command. `conflict` is not an error: it carries the
+   * current revision and value precisely so the agent can rebase its patch.
+   */
+  SlotCommandResult: {
+    type: "object",
+    required: ["outcome"],
+    properties: {
+      outcome: { type: "string", enum: ["committed", "conflict", "rejected"] },
+      revision: {
+        type: "integer",
+        description: "Slot revision — after the write when committed, current when conflicting.",
+      },
+      content: {
+        description:
+          "Slot value after a committed write. Returned because a patch is resolved server-side, so the caller may not otherwise know what was stored.",
+      },
+      current_content: {
+        description: "Slot value at the conflicting revision, for the agent to rebase onto.",
+      },
+      reason: { type: "string", description: "Machine-readable refusal cause when rejected." },
+      detail: { type: "string", description: "Human-readable explanation shown to the agent." },
+    },
+  },
   // Shared field-error item carrying the connection-resolution "smuggle"
   // fields surfaced by services/integration-connection-resolver.ts:
   // translateResolutionError (mirrors the `ResolutionFieldError` TS type in
@@ -1699,7 +1723,7 @@ export const schemas = {
             type: "array",
             items: {
               type: "string",
-              enum: ["output", "log", "note", "pin", "publish_document"],
+              enum: ["output", "log", "note", "pin", "publish_document", "update_slot"],
             },
             description:
               "Appstrate top-level extension: runtime tools the agent may use. Optional.",

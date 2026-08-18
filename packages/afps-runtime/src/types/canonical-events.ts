@@ -57,6 +57,16 @@ export interface MemoryAddedEvent extends BaseEnvelope {
   content: string;
   /** AFPS scope dimension. Defaults to `"actor"` when omitted. */
   scope?: "actor" | "shared";
+  /**
+   * Idempotency key for the underlying write, minted by the runtime BEFORE
+   * its first attempt and replayed verbatim on retry.
+   *
+   * Present when the runtime already committed the write through the platform
+   * command route: the event is then an OBSERVATION of a committed fact, and
+   * any consumer that also persists must first check for a receipt carrying
+   * this id. Absent for older runtime images, whose event IS the write.
+   */
+  operationId?: string;
 }
 
 /**
@@ -83,6 +93,14 @@ export interface PinnedSetEvent extends BaseEnvelope {
   content: unknown;
   /** AFPS scope dimension. Defaults to `"actor"` when omitted. */
   scope?: "actor" | "shared";
+  /** See {@link MemoryAddedEvent.operationId}. */
+  operationId?: string;
+  /**
+   * Slot revision AFTER the committed write, when the runtime already applied
+   * it through the command route. Lets the reducer keep the highest revision
+   * instead of the last-arriving event — the two differ under concurrency.
+   */
+  revision?: number;
 }
 
 /** `@afps/output` — `output()` tool. Replace-on-emit semantics. */
@@ -151,6 +169,15 @@ export const CANONICAL_EVENT_TYPES = [
 ] as const satisfies ReadonlyArray<CanonicalRunEvent["type"]>;
 
 const CANONICAL_TYPE_SET: ReadonlySet<string> = new Set<string>(CANONICAL_EVENT_TYPES);
+
+/**
+ * Optional idempotency key: absent, or a non-empty string. An empty string
+ * would defeat the receipt lookup it exists for — every write would collide on
+ * the same key — so the schema declares `minLength: 1` and the guard mirrors it.
+ */
+function isValidOperationId(value: unknown): boolean {
+  return value === undefined || (typeof value === "string" && value.length > 0);
+}
 
 /** Optional AFPS scope dimension — absent, or one of the two values. */
 function isValidScope(value: unknown): boolean {
@@ -224,6 +251,7 @@ export function isCanonicalRunEvent(event: RunEvent): event is CanonicalRunEvent
     case "memory.added": {
       const e = event as Record<string, unknown>;
       if (typeof e.content !== "string") return false;
+      if (!isValidOperationId(e.operationId)) return false;
       return isValidScope(e.scope);
     }
     case "pinned.set": {
@@ -233,6 +261,15 @@ export function isCanonicalRunEvent(event: RunEvent): event is CanonicalRunEvent
       // `undefined` is dropped by `JSON.stringify`, so it is absent on the
       // wire — `!== undefined`, not `"content" in e`.
       if (e.content === undefined) return false;
+      if (!isValidOperationId(e.operationId)) return false;
+      // `revision` counts committed writes, so the first one is 1: a 0 or a
+      // fractional value cannot have come from the command path that mints it.
+      if (
+        e.revision !== undefined &&
+        (!isWireNumber(e.revision) || !Number.isInteger(e.revision) || e.revision < 1)
+      ) {
+        return false;
+      }
       return isValidScope(e.scope);
     }
     case "output.emitted":

@@ -17,6 +17,11 @@
         "shared"
       ],
       "description": "AFPS persistence scope. Absent MUST be read as \"actor\" (per-actor isolation), never as \"shared\"."
+    },
+    "operationId": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Idempotency key for the underlying write, stable across retries. Present when the runtime already committed the write through the platform command route, making this event an observation rather than the write itself."
     }
   },
   "required": [

@@ -50,6 +50,39 @@ export const executionContextSchema = z.object({
    * excluded — it is rendered separately as `## Checkpoint`.
    */
   pinnedSlots: z.record(z.string(), z.unknown()).optional(),
+  /**
+   * Per-slot metadata, keyed exactly like {@link pinnedSlots}.
+   *
+   * The revision is what makes conditional writes possible: an agent cannot
+   * send `expected_revision` for a slot whose revision it has never been told.
+   * The resolved scope is shown alongside because the same key may exist in
+   * both the actor and the shared bucket, and a write to the wrong one is
+   * either a lost update or a leak.
+   */
+  pinnedSlotMeta: z
+    .record(
+      z.string(),
+      z.object({
+        revision: z.number().int().optional(),
+        scope: z.enum(["actor", "shared"]).optional(),
+      }),
+    )
+    .optional(),
+  /**
+   * Summary of the out-of-prompt archive — count and last write.
+   *
+   * Archive entries are deliberately NOT injected (they would grow the working
+   * context without bound), but until this existed nothing told the agent the
+   * archive was there at all: `memories` is empty on every platform run, so the
+   * `## Memory` section never rendered and `recall_memory` went unused. A count
+   * and a date make the capability discoverable at negligible cost.
+   */
+  archive: z
+    .object({
+      count: z.number().int().min(0),
+      lastWrittenAt: z.string().optional(),
+    })
+    .optional(),
   history: z.array(historyEntrySchema).optional(),
 
   /**

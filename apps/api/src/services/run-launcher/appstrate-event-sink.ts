@@ -56,6 +56,8 @@ import { logger } from "../../lib/logger.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import type { TokenUsage } from "./types.ts";
 import { scheduleRunMetricBroadcast } from "../run-metric-broadcaster.ts";
+import { appendMemoryCommand, upsertSlotCommand } from "../state/persistence-commands.ts";
+import type { PersistenceScope } from "../state/package-persistence.ts";
 
 export interface PersistingEventSinkOptions {
   scope: AppScope;
@@ -154,6 +156,14 @@ export async function persistRunEvent(
     writeLedger?: boolean;
     modelSource?: string | null;
     modelCost?: ModelCost | null;
+    /**
+     * Enables in-line persistence of `memory.added` / `pinned.set`.
+     *
+     * Omitted by callers that only need the write-through log (tests, legacy
+     * in-process sink), in which case those events keep falling through to the
+     * terminal path exactly as before.
+     */
+    persistence?: { packageId: string; scope: PersistenceScope };
   } = {},
 ): Promise<string | null> {
   switch (event.type) {
@@ -276,10 +286,115 @@ export async function persistRunEvent(
       return null;
     }
 
+    case "memory.added": {
+      await projectMemoryEvent(executor, scope, runId, event, opts.persistence);
+      return null;
+    }
+
+    case "pinned.set": {
+      await projectPinnedEvent(executor, scope, runId, event, opts.persistence);
+      return null;
+    }
+
     default:
-      // memory.added / pinned.set / third-party — no run_logs row.
+      // Third-party events — no run_logs row.
       return null;
   }
+}
+
+/**
+ * Ingestion-transport projection for `memory.added`.
+ *
+ * Applies ONLY when the event carries an `operationId` and no receipt claims
+ * it. Two facts make that condition exactly right:
+ *
+ * - An event WITHOUT an `operationId` comes from a runtime image that predates
+ *   the command route. For those, the event is the write and the terminal path
+ *   is its only writer — projecting here too would double-apply, since the
+ *   terminal aggregate carries no per-item identity to dedupe against.
+ * - An event WITH one either follows a committed command (receipt present →
+ *   skip, this is just an observation) or a command that never landed (no
+ *   receipt → apply here, and the receipt written now makes the terminal path
+ *   skip it in turn).
+ *
+ * Failures are swallowed: the run's event stream must not stop because a
+ * memory write failed. The command route is the path that reports errors to
+ * the agent; this one is a backstop.
+ */
+async function projectMemoryEvent(
+  executor: Db,
+  scope: AppScope,
+  runId: string,
+  event: RunEvent,
+  persistence: { packageId: string; scope: PersistenceScope } | undefined,
+): Promise<void> {
+  const operationId = (event as { operationId?: unknown }).operationId;
+  if (!persistence || typeof operationId !== "string" || operationId.length === 0) return;
+  const content = (event as { content?: unknown }).content;
+  if (typeof content !== "string") return;
+
+  try {
+    await appendMemoryCommand(executor, {
+      runId,
+      packageId: persistence.packageId,
+      applicationId: scope.applicationId!,
+      orgId: scope.orgId!,
+      scope: resolveEventScope(event as { scope?: "actor" | "shared" }, persistence.scope),
+      operationId,
+      content,
+    });
+  } catch (err) {
+    logger.error("ingestion: memory projection failed", {
+      runId,
+      error: getErrorMessage(err),
+    });
+  }
+}
+
+/** Ingestion-transport projection for `pinned.set`. See {@link projectMemoryEvent}. */
+async function projectPinnedEvent(
+  executor: Db,
+  scope: AppScope,
+  runId: string,
+  event: RunEvent,
+  persistence: { packageId: string; scope: PersistenceScope } | undefined,
+): Promise<void> {
+  const operationId = (event as { operationId?: unknown }).operationId;
+  if (!persistence || typeof operationId !== "string" || operationId.length === 0) return;
+  const key = (event as { key?: unknown }).key;
+  if (typeof key !== "string") return;
+
+  try {
+    await upsertSlotCommand(executor, {
+      runId,
+      packageId: persistence.packageId,
+      applicationId: scope.applicationId!,
+      orgId: scope.orgId!,
+      scope: resolveEventScope(event as { scope?: "actor" | "shared" }, persistence.scope),
+      operationId,
+      key,
+      content: (event as { content?: unknown }).content ?? null,
+    });
+  } catch (err) {
+    logger.error("ingestion: pinned projection failed", {
+      runId,
+      error: getErrorMessage(err),
+    });
+  }
+}
+
+/**
+ * Resolve an event's declared AFPS scope against the run's own actor scope.
+ *
+ * `"shared"` is app-wide; anything else (including an absent field) means the
+ * run's actor — the documented fail-safe is per-actor isolation, never
+ * cross-actor leakage.
+ */
+function resolveEventScope(
+  event: { scope?: "actor" | "shared" },
+  runScope: PersistenceScope,
+): PersistenceScope {
+  return event.scope === "shared" ? { type: "shared" } : runScope;
 }
 
 function resolveLogLevel(value: unknown): "debug" | "info" | "warn" | "error" | null {

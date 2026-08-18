@@ -260,6 +260,13 @@
       "when": 1786953950603,
       "tag": "0036_calm_landau",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1787037815491,
+      "tag": "0037_spicy_whirlwind",
+      "breakpoints": true
     }
   ]
 }

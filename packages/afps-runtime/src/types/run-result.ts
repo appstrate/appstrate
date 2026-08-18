@@ -18,6 +18,8 @@ export type LogLevel = "info" | "warn" | "error";
  *
  * - `memory.added` events append to `memories`
  * - `pinned.set` events upsert by `key` into `pinned` (last-write-wins per key)
+ * - the same events also aggregate into `pinnedSlots`, keyed by `(scope, key)`
+ *   and resolved by highest revision — the shape consumers should prefer
  * - `output.emitted` events replace `output` wholesale (last-write-wins;
  *   the reducer assigns `result.output = event.data`, it does NOT merge)
  * - `log.written` events append to `logs`
@@ -34,6 +36,14 @@ export interface RunResult {
    * rendered into the system prompt on the next run.
    */
   pinned?: Record<string, PinnedSlot>;
+  /**
+   * The same pinned writes, keyed by `(scope, key)` and resolved by highest
+   * revision. Supersedes {@link RunResult.pinned}, which cannot represent a
+   * run that pinned one name in both scopes. Optional so a runner that
+   * predates it keeps validating; consumers prefer it when present and fall
+   * back to the legacy map otherwise.
+   */
+  pinnedSlots?: PinnedSlotEntry[];
   output: unknown | null;
   logs: LogEntry[];
   error?: RunError;
@@ -110,6 +120,15 @@ export interface Memory {
    * Emitters MAY omit the field — consumers default to `"actor"`.
    */
   scope?: "actor" | "shared";
+  /**
+   * Idempotency key of the underlying write, when the runtime minted one.
+   *
+   * Terminal consumers use it to tell an already-committed write from one they
+   * still owe: present + a matching receipt means "already applied, skip".
+   * Absent means the event IS the write (runtime images predating the command
+   * route), and the terminal path remains its only writer.
+   */
+  operationId?: string;
 }
 
 /**
@@ -121,6 +140,32 @@ export interface PinnedSlot {
   content: unknown;
   /** AFPS per-slot persistence scope; defaults to `"actor"`. */
   scope?: "actor" | "shared";
+}
+
+/**
+ * One aggregated pinned-slot write, keyed by the FULL identity of the slot.
+ *
+ * {@link RunResult.pinned} is keyed by `key` alone, which silently collapses
+ * two distinct slots when a run pins the same name in both the `actor` and the
+ * `shared` scope — the very thing `pin`'s own documentation promises it does
+ * not do ("last-write-wins per (scope, key)"). This list is the corrected
+ * aggregate and coexists with the legacy map so no consumer breaks: producers
+ * emit both, consumers prefer this one when present.
+ */
+export interface PinnedSlotEntry {
+  key: string;
+  content: unknown;
+  /** AFPS per-slot persistence scope; defaults to `"actor"`. */
+  scope?: "actor" | "shared";
+  /**
+   * Slot revision after the write, when the runtime committed it through the
+   * platform command route. Aggregation keeps the HIGHEST revision rather than
+   * the last event received: under concurrency the two differ, and arrival
+   * order reflects when runs finished, not the causal order of the writes.
+   */
+  revision?: number;
+  /** See {@link Memory.operationId}. */
+  operationId?: string;
 }
 
 export interface LogEntry {

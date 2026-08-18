@@ -4508,6 +4508,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/internal/memory": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Append an archive memory
+         * @description Write half of the agent memory surface, backing the `note` runtime tool. Applies the write inside a transaction and returns its real outcome, so the agent learns about a full archive or a deleted actor instead of receiving an unconditional success. `operation_id` is minted by the runtime before its first attempt and replayed verbatim on retry: a lost response can never become a duplicate row. Container-to-host only. Auth via Bearer run token.
+         */
+        post: operations["commandAppendMemory"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/internal/oauth-token/{credentialId}": {
         parameters: {
             query?: never;
@@ -4562,6 +4582,46 @@ export interface paths {
         get: operations["getRunHistory"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/internal/slots": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Upsert a named pinned slot
+         * @description Backs the `pin` runtime tool. Last-write-wins per (scope, key); every committed write advances the slot revision so a concurrent conditional write can detect it. Container-to-host only. Auth via Bearer run token.
+         */
+        post: operations["commandUpsertSlot"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/internal/slots/update": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Conditionally patch a named pinned slot
+         * @description Backs the `update_slot` runtime tool: a partial write guarded by the revision the agent believes it is editing. A mismatch returns `conflict` together with the current revision AND value, so the agent replays its patch on top instead of losing the write — the failure mode a whole-value upsert resolves silently. `expected_revision: 0` means create-only. Container-to-host only. Auth via Bearer run token.
+         */
+        post: operations["commandUpdateSlot"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4909,7 +4969,7 @@ export interface components {
             [key: string]: unknown;
         }) & {
             /** @description Appstrate top-level extension: runtime tools the agent may use. Optional. */
-            runtime_tools?: ("output" | "log" | "note" | "pin" | "publish_document")[];
+            runtime_tools?: ("output" | "log" | "note" | "pin" | "publish_document" | "update_slot")[];
         };
         AgentSkillRef: {
             id: string;
@@ -5736,6 +5796,20 @@ export interface components {
             unread_count: number;
             /** @description Highest run number this schedule ever produced; 0 when it never fired. */
             last_run_number: number;
+        };
+        SlotCommandResult: {
+            /** @enum {string} */
+            outcome: "committed" | "conflict" | "rejected";
+            /** @description Slot revision — after the write when committed, current when conflicting. */
+            revision?: number;
+            /** @description Slot value after a committed write. Returned because a patch is resolved server-side, so the caller may not otherwise know what was stored. */
+            content?: unknown;
+            /** @description Slot value at the conflicting revision, for the agent to rebase onto. */
+            current_content?: unknown;
+            /** @description Machine-readable refusal cause when rejected. */
+            reason?: string;
+            /** @description Human-readable explanation shown to the agent. */
+            detail?: string;
         };
         SmtpConfigView: {
             applicationId: string;
@@ -20946,6 +21020,61 @@ export interface operations {
             500: components["responses"]["InternalServerError"];
         };
     };
+    commandAppendMemory: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description Idempotency key, stable across retries of one logical write. */
+                    operation_id: string;
+                    /** @description Memory text to archive. */
+                    content: string;
+                    /**
+                     * @description Persistence scope. Defaults to the run actor. `shared` is app-wide and requires the agent manifest to declare `memory.shared_writes: true`.
+                     * @enum {string}
+                     */
+                    scope?: "actor" | "shared";
+                };
+            };
+        };
+        responses: {
+            /** @description Command outcome */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        outcome: "committed" | "rejected";
+                        /** @description Machine-readable refusal cause when rejected. */
+                        reason?: string;
+                        /** @description Human-readable explanation shown to the agent. */
+                        detail?: string;
+                    };
+                };
+            };
+            /** @description Malformed command body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description App-wide write refused — the manifest does not declare `memory.shared_writes` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     getOAuthModelProviderToken: {
         parameters: {
             query?: never;
@@ -21064,6 +21193,115 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             500: components["responses"]["InternalServerError"];
+        };
+    };
+    commandUpsertSlot: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    operation_id: string;
+                    /** @description Slot identifier. Lowercase letters, digits and underscores, at most 64 characters. */
+                    key: string;
+                    /** @description Arbitrary JSON value stored under the slot. */
+                    content?: unknown;
+                    /**
+                     * @description Persistence scope. Defaults to the run actor. `shared` is app-wide and requires the agent manifest to declare `memory.shared_writes: true`.
+                     * @enum {string}
+                     */
+                    scope?: "actor" | "shared";
+                };
+            };
+        };
+        responses: {
+            /** @description Command outcome */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SlotCommandResult"];
+                };
+            };
+            /** @description Malformed command body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description App-wide write refused — the manifest does not declare `memory.shared_writes` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    commandUpdateSlot: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    operation_id: string;
+                    key: string;
+                    /** @description Revision the agent is editing. 0 asserts the slot does not exist yet. */
+                    expected_revision: number;
+                    patch: {
+                        /** @enum {string} */
+                        type: "merge";
+                        value: {
+                            [key: string]: unknown;
+                        };
+                    } | {
+                        /** @enum {string} */
+                        type: "replace";
+                        old: string;
+                        new: string;
+                    };
+                    /**
+                     * @description Persistence scope. Defaults to the run actor. `shared` is app-wide and requires the agent manifest to declare `memory.shared_writes: true`.
+                     * @enum {string}
+                     */
+                    scope?: "actor" | "shared";
+                };
+            };
+        };
+        responses: {
+            /** @description Command outcome */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SlotCommandResult"];
+                };
+            };
+            /** @description Malformed command body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description App-wide write refused — the manifest does not declare `memory.shared_writes` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
     acceptInvitation: {

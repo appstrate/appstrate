@@ -47,7 +47,8 @@ import {
   scopeFromActor,
   CHECKPOINT_KEY,
 } from "./state/package-persistence.ts";
-import { actorFromIds } from "../lib/actor.ts";
+import { actorFromRunRow } from "../lib/actor.ts";
+import { hasPersistenceReceipt } from "./state/persistence-commands.ts";
 import { getRunEffectiveAgent } from "./run-effective-agent.ts";
 import { validateOutput } from "./schema.ts";
 import { asJSONSchemaObject } from "@appstrate/core/form";
@@ -127,6 +128,10 @@ export async function getRunSinkContext(runId: string): Promise<RunSinkContext |
       versionRef: runs.versionRef,
       modelSource: runs.modelSource,
       modelCost: runs.modelCost,
+      actorTypeSnapshot: runs.actorTypeSnapshot,
+      actorIdSnapshot: runs.actorIdSnapshot,
+      userId: runs.userId,
+      endUserId: runs.endUserId,
     })
     .from(runs)
     .where(eq(runs.id, runId))
@@ -635,17 +640,22 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
   }
 
   // Resolve the run's actor for the unified persistence scope.
+  //
+  // The snapshot columns win over the `(user_id, end_user_id)` pair: those are
+  // `ON DELETE SET NULL`, so a run whose actor was deleted while it was still
+  // executing would otherwise resolve `shared` here and publish that actor's
+  // private memories app-wide at the exact moment they should be disappearing.
   const [actorRow] = await db
     .select({
       userId: runs.userId,
       endUserId: runs.endUserId,
+      actorTypeSnapshot: runs.actorTypeSnapshot,
+      actorIdSnapshot: runs.actorIdSnapshot,
     })
     .from(runs)
     .where(eq(runs.id, run.id))
     .limit(1);
-  const persistenceScope = scopeFromActor(
-    actorFromIds(actorRow?.userId ?? null, actorRow?.endUserId ?? null),
-  );
+  const persistenceScope = scopeFromActor(actorRow ? actorFromRunRow(actorRow) : null);
 
   // Post-CAS best-effort: the run is already terminal in `runs`. Memory and
   // pinned-slot persistence is agent-authored side-data — a transient store
@@ -655,10 +665,25 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
   // further down. (Persistence faults are surfaced via the error log for ops.)
   try {
     if (result.memories?.length) {
+      // Skip anything already committed through the command route. An entry
+      // carrying an `operationId` with a matching receipt was persisted while
+      // the run was live; replaying it here would duplicate the memory, since
+      // two identical notes are legitimately distinct rows and no content
+      // comparison could tell them apart. Entries WITHOUT an `operationId`
+      // come from a runtime image predating the command route — for those this
+      // terminal path is still the only writer.
+      const pending: typeof result.memories = [];
+      for (const memory of result.memories) {
+        if (memory.operationId && (await hasPersistenceReceipt(db, run.id, memory.operationId))) {
+          continue;
+        }
+        pending.push(memory);
+      }
+
       // Split memories by declared scope and write each non-empty bucket.
       const sharedContent: string[] = [];
       const actorContent: string[] = [];
-      for (const m of result.memories) {
+      for (const m of pending) {
         if (m.scope === "shared") sharedContent.push(m.content);
         else actorContent.push(m.content);
       }
@@ -687,22 +712,40 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
 
     // Unified-persistence pinned-slot write — the single store for every
     // named pinned slot the agent wrote via `pin({ key, content })`,
-    // including the carry-over `"checkpoint"` slot. Honors the AFPS
-    // scope when the runtime stamped one onto each slot; falls back to
-    // the run's actor scope.
-    if (result.pinned) {
-      for (const [key, slot] of Object.entries(result.pinned)) {
-        const slotScope = slot.scope === "shared" ? { type: "shared" as const } : persistenceScope;
-        await upsertPinned(
-          run.packageId,
-          run.applicationId,
-          run.orgId,
-          slotScope,
+    // including the carry-over `"checkpoint"` slot.
+    //
+    // `result.pinnedSlots` is preferred over the legacy `result.pinned` map:
+    // the latter is keyed by `key` alone, so a run that pinned the same name
+    // in both the actor and the shared scope silently loses one of the two.
+    // The legacy map remains the fallback for runners that predate the list.
+    const slotWrites = result.pinnedSlots
+      ? result.pinnedSlots.map((entry) => ({
+          key: entry.key,
+          content: entry.content,
+          scope: entry.scope,
+          operationId: entry.operationId,
+        }))
+      : Object.entries(result.pinned ?? {}).map(([key, slot]) => ({
           key,
-          slot.content,
-          run.id,
-        );
+          content: slot.content,
+          scope: slot.scope,
+          operationId: undefined as string | undefined,
+        }));
+
+    for (const slot of slotWrites) {
+      if (slot.operationId && (await hasPersistenceReceipt(db, run.id, slot.operationId))) {
+        continue;
       }
+      const slotScope = slot.scope === "shared" ? { type: "shared" as const } : persistenceScope;
+      await upsertPinned(
+        run.packageId,
+        run.applicationId,
+        run.orgId,
+        slotScope,
+        slot.key,
+        slot.content,
+        run.id,
+      );
     }
   } catch (err) {
     logger.error("finalize: memory/pinned persistence failed (run already terminal)", {
@@ -1047,6 +1090,14 @@ async function persistEventAndAdvance(
       writeLedger: true,
       modelSource: run.modelSource,
       modelCost: run.modelCost,
+      // Memory/pinned writes join THIS transaction: the sequence advance and
+      // the persistence row commit or roll back together. Passing the global
+      // `db` handle instead (as the older helpers capture) would let the write
+      // survive a rolled-back sequence.
+      persistence: {
+        packageId: run.packageId,
+        scope: scopeFromActor(actorFromRunRow(run)),
+      },
     });
 
     // No runner emits `run.started`, so flip status → running on the

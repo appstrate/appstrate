@@ -92,12 +92,53 @@ export const CANONICAL_EVENT_CORPUS: readonly CanonicalEventFixture[] = [
     valid: false,
     violates: "scope",
   },
+  {
+    label: "memory.added — carries the write's idempotency key",
+    event: { ...base, type: "memory.added", content: "x", operationId: "op-1" },
+    valid: true,
+  },
+  {
+    label: "memory.added — empty operationId",
+    event: { ...base, type: "memory.added", content: "x", operationId: "" },
+    valid: false,
+    violates: "operationId",
+  },
 
   // --- pinned.set -----------------------------------------------------
   {
     label: "pinned.set — checkpoint slot",
     event: { ...base, type: "pinned.set", key: "checkpoint", content: { counter: 1 } },
     valid: true,
+  },
+  {
+    label: "pinned.set — carries idempotency key and committed revision",
+    event: {
+      ...base,
+      type: "pinned.set",
+      key: "goals",
+      content: { a: 1 },
+      operationId: "op-2",
+      revision: 3,
+    },
+    valid: true,
+  },
+  {
+    label: "pinned.set — empty operationId",
+    event: { ...base, type: "pinned.set", key: "goals", content: null, operationId: "" },
+    valid: false,
+    violates: "operationId",
+  },
+  {
+    label: "pinned.set — revision below the first committed write",
+    event: { ...base, type: "pinned.set", key: "goals", content: null, revision: 0 },
+    valid: false,
+    violates: "revision",
+  },
+  {
+    label: "pinned.set — fractional revision",
+    event: { ...base, type: "pinned.set", key: "goals", content: null, revision: 1.5 },
+    valid: false,
+    violates: "revision",
   },
   {
     label: "pinned.set — named slot, scalar content",

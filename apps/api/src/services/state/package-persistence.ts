@@ -41,19 +41,37 @@ function assertValidContent(value: unknown, label: string): void {
   }
 }
 
-// Per-entry char cap and per-scope row cap (archive memories only;
-// pinned/checkpoint paths cap differently because they are bounded by
-// design — at most one checkpoint, and pinned memories are written by
-// admins or future tooling, not by agent loops).
+// Per-entry char cap and per-scope row cap for archive memories.
 export const MAX_MEMORY_CONTENT = 2000;
-const MAX_MEMORIES_PER_SCOPE = 100;
+export const MAX_MEMORIES_PER_SCOPE = 100;
+
+/**
+ * Cap on named slots per scope.
+ *
+ * Slots are the ONLY agent-writable surface injected into the system prompt on
+ * every run, and each may hold up to 64 KB. Uncapped, an agent could grow its
+ * own prompt until no run of it can execute — a self-inflicted denial of
+ * service with no operator-visible cause. The cap bounds slot COUNT;
+ * {@link MAX_PINNED_PROMPT_BYTES} separately bounds what is rendered.
+ */
+export const MAX_PINNED_SLOTS_PER_SCOPE = 32;
+
+/**
+ * Aggregate budget for slot content rendered into the system prompt.
+ *
+ * Applied at prompt-build time rather than at write time on purpose: a
+ * legitimate slot must never be refused because OTHER slots are large. Past
+ * the budget the renderer truncates deterministically and says so, so the
+ * agent sees a bounded prompt and the author sees a warning.
+ */
+export const MAX_PINNED_PROMPT_BYTES = 32 * 1024;
 
 /** Reserved storage key for the carry-over slot (`pin({ key: "checkpoint" })`). */
 export const CHECKPOINT_KEY = "checkpoint";
 
 /** Pattern enforced on agent-supplied pinned slot keys — must match the AFPS `pin` tool schema. */
-const PINNED_KEY_PATTERN = /^[a-z0-9_]+$/;
-const MAX_PINNED_KEY_LENGTH = 64;
+export const PINNED_KEY_PATTERN = /^[a-z0-9_]+$/;
+export const MAX_PINNED_KEY_LENGTH = 64;
 
 /**
  * Persistence scope. Narrower than `Actor` by one case: a storage scope may
@@ -74,7 +92,7 @@ export type Memory = Pick<
 // (archive rows carry `key: null`), so the row type's nullable `key` is replaced.
 export type PinnedSlotRow = Pick<
   PackagePersistenceRow,
-  "id" | "content" | "runId" | "actorType" | "actorId" | "createdAt" | "updatedAt"
+  "id" | "content" | "runId" | "actorType" | "actorId" | "createdAt" | "updatedAt" | "revision"
 > & { key: string };
 
 // --- Actor ↔ storage translation --------------------------------------------
@@ -292,6 +310,7 @@ export async function listPinnedSlots(
       actorId: packagePersistence.actorId,
       createdAt: packagePersistence.createdAt,
       updatedAt: packagePersistence.updatedAt,
+      revision: packagePersistence.revision,
     })
     .from(packagePersistence)
     .where(
@@ -299,6 +318,12 @@ export async function listPinnedSlots(
         eq(packagePersistence.packageId, packageId),
         eq(packagePersistence.applicationId, applicationId),
         sql`${packagePersistence.key} IS NOT NULL`,
+        // Both axes must be checked. `key IS NOT NULL` alone would also match
+        // the `(key, pinned = false)` quadrant, which has no writer today but
+        // would be injected straight into the system prompt the moment one
+        // appears. Reads state the full predicate rather than relying on the
+        // absence of a writer.
+        eq(packagePersistence.pinned, true),
         ...(scope ? [buildVisibilityFilter(scope)!] : []),
         ...(runId ? [eq(packagePersistence.runId, runId)] : []),
       ),
@@ -404,6 +429,43 @@ export async function recallMemories(
 }
 
 /**
+ * Cheap summary of the archive, for the prompt's discoverability line.
+ *
+ * The archive is deliberately kept OUT of the prompt, but until now nothing
+ * told the agent it existed at all: `ExecutionContext.memories` is always empty
+ * on a platform run, so the `## Memory` section never rendered and the only
+ * mention of `recall_memory` lived in a tool description the model may never
+ * read closely. A count and a date are enough to make the capability
+ * discoverable while keeping the working context small — no content, no
+ * model-written summary.
+ */
+export async function summariseArchive(
+  packageId: string,
+  applicationId: string,
+  scope: PersistenceScope,
+): Promise<{ count: number; lastWrittenAt: Date | null }> {
+  const [row] = await db
+    .select({
+      count: count(),
+      lastWrittenAt: sql<Date | null>`max(${packagePersistence.createdAt})`,
+    })
+    .from(packagePersistence)
+    .where(
+      and(
+        eq(packagePersistence.packageId, packageId),
+        eq(packagePersistence.applicationId, applicationId),
+        isNull(packagePersistence.key),
+        eq(packagePersistence.pinned, false),
+        buildVisibilityFilter(scope)!,
+      ),
+    );
+  return {
+    count: row?.count ?? 0,
+    lastWrittenAt: row?.lastWrittenAt ? new Date(row.lastWrittenAt) : null,
+  };
+}
+
+/**
  * Append memories for a scope. Always `pinned=false` (archive tier); the
  * AFPS `note` tool has no pinning parameter so every agent-written memory
  * lands in the archive. Bounded at {@link MAX_MEMORIES_PER_SCOPE} per
@@ -422,6 +484,10 @@ export async function addMemories(
 
   const { actorType, actorId } = storageActor(scope);
 
+  // `pinned = false` is load-bearing: the cap is the ARCHIVE allowance, and a
+  // pinned memo (`key IS NULL, pinned = true`) must not consume it. Without
+  // this predicate the two quadrants share one budget, so enabling any writer
+  // for pinned memos would silently shrink every agent's archive.
   const [row] = await db
     .select({ count: count() })
     .from(packagePersistence)
@@ -430,6 +496,7 @@ export async function addMemories(
         eq(packagePersistence.packageId, packageId),
         eq(packagePersistence.applicationId, applicationId),
         isNull(packagePersistence.key),
+        eq(packagePersistence.pinned, false),
         buildScopeFilter(scope),
       ),
     );

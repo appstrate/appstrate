@@ -21,6 +21,17 @@
         "shared"
       ],
       "description": "AFPS persistence scope. Absent MUST be read as \"actor\" (per-actor isolation), never as \"shared\"."
+    },
+    "operationId": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Idempotency key for the underlying write, stable across retries. Present when the runtime already committed the write through the platform command route, making this event an observation rather than the write itself."
+    },
+    "revision": {
+      "description": "Slot revision after the committed write. Consumers aggregating concurrent writes MUST keep the highest revision rather than the last event received.",
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
     }
   },
   "required": [
