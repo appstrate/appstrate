@@ -10,6 +10,7 @@ import {
   parseDotEnvValue,
   percentile,
   summarizeDurations,
+  summarizeWaveActivity,
   waitForWorkerExit,
   type MemorySample,
 } from "./chat-engine-performance-lib.ts";
@@ -38,6 +39,20 @@ describe("chat engine performance observation helpers", () => {
       after30s: samples[3],
       after60s: samples[4],
       after120s: samples[5],
+    });
+  });
+
+  it("excludes database startup from wave CPU and event-loop metrics", () => {
+    const samples = [
+      { ...sample(0, 100), cpuUserMicros: 1, cpuSystemMicros: 2, eventLoopDelayMs: 900 },
+      { ...sample(110, 120), cpuUserMicros: 11, cpuSystemMicros: 7, eventLoopDelayMs: 4 },
+      { ...sample(160, 130), cpuUserMicros: 31, cpuSystemMicros: 17, eventLoopDelayMs: 6 },
+      { ...sample(210, 125), cpuUserMicros: 41, cpuSystemMicros: 22, eventLoopDelayMs: 800 },
+    ];
+
+    expect(summarizeWaveActivity(samples, { waveStartedAtMs: 100, waveEndedAtMs: 200 })).toEqual({
+      eventLoopDelayMs: { p50: 4, p95: 6, p99: 6 },
+      cpu: { userMicros: 30, systemMicros: 15 },
     });
   });
 

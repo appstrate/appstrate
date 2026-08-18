@@ -195,6 +195,31 @@ export function memoryCheckpoints(
   };
 }
 
+export function summarizeWaveActivity(
+  samples: readonly MemorySample[],
+  timing: { waveStartedAtMs: number; waveEndedAtMs: number },
+): {
+  eventLoopDelayMs: ReturnType<typeof summarizeDurations>;
+  cpu: { userMicros: number; systemMicros: number };
+} {
+  if (samples.length === 0) throw new Error("at least one memory sample is required");
+  const initial = firstAtOrAfter(samples, timing.waveStartedAtMs) ?? samples[0]!;
+  const end = firstAtOrAfter(samples, timing.waveEndedAtMs) ?? samples.at(-1)!;
+  const waveSamples = samples.filter(
+    (sample) =>
+      sample.elapsedMs >= timing.waveStartedAtMs && sample.elapsedMs <= timing.waveEndedAtMs,
+  );
+  return {
+    eventLoopDelayMs: summarizeDurations(
+      (waveSamples.length > 0 ? waveSamples : [initial]).map((sample) => sample.eventLoopDelayMs),
+    ),
+    cpu: {
+      userMicros: Math.max(0, end.cpuUserMicros - initial.cpuUserMicros),
+      systemMicros: Math.max(0, end.cpuSystemMicros - initial.cpuSystemMicros),
+    },
+  };
+}
+
 export function compareCellInvariants(
   aiSdk: ComparisonCounters,
   pi: ComparisonCounters,

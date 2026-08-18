@@ -17,8 +17,8 @@ import {
   normalizeFetchRequest,
   parseDotEnvValue,
   parseOpenAiSseUsage,
-  percentile,
   summarizeDurations,
+  summarizeWaveActivity,
   waitForWorkerExit,
   type MemorySample,
 } from "./chat-engine-performance-lib.ts";
@@ -438,6 +438,7 @@ async function runWorker(config: WorkerConfig): Promise<void> {
   globalThis.fetch = originalFetch;
 
   const completed = turns.filter((turn) => turn.status === 200 && turn.complete);
+  const waveActivity = summarizeWaveActivity(samples, { waveStartedAtMs, waveEndedAtMs });
   const observation = {
     schemaVersion: CHAT_PERFORMANCE_OBSERVATION_VERSION,
     kind: "chat-engine-performance-observation",
@@ -467,24 +468,8 @@ async function runWorker(config: WorkerConfig): Promise<void> {
     },
     timing: { waveStartedAtMs, waveEndedAtMs, recoveryMs: config.recoveryMs },
     memory: memoryCheckpoints(samples, { waveStartedAtMs, waveEndedAtMs }),
-    eventLoopDelayMs: {
-      p50: percentile(
-        samples.map((sample) => sample.eventLoopDelayMs),
-        0.5,
-      ),
-      p95: percentile(
-        samples.map((sample) => sample.eventLoopDelayMs),
-        0.95,
-      ),
-      p99: percentile(
-        samples.map((sample) => sample.eventLoopDelayMs),
-        0.99,
-      ),
-    },
-    cpu: {
-      userMicros: samples.at(-1)?.cpuUserMicros ?? 0,
-      systemMicros: samples.at(-1)?.cpuSystemMicros ?? 0,
-    },
+    eventLoopDelayMs: waveActivity.eventLoopDelayMs,
+    cpu: waveActivity.cpu,
     latency: {
       firstTokenMs: summarizeDurations(completed.flatMap((turn) => turn.firstTokenMs ?? [])),
       totalMs: summarizeDurations(completed.map((turn) => turn.totalMs)),

@@ -1,0 +1,186 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://appstrate.com/schemas/chat-pi-performance-observation-v1.json",
+  "title": "Chat engine performance observation",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "schemaVersion",
+    "kind",
+    "benchmark",
+    "id",
+    "environment",
+    "cell",
+    "timing",
+    "memory",
+    "eventLoopDelayMs",
+    "cpu",
+    "latency",
+    "outcomes",
+    "usage",
+    "persistence",
+    "continuity",
+    "isolation",
+    "turns",
+    "samples"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "kind": { "const": "chat-engine-performance-observation" },
+    "benchmark": { "enum": ["controlled", "mistral-real", "pi-subscription"] },
+    "id": { "type": "string", "minLength": 1 },
+    "environment": {
+      "type": "object",
+      "required": ["commit", "branch", "bunVersion", "platform", "port", "database"],
+      "properties": {
+        "commit": { "type": "string" },
+        "branch": { "type": "string" },
+        "bunVersion": { "type": "string" },
+        "platform": { "type": "string" },
+        "port": { "const": 3400 },
+        "database": { "type": "string" }
+      }
+    },
+    "cell": {
+      "type": "object",
+      "required": ["engine", "form", "profile", "concurrency", "repetition", "distribution"],
+      "properties": {
+        "engine": { "enum": ["ai-sdk", "pi"] },
+        "form": { "enum": ["S", "H", "T", "L", "M"] },
+        "profile": { "enum": ["cold", "warm", "burst", "ramp", "endurance"] },
+        "concurrency": { "type": "integer", "minimum": 1 },
+        "repetition": { "type": "integer", "minimum": 1 },
+        "distribution": { "type": "string" }
+      }
+    },
+    "timing": {
+      "type": "object",
+      "required": ["waveStartedAtMs", "waveEndedAtMs", "recoveryMs"],
+      "properties": {
+        "waveStartedAtMs": { "type": "number", "minimum": 0 },
+        "waveEndedAtMs": { "type": "number", "minimum": 0 },
+        "recoveryMs": { "type": "number", "minimum": 0 }
+      }
+    },
+    "memory": {
+      "type": "object",
+      "required": ["initial", "peak", "end", "after30s", "after60s", "after120s"],
+      "properties": {
+        "initial": { "$ref": "#/$defs/memorySample" },
+        "peak": { "$ref": "#/$defs/memorySample" },
+        "end": { "$ref": "#/$defs/memorySample" },
+        "after30s": { "oneOf": [{ "$ref": "#/$defs/memorySample" }, { "type": "null" }] },
+        "after60s": { "oneOf": [{ "$ref": "#/$defs/memorySample" }, { "type": "null" }] },
+        "after120s": { "oneOf": [{ "$ref": "#/$defs/memorySample" }, { "type": "null" }] }
+      }
+    },
+    "eventLoopDelayMs": { "$ref": "#/$defs/percentiles" },
+    "cpu": {
+      "type": "object",
+      "required": ["userMicros", "systemMicros"],
+      "properties": {
+        "userMicros": { "type": "number", "minimum": 0 },
+        "systemMicros": { "type": "number", "minimum": 0 }
+      }
+    },
+    "latency": {
+      "type": "object",
+      "required": ["firstTokenMs", "totalMs", "throughputChatsPerSecond"],
+      "properties": {
+        "firstTokenMs": { "$ref": "#/$defs/percentiles" },
+        "totalMs": { "$ref": "#/$defs/percentiles" },
+        "throughputChatsPerSecond": { "type": "number", "minimum": 0 }
+      }
+    },
+    "outcomes": {
+      "type": "object",
+      "required": [
+        "requested",
+        "completed",
+        "rateLimited",
+        "serverErrors",
+        "incompleteStreams",
+        "markerFailures"
+      ],
+      "properties": {
+        "requested": { "type": "integer", "minimum": 0 },
+        "completed": { "type": "integer", "minimum": 0 },
+        "rateLimited": { "type": "integer", "minimum": 0 },
+        "serverErrors": { "type": "integer", "minimum": 0 },
+        "incompleteStreams": { "type": "integer", "minimum": 0 },
+        "markerFailures": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "usage": {
+      "type": "object",
+      "required": ["modelCalls", "toolCalls", "inputTokens", "outputTokens"],
+      "properties": {
+        "modelCalls": { "type": "integer", "minimum": 0 },
+        "toolCalls": { "type": "integer", "minimum": 0 },
+        "inputTokens": { "type": "integer", "minimum": 0 },
+        "outputTokens": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "persistence": {
+      "type": "object",
+      "required": ["messageCount", "structuredPartCount", "usageRows", "usageOwnershipValid"],
+      "properties": {
+        "messageCount": { "type": "integer", "minimum": 0 },
+        "structuredPartCount": { "type": "integer", "minimum": 0 },
+        "usageRows": { "type": "integer", "minimum": 0 },
+        "usageOwnershipValid": { "type": "boolean" }
+      }
+    },
+    "continuity": {
+      "type": "object",
+      "required": ["status", "complete", "markerValid", "persistedMessageCount"],
+      "properties": {
+        "status": { "type": "integer" },
+        "complete": { "type": "boolean" },
+        "markerValid": { "type": "boolean" },
+        "persistedMessageCount": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "isolation": {
+      "type": "object",
+      "required": ["foreignSessionRejected"],
+      "properties": { "foreignSessionRejected": { "type": "boolean" } }
+    },
+    "turns": { "type": "array", "items": { "type": "object" } },
+    "samples": { "type": "array", "items": { "$ref": "#/$defs/memorySample" } }
+  },
+  "$defs": {
+    "percentiles": {
+      "type": "object",
+      "required": ["p50", "p95", "p99"],
+      "properties": {
+        "p50": { "type": ["number", "null"] },
+        "p95": { "type": ["number", "null"] },
+        "p99": { "type": ["number", "null"] }
+      }
+    },
+    "memorySample": {
+      "type": "object",
+      "required": [
+        "elapsedMs",
+        "rss",
+        "heapUsed",
+        "external",
+        "arrayBuffers",
+        "cpuUserMicros",
+        "cpuSystemMicros",
+        "eventLoopDelayMs"
+      ],
+      "properties": {
+        "elapsedMs": { "type": "number", "minimum": 0 },
+        "rss": { "type": "integer", "minimum": 0 },
+        "heapUsed": { "type": "integer", "minimum": 0 },
+        "external": { "type": "integer", "minimum": 0 },
+        "arrayBuffers": { "type": "integer", "minimum": 0 },
+        "cpuUserMicros": { "type": "number", "minimum": 0 },
+        "cpuSystemMicros": { "type": "number", "minimum": 0 },
+        "eventLoopDelayMs": { "type": "number", "minimum": 0 }
+      }
+    }
+  }
+}
