@@ -530,6 +530,9 @@ async function runWorker(config: WorkerConfig): Promise<void> {
       0,
     );
     counters.providerStatuses.ok = waveUsage.length;
+    counters.providerStatuses.otherError = turns.filter(
+      (turn) => turn.status === 200 && turn.error !== null,
+    ).length;
   }
   const waveEndedAtMs = performance.now() - processStartedAt;
 
@@ -602,7 +605,7 @@ async function runWorker(config: WorkerConfig): Promise<void> {
 
   if (!realAppstrate) globalThis.fetch = originalFetch;
 
-  const completed = turns.filter((turn) => turn.status === 200 && turn.complete);
+  const completed = turns.filter(completedTurnHasUsage);
   const waveActivity = summarizeWaveActivity(samples, { waveStartedAtMs, waveEndedAtMs });
   const observation = {
     schemaVersion: CHAT_PERFORMANCE_OBSERVATION_VERSION,
