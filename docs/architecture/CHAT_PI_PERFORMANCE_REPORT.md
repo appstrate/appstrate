@@ -25,10 +25,17 @@ forte. Le microprofil de chargement mesure en revanche un coût fixe Pi médian 
 avec une plage de 71,5 à 360,7 Mio sur dix processus. Cette mesure est locale et constitue un ordre
 de grandeur, pas un budget de réplica.
 
-Le comparatif réel Mistral n'a pas été exécuté, car aucune `MISTRAL_API_KEY` n'est disponible. Les
-essais Pi par abonnements Codex et Claude Code n'ont pas été exécutés : Chrome Beta atteint bien le
-worktree sur le port 3400, mais une interface d'extension ouverte bloque l'automatisation. Ils ne
-sont en aucun cas remplacés par un comparatif AI SDK.
+Le comparatif réel Mistral a ensuite traversé le vrai serveur Appstrate, son authentification, le
+proxy, le ledger et une base PGlite isolée. Sur S froid et S chaud, 2 688 conversations principales
+ont terminé, sans 429, erreur, stream incomplet ni défaut d'isolation. Pi reste plus lent, mais
+l'écart réel est nettement inférieur à celui du fournisseur déterministe. À 100 organisations
+chaudes, le p95 du premier token vaut 4 253 ms pour Pi contre 3 884 ms pour AI SDK. Le débit Pi
+représente 85,2 % du débit AI SDK et échoue encore au seuil de 90 %.
+
+Les essais complémentaires Pi par abonnements sont terminés à 1, 10 et 30. Codex avec
+`gpt-5.6-luna` et Claude Code avec `claude-haiku-4-5` ont chacun livré 41 conversations principales
+sur 41 sans refus, plus leurs tours de continuité. Ils ne constituent pas un comparatif avec AI SDK.
+Le niveau 60 n'a pas été tenté, car aucune politique d'abonnement explicite n'autorise cette rafale.
 
 La capacité cloud reste inconnue. Le résultat local suffit cependant à interdire le canary tant que
 la régression de latence propre au moteur n'est pas expliquée et corrigée.
@@ -44,35 +51,38 @@ la régression de latence propre au moteur n'est pas expliquée et corrigée.
 - Récupération mémoire à 30, 60 et 120 secondes pour S à 60, 64 et 100.
 - Dix processus frais pour le coût du chargement Pi au-dessus du package AI SDK déjà chargé.
 - Base PGlite distincte par cellule, organisations, utilisateurs, applications et sessions
-  synthétiques.
+  synthétiques. Les credentials réels restent chiffrés et ne figurent dans aucun résultat.
 - Plafond Pi porté volontairement à 128 dans le banc contrôlé afin de mesurer le moteur à 100.
 - Banc séparé du plafond Appstrate par défaut à 64, avec une vague réelle à 100, et tests du refus
   429 sans message orphelin.
 
-Ne sont pas couverts : L, mix M, rampe, endurance, fournisseur Mistral réel, OpenRouter Free,
-abonnements Pi réels et profil de réplica cloud. L, M et l'endurance dépendent de percentiles cloud
+Le banc réel couvre Mistral S froid et chaud à 60, 64 et 100, trois répétitions, ainsi qu'une rampe
+exploratoire à 1, 10, 30, 60, 64 et 100 et une récupération de deux minutes. Il couvre aussi Codex
+et Claude Code à 1, 10 et 30. Ne sont pas couverts : L, mix M, endurance, OpenRouter Free,
+abonnements à 60 et profil de réplica cloud. L, M et l'endurance dépendent de percentiles cloud
 absents. Le lancement simultané de chaque vague couvre le profil rafale sous 250 ms.
 
 ## Environnement
 
-| Élément                  | Valeur                                           |
-| ------------------------ | ------------------------------------------------ |
-| Machine                  | Apple M2, 8 cœurs, 16 Gio                        |
-| Système                  | macOS 26.5.2, arm64                              |
-| Bun exécuté              | 1.3.10                                           |
-| Bun déclaré par le dépôt | 1.3.14                                           |
-| Port applicatif          | 3400 uniquement                                  |
-| Base du banc             | PGlite isolée par cellule                        |
-| Fournisseur contrôlé     | SSE OpenAI compatible déterministe, en processus |
-| Taille de réponse        | 128 tokens d'entrée, 32 tokens de sortie         |
-| Échantillonnage          | 100 ms                                           |
+| Élément                  | Valeur                                            |
+| ------------------------ | ------------------------------------------------- |
+| Machine                  | Apple M2, 8 cœurs, 16 Gio                         |
+| Système                  | macOS 26.5.2, arm64                               |
+| Bun exécuté              | 1.3.10                                            |
+| Bun déclaré par le dépôt | 1.3.14                                            |
+| Port applicatif          | 3400 uniquement                                   |
+| Base du banc             | PGlite isolée par cellule                         |
+| Fournisseur contrôlé     | SSE OpenAI compatible déterministe, en processus  |
+| Fournisseur A/B réel     | Mistral, `mistral-small-2603`, clé d'organisation |
+| Abonnements Pi           | Codex `gpt-5.6-luna`, Claude Haiku 4.5            |
+| Taille de réponse        | 128 tokens d'entrée, 32 tokens de sortie          |
+| Échantillonnage          | 100 ms                                            |
 
-L'API du worktree répond `healthy` sur `/health` au port 3400. Elle est actuellement raccordée au
-PostgreSQL local partagé sur 5423. Cette base ne compte que 13 migrations Drizzle et ne possède pas
-encore `llm_usage.chat_session_id`. Elle n'a pas été migrée, afin de ne pas modifier l'état partagé
-avec d'autres projets, et elle n'a servi à aucune mesure. La reprise navigateur doit utiliser une
-base dédiée au worktree avec le schéma courant, ou faire l'objet d'une autorisation explicite de
-mise à niveau de la base partagée.
+Chaque mesure utilise une base PGlite dédiée et migrée. Le PostgreSQL local sur 5423 sert uniquement
+de source aux credentials d'abonnement déjà connectés. Le harness copie leur enveloppe chiffrée
+dans la base synthétique, sans copier de données conversationnelles. Le test navigateur Chrome Beta
+a atteint la page du port 3400, mais l'automatisation visuelle est restée bloquée par une interface
+d'extension ouverte.
 
 Les fichiers bruts ont été produits avant les derniers commits de rapport. Chaque observation
 contient son commit exact. Les synthèses versionnées conservent le chemin de chaque observation
@@ -104,6 +114,63 @@ Les écarts par rapport à AI SDK sont les suivants.
 |         100 | chaud  |                   5,26 |           4,05 |              25,2 % |
 
 Tous ces points échouent au seuil de premier token, au seuil de durée totale et au seuil de débit.
+
+## Comparatif Mistral réel
+
+Le comparatif utilise `mistral-small-2603` et traverse le vrai endpoint `/api/chat`,
+l'authentification Better Auth, la sélection de modèle d'organisation, le proxy Mistral et
+`llm_usage`. Les valeurs suivantes sont les médianes de trois répétitions. Les cellules froides
+partagent une organisation synthétique. Les cellules chaudes utilisent une organisation par chat.
+
+| Profil | Concurrence | Moteur | p95 premier token, ms | p95 total, ms | Chats par seconde | Pic RSS, Mio |
+| ------ | ----------: | ------ | --------------------: | ------------: | ----------------: | -----------: |
+| froid  |          60 | AI SDK |                 2 393 |         2 509 |             14,91 |      1 094,7 |
+| froid  |          60 | Pi     |                 3 703 |         3 771 |             11,74 |      1 241,3 |
+| froid  |          64 | AI SDK |                 2 559 |         2 672 |             15,09 |      1 116,8 |
+| froid  |          64 | Pi     |                 3 927 |         3 964 |             14,19 |      1 125,6 |
+| froid  |         100 | AI SDK |                 3 964 |         4 022 |             22,92 |      1 202,6 |
+| froid  |         100 | Pi     |                 5 210 |         5 265 |             14,66 |      1 244,6 |
+| chaud  |          60 | AI SDK |                 2 375 |         2 455 |             17,59 |      1 107,6 |
+| chaud  |          60 | Pi     |                 4 340 |         4 381 |             10,87 |        934,5 |
+| chaud  |          64 | AI SDK |                 2 506 |         2 593 |             16,47 |        794,4 |
+| chaud  |          64 | Pi     |                 3 208 |         3 251 |             15,74 |        785,1 |
+| chaud  |         100 | AI SDK |                 3 884 |         3 971 |             20,97 |      1 054,6 |
+| chaud  |         100 | Pi     |                 4 253 |         4 300 |             17,87 |      1 000,0 |
+
+Les 2 688 conversations principales terminent, avec exactement 2 688 appels modèle, aucun 429,
+aucune erreur, aucun stream incomplet et aucun marqueur incorrect. Le ledger, les messages et les
+parties structurées sont persistés. Chaque observation valide la continuité et l'isolation.
+
+À 100 organisations chaudes, Pi respecte le seuil du premier token, car son écart de 369 ms reste
+sous AI SDK multiplié par 1,10. Il respecte aussi le seuil de durée totale, avec un ratio de 1,083.
+Son débit de 85,2 % reste toutefois sous le seuil de 90 %. À 60 et 64, Pi échoue au moins un seuil
+de latence. Le comparatif réel confirme donc la décision NO GO, même si son écart est beaucoup plus
+faible que celui du banc contrôlé à 100.
+
+La forme H réelle révèle une incompatibilité distincte : Pi accepte l'historique structuré et
+obtient une réponse Mistral, tandis que le chemin AI SDK transforme la partie de raisonnement en un
+message assistant séparé que Mistral refuse avant toute écriture d'usage. Cette cellule ne sert pas
+à la non-infériorité et reste versionnée comme observation d'anomalie.
+
+## Abonnements Pi réels
+
+Ces mesures sont complémentaires et ne comparent jamais Pi à AI SDK.
+
+| Abonnement             | Concurrence | p95 premier token, ms | p95 total, ms | Chats par seconde | RSS après 120 s, Mio |
+| ---------------------- | ----------: | --------------------: | ------------: | ----------------: | -------------------: |
+| Codex, GPT 5.6 Luna    |           1 |                 1 962 |         2 184 |              0,46 |           non mesuré |
+| Codex, GPT 5.6 Luna    |          10 |                 2 888 |         3 124 |              3,19 |                153,9 |
+| Codex, GPT 5.6 Luna    |          30 |                 3 589 |         3 784 |              7,65 |                169,7 |
+| Claude Code, Haiku 4.5 |           1 |                 2 316 |         2 344 |              0,43 |           non mesuré |
+| Claude Code, Haiku 4.5 |          10 |                 2 506 |         2 540 |              3,93 |                156,8 |
+| Claude Code, Haiku 4.5 |          30 |                 3 359 |         3 377 |              8,83 |                161,0 |
+
+Chaque abonnement termine 41 conversations principales sur 41, sans refus ni stream incomplet.
+Le nombre d'appels modèle correspond exactement aux conversations. La persistance, l'attribution
+d'usage, la continuité et l'isolation passent à tous les niveaux. Le jeton Claude Code expiré a été
+rafraîchi par le service Appstrate avant le banc, puis copié uniquement sous forme chiffrée dans les
+bases synthétiques. Le niveau 60 n'est pas exécuté faute de politique d'abonnement explicitement
+compatible avec cette rafale.
 
 ## Confirmation avec historique structuré
 
@@ -225,8 +292,11 @@ pour AI SDK contre 4 183 ms pour Pi à 60, puis 316 ms contre 2 024 ms à 100.
 
 ### Limite du fournisseur
 
-Aucune limite Mistral, OpenRouter, Codex ou Claude ne peut être affirmée. Aucun appel réel à ces
-fournisseurs n'a été réalisé dans cette campagne.
+Mistral accepte les vagues réelles jusqu'à 100 sans 429 dans cette campagne. Cela décrit la clé et
+la fenêtre testées, pas une garantie de capacité permanente. Codex et Claude Code acceptent 30
+conversations simultanées sans refus. Leur capacité à 60 reste inconnue et n'est pas testée sans
+confirmation de politique. OpenRouter n'a pas été utilisé, car Mistral suffit à confirmer la
+direction du résultat.
 
 ### Limite de politique Appstrate
 
@@ -243,17 +313,16 @@ Le nombre de réplicas, leur mémoire et CPU, l'autoscaling, les redémarrages, 
 la distribution réelle des tokens et outils ne sont pas disponibles. Aucun chiffre local ne doit
 être présenté comme capacité cloud.
 
-## Fournisseurs réels encore nécessaires
+## Travail local encore nécessaire
 
-1. Fournir une clé Mistral dans un fichier local explicitement passé au harness. Exécuter trois
-   répétitions A/B strictement identiques à 60, 64 et 100.
-2. Utiliser OpenRouter Free uniquement si un second fournisseur est nécessaire pour confirmer une
-   conclusion, jamais pour remplacer Mistral silencieusement.
-3. Fermer l'interface d'extension qui bloque Chrome Beta. Rejouer Pi avec GPT 5.4 Mini via
-   abonnement Codex et Claude Haiku 4.5 via abonnement Claude Code à 1, 10 et 30. Ne tenter 60 que
-   si les politiques et les limites fournisseur l'autorisent.
-4. Raccorder d'abord le port 3400 à une base dédiée et migrée. Ne pas mettre à niveau la base locale
-   partagée sans autorisation.
+1. Diagnostiquer la contention de boucle événementielle Pi observée dans le banc contrôlé et le
+   surcoût réel restant à 60, 64 et 100.
+2. Corriger ou documenter la conversion AI SDK d'un historique contenant du raisonnement avant un
+   nouvel essai H réel.
+3. Fermer l'interface d'extension qui bloque Chrome Beta, puis terminer le contrôle visuel d'un
+   chat AI SDK et d'un chat Pi relus depuis leur session persistée.
+4. N'utiliser OpenRouter Free que si une correction change la conclusion Mistral et nécessite une
+   confirmation indépendante.
 5. Ne jamais présenter Codex ou Claude Code comme comparaison directe avec AI SDK.
 
 ## Données cloud nécessaires
@@ -293,10 +362,11 @@ bun scripts/chat-engine-performance-report.ts --input=artifacts/chat-engine-perf
 TEST_TIER=0 bun test packages/module-chat/test/pi-chat-concurrency.test.ts packages/module-chat/test/chat-stream-handler.test.ts packages/module-chat/test/pi-chat-engine-selection.test.ts packages/module-chat/test/pi-chat-model-binding.test.ts
 ```
 
-Comparatif Mistral, lorsque la clé sera disponible :
+Comparatif Mistral réel :
 
 ```bash
-bun scripts/chat-engine-performance.ts mistral --env-file=/chemin/absolu/mistral.env --model=mistral-small-2603 --forms=S,H --profiles=cold,warm --concurrency=60,64,100 --repetitions=3 --recovery-ms=120000 --output=artifacts/chat-engine-performance/mistral-real
+bun scripts/chat-engine-performance.ts mistral --env-file=/chemin/absolu/mistral.env --model=mistral-small-2603 --forms=S --profiles=cold,warm --concurrency=60,64,100 --repetitions=3 --recovery-ms=0 --output=artifacts/chat-engine-performance/mistral-real
+bun scripts/chat-engine-performance.ts mistral --env-file=/chemin/absolu/mistral.env --model=mistral-small-2603 --forms=S --profiles=warm --concurrency=60,64,100 --repetitions=1 --recovery-ms=120000 --output=artifacts/chat-engine-performance/mistral-real-recovery
 ```
 
 Le modèle épinglé `mistral-small-2603` correspond à Mistral Small 4 v26.03 et expose officiellement
@@ -305,6 +375,20 @@ Chat Completions et Function Calling, voir la
 
 Le fichier d'environnement doit contenir uniquement la clé attendue ou, au minimum, le harness ne
 lit explicitement que `MISTRAL_API_KEY`. La clé n'est jamais copiée dans les observations.
+
+Abonnements Pi réels, avec un fichier local contenant `DATABASE_URL` et
+`CONNECTION_ENCRYPTION_KEY` pour la base où les abonnements sont déjà connectés :
+
+```bash
+bun scripts/chat-engine-performance.ts subscription --provider=codex --model=gpt-5.6-luna --env-file=/chemin/absolu/subscriptions.env --forms=S --profiles=cold --concurrency=1,10,30 --repetitions=1 --recovery-ms=120000 --output=artifacts/chat-engine-performance/subscription-codex
+bun scripts/chat-engine-performance.ts subscription --provider=claude-code --model=claude-haiku-4-5 --env-file=/chemin/absolu/subscriptions.env --forms=S --profiles=cold --concurrency=1,10,30 --repetitions=1 --recovery-ms=120000 --output=artifacts/chat-engine-performance/subscription-claude
+```
+
+Publication des observations brutes sans leurs bases PGlite :
+
+```bash
+bun scripts/chat-engine-performance-publish.ts --input=artifacts/chat-engine-performance/mistral-real,artifacts/chat-engine-performance/subscription-codex,artifacts/chat-engine-performance/subscription-claude --output=docs/architecture/performance-results/raw/2026-08-18-real
+```
 
 ## Requêtes SQL de contrôle
 
@@ -354,19 +438,29 @@ Le dernier résultat attendu est zéro.
 - Récupération mémoire et références vers 12 observations : [2026-08-18-controlled-recovery.v1.json](./performance-results/2026-08-18-controlled-recovery.v1.json)
 - Coût fixe Pi et références vers 10 observations : [2026-08-18-pi-fixed-load.v1.json](./performance-results/2026-08-18-pi-fixed-load.v1.json)
 - Politique Pi à 64 et référence vers l'observation à 100 : [2026-08-18-policy-cap64.v1.json](./performance-results/2026-08-18-policy-cap64.v1.json)
+- Mistral S froid, trois répétitions : [2026-08-18-mistral-cold-summary.v1.json](./performance-results/2026-08-18-mistral-cold-summary.v1.json)
+- Mistral principal, dont S chaud et l'anomalie H : [2026-08-18-mistral-main-summary.v1.json](./performance-results/2026-08-18-mistral-main-summary.v1.json)
+- Récupération Mistral à 30, 60 et 120 secondes : [2026-08-18-mistral-recovery.v1.json](./performance-results/2026-08-18-mistral-recovery.v1.json)
+- Abonnements Pi Codex et Claude Code : [2026-08-18-pi-subscriptions.v1.json](./performance-results/2026-08-18-pi-subscriptions.v1.json)
+- Index et sommes SHA-256 de 65 observations réelles : [index.v1.json](./performance-results/raw/2026-08-18-real/index.v1.json)
 
-Les observations volumineuses et leurs bases restent sous `artifacts/chat-engine-performance/`, hors
-Git. Leur `schemaVersion` vaut 1. Aucun secret ni contenu réel n'y figure.
+Les 65 observations réelles sélectionnées sont désormais versionnées sans leur base PGlite. Leur
+`schemaVersion` vaut 1. Aucun secret ni contenu utilisateur réel n'y figure. Les autres observations
+exploratoires et les bases restent sous `artifacts/chat-engine-performance/`, hors Git.
 
 ## Entrée du journal de décision RFC
 
-**18 août 2026, validation locale contrôlée : NO GO avant canary.** Le banc déterministe a terminé
-18 260 conversations mesurées sans erreur fonctionnelle, perte de persistance ni contamination.
-Pi échoue toutefois aux seuils de non-infériorité de latence et débit à 60, 64 et 100. La mémoire
-marginale locale reste non concluante et la capacité cloud est inconnue. Le comparatif Mistral est
-bloqué par l'absence de clé. Les essais Codex et Claude Code restent Pi uniquement et sont bloqués
-par la validation Chrome Beta. AI SDK reste déployable. Aucun canary, aucune migration de trafic et
-aucune suppression d'AI SDK ne sont autorisés à ce stade.
+**18 août 2026, validation locale contrôlée et réelle : NO GO avant canary.** Le banc déterministe a
+terminé 18 260 conversations mesurées sans erreur fonctionnelle, perte de persistance ni
+contamination, mais Pi échoue aux seuils de non-infériorité de latence et débit à 60, 64 et 100. Le
+comparatif Mistral réel S a ajouté 2 688 conversations principales valides. À 100 organisations
+chaudes, Pi se rapproche des seuils de latence, mais son débit reste à 85,2 % de celui d'AI SDK,
+sous le minimum de 90 %. Mistral n'a produit aucun 429 jusqu'à 100. Les essais Pi uniquement Codex
+et Claude Code passent à 1, 10 et 30, sans autoriser une comparaison avec AI SDK ni un test à 60.
+La récupération mémoire locale passe, mais la pente marginale et la capacité cloud restent
+inconnues. Le contrôle Chrome Beta est encore bloqué par une interface d'extension ouverte. AI SDK
+reste déployable. Aucun canary, aucune migration de trafic et aucune suppression d'AI SDK ne sont
+autorisés à ce stade.
 
 La RFC source se trouve hors du worktree autorisé. Cette entrée est donc fournie ici, prête à être
 reportée dans son journal sans modifier le satellite externe.

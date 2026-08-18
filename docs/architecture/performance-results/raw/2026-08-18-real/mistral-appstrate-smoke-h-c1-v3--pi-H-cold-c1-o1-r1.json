@@ -1,0 +1,383 @@
+{
+  "schemaVersion": 1,
+  "kind": "chat-engine-performance-observation",
+  "benchmark": "mistral-real",
+  "id": "pi-H-cold-c1-o1-r1",
+  "environment": {
+    "commit": "8f51347fb2f8bdf925a4b0f8128c9c95328a3dcb",
+    "branch": "feat/chat-pi-unified-engine-phase4",
+    "bunVersion": "1.3.10",
+    "platform": "darwin-arm64",
+    "port": 3400,
+    "database": "isolated-pglite"
+  },
+  "cell": {
+    "engine": "pi",
+    "form": "H",
+    "profile": "cold",
+    "concurrency": 1,
+    "repetition": 1,
+    "distribution": "1-organizations-x-1-chats"
+  },
+  "timing": {
+    "waveStartedAtMs": 1245.7915420000002,
+    "waveEndedAtMs": 2999.529208,
+    "recoveryMs": 0
+  },
+  "memory": {
+    "initial": {
+      "elapsedMs": 1262.306458,
+      "rss": 682819584,
+      "heapUsed": 490806496,
+      "external": 442299023,
+      "arrayBuffers": 223789672,
+      "cpuUserMicros": 2237911,
+      "cpuSystemMicros": 312741,
+      "eventLoopDelayMs": 6.117124999999987
+    },
+    "peak": {
+      "elapsedMs": 1262.306458,
+      "rss": 682819584,
+      "heapUsed": 490806496,
+      "external": 442299023,
+      "arrayBuffers": 223789672,
+      "cpuUserMicros": 2237911,
+      "cpuSystemMicros": 312741,
+      "eventLoopDelayMs": 6.117124999999987
+    },
+    "end": {
+      "elapsedMs": 3054.975583,
+      "rss": 509624320,
+      "heapUsed": 535457144,
+      "external": 443258878,
+      "arrayBuffers": 207382554,
+      "cpuUserMicros": 3069374,
+      "cpuSystemMicros": 457552,
+      "eventLoopDelayMs": 2.861291000000165
+    },
+    "after30s": null,
+    "after60s": null,
+    "after120s": null
+  },
+  "eventLoopDelayMs": {
+    "p50": 2.0241249999999127,
+    "p95": 773.919834,
+    "p99": 773.919834
+  },
+  "cpu": {
+    "userMicros": 831463,
+    "systemMicros": 144811
+  },
+  "latency": {
+    "firstTokenMs": {
+      "p50": 1703.9703339999999,
+      "p95": 1703.9703339999999,
+      "p99": 1703.9703339999999
+    },
+    "totalMs": {
+      "p50": 1721.1950840000002,
+      "p95": 1721.1950840000002,
+      "p99": 1721.1950840000002
+    },
+    "throughputChatsPerSecond": 0.5702107101804131
+  },
+  "outcomes": {
+    "requested": 1,
+    "completed": 1,
+    "rateLimited": 0,
+    "serverErrors": 0,
+    "incompleteStreams": 0,
+    "markerFailures": 0
+  },
+  "usage": {
+    "modelCalls": 1,
+    "toolCalls": 0,
+    "inputTokens": 8510,
+    "outputTokens": 12
+  },
+  "provider": {
+    "id": "mistral-api-key",
+    "modelId": "mistral-small-2603",
+    "statuses": {
+      "ok": 1,
+      "rateLimited": 0,
+      "serverError": 0,
+      "otherError": 0
+    }
+  },
+  "persistence": {
+    "messageCount": 4,
+    "structuredPartCount": 8,
+    "usageRows": 2,
+    "usageOwnershipValid": true,
+    "bySession": {
+      "chs_02a2cc68ef2f497a8be774bd23134593": 4
+    }
+  },
+  "continuity": {
+    "status": 200,
+    "complete": true,
+    "markerValid": true,
+    "persistedMessageCount": 4
+  },
+  "isolation": {
+    "foreignSessionRejected": true
+  },
+  "teardown": {
+    "databaseRelease": "process-exit-after-verification"
+  },
+  "turns": [
+    {
+      "marker": "ORG0001_USER0001",
+      "sessionId": "chs_02a2cc68ef2f497a8be774bd23134593",
+      "status": 200,
+      "firstTokenMs": 1703.9703339999999,
+      "totalMs": 1721.1950840000002,
+      "complete": true,
+      "markerValid": true,
+      "error": null
+    }
+  ],
+  "samples": [
+    {
+      "elapsedMs": 0.025916999999999746,
+      "rss": 24199168,
+      "heapUsed": 211394,
+      "external": 27778,
+      "arrayBuffers": 0,
+      "cpuUserMicros": 26,
+      "cpuSystemMicros": 3,
+      "eventLoopDelayMs": 0
+    },
+    {
+      "elapsedMs": 102.86433299999999,
+      "rss": 87359488,
+      "heapUsed": 150310162,
+      "external": 278156450,
+      "arrayBuffers": 140513371,
+      "cpuUserMicros": 111615,
+      "cpuSystemMicros": 18526,
+      "eventLoopDelayMs": 2.838415999999995
+    },
+    {
+      "elapsedMs": 327.82725,
+      "rss": 380993536,
+      "heapUsed": 285301235,
+      "external": 672704157,
+      "arrayBuffers": 504156510,
+      "cpuUserMicros": 517375,
+      "cpuSystemMicros": 105857,
+      "eventLoopDelayMs": 124.962917
+    },
+    {
+      "elapsedMs": 601.09325,
+      "rss": 437862400,
+      "heapUsed": 686381103,
+      "external": 409969072,
+      "arrayBuffers": 205106644,
+      "cpuUserMicros": 801728,
+      "cpuSystemMicros": 168495,
+      "eventLoopDelayMs": 173.26600000000002
+    },
+    {
+      "elapsedMs": 943.6005,
+      "rss": 508133376,
+      "heapUsed": 443772160,
+      "external": 414840317,
+      "arrayBuffers": 205158428,
+      "cpuUserMicros": 1240823,
+      "cpuSystemMicros": 240705,
+      "eventLoopDelayMs": 242.50725
+    },
+    {
+      "elapsedMs": 1156.189333,
+      "rss": 659374080,
+      "heapUsed": 488273510,
+      "external": 441234012,
+      "arrayBuffers": 223730380,
+      "cpuUserMicros": 1981779,
+      "cpuSystemMicros": 293653,
+      "eventLoopDelayMs": 112.5888329999998
+    },
+    {
+      "elapsedMs": 1262.306458,
+      "rss": 682819584,
+      "heapUsed": 490806496,
+      "external": 442299023,
+      "arrayBuffers": 223789672,
+      "cpuUserMicros": 2237911,
+      "cpuSystemMicros": 312741,
+      "eventLoopDelayMs": 6.117124999999987
+    },
+    {
+      "elapsedMs": 2136.226292,
+      "rss": 555663360,
+      "heapUsed": 494163502,
+      "external": 430566498,
+      "arrayBuffers": 224044002,
+      "cpuUserMicros": 2807621,
+      "cpuSystemMicros": 430148,
+      "eventLoopDelayMs": 773.919834
+    },
+    {
+      "elapsedMs": 2240.0314169999997,
+      "rss": 549797888,
+      "heapUsed": 531363999,
+      "external": 439573055,
+      "arrayBuffers": 205231767,
+      "cpuUserMicros": 2900029,
+      "cpuSystemMicros": 437465,
+      "eventLoopDelayMs": 3.8051249999998618
+    },
+    {
+      "elapsedMs": 2343.284917,
+      "rss": 549847040,
+      "heapUsed": 531364079,
+      "external": 439573055,
+      "arrayBuffers": 205231767,
+      "cpuUserMicros": 2910487,
+      "cpuSystemMicros": 439200,
+      "eventLoopDelayMs": 3.2535000000002583
+    },
+    {
+      "elapsedMs": 2444.850708,
+      "rss": 549847040,
+      "heapUsed": 531364319,
+      "external": 439573055,
+      "arrayBuffers": 205231767,
+      "cpuUserMicros": 2913681,
+      "cpuSystemMicros": 439760,
+      "eventLoopDelayMs": 1.5657909999999902
+    },
+    {
+      "elapsedMs": 2546.864708,
+      "rss": 501530624,
+      "heapUsed": 531364319,
+      "external": 439573055,
+      "arrayBuffers": 205231767,
+      "cpuUserMicros": 2913924,
+      "cpuSystemMicros": 440030,
+      "eventLoopDelayMs": 2.0140000000001237
+    },
+    {
+      "elapsedMs": 2648.893208,
+      "rss": 501530624,
+      "heapUsed": 531364319,
+      "external": 439573055,
+      "arrayBuffers": 205231767,
+      "cpuUserMicros": 2914389,
+      "cpuSystemMicros": 441188,
+      "eventLoopDelayMs": 2.0284999999998945
+    },
+    {
+      "elapsedMs": 2750.917333,
+      "rss": 501530624,
+      "heapUsed": 531364319,
+      "external": 439573055,
+      "arrayBuffers": 205231767,
+      "cpuUserMicros": 2914596,
+      "cpuSystemMicros": 441358,
+      "eventLoopDelayMs": 2.0241249999999127
+    },
+    {
+      "elapsedMs": 2851.749167,
+      "rss": 501530624,
+      "heapUsed": 531364319,
+      "external": 439573055,
+      "arrayBuffers": 205231767,
+      "cpuUserMicros": 2914637,
+      "cpuSystemMicros": 441378,
+      "eventLoopDelayMs": 0.8318340000000717
+    },
+    {
+      "elapsedMs": 2952.1142919999998,
+      "rss": 503447552,
+      "heapUsed": 531364319,
+      "external": 440624578,
+      "arrayBuffers": 206283290,
+      "cpuUserMicros": 2932404,
+      "cpuSystemMicros": 442628,
+      "eventLoopDelayMs": 0.3651249999998072
+    },
+    {
+      "elapsedMs": 3054.975583,
+      "rss": 509624320,
+      "heapUsed": 535457144,
+      "external": 443258878,
+      "arrayBuffers": 207382554,
+      "cpuUserMicros": 3069374,
+      "cpuSystemMicros": 457552,
+      "eventLoopDelayMs": 2.861291000000165
+    },
+    {
+      "elapsedMs": 3157.021167,
+      "rss": 503414784,
+      "heapUsed": 535898267,
+      "external": 443591003,
+      "arrayBuffers": 207382800,
+      "cpuUserMicros": 3077229,
+      "cpuSystemMicros": 458661,
+      "eventLoopDelayMs": 2.0455839999999625
+    },
+    {
+      "elapsedMs": 3261.730333,
+      "rss": 481034240,
+      "heapUsed": 535898347,
+      "external": 443591003,
+      "arrayBuffers": 207382800,
+      "cpuUserMicros": 3083576,
+      "cpuSystemMicros": 459014,
+      "eventLoopDelayMs": 4.709166000000096
+    },
+    {
+      "elapsedMs": 3363.7432919999997,
+      "rss": 481034240,
+      "heapUsed": 535898347,
+      "external": 443591003,
+      "arrayBuffers": 207382800,
+      "cpuUserMicros": 3083784,
+      "cpuSystemMicros": 459184,
+      "eventLoopDelayMs": 2.0129589999996824
+    },
+    {
+      "elapsedMs": 3465.794542,
+      "rss": 481034240,
+      "heapUsed": 535898347,
+      "external": 443591003,
+      "arrayBuffers": 207382800,
+      "cpuUserMicros": 3083975,
+      "cpuSystemMicros": 459235,
+      "eventLoopDelayMs": 2.0512500000004366
+    },
+    {
+      "elapsedMs": 3566.242083,
+      "rss": 481034240,
+      "heapUsed": 535898347,
+      "external": 443591003,
+      "arrayBuffers": 207382800,
+      "cpuUserMicros": 3084152,
+      "cpuSystemMicros": 459267,
+      "eventLoopDelayMs": 0.4475410000000011
+    },
+    {
+      "elapsedMs": 3675.1374579999997,
+      "rss": 481280000,
+      "heapUsed": 535898347,
+      "external": 443891349,
+      "arrayBuffers": 207683146,
+      "cpuUserMicros": 3122893,
+      "cpuSystemMicros": 462607,
+      "eventLoopDelayMs": 8.895374999999603
+    },
+    {
+      "elapsedMs": 3705.687375,
+      "rss": 481329152,
+      "heapUsed": 536578344,
+      "external": 444229892,
+      "arrayBuffers": 207692644,
+      "cpuUserMicros": 3138409,
+      "cpuSystemMicros": 463909,
+      "eventLoopDelayMs": 0
+    }
+  ]
+}

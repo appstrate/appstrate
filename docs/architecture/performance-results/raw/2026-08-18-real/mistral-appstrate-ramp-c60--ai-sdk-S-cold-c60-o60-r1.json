@@ -1,0 +1,1392 @@
+{
+  "schemaVersion": 1,
+  "kind": "chat-engine-performance-observation",
+  "benchmark": "mistral-real",
+  "id": "ai-sdk-S-cold-c60-o60-r1",
+  "environment": {
+    "commit": "1b6b5ba826ec3b172feb9759e4b627cac09cdf78",
+    "branch": "feat/chat-pi-unified-engine-phase4",
+    "bunVersion": "1.3.10",
+    "platform": "darwin-arm64",
+    "port": 3400,
+    "database": "isolated-pglite"
+  },
+  "cell": {
+    "engine": "ai-sdk",
+    "form": "S",
+    "profile": "cold",
+    "concurrency": 60,
+    "repetition": 1,
+    "distribution": "60-organizations-x-1-chats"
+  },
+  "timing": {
+    "waveStartedAtMs": 2909.9349169999996,
+    "waveEndedAtMs": 7995.555917,
+    "recoveryMs": 0
+  },
+  "memory": {
+    "initial": {
+      "elapsedMs": 2942.428833,
+      "rss": 1001422848,
+      "heapUsed": 936699020,
+      "external": 883863558,
+      "arrayBuffers": 461130850,
+      "cpuUserMicros": 4780488,
+      "cpuSystemMicros": 885800,
+      "eventLoopDelayMs": 8.309333000000152
+    },
+    "peak": {
+      "elapsedMs": 4106.566667,
+      "rss": 1205534720,
+      "heapUsed": 1038170112,
+      "external": 970200928,
+      "arrayBuffers": 506179637,
+      "cpuUserMicros": 6964013,
+      "cpuSystemMicros": 1083953,
+      "eventLoopDelayMs": 1064.137834
+    },
+    "end": {
+      "elapsedMs": 8007.611167,
+      "rss": 958414848,
+      "heapUsed": 955693642,
+      "external": 901220061,
+      "arrayBuffers": 458530774,
+      "cpuUserMicros": 7849934,
+      "cpuSystemMicros": 1187161,
+      "eventLoopDelayMs": 7.264874999999847
+    },
+    "after30s": null,
+    "after60s": null,
+    "after120s": null
+  },
+  "eventLoopDelayMs": {
+    "p50": 2.064624999999978,
+    "p95": 8.309333000000152,
+    "p99": 1064.137834
+  },
+  "cpu": {
+    "userMicros": 3069446,
+    "systemMicros": 301361
+  },
+  "latency": {
+    "firstTokenMs": {
+      "p50": 2262.9257089999996,
+      "p95": 2594.5515,
+      "p99": 4940.293458
+    },
+    "totalMs": {
+      "p50": 2323.6485829999997,
+      "p95": 2651.309209,
+      "p99": 5067.369500000001
+    },
+    "throughputChatsPerSecond": 11.797969215558927
+  },
+  "outcomes": {
+    "requested": 60,
+    "completed": 60,
+    "rateLimited": 0,
+    "serverErrors": 0,
+    "incompleteStreams": 0,
+    "markerFailures": 0
+  },
+  "usage": {
+    "modelCalls": 60,
+    "toolCalls": 0,
+    "inputTokens": 499560,
+    "outputTokens": 720
+  },
+  "provider": {
+    "id": "mistral-api-key",
+    "modelId": "mistral-small-2603",
+    "statuses": {
+      "ok": 60,
+      "rateLimited": 0,
+      "serverError": 0,
+      "otherError": 0
+    }
+  },
+  "persistence": {
+    "messageCount": 122,
+    "structuredPartCount": 183,
+    "usageRows": 61,
+    "usageOwnershipValid": true,
+    "bySession": {
+      "chs_a8ba3cfdc4f74a559e2628978c8fe947": 4,
+      "chs_3c641dd402a8496681535913f91abbcf": 2,
+      "chs_cecb9767b5734140a95f6bdbdcfc2758": 2,
+      "chs_0de2c427fab64b158bc58406697df77b": 2,
+      "chs_da9e1d7270984cd7a9b877fae4385277": 2,
+      "chs_a5ae35f8ff224311b06eb9add207f87a": 2,
+      "chs_7923b3533a914d9b8f69dcb1b38f2428": 2,
+      "chs_a0a8ad40904e494a9168a1368377f062": 2,
+      "chs_5918df61791c42a795bd2464871ef413": 2,
+      "chs_030313c989f7414ebd1670cb57de7585": 2,
+      "chs_5265ceff300e4c95aaeb477be179dab3": 2,
+      "chs_b5125056ae7549ddad77e09083a79a32": 2,
+      "chs_6fa0aa9a060b4898b4470cf11e9ea429": 2,
+      "chs_2e0786a41f004e96a423ac4a3876bb7f": 2,
+      "chs_0f7c47e835a04cc4a6e4ba4e2b6050d2": 2,
+      "chs_635f1b3edbc1494782858fd3993a900b": 2,
+      "chs_5bb29a3df0f54e0bb6e3636089f18e23": 2,
+      "chs_fa6b0fad46b44c80a2bac28ed3fb6a83": 2,
+      "chs_305b7a2c8f094c63a232e6a30378b215": 2,
+      "chs_52f0ecc8b9434a90abfdf028ea5351b7": 2,
+      "chs_3a7f66844931407f8c0e0e8306e24362": 2,
+      "chs_10ce2e085ffc4c45932a56048d2904f4": 2,
+      "chs_3113d8226a4f40069cf1ca1e2043855a": 2,
+      "chs_f647fa94149949a2a531038dda19f22b": 2,
+      "chs_34408429371a4e0794343b9c75793fa9": 2,
+      "chs_9ca17b4bb3f3405dab1b9a2c1a706560": 2,
+      "chs_cf6c0807d96f4eda9f87b6b30162f35d": 2,
+      "chs_fef0c1c1ad444133867325e77ead7332": 2,
+      "chs_c23e1eb02a71427e93b22d1214165661": 2,
+      "chs_cd2e67a9a2274aaa917b0811b88a0ad8": 2,
+      "chs_b20c5749a54b43f3aa56b2972daee963": 2,
+      "chs_5b00b172cabe43a492c2a932598788bc": 2,
+      "chs_1c8b25f8787a428a86eff392ebc51256": 2,
+      "chs_9aedbf4fd74a43ba93a0372faf53f47f": 2,
+      "chs_01eb58baa22f4d65b6803b53c360fbb2": 2,
+      "chs_5ec5512256be415699ed36456ef0d14b": 2,
+      "chs_aa90a7bced284d6e9cb88b3c2f01a347": 2,
+      "chs_6a7f38b392ba4068a77dde2bc93fdde9": 2,
+      "chs_1c5bc616f77c4d308bfdeddb39b73723": 2,
+      "chs_ace6c059b4884fccadfc6eacd97f5159": 2,
+      "chs_5125ffff6c6941d08a1d41b242684634": 2,
+      "chs_5e053cd878c143bdb1dc41c1ecb45ae7": 2,
+      "chs_4c89ca7a4d544f9983b7cb0b519c2412": 2,
+      "chs_6ccce737f38f4e2993d1b40f8414bcfa": 2,
+      "chs_b00f7ccabf9749d39244c0e606c1b86d": 2,
+      "chs_ad47e6c6f4ef47a9973b3fe09b657818": 2,
+      "chs_f652545031784b5395a89af42161f729": 2,
+      "chs_8f79c45c28744665bb19d02150344709": 2,
+      "chs_6b4a6f242d5b4c8bb95d201968fd4edb": 2,
+      "chs_b63269066aaa40d8a7513e2a96f5153a": 2,
+      "chs_0494e995f7924897839222ef14201c2e": 2,
+      "chs_439c573611e84c5098dc0cbbcfc72eec": 2,
+      "chs_6e4656ccec8e4ecdabf3d419828af26b": 2,
+      "chs_b54140c375fe432c9e9beaa19dfdfeb6": 2,
+      "chs_4a492563d132417e983f84d5b0b703c4": 2,
+      "chs_1fcb04006aaa46ff9e6c6de6deac36ae": 2,
+      "chs_4c1a0161ace14ce38d2930846f29ba1c": 2,
+      "chs_b6a0f2e97c89481397c889de220b595c": 2,
+      "chs_f8c4feddb87e4c4aaf1eb8e2a7bcea9c": 2,
+      "chs_c64f736128b244d79ff5f67cce80bd23": 2
+    }
+  },
+  "continuity": {
+    "status": 200,
+    "complete": true,
+    "markerValid": true,
+    "persistedMessageCount": 4
+  },
+  "isolation": {
+    "foreignSessionRejected": true
+  },
+  "teardown": {
+    "databaseRelease": "process-exit-after-verification"
+  },
+  "turns": [
+    {
+      "marker": "ORG0001_USER0001",
+      "sessionId": "chs_a8ba3cfdc4f74a559e2628978c8fe947",
+      "status": 200,
+      "firstTokenMs": 2029.8043329999996,
+      "totalMs": 2085.3891660000004,
+      "complete": true,
+      "markerValid": true,
+      "error": null
+    },
+    {
+      "marker": "ORG0002_USER0002",
+      "sessionId": "chs_3c641dd402a8496681535913f91abbcf",
+      "status": 200,
+      "firstTokenMs": 1964.0724169999999,
+      "totalMs": 2064.40825,
+      "complete": true,
+      "markerValid": true,
+      "error": null
+    },
+    {
+      "marker": "ORG0003_USER0003",
+      "sessionId": "chs_cecb9767b5734140a95f6bdbdcfc2758",
+      "status": 200,
+      "firstTokenMs": 1964.1272919999997,
+      "totalMs": 2004.0577090000002,
+      "complete": true,
+      "markerValid": true,
+      "error": null
+    },
+    {
+      "marker": "ORG0004_USER0004",
+      "sessionId": "chs_0de2c427fab64b158bc58406697df77b",
+      "status": 200,
+      "firstTokenMs": 2052.970625,
+      "totalMs": 2120.508833,
+      "complete": true,
+      "markerValid": true,
+      "error": null
+    },
+    {
+      "marker": "ORG0005_USER0005",
+      "sessionId": "chs_da9e1d7270984cd7a9b877fae4385277",
+      "status": 200,
+      "firstTokenMs": 2020.0623340000002,
+      "totalMs": 2078.418125,
+      "complete": true,
+      "markerValid": true,
+      "error": null
+    },
+    {
+      "marker": "ORG0006_USER0006",
+      "sessionId": "chs_a5ae35f8ff224311b06eb9add207f87a",
+      "status": 200,
+      "firstTokenMs": 2297.3292089999995,
+      "totalMs": 2403.8239999999996,
+      "complete": true,
+      "markerValid": true,
+      "error": null
+    },
+    {
+      "marker": "ORG0007_USER0007",
+      "sessionId": "chs_7923b3533a914d9b8f69dcb1b38f2428",
+      "status": 200,
+      "firstTokenMs": 2192.7071250000004,
+      "totalMs": 2240.4209159999996,
+      "complete": true,
+      "markerValid": true,
+      "error": null
+    },
+    {
+      "marker": "ORG0008_USER0008",
+      "sessionId": "chs_a0a8ad40904e494a9168a1368377f062",
+      "status": 200,
+      "firstTokenMs": 2201.591208,
+      "totalMs": 2247.3379160000004,
+      "complete": true,
+      "markerValid": true,
+      "error": null
+    },
+    {
+      "marker": "ORG0009_USER0009",
+      "sessionId": "chs_5918df61791c42a795bd2464871ef413",
+      "status": 200,
+      "firstTokenMs": 1966.085833,
+      "totalMs": 2078.934625,
+      "complete": true,
+      "markerValid": true,
+      "error": null
+    },
+    {
+      "marker": "ORG0010_USER0010",
+      "sessionId": "chs_030313c989f7414ebd1670cb57de7585",
+      "status": 200,
+      "firstTokenMs": 2164.613875,
+      "totalMs": 2215.917875,
+      "complete": true,
+      "markerValid": true,
+      "error": null
+    },
+    {
+      "marker": "ORG0011_USER0011",
+      "sessionId": "chs_5265ceff300e4c95aaeb477be179dab3",
+      "status": 200,
+      "firstTokenMs": 2050.9105000000004,
+      "totalMs": 2120.49425,
+      "complete": true,
+      "markerValid": true,
+      "error": null
+    },
+    {
+      "marker": "ORG0012_USER0012",
+      "sessionId": "chs_b5125056ae7549ddad77e09083a79a32",
+      "status": 200,
+      "firstTokenMs": 2334.316542,
+      "totalMs": 2441.002417,
+      "complete": true,
+      "markerValid": true,
+      "error": null
+    },
+    {
+      "marker": "ORG0013_USER0013",
+      "sessionId": "chs_6fa0aa9a060b4898b4470cf11e9ea429",
+      "status": 200,
+      "firstTokenMs": 2445.1772919999994,
+      "totalMs": 2473.684625,
+      "complete": true,
+      "markerValid": true,
+      "error": null
+    },
+    {
+      "marker": "ORG0014_USER0014",
+      "sessionId": "chs_2e0786a41f004e96a423ac4a3876bb7f",
+      "status": 200,
+      "firstTokenMs": 3356.4182499999997,
+      "totalMs": 3407.2830000000004,
+      "complete": true,
+      "markerValid": true,
+      "error": null
+    },
+    {
+      "marker": "ORG0015_USER0015",
+      "sessionId": "chs_0f7c47e835a04cc4a6e4ba4e2b6050d2",
+      "status": 200,
+      "firstTokenMs": 2549.656333,
+      "totalMs": 2594.528416,
+      "complete": true,
+      "markerValid": true,
+      "error": null
+    },
+    {
+      "marker": "ORG0016_USER0016",
+      "sessionId": "chs_635f1b3edbc1494782858fd3993a900b",
+      "status": 200,
+      "firstTokenMs": 2052.866125,
+      "totalMs": 2118.229,
+      "complete": true,
+      "markerValid": true,
+      "error": null
+    },
+    {
+      "marker": "ORG0017_USER0017",
+      "sessionId": "chs_5bb29a3df0f54e0bb6e3636089f18e23",
+      "status": 200,
+      "firstTokenMs": 2574.4406670000003,
+      "totalMs": 2616.4395,
+      "complete": true,
+      "markerValid": true,
+      "error": null
+    },
+    {
+      "marker": "ORG0018_USER0018",
+      "sessionId": "chs_fa6b0fad46b44c80a2bac28ed3fb6a83",
+      "status": 200,
+      "firstTokenMs": 2562.7878750000004,
+      "totalMs": 2607.8115000000003,
+      "complete": true,
+      "markerValid": true,
+      "error": null
+    },
+    {
+      "marker": "ORG0019_USER0019",
+      "sessionId": "chs_305b7a2c8f094c63a232e6a30378b215",
+      "status": 200,
+      "firstTokenMs": 2011.0204169999997,
+      "totalMs": 2060.9930830000003,
+      "complete": true,
+      "markerValid": true,
+      "error": null
+    },
+    {
+      "marker": "ORG0020_USER0020",
+      "sessionId": "chs_52f0ecc8b9434a90abfdf028ea5351b7",
+      "status": 200,
+      "firstTokenMs": 2594.5515,
+      "totalMs": 2698.128375,
+      "complete": true,
+      "markerValid": true,
+      "error": null
+    },
+    {
+      "marker": "ORG0021_USER0021",
+      "sessionId": "chs_3a7f66844931407f8c0e0e8306e24362",
+      "status": 200,
+      "firstTokenMs": 2048.1053330000004,
+      "totalMs": 2120.3611659999997,
+      "complete": true,
+      "markerValid": true,
+      "error": null
+    },
+    {
+      "marker": "ORG0022_USER0022",
+      "sessionId": "chs_10ce2e085ffc4c45932a56048d2904f4",
+      "status": 200,
+      "firstTokenMs": 2491.657916,
+      "totalMs": 2538.3951660000002,
+      "complete": true,
+      "markerValid": true,
+      "error": null
+    },
+    {
+      "marker": "ORG0023_USER0023",
+      "sessionId": "chs_3113d8226a4f40069cf1ca1e2043855a",
+      "status": 200,
+      "firstTokenMs": 2379.078458,
+      "totalMs": 2432.846542,
+      "complete": true,
+      "markerValid": true,
+      "error": null
+    },
+    {
+      "marker": "ORG0024_USER0024",
+      "sessionId": "chs_f647fa94149949a2a531038dda19f22b",
+      "status": 200,
+      "firstTokenMs": 2060.978209,
+      "totalMs": 2120.7837090000003,
+      "complete": true,
+      "markerValid": true,
+      "error": null
+    },
+    {
+      "marker": "ORG0025_USER0025",
+      "sessionId": "chs_34408429371a4e0794343b9c75793fa9",
+      "status": 200,
+      "firstTokenMs": 1985.6758339999997,
+      "totalMs": 2042.3514169999999,
+      "complete": true,
+      "markerValid": true,
+      "error": null
+    },
+    {
+      "marker": "ORG0026_USER0026",
+      "sessionId": "chs_9ca17b4bb3f3405dab1b9a2c1a706560",
+      "status": 200,
+      "firstTokenMs": 2538.4412499999994,
+      "totalMs": 2585.607875,
+      "complete": true,
+      "markerValid": true,
+      "error": null
+    },
+    {
+      "marker": "ORG0027_USER0027",
+      "sessionId": "chs_cf6c0807d96f4eda9f87b6b30162f35d",
+      "status": 200,
+      "firstTokenMs": 2562.701875,
+      "totalMs": 2609.7597499999997,
+      "complete": true,
+      "markerValid": true,
+      "error": null
+    },
+    {
+      "marker": "ORG0028_USER0028",
+      "sessionId": "chs_fef0c1c1ad444133867325e77ead7332",
+      "status": 200,
+      "firstTokenMs": 2342.6314589999997,
+      "totalMs": 2438.943917,
+      "complete": true,
+      "markerValid": true,
+      "error": null
+    },
+    {
+      "marker": "ORG0029_USER0029",
+      "sessionId": "chs_c23e1eb02a71427e93b22d1214165661",
+      "status": 200,
+      "firstTokenMs": 2153.3965000000003,
+      "totalMs": 2238.1722910000003,
+      "complete": true,
+      "markerValid": true,
+      "error": null
+    },
+    {
+      "marker": "ORG0030_USER0030",
+      "sessionId": "chs_cd2e67a9a2274aaa917b0811b88a0ad8",
+      "status": 200,
+      "firstTokenMs": 2199.523208,
+      "totalMs": 2323.6485829999997,
+      "complete": true,
+      "markerValid": true,
+      "error": null
+    },
+    {
+      "marker": "ORG0031_USER0031",
+      "sessionId": "chs_b20c5749a54b43f3aa56b2972daee963",
+      "status": 200,
+      "firstTokenMs": 2514.848625,
+      "totalMs": 2574.3066249999997,
+      "complete": true,
+      "markerValid": true,
+      "error": null
+    },
+    {
+      "marker": "ORG0032_USER0032",
+      "sessionId": "chs_5b00b172cabe43a492c2a932598788bc",
+      "status": 200,
+      "firstTokenMs": 2324.193292,
+      "totalMs": 2378.9804999999997,
+      "complete": true,
+      "markerValid": true,
+      "error": null
+    },
+    {
+      "marker": "ORG0033_USER0033",
+      "sessionId": "chs_1c8b25f8787a428a86eff392ebc51256",
+      "status": 200,
+      "firstTokenMs": 2541.686125,
+      "totalMs": 2651.309209,
+      "complete": true,
+      "markerValid": true,
+      "error": null
+    },
+    {
+      "marker": "ORG0034_USER0034",
+      "sessionId": "chs_9aedbf4fd74a43ba93a0372faf53f47f",
+      "status": 200,
+      "firstTokenMs": 2501.0763330000004,
+      "totalMs": 2559.717875,
+      "complete": true,
+      "markerValid": true,
+      "error": null
+    },
+    {
+      "marker": "ORG0035_USER0035",
+      "sessionId": "chs_01eb58baa22f4d65b6803b53c360fbb2",
+      "status": 200,
+      "firstTokenMs": 2596.257792,
+      "totalMs": 2644.991875,
+      "complete": true,
+      "markerValid": true,
+      "error": null
+    },
+    {
+      "marker": "ORG0036_USER0036",
+      "sessionId": "chs_5ec5512256be415699ed36456ef0d14b",
+      "status": 200,
+      "firstTokenMs": 4940.293458,
+      "totalMs": 5067.369500000001,
+      "complete": true,
+      "markerValid": true,
+      "error": null
+    },
+    {
+      "marker": "ORG0037_USER0037",
+      "sessionId": "chs_aa90a7bced284d6e9cb88b3c2f01a347",
+      "status": 200,
+      "firstTokenMs": 2391.3289170000003,
+      "totalMs": 2440.815583,
+      "complete": true,
+      "markerValid": true,
+      "error": null
+    },
+    {
+      "marker": "ORG0038_USER0038",
+      "sessionId": "chs_6a7f38b392ba4068a77dde2bc93fdde9",
+      "status": 200,
+      "firstTokenMs": 2033.8247920000003,
+      "totalMs": 2142.3295419999995,
+      "complete": true,
+      "markerValid": true,
+      "error": null
+    },
+    {
+      "marker": "ORG0039_USER0039",
+      "sessionId": "chs_1c5bc616f77c4d308bfdeddb39b73723",
+      "status": 200,
+      "firstTokenMs": 2440.838208,
+      "totalMs": 2537.735917,
+      "complete": true,
+      "markerValid": true,
+      "error": null
+    },
+    {
+      "marker": "ORG0040_USER0040",
+      "sessionId": "chs_ace6c059b4884fccadfc6eacd97f5159",
+      "status": 200,
+      "firstTokenMs": 2450.262667,
+      "totalMs": 2574.280167,
+      "complete": true,
+      "markerValid": true,
+      "error": null
+    },
+    {
+      "marker": "ORG0041_USER0041",
+      "sessionId": "chs_5125ffff6c6941d08a1d41b242684634",
+      "status": 200,
+      "firstTokenMs": 2501.1026250000004,
+      "totalMs": 2607.6895830000003,
+      "complete": true,
+      "markerValid": true,
+      "error": null
+    },
+    {
+      "marker": "ORG0042_USER0042",
+      "sessionId": "chs_5e053cd878c143bdb1dc41c1ecb45ae7",
+      "status": 200,
+      "firstTokenMs": 2363.3352080000004,
+      "totalMs": 2473.5356250000004,
+      "complete": true,
+      "markerValid": true,
+      "error": null
+    },
+    {
+      "marker": "ORG0043_USER0043",
+      "sessionId": "chs_4c89ca7a4d544f9983b7cb0b519c2412",
+      "status": 200,
+      "firstTokenMs": 2324.133083,
+      "totalMs": 2436.8456249999995,
+      "complete": true,
+      "markerValid": true,
+      "error": null
+    },
+    {
+      "marker": "ORG0044_USER0044",
+      "sessionId": "chs_6ccce737f38f4e2993d1b40f8414bcfa",
+      "status": 200,
+      "firstTokenMs": 2342.5812499999997,
+      "totalMs": 2473.2986669999996,
+      "complete": true,
+      "markerValid": true,
+      "error": null
+    },
+    {
+      "marker": "ORG0045_USER0045",
+      "sessionId": "chs_b00f7ccabf9749d39244c0e606c1b86d",
+      "status": 200,
+      "firstTokenMs": 2333.2146249999996,
+      "totalMs": 2438.843417,
+      "complete": true,
+      "markerValid": true,
+      "error": null
+    },
+    {
+      "marker": "ORG0046_USER0046",
+      "sessionId": "chs_ad47e6c6f4ef47a9973b3fe09b657818",
+      "status": 200,
+      "firstTokenMs": 2491.4841250000004,
+      "totalMs": 2562.542334,
+      "complete": true,
+      "markerValid": true,
+      "error": null
+    },
+    {
+      "marker": "ORG0047_USER0047",
+      "sessionId": "chs_f652545031784b5395a89af42161f729",
+      "status": 200,
+      "firstTokenMs": 2120.584416,
+      "totalMs": 2145.151791,
+      "complete": true,
+      "markerValid": true,
+      "error": null
+    },
+    {
+      "marker": "ORG0048_USER0048",
+      "sessionId": "chs_8f79c45c28744665bb19d02150344709",
+      "status": 200,
+      "firstTokenMs": 2333.15825,
+      "totalMs": 2378.3172090000003,
+      "complete": true,
+      "markerValid": true,
+      "error": null
+    },
+    {
+      "marker": "ORG0049_USER0049",
+      "sessionId": "chs_6b4a6f242d5b4c8bb95d201968fd4edb",
+      "status": 200,
+      "firstTokenMs": 2277.937083,
+      "totalMs": 2328.247292,
+      "complete": true,
+      "markerValid": true,
+      "error": null
+    },
+    {
+      "marker": "ORG0050_USER0050",
+      "sessionId": "chs_b63269066aaa40d8a7513e2a96f5153a",
+      "status": 200,
+      "firstTokenMs": 2176.1353750000003,
+      "totalMs": 2221.9685000000004,
+      "complete": true,
+      "markerValid": true,
+      "error": null
+    },
+    {
+      "marker": "ORG0051_USER0051",
+      "sessionId": "chs_0494e995f7924897839222ef14201c2e",
+      "status": 200,
+      "firstTokenMs": 2121.629292,
+      "totalMs": 2137.009375,
+      "complete": true,
+      "markerValid": true,
+      "error": null
+    },
+    {
+      "marker": "ORG0052_USER0052",
+      "sessionId": "chs_439c573611e84c5098dc0cbbcfc72eec",
+      "status": 200,
+      "firstTokenMs": 2142.903916,
+      "totalMs": 2199.019083,
+      "complete": true,
+      "markerValid": true,
+      "error": null
+    },
+    {
+      "marker": "ORG0053_USER0053",
+      "sessionId": "chs_6e4656ccec8e4ecdabf3d419828af26b",
+      "status": 200,
+      "firstTokenMs": 2033.754583,
+      "totalMs": 2139.281083,
+      "complete": true,
+      "markerValid": true,
+      "error": null
+    },
+    {
+      "marker": "ORG0054_USER0054",
+      "sessionId": "chs_b54140c375fe432c9e9beaa19dfdfeb6",
+      "status": 200,
+      "firstTokenMs": 2120.3812500000004,
+      "totalMs": 2153.1630830000004,
+      "complete": true,
+      "markerValid": true,
+      "error": null
+    },
+    {
+      "marker": "ORG0055_USER0055",
+      "sessionId": "chs_4a492563d132417e983f84d5b0b703c4",
+      "status": 200,
+      "firstTokenMs": 2171.493,
+      "totalMs": 2297.079,
+      "complete": true,
+      "markerValid": true,
+      "error": null
+    },
+    {
+      "marker": "ORG0056_USER0056",
+      "sessionId": "chs_1fcb04006aaa46ff9e6c6de6deac36ae",
+      "status": 200,
+      "firstTokenMs": 2080.267042,
+      "totalMs": 2131.3577499999997,
+      "complete": true,
+      "markerValid": true,
+      "error": null
+    },
+    {
+      "marker": "ORG0057_USER0057",
+      "sessionId": "chs_4c1a0161ace14ce38d2930846f29ba1c",
+      "status": 200,
+      "firstTokenMs": 2262.9257089999996,
+      "totalMs": 2314.4241669999997,
+      "complete": true,
+      "markerValid": true,
+      "error": null
+    },
+    {
+      "marker": "ORG0058_USER0058",
+      "sessionId": "chs_b6a0f2e97c89481397c889de220b595c",
+      "status": 200,
+      "firstTokenMs": 2037.1507500000002,
+      "totalMs": 2104.642292,
+      "complete": true,
+      "markerValid": true,
+      "error": null
+    },
+    {
+      "marker": "ORG0059_USER0059",
+      "sessionId": "chs_f8c4feddb87e4c4aaf1eb8e2a7bcea9c",
+      "status": 200,
+      "firstTokenMs": 2164.309625,
+      "totalMs": 2217.478875,
+      "complete": true,
+      "markerValid": true,
+      "error": null
+    },
+    {
+      "marker": "ORG0060_USER0060",
+      "sessionId": "chs_c64f736128b244d79ff5f67cce80bd23",
+      "status": 200,
+      "firstTokenMs": 2117.9180409999994,
+      "totalMs": 2213.686333,
+      "complete": true,
+      "markerValid": true,
+      "error": null
+    }
+  ],
+  "samples": [
+    {
+      "elapsedMs": 0.043457999999997554,
+      "rss": 27115520,
+      "heapUsed": 211394,
+      "external": 27778,
+      "arrayBuffers": 0,
+      "cpuUserMicros": 40,
+      "cpuSystemMicros": 7,
+      "eventLoopDelayMs": 0
+    },
+    {
+      "elapsedMs": 102.096333,
+      "rss": 84000768,
+      "heapUsed": 5298477,
+      "external": 1653069,
+      "arrayBuffers": 260,
+      "cpuUserMicros": 82572,
+      "cpuSystemMicros": 38102,
+      "eventLoopDelayMs": 2.0528750000000002
+    },
+    {
+      "elapsedMs": 239.40200000000002,
+      "rss": 213532672,
+      "heapUsed": 295387557,
+      "external": 288615087,
+      "arrayBuffers": 150600288,
+      "cpuUserMicros": 289573,
+      "cpuSystemMicros": 78210,
+      "eventLoopDelayMs": 37.305667
+    },
+    {
+      "elapsedMs": 348.475625,
+      "rss": 481329152,
+      "heapUsed": 440587524,
+      "external": 699807223,
+      "arrayBuffers": 358220563,
+      "cpuUserMicros": 350515,
+      "cpuSystemMicros": 108291,
+      "eventLoopDelayMs": 9.073624999999993
+    },
+    {
+      "elapsedMs": 1431.317667,
+      "rss": 1174765568,
+      "heapUsed": 440587524,
+      "external": 1934848193,
+      "arrayBuffers": 1397343815,
+      "cpuUserMicros": 2667963,
+      "cpuSystemMicros": 462127,
+      "eventLoopDelayMs": 982.842042
+    },
+    {
+      "elapsedMs": 1580.100833,
+      "rss": 1194360832,
+      "heapUsed": 1953835468,
+      "external": 995883464,
+      "arrayBuffers": 522631928,
+      "cpuUserMicros": 2871447,
+      "cpuSystemMicros": 515211,
+      "eventLoopDelayMs": 48.78316599999994
+    },
+    {
+      "elapsedMs": 1685.41225,
+      "rss": 1190232064,
+      "heapUsed": 1010664003,
+      "external": 996234474,
+      "arrayBuffers": 522882818,
+      "cpuUserMicros": 3028957,
+      "cpuSystemMicros": 542991,
+      "eventLoopDelayMs": 5.3114170000001195
+    },
+    {
+      "elapsedMs": 1968.054125,
+      "rss": 1195278336,
+      "heapUsed": 1011122145,
+      "external": 996588850,
+      "arrayBuffers": 523085309,
+      "cpuUserMicros": 3282737,
+      "cpuSystemMicros": 663424,
+      "eventLoopDelayMs": 182.64187500000003
+    },
+    {
+      "elapsedMs": 2094.767375,
+      "rss": 1126137856,
+      "heapUsed": 1016951842,
+      "external": 998352043,
+      "arrayBuffers": 523298230,
+      "cpuUserMicros": 3426472,
+      "cpuSystemMicros": 674451,
+      "eventLoopDelayMs": 26.713250000000244
+    },
+    {
+      "elapsedMs": 2208.8305419999997,
+      "rss": 1122680832,
+      "heapUsed": 1035233046,
+      "external": 1003528714,
+      "arrayBuffers": 525103988,
+      "cpuUserMicros": 3650923,
+      "cpuSystemMicros": 693629,
+      "eventLoopDelayMs": 14.063166999999794
+    },
+    {
+      "elapsedMs": 2458.3528749999996,
+      "rss": 1130528768,
+      "heapUsed": 1037773924,
+      "external": 1004216884,
+      "arrayBuffers": 525108644,
+      "cpuUserMicros": 3906223,
+      "cpuSystemMicros": 797116,
+      "eventLoopDelayMs": 149.5223329999999
+    },
+    {
+      "elapsedMs": 2571.0387079999996,
+      "rss": 1104920576,
+      "heapUsed": 1061658083,
+      "external": 1011177483,
+      "arrayBuffers": 526529188,
+      "cpuUserMicros": 4067807,
+      "cpuSystemMicros": 810473,
+      "eventLoopDelayMs": 12.685833000000002
+    },
+    {
+      "elapsedMs": 2733.519375,
+      "rss": 1028685824,
+      "heapUsed": 928334313,
+      "external": 880196984,
+      "arrayBuffers": 459070606,
+      "cpuUserMicros": 4415443,
+      "cpuSystemMicros": 844493,
+      "eventLoopDelayMs": 62.48066700000027
+    },
+    {
+      "elapsedMs": 2834.1195,
+      "rss": 1002782720,
+      "heapUsed": 934567810,
+      "external": 882202712,
+      "arrayBuffers": 460112459,
+      "cpuUserMicros": 4587222,
+      "cpuSystemMicros": 864240,
+      "eventLoopDelayMs": 0.6001249999999345
+    },
+    {
+      "elapsedMs": 2942.428833,
+      "rss": 1001422848,
+      "heapUsed": 936699020,
+      "external": 883863558,
+      "arrayBuffers": 461130850,
+      "cpuUserMicros": 4780488,
+      "cpuSystemMicros": 885800,
+      "eventLoopDelayMs": 8.309333000000152
+    },
+    {
+      "elapsedMs": 4106.566667,
+      "rss": 1205534720,
+      "heapUsed": 1038170112,
+      "external": 970200928,
+      "arrayBuffers": 506179637,
+      "cpuUserMicros": 6964013,
+      "cpuSystemMicros": 1083953,
+      "eventLoopDelayMs": 1064.137834
+    },
+    {
+      "elapsedMs": 4208.713957999999,
+      "rss": 1154301952,
+      "heapUsed": 1038744583,
+      "external": 970575959,
+      "arrayBuffers": 506179824,
+      "cpuUserMicros": 6992410,
+      "cpuSystemMicros": 1095900,
+      "eventLoopDelayMs": 2.1472909999993135
+    },
+    {
+      "elapsedMs": 4312.021083,
+      "rss": 1114128384,
+      "heapUsed": 1038744663,
+      "external": 970575959,
+      "arrayBuffers": 506179824,
+      "cpuUserMicros": 7031803,
+      "cpuSystemMicros": 1099989,
+      "eventLoopDelayMs": 3.307125000000269
+    },
+    {
+      "elapsedMs": 4414.043291999999,
+      "rss": 1094434816,
+      "heapUsed": 1038744743,
+      "external": 970575959,
+      "arrayBuffers": 506179824,
+      "cpuUserMicros": 7040004,
+      "cpuSystemMicros": 1113522,
+      "eventLoopDelayMs": 2.022208999999748
+    },
+    {
+      "elapsedMs": 4518.045333,
+      "rss": 1094664192,
+      "heapUsed": 1038744823,
+      "external": 970575959,
+      "arrayBuffers": 506179824,
+      "cpuUserMicros": 7050673,
+      "cpuSystemMicros": 1114581,
+      "eventLoopDelayMs": 4.002041000000645
+    },
+    {
+      "elapsedMs": 4618.8004169999995,
+      "rss": 1070432256,
+      "heapUsed": 1038744823,
+      "external": 970575959,
+      "arrayBuffers": 506179824,
+      "cpuUserMicros": 7050939,
+      "cpuSystemMicros": 1114735,
+      "eventLoopDelayMs": 0.7550839999994423
+    },
+    {
+      "elapsedMs": 4720.830375,
+      "rss": 1070432256,
+      "heapUsed": 1038744823,
+      "external": 970575959,
+      "arrayBuffers": 506179824,
+      "cpuUserMicros": 7051515,
+      "cpuSystemMicros": 1115502,
+      "eventLoopDelayMs": 2.0299580000000788
+    },
+    {
+      "elapsedMs": 4822.8949999999995,
+      "rss": 1040990208,
+      "heapUsed": 1038744823,
+      "external": 970575959,
+      "arrayBuffers": 506179824,
+      "cpuUserMicros": 7053117,
+      "cpuSystemMicros": 1118464,
+      "eventLoopDelayMs": 2.064624999999978
+    },
+    {
+      "elapsedMs": 4923.163167,
+      "rss": 1043988480,
+      "heapUsed": 1048914385,
+      "external": 980754728,
+      "arrayBuffers": 512252402,
+      "cpuUserMicros": 7095994,
+      "cpuSystemMicros": 1128869,
+      "eventLoopDelayMs": 0.2681670000001759
+    },
+    {
+      "elapsedMs": 5031.431833,
+      "rss": 979550208,
+      "heapUsed": 1090692470,
+      "external": 1026712413,
+      "arrayBuffers": 542578823,
+      "cpuUserMicros": 7213774,
+      "cpuSystemMicros": 1137550,
+      "eventLoopDelayMs": 8.26866599999994
+    },
+    {
+      "elapsedMs": 5132.559333,
+      "rss": 988364800,
+      "heapUsed": 1128775019,
+      "external": 1061632423,
+      "arrayBuffers": 563945330,
+      "cpuUserMicros": 7315830,
+      "cpuSystemMicros": 1143105,
+      "eventLoopDelayMs": 1.1275000000005093
+    },
+    {
+      "elapsedMs": 5234.601583,
+      "rss": 992903168,
+      "heapUsed": 1152627074,
+      "external": 1081604765,
+      "arrayBuffers": 575957938,
+      "cpuUserMicros": 7367112,
+      "cpuSystemMicros": 1146437,
+      "eventLoopDelayMs": 2.0422499999995125
+    },
+    {
+      "elapsedMs": 5334.915083,
+      "rss": 998866944,
+      "heapUsed": 1191411877,
+      "external": 1117799712,
+      "arrayBuffers": 597086958,
+      "cpuUserMicros": 7426625,
+      "cpuSystemMicros": 1150237,
+      "eventLoopDelayMs": 0.3135000000002037
+    },
+    {
+      "elapsedMs": 5437.059625,
+      "rss": 1008009216,
+      "heapUsed": 1218404106,
+      "external": 1141554666,
+      "arrayBuffers": 611302226,
+      "cpuUserMicros": 7488389,
+      "cpuSystemMicros": 1154173,
+      "eventLoopDelayMs": 2.1445420000000013
+    },
+    {
+      "elapsedMs": 5537.830875,
+      "rss": 1020723200,
+      "heapUsed": 1253828760,
+      "external": 1177502410,
+      "arrayBuffers": 635063010,
+      "cpuUserMicros": 7553528,
+      "cpuSystemMicros": 1158779,
+      "eventLoopDelayMs": 0.7712499999997817
+    },
+    {
+      "elapsedMs": 5642.170958,
+      "rss": 1019887616,
+      "heapUsed": 1261086942,
+      "external": 1182347150,
+      "arrayBuffers": 638049827,
+      "cpuUserMicros": 7582432,
+      "cpuSystemMicros": 1160242,
+      "eventLoopDelayMs": 4.34008300000005
+    },
+    {
+      "elapsedMs": 5745.834,
+      "rss": 1013399552,
+      "heapUsed": 1261087022,
+      "external": 1182347150,
+      "arrayBuffers": 638049827,
+      "cpuUserMicros": 7588400,
+      "cpuSystemMicros": 1160520,
+      "eventLoopDelayMs": 3.6630420000001322
+    },
+    {
+      "elapsedMs": 5850.964667,
+      "rss": 1007108096,
+      "heapUsed": 1261087534,
+      "external": 1182347150,
+      "arrayBuffers": 638049827,
+      "cpuUserMicros": 7596364,
+      "cpuSystemMicros": 1160961,
+      "eventLoopDelayMs": 5.130667000000358
+    },
+    {
+      "elapsedMs": 5953.060875,
+      "rss": 1007108096,
+      "heapUsed": 1261087534,
+      "external": 1182347150,
+      "arrayBuffers": 638049827,
+      "cpuUserMicros": 7596812,
+      "cpuSystemMicros": 1161002,
+      "eventLoopDelayMs": 2.0962079999999332
+    },
+    {
+      "elapsedMs": 6059.914374999999,
+      "rss": 1007108096,
+      "heapUsed": 1261087694,
+      "external": 1182347150,
+      "arrayBuffers": 638049827,
+      "cpuUserMicros": 7602458,
+      "cpuSystemMicros": 1161475,
+      "eventLoopDelayMs": 6.853499999999258
+    },
+    {
+      "elapsedMs": 6161.9500419999995,
+      "rss": 1007108096,
+      "heapUsed": 1261087694,
+      "external": 1182347150,
+      "arrayBuffers": 638049827,
+      "cpuUserMicros": 7603006,
+      "cpuSystemMicros": 1161590,
+      "eventLoopDelayMs": 2.035667000000103
+    },
+    {
+      "elapsedMs": 6262.373167,
+      "rss": 1007108096,
+      "heapUsed": 1261087694,
+      "external": 1182347150,
+      "arrayBuffers": 638049827,
+      "cpuUserMicros": 7603648,
+      "cpuSystemMicros": 1161815,
+      "eventLoopDelayMs": 0.42312500000025466
+    },
+    {
+      "elapsedMs": 6367.130625,
+      "rss": 1007206400,
+      "heapUsed": 1263881592,
+      "external": 1185011704,
+      "arrayBuffers": 640183294,
+      "cpuUserMicros": 7643016,
+      "cpuSystemMicros": 1164588,
+      "eventLoopDelayMs": 4.757458000000042
+    },
+    {
+      "elapsedMs": 6467.303,
+      "rss": 1007206400,
+      "heapUsed": 1263881592,
+      "external": 1185011704,
+      "arrayBuffers": 640183294,
+      "cpuUserMicros": 7643646,
+      "cpuSystemMicros": 1164640,
+      "eventLoopDelayMs": 0.17237500000010186
+    },
+    {
+      "elapsedMs": 6574.045,
+      "rss": 1007206400,
+      "heapUsed": 1263881752,
+      "external": 1185011704,
+      "arrayBuffers": 640183294,
+      "cpuUserMicros": 7655354,
+      "cpuSystemMicros": 1165324,
+      "eventLoopDelayMs": 6.742000000000189
+    },
+    {
+      "elapsedMs": 6676.03075,
+      "rss": 1007206400,
+      "heapUsed": 1263881752,
+      "external": 1185011704,
+      "arrayBuffers": 640183294,
+      "cpuUserMicros": 7655579,
+      "cpuSystemMicros": 1165381,
+      "eventLoopDelayMs": 1.9857499999998254
+    },
+    {
+      "elapsedMs": 6779.126875,
+      "rss": 1012678656,
+      "heapUsed": 1263881752,
+      "external": 1054847637,
+      "arrayBuffers": 640183294,
+      "cpuUserMicros": 7702074,
+      "cpuSystemMicros": 1168300,
+      "eventLoopDelayMs": 3.096125000000029
+    },
+    {
+      "elapsedMs": 6882.4655,
+      "rss": 1015447552,
+      "heapUsed": 952671140,
+      "external": 897444548,
+      "arrayBuffers": 456073816,
+      "cpuUserMicros": 7757410,
+      "cpuSystemMicros": 1170489,
+      "eventLoopDelayMs": 3.33862500000032
+    },
+    {
+      "elapsedMs": 6986.5385,
+      "rss": 1015644160,
+      "heapUsed": 952671220,
+      "external": 897444548,
+      "arrayBuffers": 456073816,
+      "cpuUserMicros": 7774953,
+      "cpuSystemMicros": 1171322,
+      "eventLoopDelayMs": 4.072999999999411
+    },
+    {
+      "elapsedMs": 7088.6309169999995,
+      "rss": 1003601920,
+      "heapUsed": 952671300,
+      "external": 897444548,
+      "arrayBuffers": 456073816,
+      "cpuUserMicros": 7779559,
+      "cpuSystemMicros": 1171577,
+      "eventLoopDelayMs": 2.092416999999841
+    },
+    {
+      "elapsedMs": 7189.36475,
+      "rss": 1003601920,
+      "heapUsed": 952671300,
+      "external": 897444548,
+      "arrayBuffers": 456073816,
+      "cpuUserMicros": 7779828,
+      "cpuSystemMicros": 1174128,
+      "eventLoopDelayMs": 0.7338330000002316
+    },
+    {
+      "elapsedMs": 7291.391708,
+      "rss": 1003601920,
+      "heapUsed": 952671300,
+      "external": 897444548,
+      "arrayBuffers": 456073816,
+      "cpuUserMicros": 7781887,
+      "cpuSystemMicros": 1182775,
+      "eventLoopDelayMs": 2.026958000000377
+    },
+    {
+      "elapsedMs": 7392.181833,
+      "rss": 1003601920,
+      "heapUsed": 952671300,
+      "external": 897444548,
+      "arrayBuffers": 456073816,
+      "cpuUserMicros": 7782058,
+      "cpuSystemMicros": 1182815,
+      "eventLoopDelayMs": 0.7901249999995343
+    },
+    {
+      "elapsedMs": 7494.255375,
+      "rss": 1003601920,
+      "heapUsed": 952671300,
+      "external": 897444548,
+      "arrayBuffers": 456073816,
+      "cpuUserMicros": 7782112,
+      "cpuSystemMicros": 1182840,
+      "eventLoopDelayMs": 2.0735420000000886
+    },
+    {
+      "elapsedMs": 7594.701417,
+      "rss": 1003601920,
+      "heapUsed": 952671300,
+      "external": 897444548,
+      "arrayBuffers": 456073816,
+      "cpuUserMicros": 7782780,
+      "cpuSystemMicros": 1182951,
+      "eventLoopDelayMs": 0.44604200000048877
+    },
+    {
+      "elapsedMs": 7696.6453329999995,
+      "rss": 1003601920,
+      "heapUsed": 952671300,
+      "external": 897444548,
+      "arrayBuffers": 456073816,
+      "cpuUserMicros": 7783415,
+      "cpuSystemMicros": 1183055,
+      "eventLoopDelayMs": 1.9439159999992626
+    },
+    {
+      "elapsedMs": 7798.647958,
+      "rss": 985726976,
+      "heapUsed": 952671300,
+      "external": 897444548,
+      "arrayBuffers": 456073816,
+      "cpuUserMicros": 7783536,
+      "cpuSystemMicros": 1183079,
+      "eventLoopDelayMs": 2.00262500000008
+    },
+    {
+      "elapsedMs": 7900.346292,
+      "rss": 976420864,
+      "heapUsed": 955164270,
+      "external": 900075806,
+      "arrayBuffers": 457649083,
+      "cpuUserMicros": 7794122,
+      "cpuSystemMicros": 1183711,
+      "eventLoopDelayMs": 1.6983340000006137
+    },
+    {
+      "elapsedMs": 8007.611167,
+      "rss": 958414848,
+      "heapUsed": 955693642,
+      "external": 901220061,
+      "arrayBuffers": 458530774,
+      "cpuUserMicros": 7849934,
+      "cpuSystemMicros": 1187161,
+      "eventLoopDelayMs": 7.264874999999847
+    },
+    {
+      "elapsedMs": 8113.154125,
+      "rss": 940933120,
+      "heapUsed": 958078146,
+      "external": 902384946,
+      "arrayBuffers": 458979361,
+      "cpuUserMicros": 7885599,
+      "cpuSystemMicros": 1189580,
+      "eventLoopDelayMs": 5.542957999999999
+    },
+    {
+      "elapsedMs": 8214.015667,
+      "rss": 940933120,
+      "heapUsed": 958078146,
+      "external": 902384946,
+      "arrayBuffers": 458979361,
+      "cpuUserMicros": 7886437,
+      "cpuSystemMicros": 1189704,
+      "eventLoopDelayMs": 0.8615420000005543
+    },
+    {
+      "elapsedMs": 8317.032458,
+      "rss": 933904384,
+      "heapUsed": 958078498,
+      "external": 902384946,
+      "arrayBuffers": 458979361,
+      "cpuUserMicros": 7892846,
+      "cpuSystemMicros": 1190292,
+      "eventLoopDelayMs": 3.016791000000012
+    },
+    {
+      "elapsedMs": 8418.261083,
+      "rss": 918454272,
+      "heapUsed": 958078498,
+      "external": 902384946,
+      "arrayBuffers": 458979361,
+      "cpuUserMicros": 7893061,
+      "cpuSystemMicros": 1190326,
+      "eventLoopDelayMs": 1.228624999999738
+    },
+    {
+      "elapsedMs": 8519.938042,
+      "rss": 918454272,
+      "heapUsed": 958078498,
+      "external": 902648220,
+      "arrayBuffers": 459242635,
+      "cpuUserMicros": 7894620,
+      "cpuSystemMicros": 1190496,
+      "eventLoopDelayMs": 1.6769590000003518
+    },
+    {
+      "elapsedMs": 8564.171917,
+      "rss": 918503424,
+      "heapUsed": 960562858,
+      "external": 905601465,
+      "arrayBuffers": 461142768,
+      "cpuUserMicros": 7913329,
+      "cpuSystemMicros": 1191852,
+      "eventLoopDelayMs": 0
+    }
+  ]
+}

@@ -1,0 +1,1092 @@
+{
+  "schemaVersion": 1,
+  "kind": "chat-engine-performance-observation",
+  "benchmark": "mistral-real",
+  "id": "ai-sdk-H-warm-c60-o60-r1",
+  "environment": {
+    "commit": "8f51347fb2f8bdf925a4b0f8128c9c95328a3dcb",
+    "branch": "feat/chat-pi-unified-engine-phase4",
+    "bunVersion": "1.3.10",
+    "platform": "darwin-arm64",
+    "port": 3400,
+    "database": "isolated-pglite"
+  },
+  "cell": {
+    "engine": "ai-sdk",
+    "form": "H",
+    "profile": "warm",
+    "concurrency": 60,
+    "repetition": 1,
+    "distribution": "60-organizations-x-1-chats"
+  },
+  "timing": {
+    "waveStartedAtMs": 1799.376416,
+    "waveEndedAtMs": 4047.764625,
+    "recoveryMs": 0
+  },
+  "memory": {
+    "initial": {
+      "elapsedMs": 2586.523416,
+      "rss": 1003356160,
+      "heapUsed": 536016812,
+      "external": 480522106,
+      "arrayBuffers": 233672336,
+      "cpuUserMicros": 4535885,
+      "cpuSystemMicros": 451108,
+      "eventLoopDelayMs": 726.7187080000001
+    },
+    "peak": {
+      "elapsedMs": 2586.523416,
+      "rss": 1003356160,
+      "heapUsed": 536016812,
+      "external": 480522106,
+      "arrayBuffers": 233672336,
+      "cpuUserMicros": 4535885,
+      "cpuSystemMicros": 451108,
+      "eventLoopDelayMs": 726.7187080000001
+    },
+    "end": {
+      "elapsedMs": 4102.843583,
+      "rss": 839417856,
+      "heapUsed": 599556446,
+      "external": 532867934,
+      "arrayBuffers": 268189084,
+      "cpuUserMicros": 5791460,
+      "cpuSystemMicros": 569943,
+      "eventLoopDelayMs": 1.3583330000001297
+    },
+    "after30s": null,
+    "after60s": null,
+    "after120s": null
+  },
+  "eventLoopDelayMs": {
+    "p50": 3.822208000000046,
+    "p95": 726.7187080000001,
+    "p99": 726.7187080000001
+  },
+  "cpu": {
+    "userMicros": 1255575,
+    "systemMicros": 118835
+  },
+  "latency": {
+    "firstTokenMs": {
+      "p50": null,
+      "p95": null,
+      "p99": null
+    },
+    "totalMs": {
+      "p50": null,
+      "p95": null,
+      "p99": null
+    },
+    "throughputChatsPerSecond": 0
+  },
+  "outcomes": {
+    "requested": 60,
+    "completed": 0,
+    "rateLimited": 0,
+    "serverErrors": 0,
+    "incompleteStreams": 0,
+    "markerFailures": 60
+  },
+  "usage": {
+    "modelCalls": 0,
+    "toolCalls": 0,
+    "inputTokens": 0,
+    "outputTokens": 0
+  },
+  "provider": {
+    "id": "mistral-api-key",
+    "modelId": "mistral-small-2603",
+    "statuses": {
+      "ok": 0,
+      "rateLimited": 0,
+      "serverError": 0,
+      "otherError": 60
+    }
+  },
+  "persistence": {
+    "messageCount": 123,
+    "structuredPartCount": 63,
+    "usageRows": 1,
+    "usageOwnershipValid": true,
+    "bySession": {
+      "chs_9449472db96a4037883edb7344b62990": 5,
+      "chs_5571bc2d2b534d5c87550a845181754f": 2,
+      "chs_f98d92abe1a64a36a66a14637f2255a6": 2,
+      "chs_c7341389fbc44b4ca7aeaa1ae886b4f5": 2,
+      "chs_3c0726d804bb4a3d92bc725488f528b6": 2,
+      "chs_3eab22208e0d4ea898d0b36685e0a529": 2,
+      "chs_50303ecc7a744f4fab110ea9df6e2315": 2,
+      "chs_bfceb1acca0f4ffbb12a7457b71b35d0": 2,
+      "chs_ac349993135c491cabec79c64881a34c": 2,
+      "chs_c7c28f828f524c0ebf2bac083162059c": 2,
+      "chs_6d2114236334476198b69d29ec4cf567": 2,
+      "chs_b956e5dbee8c47e8b64a403d7b80c0b3": 2,
+      "chs_cbf027162024447b948a4ee1949985d8": 2,
+      "chs_b22a41d2e0fc4e2fb341c6297bea0539": 2,
+      "chs_939c29b1db654983940c108d5e85ce8b": 2,
+      "chs_750a3f37c4654e0d97443821173fd3c8": 2,
+      "chs_27cded9ded0549d7803cf62cc2260f7a": 2,
+      "chs_5439d2091d23440d8f1da23510ae20c8": 2,
+      "chs_af5d7a137dba4ddf88e1389e1f65e544": 2,
+      "chs_8fe1713ed16a4d8b87de66f3db3cf37d": 2,
+      "chs_7eedc640893c43d1a5eb9a37c9a59a32": 2,
+      "chs_f82608db9f2f4fe18246bb813c9262bc": 2,
+      "chs_aa774d196356422096d46aa429be7e57": 2,
+      "chs_f6aea14e5a5b4cec97461ae578613f5a": 2,
+      "chs_5488b11a6e2b44789b4b3a9fcd6000a9": 2,
+      "chs_271d67fd327443a380e9a1c372661302": 2,
+      "chs_46327e7b05084697b1b00849e24f11b8": 2,
+      "chs_b8bd83160ae84425865b576afa8f271a": 2,
+      "chs_e605f379a24749058e5559d6f968efd3": 2,
+      "chs_dc1cad3c61744d8f8deb43d584157fbd": 2,
+      "chs_f56e6305719a4df5a0ad52aedb4ab0a6": 2,
+      "chs_0564069492c2459ab11fa6f8f71fb3b7": 2,
+      "chs_9fcb66bd76c3416781de24c423040a35": 2,
+      "chs_76f43aa52a0942f9b3044849ee74a238": 2,
+      "chs_bd99251585ae42ee9511c8318bfd3b23": 2,
+      "chs_d9542e5b74d947b2938a1acca8f389b7": 2,
+      "chs_6ed16f67322c48fbbb4044414ca43202": 2,
+      "chs_2d8f691cc12948dbaa46a8b487112b42": 2,
+      "chs_d4e4794c09da4ed1b5fbb70e42d701a7": 2,
+      "chs_61b8d7511a6a45749db9645126eeae94": 2,
+      "chs_ac5e96d403cc4883be6f001fd96db8f8": 2,
+      "chs_a7c0785eb9244adaaea378d6c7ed19b9": 2,
+      "chs_913643d046f844149a48ce58275bcd1f": 2,
+      "chs_a8f633673c124aa4845fcadc3ec4411c": 2,
+      "chs_1c589aef9e904415a503b44ef4f086b1": 2,
+      "chs_0108756132f24933ae9de1c2a87ecc4e": 2,
+      "chs_2ee1c32bd94f482fbea2b4fafdd77704": 2,
+      "chs_163244c3e3064d348e039358fbc8ddb3": 2,
+      "chs_a6010b9f7fcd4d66b3ad745058cd966a": 2,
+      "chs_40be44c19d9c48f2a3e735df5e273f4a": 2,
+      "chs_4cd2f5b589324daeb5d157e25441cb3e": 2,
+      "chs_6ee2e5ca1a90472c970552a9a5276c13": 2,
+      "chs_aa0f97f86b094692b2f90dd559f53cd1": 2,
+      "chs_6bef0ea9af094b4694ce7c73f6ec93bd": 2,
+      "chs_d2e3b2f8191d4ae1aa77eab7b33c0451": 2,
+      "chs_da206fd71d5047f186558934959e989f": 2,
+      "chs_597353bbbba145e0b08bc3dd1fdc3995": 2,
+      "chs_fe602f94a8c34f679c570f49737c0ed1": 2,
+      "chs_c1483a36b37c48f2a8f909f6022394b4": 2,
+      "chs_29f74c68311a47aa96b6dce49a0fb0e5": 2
+    }
+  },
+  "continuity": {
+    "status": 200,
+    "complete": true,
+    "markerValid": true,
+    "persistedMessageCount": 5
+  },
+  "isolation": {
+    "foreignSessionRejected": true
+  },
+  "teardown": {
+    "databaseRelease": "process-exit-after-verification"
+  },
+  "turns": [
+    {
+      "marker": "ORG0001_USER0001",
+      "sessionId": "chs_9449472db96a4037883edb7344b62990",
+      "status": 200,
+      "firstTokenMs": null,
+      "totalMs": 1502.2424159999998,
+      "complete": true,
+      "markerValid": false,
+      "error": "appstrate:chat-turn-error:unknown"
+    },
+    {
+      "marker": "ORG0002_USER0002",
+      "sessionId": "chs_5571bc2d2b534d5c87550a845181754f",
+      "status": 200,
+      "firstTokenMs": null,
+      "totalMs": 1739.866708,
+      "complete": true,
+      "markerValid": false,
+      "error": "appstrate:chat-turn-error:unknown"
+    },
+    {
+      "marker": "ORG0003_USER0003",
+      "sessionId": "chs_f98d92abe1a64a36a66a14637f2255a6",
+      "status": 200,
+      "firstTokenMs": null,
+      "totalMs": 1841.515209,
+      "complete": true,
+      "markerValid": false,
+      "error": "appstrate:chat-turn-error:unknown"
+    },
+    {
+      "marker": "ORG0004_USER0004",
+      "sessionId": "chs_c7341389fbc44b4ca7aeaa1ae886b4f5",
+      "status": 200,
+      "firstTokenMs": null,
+      "totalMs": 1709.88275,
+      "complete": true,
+      "markerValid": false,
+      "error": "appstrate:chat-turn-error:unknown"
+    },
+    {
+      "marker": "ORG0005_USER0005",
+      "sessionId": "chs_3c0726d804bb4a3d92bc725488f528b6",
+      "status": 200,
+      "firstTokenMs": null,
+      "totalMs": 1709.9103340000001,
+      "complete": true,
+      "markerValid": false,
+      "error": "appstrate:chat-turn-error:unknown"
+    },
+    {
+      "marker": "ORG0006_USER0006",
+      "sessionId": "chs_3eab22208e0d4ea898d0b36685e0a529",
+      "status": 200,
+      "firstTokenMs": null,
+      "totalMs": 1841.488042,
+      "complete": true,
+      "markerValid": false,
+      "error": "appstrate:chat-turn-error:unknown"
+    },
+    {
+      "marker": "ORG0007_USER0007",
+      "sessionId": "chs_50303ecc7a744f4fab110ea9df6e2315",
+      "status": 200,
+      "firstTokenMs": null,
+      "totalMs": 1841.4986249999997,
+      "complete": true,
+      "markerValid": false,
+      "error": "appstrate:chat-turn-error:unknown"
+    },
+    {
+      "marker": "ORG0008_USER0008",
+      "sessionId": "chs_bfceb1acca0f4ffbb12a7457b71b35d0",
+      "status": 200,
+      "firstTokenMs": null,
+      "totalMs": 1739.70025,
+      "complete": true,
+      "markerValid": false,
+      "error": "appstrate:chat-turn-error:unknown"
+    },
+    {
+      "marker": "ORG0009_USER0009",
+      "sessionId": "chs_ac349993135c491cabec79c64881a34c",
+      "status": 200,
+      "firstTokenMs": null,
+      "totalMs": 1876.1957909999999,
+      "complete": true,
+      "markerValid": false,
+      "error": "appstrate:chat-turn-error:unknown"
+    },
+    {
+      "marker": "ORG0010_USER0010",
+      "sessionId": "chs_c7c28f828f524c0ebf2bac083162059c",
+      "status": 200,
+      "firstTokenMs": null,
+      "totalMs": 1739.583458,
+      "complete": true,
+      "markerValid": false,
+      "error": "appstrate:chat-turn-error:unknown"
+    },
+    {
+      "marker": "ORG0011_USER0011",
+      "sessionId": "chs_6d2114236334476198b69d29ec4cf567",
+      "status": 200,
+      "firstTokenMs": null,
+      "totalMs": 1793.9334580000002,
+      "complete": true,
+      "markerValid": false,
+      "error": "appstrate:chat-turn-error:unknown"
+    },
+    {
+      "marker": "ORG0012_USER0012",
+      "sessionId": "chs_b956e5dbee8c47e8b64a403d7b80c0b3",
+      "status": 200,
+      "firstTokenMs": null,
+      "totalMs": 1841.378958,
+      "complete": true,
+      "markerValid": false,
+      "error": "appstrate:chat-turn-error:unknown"
+    },
+    {
+      "marker": "ORG0013_USER0013",
+      "sessionId": "chs_cbf027162024447b948a4ee1949985d8",
+      "status": 200,
+      "firstTokenMs": null,
+      "totalMs": 1882.9304160000002,
+      "complete": true,
+      "markerValid": false,
+      "error": "appstrate:chat-turn-error:unknown"
+    },
+    {
+      "marker": "ORG0014_USER0014",
+      "sessionId": "chs_b22a41d2e0fc4e2fb341c6297bea0539",
+      "status": 200,
+      "firstTokenMs": null,
+      "totalMs": 1739.5683330000002,
+      "complete": true,
+      "markerValid": false,
+      "error": "appstrate:chat-turn-error:unknown"
+    },
+    {
+      "marker": "ORG0015_USER0015",
+      "sessionId": "chs_939c29b1db654983940c108d5e85ce8b",
+      "status": 200,
+      "firstTokenMs": null,
+      "totalMs": 1742.328792,
+      "complete": true,
+      "markerValid": false,
+      "error": "appstrate:chat-turn-error:unknown"
+    },
+    {
+      "marker": "ORG0016_USER0016",
+      "sessionId": "chs_750a3f37c4654e0d97443821173fd3c8",
+      "status": 200,
+      "firstTokenMs": null,
+      "totalMs": 1841.347084,
+      "complete": true,
+      "markerValid": false,
+      "error": "appstrate:chat-turn-error:unknown"
+    },
+    {
+      "marker": "ORG0017_USER0017",
+      "sessionId": "chs_27cded9ded0549d7803cf62cc2260f7a",
+      "status": 200,
+      "firstTokenMs": null,
+      "totalMs": 2053.4944160000005,
+      "complete": true,
+      "markerValid": false,
+      "error": "appstrate:chat-turn-error:unknown"
+    },
+    {
+      "marker": "ORG0018_USER0018",
+      "sessionId": "chs_5439d2091d23440d8f1da23510ae20c8",
+      "status": 200,
+      "firstTokenMs": null,
+      "totalMs": 1878.165708,
+      "complete": true,
+      "markerValid": false,
+      "error": "appstrate:chat-turn-error:unknown"
+    },
+    {
+      "marker": "ORG0019_USER0019",
+      "sessionId": "chs_af5d7a137dba4ddf88e1389e1f65e544",
+      "status": 200,
+      "firstTokenMs": null,
+      "totalMs": 2112.951667,
+      "complete": true,
+      "markerValid": false,
+      "error": "appstrate:chat-turn-error:unknown"
+    },
+    {
+      "marker": "ORG0020_USER0020",
+      "sessionId": "chs_8fe1713ed16a4d8b87de66f3db3cf37d",
+      "status": 200,
+      "firstTokenMs": null,
+      "totalMs": 1787.985042,
+      "complete": true,
+      "markerValid": false,
+      "error": "appstrate:chat-turn-error:unknown"
+    },
+    {
+      "marker": "ORG0021_USER0021",
+      "sessionId": "chs_7eedc640893c43d1a5eb9a37c9a59a32",
+      "status": 200,
+      "firstTokenMs": null,
+      "totalMs": 2053.421292,
+      "complete": true,
+      "markerValid": false,
+      "error": "appstrate:chat-turn-error:unknown"
+    },
+    {
+      "marker": "ORG0022_USER0022",
+      "sessionId": "chs_f82608db9f2f4fe18246bb813c9262bc",
+      "status": 200,
+      "firstTokenMs": null,
+      "totalMs": 1841.2388749999998,
+      "complete": true,
+      "markerValid": false,
+      "error": "appstrate:chat-turn-error:unknown"
+    },
+    {
+      "marker": "ORG0023_USER0023",
+      "sessionId": "chs_aa774d196356422096d46aa429be7e57",
+      "status": 200,
+      "firstTokenMs": null,
+      "totalMs": 1924.5279159999998,
+      "complete": true,
+      "markerValid": false,
+      "error": "appstrate:chat-turn-error:unknown"
+    },
+    {
+      "marker": "ORG0024_USER0024",
+      "sessionId": "chs_f6aea14e5a5b4cec97461ae578613f5a",
+      "status": 200,
+      "firstTokenMs": null,
+      "totalMs": 1841.2366670000001,
+      "complete": true,
+      "markerValid": false,
+      "error": "appstrate:chat-turn-error:unknown"
+    },
+    {
+      "marker": "ORG0025_USER0025",
+      "sessionId": "chs_5488b11a6e2b44789b4b3a9fcd6000a9",
+      "status": 200,
+      "firstTokenMs": null,
+      "totalMs": 1826.349917,
+      "complete": true,
+      "markerValid": false,
+      "error": "appstrate:chat-turn-error:unknown"
+    },
+    {
+      "marker": "ORG0026_USER0026",
+      "sessionId": "chs_271d67fd327443a380e9a1c372661302",
+      "status": 200,
+      "firstTokenMs": null,
+      "totalMs": 2085.96475,
+      "complete": true,
+      "markerValid": false,
+      "error": "appstrate:chat-turn-error:unknown"
+    },
+    {
+      "marker": "ORG0027_USER0027",
+      "sessionId": "chs_46327e7b05084697b1b00849e24f11b8",
+      "status": 200,
+      "firstTokenMs": null,
+      "totalMs": 1793.7299580000001,
+      "complete": true,
+      "markerValid": false,
+      "error": "appstrate:chat-turn-error:unknown"
+    },
+    {
+      "marker": "ORG0028_USER0028",
+      "sessionId": "chs_b8bd83160ae84425865b576afa8f271a",
+      "status": 200,
+      "firstTokenMs": null,
+      "totalMs": 1895.06125,
+      "complete": true,
+      "markerValid": false,
+      "error": "appstrate:chat-turn-error:unknown"
+    },
+    {
+      "marker": "ORG0029_USER0029",
+      "sessionId": "chs_e605f379a24749058e5559d6f968efd3",
+      "status": 200,
+      "firstTokenMs": null,
+      "totalMs": 2036.6815829999998,
+      "complete": true,
+      "markerValid": false,
+      "error": "appstrate:chat-turn-error:unknown"
+    },
+    {
+      "marker": "ORG0030_USER0030",
+      "sessionId": "chs_dc1cad3c61744d8f8deb43d584157fbd",
+      "status": 200,
+      "firstTokenMs": null,
+      "totalMs": 1882.7125,
+      "complete": true,
+      "markerValid": false,
+      "error": "appstrate:chat-turn-error:unknown"
+    },
+    {
+      "marker": "ORG0031_USER0031",
+      "sessionId": "chs_f56e6305719a4df5a0ad52aedb4ab0a6",
+      "status": 200,
+      "firstTokenMs": null,
+      "totalMs": 2112.789167,
+      "complete": true,
+      "markerValid": false,
+      "error": "appstrate:chat-turn-error:unknown"
+    },
+    {
+      "marker": "ORG0032_USER0032",
+      "sessionId": "chs_0564069492c2459ab11fa6f8f71fb3b7",
+      "status": 200,
+      "firstTokenMs": null,
+      "totalMs": 2191.108167,
+      "complete": true,
+      "markerValid": false,
+      "error": "appstrate:chat-turn-error:unknown"
+    },
+    {
+      "marker": "ORG0033_USER0033",
+      "sessionId": "chs_9fcb66bd76c3416781de24c423040a35",
+      "status": 200,
+      "firstTokenMs": null,
+      "totalMs": 1882.6486249999998,
+      "complete": true,
+      "markerValid": false,
+      "error": "appstrate:chat-turn-error:unknown"
+    },
+    {
+      "marker": "ORG0034_USER0034",
+      "sessionId": "chs_76f43aa52a0942f9b3044849ee74a238",
+      "status": 200,
+      "firstTokenMs": null,
+      "totalMs": 2034.795709,
+      "complete": true,
+      "markerValid": false,
+      "error": "appstrate:chat-turn-error:unknown"
+    },
+    {
+      "marker": "ORG0035_USER0035",
+      "sessionId": "chs_bd99251585ae42ee9511c8318bfd3b23",
+      "status": 200,
+      "firstTokenMs": null,
+      "totalMs": 1931.908334,
+      "complete": true,
+      "markerValid": false,
+      "error": "appstrate:chat-turn-error:unknown"
+    },
+    {
+      "marker": "ORG0036_USER0036",
+      "sessionId": "chs_d9542e5b74d947b2938a1acca8f389b7",
+      "status": 200,
+      "firstTokenMs": null,
+      "totalMs": 1931.848,
+      "complete": true,
+      "markerValid": false,
+      "error": "appstrate:chat-turn-error:unknown"
+    },
+    {
+      "marker": "ORG0037_USER0037",
+      "sessionId": "chs_6ed16f67322c48fbbb4044414ca43202",
+      "status": 200,
+      "firstTokenMs": null,
+      "totalMs": 1896.8232499999997,
+      "complete": true,
+      "markerValid": false,
+      "error": "appstrate:chat-turn-error:unknown"
+    },
+    {
+      "marker": "ORG0038_USER0038",
+      "sessionId": "chs_2d8f691cc12948dbaa46a8b487112b42",
+      "status": 200,
+      "firstTokenMs": null,
+      "totalMs": 1933.5511659999997,
+      "complete": true,
+      "markerValid": false,
+      "error": "appstrate:chat-turn-error:unknown"
+    },
+    {
+      "marker": "ORG0039_USER0039",
+      "sessionId": "chs_d4e4794c09da4ed1b5fbb70e42d701a7",
+      "status": 200,
+      "firstTokenMs": null,
+      "totalMs": 2112.6345,
+      "complete": true,
+      "markerValid": false,
+      "error": "appstrate:chat-turn-error:unknown"
+    },
+    {
+      "marker": "ORG0040_USER0040",
+      "sessionId": "chs_61b8d7511a6a45749db9645126eeae94",
+      "status": 200,
+      "firstTokenMs": null,
+      "totalMs": 1974.000959,
+      "complete": true,
+      "markerValid": false,
+      "error": "appstrate:chat-turn-error:unknown"
+    },
+    {
+      "marker": "ORG0041_USER0041",
+      "sessionId": "chs_ac5e96d403cc4883be6f001fd96db8f8",
+      "status": 200,
+      "firstTokenMs": null,
+      "totalMs": 2006.669459,
+      "complete": true,
+      "markerValid": false,
+      "error": "appstrate:chat-turn-error:unknown"
+    },
+    {
+      "marker": "ORG0042_USER0042",
+      "sessionId": "chs_a7c0785eb9244adaaea378d6c7ed19b9",
+      "status": 200,
+      "firstTokenMs": null,
+      "totalMs": 2107.146292,
+      "complete": true,
+      "markerValid": false,
+      "error": "appstrate:chat-turn-error:unknown"
+    },
+    {
+      "marker": "ORG0043_USER0043",
+      "sessionId": "chs_913643d046f844149a48ce58275bcd1f",
+      "status": 200,
+      "firstTokenMs": null,
+      "totalMs": 1999.166209,
+      "complete": true,
+      "markerValid": false,
+      "error": "appstrate:chat-turn-error:unknown"
+    },
+    {
+      "marker": "ORG0044_USER0044",
+      "sessionId": "chs_a8f633673c124aa4845fcadc3ec4411c",
+      "status": 200,
+      "firstTokenMs": null,
+      "totalMs": 1951.4973750000001,
+      "complete": true,
+      "markerValid": false,
+      "error": "appstrate:chat-turn-error:unknown"
+    },
+    {
+      "marker": "ORG0045_USER0045",
+      "sessionId": "chs_1c589aef9e904415a503b44ef4f086b1",
+      "status": 200,
+      "firstTokenMs": null,
+      "totalMs": 1931.724125,
+      "complete": true,
+      "markerValid": false,
+      "error": "appstrate:chat-turn-error:unknown"
+    },
+    {
+      "marker": "ORG0046_USER0046",
+      "sessionId": "chs_0108756132f24933ae9de1c2a87ecc4e",
+      "status": 200,
+      "firstTokenMs": null,
+      "totalMs": 1931.736417,
+      "complete": true,
+      "markerValid": false,
+      "error": "appstrate:chat-turn-error:unknown"
+    },
+    {
+      "marker": "ORG0047_USER0047",
+      "sessionId": "chs_2ee1c32bd94f482fbea2b4fafdd77704",
+      "status": 200,
+      "firstTokenMs": null,
+      "totalMs": 2117.384833,
+      "complete": true,
+      "markerValid": false,
+      "error": "appstrate:chat-turn-error:unknown"
+    },
+    {
+      "marker": "ORG0048_USER0048",
+      "sessionId": "chs_163244c3e3064d348e039358fbc8ddb3",
+      "status": 200,
+      "firstTokenMs": null,
+      "totalMs": 2180.316375,
+      "complete": true,
+      "markerValid": false,
+      "error": "appstrate:chat-turn-error:unknown"
+    },
+    {
+      "marker": "ORG0049_USER0049",
+      "sessionId": "chs_a6010b9f7fcd4d66b3ad745058cd966a",
+      "status": 200,
+      "firstTokenMs": null,
+      "totalMs": 1949.78225,
+      "complete": true,
+      "markerValid": false,
+      "error": "appstrate:chat-turn-error:unknown"
+    },
+    {
+      "marker": "ORG0050_USER0050",
+      "sessionId": "chs_40be44c19d9c48f2a3e735df5e273f4a",
+      "status": 200,
+      "firstTokenMs": null,
+      "totalMs": 2071.116916,
+      "complete": true,
+      "markerValid": false,
+      "error": "appstrate:chat-turn-error:unknown"
+    },
+    {
+      "marker": "ORG0051_USER0051",
+      "sessionId": "chs_4cd2f5b589324daeb5d157e25441cb3e",
+      "status": 200,
+      "firstTokenMs": null,
+      "totalMs": 1940.2510829999999,
+      "complete": true,
+      "markerValid": false,
+      "error": "appstrate:chat-turn-error:unknown"
+    },
+    {
+      "marker": "ORG0052_USER0052",
+      "sessionId": "chs_6ee2e5ca1a90472c970552a9a5276c13",
+      "status": 200,
+      "firstTokenMs": null,
+      "totalMs": 2004.659708,
+      "complete": true,
+      "markerValid": false,
+      "error": "appstrate:chat-turn-error:unknown"
+    },
+    {
+      "marker": "ORG0053_USER0053",
+      "sessionId": "chs_aa0f97f86b094692b2f90dd559f53cd1",
+      "status": 200,
+      "firstTokenMs": null,
+      "totalMs": 2217.142375,
+      "complete": true,
+      "markerValid": false,
+      "error": "appstrate:chat-turn-error:unknown"
+    },
+    {
+      "marker": "ORG0054_USER0054",
+      "sessionId": "chs_6bef0ea9af094b4694ce7c73f6ec93bd",
+      "status": 200,
+      "firstTokenMs": null,
+      "totalMs": 2020.0043329999999,
+      "complete": true,
+      "markerValid": false,
+      "error": "appstrate:chat-turn-error:unknown"
+    },
+    {
+      "marker": "ORG0055_USER0055",
+      "sessionId": "chs_d2e3b2f8191d4ae1aa77eab7b33c0451",
+      "status": 200,
+      "firstTokenMs": null,
+      "totalMs": 2072.8845840000004,
+      "complete": true,
+      "markerValid": false,
+      "error": "appstrate:chat-turn-error:unknown"
+    },
+    {
+      "marker": "ORG0056_USER0056",
+      "sessionId": "chs_da206fd71d5047f186558934959e989f",
+      "status": 200,
+      "firstTokenMs": null,
+      "totalMs": 2017.6592499999997,
+      "complete": true,
+      "markerValid": false,
+      "error": "appstrate:chat-turn-error:unknown"
+    },
+    {
+      "marker": "ORG0057_USER0057",
+      "sessionId": "chs_597353bbbba145e0b08bc3dd1fdc3995",
+      "status": 200,
+      "firstTokenMs": null,
+      "totalMs": 2032.4068750000001,
+      "complete": true,
+      "markerValid": false,
+      "error": "appstrate:chat-turn-error:unknown"
+    },
+    {
+      "marker": "ORG0058_USER0058",
+      "sessionId": "chs_fe602f94a8c34f679c570f49737c0ed1",
+      "status": 200,
+      "firstTokenMs": null,
+      "totalMs": 2048.9732919999997,
+      "complete": true,
+      "markerValid": false,
+      "error": "appstrate:chat-turn-error:unknown"
+    },
+    {
+      "marker": "ORG0059_USER0059",
+      "sessionId": "chs_c1483a36b37c48f2a8f909f6022394b4",
+      "status": 200,
+      "firstTokenMs": null,
+      "totalMs": 2236.0760840000003,
+      "complete": true,
+      "markerValid": false,
+      "error": "appstrate:chat-turn-error:unknown"
+    },
+    {
+      "marker": "ORG0060_USER0060",
+      "sessionId": "chs_29f74c68311a47aa96b6dce49a0fb0e5",
+      "status": 200,
+      "firstTokenMs": null,
+      "totalMs": 2083.666709,
+      "complete": true,
+      "markerValid": false,
+      "error": "appstrate:chat-turn-error:unknown"
+    }
+  ],
+  "samples": [
+    {
+      "elapsedMs": 0.02612499999999862,
+      "rss": 24199168,
+      "heapUsed": 211394,
+      "external": 27778,
+      "arrayBuffers": 0,
+      "cpuUserMicros": 26,
+      "cpuSystemMicros": 3,
+      "eventLoopDelayMs": 0
+    },
+    {
+      "elapsedMs": 101.894166,
+      "rss": 86818816,
+      "heapUsed": 150315187,
+      "external": 278158963,
+      "arrayBuffers": 140513371,
+      "cpuUserMicros": 111271,
+      "cpuSystemMicros": 16714,
+      "eventLoopDelayMs": 1.868040999999991
+    },
+    {
+      "elapsedMs": 330.101208,
+      "rss": 381796352,
+      "heapUsed": 285304212,
+      "external": 672702468,
+      "arrayBuffers": 504156510,
+      "cpuUserMicros": 508492,
+      "cpuSystemMicros": 98738,
+      "eventLoopDelayMs": 128.207042
+    },
+    {
+      "elapsedMs": 617.51575,
+      "rss": 476839936,
+      "heapUsed": 686386384,
+      "external": 410199217,
+      "arrayBuffers": 205331662,
+      "cpuUserMicros": 967278,
+      "cpuSystemMicros": 166335,
+      "eventLoopDelayMs": 187.41454199999998
+    },
+    {
+      "elapsedMs": 1065.8662080000001,
+      "rss": 594165760,
+      "heapUsed": 444486684,
+      "external": 417090217,
+      "arrayBuffers": 207132515,
+      "cpuUserMicros": 1828584,
+      "cpuSystemMicros": 259808,
+      "eventLoopDelayMs": 348.3504580000001
+    },
+    {
+      "elapsedMs": 1219.886458,
+      "rss": 664682496,
+      "heapUsed": 491242335,
+      "external": 444076357,
+      "arrayBuffers": 225727286,
+      "cpuUserMicros": 2318086,
+      "cpuSystemMicros": 289817,
+      "eventLoopDelayMs": 54.020249999999805
+    },
+    {
+      "elapsedMs": 1343.308458,
+      "rss": 675872768,
+      "heapUsed": 493567727,
+      "external": 445091311,
+      "arrayBuffers": 225925219,
+      "cpuUserMicros": 2525401,
+      "cpuSystemMicros": 301474,
+      "eventLoopDelayMs": 23.422000000000025
+    },
+    {
+      "elapsedMs": 1445.557041,
+      "rss": 690487296,
+      "heapUsed": 499604177,
+      "external": 449043905,
+      "arrayBuffers": 226377371,
+      "cpuUserMicros": 2705975,
+      "cpuSystemMicros": 307803,
+      "eventLoopDelayMs": 2.2485830000000533
+    },
+    {
+      "elapsedMs": 1556.218125,
+      "rss": 690651136,
+      "heapUsed": 499604177,
+      "external": 429892294,
+      "arrayBuffers": 205509908,
+      "cpuUserMicros": 2774442,
+      "cpuSystemMicros": 309606,
+      "eventLoopDelayMs": 10.661084000000074
+    },
+    {
+      "elapsedMs": 1659.601625,
+      "rss": 690651136,
+      "heapUsed": 479626582,
+      "external": 429892294,
+      "arrayBuffers": 205509908,
+      "cpuUserMicros": 2777827,
+      "cpuSystemMicros": 310010,
+      "eventLoopDelayMs": 3.3834999999999127
+    },
+    {
+      "elapsedMs": 1759.8047080000001,
+      "rss": 690667520,
+      "heapUsed": 479627671,
+      "external": 429892695,
+      "arrayBuffers": 205509908,
+      "cpuUserMicros": 2786996,
+      "cpuSystemMicros": 311232,
+      "eventLoopDelayMs": 0.20308300000010604
+    },
+    {
+      "elapsedMs": 2586.523416,
+      "rss": 1003356160,
+      "heapUsed": 536016812,
+      "external": 480522106,
+      "arrayBuffers": 233672336,
+      "cpuUserMicros": 4535885,
+      "cpuSystemMicros": 451108,
+      "eventLoopDelayMs": 726.7187080000001
+    },
+    {
+      "elapsedMs": 2970.9967079999997,
+      "rss": 958529536,
+      "heapUsed": 544446857,
+      "external": 500778675,
+      "arrayBuffers": 249956490,
+      "cpuUserMicros": 5289717,
+      "cpuSystemMicros": 522288,
+      "eventLoopDelayMs": 284.4732919999997
+    },
+    {
+      "elapsedMs": 3073.8916249999997,
+      "rss": 934936576,
+      "heapUsed": 578077197,
+      "external": 513550045,
+      "arrayBuffers": 249956677,
+      "cpuUserMicros": 5330316,
+      "cpuSystemMicros": 534517,
+      "eventLoopDelayMs": 2.8949170000000777
+    },
+    {
+      "elapsedMs": 3173.9794159999997,
+      "rss": 935591936,
+      "heapUsed": 578077197,
+      "external": 513550045,
+      "arrayBuffers": 249956677,
+      "cpuUserMicros": 5361427,
+      "cpuSystemMicros": 536563,
+      "eventLoopDelayMs": 0.08779099999992468
+    },
+    {
+      "elapsedMs": 3278.037958,
+      "rss": 935591936,
+      "heapUsed": 578077357,
+      "external": 513550045,
+      "arrayBuffers": 249956677,
+      "cpuUserMicros": 5368501,
+      "cpuSystemMicros": 541851,
+      "eventLoopDelayMs": 4.058542000000216
+    },
+    {
+      "elapsedMs": 3382.995708,
+      "rss": 936378368,
+      "heapUsed": 578408015,
+      "external": 513847551,
+      "arrayBuffers": 250246360,
+      "cpuUserMicros": 5395565,
+      "cpuSystemMicros": 544929,
+      "eventLoopDelayMs": 4.957750000000033
+    },
+    {
+      "elapsedMs": 3488.0833329999996,
+      "rss": 936378368,
+      "heapUsed": 578408095,
+      "external": 513847551,
+      "arrayBuffers": 250246360,
+      "cpuUserMicros": 5400026,
+      "cpuSystemMicros": 545985,
+      "eventLoopDelayMs": 5.087624999999662
+    },
+    {
+      "elapsedMs": 3593.624708,
+      "rss": 838500352,
+      "heapUsed": 580734863,
+      "external": 516816952,
+      "arrayBuffers": 253143190,
+      "cpuUserMicros": 5492277,
+      "cpuSystemMicros": 551693,
+      "eventLoopDelayMs": 5.541375000000244
+    },
+    {
+      "elapsedMs": 3696.8782499999998,
+      "rss": 838729728,
+      "heapUsed": 586022428,
+      "external": 521303698,
+      "arrayBuffers": 257488435,
+      "cpuUserMicros": 5564680,
+      "cpuSystemMicros": 556317,
+      "eventLoopDelayMs": 3.253541999999925
+    },
+    {
+      "elapsedMs": 3797.053458,
+      "rss": 838893568,
+      "heapUsed": 589976242,
+      "external": 524292962,
+      "arrayBuffers": 260385265,
+      "cpuUserMicros": 5614085,
+      "cpuSystemMicros": 558956,
+      "eventLoopDelayMs": 0.1752080000001115
+    },
+    {
+      "elapsedMs": 3900.875666,
+      "rss": 838959104,
+      "heapUsed": 594935020,
+      "external": 528767948,
+      "arrayBuffers": 264730510,
+      "cpuUserMicros": 5675119,
+      "cpuSystemMicros": 562326,
+      "eventLoopDelayMs": 3.822208000000046
+    },
+    {
+      "elapsedMs": 4001.4852499999997,
+      "rss": 838975488,
+      "heapUsed": 596581362,
+      "external": 530831928,
+      "arrayBuffers": 266758291,
+      "cpuUserMicros": 5723917,
+      "cpuSystemMicros": 565409,
+      "eventLoopDelayMs": 0.6095839999998134
+    },
+    {
+      "elapsedMs": 4102.843583,
+      "rss": 839417856,
+      "heapUsed": 599556446,
+      "external": 532867934,
+      "arrayBuffers": 268189084,
+      "cpuUserMicros": 5791460,
+      "cpuSystemMicros": 569943,
+      "eventLoopDelayMs": 1.3583330000001297
+    },
+    {
+      "elapsedMs": 4206.729958,
+      "rss": 839417856,
+      "heapUsed": 599556526,
+      "external": 532867934,
+      "arrayBuffers": 268189084,
+      "cpuUserMicros": 5795505,
+      "cpuSystemMicros": 570430,
+      "eventLoopDelayMs": 3.8863750000000437
+    },
+    {
+      "elapsedMs": 4312.408791,
+      "rss": 839417856,
+      "heapUsed": 599556606,
+      "external": 532867934,
+      "arrayBuffers": 268189084,
+      "cpuUserMicros": 5803491,
+      "cpuSystemMicros": 571034,
+      "eventLoopDelayMs": 5.6788329999999405
+    },
+    {
+      "elapsedMs": 4414.451916,
+      "rss": 839417856,
+      "heapUsed": 599556606,
+      "external": 532867934,
+      "arrayBuffers": 268189084,
+      "cpuUserMicros": 5803922,
+      "cpuSystemMicros": 571459,
+      "eventLoopDelayMs": 2.0431250000001455
+    },
+    {
+      "elapsedMs": 4515.827416,
+      "rss": 839417856,
+      "heapUsed": 599556606,
+      "external": 532867934,
+      "arrayBuffers": 268189084,
+      "cpuUserMicros": 5804158,
+      "cpuSystemMicros": 571531,
+      "eventLoopDelayMs": 1.3755000000001019
+    },
+    {
+      "elapsedMs": 4616.6230829999995,
+      "rss": 839417856,
+      "heapUsed": 599556606,
+      "external": 532867934,
+      "arrayBuffers": 268189084,
+      "cpuUserMicros": 5804444,
+      "cpuSystemMicros": 571645,
+      "eventLoopDelayMs": 0.7956669999994119
+    },
+    {
+      "elapsedMs": 4698.293666,
+      "rss": 840695808,
+      "heapUsed": 601683070,
+      "external": 535428788,
+      "arrayBuffers": 270082783,
+      "cpuUserMicros": 5838809,
+      "cpuSystemMicros": 574998,
+      "eventLoopDelayMs": 0
+    }
+  ]
+}

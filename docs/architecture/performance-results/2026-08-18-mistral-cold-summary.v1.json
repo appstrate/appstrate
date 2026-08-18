@@ -1,0 +1,1219 @@
+{
+  "schemaVersion": 1,
+  "kind": "chat-engine-performance-summary",
+  "groups": [
+    {
+      "benchmark": "mistral-real",
+      "provider": "mistral-api-key",
+      "modelId": "mistral-small-2603",
+      "engine": "ai-sdk",
+      "form": "S",
+      "profile": "cold",
+      "concurrency": 60,
+      "distribution": "1-organizations-x-60-chats",
+      "repetitions": 3,
+      "observations": [
+        "artifacts/chat-engine-performance/mistral-real-s-cold-r3/ai-sdk-S-cold-c60-o1-r1.json",
+        "artifacts/chat-engine-performance/mistral-real-s-cold-r3/ai-sdk-S-cold-c60-o1-r2.json",
+        "artifacts/chat-engine-performance/mistral-real-s-cold-r3/ai-sdk-S-cold-c60-o1-r3.json"
+      ],
+      "metrics": {
+        "firstTokenP95Ms": {
+          "estimate": 2393.050417,
+          "low": 2180.4887090000007,
+          "high": 2856.588708,
+          "confidence": 0.95,
+          "method": "deterministic-nonparametric-bootstrap"
+        },
+        "totalP95Ms": {
+          "estimate": 2509.0718749999996,
+          "low": 2444.777834,
+          "high": 2892.3184159999996,
+          "confidence": 0.95,
+          "method": "deterministic-nonparametric-bootstrap"
+        },
+        "throughputChatsPerSecond": {
+          "estimate": 14.910395512219456,
+          "low": 14.8029835466629,
+          "high": 18.873246231785824,
+          "confidence": 0.95,
+          "method": "deterministic-nonparametric-bootstrap"
+        },
+        "initialRssBytes": {
+          "estimate": 1147846656,
+          "low": 1063485440,
+          "high": 1279164416,
+          "confidence": 0.95,
+          "method": "deterministic-nonparametric-bootstrap"
+        },
+        "peakRssBytes": {
+          "estimate": 1147846656,
+          "low": 1075920896,
+          "high": 1279164416,
+          "confidence": 0.95,
+          "method": "deterministic-nonparametric-bootstrap"
+        },
+        "endRssBytes": {
+          "estimate": 1055244288,
+          "low": 984694784,
+          "high": 1192574976,
+          "confidence": 0.95,
+          "method": "deterministic-nonparametric-bootstrap"
+        },
+        "eventLoopDelayP95Ms": {
+          "estimate": 23.432708000000275,
+          "low": 7.1085000000002765,
+          "high": 35.863000000000284,
+          "confidence": 0.95,
+          "method": "deterministic-nonparametric-bootstrap"
+        },
+        "cpuUserMicros": {
+          "estimate": 755604,
+          "low": 700154,
+          "high": 3168421,
+          "confidence": 0.95,
+          "method": "deterministic-nonparametric-bootstrap"
+        },
+        "cpuSystemMicros": {
+          "estimate": 89110,
+          "low": 88808,
+          "high": 327819,
+          "confidence": 0.95,
+          "method": "deterministic-nonparametric-bootstrap"
+        },
+        "memory": {
+          "initial": {
+            "rssBytes": {
+              "estimate": 1147846656,
+              "low": 1063485440,
+              "high": 1279164416,
+              "confidence": 0.95,
+              "method": "deterministic-nonparametric-bootstrap"
+            },
+            "heapUsedBytes": {
+              "estimate": 1045552073,
+              "low": 1014484193,
+              "high": 1223315848,
+              "confidence": 0.95,
+              "method": "deterministic-nonparametric-bootstrap"
+            },
+            "externalBytes": {
+              "estimate": 960687166,
+              "low": 957767792,
+              "high": 977630681,
+              "confidence": 0.95,
+              "method": "deterministic-nonparametric-bootstrap"
+            },
+            "arrayBuffersBytes": {
+              "estimate": 514394698,
+              "low": 512810707,
+              "high": 546944547,
+              "confidence": 0.95,
+              "method": "deterministic-nonparametric-bootstrap"
+            }
+          },
+          "peak": {
+            "rssBytes": {
+              "estimate": 1147846656,
+              "low": 1075920896,
+              "high": 1279164416,
+              "confidence": 0.95,
+              "method": "deterministic-nonparametric-bootstrap"
+            },
+            "heapUsedBytes": {
+              "estimate": 1223315848,
+              "low": 1045552073,
+              "high": 1273802471,
+              "confidence": 0.95,
+              "method": "deterministic-nonparametric-bootstrap"
+            },
+            "externalBytes": {
+              "estimate": 977630681,
+              "low": 960687166,
+              "high": 1194222791,
+              "confidence": 0.95,
+              "method": "deterministic-nonparametric-bootstrap"
+            },
+            "arrayBuffersBytes": {
+              "estimate": 546944547,
+              "low": 514394698,
+              "high": 644417686,
+              "confidence": 0.95,
+              "method": "deterministic-nonparametric-bootstrap"
+            }
+          },
+          "end": {
+            "rssBytes": {
+              "estimate": 1055244288,
+              "low": 984694784,
+              "high": 1192574976,
+              "confidence": 0.95,
+              "method": "deterministic-nonparametric-bootstrap"
+            },
+            "heapUsedBytes": {
+              "estimate": 1271263580,
+              "low": 992544289,
+              "high": 1280170902,
+              "confidence": 0.95,
+              "method": "deterministic-nonparametric-bootstrap"
+            },
+            "externalBytes": {
+              "estimate": 1191838583,
+              "low": 933059537,
+              "high": 1201307685,
+              "confidence": 0.95,
+              "method": "deterministic-nonparametric-bootstrap"
+            },
+            "arrayBuffersBytes": {
+              "estimate": 644748093,
+              "low": 478423964,
+              "high": 649128786,
+              "confidence": 0.95,
+              "method": "deterministic-nonparametric-bootstrap"
+            }
+          },
+          "after30s": null,
+          "after60s": null,
+          "after120s": null
+        }
+      },
+      "totals": {
+        "requested": 180,
+        "completed": 180,
+        "rateLimited": 0,
+        "serverErrors": 0,
+        "incompleteStreams": 0,
+        "markerFailures": 0,
+        "modelCalls": 180,
+        "toolCalls": 0,
+        "inputTokens": 1498681,
+        "outputTokens": 2160,
+        "messages": 366,
+        "structuredParts": 549,
+        "usageRows": 183
+      },
+      "invariants": {
+        "continuityValid": true,
+        "isolationValid": true
+      }
+    },
+    {
+      "benchmark": "mistral-real",
+      "provider": "mistral-api-key",
+      "modelId": "mistral-small-2603",
+      "engine": "pi",
+      "form": "S",
+      "profile": "cold",
+      "concurrency": 60,
+      "distribution": "1-organizations-x-60-chats",
+      "repetitions": 3,
+      "observations": [
+        "artifacts/chat-engine-performance/mistral-real-s-cold-r3/pi-S-cold-c60-o1-r1.json",
+        "artifacts/chat-engine-performance/mistral-real-s-cold-r3/pi-S-cold-c60-o1-r2.json",
+        "artifacts/chat-engine-performance/mistral-real-s-cold-r3/pi-S-cold-c60-o1-r3.json"
+      ],
+      "metrics": {
+        "firstTokenP95Ms": {
+          "estimate": 3703.2593749999996,
+          "low": 3503.744625,
+          "high": 3809.444666,
+          "confidence": 0.95,
+          "method": "deterministic-nonparametric-bootstrap"
+        },
+        "totalP95Ms": {
+          "estimate": 3771.4431669999994,
+          "low": 3567.7232499999996,
+          "high": 3855.9365000000003,
+          "confidence": 0.95,
+          "method": "deterministic-nonparametric-bootstrap"
+        },
+        "throughputChatsPerSecond": {
+          "estimate": 11.738343709807122,
+          "low": 11.619850958845417,
+          "high": 14.505904416848436,
+          "confidence": 0.95,
+          "method": "deterministic-nonparametric-bootstrap"
+        },
+        "initialRssBytes": {
+          "estimate": 1036025856,
+          "low": 976748544,
+          "high": 1223786496,
+          "confidence": 0.95,
+          "method": "deterministic-nonparametric-bootstrap"
+        },
+        "peakRssBytes": {
+          "estimate": 1301643264,
+          "low": 1237680128,
+          "high": 1390477312,
+          "confidence": 0.95,
+          "method": "deterministic-nonparametric-bootstrap"
+        },
+        "endRssBytes": {
+          "estimate": 1133658112,
+          "low": 1123483648,
+          "high": 1264009216,
+          "confidence": 0.95,
+          "method": "deterministic-nonparametric-bootstrap"
+        },
+        "eventLoopDelayP95Ms": {
+          "estimate": 456.7560000000003,
+          "low": 413.1310830000002,
+          "high": 498.81224999999995,
+          "confidence": 0.95,
+          "method": "deterministic-nonparametric-bootstrap"
+        },
+        "cpuUserMicros": {
+          "estimate": 4155912,
+          "low": 2869628,
+          "high": 4192594,
+          "confidence": 0.95,
+          "method": "deterministic-nonparametric-bootstrap"
+        },
+        "cpuSystemMicros": {
+          "estimate": 774836,
+          "low": 697940,
+          "high": 828880,
+          "confidence": 0.95,
+          "method": "deterministic-nonparametric-bootstrap"
+        },
+        "memory": {
+          "initial": {
+            "rssBytes": {
+              "estimate": 1036025856,
+              "low": 976748544,
+              "high": 1223786496,
+              "confidence": 0.95,
+              "method": "deterministic-nonparametric-bootstrap"
+            },
+            "heapUsedBytes": {
+              "estimate": 935845333,
+              "low": 930145845,
+              "high": 956730444,
+              "confidence": 0.95,
+              "method": "deterministic-nonparametric-bootstrap"
+            },
+            "externalBytes": {
+              "estimate": 883271797,
+              "low": 878160405,
+              "high": 886734818,
+              "confidence": 0.95,
+              "method": "deterministic-nonparametric-bootstrap"
+            },
+            "arrayBuffersBytes": {
+              "estimate": 460489815,
+              "low": 455880917,
+              "high": 461123774,
+              "confidence": 0.95,
+              "method": "deterministic-nonparametric-bootstrap"
+            }
+          },
+          "peak": {
+            "rssBytes": {
+              "estimate": 1301643264,
+              "low": 1237680128,
+              "high": 1390477312,
+              "confidence": 0.95,
+              "method": "deterministic-nonparametric-bootstrap"
+            },
+            "heapUsedBytes": {
+              "estimate": 1092136604,
+              "low": 938778126,
+              "high": 1105535583,
+              "confidence": 0.95,
+              "method": "deterministic-nonparametric-bootstrap"
+            },
+            "externalBytes": {
+              "estimate": 982748835,
+              "low": 892868988,
+              "high": 992654335,
+              "confidence": 0.95,
+              "method": "deterministic-nonparametric-bootstrap"
+            },
+            "arrayBuffersBytes": {
+              "estimate": 477564643,
+              "low": 469510092,
+              "high": 483438423,
+              "confidence": 0.95,
+              "method": "deterministic-nonparametric-bootstrap"
+            }
+          },
+          "end": {
+            "rssBytes": {
+              "estimate": 1133658112,
+              "low": 1123483648,
+              "high": 1264009216,
+              "confidence": 0.95,
+              "method": "deterministic-nonparametric-bootstrap"
+            },
+            "heapUsedBytes": {
+              "estimate": 1413576290,
+              "low": 1173031830,
+              "high": 1428786923,
+              "confidence": 0.95,
+              "method": "deterministic-nonparametric-bootstrap"
+            },
+            "externalBytes": {
+              "estimate": 1296876850,
+              "low": 1069749990,
+              "high": 1317006215,
+              "confidence": 0.95,
+              "method": "deterministic-nonparametric-bootstrap"
+            },
+            "arrayBuffersBytes": {
+              "estimate": 648369901,
+              "low": 534688475,
+              "high": 675571014,
+              "confidence": 0.95,
+              "method": "deterministic-nonparametric-bootstrap"
+            }
+          },
+          "after30s": null,
+          "after60s": null,
+          "after120s": null
+        }
+      },
+      "totals": {
+        "requested": 180,
+        "completed": 180,
+        "rateLimited": 0,
+        "serverErrors": 0,
+        "incompleteStreams": 0,
+        "markerFailures": 0,
+        "modelCalls": 180,
+        "toolCalls": 0,
+        "inputTokens": 1510305,
+        "outputTokens": 2160,
+        "messages": 366,
+        "structuredParts": 732,
+        "usageRows": 183
+      },
+      "invariants": {
+        "continuityValid": true,
+        "isolationValid": true
+      }
+    },
+    {
+      "benchmark": "mistral-real",
+      "provider": "mistral-api-key",
+      "modelId": "mistral-small-2603",
+      "engine": "ai-sdk",
+      "form": "S",
+      "profile": "cold",
+      "concurrency": 64,
+      "distribution": "1-organizations-x-64-chats",
+      "repetitions": 3,
+      "observations": [
+        "artifacts/chat-engine-performance/mistral-real-s-cold-r3/ai-sdk-S-cold-c64-o1-r1.json",
+        "artifacts/chat-engine-performance/mistral-real-s-cold-r3/ai-sdk-S-cold-c64-o1-r2.json",
+        "artifacts/chat-engine-performance/mistral-real-s-cold-r3/ai-sdk-S-cold-c64-o1-r3.json"
+      ],
+      "metrics": {
+        "firstTokenP95Ms": {
+          "estimate": 2559.1663750000002,
+          "low": 2513.3669170000003,
+          "high": 3039.9985839999995,
+          "confidence": 0.95,
+          "method": "deterministic-nonparametric-bootstrap"
+        },
+        "totalP95Ms": {
+          "estimate": 2671.526292,
+          "low": 2574.0322920000003,
+          "high": 3090.1672919999996,
+          "confidence": 0.95,
+          "method": "deterministic-nonparametric-bootstrap"
+        },
+        "throughputChatsPerSecond": {
+          "estimate": 15.094305653333834,
+          "low": 14.885539506979386,
+          "high": 15.97284383743437,
+          "confidence": 0.95,
+          "method": "deterministic-nonparametric-bootstrap"
+        },
+        "initialRssBytes": {
+          "estimate": 1153269760,
+          "low": 1017970688,
+          "high": 1317142528,
+          "confidence": 0.95,
+          "method": "deterministic-nonparametric-bootstrap"
+        },
+        "peakRssBytes": {
+          "estimate": 1171013632,
+          "low": 1017970688,
+          "high": 1321402368,
+          "confidence": 0.95,
+          "method": "deterministic-nonparametric-bootstrap"
+        },
+        "endRssBytes": {
+          "estimate": 949288960,
+          "low": 757334016,
+          "high": 1167015936,
+          "confidence": 0.95,
+          "method": "deterministic-nonparametric-bootstrap"
+        },
+        "eventLoopDelayP95Ms": {
+          "estimate": 11.806500000000597,
+          "low": 5.954957999999351,
+          "high": 89.6336250000004,
+          "confidence": 0.95,
+          "method": "deterministic-nonparametric-bootstrap"
+        },
+        "cpuUserMicros": {
+          "estimate": 800182,
+          "low": 773981,
+          "high": 885487,
+          "confidence": 0.95,
+          "method": "deterministic-nonparametric-bootstrap"
+        },
+        "cpuSystemMicros": {
+          "estimate": 105463,
+          "low": 99869,
+          "high": 122152,
+          "confidence": 0.95,
+          "method": "deterministic-nonparametric-bootstrap"
+        },
+        "memory": {
+          "initial": {
+            "rssBytes": {
+              "estimate": 1153269760,
+              "low": 1017970688,
+              "high": 1317142528,
+              "confidence": 0.95,
+              "method": "deterministic-nonparametric-bootstrap"
+            },
+            "heapUsedBytes": {
+              "estimate": 1039317085,
+              "low": 1036653865,
+              "high": 1330164704,
+              "confidence": 0.95,
+              "method": "deterministic-nonparametric-bootstrap"
+            },
+            "externalBytes": {
+              "estimate": 971052749,
+              "low": 968518281,
+              "high": 1260766656,
+              "confidence": 0.95,
+              "method": "deterministic-nonparametric-bootstrap"
+            },
+            "arrayBuffersBytes": {
+              "estimate": 504761651,
+              "low": 502999782,
+              "high": 593862853,
+              "confidence": 0.95,
+              "method": "deterministic-nonparametric-bootstrap"
+            }
+          },
+          "peak": {
+            "rssBytes": {
+              "estimate": 1171013632,
+              "low": 1017970688,
+              "high": 1321402368,
+              "confidence": 0.95,
+              "method": "deterministic-nonparametric-bootstrap"
+            },
+            "heapUsedBytes": {
+              "estimate": 1039911583,
+              "low": 1036653865,
+              "high": 1217203150,
+              "confidence": 0.95,
+              "method": "deterministic-nonparametric-bootstrap"
+            },
+            "externalBytes": {
+              "estimate": 971434783,
+              "low": 968518281,
+              "high": 1140193470,
+              "confidence": 0.95,
+              "method": "deterministic-nonparametric-bootstrap"
+            },
+            "arrayBuffersBytes": {
+              "estimate": 504761838,
+              "low": 502999782,
+              "high": 605200679,
+              "confidence": 0.95,
+              "method": "deterministic-nonparametric-bootstrap"
+            }
+          },
+          "end": {
+            "rssBytes": {
+              "estimate": 949288960,
+              "low": 757334016,
+              "high": 1167015936,
+              "confidence": 0.95,
+              "method": "deterministic-nonparametric-bootstrap"
+            },
+            "heapUsedBytes": {
+              "estimate": 1258393146,
+              "low": 1223050574,
+              "high": 1285693380,
+              "confidence": 0.95,
+              "method": "deterministic-nonparametric-bootstrap"
+            },
+            "externalBytes": {
+              "estimate": 1179707227,
+              "low": 1145641262,
+              "high": 1205286372,
+              "confidence": 0.95,
+              "method": "deterministic-nonparametric-bootstrap"
+            },
+            "arrayBuffersBytes": {
+              "estimate": 639751550,
+              "low": 609191776,
+              "high": 648742920,
+              "confidence": 0.95,
+              "method": "deterministic-nonparametric-bootstrap"
+            }
+          },
+          "after30s": null,
+          "after60s": null,
+          "after120s": null
+        }
+      },
+      "totals": {
+        "requested": 192,
+        "completed": 192,
+        "rateLimited": 0,
+        "serverErrors": 0,
+        "incompleteStreams": 0,
+        "markerFailures": 0,
+        "modelCalls": 192,
+        "toolCalls": 0,
+        "inputTokens": 1598593,
+        "outputTokens": 2304,
+        "messages": 390,
+        "structuredParts": 585,
+        "usageRows": 195
+      },
+      "invariants": {
+        "continuityValid": true,
+        "isolationValid": true
+      }
+    },
+    {
+      "benchmark": "mistral-real",
+      "provider": "mistral-api-key",
+      "modelId": "mistral-small-2603",
+      "engine": "pi",
+      "form": "S",
+      "profile": "cold",
+      "concurrency": 64,
+      "distribution": "1-organizations-x-64-chats",
+      "repetitions": 3,
+      "observations": [
+        "artifacts/chat-engine-performance/mistral-real-s-cold-r3/pi-S-cold-c64-o1-r1.json",
+        "artifacts/chat-engine-performance/mistral-real-s-cold-r3/pi-S-cold-c64-o1-r2.json",
+        "artifacts/chat-engine-performance/mistral-real-s-cold-r3/pi-S-cold-c64-o1-r3.json"
+      ],
+      "metrics": {
+        "firstTokenP95Ms": {
+          "estimate": 3927.184542,
+          "low": 3804.7505830000005,
+          "high": 4218.569333,
+          "confidence": 0.95,
+          "method": "deterministic-nonparametric-bootstrap"
+        },
+        "totalP95Ms": {
+          "estimate": 3964.2672500000003,
+          "low": 3851.063083,
+          "high": 4261.930791,
+          "confidence": 0.95,
+          "method": "deterministic-nonparametric-bootstrap"
+        },
+        "throughputChatsPerSecond": {
+          "estimate": 14.190367212890486,
+          "low": 12.428390502554107,
+          "high": 15.825254243082373,
+          "confidence": 0.95,
+          "method": "deterministic-nonparametric-bootstrap"
+        },
+        "initialRssBytes": {
+          "estimate": 1080508416,
+          "low": 1053048832,
+          "high": 1180254208,
+          "confidence": 0.95,
+          "method": "deterministic-nonparametric-bootstrap"
+        },
+        "peakRssBytes": {
+          "estimate": 1180254208,
+          "low": 1136263168,
+          "high": 1230913536,
+          "confidence": 0.95,
+          "method": "deterministic-nonparametric-bootstrap"
+        },
+        "endRssBytes": {
+          "estimate": 1062371328,
+          "low": 1037615104,
+          "high": 1141391360,
+          "confidence": 0.95,
+          "method": "deterministic-nonparametric-bootstrap"
+        },
+        "eventLoopDelayP95Ms": {
+          "estimate": 573.3029160000001,
+          "low": 487.38137499999993,
+          "high": 1500.1746669999998,
+          "confidence": 0.95,
+          "method": "deterministic-nonparametric-bootstrap"
+        },
+        "cpuUserMicros": {
+          "estimate": 3094660,
+          "low": 3012335,
+          "high": 4289630,
+          "confidence": 0.95,
+          "method": "deterministic-nonparametric-bootstrap"
+        },
+        "cpuSystemMicros": {
+          "estimate": 806529,
+          "low": 683089,
+          "high": 873653,
+          "confidence": 0.95,
+          "method": "deterministic-nonparametric-bootstrap"
+        },
+        "memory": {
+          "initial": {
+            "rssBytes": {
+              "estimate": 1080508416,
+              "low": 1053048832,
+              "high": 1180254208,
+              "confidence": 0.95,
+              "method": "deterministic-nonparametric-bootstrap"
+            },
+            "heapUsedBytes": {
+              "estimate": 955069988,
+              "low": 931949947,
+              "high": 957106284,
+              "confidence": 0.95,
+              "method": "deterministic-nonparametric-bootstrap"
+            },
+            "externalBytes": {
+              "estimate": 888229535,
+              "low": 885250726,
+              "high": 901079895,
+              "confidence": 0.95,
+              "method": "deterministic-nonparametric-bootstrap"
+            },
+            "arrayBuffersBytes": {
+              "estimate": 465210822,
+              "low": 456010837,
+              "high": 479602117,
+              "confidence": 0.95,
+              "method": "deterministic-nonparametric-bootstrap"
+            }
+          },
+          "peak": {
+            "rssBytes": {
+              "estimate": 1180254208,
+              "low": 1136263168,
+              "high": 1230913536,
+              "confidence": 0.95,
+              "method": "deterministic-nonparametric-bootstrap"
+            },
+            "heapUsedBytes": {
+              "estimate": 1092623144,
+              "low": 931949947,
+              "high": 1438868858,
+              "confidence": 0.95,
+              "method": "deterministic-nonparametric-bootstrap"
+            },
+            "externalBytes": {
+              "estimate": 979744712,
+              "low": 888229535,
+              "high": 1327080028,
+              "confidence": 0.95,
+              "method": "deterministic-nonparametric-bootstrap"
+            },
+            "arrayBuffersBytes": {
+              "estimate": 478276679,
+              "low": 465210822,
+              "high": 681252787,
+              "confidence": 0.95,
+              "method": "deterministic-nonparametric-bootstrap"
+            }
+          },
+          "end": {
+            "rssBytes": {
+              "estimate": 1062371328,
+              "low": 1037615104,
+              "high": 1141391360,
+              "confidence": 0.95,
+              "method": "deterministic-nonparametric-bootstrap"
+            },
+            "heapUsedBytes": {
+              "estimate": 1396195436,
+              "low": 1293058422,
+              "high": 1467006805,
+              "confidence": 0.95,
+              "method": "deterministic-nonparametric-bootstrap"
+            },
+            "externalBytes": {
+              "estimate": 1279187386,
+              "low": 1186088284,
+              "high": 1348424507,
+              "confidence": 0.95,
+              "method": "deterministic-nonparametric-bootstrap"
+            },
+            "arrayBuffersBytes": {
+              "estimate": 675744641,
+              "low": 587442771,
+              "high": 693820452,
+              "confidence": 0.95,
+              "method": "deterministic-nonparametric-bootstrap"
+            }
+          },
+          "after30s": null,
+          "after60s": null,
+          "after120s": null
+        }
+      },
+      "totals": {
+        "requested": 192,
+        "completed": 192,
+        "rateLimited": 0,
+        "serverErrors": 0,
+        "incompleteStreams": 0,
+        "markerFailures": 0,
+        "modelCalls": 192,
+        "toolCalls": 0,
+        "inputTokens": 1611200,
+        "outputTokens": 2304,
+        "messages": 390,
+        "structuredParts": 780,
+        "usageRows": 195
+      },
+      "invariants": {
+        "continuityValid": true,
+        "isolationValid": true
+      }
+    },
+    {
+      "benchmark": "mistral-real",
+      "provider": "mistral-api-key",
+      "modelId": "mistral-small-2603",
+      "engine": "ai-sdk",
+      "form": "S",
+      "profile": "cold",
+      "concurrency": 100,
+      "distribution": "1-organizations-x-100-chats",
+      "repetitions": 3,
+      "observations": [
+        "artifacts/chat-engine-performance/mistral-real-s-cold-r3/ai-sdk-S-cold-c100-o1-r1.json",
+        "artifacts/chat-engine-performance/mistral-real-s-cold-r3/ai-sdk-S-cold-c100-o1-r2.json",
+        "artifacts/chat-engine-performance/mistral-real-s-cold-r3/ai-sdk-S-cold-c100-o1-r3.json"
+      ],
+      "metrics": {
+        "firstTokenP95Ms": {
+          "estimate": 3964.165667,
+          "low": 3392.772833,
+          "high": 4087.898791,
+          "confidence": 0.95,
+          "method": "deterministic-nonparametric-bootstrap"
+        },
+        "totalP95Ms": {
+          "estimate": 4021.827333,
+          "low": 3469.1134169999996,
+          "high": 4168.576083,
+          "confidence": 0.95,
+          "method": "deterministic-nonparametric-bootstrap"
+        },
+        "throughputChatsPerSecond": {
+          "estimate": 22.920271613781633,
+          "low": 17.795141352944423,
+          "high": 26.2301248196556,
+          "confidence": 0.95,
+          "method": "deterministic-nonparametric-bootstrap"
+        },
+        "initialRssBytes": {
+          "estimate": 1257897984,
+          "low": 1043316736,
+          "high": 1306345472,
+          "confidence": 0.95,
+          "method": "deterministic-nonparametric-bootstrap"
+        },
+        "peakRssBytes": {
+          "estimate": 1261010944,
+          "low": 1043316736,
+          "high": 1306345472,
+          "confidence": 0.95,
+          "method": "deterministic-nonparametric-bootstrap"
+        },
+        "endRssBytes": {
+          "estimate": 1211777024,
+          "low": 968933376,
+          "high": 1282621440,
+          "confidence": 0.95,
+          "method": "deterministic-nonparametric-bootstrap"
+        },
+        "eventLoopDelayP95Ms": {
+          "estimate": 25.584249999999884,
+          "low": 14.637625000000298,
+          "high": 42.141999999999825,
+          "confidence": 0.95,
+          "method": "deterministic-nonparametric-bootstrap"
+        },
+        "cpuUserMicros": {
+          "estimate": 1069978,
+          "low": 1003928,
+          "high": 1196756,
+          "confidence": 0.95,
+          "method": "deterministic-nonparametric-bootstrap"
+        },
+        "cpuSystemMicros": {
+          "estimate": 118856,
+          "low": 115886,
+          "high": 149762,
+          "confidence": 0.95,
+          "method": "deterministic-nonparametric-bootstrap"
+        },
+        "memory": {
+          "initial": {
+            "rssBytes": {
+              "estimate": 1257897984,
+              "low": 1043316736,
+              "high": 1306345472,
+              "confidence": 0.95,
+              "method": "deterministic-nonparametric-bootstrap"
+            },
+            "heapUsedBytes": {
+              "estimate": 1098120255,
+              "low": 957964928,
+              "high": 1099185272,
+              "confidence": 0.95,
+              "method": "deterministic-nonparametric-bootstrap"
+            },
+            "externalBytes": {
+              "estimate": 1013952063,
+              "low": 962910611,
+              "high": 1014989544,
+              "confidence": 0.95,
+              "method": "deterministic-nonparametric-bootstrap"
+            },
+            "arrayBuffersBytes": {
+              "estimate": 524985569,
+              "low": 516289065,
+              "high": 526049283,
+              "confidence": 0.95,
+              "method": "deterministic-nonparametric-bootstrap"
+            }
+          },
+          "peak": {
+            "rssBytes": {
+              "estimate": 1261010944,
+              "low": 1043316736,
+              "high": 1306345472,
+              "confidence": 0.95,
+              "method": "deterministic-nonparametric-bootstrap"
+            },
+            "heapUsedBytes": {
+              "estimate": 1098830404,
+              "low": 957964928,
+              "high": 1099185272,
+              "confidence": 0.95,
+              "method": "deterministic-nonparametric-bootstrap"
+            },
+            "externalBytes": {
+              "estimate": 1014341108,
+              "low": 962910611,
+              "high": 1014989544,
+              "confidence": 0.95,
+              "method": "deterministic-nonparametric-bootstrap"
+            },
+            "arrayBuffersBytes": {
+              "estimate": 524985756,
+              "low": 516289065,
+              "high": 526049283,
+              "confidence": 0.95,
+              "method": "deterministic-nonparametric-bootstrap"
+            }
+          },
+          "end": {
+            "rssBytes": {
+              "estimate": 1211777024,
+              "low": 968933376,
+              "high": 1282621440,
+              "confidence": 0.95,
+              "method": "deterministic-nonparametric-bootstrap"
+            },
+            "heapUsedBytes": {
+              "estimate": 1060373081,
+              "low": 1026537596,
+              "high": 1388797117,
+              "confidence": 0.95,
+              "method": "deterministic-nonparametric-bootstrap"
+            },
+            "externalBytes": {
+              "estimate": 996345364,
+              "low": 964917324,
+              "high": 1297255849,
+              "confidence": 0.95,
+              "method": "deterministic-nonparametric-bootstrap"
+            },
+            "arrayBuffersBytes": {
+              "estimate": 510521194,
+              "low": 492963403,
+              "high": 701005859,
+              "confidence": 0.95,
+              "method": "deterministic-nonparametric-bootstrap"
+            }
+          },
+          "after30s": null,
+          "after60s": null,
+          "after120s": null
+        }
+      },
+      "totals": {
+        "requested": 300,
+        "completed": 300,
+        "rateLimited": 0,
+        "serverErrors": 0,
+        "incompleteStreams": 0,
+        "markerFailures": 0,
+        "modelCalls": 300,
+        "toolCalls": 0,
+        "inputTokens": 2497800,
+        "outputTokens": 3600,
+        "messages": 606,
+        "structuredParts": 909,
+        "usageRows": 303
+      },
+      "invariants": {
+        "continuityValid": true,
+        "isolationValid": true
+      }
+    },
+    {
+      "benchmark": "mistral-real",
+      "provider": "mistral-api-key",
+      "modelId": "mistral-small-2603",
+      "engine": "pi",
+      "form": "S",
+      "profile": "cold",
+      "concurrency": 100,
+      "distribution": "1-organizations-x-100-chats",
+      "repetitions": 3,
+      "observations": [
+        "artifacts/chat-engine-performance/mistral-real-s-cold-r3/pi-S-cold-c100-o1-r1.json",
+        "artifacts/chat-engine-performance/mistral-real-s-cold-r3/pi-S-cold-c100-o1-r2.json",
+        "artifacts/chat-engine-performance/mistral-real-s-cold-r3/pi-S-cold-c100-o1-r3.json"
+      ],
+      "metrics": {
+        "firstTokenP95Ms": {
+          "estimate": 5209.672,
+          "low": 5130.099791999999,
+          "high": 5414.525083,
+          "confidence": 0.95,
+          "method": "deterministic-nonparametric-bootstrap"
+        },
+        "totalP95Ms": {
+          "estimate": 5264.954709000001,
+          "low": 5186.213250000001,
+          "high": 5469.27375,
+          "confidence": 0.95,
+          "method": "deterministic-nonparametric-bootstrap"
+        },
+        "throughputChatsPerSecond": {
+          "estimate": 14.657475948091138,
+          "low": 14.608580879540654,
+          "high": 17.34408883642302,
+          "confidence": 0.95,
+          "method": "deterministic-nonparametric-bootstrap"
+        },
+        "initialRssBytes": {
+          "estimate": 1085079552,
+          "low": 784875520,
+          "high": 1093009408,
+          "confidence": 0.95,
+          "method": "deterministic-nonparametric-bootstrap"
+        },
+        "peakRssBytes": {
+          "estimate": 1305083904,
+          "low": 1166180352,
+          "high": 1388822528,
+          "confidence": 0.95,
+          "method": "deterministic-nonparametric-bootstrap"
+        },
+        "endRssBytes": {
+          "estimate": 1149042688,
+          "low": 1048805376,
+          "high": 1261387776,
+          "confidence": 0.95,
+          "method": "deterministic-nonparametric-bootstrap"
+        },
+        "eventLoopDelayP95Ms": {
+          "estimate": 764.3016670000002,
+          "low": 337.68645899999956,
+          "high": 910.9596250000002,
+          "confidence": 0.95,
+          "method": "deterministic-nonparametric-bootstrap"
+        },
+        "cpuUserMicros": {
+          "estimate": 3873699,
+          "low": 3808569,
+          "high": 3960744,
+          "confidence": 0.95,
+          "method": "deterministic-nonparametric-bootstrap"
+        },
+        "cpuSystemMicros": {
+          "estimate": 1056044,
+          "low": 1020512,
+          "high": 1111086,
+          "confidence": 0.95,
+          "method": "deterministic-nonparametric-bootstrap"
+        },
+        "memory": {
+          "initial": {
+            "rssBytes": {
+              "estimate": 1085079552,
+              "low": 784875520,
+              "high": 1093009408,
+              "confidence": 0.95,
+              "method": "deterministic-nonparametric-bootstrap"
+            },
+            "heapUsedBytes": {
+              "estimate": 933559758,
+              "low": 496077206,
+              "high": 935256154,
+              "confidence": 0.95,
+              "method": "deterministic-nonparametric-bootstrap"
+            },
+            "externalBytes": {
+              "estimate": 893085680,
+              "low": 438265992,
+              "high": 894501412,
+              "confidence": 0.95,
+              "method": "deterministic-nonparametric-bootstrap"
+            },
+            "arrayBuffersBytes": {
+              "estimate": 469655703,
+              "low": 213400144,
+              "high": 470867867,
+              "confidence": 0.95,
+              "method": "deterministic-nonparametric-bootstrap"
+            }
+          },
+          "peak": {
+            "rssBytes": {
+              "estimate": 1305083904,
+              "low": 1166180352,
+              "high": 1388822528,
+              "confidence": 0.95,
+              "method": "deterministic-nonparametric-bootstrap"
+            },
+            "heapUsedBytes": {
+              "estimate": 1154210325,
+              "low": 1138649148,
+              "high": 1524415233,
+              "confidence": 0.95,
+              "method": "deterministic-nonparametric-bootstrap"
+            },
+            "externalBytes": {
+              "estimate": 1034636579,
+              "low": 1028236709,
+              "high": 1397482150,
+              "confidence": 0.95,
+              "method": "deterministic-nonparametric-bootstrap"
+            },
+            "arrayBuffersBytes": {
+              "estimate": 502219083,
+              "low": 457015983,
+              "high": 732266280,
+              "confidence": 0.95,
+              "method": "deterministic-nonparametric-bootstrap"
+            }
+          },
+          "end": {
+            "rssBytes": {
+              "estimate": 1149042688,
+              "low": 1048805376,
+              "high": 1261387776,
+              "confidence": 0.95,
+              "method": "deterministic-nonparametric-bootstrap"
+            },
+            "heapUsedBytes": {
+              "estimate": 1235936302,
+              "low": 1009222563,
+              "high": 1670485991,
+              "confidence": 0.95,
+              "method": "deterministic-nonparametric-bootstrap"
+            },
+            "externalBytes": {
+              "estimate": 1120044170,
+              "low": 914223858,
+              "high": 1541071395,
+              "confidence": 0.95,
+              "method": "deterministic-nonparametric-bootstrap"
+            },
+            "arrayBuffersBytes": {
+              "estimate": 515856916,
+              "low": 457884919,
+              "high": 820920856,
+              "confidence": 0.95,
+              "method": "deterministic-nonparametric-bootstrap"
+            }
+          },
+          "after30s": null,
+          "after60s": null,
+          "after120s": null
+        }
+      },
+      "totals": {
+        "requested": 300,
+        "completed": 300,
+        "rateLimited": 0,
+        "serverErrors": 0,
+        "incompleteStreams": 0,
+        "markerFailures": 0,
+        "modelCalls": 300,
+        "toolCalls": 0,
+        "inputTokens": 2517358,
+        "outputTokens": 3600,
+        "messages": 606,
+        "structuredParts": 1212,
+        "usageRows": 303
+      },
+      "invariants": {
+        "continuityValid": true,
+        "isolationValid": true
+      }
+    }
+  ],
+  "memorySlopes": [
+    {
+      "benchmark": "mistral-real",
+      "provider": "mistral-api-key",
+      "modelId": "mistral-small-2603",
+      "engine": "ai-sdk",
+      "form": "S",
+      "profile": "cold",
+      "distribution": "single-organization",
+      "fromConcurrency": 60,
+      "toConcurrency": 100,
+      "pairedRepetitions": 3,
+      "rssBytesPerChat": {
+        "estimate": 2829107.2,
+        "low": -5896192,
+        "high": 5760614.4,
+        "confidence": 0.95,
+        "method": "deterministic-nonparametric-bootstrap"
+      }
+    },
+    {
+      "benchmark": "mistral-real",
+      "provider": "mistral-api-key",
+      "modelId": "mistral-small-2603",
+      "engine": "pi",
+      "form": "S",
+      "profile": "cold",
+      "distribution": "single-organization",
+      "fromConcurrency": 60,
+      "toConcurrency": 100,
+      "pairedRepetitions": 3,
+      "rssBytesPerChat": {
+        "estimate": 1685094.4,
+        "low": -5607424,
+        "high": 2179481.6,
+        "confidence": 0.95,
+        "method": "deterministic-nonparametric-bootstrap"
+      }
+    }
+  ],
+  "generatedAt": "2026-08-18T23:32:41.305Z",
+  "command": "/Users/olivier/.bun/bin/bun /Users/olivier/Dev/appstrate/worktrees/chat-pi-unified-engine-phase4/scripts/chat-engine-performance-report.ts --input=artifacts/chat-engine-performance/mistral-real-s-cold-r3 --output=docs/architecture/performance-results/2026-08-18-mistral-cold-summary.v1.json",
+  "inputDirectories": ["artifacts/chat-engine-performance/mistral-real-s-cold-r3"]
+}

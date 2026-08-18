@@ -365,9 +365,16 @@ Les invariants fonctionnels passent, mais Pi échoue aux seuils locaux de latenc
 décision locale est donc NO GO avant canary. La pente mémoire locale reste non concluante et aucune
 capacité cloud n'est déduite de ces données.
 
-Le comparatif Mistral reste en attente d'une clé `MISTRAL_API_KEY`. Les essais Codex et Claude Code
-restent en attente d'une validation Chrome Beta disponible. Ils seront rapportés comme essais Pi
-complémentaires, jamais comme comparaison directe avec AI SDK.
+Le comparatif Mistral réel S est terminé à 60, 64 et 100 pour les profils froid et chaud, avec trois
+répétitions, ledger réconcilié et récupération à 30, 60 et 120 secondes. Mistral n'a produit aucun
+429 jusqu'à 100. Pi reste sous le seuil de débit à 100 organisations chaudes. La forme H réelle a
+mis en évidence un refus Mistral propre à la conversion AI SDK du raisonnement historique, tandis
+que Pi termine la même conversation.
+
+Les essais Pi complémentaires Codex et Claude Code sont terminés à 1, 10 et 30, sans refus ni perte
+de persistance. Ils ne sont pas un comparatif direct avec AI SDK. Le niveau 60 n'a pas été tenté
+faute de politique d'abonnement explicitement compatible. Chrome Beta atteint le port 3400, mais
+son contrôle final reste bloqué par une interface d'extension ouverte.
 
 Le rapport, les commandes, le journal de décision prêt à reporter et les artifacts versionnés se
 trouvent dans [CHAT_PI_PERFORMANCE_REPORT.md](./CHAT_PI_PERFORMANCE_REPORT.md).
