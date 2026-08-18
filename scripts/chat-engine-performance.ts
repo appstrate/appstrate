@@ -12,11 +12,9 @@
 import { $ } from "bun";
 import {
   CHAT_PERFORMANCE_OBSERVATION_VERSION,
-  forwardMistralChatCompletion,
   memoryCheckpoints,
   normalizeFetchRequest,
   parseDotEnvValue,
-  parseOpenAiSseUsage,
   summarizeDurations,
   summarizeWaveActivity,
   waitForWorkerExit,
@@ -64,6 +62,7 @@ interface SyntheticIdentity {
   orgSlug: string;
   appId: string;
   sessionId: string;
+  cookie?: string;
 }
 
 type FetchLike = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
@@ -291,6 +290,7 @@ async function runWorker(config: WorkerConfig): Promise<void> {
     import("../apps/api/src/middleware/error-handler.ts"),
   ]);
   const { db } = dbModule;
+  const originalFetch = globalThis.fetch;
   const identities = await seedIdentities(
     db,
     schema,
@@ -298,6 +298,23 @@ async function runWorker(config: WorkerConfig): Promise<void> {
     "perf",
     config.organizations,
   );
+  const realAppstrate = config.benchmark === "mistral-real";
+  let realServer: ReturnType<typeof Bun.serve> | null = null;
+  if (realAppstrate) {
+    await seedRealMistralContext(db, schema, identities, config);
+    process.env.CHAT_PI_ENGINE_ORG_IDS =
+      config.engine === "pi"
+        ? [...new Set(identities.map((identity) => identity.orgId))].join(",")
+        : "";
+    const apiEntrypoint = new URL("../apps/api/src/index.ts", import.meta.url).href;
+    const serverConfig = (
+      (await import(apiEntrypoint)) as {
+        default: Parameters<typeof Bun.serve>[0];
+      }
+    ).default;
+    realServer = Bun.serve(serverConfig);
+    await waitForHealthyApi(originalFetch, "http://127.0.0.1:3400/health");
+  }
   const sessionByMarker = new Map(
     identities.map((identity) => [identity.marker, identity.sessionId] as const),
   );
@@ -316,9 +333,7 @@ async function runWorker(config: WorkerConfig): Promise<void> {
     statuses: { ok: 0, rateLimited: 0, serverError: 0 },
     providerStatuses: { ok: 0, rateLimited: 0, serverError: 0, otherError: 0 },
   };
-  const providerUsageTasks: Promise<void>[] = [];
 
-  const originalFetch = globalThis.fetch;
   const sharedDispatchOptions = {
     db,
     schema,
@@ -336,25 +351,10 @@ async function runWorker(config: WorkerConfig): Promise<void> {
       counters.outputTokens += usage.outputTokens;
     },
   };
-  const dispatch =
-    config.benchmark === "mistral-real"
-      ? createMistralDispatch({
-          ...sharedDispatchOptions,
-          apiKey: await loadProviderKey(config),
-          modelId: config.providerModelId,
-          upstreamFetch: originalFetch.bind(globalThis),
-          usageTasks: providerUsageTasks,
-          isMeasuredWave: () => phase === "wave",
-          onProviderStatus: (status) => {
-            if (phase !== "wave") return;
-            if (status >= 200 && status < 300) counters.providerStatuses.ok += 1;
-            else if (status === 429) counters.providerStatuses.rateLimited += 1;
-            else if (status >= 500) counters.providerStatuses.serverError += 1;
-            else counters.providerStatuses.otherError += 1;
-          },
-        })
-      : createControlledDispatch(sharedDispatchOptions);
-  globalThis.fetch = dispatch as typeof fetch;
+  const dispatch = realAppstrate
+    ? originalFetch.bind(globalThis)
+    : createControlledDispatch(sharedDispatchOptions);
+  if (!realAppstrate) globalThis.fetch = dispatch as typeof fetch;
 
   const deps = {
     dispatch,
@@ -395,16 +395,21 @@ async function runWorker(config: WorkerConfig): Promise<void> {
   ): Promise<TurnObservation> => {
     const startedAt = performance.now();
     try {
-      const response = await app.request(`/api/chat/${identity.orgId}`, {
+      const headers = {
+        "content-type": "application/json",
+        "x-application-id": identity.appId,
+        "x-org-id": identity.orgId,
+        "x-performance-marker": identity.marker,
+        ...(identity.cookie ? { cookie: identity.cookie } : {}),
+      };
+      const requestInit = {
         method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "x-application-id": identity.appId,
-          "x-org-id": identity.orgId,
-          "x-performance-marker": identity.marker,
-        },
+        headers,
         body: JSON.stringify({ id: identity.sessionId, messages }),
-      });
+      };
+      const response = realAppstrate
+        ? await originalFetch("http://127.0.0.1:3400/api/chat", requestInit)
+        : await app.request(`/api/chat/${identity.orgId}`, requestInit);
       if (response.status === 200) counters.statuses.ok += 1;
       else if (response.status === 429) counters.statuses.rateLimited += 1;
       else if (response.status >= 500) counters.statuses.serverError += 1;
@@ -444,10 +449,12 @@ async function runWorker(config: WorkerConfig): Promise<void> {
     await waitForPersistence(db, schema, identities[0]!.sessionId, 2);
   }
 
+  const usageIdsBeforeWave = realAppstrate
+    ? await selectUsageIds(db, schema, identities)
+    : new Set<string>();
   phase = "wave";
   const waveStartedAtMs = performance.now() - processStartedAt;
   const turns = await Promise.all(identities.map((identity) => runTurn(identity)));
-  await Promise.all(providerUsageTasks);
   await Promise.all(
     identities.map((identity, index) =>
       turns[index]?.status === 200
@@ -455,9 +462,29 @@ async function runWorker(config: WorkerConfig): Promise<void> {
         : Promise.resolve(),
     ),
   );
+  if (realAppstrate) {
+    const expectedUsageRows =
+      usageIdsBeforeWave.size +
+      turns.filter((turn) => turn.status === 200 && turn.complete && turn.error === null).length;
+    await waitForUsageCount(db, schema, identities, expectedUsageRows);
+    const waveUsage = await selectNewUsage(db, schema, identities, usageIdsBeforeWave);
+    counters.waveModelCalls = waveUsage.length;
+    counters.inputTokens = waveUsage.reduce(
+      (total: number, row: any) => total + (row.inputTokens ?? 0) + (row.cacheReadTokens ?? 0),
+      0,
+    );
+    counters.outputTokens = waveUsage.reduce(
+      (total: number, row: any) => total + (row.outputTokens ?? 0),
+      0,
+    );
+    counters.providerStatuses.ok = waveUsage.length;
+  }
   const waveEndedAtMs = performance.now() - processStartedAt;
 
   phase = "continuity";
+  const usageCountBeforeContinuity = realAppstrate
+    ? (await selectUsageIds(db, schema, identities)).size
+    : 0;
   const continuityIdentity = identities[0]!;
   const persisted = await db
     .select({ content: schema.chatMessages.content })
@@ -469,11 +496,23 @@ async function runWorker(config: WorkerConfig): Promise<void> {
     {
       id: `u-cont-${config.repetition}`,
       role: "user",
-      parts: [{ type: "text", text: `continue ${continuityIdentity.marker}` }],
+      parts: [
+        {
+          type: "text",
+          text: `Réponds uniquement avec ce code de vérification, sans outil : ${continuityIdentity.marker}`,
+        },
+      ],
     },
   ]);
   await waitForPersistence(db, schema, continuityIdentity.sessionId, 4);
-  await Promise.all(providerUsageTasks);
+  if (
+    realAppstrate &&
+    continuity.status === 200 &&
+    continuity.complete &&
+    continuity.error === null
+  ) {
+    await waitForUsageCount(db, schema, identities, usageCountBeforeContinuity + 1);
+  }
 
   const recoveryDeadline = performance.now() + config.recoveryMs;
   while (performance.now() < recoveryDeadline) {
@@ -509,7 +548,7 @@ async function runWorker(config: WorkerConfig): Promise<void> {
     }
   }
 
-  globalThis.fetch = originalFetch;
+  if (!realAppstrate) globalThis.fetch = originalFetch;
 
   const completed = turns.filter((turn) => turn.status === 200 && turn.complete);
   const waveActivity = summarizeWaveActivity(samples, { waveStartedAtMs, waveEndedAtMs });
@@ -583,6 +622,7 @@ async function runWorker(config: WorkerConfig): Promise<void> {
     samples,
   };
   await Bun.write(config.outputFile, `${JSON.stringify(observation, null, 2)}\n`);
+  realServer?.stop(true);
   process.exit(0);
 }
 
@@ -597,10 +637,13 @@ function configureIsolatedEnvironment(config: WorkerConfig): void {
   process.env.CONNECT_SESSION_SECRET = "performance-connect-secret-at-least-16";
   process.env.CONNECTION_ENCRYPTION_KEY = btoa("0123456789abcdef0123456789abcdef");
   process.env.PORT = "3400";
-  process.env.APP_URL = "http://chat-pi-unified-engine-phase4.localhost:3400";
+  process.env.APP_URL = "http://localhost:3400";
   process.env.TRUSTED_ORIGINS = process.env.APP_URL;
   process.env.CHAT_SELF_ORIGIN = "http://127.0.0.1:3400";
   process.env.CHAT_PI_MAX_CONCURRENCY = String(config.piMaxConcurrency);
+  process.env.MODULES =
+    "mcp,core-providers,@appstrate/module-codex,@appstrate/module-claude-code,@appstrate/module-chat";
+  process.env.OAUTH_REFRESH_WORKER_ENABLED = "false";
   process.env.LOG_LEVEL = "error";
 }
 
@@ -681,101 +724,6 @@ function createControlledDispatch(options: {
   };
 }
 
-function createMistralDispatch(options: {
-  db: any;
-  schema: any;
-  sessionByMarker: Map<string, string>;
-  identityByOrg: Map<string, any>;
-  identityByMarker: Map<string, any>;
-  apiKey: string;
-  modelId: string;
-  upstreamFetch: FetchLike;
-  usageTasks: Promise<void>[];
-  isMeasuredWave(): boolean;
-  onToolCall(): void;
-  onInference(usage: { inputTokens: number; outputTokens: number }): void;
-  onProviderStatus(status: number): void;
-}): FetchLike {
-  return async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
-    const request = normalizeFetchRequest(input, init);
-    const url = new URL(request.url);
-    if (url.pathname === "/api/models") return mistralModelsResponse(options.modelId);
-    if (url.pathname === "/api/me/context") {
-      const identity = options.identityByOrg.get(request.headers.get("x-org-id") ?? "");
-      return Response.json({
-        user: identity?.user ?? { name: "Synthetic", email: "synthetic@example.test" },
-        org: { role: "owner", name: identity?.orgName ?? "Synthetic", slug: identity?.orgSlug },
-        connections: [],
-        agents: [],
-        skills: [],
-        recent_runs: [],
-      });
-    }
-    if (url.pathname.startsWith("/api/mcp/")) {
-      return mcpResponse(request, {
-        enableControlledTool: false,
-        onToolCall: options.onToolCall,
-      });
-    }
-    if (!url.pathname.endsWith("/chat/completions")) {
-      return new Response(`unexpected Mistral dispatch: ${url.pathname}`, { status: 404 });
-    }
-
-    const serialized = await request.clone().text();
-    const marker = [...options.sessionByMarker.keys()].find((candidate) =>
-      serialized.includes(candidate),
-    );
-    if (!marker) return new Response("missing synthetic marker", { status: 400 });
-    const startedAt = performance.now();
-    const measuredWave = options.isMeasuredWave();
-    const upstream = await forwardMistralChatCompletion(request, {
-      apiKey: options.apiKey,
-      modelId: options.modelId,
-      fetch: options.upstreamFetch,
-    });
-    if (measuredWave) options.onProviderStatus(upstream.status);
-    if (!upstream.body || !upstream.ok) {
-      if (measuredWave) options.onInference({ inputTokens: 0, outputTokens: 0 });
-      return upstream;
-    }
-
-    const identity = options.identityByMarker.get(marker)!;
-    const sessionId = options.sessionByMarker.get(marker)!;
-    const [clientBody, meteringBody] = upstream.body.tee();
-    options.usageTasks.push(
-      (async () => {
-        const captured = await new Response(meteringBody).text();
-        const usage = parseOpenAiSseUsage(captured);
-        if (measuredWave) options.onInference(usage ?? { inputTokens: 0, outputTokens: 0 });
-        if (!usage) return;
-        await options.db.insert(options.schema.llmUsage).values({
-          source: "proxy",
-          orgId: identity.orgId,
-          userId: identity.user.id,
-          chatSessionId: sessionId,
-          model: "mistral-benchmark-preset",
-          realModel: options.modelId,
-          api: "openai-completions",
-          credentialSource: "org",
-          inputTokens: usage.inputTokens,
-          outputTokens: usage.outputTokens,
-          cacheReadTokens: 0,
-          cacheWriteTokens: 0,
-          costUsd: 0,
-          pricingStatus: "unpriced",
-          durationMs: Math.round(performance.now() - startedAt),
-          requestId: crypto.randomUUID(),
-        });
-      })(),
-    );
-    return new Response(clientBody, {
-      status: upstream.status,
-      statusText: upstream.statusText,
-      headers: upstream.headers,
-    });
-  };
-}
-
 function modelsResponse(): Response {
   return Response.json({
     object: "list",
@@ -787,32 +735,6 @@ function modelsResponse(): Response {
         modelId: "controlled-v1",
         providerId: "controlled",
         apiShape: "openai-completions",
-        enabled: true,
-        is_default: true,
-        input: ["text"],
-        contextWindow: 32_768,
-        maxTokens: 256,
-        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-        generation: {
-          temperature: "unsupported",
-          reasoning: { supported: "unsupported", adaptive: null, levels: {} },
-        },
-      },
-    ],
-  });
-}
-
-function mistralModelsResponse(modelId: string): Response {
-  return Response.json({
-    object: "list",
-    hasMore: false,
-    data: [
-      {
-        id: "mistral-benchmark-preset",
-        label: `Mistral benchmark (${modelId})`,
-        modelId,
-        providerId: "mistral",
-        apiShape: "mistral-conversations",
         enabled: true,
         is_default: true,
         input: ["text"],
@@ -1010,7 +932,18 @@ async function readUiStream(
 
 function conversation(form: ConversationForm, marker: string): any[] {
   if (form === "S") {
-    return [{ id: `u-${marker}`, role: "user", parts: [{ type: "text", text: `echo ${marker}` }] }];
+    return [
+      {
+        id: `u-${marker}`,
+        role: "user",
+        parts: [
+          {
+            type: "text",
+            text: `Réponds uniquement avec ce code de vérification, sans outil : ${marker}`,
+          },
+        ],
+      },
+    ];
   }
   const history = [
     { id: `u0-${marker}`, role: "user", parts: [{ type: "text", text: `context ${marker}` }] },
@@ -1049,7 +982,7 @@ function conversation(form: ConversationForm, marker: string): any[] {
           text:
             form === "T"
               ? `Call controlled_echo once with marker ${marker}, then echo its result.`
-              : `echo ${marker}`,
+              : `Réponds uniquement avec ce code de vérification, sans outil : ${marker}`,
         },
       ],
     },
@@ -1123,6 +1056,149 @@ async function seedIdentities(
     })),
   );
   return identities;
+}
+
+async function seedRealMistralContext(
+  db: any,
+  schema: any,
+  identities: SyntheticIdentity[],
+  config: WorkerConfig,
+): Promise<void> {
+  const [{ encryptCredentials }, { eq }] = await Promise.all([
+    import("@appstrate/connect"),
+    import("../packages/db/node_modules/drizzle-orm"),
+  ]);
+  const apiKey = await loadProviderKey(config);
+  const secret = process.env.BETTER_AUTH_SECRET!;
+  await db.insert(schema.profiles).values(
+    identities.map((identity) => ({
+      id: identity.user.id,
+      displayName: identity.user.name,
+      language: "fr",
+    })),
+  );
+  for (const identity of identities) {
+    const token = crypto.randomUUID().replaceAll("-", "") + crypto.randomUUID().slice(0, 16);
+    identity.cookie = await signBenchmarkSessionCookie(token, secret);
+    await db.insert(schema.session).values({
+      id: crypto.randomUUID(),
+      token,
+      userId: identity.user.id,
+      expiresAt: new Date(Date.now() + 3_600_000),
+      realm: "platform",
+    });
+  }
+
+  for (const orgId of [...new Set(identities.map((identity) => identity.orgId))]) {
+    const owner = identities.find((identity) => identity.orgId === orgId)!;
+    const [credential] = await db
+      .insert(schema.modelProviderCredentials)
+      .values({
+        orgId,
+        label: "Mistral performance key",
+        providerId: "mistral",
+        credentialsEncrypted: encryptCredentials({ kind: "api_key", apiKey }),
+        availableModelIds: [config.providerModelId],
+        createdBy: owner.user.id,
+      })
+      .returning();
+    const [model] = await db
+      .insert(schema.orgModels)
+      .values({
+        orgId,
+        credentialId: credential.id,
+        label: `Mistral performance ${config.providerModelId}`,
+        modelId: config.providerModelId,
+        input: ["text"],
+        contextWindow: 32_768,
+        maxTokens: 256,
+        enabled: true,
+        createdBy: owner.user.id,
+      })
+      .returning();
+    await db
+      .update(schema.organizations)
+      .set({ defaultModelId: model.id })
+      .where(eq(schema.organizations.id, orgId));
+  }
+}
+
+async function signBenchmarkSessionCookie(token: string, secret: string): Promise<string> {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const signed = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(token));
+  const signature = btoa(String.fromCharCode(...new Uint8Array(signed)));
+  return `better-auth.session_token=${encodeURIComponent(`${token}.${signature}`)}`;
+}
+
+async function selectUsageIds(db: any, schema: any, identities: SyntheticIdentity[]) {
+  const { inArray } = await import("../packages/db/node_modules/drizzle-orm");
+  const rows = await db
+    .select({ id: schema.llmUsage.id })
+    .from(schema.llmUsage)
+    .where(
+      inArray(
+        schema.llmUsage.chatSessionId,
+        identities.map((identity) => identity.sessionId),
+      ),
+    );
+  return new Set<string>(rows.map((row: { id: string }) => row.id));
+}
+
+async function selectNewUsage(
+  db: any,
+  schema: any,
+  identities: SyntheticIdentity[],
+  existingIds: Set<string>,
+) {
+  const { inArray } = await import("../packages/db/node_modules/drizzle-orm");
+  const rows = await db
+    .select()
+    .from(schema.llmUsage)
+    .where(
+      inArray(
+        schema.llmUsage.chatSessionId,
+        identities.map((identity) => identity.sessionId),
+      ),
+    );
+  return rows.filter((row: { id: string }) => !existingIds.has(row.id));
+}
+
+async function waitForUsageCount(
+  db: any,
+  schema: any,
+  identities: SyntheticIdentity[],
+  minimum: number,
+): Promise<void> {
+  const deadline = performance.now() + 10_000;
+  for (;;) {
+    const count = (await selectUsageIds(db, schema, identities)).size;
+    if (count >= minimum) return;
+    if (performance.now() >= deadline) {
+      throw new Error(`usage persistence timeout: expected ${minimum}, observed ${count}`);
+    }
+    await Bun.sleep(25);
+  }
+}
+
+async function waitForHealthyApi(fetchImpl: FetchLike, url: string): Promise<void> {
+  const deadline = performance.now() + 30_000;
+  for (;;) {
+    try {
+      const response = await fetchImpl(url);
+      if (response.ok) return;
+    } catch {
+      // The socket is expected to refuse connections until Bun.serve binds it.
+    }
+    if (performance.now() >= deadline)
+      throw new Error(`Appstrate API did not become healthy: ${url}`);
+    await Bun.sleep(50);
+  }
 }
 
 async function waitForPersistence(db: any, schema: any, sessionId: string, minimum: number) {

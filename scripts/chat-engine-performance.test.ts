@@ -3,10 +3,8 @@
 import { describe, expect, it } from "bun:test";
 import {
   compareCellInvariants,
-  forwardMistralChatCompletion,
   memoryCheckpoints,
   normalizeFetchRequest,
-  parseOpenAiSseUsage,
   parseDotEnvValue,
   percentile,
   summarizeDurations,
@@ -94,47 +92,6 @@ describe("chat engine performance observation helpers", () => {
 
     expect(parseDotEnvValue(contents, "MISTRAL_API_KEY")).toBe("mistral-test-key");
     expect(parseDotEnvValue(contents, "ABSENT_API_KEY")).toBeNull();
-  });
-
-  it("forwards a proxy-shaped chat request to the pinned Mistral model", async () => {
-    let capturedUrl = "";
-    let capturedInit: RequestInit | undefined;
-    const response = await forwardMistralChatCompletion(
-      new Request("http://127.0.0.1:3400/api/llm-proxy/openai-completions/v1/chat/completions", {
-        method: "POST",
-        headers: { "content-type": "application/json", authorization: "Bearer local-loopback" },
-        body: JSON.stringify({ model: "benchmark-preset", stream: true, messages: [] }),
-      }),
-      {
-        apiKey: "mistral-test-key",
-        modelId: "mistral-small-2603",
-        fetch: async (input, init) => {
-          capturedUrl = String(input);
-          capturedInit = init;
-          return new Response("provider-stream", { status: 200 });
-        },
-      },
-    );
-
-    expect(capturedUrl).toBe("https://api.mistral.ai/v1/chat/completions");
-    expect(new Headers(capturedInit?.headers).get("authorization")).toBe("Bearer mistral-test-key");
-    expect(JSON.parse(String(capturedInit?.body))).toMatchObject({
-      model: "mistral-small-2603",
-      stream: true,
-      stream_options: { include_usage: true },
-    });
-    expect(await response.text()).toBe("provider-stream");
-  });
-
-  it("extracts persisted token usage from a provider SSE stream", () => {
-    const stream = [
-      'data: {"choices":[{"delta":{"content":"ok"}}]}',
-      'data: {"choices":[],"usage":{"prompt_tokens":37,"completion_tokens":11,"total_tokens":48}}',
-      "data: [DONE]",
-      "",
-    ].join("\n\n");
-
-    expect(parseOpenAiSseUsage(stream)).toEqual({ inputTokens: 37, outputTokens: 11 });
   });
 
   it("force-stops a benchmark worker that ignores graceful timeout shutdown", async () => {

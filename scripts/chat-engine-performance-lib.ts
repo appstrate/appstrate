@@ -50,62 +50,6 @@ export function parseDotEnvValue(contents: string, name: string): string | null 
   return null;
 }
 
-export async function forwardMistralChatCompletion(
-  request: Request,
-  options: {
-    apiKey: string;
-    modelId: string;
-    fetch: (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
-    baseUrl?: string;
-  },
-): Promise<Response> {
-  const body = (await request.json()) as Record<string, unknown>;
-  const headers = new Headers(request.headers);
-  headers.set("authorization", `Bearer ${options.apiKey}`);
-  headers.set("content-type", "application/json");
-  headers.delete("host");
-  headers.delete("content-length");
-  const upstreamBody = {
-    ...body,
-    model: options.modelId,
-    ...(body.stream === true ? { stream_options: { include_usage: true } } : {}),
-  };
-  return options.fetch(options.baseUrl ?? "https://api.mistral.ai/v1/chat/completions", {
-    method: "POST",
-    headers,
-    body: JSON.stringify(upstreamBody),
-    signal: request.signal,
-  });
-}
-
-export function parseOpenAiSseUsage(
-  contents: string,
-): { inputTokens: number; outputTokens: number } | null {
-  let usage: { inputTokens: number; outputTokens: number } | null = null;
-  for (const line of contents.split(/\r?\n/)) {
-    if (!line.startsWith("data:")) continue;
-    const data = line.slice(5).trim();
-    if (!data || data === "[DONE]") continue;
-    try {
-      const parsed = JSON.parse(data) as {
-        usage?: { prompt_tokens?: unknown; completion_tokens?: unknown };
-      };
-      if (
-        typeof parsed.usage?.prompt_tokens === "number" &&
-        typeof parsed.usage.completion_tokens === "number"
-      ) {
-        usage = {
-          inputTokens: parsed.usage.prompt_tokens,
-          outputTokens: parsed.usage.completion_tokens,
-        };
-      }
-    } catch {
-      continue;
-    }
-  }
-  return usage;
-}
-
 /** Wait for a worker and guarantee that a timed-out process cannot survive its controller. */
 export async function waitForWorkerExit(
   worker: BenchmarkWorker,
