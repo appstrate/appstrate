@@ -45,7 +45,7 @@ import { logger } from "../../lib/logger.ts";
 import { listResponse } from "../../lib/list-response.ts";
 import { scopedWhere } from "../../lib/db-helpers.ts";
 import { orgOrSystemFilter } from "../../lib/package-helpers.ts";
-import { type Actor, actorFilter } from "../../lib/actor.ts";
+import { type Actor, actorFilter, actorSnapshotInsert } from "../../lib/actor.ts";
 import {
   runMetadataSchema,
   runConfigSchema,
@@ -625,6 +625,12 @@ export async function createRun(scope: AppScope, params: CreateRunParams): Promi
       packageId,
       userId: actor?.type === "user" ? actor.id : null,
       endUserId: actor?.type === "end_user" ? actor.id : null,
+      // Immutable actor identity. The two columns above are ON DELETE SET
+      // NULL, so deleting the actor rewrites this run's identity to "no
+      // actor" — and every persistence-scope resolver then reads it as the
+      // APP-WIDE `shared` bucket. Stamping the snapshot here is what keeps a
+      // deleted actor's private memories out of everyone else's prompt.
+      ...actorSnapshotInsert(actor ?? null),
       orgId: scope.orgId,
       status: "pending",
       input,
@@ -727,6 +733,12 @@ export async function createFailedRun(
       packageId,
       userId: actor?.type === "user" ? actor.id : null,
       endUserId: actor?.type === "end_user" ? actor.id : null,
+      // Immutable actor identity. The two columns above are ON DELETE SET
+      // NULL, so deleting the actor rewrites this run's identity to "no
+      // actor" — and every persistence-scope resolver then reads it as the
+      // APP-WIDE `shared` bucket. Stamping the snapshot here is what keeps a
+      // deleted actor's private memories out of everyone else's prompt.
+      ...actorSnapshotInsert(actor ?? null),
       orgId: scope.orgId,
       applicationId: scope.applicationId,
       status: "failed",

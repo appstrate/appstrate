@@ -527,9 +527,19 @@
           "log",
           "note",
           "pin",
-          "publish_document"
+          "publish_document",
+          "update_slot"
         ]
       }
+    },
+    "memory": {
+      "type": "object",
+      "properties": {
+        "shared_writes": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
     }
   },
   "required": [

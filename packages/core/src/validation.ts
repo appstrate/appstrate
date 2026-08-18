@@ -294,6 +294,22 @@ const agentManifestObjectSchema = afpsAgentManifestObjectSchema.extend({
   // validation, prompt builder, sidecar tool registration) and namespacing
   // it would be disproportionate.
   runtime_tools: z.array(z.enum(SELECTABLE_RUNTIME_TOOLS)).optional(),
+  /**
+   * Agent memory capabilities.
+   *
+   * `shared_writes` opts the agent into APP-WIDE memory: `note`/`pin` calls
+   * carrying `scope: "shared"` write state every other actor of the
+   * application reads on its next run, pinned slots included — which are
+   * injected into their system prompt. That is exactly right for a
+   * single-tenant catalogue agent and a cross-actor poisoning channel for
+   * anything multi-tenant, so it is declared rather than assumed. Absent or
+   * `false` keeps every write private to the run's own actor.
+   */
+  memory: z
+    .object({
+      shared_writes: z.boolean().optional(),
+    })
+    .optional(),
 });
 
 /**

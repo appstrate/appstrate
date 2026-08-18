@@ -50,4 +50,18 @@ export interface RunSinkContext {
    * pricing (or, for a remote-origin run, no platform model at all).
    */
   modelCost: ModelCost | null;
+  /**
+   * Immutable actor identity, stamped at run creation and never nulled.
+   *
+   * Read in preference to `runs.user_id` / `runs.end_user_id` when resolving
+   * the persistence scope: those are `ON DELETE SET NULL`, so a run whose
+   * actor is deleted mid-flight would otherwise resolve the app-wide `shared`
+   * bucket and finalize that actor's private memories into it. `null` on rows
+   * predating the column (already terminal, never backfilled).
+   */
+  actorTypeSnapshot: "user" | "end_user" | "shared" | null;
+  actorIdSnapshot: string | null;
+  /** Actor kept for FK-based reads; the snapshot above wins for scope resolution. */
+  userId: string | null;
+  endUserId: string | null;
 }

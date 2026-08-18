@@ -700,6 +700,16 @@ const envSchema = z
     // does not kill event ingestion for in-flight runs. Rotation pattern:
     // prepend the new key + restart, wait out the longest in-flight run, drop
     // the old key + restart. Each key must be ≥16 chars (and thus comma-free).
+    /**
+     * Refuse app-wide (`scope: "shared"`) agent memory writes from agents that
+     * have not declared `memory.shared_writes: true` in their manifest.
+     *
+     * Defaults to warn-only because agents published before the capability
+     * existed already perform such writes, and flipping straight to a refusal
+     * would break them on deploy with no migration path. Operators turn it on
+     * once their agents declare the capability.
+     */
+    MEMORY_SHARED_WRITE_ENFORCE: boolEnv("false"),
     RUN_TOKEN_SECRET: z
       .string()
       .min(1, "RUN_TOKEN_SECRET is required")

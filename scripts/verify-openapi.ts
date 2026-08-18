@@ -283,6 +283,9 @@ const expectedEndpoints = [
   // Internal
   "GET /internal/run-history",
   "GET /internal/memories",
+  "POST /internal/memory",
+  "POST /internal/slots",
+  "POST /internal/slots/update",
   "GET /internal/oauth-token/{credentialId}",
   "POST /internal/oauth-token/{credentialId}/refresh",
   "GET /internal/mcp-server-bundle/{scope}/{name}",

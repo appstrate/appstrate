@@ -29,6 +29,14 @@ import {
   scopeFromActor,
   MAX_MEMORY_CONTENT,
 } from "../services/state/package-persistence.ts";
+import {
+  appendMemoryCommand,
+  updateSlotCommand,
+  upsertSlotCommand,
+  type SlotCommandResult,
+} from "../services/state/persistence-commands.ts";
+import { parseBody } from "@appstrate/core/api-errors";
+import { getEnv } from "@appstrate/env";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { getRunEffectiveAgent } from "../services/run-effective-agent.ts";
 import {
@@ -39,7 +47,7 @@ import {
   invalidRequest,
   internalError,
 } from "../lib/errors.ts";
-import { actorFromIds, type Actor } from "../lib/actor.ts";
+import { actorFromIds, actorFromRunRow, type Actor } from "../lib/actor.ts";
 import {
   forceRefreshOAuthModelProviderToken,
   resolveOAuthTokenForSidecar,
@@ -75,6 +83,14 @@ async function verifyRunToken(c: Context): Promise<{
      * pinned run's authorization set.
      */
     versionRef: string | null;
+    /**
+     * Immutable actor identity, preferred over the nullable FK pair when
+     * resolving a persistence scope: deleting an actor nulls `user_id` /
+     * `end_user_id`, and a scope derived from those would silently widen to
+     * the app-wide `shared` bucket.
+     */
+    actorTypeSnapshot: "user" | "end_user" | "shared" | null;
+    actorIdSnapshot: string | null;
     /**
      * Snapshot of the connection resolver output frozen at run kickoff
      * (#199). The credentials resolver uses it to honour admin pins and
@@ -115,6 +131,8 @@ async function verifyRunToken(c: Context): Promise<{
       modelCredentialId: runs.modelCredentialId,
       runOrigin: runs.runOrigin,
       versionRef: runs.versionRef,
+      actorTypeSnapshot: runs.actorTypeSnapshot,
+      actorIdSnapshot: runs.actorIdSnapshot,
       resolvedConnections: runs.resolvedConnections,
       resolvedIntegrationVersions: runs.resolvedIntegrationVersions,
     })
@@ -137,6 +155,8 @@ async function verifyRunToken(c: Context): Promise<{
       packageId: run.packageId!,
       userId: run.userId,
       endUserId: run.endUserId,
+      actorTypeSnapshot: run.actorTypeSnapshot,
+      actorIdSnapshot: run.actorIdSnapshot,
       orgId: run.orgId,
       applicationId: run.applicationId,
       status: run.status,
@@ -265,6 +285,181 @@ export function createInternalRouter() {
       });
       throw internalError();
     }
+  });
+
+  /**
+   * Gate app-wide writes on an explicit manifest capability.
+   *
+   * `scope: "shared"` lets one run rewrite state every other actor of the
+   * application reads on its next run — including the pinned slots injected
+   * into their system prompt. That is a legitimate feature for a single-tenant
+   * catalogue agent and a cross-actor poisoning channel for everything else, so
+   * it stops being implicit: the agent has to ask for it in its manifest.
+   *
+   * Enforcement is deliberately WARN-first. Agents published before the
+   * capability existed already write shared slots, and a hard refusal would
+   * break them at deploy time with no migration path. The refusal flips on once
+   * `MEMORY_SHARED_WRITE_ENFORCE` is set — see `docs/ENV.md`.
+   */
+  async function assertSharedWriteAllowed(
+    run: { packageId: string; orgId: string; versionRef: string | null },
+    declared: "actor" | "shared" | undefined,
+  ): Promise<void> {
+    if (declared !== "shared") return;
+
+    const effective = await getRunEffectiveAgent(run);
+    const manifest = (effective?.manifest ?? {}) as { memory?: { shared_writes?: unknown } };
+    if (manifest.memory?.shared_writes === true) return;
+
+    if (getEnv().MEMORY_SHARED_WRITE_ENFORCE) {
+      throw forbidden(
+        "This agent may not write app-wide memory. Declare `memory.shared_writes: true` in its manifest to allow it.",
+      );
+    }
+    logger.warn("Agent wrote app-wide memory without declaring the capability", {
+      packageId: run.packageId,
+      orgId: run.orgId,
+    });
+  }
+
+  /** Wire shape for a slot command outcome — snake_case per the platform convention. */
+  function serializeSlotResult(result: SlotCommandResult) {
+    if (result.outcome === "committed") {
+      return {
+        outcome: "committed" as const,
+        revision: result.revision,
+        content: result.content,
+      };
+    }
+    if (result.outcome === "conflict") {
+      // The current value travels back so the agent can replay its patch on
+      // top instead of losing the write — the entire point of the conflict.
+      return {
+        outcome: "conflict" as const,
+        revision: result.revision,
+        current_content: result.currentContent,
+      };
+    }
+    return { outcome: "rejected" as const, reason: result.reason, detail: result.detail };
+  }
+
+  // ─── Agent persistence commands ───────────────────────────────────────
+  //
+  // The write half of the memory surface. These exist because an event cannot
+  // answer: the agent needs to learn that its archive is full, that its patch
+  // hit a conflict, or that its actor is gone — none of which an emitted
+  // `memory.added` can ever report back. The runtime mints `operation_id`
+  // before its first attempt and replays it on retry, so a lost response
+  // cannot turn into a duplicate write.
+
+  const persistenceCommandSchema = z.object({
+    operation_id: z.string().min(1).max(200),
+    scope: z.enum(["actor", "shared"]).optional(),
+  });
+
+  const memoryCommandSchema = persistenceCommandSchema.extend({
+    content: z.string().min(1),
+  });
+
+  const slotPatchSchema = z.discriminatedUnion("type", [
+    z.object({ type: z.literal("merge"), value: z.record(z.string(), z.unknown()) }),
+    z.object({ type: z.literal("replace"), old: z.string().min(1), new: z.string() }),
+  ]);
+
+  const slotUpsertSchema = persistenceCommandSchema.extend({
+    key: z.string().min(1).max(64),
+    content: z.unknown(),
+  });
+
+  const slotUpdateSchema = persistenceCommandSchema.extend({
+    key: z.string().min(1).max(64),
+    patch: slotPatchSchema,
+    expected_revision: z.number().int().min(0),
+  });
+
+  /**
+   * Resolve the persistence scope for a command.
+   *
+   * `shared` is app-wide and therefore capability-gated (see
+   * `assertSharedWriteAllowed`); anything else resolves to the run's own actor,
+   * read from the immutable snapshot so a deleted actor cannot silently widen
+   * into the shared bucket.
+   */
+  function commandScope(
+    run: {
+      userId: string | null;
+      endUserId: string | null;
+      actorTypeSnapshot: "user" | "end_user" | "shared" | null;
+      actorIdSnapshot: string | null;
+    },
+    declared: "actor" | "shared" | undefined,
+  ) {
+    if (declared === "shared") return { type: "shared" as const };
+    return scopeFromActor(actorFromRunRow(run));
+  }
+
+  // POST /internal/memory — append one archive entry.
+  router.post("/memory", async (c) => {
+    const { runId, run } = await verifyRunToken(c);
+    const body = parseBody(memoryCommandSchema, await c.req.json().catch(() => ({})));
+    await assertSharedWriteAllowed(run, body.scope);
+
+    const result = await appendMemoryCommand(db, {
+      runId,
+      packageId: run.packageId,
+      applicationId: run.applicationId,
+      orgId: run.orgId,
+      scope: commandScope(run, body.scope),
+      operationId: body.operation_id,
+      content: body.content,
+    });
+
+    return c.json(
+      result.outcome === "committed"
+        ? { outcome: "committed" as const }
+        : { outcome: "rejected" as const, reason: result.reason, detail: result.detail },
+    );
+  });
+
+  // POST /internal/slots — unconditional upsert (`pin`).
+  router.post("/slots", async (c) => {
+    const { runId, run } = await verifyRunToken(c);
+    const body = parseBody(slotUpsertSchema, await c.req.json().catch(() => ({})));
+    await assertSharedWriteAllowed(run, body.scope);
+
+    const result = await upsertSlotCommand(db, {
+      runId,
+      packageId: run.packageId,
+      applicationId: run.applicationId,
+      orgId: run.orgId,
+      scope: commandScope(run, body.scope),
+      operationId: body.operation_id,
+      key: body.key,
+      content: body.content ?? null,
+    });
+
+    return c.json(serializeSlotResult(result));
+  });
+
+  // POST /internal/slots/update — conditional, partial write (`update_slot`).
+  router.post("/slots/update", async (c) => {
+    const { runId, run } = await verifyRunToken(c);
+    const body = parseBody(slotUpdateSchema, await c.req.json().catch(() => ({})));
+    await assertSharedWriteAllowed(run, body.scope);
+
+    const result = await updateSlotCommand(db, {
+      runId,
+      packageId: run.packageId,
+      applicationId: run.applicationId,
+      orgId: run.orgId,
+      scope: commandScope(run, body.scope),
+      operationId: body.operation_id,
+      key: body.key,
+      patch: body.patch,
+      expectedRevision: body.expected_revision,
+    });
+
+    return c.json(serializeSlotResult(result));
   });
 
   // ─── OAuth Model Provider tokens ──────────────────────────────────────

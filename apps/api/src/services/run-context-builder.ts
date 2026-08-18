@@ -9,6 +9,7 @@ import {
   getCheckpoint,
   listPinnedSlots,
   scopeFromActor,
+  summariseArchive,
 } from "./state/package-persistence.ts";
 import { getPackageConfig } from "./application-packages.ts";
 import type { Actor } from "../lib/actor.ts";
@@ -168,23 +169,30 @@ export async function buildRunContext(params: {
 
   // Step 1: load all independent data in parallel
   const persistenceScope = scopeFromActor(actor);
-  const [configFull, previousCheckpoint, agentPackageResult, latestVersion, pinnedSlotRows] =
-    await Promise.all([
-      skipConfigFetch ? null : getPackageConfig(applicationId, agent.id),
-      getCheckpoint(agent.id, applicationId, persistenceScope),
-      buildAgentPackage(agent, orgId, params.dependencyOverrides ?? null),
-      params.overrideVersionLabel
-        ? null
-        : agent.source !== "system"
-          ? getLatestVersionInfo(agent.id).catch(() => null)
-          : null,
-      // Named pinned slots (any non-null key, EXCEPT "checkpoint" which is
-      // already loaded above as `previousCheckpoint`). Renders in the prompt's
-      // `## Pinned Slots` section so cross-run state under custom keys is
-      // visible to the agent. Honors the documented contract: `pin({key, ...})`
-      // with any key produces a slot rendered in this prompt on every run.
-      listPinnedSlots(agent.id, applicationId, persistenceScope),
-    ]);
+  const [
+    configFull,
+    previousCheckpoint,
+    agentPackageResult,
+    latestVersion,
+    pinnedSlotRows,
+    archiveSummary,
+  ] = await Promise.all([
+    skipConfigFetch ? null : getPackageConfig(applicationId, agent.id),
+    getCheckpoint(agent.id, applicationId, persistenceScope),
+    buildAgentPackage(agent, orgId, params.dependencyOverrides ?? null),
+    params.overrideVersionLabel
+      ? null
+      : agent.source !== "system"
+        ? getLatestVersionInfo(agent.id).catch(() => null)
+        : null,
+    // Named pinned slots (any non-null key, EXCEPT "checkpoint" which is
+    // already loaded above as `previousCheckpoint`). Renders in the prompt's
+    // `## Pinned Slots` section so cross-run state under custom keys is
+    // visible to the agent. Honors the documented contract: `pin({key, ...})`
+    // with any key produces a slot rendered in this prompt on every run.
+    listPinnedSlots(agent.id, applicationId, persistenceScope),
+    summariseArchive(agent.id, applicationId, persistenceScope),
+  ]);
 
   const config = params.config ?? configFull?.config ?? {};
   const agentPackage = agentPackageResult.zip;
@@ -251,9 +259,21 @@ export async function buildRunContext(params: {
   // Visibility itself is already enforced upstream by `buildVisibilityFilter`
   // (the caller's scope determines which rows are eligible).
   const pinnedSlots: Record<string, unknown> = {};
+  // Per-slot metadata rendered beside each slot. The revision is not decoration:
+  // an agent cannot send `expected_revision` to `update_slot` for a slot whose
+  // revision it was never shown, so without this the conditional write is
+  // unusable. The resolved scope goes with it because the same key can exist in
+  // both buckets and a write to the wrong one is a lost update or a leak.
+  const pinnedSlotMeta: Record<string, { revision?: number; scope?: "actor" | "shared" }> = {};
   for (const row of pinnedSlotRows) {
     if (row.key === CHECKPOINT_KEY) continue;
-    if (!(row.key in pinnedSlots)) pinnedSlots[row.key] = row.content;
+    if (!(row.key in pinnedSlots)) {
+      pinnedSlots[row.key] = row.content;
+      pinnedSlotMeta[row.key] = {
+        revision: row.revision,
+        scope: row.actorType === "shared" ? "shared" : "actor",
+      };
+    }
   }
 
   // Step 4: assemble AFPS execution context + platform plan
@@ -264,7 +284,20 @@ export async function buildRunContext(params: {
     // `recall_memory` tool on demand.
     memories: [],
     ...(previousCheckpoint !== null ? { checkpoint: previousCheckpoint } : {}),
-    ...(Object.keys(pinnedSlots).length > 0 ? { pinnedSlots } : {}),
+    ...(Object.keys(pinnedSlots).length > 0 ? { pinnedSlots, pinnedSlotMeta } : {}),
+    // Count + last-write only. The archive stays out of the prompt, but the
+    // agent now knows it exists — previously nothing did, so `recall_memory`
+    // was advertised and never called.
+    ...(archiveSummary.count > 0
+      ? {
+          archive: {
+            count: archiveSummary.count,
+            ...(archiveSummary.lastWrittenAt
+              ? { lastWrittenAt: archiveSummary.lastWrittenAt.toISOString().slice(0, 10) }
+              : {}),
+          },
+        }
+      : {}),
     config,
     ...(params.traceparent ? { traceparent: params.traceparent } : {}),
   };

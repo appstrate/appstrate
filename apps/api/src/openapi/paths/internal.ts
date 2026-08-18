@@ -60,6 +60,195 @@ export const internalPaths = {
       },
     },
   },
+  "/internal/memory": {
+    post: {
+      operationId: "commandAppendMemory",
+      tags: ["Internal"],
+      summary: "Append an archive memory",
+      description:
+        "Write half of the agent memory surface, backing the `note` runtime tool. Applies the write inside a transaction and returns its real outcome, so the agent learns about a full archive or a deleted actor instead of receiving an unconditional success. `operation_id` is minted by the runtime before its first attempt and replayed verbatim on retry: a lost response can never become a duplicate row. Container-to-host only. Auth via Bearer run token.",
+      security: [{ bearerExecToken: [] }],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              required: ["operation_id", "content"],
+              properties: {
+                operation_id: {
+                  type: "string",
+                  description: "Idempotency key, stable across retries of one logical write.",
+                },
+                content: { type: "string", description: "Memory text to archive." },
+                scope: {
+                  type: "string",
+                  enum: ["actor", "shared"],
+                  description:
+                    "Persistence scope. Defaults to the run actor. `shared` is app-wide and requires the agent manifest to declare `memory.shared_writes: true`.",
+                },
+              },
+            },
+          },
+        },
+      },
+      responses: {
+        "200": {
+          description: "Command outcome",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["outcome"],
+                properties: {
+                  outcome: { type: "string", enum: ["committed", "rejected"] },
+                  reason: {
+                    type: "string",
+                    description: "Machine-readable refusal cause when rejected.",
+                  },
+                  detail: {
+                    type: "string",
+                    description: "Human-readable explanation shown to the agent.",
+                  },
+                },
+              },
+            },
+          },
+        },
+        "400": { description: "Malformed command body" },
+        "403": {
+          description:
+            "App-wide write refused — the manifest does not declare `memory.shared_writes`",
+        },
+      },
+    },
+  },
+
+  "/internal/slots": {
+    post: {
+      operationId: "commandUpsertSlot",
+      tags: ["Internal"],
+      summary: "Upsert a named pinned slot",
+      description:
+        "Backs the `pin` runtime tool. Last-write-wins per (scope, key); every committed write advances the slot revision so a concurrent conditional write can detect it. Container-to-host only. Auth via Bearer run token.",
+      security: [{ bearerExecToken: [] }],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              required: ["operation_id", "key"],
+              properties: {
+                operation_id: { type: "string" },
+                key: {
+                  type: "string",
+                  description:
+                    "Slot identifier. Lowercase letters, digits and underscores, at most 64 characters.",
+                },
+                content: { description: "Arbitrary JSON value stored under the slot." },
+                scope: {
+                  type: "string",
+                  enum: ["actor", "shared"],
+                  description:
+                    "Persistence scope. Defaults to the run actor. `shared` is app-wide and requires the agent manifest to declare `memory.shared_writes: true`.",
+                },
+              },
+            },
+          },
+        },
+      },
+      responses: {
+        "200": {
+          description: "Command outcome",
+          content: {
+            "application/json": { schema: { $ref: "#/components/schemas/SlotCommandResult" } },
+          },
+        },
+        "400": { description: "Malformed command body" },
+        "403": {
+          description:
+            "App-wide write refused — the manifest does not declare `memory.shared_writes`",
+        },
+      },
+    },
+  },
+
+  "/internal/slots/update": {
+    post: {
+      operationId: "commandUpdateSlot",
+      tags: ["Internal"],
+      summary: "Conditionally patch a named pinned slot",
+      description:
+        "Backs the `update_slot` runtime tool: a partial write guarded by the revision the agent believes it is editing. A mismatch returns `conflict` together with the current revision AND value, so the agent replays its patch on top instead of losing the write — the failure mode a whole-value upsert resolves silently. `expected_revision: 0` means create-only. Container-to-host only. Auth via Bearer run token.",
+      security: [{ bearerExecToken: [] }],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              required: ["operation_id", "key", "patch", "expected_revision"],
+              properties: {
+                operation_id: { type: "string" },
+                key: { type: "string" },
+                expected_revision: {
+                  type: "integer",
+                  minimum: 0,
+                  description:
+                    "Revision the agent is editing. 0 asserts the slot does not exist yet.",
+                },
+                patch: {
+                  oneOf: [
+                    {
+                      type: "object",
+                      required: ["type", "value"],
+                      description: "JSON Merge Patch (RFC 7386) at the top level of the slot.",
+                      properties: {
+                        type: { type: "string", enum: ["merge"] },
+                        value: { type: "object", additionalProperties: true },
+                      },
+                    },
+                    {
+                      type: "object",
+                      required: ["type", "old", "new"],
+                      description:
+                        "Anchored text replacement. Refused unless `old` matches exactly once.",
+                      properties: {
+                        type: { type: "string", enum: ["replace"] },
+                        old: { type: "string" },
+                        new: { type: "string" },
+                      },
+                    },
+                  ],
+                },
+                scope: {
+                  type: "string",
+                  enum: ["actor", "shared"],
+                  description:
+                    "Persistence scope. Defaults to the run actor. `shared` is app-wide and requires the agent manifest to declare `memory.shared_writes: true`.",
+                },
+              },
+            },
+          },
+        },
+      },
+      responses: {
+        "200": {
+          description: "Command outcome",
+          content: {
+            "application/json": { schema: { $ref: "#/components/schemas/SlotCommandResult" } },
+          },
+        },
+        "400": { description: "Malformed command body" },
+        "403": {
+          description:
+            "App-wide write refused — the manifest does not declare `memory.shared_writes`",
+        },
+      },
+    },
+  },
+
   "/internal/memories": {
     get: {
       operationId: "recallMemories",

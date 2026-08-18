@@ -8,7 +8,13 @@
 
 import { eq, and, or, ilike, desc, lt, gt } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { endUsers, notifications, uploads, organizations } from "@appstrate/db/schema";
+import {
+  endUsers,
+  notifications,
+  packagePersistence,
+  uploads,
+  organizations,
+} from "@appstrate/db/schema";
 import type { EndUserInfo, ListEnvelope } from "@appstrate/shared-types";
 import { logger } from "../lib/logger.ts";
 import { notFound, ApiError } from "../lib/errors.ts";
@@ -349,7 +355,28 @@ export async function deleteEndUser(scope: AppScope, endUserId: string): Promise
         ),
       );
 
+    // Persistence rows carry the actor as a polymorphic `(actor_type,
+    // actor_id)` pair with NO foreign key — exactly like notifications above —
+    // so nothing cascades them. Left in place, a deleted end-user's memories
+    // and pinned slots outlive them indefinitely: personal preferences and
+    // recalled facts, retained for an identity the operator believes is gone.
+    // Delete them explicitly, scoped to the app for tenant safety.
+    await tx
+      .delete(packagePersistence)
+      .where(
+        and(
+          eq(packagePersistence.actorType, "end_user"),
+          eq(packagePersistence.actorId, endUserId),
+          eq(packagePersistence.orgId, scope.orgId),
+          eq(packagePersistence.applicationId, scope.applicationId),
+        ),
+      );
+
     // Cascade-owned rows are removed; runs survive with end_user_id set null.
+    // Their `actor_type_snapshot` keeps the deleted identity, which is what
+    // stops a still-running run from finalizing those memories into the
+    // app-wide `shared` bucket once this row is gone — and the command service
+    // refuses the write outright once the actor cannot be found.
     const deleted = await tx
       .delete(endUsers)
       .where(

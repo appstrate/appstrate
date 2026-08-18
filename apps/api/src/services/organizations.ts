@@ -13,6 +13,7 @@ import {
   packages,
   orgInvitations,
   notifications,
+  packagePersistence,
   schedules,
   documents,
   uploads,
@@ -314,6 +315,22 @@ export async function removeMember(orgId: string, userId: string): Promise<void>
           eq(notifications.orgId, orgId),
           eq(notifications.recipientType, "user"),
           eq(notifications.recipientId, userId),
+        ),
+      );
+
+    // Same reasoning as the notifications above, one step further: the
+    // member's agent memories and pinned slots are keyed by a polymorphic
+    // `(actor_type, actor_id)` pair with no foreign key, so removing them from
+    // the org leaves their remembered facts and preferences readable by any
+    // future run that resolves the same actor id. Revoking access to an org
+    // has to revoke the state that access produced.
+    await tx
+      .delete(packagePersistence)
+      .where(
+        and(
+          eq(packagePersistence.orgId, orgId),
+          eq(packagePersistence.actorType, "user"),
+          eq(packagePersistence.actorId, userId),
         ),
       );
 

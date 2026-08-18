@@ -29,6 +29,49 @@ export function actorInsert(actor: Actor): {
   };
 }
 
+/**
+ * Columns freezing the actor's identity for the lifetime of the row.
+ *
+ * `runs.user_id` / `runs.end_user_id` are `ON DELETE SET NULL`: deleting an
+ * actor rewrites every one of their runs to "no actor". Any consumer that
+ * derives a persistence scope from that pair then resolves the APP-WIDE
+ * `shared` bucket, so a run still in flight when its end-user is deleted would
+ * write that end-user's private memories where every other actor can read
+ * them. The snapshot is the only field that still tells the truth afterwards.
+ *
+ * `"shared"` is a legitimate stored value: it is what a scheduled or system
+ * run (genuinely no actor) records, which keeps the column total so readers
+ * never have to re-derive the null case.
+ */
+export function actorSnapshotInsert(actor: Actor | null): {
+  actorTypeSnapshot: "user" | "end_user" | "shared";
+  actorIdSnapshot: string | null;
+} {
+  if (!actor) return { actorTypeSnapshot: "shared", actorIdSnapshot: null };
+  return { actorTypeSnapshot: actor.type, actorIdSnapshot: actor.id };
+}
+
+/**
+ * Recover a run's actor, preferring the immutable snapshot.
+ *
+ * Falls back to the mutable `(userId, endUserId)` pair only when the snapshot
+ * is absent — rows written before the column existed, and never backfilled
+ * because they were already terminal. For those the behaviour is exactly
+ * today's, which is the point: the fallback must not change anything for rows
+ * the hazard cannot reach.
+ */
+export function actorFromRunRow(row: {
+  actorTypeSnapshot?: "user" | "end_user" | "shared" | null;
+  actorIdSnapshot?: string | null;
+  userId: string | null;
+  endUserId: string | null;
+}): Actor | null {
+  const snapshotType = row.actorTypeSnapshot ?? null;
+  if (snapshotType === "shared") return null;
+  if (snapshotType && row.actorIdSnapshot) return { type: snapshotType, id: row.actorIdSnapshot };
+  return actorFromIds(row.userId, row.endUserId);
+}
+
 /** Reconstructs an Actor from nullable userId/endUserId columns. */
 export function actorFromIds(userId: string | null, endUserId: string | null): Actor | null {
   if (userId) return { type: "user", id: userId };

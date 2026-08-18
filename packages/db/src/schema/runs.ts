@@ -109,6 +109,22 @@ export const runs = pgTable(
     endUserId: text("end_user_id").references(() => endUsers.id, {
       onDelete: "set null",
     }),
+    // Immutable actor snapshot, written once at run creation and NEVER nulled.
+    //
+    // `user_id` / `end_user_id` above are `ON DELETE SET NULL`, so deleting an
+    // actor silently rewrites the run's identity to "no actor". Every consumer
+    // that derives a persistence scope from those columns then resolves
+    // `scopeFromActor(null)` → `shared`: a run still in flight when its
+    // end-user is deleted would finalize that end-user's private memories into
+    // the APP-WIDE shared bucket, visible to every other actor. The snapshot is
+    // the only field that still tells the truth after the FK has been nulled,
+    // so scope resolution reads it in preference to the FK pair.
+    //
+    // `actor_type = 'shared'` is a legitimate stored value here: it is what a
+    // scheduled/system run (no actor at all) snapshots, and it keeps the column
+    // total so readers never have to re-derive the null case.
+    actorTypeSnapshot: text("actor_type_snapshot").$type<"user" | "end_user" | "shared">(),
+    actorIdSnapshot: text("actor_id_snapshot"),
     applicationId: text("application_id")
       .notNull()
       .references(() => applications.id, { onDelete: "cascade" }),
@@ -493,6 +509,12 @@ export const packagePersistence = pgTable(
     actorType: text("actor_type").notNull().$type<"user" | "end_user" | "shared">(),
     actorId: text("actor_id"),
     content: jsonb("content").notNull(),
+    // Optimistic-concurrency token for named slots. Bumped on every committed
+    // write; `update_slot` refuses a patch whose `expected_revision` no longer
+    // matches so two concurrent runs can no longer silently overwrite each
+    // other (the loser gets the current value back and replays its patch).
+    // Archive rows are append-only and keep the initial value.
+    revision: integer("revision").notNull().default(1),
     runId: text("run_id").references(() => runs.id, {
       onDelete: "set null",
     }),
@@ -533,6 +555,67 @@ export const packagePersistence = pgTable(
       "pkp_actor_id_shape",
       sql`(actor_type = 'shared' AND actor_id IS NULL) OR (actor_type <> 'shared' AND actor_id IS NOT NULL)`,
     ),
+  ],
+);
+
+/**
+ * Durable receipts for agent-issued persistence commands — the idempotency
+ * ledger that lets the SAME logical write arrive by three different transports
+ * without ever applying twice.
+ *
+ * The agent's write is a network call: the command can commit and the response
+ * still be lost, after which the runtime retries. Content comparison cannot
+ * dedupe that (two identical notes are legitimately distinct), so the runtime
+ * mints an `operation_id` BEFORE its first attempt and replays it verbatim.
+ * The unique index below is what makes the retry a no-op.
+ *
+ * The same receipt arbitrates between transports, in priority order:
+ *
+ *   1. command    — `POST /internal/memory|slots`, the source of truth.
+ *   2. ingestion  — the canonical `memory.added` / `pinned.set` event mutates
+ *                   ONLY when no receipt claims its `operation_id` (an older
+ *                   runtime image that never called the command route).
+ *   3. finalize   — replays only what neither of the above committed.
+ *
+ * Rows are per-run and cascade with it: the receipt exists to dedupe within a
+ * run's lifetime, not to be an audit log (that is `audit_events`).
+ */
+export const runPersistenceOperations = pgTable(
+  "run_persistence_operations",
+  {
+    id: serial("id").primaryKey(),
+    runId: text("run_id")
+      .notNull()
+      .references(() => runs.id, { onDelete: "cascade" }),
+    /**
+     * Runtime-minted idempotency key, stable across retries of one logical
+     * write. Opaque to the platform — never parsed, only compared.
+     */
+    operationId: text("operation_id").notNull(),
+    /** `memory` (append) or `slot` (upsert / conditional update). */
+    kind: text("kind").notNull().$type<"memory" | "slot">(),
+    /**
+     * Terminal issue of the command, replayed verbatim to a retry so the agent
+     * observes the same answer it would have received the first time.
+     */
+    outcome: text("outcome").notNull().$type<"committed" | "rejected" | "conflict">(),
+    /** Slot revision after a committed write; NULL for archive appends and refusals. */
+    committedRevision: integer("committed_revision"),
+    /** Slot key for `kind = 'slot'`; NULL for archive appends. */
+    targetKey: text("target_key"),
+    /** Resolved persistence scope, replayed so a retry cannot land elsewhere. */
+    actorType: text("actor_type").notNull().$type<"user" | "end_user" | "shared">(),
+    actorId: text("actor_id"),
+    /** Machine-readable refusal cause (`quota_exceeded`, `actor_gone`, …). */
+    reason: text("reason"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    // THE load-bearing constraint: makes a retried command a lookup, not a
+    // second write. Everything else in this table is diagnostics.
+    uniqueIndex("rpo_run_operation_unique").on(table.runId, table.operationId),
+    check("rpo_kind_valid", sql`kind IN ('memory', 'slot')`),
+    check("rpo_outcome_valid", sql`outcome IN ('committed', 'rejected', 'conflict')`),
   ],
 );
 

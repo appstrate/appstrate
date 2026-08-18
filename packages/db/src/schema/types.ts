@@ -3,7 +3,13 @@
 import type { InferSelectModel } from "drizzle-orm";
 import type { profiles } from "./profiles.ts";
 import type { packages, packageVersions, applicationPackages } from "./packages.ts";
-import type { runs, runLogs, schedules, packagePersistence } from "./runs.ts";
+import type {
+  runs,
+  runLogs,
+  schedules,
+  packagePersistence,
+  runPersistenceOperations,
+} from "./runs.ts";
 import type { applications, endUsers } from "./applications.ts";
 import type { integrationConnections } from "./integrations.ts";
 import type { integrationPins } from "./integration-pins.ts";
@@ -37,6 +43,7 @@ export type OrgModel = InferSelectModel<typeof orgModels>;
 export type User = InferSelectModel<typeof user>;
 
 export type PackagePersistenceRow = InferSelectModel<typeof packagePersistence>;
+export type RunPersistenceOperationRow = InferSelectModel<typeof runPersistenceOperations>;
 
 export type IntegrationConnectionRow = InferSelectModel<typeof integrationConnections>;
 

@@ -45,6 +45,10 @@ function makeRun(overrides: Partial<RunSinkContext> = {}): RunSinkContext {
     versionRef: "draft",
     modelSource: null,
     modelCost: null,
+    actorTypeSnapshot: null,
+    actorIdSnapshot: null,
+    userId: null,
+    endUserId: null,
     ...overrides,
   };
 }

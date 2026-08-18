@@ -130,9 +130,17 @@ const tokenUsageSchema = z.object({
  * by design, so an emitter carrying extra keys is conformant and MUST
  * NOT be rejected by a downstream validator.
  */
+const operationIdSchema = z
+  .string()
+  .min(1)
+  .describe(
+    "Idempotency key for the underlying write, stable across retries. Present when the runtime already committed the write through the platform command route, making this event an observation rather than the write itself.",
+  );
+
 const memoryAddedDataSchema = z.looseObject({
   content: z.string().describe("Archive entry appended to the run actor's memory."),
   scope: scopeSchema.optional(),
+  operationId: operationIdSchema.optional(),
 });
 
 const pinnedSetDataSchema = z.looseObject({
@@ -142,6 +150,15 @@ const pinnedSetDataSchema = z.looseObject({
     .describe('Pinned slot identifier. "checkpoint" is reserved for the carry-over slot.'),
   content: z.unknown().describe("Arbitrary JSON value stored under the pinned slot."),
   scope: scopeSchema.optional(),
+  operationId: operationIdSchema.optional(),
+  revision: z
+    .number()
+    .int()
+    .min(1)
+    .optional()
+    .describe(
+      "Slot revision after the committed write. Consumers aggregating concurrent writes MUST keep the highest revision rather than the last event received.",
+    ),
 });
 
 const outputEmittedDataSchema = z.looseObject({

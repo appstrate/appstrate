@@ -207,6 +207,8 @@ export const EXEMPT_SCHEMAS: Record<string, string> = {
   OAuthClientWithSecret: "OIDC client-create wire; no shared-type",
   OAuthTokenResponse: "internal credential-proxy wire; mirrors @appstrate/core/sidecar-types",
   IntegrationCredentialsResponse: "sidecar↔platform credential-proxy wire; no SPA consumer",
+  SlotCommandResult:
+    "container→platform persistence-command wire; consumed by the sidecar tool handlers, never by the SPA",
   User: "Better-Auth-shaped minimal user; no shared-type",
   ProfileBatchItem: "profiles/batch list item; SPA uses the generated spec type",
   LibraryPackageList: "SPA consumes components['schemas']['LibraryPackageList'] directly",

@@ -16,6 +16,7 @@ import type { AppstrateToolDefinition } from "@appstrate/mcp-transport";
 import type { IntegrationSpawnSpec, IntegrationBootReport } from "@appstrate/core/sidecar-types";
 import { buildRuntimeToolDefs } from "@appstrate/core/runtime-tool-defs";
 import { RuntimeEventJournal, journalRuntimeToolDefs } from "./runtime-event-journal.ts";
+import { commandBackedRuntimeToolDefs } from "./persistence-tools.ts";
 
 /** Parse the agent-selected runtime tools forwarded as `RUNTIME_TOOLS_JSON`. */
 function readRuntimeToolsFromEnv(): string[] {
@@ -220,11 +221,25 @@ const runtimeDeps = buildSidecarRuntimeDeps({
 // runner drains `GET /runtime-events` and re-emits on its single sink — one
 // execution, transport-agnostic, no `_meta` reliance.
 const runtimeEventJournal = new RuntimeEventJournal();
+const selectedRuntimeTools = readRuntimeToolsFromEnv() ?? [];
+// `note` / `pin` / `update_slot` are swapped for command-backed handlers: they
+// call the platform, then derive BOTH their answer to the agent and the
+// canonical event they journal from what actually committed. An emitted event
+// cannot report a full archive or a write conflict, and answering "saved"
+// regardless is the failure this replaces.
 const runtimeToolDefs = journalRuntimeToolDefs(
-  buildRuntimeToolDefs({
-    runtimeTools: readRuntimeToolsFromEnv(),
-    outputSchema: readOutputSchemaFromEnv(),
-  }),
+  commandBackedRuntimeToolDefs(
+    buildRuntimeToolDefs({
+      runtimeTools: readRuntimeToolsFromEnv(),
+      outputSchema: readOutputSchemaFromEnv(),
+    }),
+    {
+      platformApiUrl: config.platformApiUrl,
+      runToken: config.runToken,
+      fetchFn: fetch,
+    },
+    selectedRuntimeTools,
+  ),
   runtimeEventJournal,
 ) as unknown as AppstrateToolDefinition[];
 

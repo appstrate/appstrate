@@ -17,7 +17,7 @@
 
 import type { RunEvent } from "@afps-spec/types";
 import { isCanonicalRunEvent } from "../types/canonical-events.ts";
-import type { RunError, RunResult, TokenUsage } from "../types/run-result.ts";
+import type { PinnedSlotEntry, RunError, RunResult, TokenUsage } from "../types/run-result.ts";
 
 export interface ReduceOptions {
   /** Optional error to attach after reduction (populated by the runner). */
@@ -63,15 +63,48 @@ export function foldEvent(result: RunResult, event: RunEvent): void {
       result.memories.push({
         content: canonical.content,
         ...(canonical.scope !== undefined ? { scope: canonical.scope } : {}),
+        ...(canonical.operationId !== undefined ? { operationId: canonical.operationId } : {}),
       });
       return;
     case "pinned.set": {
+      // Legacy aggregate: keyed by `key` alone. Kept verbatim so consumers
+      // reading `result.pinned[key]` are unaffected.
       if (result.pinned === undefined) result.pinned = {};
       const slot: { content: unknown; scope?: "actor" | "shared" } = {
         content: canonical.content ?? null,
       };
       if (canonical.scope !== undefined) slot.scope = canonical.scope;
       result.pinned[canonical.key] = slot;
+
+      // Corrected aggregate: `(scope, key)` identity, highest revision wins.
+      //
+      // Arrival order is NOT causal order — two concurrent runs finish in
+      // whichever order their containers happen to close, so "last event
+      // received" can be an older write. When the runtime reports a revision
+      // (it committed through the command route) that revision is the only
+      // reliable ordering signal; without one we fall back to last-write.
+      if (result.pinnedSlots === undefined) result.pinnedSlots = [];
+      const scope = canonical.scope ?? "actor";
+      const existing = result.pinnedSlots.find(
+        (entry) => entry.key === canonical.key && (entry.scope ?? "actor") === scope,
+      );
+      const incomingRevision = canonical.revision;
+      if (existing === undefined) {
+        const entry: PinnedSlotEntry = { key: canonical.key, content: canonical.content ?? null };
+        if (canonical.scope !== undefined) entry.scope = canonical.scope;
+        if (incomingRevision !== undefined) entry.revision = incomingRevision;
+        if (canonical.operationId !== undefined) entry.operationId = canonical.operationId;
+        result.pinnedSlots.push(entry);
+      } else if (
+        existing.revision === undefined ||
+        incomingRevision === undefined ||
+        incomingRevision >= existing.revision
+      ) {
+        existing.content = canonical.content ?? null;
+        if (canonical.scope !== undefined) existing.scope = canonical.scope;
+        if (incomingRevision !== undefined) existing.revision = incomingRevision;
+        if (canonical.operationId !== undefined) existing.operationId = canonical.operationId;
+      }
       return;
     }
     case "output.emitted":

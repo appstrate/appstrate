@@ -18,6 +18,7 @@ describe("runtime-tools-catalog", () => {
       "note",
       "pin",
       "publish_document",
+      "update_slot",
     ]);
   });
 
