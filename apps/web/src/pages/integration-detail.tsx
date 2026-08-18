@@ -41,6 +41,7 @@ import { useTabWithHash } from "../hooks/use-tab-with-hash";
 import { useCopyToClipboard } from "../hooks/use-copy-to-clipboard";
 import { ManifestOverview } from "../components/package-manifest/manifest-overview";
 import { FileExplorer } from "../components/package-files/file-explorer";
+import { CallbackUrlHint } from "../components/package-detail/callback-url-hint";
 
 /** Tab ids, also the URL fragments that select them. `content` is the same id
  *  the unified package page uses for its file explorer, so a deep link reads
@@ -275,16 +276,16 @@ function OAuthClientModal({
               testId={`platform-redirect-uri-modal-${authKey}`}
             />
           </div>
-          {/* AFPS §7.10 — surface `auths.<key>.callback_url_hint`. Read-only
-              display; the actual redirectUri value lives in the input above. */}
+          {/* AFPS §7.10 — surface `auths.<key>.callback_url_hint`, with its
+              `{{callback_url}}` placeholder resolved against the SAME value
+              shown above. Read-only display; the editable override lives in
+              the input. */}
           {authDecl?.callback_url_hint && (
-            <p
-              className="text-muted-foreground text-[0.7rem]"
-              data-testid={`callback-url-hint-${authKey}`}
-            >
-              <span className="font-semibold">{t("integration.oauthClient.callbackUrlHint")}:</span>{" "}
-              <span className="font-mono">{authDecl.callback_url_hint}</span>
-            </p>
+            <CallbackUrlHint
+              hint={authDecl.callback_url_hint}
+              callbackUrl={redirectUri.trim() || platformRedirectUri}
+              authKey={authKey}
+            />
           )}
         </div>
         <label className="flex items-center gap-2 text-sm sm:col-span-2">

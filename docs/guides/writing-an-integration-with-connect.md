@@ -676,6 +676,19 @@ UI-side substitution the dashboard performs when rendering the hint):
 The top-level `setup_guide.callback_url_hint` from earlier drafts is deprecated;
 consumers MUST keep accepting it as a fallback.
 
+The dashboard substitutes `{{callback_url}}` with the callback it will actually send for
+the client being configured — the client's own `redirect_uri` override when it has one,
+else the platform callback. Substitution is raw, with no percent-encoding, because a hint
+is prose as often as it is a deep link; in the deep-link form the value lands in a query
+parameter, where RFC 3986 §3.4 already permits the `:` and `/` an unencoded URL
+contributes. A hint that resolves to a whole `http(s)` URL is rendered as a link, anything
+else as text — the string is publisher-controlled, so it never becomes a navigation sink.
+
+Write the hint to name the screen and field, not to restate the URL: the dashboard already
+shows the callback with a copy button right above the form. A hint that omits
+`{{callback_url}}` is something the UI could have hard-coded, and a conformance test
+rejects it.
+
 ---
 
 ## Security notes
