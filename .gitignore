@@ -79,4 +79,5 @@ playwright-report/
 .claude/worktrees/
 
 # Conformance harness — live tool-surface snapshots (uploaded as CI artifacts)
+artifacts/chat-engine-performance/
 conformance-snapshot/
