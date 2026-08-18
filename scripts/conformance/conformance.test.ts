@@ -7,7 +7,8 @@ import { diffToolSets } from "./tool-diff.ts";
 import { resolveToken, resolveAccessToken, credentialedCount, _resetCredsCache } from "./creds.ts";
 import { remoteUrl, toolsPolicyKeys, allowsUndeclared } from "./remote-parity.ts";
 import { applyAuth, checkAuthLiveness } from "./auth-live.ts";
-import { metadataCandidates, compareAuth, issuerBinds } from "./oauth-metadata.ts";
+import { metadataCandidates, compareAuth } from "./oauth-metadata.ts";
+import { buildDiscoveryProbes, discoveryIssuerMatches } from "@appstrate/connect";
 import { listAllTools } from "./mcp-list.ts";
 import { snapshotSlug, writeSnapshot, readSnapshot } from "./snapshot.ts";
 import { rm, mkdtemp } from "node:fs/promises";
@@ -438,63 +439,30 @@ describe("snapshot", () => {
 });
 
 describe("oauth-metadata — candidate discovery", () => {
-  it("builds both well-known paths from a declared issuer, issuer-trusted", () => {
+  // Probe SHAPES are owned by `buildDiscoveryProbes` in @appstrate/connect and
+  // covered there; what matters here is that this check delegates to it rather
+  // than rebuilding it, and labels the result issuer-trusted.
+  it("delegates issuer probes to the connect engine's builder", () => {
     const candidates = metadataCandidates({ type: "oauth2", issuer: "https://auth.example.com" });
-    expect(new Set(candidates.map((c) => c.url))).toEqual(
-      new Set([
-        "https://auth.example.com/.well-known/oauth-authorization-server",
-        "https://auth.example.com/.well-known/openid-configuration",
-      ]),
-    );
+    expect(candidates.map((c) => c.url)).toEqual(buildDiscoveryProbes("https://auth.example.com"));
     expect(candidates.every((c) => c.trust === "issuer")).toBe(true);
   });
 
-  it("strips a trailing slash from the issuer before building the well-known paths", () => {
-    const urls = metadataCandidates({ type: "oauth2", issuer: "https://auth.example.com/" }).map(
-      (c) => c.url,
-    );
-    expect(urls).not.toContain("https://auth.example.com//.well-known/openid-configuration");
-    expect(urls).toContain("https://auth.example.com/.well-known/openid-configuration");
-  });
-
-  // RFC 8414 §3.1 inserts the well-known segment between host and issuer path;
-  // OIDC Discovery §4 appends it. A multi-tenant AS is served at one location
-  // and 404s at the other, so probing only the appended form would report
-  // "publishes nothing" for a server that publishes plenty.
-  it("probes both the RFC 8414 inserted and the OIDC appended form for a path-bearing issuer", () => {
+  it("covers the RFC 8414 inserted form for a path-bearing issuer", () => {
     const urls = metadataCandidates({ type: "oauth2", issuer: "https://example.com/tenant" }).map(
       (c) => c.url,
     );
     expect(urls).toContain("https://example.com/.well-known/oauth-authorization-server/tenant");
     expect(urls).toContain("https://example.com/tenant/.well-known/openid-configuration");
-    expect(urls).toContain("https://example.com/tenant/.well-known/oauth-authorization-server");
   });
 
-  it("emits no duplicate when the two forms coincide (path-less issuer)", () => {
-    const urls = metadataCandidates({ type: "oauth2", issuer: "https://auth.example.com" }).map(
-      (c) => c.url,
-    );
-    expect(new Set(urls).size).toBe(urls.length);
-  });
-
-  it("ignores a malformed issuer instead of throwing", () => {
-    expect(metadataCandidates({ type: "oauth2", issuer: "not a url" })).toEqual([]);
-  });
-
-  // Without an issuer the origin is a guess: it may host an unrelated
-  // authorization server (api.hubapi.com publishes metadata for HubSpot's MCP
-  // server, not for classic app OAuth), so everything found this way is
-  // marked `probed` and can only ever warn.
-  it("falls back to probing the token_endpoint origin, marked probed", () => {
-    const candidates = metadataCandidates({
+  it("emits no duplicate URL", () => {
+    const urls = metadataCandidates({
       type: "oauth2",
-      token_endpoint: "https://api.example.com/oauth/v1/token",
-    });
-    expect(candidates.map((c) => c.url)).toEqual([
-      "https://api.example.com/.well-known/openid-configuration",
-      "https://api.example.com/.well-known/oauth-authorization-server",
-    ]);
-    expect(candidates.every((c) => c.trust === "probed")).toBe(true);
+      issuer: "https://auth.example.com",
+      token_endpoint: "https://api.example.com/oauth/token",
+    }).map((c) => c.url);
+    expect(new Set(urls).size).toBe(urls.length);
   });
 
   it("puts the issuer candidates ahead of the probed ones and never duplicates a URL", () => {
@@ -549,7 +517,7 @@ describe("oauth-metadata — manifest vs published metadata", () => {
     expect(findings[0]!.message).toContain("invalid_client");
   });
 
-  it("only warns for the same contradiction on a probed document", () => {
+  it("only warns for an auth-method contradiction on a probed document", () => {
     const findings = compareAuth(
       "@test/pkg",
       "primary",
@@ -604,6 +572,38 @@ describe("oauth-metadata — manifest vs published metadata", () => {
     expect(findings[0]!.message).toContain("token_endpoint");
   });
 
+  // Every endpoint mismatch this check ever reported from a probed document was
+  // a document describing a DIFFERENT authorization server on the same host.
+  // A warning an operator dismisses every week teaches them to dismiss the
+  // file, so the comparison does not run there at all.
+  it("says nothing about endpoints on a probed document", () => {
+    const findings = compareAuth(
+      "@test/pkg",
+      "primary",
+      { type: "oauth2", token_endpoint: "https://old.example.com/token" },
+      { token_endpoint: "https://auth.example.com/token" },
+      META,
+      "probed",
+    );
+    expect(findings).toEqual([]);
+  });
+
+  // The userinfo hint is an opportunity, not an accusation — it holds for
+  // whichever authorization server the document describes, so it survives on a
+  // probed document where the equality checks do not.
+  it("still surfaces a missing identity mechanism from a probed document", () => {
+    const findings = compareAuth(
+      "@test/pkg",
+      "primary",
+      { type: "oauth2" },
+      { userinfo_endpoint: "https://auth.example.com/userinfo" },
+      META,
+      "probed",
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0]!.severity).toBe("warn");
+  });
+
   it("warns when the provider offers userinfo and the manifest declares no identity mechanism", () => {
     const findings = compareAuth(
       "@test/pkg",
@@ -646,18 +646,26 @@ describe("oauth-metadata — manifest vs published metadata", () => {
   });
 });
 
-describe("oauth-metadata — issuer binding", () => {
+describe("oauth-metadata — issuer binding (shared with the connect engine)", () => {
   it("binds a document whose issuer claim matches the declared one", () => {
-    expect(issuerBinds("https://auth.example.com", "https://auth.example.com")).toBe(true);
+    expect(discoveryIssuerMatches("https://auth.example.com", "https://auth.example.com")).toBe(
+      true,
+    );
   });
 
   it("ignores a trailing slash on either side", () => {
-    expect(issuerBinds("https://auth.example.com/", "https://auth.example.com")).toBe(true);
-    expect(issuerBinds("https://auth.example.com", "https://auth.example.com/")).toBe(true);
+    expect(discoveryIssuerMatches("https://auth.example.com/", "https://auth.example.com")).toBe(
+      true,
+    );
+    expect(discoveryIssuerMatches("https://auth.example.com", "https://auth.example.com/")).toBe(
+      true,
+    );
   });
 
   it("refuses a document describing a different issuer", () => {
-    expect(issuerBinds("https://other.example.com", "https://auth.example.com")).toBe(false);
+    expect(discoveryIssuerMatches("https://other.example.com", "https://auth.example.com")).toBe(
+      false,
+    );
   });
 
   // RFC 8414 §3.2 makes `issuer` REQUIRED. Accepting a document that omits it
@@ -665,9 +673,9 @@ describe("oauth-metadata — issuer binding", () => {
   // issuer trust is exactly what turns a contradiction into a `fail` that opens
   // an issue against a manifest that may well be correct.
   it("refuses a document with no issuer claim at all", () => {
-    expect(issuerBinds(undefined, "https://auth.example.com")).toBe(false);
-    expect(issuerBinds("", "https://auth.example.com")).toBe(false);
-    expect(issuerBinds(null, "https://auth.example.com")).toBe(false);
-    expect(issuerBinds(42, "https://auth.example.com")).toBe(false);
+    expect(discoveryIssuerMatches(undefined, "https://auth.example.com")).toBe(false);
+    expect(discoveryIssuerMatches("", "https://auth.example.com")).toBe(false);
+    expect(discoveryIssuerMatches(null, "https://auth.example.com")).toBe(false);
+    expect(discoveryIssuerMatches(42, "https://auth.example.com")).toBe(false);
   });
 });

@@ -30,6 +30,7 @@
 
 import type { SystemPackageEntry } from "@appstrate/core/system-packages";
 import type { Finding, Severity } from "./types.ts";
+import { buildDiscoveryProbes, discoveryIssuerMatches } from "@appstrate/connect";
 import { ssrfGuardedFetch } from "./ssrf-fetch.ts";
 
 const CHECK = "oauth-metadata";
@@ -114,27 +115,15 @@ export function metadataCandidates(auth: OAuthAuth): Array<{ url: string; trust:
     if (!out.some((c) => c.url === url)) out.push({ url, trust });
   };
 
+  // A declared issuer gets EXACTLY the probes the connect engine uses —
+  // `buildDiscoveryProbes` owns the RFC 8414 path-insertion vs OIDC
+  // path-append distinction, the trailing-slash normalisation and the dedupe.
+  // Rebuilding that here is how this check first shipped, and it shipped with
+  // a bug the engine never had: only the appended form was probed, so every
+  // multi-tenant authorization server would have been reported as publishing
+  // no metadata at all.
   const issuer = str(auth.issuer);
-  if (issuer) {
-    try {
-      const url = new URL(issuer);
-      const path = url.pathname.replace(/\/+$/, "");
-      // RFC 8414 §3.1 INSERTS the well-known segment between host and issuer
-      // path (`https://host/.well-known/oauth-authorization-server/tenant`),
-      // while OIDC Discovery §4 APPENDS it
-      // (`https://host/tenant/.well-known/openid-configuration`). A
-      // path-bearing issuer — every multi-tenant authorization server — is
-      // served at one location and 404s at the other, so probing only the
-      // appended form reports "publishes nothing" for a server that publishes
-      // plenty. Both forms are tried; they coincide when the issuer carries no
-      // path, and `add` drops the duplicate.
-      add(`${url.origin}/.well-known/oauth-authorization-server${path}`, "issuer");
-      add(`${url.origin}${path}/.well-known/openid-configuration`, "issuer");
-      add(`${url.origin}${path}/.well-known/oauth-authorization-server`, "issuer");
-    } catch {
-      // A malformed issuer is the schema's problem, not this check's.
-    }
-  }
+  if (issuer) for (const url of buildDiscoveryProbes(issuer)) add(url, "issuer");
 
   const tokenEndpoint = str(auth.token_endpoint);
   if (tokenEndpoint) {
@@ -147,23 +136,6 @@ export function metadataCandidates(auth: OAuthAuth): Array<{ url: string; trust:
     }
   }
   return out;
-}
-
-/**
- * Whether a metadata document may be treated as describing `declaredIssuer`.
- *
- * RFC 8414 §3.2 makes `issuer` REQUIRED in the document and §3.3 makes the
- * client reject any document whose `issuer` does not match the one it asked
- * about. A MISSING claim is refused for the same reason a mismatched one is:
- * without it nothing ties the document to this authorization server, and
- * issuer trust is exactly what promotes a contradiction from a warning to a
- * `fail` that opens an issue against a manifest that may well be correct.
- */
-export function issuerBinds(published: unknown, declaredIssuer: string): boolean {
-  const value = str(published);
-  if (!value) return false;
-  const normalize = (v: string): string => v.replace(/\/+$/, "");
-  return normalize(value) === normalize(declaredIssuer);
 }
 
 /**
@@ -189,7 +161,11 @@ async function fetchMetadata(
       const body: unknown = await res.json();
       if (!body || typeof body !== "object") continue;
       const metadata = body as AsMetadata;
-      if (trust === "issuer" && declaredIssuer && !issuerBinds(metadata.issuer, declaredIssuer)) {
+      if (
+        trust === "issuer" &&
+        declaredIssuer &&
+        !discoveryIssuerMatches(metadata.issuer, declaredIssuer)
+      ) {
         continue;
       }
       return { url, trust, metadata };
@@ -259,34 +235,41 @@ export function compareAuth(
     }
   }
 
-  // Endpoints. A mismatch here means the connect flow talks to a URL the
-  // provider no longer considers current — the redirect works, the exchange
-  // does not.
-  for (const field of ["authorization_endpoint", "token_endpoint", "userinfo_endpoint"] as const) {
-    const declared = str(auth[field]);
-    const published = str(metadata[field]);
-    if (!published) continue;
-    if (!declared) {
-      // Only a missing IDENTITY mechanism is worth flagging. An auth that maps
-      // `identity_claims` onto OIDC `id_token` claims (every Google
-      // integration here) resolves an account without ever calling userinfo,
-      // so demanding the endpoint too would be noise.
-      if (field === "userinfo_endpoint" && !declaresIdentity(auth)) {
-        findings.push({
-          packageId,
-          check: CHECK,
-          severity: "warn",
-          message: `${where}: provider publishes userinfo_endpoint '${published}' and the manifest declares no identity mechanism — connections fall back to accountId "default" and are labelled "Connexion N"`,
-        });
-      }
-      continue;
-    }
-    if (declared !== published) {
+  // A published `userinfo_endpoint` against an auth with no identity mechanism
+  // is an OPPORTUNITY, not an accusation — it holds whichever authorization
+  // server the document describes, so it is worth surfacing even from a probed
+  // document.
+  const publishedUserinfo = str(metadata.userinfo_endpoint);
+  if (publishedUserinfo && !str(auth.userinfo_endpoint) && !declaresIdentity(auth)) {
+    findings.push({
+      packageId,
+      check: CHECK,
+      severity: "warn",
+      message: `${where}: provider publishes userinfo_endpoint '${publishedUserinfo}' and the manifest declares no identity mechanism — connections fall back to accountId "default" and are labelled "Connexion N"`,
+    });
+  }
+
+  // Endpoint EQUALITY is only checked against an issuer-bound document. On a
+  // probed one it produced nothing but noise: every mismatch this check has
+  // ever reported that way was a document describing a different authorization
+  // server on the same host (HubSpot's MCP server vs classic app OAuth, Slack's
+  // "Sign in with Slack" OIDC server vs its app OAuth, Discord's equivalent
+  // alias path). A warning an operator must dismiss every week teaches them to
+  // dismiss the file, so the branch is gone rather than downgraded.
+  if (trust === "issuer") {
+    for (const field of [
+      "authorization_endpoint",
+      "token_endpoint",
+      "userinfo_endpoint",
+    ] as const) {
+      const declared = str(auth[field]);
+      const published = str(metadata[field]);
+      if (!declared || !published || declared === published) continue;
       findings.push({
         packageId,
         check: CHECK,
-        severity: contradiction,
-        message: `${where}: ${field} '${declared}' ≠ published '${published}'${caveat}`,
+        severity: "fail",
+        message: `${where}: ${field} '${declared}' ≠ published '${published}'`,
       });
     }
   }

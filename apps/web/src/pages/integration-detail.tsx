@@ -38,7 +38,7 @@
 
 import { useState } from "react";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
-import { useCopyToClipboard } from "../hooks/use-copy-to-clipboard";
+import { CopyBlock } from "../components/copy-block";
 import { ManifestOverview } from "../components/package-manifest/manifest-overview";
 import { FileExplorer } from "../components/package-files/file-explorer";
 import { CallbackUrlHint } from "../components/package-detail/callback-url-hint";
@@ -57,7 +57,7 @@ const INTEGRATION_TABS = [
 import { useTranslation } from "react-i18next";
 import { useParams } from "react-router-dom";
 import { toast } from "sonner";
-import { Trash2, ShieldCheck, Plus, Pencil, Check, X, ChevronRight, Copy } from "lucide-react";
+import { Trash2, ShieldCheck, Plus, Pencil, Check, X, ChevronRight } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { Badge } from "@appstrate/ui/components/badge";
 import { Input } from "@appstrate/ui/components/input";
@@ -138,36 +138,6 @@ import { ConnectionStatusBadge } from "../components/integration-connect/connect
  * cleanly between invocations. The client secret is write-only — never echoed
  * back, shown as a placeholder when one is already set.
  */
-/**
- * Read-only URL with a copy button. Used for the platform redirect URI, which
- * an admin must reproduce byte-for-byte in the provider's OAuth app: a value
- * that has to be copied exactly is a value that must be copyable, not retyped.
- * `select-all` + `break-all` keep a long URL fully visible and one-click
- * selectable when the clipboard API is unavailable (plain-HTTP origins have no
- * `navigator.clipboard`).
- */
-function CopyableUrl({ value, testId }: { value: string; testId: string }) {
-  const { t } = useTranslation("common");
-  const { copied, copy } = useCopyToClipboard();
-  return (
-    <div className="border-border bg-muted/50 relative rounded-md border" data-testid={testId}>
-      <code className="text-foreground block px-2 py-1.5 pr-9 font-mono text-xs break-all select-all">
-        {value}
-      </code>
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon"
-        className="text-muted-foreground hover:text-foreground absolute top-0.5 right-0.5 h-6 w-6"
-        aria-label={t("btn.copy")}
-        onClick={() => copy(value)}
-      >
-        {copied ? <Check className="text-primary" /> : <Copy />}
-      </Button>
-    </div>
-  );
-}
-
 function OAuthClientModal({
   packageId,
   authKey,
@@ -192,6 +162,10 @@ function OAuthClientModal({
   const [clientId, setClientId] = useState(existing?.client_id ?? "");
   const [clientSecret, setClientSecret] = useState("");
   const [redirectUri, setRedirectUri] = useState(existing?.redirect_uri ?? "");
+  // What connect will send for THIS client. Named once: the copy block and the
+  // publisher hint below must agree, and they diverge the moment the same
+  // expression is spelled out twice.
+  const effectiveRedirectUri = redirectUri.trim() || platformRedirectUri;
   const [publicClient, setPublicClient] = useState(existing ? !existing.has_client_secret : false);
 
   const submit = (e: React.FormEvent) => {
@@ -271,8 +245,9 @@ function OAuthClientModal({
             <p className="text-muted-foreground text-[0.7rem]">
               {t("integration.oauthClient.platformRedirectUri")}
             </p>
-            <CopyableUrl
-              value={redirectUri.trim() || platformRedirectUri}
+            <CopyBlock
+              value={effectiveRedirectUri}
+              dense
               testId={`platform-redirect-uri-modal-${authKey}`}
             />
           </div>
@@ -283,7 +258,7 @@ function OAuthClientModal({
           {authDecl?.callback_url_hint && (
             <CallbackUrlHint
               hint={authDecl.callback_url_hint}
-              callbackUrl={redirectUri.trim() || platformRedirectUri}
+              callbackUrl={effectiveRedirectUri}
               authKey={authKey}
             />
           )}
@@ -332,16 +307,19 @@ function ClientsTable({
   authKey,
   authDecl,
   autoProvisioned,
-  platformRedirectUri,
 }: {
   packageId: string;
   authKey: string;
   authDecl?: IntegrationManifestAuth;
   autoProvisioned: boolean;
-  platformRedirectUri: string;
 }) {
   const { t } = useTranslation("settings");
   const { data: clients } = useIntegrationClients(packageId, authKey);
+  // Read from the same query key the page already holds, rather than threading
+  // the value down through `ConfigAuthBlock`, which would carry a prop it never
+  // reads. React Query dedupes, so this costs no request.
+  const { data: detail } = useIntegrationDetail(packageId);
+  const platformRedirectUri = detail?.platform_redirect_uri ?? "";
   const setDefault = useSetDefaultIntegrationClient();
   const del = useDeleteIntegrationOAuthClient();
   const [modal, setModal] = useState<
@@ -380,7 +358,7 @@ function ClientsTable({
         <p className="text-muted-foreground text-xs font-semibold">
           {t("integration.oauthClient.platformRedirectUri")}
         </p>
-        <CopyableUrl value={effectiveRedirectUri} testId={`platform-redirect-uri-${authKey}`} />
+        <CopyBlock value={effectiveRedirectUri} testId={`platform-redirect-uri-${authKey}`} />
       </div>
 
       <div className="mb-2 flex items-center justify-between gap-2">
@@ -651,12 +629,10 @@ function ConfigAuthBlock({
   packageId,
   status,
   authDecl,
-  platformRedirectUri,
 }: {
   packageId: string;
   status: IntegrationAuthStatus;
   authDecl: IntegrationManifestAuth;
-  platformRedirectUri: string;
 }) {
   const { t } = useTranslation("settings");
   const isOAuth = status.type === "oauth2";
@@ -702,7 +678,6 @@ function ConfigAuthBlock({
           authKey={status.auth_key}
           authDecl={authDecl}
           autoProvisioned={status.client_auto_provisioned}
-          platformRedirectUri={platformRedirectUri}
         />
       )}
       {!isOAuth && (
@@ -1635,7 +1610,6 @@ export function IntegrationDetailPage() {
                         packageId={packageId}
                         status={authStatus}
                         authDecl={declared}
-                        platformRedirectUri={detail.platform_redirect_uri}
                       />
                     );
                   })
