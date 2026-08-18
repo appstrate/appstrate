@@ -56,7 +56,7 @@ Chaque cellule A/B respecte tous les invariants suivants :
 - même machine ou même limite de conteneur ;
 - processus frais distinct pour chaque moteur froid ;
 - même base isolée remise dans le même état logique ;
-- même modèle Mistral et même preset d'organisation ;
+- même modèle par clé API et même preset d'organisation pour chaque cellule A/B ;
 - même chemin `llm-proxy` et même politique d'usage ;
 - même prompt système, contexte appelant, historique et pièces jointes ;
 - mêmes outils MCP et mêmes résultats d'outils ;
@@ -93,9 +93,13 @@ et les métriques brutes conservées.
 
 ### 4.2 Banc fournisseur réel
 
-Le banc réel utilise Mistral par clé d'organisation et traverse le véritable `llm-proxy`. L'ordre
-des exécutions suit des blocs AI SDK, Pi, Pi, AI SDK afin de réduire le biais temporel du réseau et
-du fournisseur.
+Le banc réel utilise d'abord Mistral par clé d'organisation et traverse le véritable `llm-proxy`.
+OpenRouter Free peut servir de second fournisseur si un résultat doit être confirmé avec une autre
+clé API. Dans ce cas, un modèle `:free` explicite est choisi dans le catalogue disponible au début
+du banc, puis son identifiant exact est figé dans le manifeste. Le routeur automatique OpenRouter
+n'est pas utilisé, car il pourrait envoyer les requêtes comparées vers des modèles différents.
+L'ordre des exécutions suit des blocs AI SDK, Pi, Pi, AI SDK afin de réduire le biais temporel du
+réseau et du fournisseur.
 
 Deux sous-profils sont nécessaires :
 
@@ -103,11 +107,28 @@ Deux sous-profils sont nécessaires :
 - cache chaud, avec un préfixe stable répété, en enregistrant les tokens de cache lus et écrits.
 
 Ce banc mesure le produit complet, notamment la sérialisation propre à chaque moteur. Il est exécuté
-trois fois par cellule. Les erreurs et limites du fournisseur sont rapportées séparément des erreurs
-du moteur.
+trois fois par cellule. Les erreurs, limites et files d'attente du fournisseur sont rapportées
+séparément des erreurs du moteur. Les niveaux de forte concurrence qui saturent le fournisseur sont
+mesurés par le banc contrôlé et ne servent pas à comparer la capacité brute des moteurs sur le banc
+réel.
 
 Critère de fin : les deux moteurs ont traversé le même proxy avec un ledger complet et aucun écart
 inexpliqué dans le nombre d'appels.
+
+### 4.3 Banc abonnements Pi
+
+Les abonnements Codex et Claude Code traversent Pi uniquement. Ils ne peuvent donc pas remplacer le
+banc A/B, puisque le moteur AI SDK ne sait pas utiliser les mêmes modes d'authentification. Ils
+forment un banc Pi complémentaire qui vérifie le coût mémoire, la stabilité, la persistance et la
+continuité de session dans les chemins d'abonnement réellement proposés par le produit.
+
+Pour chaque abonnement, exécuter les niveaux `1`, `10` et `30`, puis atteindre `60` uniquement si le
+fournisseur ne limite pas déjà le compte et si cette charge respecte sa politique d'utilisation.
+Les ralentissements et refus du fournisseur sont séparés des erreurs du moteur. Ce banc ne peut pas
+servir à conclure que Pi est non inférieur à AI SDK.
+
+Critère de fin : chaque chemin d'abonnement admis termine sans fuite de mémoire, perte de
+persistance ni rupture de continuité, avec les limites fournisseur explicitement identifiées.
 
 ## 5. Charges à exécuter
 
@@ -313,15 +334,18 @@ les scripts reproductibles sont versionnés.
    Critère : une cellule S à concurrence 1 produit des sorties identiques pour les deux moteurs.
 3. Exécuter le banc contrôlé complet.
    Critère : cinq répétitions valides par cellule avec métriques brutes.
-4. Exécuter le banc Mistral réel.
+4. Exécuter le banc fournisseur réel A/B avec Mistral, puis confirmer avec un modèle OpenRouter
+   `:free` explicite uniquement si nécessaire.
    Critère : trois répétitions valides et ledger réconcilié.
-5. Exécuter les distributions à 100 organisations.
+5. Exécuter le banc Pi par abonnements Codex et Claude Code.
+   Critère : stabilité, persistance et limites fournisseur caractérisées séparément.
+6. Exécuter les distributions à 100 organisations.
    Critère : capacité, isolation et politique de refus vérifiées.
-6. Rejouer dans le profil de réplica cloud.
+7. Rejouer dans le profil de réplica cloud.
    Critère : aucune OOM et marge mémoire calculée.
-7. Produire le rapport et la décision GO, HOLD ou NO GO.
+8. Produire le rapport et la décision GO, HOLD ou NO GO.
    Critère : chaque affirmation renvoie à une observation brute reproductible.
-8. Effectuer un contrôle fonctionnel final dans Chrome Beta avec Chrome DevTools MCP.
+9. Effectuer un contrôle fonctionnel final dans Chrome Beta avec Chrome DevTools MCP.
    Critère : un chat AI SDK de contrôle et un chat Pi relisent correctement leur résultat persisté.
 
 Ce plan ne lance pas le canary, ne modifie pas le trafic de production et ne supprime pas le moteur
