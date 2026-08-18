@@ -12,8 +12,11 @@
 import { $ } from "bun";
 import {
   CHAT_PERFORMANCE_OBSERVATION_VERSION,
+  forwardMistralChatCompletion,
   memoryCheckpoints,
   normalizeFetchRequest,
+  parseDotEnvValue,
+  parseOpenAiSseUsage,
   percentile,
   summarizeDurations,
   waitForWorkerExit,
@@ -24,8 +27,10 @@ import type { ChatEnv } from "../packages/module-chat/src/prompt.ts";
 type Engine = "ai-sdk" | "pi";
 type ConversationForm = "S" | "H";
 type Profile = "cold" | "warm";
+type Benchmark = "controlled" | "mistral-real";
 
 interface WorkerConfig {
+  benchmark: Benchmark;
   engine: Engine;
   form: ConversationForm;
   profile: Profile;
@@ -34,6 +39,8 @@ interface WorkerConfig {
   recoveryMs: number;
   outputFile: string;
   databaseDir: string;
+  providerEnvFile: string | null;
+  providerModelId: string;
 }
 
 interface TurnObservation {
@@ -70,9 +77,10 @@ if (worker) {
 
 async function runController(args: string[]): Promise<void> {
   const command = args[0] ?? "controlled";
-  if (command !== "controlled") {
+  if (command !== "controlled" && command !== "mistral") {
     throw new Error(`Unsupported benchmark command: ${command}`);
   }
+  const benchmark: Benchmark = command === "mistral" ? "mistral-real" : "controlled";
   const engines = csvOption(args, "engines", ["ai-sdk", "pi"]) as Engine[];
   const forms = csvOption(args, "forms", ["S", "H"]) as ConversationForm[];
   const profiles = csvOption(args, "profiles", ["cold", "warm"]) as Profile[];
@@ -82,7 +90,18 @@ async function runController(args: string[]): Promise<void> {
   const repetitions = numberOption(args, "repetitions", 5);
   const recoveryMs = numberOption(args, "recovery-ms", 120_000);
   const cellTimeoutMs = numberOption(args, "cell-timeout-ms", 15 * 60_000);
-  const outputDir = stringOption(args, "output", "artifacts/chat-engine-performance/controlled");
+  const outputDir = stringOption(args, "output", `artifacts/chat-engine-performance/${command}`);
+  const providerEnvFile = command === "mistral" ? stringOption(args, "env-file", "") : "";
+  const providerModelId = stringOption(args, "model", "mistral-small-2603");
+  if (command === "mistral" && !providerEnvFile) {
+    throw new Error("The Mistral benchmark requires --env-file=/absolute/path/to/.env");
+  }
+  if (command === "mistral") {
+    const providerEnv = await Bun.file(providerEnvFile).text();
+    if (!parseDotEnvValue(providerEnv, "MISTRAL_API_KEY")) {
+      throw new Error("MISTRAL_API_KEY is missing or empty in the provider env file");
+    }
+  }
 
   await $`mkdir -p ${outputDir}`.quiet();
   const commit = textCommand(["git", "rev-parse", "HEAD"]);
@@ -109,6 +128,9 @@ async function runController(args: string[]): Promise<void> {
                 CHAT_PERF_RECOVERY_MS: String(recoveryMs),
                 CHAT_PERF_OUTPUT_FILE: outputFile,
                 CHAT_PERF_DATABASE_DIR: databaseDir,
+                CHAT_PERF_BENCHMARK: benchmark,
+                CHAT_PERF_PROVIDER_ENV_FILE: providerEnvFile,
+                CHAT_PERF_PROVIDER_MODEL_ID: providerModelId,
               },
               stdout: "inherit",
               stderr: "inherit",
@@ -126,12 +148,13 @@ async function runController(args: string[]): Promise<void> {
               continuity: { complete: boolean; markerValid: boolean };
             };
             if (
-              observation.outcomes.completed !== observation.outcomes.requested ||
-              observation.outcomes.incompleteStreams !== 0 ||
-              observation.outcomes.markerFailures !== 0 ||
-              !observation.isolation.foreignSessionRejected ||
-              !observation.continuity.complete ||
-              !observation.continuity.markerValid
+              benchmark === "controlled" &&
+              (observation.outcomes.completed !== observation.outcomes.requested ||
+                observation.outcomes.incompleteStreams !== 0 ||
+                observation.outcomes.markerFailures !== 0 ||
+                !observation.isolation.foreignSessionRejected ||
+                !observation.continuity.complete ||
+                !observation.continuity.markerValid)
             ) {
               throw new Error(`Controlled benchmark invariants failed for ${id}`);
             }
@@ -144,7 +167,7 @@ async function runController(args: string[]): Promise<void> {
   const manifest = {
     schemaVersion: CHAT_PERFORMANCE_OBSERVATION_VERSION,
     kind: "chat-engine-performance-manifest",
-    benchmark: "controlled",
+    benchmark,
     startedAt,
     completedAt: new Date().toISOString(),
     commit,
@@ -158,6 +181,8 @@ async function runController(args: string[]): Promise<void> {
       repetitions,
       recoveryMs,
       cellTimeoutMs,
+      provider: command === "mistral" ? "mistral-api-key" : "deterministic",
+      modelId: command === "mistral" ? providerModelId : "controlled-v1",
     },
     observations: files,
   };
@@ -228,26 +253,43 @@ async function runWorker(config: WorkerConfig): Promise<void> {
     inputTokens: 0,
     outputTokens: 0,
     statuses: { ok: 0, rateLimited: 0, serverError: 0 },
+    providerStatuses: { ok: 0, rateLimited: 0, serverError: 0, otherError: 0 },
   };
 
-  const controlledDispatch = createControlledDispatch({
+  const originalFetch = globalThis.fetch;
+  const sharedDispatchOptions = {
     db,
     schema,
     sessionByMarker,
     identityByOrg,
     identityByMarker,
-    onInference: (usage) => {
+    onInference: (usage: { inputTokens: number; outputTokens: number }) => {
       if (phase !== "wave") return;
       counters.waveModelCalls += 1;
       counters.inputTokens += usage.inputTokens;
       counters.outputTokens += usage.outputTokens;
     },
-  });
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = controlledDispatch as typeof fetch;
+  };
+  const dispatch =
+    config.benchmark === "mistral-real"
+      ? createMistralDispatch({
+          ...sharedDispatchOptions,
+          apiKey: await loadProviderKey(config),
+          modelId: config.providerModelId,
+          upstreamFetch: originalFetch.bind(globalThis),
+          onProviderStatus: (status) => {
+            if (phase !== "wave") return;
+            if (status >= 200 && status < 300) counters.providerStatuses.ok += 1;
+            else if (status === 429) counters.providerStatuses.rateLimited += 1;
+            else if (status >= 500) counters.providerStatuses.serverError += 1;
+            else counters.providerStatuses.otherError += 1;
+          },
+        })
+      : createControlledDispatch(sharedDispatchOptions);
+  globalThis.fetch = dispatch as typeof fetch;
 
   const deps = {
-    dispatch: controlledDispatch,
+    dispatch,
     rateLimit: () => async (_context: unknown, next: () => Promise<void>) => next(),
     resolveSubscriptionChatModel: async () => ({ subscription: false as const }),
     recordChatUsage: async () => {},
@@ -394,7 +436,7 @@ async function runWorker(config: WorkerConfig): Promise<void> {
   const observation = {
     schemaVersion: CHAT_PERFORMANCE_OBSERVATION_VERSION,
     kind: "chat-engine-performance-observation",
-    benchmark: "controlled",
+    benchmark: config.benchmark,
     id: [
       config.engine,
       config.form,
@@ -457,6 +499,11 @@ async function runWorker(config: WorkerConfig): Promise<void> {
       toolCalls: counters.waveToolCalls,
       inputTokens: counters.inputTokens,
       outputTokens: counters.outputTokens,
+    },
+    provider: {
+      id: config.benchmark === "mistral-real" ? "mistral-api-key" : "deterministic",
+      modelId: config.benchmark === "mistral-real" ? config.providerModelId : "controlled-v1",
+      statuses: counters.providerStatuses,
     },
     persistence,
     continuity: {
@@ -555,6 +602,99 @@ function createControlledDispatch(options: {
   };
 }
 
+function createMistralDispatch(options: {
+  db: any;
+  schema: any;
+  sessionByMarker: Map<string, string>;
+  identityByOrg: Map<string, any>;
+  identityByMarker: Map<string, any>;
+  apiKey: string;
+  modelId: string;
+  upstreamFetch: FetchLike;
+  onInference(usage: { inputTokens: number; outputTokens: number }): void;
+  onProviderStatus(status: number): void;
+}): FetchLike {
+  return async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+    const request = normalizeFetchRequest(input, init);
+    const url = new URL(request.url);
+    if (url.pathname === "/api/models") return mistralModelsResponse(options.modelId);
+    if (url.pathname === "/api/me/context") {
+      const identity = options.identityByOrg.get(request.headers.get("x-org-id") ?? "");
+      return Response.json({
+        user: identity?.user ?? { name: "Synthetic", email: "synthetic@example.test" },
+        org: { role: "owner", name: identity?.orgName ?? "Synthetic", slug: identity?.orgSlug },
+        connections: [],
+        agents: [],
+        skills: [],
+        recent_runs: [],
+      });
+    }
+    if (url.pathname.startsWith("/api/mcp/")) return mcpResponse(request);
+    if (!url.pathname.endsWith("/chat/completions")) {
+      return new Response(`unexpected Mistral dispatch: ${url.pathname}`, { status: 404 });
+    }
+
+    const serialized = await request.clone().text();
+    const marker = [...options.sessionByMarker.keys()].find((candidate) =>
+      serialized.includes(candidate),
+    );
+    if (!marker) return new Response("missing synthetic marker", { status: 400 });
+    const startedAt = performance.now();
+    const upstream = await forwardMistralChatCompletion(request, {
+      apiKey: options.apiKey,
+      modelId: options.modelId,
+      fetch: options.upstreamFetch,
+    });
+    options.onProviderStatus(upstream.status);
+    if (!upstream.body || !upstream.ok) {
+      options.onInference({ inputTokens: 0, outputTokens: 0 });
+      return upstream;
+    }
+
+    const identity = options.identityByMarker.get(marker)!;
+    const sessionId = options.sessionByMarker.get(marker)!;
+    const decoder = new TextDecoder();
+    let captured = "";
+    const tapped = upstream.body.pipeThrough(
+      new TransformStream<Uint8Array, Uint8Array>({
+        transform(chunk, controller) {
+          captured += decoder.decode(chunk, { stream: true });
+          controller.enqueue(chunk);
+        },
+        async flush() {
+          captured += decoder.decode();
+          const usage = parseOpenAiSseUsage(captured);
+          options.onInference(usage ?? { inputTokens: 0, outputTokens: 0 });
+          if (!usage) return;
+          await options.db.insert(options.schema.llmUsage).values({
+            source: "proxy",
+            orgId: identity.orgId,
+            userId: identity.user.id,
+            chatSessionId: sessionId,
+            model: "mistral-benchmark-preset",
+            realModel: options.modelId,
+            api: "openai-completions",
+            credentialSource: "org",
+            inputTokens: usage.inputTokens,
+            outputTokens: usage.outputTokens,
+            cacheReadTokens: 0,
+            cacheWriteTokens: 0,
+            costUsd: 0,
+            pricingStatus: "unpriced",
+            durationMs: Math.round(performance.now() - startedAt),
+            requestId: crypto.randomUUID(),
+          });
+        },
+      }),
+    );
+    return new Response(tapped, {
+      status: upstream.status,
+      statusText: upstream.statusText,
+      headers: upstream.headers,
+    });
+  };
+}
+
 function modelsResponse(): Response {
   return Response.json({
     object: "list",
@@ -566,6 +706,32 @@ function modelsResponse(): Response {
         modelId: "controlled-v1",
         providerId: "controlled",
         apiShape: "openai-completions",
+        enabled: true,
+        is_default: true,
+        input: ["text"],
+        contextWindow: 32_768,
+        maxTokens: 256,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        generation: {
+          temperature: "unsupported",
+          reasoning: { supported: "unsupported", adaptive: null, levels: {} },
+        },
+      },
+    ],
+  });
+}
+
+function mistralModelsResponse(modelId: string): Response {
+  return Response.json({
+    object: "list",
+    hasMore: false,
+    data: [
+      {
+        id: "mistral-benchmark-preset",
+        label: `Mistral benchmark (${modelId})`,
+        modelId,
+        providerId: "mistral",
+        apiShape: "mistral-conversations",
         enabled: true,
         is_default: true,
         input: ["text"],
@@ -814,6 +980,14 @@ async function verifyPersistence(db: any, schema: any, identities: any[]) {
   };
 }
 
+async function loadProviderKey(config: WorkerConfig): Promise<string> {
+  if (!config.providerEnvFile) throw new Error("Missing provider env file");
+  const contents = await Bun.file(config.providerEnvFile).text();
+  const key = parseDotEnvValue(contents, "MISTRAL_API_KEY");
+  if (!key) throw new Error("MISTRAL_API_KEY is missing or empty in the provider env file");
+  return key;
+}
+
 function workerConfigFromEnvironment(): WorkerConfig {
   const required = (name: string): string => {
     const value = process.env[name];
@@ -821,6 +995,7 @@ function workerConfigFromEnvironment(): WorkerConfig {
     return value;
   };
   return {
+    benchmark: required("CHAT_PERF_BENCHMARK") as Benchmark,
     engine: required("CHAT_PERF_ENGINE") as Engine,
     form: required("CHAT_PERF_FORM") as ConversationForm,
     profile: required("CHAT_PERF_PROFILE") as Profile,
@@ -829,6 +1004,8 @@ function workerConfigFromEnvironment(): WorkerConfig {
     recoveryMs: Number(required("CHAT_PERF_RECOVERY_MS")),
     outputFile: required("CHAT_PERF_OUTPUT_FILE"),
     databaseDir: required("CHAT_PERF_DATABASE_DIR"),
+    providerEnvFile: process.env.CHAT_PERF_PROVIDER_ENV_FILE || null,
+    providerModelId: process.env.CHAT_PERF_PROVIDER_MODEL_ID || "mistral-small-2603",
   };
 }
 
