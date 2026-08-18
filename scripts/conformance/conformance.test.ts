@@ -8,6 +8,7 @@ import { resolveToken, resolveAccessToken, credentialedCount, _resetCredsCache }
 import { remoteUrl, toolsPolicyKeys, allowsUndeclared } from "./remote-parity.ts";
 import { applyAuth, checkAuthLiveness } from "./auth-live.ts";
 import { metadataCandidates, compareAuth } from "./oauth-metadata.ts";
+import { declaredIdentityEndpoints, classifyIdentityProbe } from "./identity-endpoint.ts";
 import { buildDiscoveryProbes, discoveryIssuerMatches } from "@appstrate/connect";
 import { listAllTools } from "./mcp-list.ts";
 import { snapshotSlug, writeSnapshot, readSnapshot } from "./snapshot.ts";
@@ -677,5 +678,71 @@ describe("oauth-metadata — issuer binding (shared with the connect engine)", (
     expect(discoveryIssuerMatches("", "https://auth.example.com")).toBe(false);
     expect(discoveryIssuerMatches(null, "https://auth.example.com")).toBe(false);
     expect(discoveryIssuerMatches(42, "https://auth.example.com")).toBe(false);
+  });
+});
+
+describe("identity-endpoint — declaration reading", () => {
+  it("collects every declared userinfo_endpoint with its auth key", () => {
+    expect(
+      declaredIdentityEndpoints({
+        auths: {
+          primary: { type: "oauth2", userinfo_endpoint: "https://api.example.com/me" },
+          pat: { type: "api_key" },
+        },
+      }),
+    ).toEqual([{ authKey: "primary", url: "https://api.example.com/me" }]);
+  });
+
+  it("yields nothing when no auth declares one", () => {
+    expect(declaredIdentityEndpoints({ auths: { primary: { type: "oauth2" } } })).toEqual([]);
+  });
+
+  it("tolerates a missing or foreign auths shape", () => {
+    expect(declaredIdentityEndpoints({})).toEqual([]);
+    expect(declaredIdentityEndpoints({ auths: "nope" })).toEqual([]);
+    expect(declaredIdentityEndpoints({ auths: { primary: null } })).toEqual([]);
+  });
+});
+
+describe("identity-endpoint — probe classification", () => {
+  const probe = (status: number) =>
+    classifyIdentityProbe("@test/pkg", "primary", "https://api.example.com/me", status);
+
+  // 403 is read the same way as 401 even though it is ambiguous — Reddit
+  // returns it for a datacenter-IP block, not for the token. Both readings
+  // agree on the only claim made here: something serves this path.
+  it("treats a refusal as proof the endpoint is live", () => {
+    expect(probe(401).severity).toBe("info");
+    expect(probe(403).severity).toBe("info");
+  });
+
+  // The failure this check exists for: a renamed or retired path degrades every
+  // connection to accountId "default" without raising anything.
+  it("fails a status that means the path is wrong", () => {
+    for (const status of [404, 405, 410]) {
+      const finding = probe(status);
+      expect(finding.severity).toBe("fail");
+      expect(finding.message).toContain("default");
+    }
+  });
+
+  it("fails a 2xx — an invalid token must never be served content", () => {
+    expect(probe(200).severity).toBe("fail");
+    expect(probe(204).severity).toBe("fail");
+  });
+
+  // A third party being down is not a manifest defect, and a check that fails
+  // the run on someone else's outage gets muted.
+  it("only warns on a status that proves nothing", () => {
+    expect(probe(500).severity).toBe("warn");
+    expect(probe(429).severity).toBe("warn");
+    expect(probe(302).severity).toBe("warn");
+  });
+
+  it("names the endpoint it probed in every finding", () => {
+    for (const status of [401, 404, 200, 500]) {
+      expect(probe(status).message).toContain("https://api.example.com/me");
+      expect(probe(status).check).toBe("identity-endpoint");
+    }
   });
 });

@@ -3,9 +3,10 @@ name: System-package conformance monitor
 on:
   schedule:
     # Weekly — Mondays 06:00 UTC. Remote servers are upstream-controlled; this
-    # catches MCP tool-catalog drift, credential-only auth-liveness and OAuth
-    # authorization-server metadata conformance (--tier all) out of band from
-    # the merge gate, which only runs the deterministic local checks.
+    # catches MCP tool-catalog drift, credential-only auth-liveness, OAuth
+    # authorization-server metadata conformance and identity-endpoint liveness
+    # (--tier all) out of band from the merge gate, which only runs the
+    # deterministic local checks.
     #
     # The metadata check deliberately does NOT gate merges: it reads documents
     # served by third parties, so a provider outage or a rename on their side
