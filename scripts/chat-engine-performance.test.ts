@@ -3,12 +3,15 @@
 import { describe, expect, it } from "bun:test";
 import {
   benchmarkHistoryToolPart,
+  completedTurnHasUsage,
+  defaultSubscriptionModel,
   compareCellInvariants,
   memoryCheckpoints,
   normalizeFetchRequest,
   parseDotEnvValue,
   percentile,
   repetitionNumbers,
+  publishedObservationName,
   summarizeDurations,
   summarizeWaveActivity,
   waitForWorkerExit,
@@ -109,6 +112,24 @@ describe("chat engine performance observation helpers", () => {
       output: { content: [{ type: "text" }] },
     });
     expect(benchmarkHistoryToolPart("ORG0001_USER0001").toolCallId).toMatch(/^[A-Za-z0-9]{9}$/);
+  });
+
+  it("pins the low-cost model for each Pi subscription benchmark", () => {
+    expect(defaultSubscriptionModel("codex")).toBe("gpt-5.6-luna");
+    expect(defaultSubscriptionModel("claude-code")).toBe("claude-haiku-4-5");
+    expect(() => defaultSubscriptionModel("anthropic")).toThrow();
+  });
+
+  it("gives raw observations a collision-free campaign name", () => {
+    expect(publishedObservationName("artifacts/perf/codex", "pi-S-cold-c1-o1-r1.json")).toBe(
+      "codex--pi-S-cold-c1-o1-r1.json",
+    );
+  });
+
+  it("waits for usage only after a completed error-free model turn", () => {
+    expect(completedTurnHasUsage({ status: 200, complete: true, error: null })).toBeTrue();
+    expect(completedTurnHasUsage({ status: 200, complete: true, error: "provider" })).toBeFalse();
+    expect(completedTurnHasUsage({ status: 429, complete: false, error: null })).toBeFalse();
   });
 
   it("force-stops a benchmark worker that ignores graceful timeout shutdown", async () => {

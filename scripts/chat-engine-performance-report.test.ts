@@ -56,6 +56,29 @@ describe("chat engine performance report", () => {
 
     expect(aggregatePerformanceObservations([onePerOrg, tenPerOrg]).groups).toHaveLength(2);
   });
+
+  it("does not merge distinct subscription providers", () => {
+    const codex = observation("pi", 10, 1, 100);
+    codex.value.benchmark = "subscription-real";
+    codex.value.provider = { id: "codex-subscription", modelId: "gpt-5.6-luna" };
+    const claude = observation("pi", 10, 1, 100);
+    claude.value.benchmark = "subscription-real";
+    claude.value.provider = {
+      id: "claude-code-subscription",
+      modelId: "claude-haiku-4-5",
+    };
+
+    const report = aggregatePerformanceObservations([
+      { source: "codex.json", value: codex.value },
+      { source: "claude.json", value: claude.value },
+    ]);
+
+    expect(report.groups).toHaveLength(2);
+    expect(report.groups.map((group) => group.provider).sort()).toEqual([
+      "claude-code-subscription",
+      "codex-subscription",
+    ]);
+  });
 });
 
 function observation(

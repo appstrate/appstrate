@@ -13,6 +13,7 @@ export interface ConfidenceInterval {
 export interface ObservationValue {
   schemaVersion: number;
   benchmark: string;
+  provider?: { id: string; modelId: string };
   timing?: { waveStartedAtMs: number; waveEndedAtMs: number };
   samples?: MemorySample[];
   cell: {
@@ -108,6 +109,7 @@ export function aggregatePerformanceObservations(observations: readonly ReportOb
   const grouped = Map.groupBy(observations, ({ value }) =>
     [
       value.benchmark,
+      providerKey(value),
       value.cell.engine,
       value.cell.form,
       value.cell.profile,
@@ -126,6 +128,8 @@ export function aggregatePerformanceObservations(observations: readonly ReportOb
       };
       return {
         benchmark: first.benchmark,
+        provider: first.provider?.id ?? "unspecified",
+        modelId: first.provider?.modelId ?? "unspecified",
         engine: first.cell.engine,
         form: first.cell.form,
         profile: first.cell.profile,
@@ -166,6 +170,7 @@ export function aggregatePerformanceObservations(observations: readonly ReportOb
   const slopeFamilies = Map.groupBy(observations, ({ value }) =>
     [
       value.benchmark,
+      providerKey(value),
       value.cell.engine,
       value.cell.form,
       value.cell.profile,
@@ -231,6 +236,8 @@ function memorySlope(items: readonly ReportObservation[]) {
   if (slopes.length === 0) return null;
   return {
     benchmark: first.benchmark,
+    provider: first.provider?.id ?? "unspecified",
+    modelId: first.provider?.modelId ?? "unspecified",
     engine: first.cell.engine,
     form: first.cell.form,
     profile: first.cell.profile,
@@ -284,6 +291,10 @@ function distributionFamily(value: ObservationValue): string {
   if (Number(match[2]) === 1) return "one-organization-per-chat";
   if (Number(match[1]) === 1) return "single-organization";
   return `${match[1]}-organizations`;
+}
+
+function providerKey(value: ObservationValue): string {
+  return `${value.provider?.id ?? "unspecified"}|${value.provider?.modelId ?? "unspecified"}`;
 }
 
 function median(values: readonly number[]): number {

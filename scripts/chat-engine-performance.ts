@@ -12,6 +12,8 @@
 import { $ } from "bun";
 import {
   benchmarkHistoryToolPart,
+  completedTurnHasUsage,
+  defaultSubscriptionModel,
   CHAT_PERFORMANCE_OBSERVATION_VERSION,
   memoryCheckpoints,
   normalizeFetchRequest,
@@ -27,7 +29,7 @@ import type { ChatEnv } from "../packages/module-chat/src/prompt.ts";
 type Engine = "ai-sdk" | "pi";
 type ConversationForm = "S" | "H" | "T";
 type Profile = "cold" | "warm";
-type Benchmark = "controlled" | "mistral-real";
+type Benchmark = "controlled" | "mistral-real" | "subscription-real";
 
 interface WorkerConfig {
   benchmark: Benchmark;
@@ -42,6 +44,7 @@ interface WorkerConfig {
   outputFile: string;
   databaseDir: string;
   providerEnvFile: string | null;
+  providerId: string;
   providerModelId: string;
 }
 
@@ -80,11 +83,20 @@ if (worker) {
 
 async function runController(args: string[]): Promise<void> {
   const command = args[0] ?? "controlled";
-  if (command !== "controlled" && command !== "mistral") {
+  if (command !== "controlled" && command !== "mistral" && command !== "subscription") {
     throw new Error(`Unsupported benchmark command: ${command}`);
   }
-  const benchmark: Benchmark = command === "mistral" ? "mistral-real" : "controlled";
-  const engines = csvOption(args, "engines", ["ai-sdk", "pi"]) as Engine[];
+  const benchmark: Benchmark =
+    command === "mistral"
+      ? "mistral-real"
+      : command === "subscription"
+        ? "subscription-real"
+        : "controlled";
+  const engines = csvOption(
+    args,
+    "engines",
+    command === "subscription" ? ["pi"] : ["ai-sdk", "pi"],
+  ) as Engine[];
   const forms = csvOption(args, "forms", ["S", "H"]) as ConversationForm[];
   const profiles = csvOption(args, "profiles", ["cold", "warm"]) as Profile[];
   const concurrencies = csvOption(args, "concurrency", ["1", "10", "30", "60", "64", "100"])
@@ -97,15 +109,39 @@ async function runController(args: string[]): Promise<void> {
   const recoveryMs = numberOption(args, "recovery-ms", 120_000);
   const cellTimeoutMs = numberOption(args, "cell-timeout-ms", 15 * 60_000);
   const outputDir = stringOption(args, "output", `artifacts/chat-engine-performance/${command}`);
-  const providerEnvFile = command === "mistral" ? stringOption(args, "env-file", "") : "";
-  const providerModelId = stringOption(args, "model", "mistral-small-2603");
+  const providerEnvFile = command === "controlled" ? "" : stringOption(args, "env-file", "");
+  const providerId = stringOption(
+    args,
+    "provider",
+    command === "subscription" ? "codex" : "mistral",
+  );
+  const providerModelId = stringOption(
+    args,
+    "model",
+    command === "subscription" ? defaultSubscriptionModel(providerId) : "mistral-small-2603",
+  );
   if (command === "mistral" && !providerEnvFile) {
     throw new Error("The Mistral benchmark requires --env-file=/absolute/path/to/.env");
+  }
+  if (command === "subscription" && !providerEnvFile) {
+    throw new Error("The subscription benchmark requires --env-file=/absolute/path/to/.env");
   }
   if (command === "mistral") {
     const providerEnv = await Bun.file(providerEnvFile).text();
     if (!parseDotEnvValue(providerEnv, "MISTRAL_API_KEY")) {
       throw new Error("MISTRAL_API_KEY is missing or empty in the provider env file");
+    }
+  }
+  if (command === "subscription") {
+    if (engines.some((engine) => engine !== "pi")) {
+      throw new Error("Subscription benchmarks are Pi-only");
+    }
+    const sourceEnv = await Bun.file(providerEnvFile).text();
+    if (!parseDotEnvValue(sourceEnv, "DATABASE_URL")) {
+      throw new Error("DATABASE_URL is missing from the subscription source env file");
+    }
+    if (!parseDotEnvValue(sourceEnv, "CONNECTION_ENCRYPTION_KEY")) {
+      throw new Error("CONNECTION_ENCRYPTION_KEY is missing from the subscription source env file");
     }
   }
 
@@ -149,6 +185,7 @@ async function runController(args: string[]): Promise<void> {
                 CHAT_PERF_DATABASE_DIR: databaseDir,
                 CHAT_PERF_BENCHMARK: benchmark,
                 CHAT_PERF_PROVIDER_ENV_FILE: providerEnvFile,
+                CHAT_PERF_PROVIDER_ID: providerId,
                 CHAT_PERF_PROVIDER_MODEL_ID: providerModelId,
               },
               stdout: "inherit",
@@ -238,8 +275,13 @@ async function runController(args: string[]): Promise<void> {
       piMaxConcurrency,
       recoveryMs,
       cellTimeoutMs,
-      provider: command === "mistral" ? "mistral-api-key" : "deterministic",
-      modelId: command === "mistral" ? providerModelId : "controlled-v1",
+      provider:
+        command === "mistral"
+          ? "mistral-api-key"
+          : command === "subscription"
+            ? `${providerId}-subscription`
+            : "deterministic",
+      modelId: command === "controlled" ? "controlled-v1" : providerModelId,
     },
     observations: files,
   };
@@ -247,7 +289,9 @@ async function runController(args: string[]): Promise<void> {
 }
 
 async function runWorker(config: WorkerConfig): Promise<void> {
-  configureIsolatedEnvironment(config);
+  const subscriptionSource =
+    config.benchmark === "subscription-real" ? await loadSubscriptionSource(config) : null;
+  configureIsolatedEnvironment(config, subscriptionSource?.encryptionKey);
   const processStartedAt = performance.now();
   const samples: MemorySample[] = [];
   const cpuStart = process.cpuUsage();
@@ -301,10 +345,14 @@ async function runWorker(config: WorkerConfig): Promise<void> {
     "perf",
     config.organizations,
   );
-  const realAppstrate = config.benchmark === "mistral-real";
+  const realAppstrate = config.benchmark !== "controlled";
   let realServer: ReturnType<typeof Bun.serve> | null = null;
   if (realAppstrate) {
-    await seedRealMistralContext(db, schema, identities, config);
+    if (config.benchmark === "mistral-real") {
+      await seedRealMistralContext(db, schema, identities, config);
+    } else {
+      await seedRealSubscriptionContext(db, schema, identities, config, subscriptionSource!);
+    }
     process.env.CHAT_PI_ENGINE_ORG_IDS =
       config.engine === "pi"
         ? [...new Set(identities.map((identity) => identity.orgId))].join(",")
@@ -448,8 +496,11 @@ async function runWorker(config: WorkerConfig): Promise<void> {
 
   if (config.profile === "warm") {
     phase = "warmup";
-    await runTurn(identities[0]!);
+    const warmup = await runTurn(identities[0]!);
     await waitForPersistence(db, schema, identities[0]!.sessionId, 2);
+    if (realAppstrate && completedTurnHasUsage(warmup)) {
+      await waitForUsageCount(db, schema, identities, 1);
+    }
   }
 
   const usageIdsBeforeWave = realAppstrate
@@ -466,9 +517,7 @@ async function runWorker(config: WorkerConfig): Promise<void> {
     ),
   );
   if (realAppstrate) {
-    const expectedUsageRows =
-      usageIdsBeforeWave.size +
-      turns.filter((turn) => turn.status === 200 && turn.complete && turn.error === null).length;
+    const expectedUsageRows = usageIdsBeforeWave.size + turns.filter(completedTurnHasUsage).length;
     await waitForUsageCount(db, schema, identities, expectedUsageRows);
     const waveUsage = await selectNewUsage(db, schema, identities, usageIdsBeforeWave);
     counters.waveModelCalls = waveUsage.length;
@@ -512,7 +561,7 @@ async function runWorker(config: WorkerConfig): Promise<void> {
     realAppstrate &&
     continuity.status === 200 &&
     continuity.complete &&
-    continuity.error === null
+    completedTurnHasUsage(continuity)
   ) {
     await waitForUsageCount(db, schema, identities, usageCountBeforeContinuity + 1);
   }
@@ -608,8 +657,13 @@ async function runWorker(config: WorkerConfig): Promise<void> {
       outputTokens: counters.outputTokens,
     },
     provider: {
-      id: config.benchmark === "mistral-real" ? "mistral-api-key" : "deterministic",
-      modelId: config.benchmark === "mistral-real" ? config.providerModelId : "controlled-v1",
+      id:
+        config.benchmark === "mistral-real"
+          ? "mistral-api-key"
+          : config.benchmark === "subscription-real"
+            ? `${config.providerId}-subscription`
+            : "deterministic",
+      modelId: config.benchmark === "controlled" ? "controlled-v1" : config.providerModelId,
       statuses: counters.providerStatuses,
     },
     persistence,
@@ -629,7 +683,7 @@ async function runWorker(config: WorkerConfig): Promise<void> {
   process.exit(0);
 }
 
-function configureIsolatedEnvironment(config: WorkerConfig): void {
+function configureIsolatedEnvironment(config: WorkerConfig, encryptionKey?: string): void {
   delete process.env.DATABASE_URL;
   delete process.env.REDIS_URL;
   process.env.PGLITE_DATA_DIR = config.databaseDir;
@@ -638,7 +692,7 @@ function configureIsolatedEnvironment(config: WorkerConfig): void {
   process.env.UPLOAD_SIGNING_SECRET = "performance-upload-secret-at-least-16";
   process.env.RUN_TOKEN_SECRET = "performance-run-secret-at-least-16";
   process.env.CONNECT_SESSION_SECRET = "performance-connect-secret-at-least-16";
-  process.env.CONNECTION_ENCRYPTION_KEY = btoa("0123456789abcdef0123456789abcdef");
+  process.env.CONNECTION_ENCRYPTION_KEY = encryptionKey ?? btoa("0123456789abcdef0123456789abcdef");
   process.env.PORT = "3400";
   process.env.APP_URL = "http://localhost:3400";
   process.env.TRUSTED_ORIGINS = process.env.APP_URL;
@@ -1065,25 +1119,7 @@ async function seedRealMistralContext(
     import("../packages/db/node_modules/drizzle-orm"),
   ]);
   const apiKey = await loadProviderKey(config);
-  const secret = process.env.BETTER_AUTH_SECRET!;
-  await db.insert(schema.profiles).values(
-    identities.map((identity) => ({
-      id: identity.user.id,
-      displayName: identity.user.name,
-      language: "fr",
-    })),
-  );
-  for (const identity of identities) {
-    const token = crypto.randomUUID().replaceAll("-", "") + crypto.randomUUID().slice(0, 16);
-    identity.cookie = await signBenchmarkSessionCookie(token, secret);
-    await db.insert(schema.session).values({
-      id: crypto.randomUUID(),
-      token,
-      userId: identity.user.id,
-      expiresAt: new Date(Date.now() + 3_600_000),
-      realm: "platform",
-    });
-  }
+  await seedRealAuthContext(db, schema, identities);
 
   for (const orgId of [...new Set(identities.map((identity) => identity.orgId))]) {
     const owner = identities.find((identity) => identity.orgId === orgId)!;
@@ -1117,6 +1153,105 @@ async function seedRealMistralContext(
       .set({ defaultModelId: model.id })
       .where(eq(schema.organizations.id, orgId));
   }
+}
+
+async function seedRealAuthContext(db: any, schema: any, identities: SyntheticIdentity[]) {
+  const secret = process.env.BETTER_AUTH_SECRET!;
+  await db.insert(schema.profiles).values(
+    identities.map((identity) => ({
+      id: identity.user.id,
+      displayName: identity.user.name,
+      language: "fr",
+    })),
+  );
+  for (const identity of identities) {
+    const token = crypto.randomUUID().replaceAll("-", "") + crypto.randomUUID().slice(0, 16);
+    identity.cookie = await signBenchmarkSessionCookie(token, secret);
+    await db.insert(schema.session).values({
+      id: crypto.randomUUID(),
+      token,
+      userId: identity.user.id,
+      expiresAt: new Date(Date.now() + 3_600_000),
+      realm: "platform",
+    });
+  }
+}
+
+async function seedRealSubscriptionContext(
+  db: any,
+  schema: any,
+  identities: SyntheticIdentity[],
+  config: WorkerConfig,
+  source: { databaseUrl: string; encryptionKey: string },
+): Promise<void> {
+  const [{ default: postgres }, { eq }] = await Promise.all([
+    import("../packages/db/node_modules/postgres"),
+    import("../packages/db/node_modules/drizzle-orm"),
+  ]);
+  const sourceDb = postgres(source.databaseUrl, { max: 1 });
+  let credentialSource: { credentials_encrypted: string; expires_at: Date | null } | undefined;
+  try {
+    [credentialSource] = await sourceDb<
+      Array<{ credentials_encrypted: string; expires_at: Date | null }>
+    >`
+      select credentials_encrypted, expires_at
+      from model_provider_credentials
+      where provider_id = ${config.providerId}
+      order by updated_at desc
+      limit 1
+    `;
+  } finally {
+    await sourceDb.end();
+  }
+  if (!credentialSource) {
+    throw new Error(`No connected ${config.providerId} subscription credential was found`);
+  }
+
+  await seedRealAuthContext(db, schema, identities);
+  for (const orgId of [...new Set(identities.map((identity) => identity.orgId))]) {
+    const owner = identities.find((identity) => identity.orgId === orgId)!;
+    const [credential] = await db
+      .insert(schema.modelProviderCredentials)
+      .values({
+        orgId,
+        label: `${config.providerId} performance subscription`,
+        providerId: config.providerId,
+        credentialsEncrypted: credentialSource.credentials_encrypted,
+        expiresAt: credentialSource.expires_at,
+        createdBy: owner.user.id,
+      })
+      .returning();
+    const [model] = await db
+      .insert(schema.orgModels)
+      .values({
+        orgId,
+        credentialId: credential.id,
+        label: `${config.providerId} performance ${config.providerModelId}`,
+        modelId: config.providerModelId,
+        input: ["text"],
+        maxTokens: 512,
+        enabled: true,
+        createdBy: owner.user.id,
+      })
+      .returning();
+    await db
+      .update(schema.organizations)
+      .set({ defaultModelId: model.id })
+      .where(eq(schema.organizations.id, orgId));
+  }
+}
+
+async function loadSubscriptionSource(
+  config: WorkerConfig,
+): Promise<{ databaseUrl: string; encryptionKey: string }> {
+  if (!config.providerEnvFile) throw new Error("Missing subscription source env file");
+  const contents = await Bun.file(config.providerEnvFile).text();
+  const databaseUrl = parseDotEnvValue(contents, "DATABASE_URL");
+  const encryptionKey = parseDotEnvValue(contents, "CONNECTION_ENCRYPTION_KEY");
+  if (!databaseUrl || !encryptionKey) {
+    throw new Error("Subscription source env file is missing database configuration");
+  }
+  return { databaseUrl, encryptionKey };
 }
 
 async function signBenchmarkSessionCookie(token: string, secret: string): Promise<string> {
@@ -1273,6 +1408,7 @@ function workerConfigFromEnvironment(): WorkerConfig {
     outputFile: required("CHAT_PERF_OUTPUT_FILE"),
     databaseDir: required("CHAT_PERF_DATABASE_DIR"),
     providerEnvFile: process.env.CHAT_PERF_PROVIDER_ENV_FILE || null,
+    providerId: process.env.CHAT_PERF_PROVIDER_ID || "mistral",
     providerModelId: process.env.CHAT_PERF_PROVIDER_MODEL_ID || "mistral-small-2603",
   };
 }

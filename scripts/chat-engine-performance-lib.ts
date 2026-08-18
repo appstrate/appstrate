@@ -70,6 +70,26 @@ export function benchmarkHistoryToolPart(marker: string) {
   } as const;
 }
 
+export function defaultSubscriptionModel(providerId: string): string {
+  if (providerId === "codex") return "gpt-5.6-luna";
+  if (providerId === "claude-code") return "claude-haiku-4-5";
+  throw new Error(`Unsupported subscription provider: ${providerId}`);
+}
+
+export function publishedObservationName(inputDirectory: string, filename: string): string {
+  const campaign = inputDirectory.replaceAll(/\/+$/g, "").split("/").at(-1);
+  if (!campaign || !filename.endsWith(".json")) throw new Error("Invalid observation source");
+  return `${campaign}--${filename}`;
+}
+
+export function completedTurnHasUsage(turn: {
+  status: number;
+  complete: boolean;
+  error: string | null;
+}): boolean {
+  return turn.status === 200 && turn.complete && turn.error === null;
+}
+
 /** Wait for a worker and guarantee that a timed-out process cannot survive its controller. */
 export async function waitForWorkerExit(
   worker: BenchmarkWorker,
