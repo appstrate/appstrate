@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "kind": "chat-pi-fixed-load-manifest",
+  "commit": "9d921a730a8cdd0d8fada5e3a184defecbc836f5",
+  "bunVersion": "1.3.10",
+  "command": "/Users/olivier/.bun/bin/bun /Users/olivier/Dev/appstrate/worktrees/chat-pi-unified-engine-phase4/scripts/chat-pi-fixed-load.ts --repetitions=10 --output=artifacts/chat-engine-performance/fixed-load-r10-v3 --summary-output=docs/architecture/performance-results/2026-08-18-pi-fixed-load.v1.json",
+  "repetitions": 10,
+  "observations": [
+    "artifacts/chat-engine-performance/fixed-load-r10-v3/pi-fixed-load-r1.json",
+    "artifacts/chat-engine-performance/fixed-load-r10-v3/pi-fixed-load-r2.json",
+    "artifacts/chat-engine-performance/fixed-load-r10-v3/pi-fixed-load-r3.json",
+    "artifacts/chat-engine-performance/fixed-load-r10-v3/pi-fixed-load-r4.json",
+    "artifacts/chat-engine-performance/fixed-load-r10-v3/pi-fixed-load-r5.json",
+    "artifacts/chat-engine-performance/fixed-load-r10-v3/pi-fixed-load-r6.json",
+    "artifacts/chat-engine-performance/fixed-load-r10-v3/pi-fixed-load-r7.json",
+    "artifacts/chat-engine-performance/fixed-load-r10-v3/pi-fixed-load-r8.json",
+    "artifacts/chat-engine-performance/fixed-load-r10-v3/pi-fixed-load-r9.json",
+    "artifacts/chat-engine-performance/fixed-load-r10-v3/pi-fixed-load-r10.json"
+  ],
+  "summary": {
+    "importDurationMs": {
+      "median": 265.028,
+      "min": 185.897166,
+      "max": 1228.854958
+    },
+    "delta": {
+      "rss": {
+        "median": 278798336,
+        "min": 74940416,
+        "max": 378175488
+      },
+      "heapUsed": {
+        "median": 706658265,
+        "min": 155512939,
+        "max": 707200080
+      },
+      "external": {
+        "median": 686739632,
+        "min": 279921080,
+        "max": 686773892
+      },
+      "arrayBuffers": {
+        "median": 514225336,
+        "min": 140512611,
+        "max": 514225336
+      }
+    }
+  }
+}

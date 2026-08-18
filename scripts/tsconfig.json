@@ -9,6 +9,7 @@
     "chat-engine-performance-lib.ts",
     "chat-engine-performance-report.ts",
     "chat-engine-performance-report-lib.ts",
+    "chat-pi-fixed-load.ts",
     "verify-module-contract.ts",
     "verify-package-resolves.ts",
     "check-consumer-versions.ts",
