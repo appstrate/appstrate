@@ -7,9 +7,10 @@ Décision locale : **NO GO pour un canary en l'état**
 
 ## Synthèse
 
-Le banc contrôlé isole le coût des moteurs derrière le même faux fournisseur OpenAI compatible,
-avec les mêmes réponses, 128 tokens d'entrée, 32 tokens de sortie et un appel modèle par tour.
-Sur 180 observations agrégées, soit 9 780 conversations mesurées, toutes les conversations ont
+Le banc contrôlé isole le coût des moteurs derrière le même faux fournisseur OpenAI compatible.
+Les formes S et H utilisent les mêmes réponses, 128 tokens d'entrée, 32 tokens de sortie et un
+appel modèle par tour. La forme T utilise deux appels modèle et un appel MCP identiques.
+Sur 240 observations agrégées, soit 14 260 conversations mesurées, toutes les conversations ont
 terminé. Il n'y a eu aucun 429, aucune erreur serveur, aucun stream incomplet, aucun marqueur
 étranger et aucun défaut de persistance ou d'attribution d'usage.
 
@@ -36,6 +37,8 @@ la régression de latence propre au moteur n'est pas expliquée et corrigée.
 
 - Forme S, profils froid et chaud, concurrences 1, 10, 30, 60, 64 et 100, cinq répétitions.
 - Forme H, profils froid et chaud, concurrences 60, 64 et 100, cinq répétitions.
+- Forme T avec un appel MCP et deux appels modèle, profils froid et chaud, concurrences 60, 64 et
+  100, cinq répétitions.
 - Récupération mémoire à 30, 60 et 120 secondes pour S à 60, 64 et 100.
 - Dix processus frais pour le coût du chargement Pi au-dessus du package AI SDK déjà chargé.
 - Base PGlite distincte par cellule, organisations, utilisateurs, applications et sessions
@@ -43,8 +46,9 @@ la régression de latence propre au moteur n'est pas expliquée et corrigée.
 - Plafond Pi porté volontairement à 128 dans le banc contrôlé afin de mesurer le moteur à 100.
 - Tests séparés du plafond Appstrate par défaut à 64 et du refus 429 sans message orphelin.
 
-Ne sont pas couverts : T avec un nouvel appel d'outil, L, mix M, rafale, rampe, endurance,
-fournisseur Mistral réel, OpenRouter Free, abonnements Pi réels et profil de réplica cloud.
+Ne sont pas couverts : L, mix M, rampe, endurance, fournisseur Mistral réel, OpenRouter Free,
+abonnements Pi réels et profil de réplica cloud. L, M et l'endurance dépendent de percentiles cloud
+absents. Le lancement simultané de chaque vague couvre le profil rafale sous 250 ms.
 
 ## Environnement
 
@@ -108,6 +112,17 @@ au premier token contre 532 ms, puis 3 638 ms au total contre 1 061 ms.
 Les parties structurées sont persistées. Selon la concurrence, chaque observation H contient entre
 183 et 407 parties persistées. Aucun mélange inter-organisation n'a été détecté.
 
+## Outil MCP contrôlé
+
+La forme T part de l'historique H, appelle réellement `controlled_echo`, persiste son résultat
+structuré, puis effectue un second appel modèle. Chaque conversation mesure exactement deux appels
+modèle, un appel d'outil, 288 tokens d'entrée et 48 tokens de sortie.
+
+Les 4 480 conversations T ont toutes terminé. À 60 chats chauds, le p95 au premier token vaut
+599 ms pour AI SDK et 2 268 ms pour Pi. Le p95 total vaut 882 ms contre 2 604 ms. À 100 chats
+chauds, le premier token vaut 777 ms contre 2 392 ms et le total 1 191 ms contre 2 762 ms. La forme
+T confirme donc la régression du chemin Pi sans introduire de perte d'outil ou de persistance.
+
 ## Coût fixe et coût marginal
 
 ### Coût fixe du chargement Pi
@@ -157,21 +172,22 @@ une fuite ou à une régression.
 
 ## Persistance, usage, continuité et isolation
 
-Sur les 180 observations principales :
+Sur les 240 observations principales :
 
 | Mesure                                   |                       Résultat |
 | ---------------------------------------- | -----------------------------: |
-| Conversations demandées et terminées     |                9 780 sur 9 780 |
+| Conversations demandées et terminées     |              14 260 sur 14 260 |
 | 429                                      |                              0 |
 | Erreurs serveur                          |                              0 |
 | Streams incomplets                       |                              0 |
 | Marqueurs incorrects                     |                              0 |
-| Appels modèle                            |                          9 780 |
-| Tokens d'entrée                          |                      1 251 840 |
-| Tokens de sortie                         |                        312 960 |
-| Messages persistés                       |                         20 010 |
-| Parties structurées persistées           |                         35 085 |
-| Lignes d'usage persistées                |                         10 050 |
+| Appels modèle                            |                         18 740 |
+| Appels d'outil                           |                          4 480 |
+| Tokens d'entrée                          |                      2 542 080 |
+| Tokens de sortie                         |                        528 000 |
+| Messages persistés                       |                         29 120 |
+| Parties structurées persistées           |                         62 475 |
+| Lignes d'usage persistées                |                         19 190 |
 | Continuité                               | valide dans chaque observation |
 | Isolation session et attribution d'usage | valide dans chaque observation |
 
@@ -241,11 +257,12 @@ bunx tsc --noEmit -p scripts/tsconfig.json
 bun scripts/chat-engine-performance.ts controlled --forms=S --profiles=cold,warm --concurrency=1,10,30 --repetitions=5 --recovery-ms=0 --output=artifacts/chat-engine-performance/controlled-s-low-r5
 bun scripts/chat-engine-performance.ts controlled --forms=S --profiles=cold,warm --concurrency=60,64,100 --repetitions=5 --recovery-ms=0 --output=artifacts/chat-engine-performance/controlled-s-high-r5
 bun scripts/chat-engine-performance.ts controlled --forms=H --profiles=cold,warm --concurrency=60,64,100 --repetitions=5 --recovery-ms=0 --output=artifacts/chat-engine-performance/controlled-h-high-r5
+bun scripts/chat-engine-performance.ts controlled --forms=T --profiles=cold,warm --concurrency=60,64,100 --repetitions=5 --recovery-ms=0 --output=artifacts/chat-engine-performance/controlled-t-high-r5
 bun scripts/chat-engine-performance.ts controlled --forms=S --profiles=cold,warm --concurrency=60,64,100 --repetitions=1 --recovery-ms=120000 --output=artifacts/chat-engine-performance/controlled-s-recovery-120s
 
 bun scripts/chat-pi-fixed-load.ts --repetitions=10 --output=artifacts/chat-engine-performance/fixed-load-r10 --summary-output=docs/architecture/performance-results/2026-08-18-pi-fixed-load.v1.json
 
-bun scripts/chat-engine-performance-report.ts --input=artifacts/chat-engine-performance/controlled-s-low-r5,artifacts/chat-engine-performance/controlled-s-high-r5,artifacts/chat-engine-performance/controlled-h-high-r5 --output=docs/architecture/performance-results/2026-08-18-controlled-summary.v1.json
+bun scripts/chat-engine-performance-report.ts --input=artifacts/chat-engine-performance/controlled-s-low-r5,artifacts/chat-engine-performance/controlled-s-high-r5,artifacts/chat-engine-performance/controlled-h-high-r5,artifacts/chat-engine-performance/controlled-t-high-r5 --output=docs/architecture/performance-results/2026-08-18-controlled-summary.v1.json
 bun scripts/chat-engine-performance-report.ts --input=artifacts/chat-engine-performance/controlled-s-recovery-120s --output=docs/architecture/performance-results/2026-08-18-controlled-recovery.v1.json
 
 TEST_TIER=0 bun test packages/module-chat/test/pi-chat-concurrency.test.ts packages/module-chat/test/chat-stream-handler.test.ts packages/module-chat/test/pi-chat-engine-selection.test.ts packages/module-chat/test/pi-chat-model-binding.test.ts
@@ -304,7 +321,7 @@ Le dernier résultat attendu est zéro.
 ## Artifacts versionnés
 
 - Schéma brut : [CHAT_PI_PERFORMANCE_OBSERVATION.schema.json](./CHAT_PI_PERFORMANCE_OBSERVATION.schema.json)
-- Synthèse contrôlée et références vers 180 observations : [2026-08-18-controlled-summary.v1.json](./performance-results/2026-08-18-controlled-summary.v1.json)
+- Synthèse contrôlée et références vers 240 observations : [2026-08-18-controlled-summary.v1.json](./performance-results/2026-08-18-controlled-summary.v1.json)
 - Récupération mémoire et références vers 12 observations : [2026-08-18-controlled-recovery.v1.json](./performance-results/2026-08-18-controlled-recovery.v1.json)
 - Coût fixe Pi et références vers 10 observations : [2026-08-18-pi-fixed-load.v1.json](./performance-results/2026-08-18-pi-fixed-load.v1.json)
 
@@ -314,7 +331,7 @@ Git. Leur `schemaVersion` vaut 1. Aucun secret ni contenu réel n'y figure.
 ## Entrée du journal de décision RFC
 
 **18 août 2026, validation locale contrôlée : NO GO avant canary.** Le banc déterministe a terminé
-9 780 conversations mesurées sans erreur fonctionnelle, perte de persistance ni contamination.
+14 260 conversations mesurées sans erreur fonctionnelle, perte de persistance ni contamination.
 Pi échoue toutefois aux seuils de non-infériorité de latence et débit à 60, 64 et 100. La mémoire
 marginale locale reste non concluante et la capacité cloud est inconnue. Le comparatif Mistral est
 bloqué par l'absence de clé. Les essais Codex et Claude Code restent Pi uniquement et sont bloqués

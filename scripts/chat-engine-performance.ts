@@ -25,7 +25,7 @@ import {
 import type { ChatEnv } from "../packages/module-chat/src/prompt.ts";
 
 type Engine = "ai-sdk" | "pi";
-type ConversationForm = "S" | "H";
+type ConversationForm = "S" | "H" | "T";
 type Profile = "cold" | "warm";
 type Benchmark = "controlled" | "mistral-real";
 
@@ -146,7 +146,27 @@ async function runController(args: string[]): Promise<void> {
               };
               isolation: { foreignSessionRejected: boolean };
               continuity: { complete: boolean; markerValid: boolean };
+              usage: {
+                modelCalls: number;
+                toolCalls: number;
+                inputTokens: number;
+                outputTokens: number;
+              };
             };
+            const expectedUsage =
+              form === "T"
+                ? {
+                    modelCalls: concurrency * 2,
+                    toolCalls: concurrency,
+                    inputTokens: concurrency * 288,
+                    outputTokens: concurrency * 48,
+                  }
+                : {
+                    modelCalls: concurrency,
+                    toolCalls: 0,
+                    inputTokens: concurrency * 128,
+                    outputTokens: concurrency * 32,
+                  };
             if (
               benchmark === "controlled" &&
               (observation.outcomes.completed !== observation.outcomes.requested ||
@@ -154,7 +174,11 @@ async function runController(args: string[]): Promise<void> {
                 observation.outcomes.markerFailures !== 0 ||
                 !observation.isolation.foreignSessionRejected ||
                 !observation.continuity.complete ||
-                !observation.continuity.markerValid)
+                !observation.continuity.markerValid ||
+                observation.usage.modelCalls !== expectedUsage.modelCalls ||
+                observation.usage.toolCalls !== expectedUsage.toolCalls ||
+                observation.usage.inputTokens !== expectedUsage.inputTokens ||
+                observation.usage.outputTokens !== expectedUsage.outputTokens)
             ) {
               throw new Error(`Controlled benchmark invariants failed for ${id}`);
             }
@@ -264,6 +288,10 @@ async function runWorker(config: WorkerConfig): Promise<void> {
     sessionByMarker,
     identityByOrg,
     identityByMarker,
+    form: config.form,
+    onToolCall: () => {
+      if (phase === "wave") counters.waveToolCalls += 1;
+    },
     onInference: (usage: { inputTokens: number; outputTokens: number }) => {
       if (phase !== "wave") return;
       counters.waveModelCalls += 1;
@@ -535,8 +563,11 @@ function createControlledDispatch(options: {
   sessionByMarker: Map<string, string>;
   identityByOrg: Map<string, any>;
   identityByMarker: Map<string, any>;
+  form: ConversationForm;
+  onToolCall(): void;
   onInference(usage: { inputTokens: number; outputTokens: number }): void;
 }): FetchLike {
+  const awaitingToolResult = new Set<string>();
   return async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
     const request = normalizeFetchRequest(input, init);
     const url = new URL(request.url);
@@ -553,7 +584,12 @@ function createControlledDispatch(options: {
         recent_runs: [],
       });
     }
-    if (url.pathname.startsWith("/api/mcp/")) return mcpResponse(request);
+    if (url.pathname.startsWith("/api/mcp/")) {
+      return mcpResponse(request, {
+        enableControlledTool: options.form === "T",
+        onToolCall: options.onToolCall,
+      });
+    }
     if (url.pathname.endsWith("/chat/completions")) {
       const body = await request.json();
       const serialized = JSON.stringify(body);
@@ -561,8 +597,9 @@ function createControlledDispatch(options: {
         serialized.includes(candidate),
       );
       if (!marker) return new Response("missing synthetic marker", { status: 400 });
-      const inputTokens = 128;
-      const outputTokens = 32;
+      const toolStep = options.form === "T" && !awaitingToolResult.has(marker);
+      const inputTokens = toolStep ? 128 : options.form === "T" ? 160 : 128;
+      const outputTokens = toolStep ? 16 : 32;
       options.onInference({ inputTokens, outputTokens });
       const identity = options.identityByMarker.get(marker);
       const sessionId = options.sessionByMarker.get(marker)!;
@@ -586,6 +623,11 @@ function createControlledDispatch(options: {
           requestId: crypto.randomUUID(),
         });
       }
+      if (toolStep) {
+        awaitingToolResult.add(marker);
+        return controlledOpenAiToolSse(marker, inputTokens, outputTokens);
+      }
+      awaitingToolResult.delete(marker);
       return controlledOpenAiSse(marker, inputTokens, outputTokens);
     }
     return new Response(`unexpected controlled dispatch: ${url.pathname}`, { status: 404 });
@@ -603,6 +645,7 @@ function createMistralDispatch(options: {
   upstreamFetch: FetchLike;
   usageTasks: Promise<void>[];
   isMeasuredWave(): boolean;
+  onToolCall(): void;
   onInference(usage: { inputTokens: number; outputTokens: number }): void;
   onProviderStatus(status: number): void;
 }): FetchLike {
@@ -621,7 +664,12 @@ function createMistralDispatch(options: {
         recent_runs: [],
       });
     }
-    if (url.pathname.startsWith("/api/mcp/")) return mcpResponse(request);
+    if (url.pathname.startsWith("/api/mcp/")) {
+      return mcpResponse(request, {
+        enableControlledTool: false,
+        onToolCall: options.onToolCall,
+      });
+    }
     if (!url.pathname.endsWith("/chat/completions")) {
       return new Response(`unexpected Mistral dispatch: ${url.pathname}`, { status: 404 });
     }
@@ -733,10 +781,17 @@ function mistralModelsResponse(modelId: string): Response {
   });
 }
 
-async function mcpResponse(request: Request): Promise<Response> {
+async function mcpResponse(
+  request: Request,
+  options: { enableControlledTool: boolean; onToolCall(): void },
+): Promise<Response> {
   if (request.method === "GET") return new Response(null, { status: 405 });
   if (request.method === "DELETE") return new Response(null, { status: 202 });
-  const message = (await request.json()) as { id?: unknown; method?: string };
+  const message = (await request.json()) as {
+    id?: unknown;
+    method?: string;
+    params?: { name?: string; arguments?: { marker?: string } };
+  };
   if (message.id === undefined) return new Response(null, { status: 202 });
   const result =
     message.method === "initialize"
@@ -747,12 +802,97 @@ async function mcpResponse(request: Request): Promise<Response> {
           instructions: "Controlled benchmark. Echo only the synthetic marker.",
         }
       : message.method === "tools/list"
-        ? { tools: [] }
-        : {};
+        ? {
+            tools: options.enableControlledTool
+              ? [
+                  {
+                    name: "controlled_echo",
+                    description: "Return the supplied synthetic isolation marker.",
+                    inputSchema: {
+                      type: "object",
+                      properties: { marker: { type: "string" } },
+                      required: ["marker"],
+                      additionalProperties: false,
+                    },
+                  },
+                ]
+              : [],
+          }
+        : message.method === "tools/call" &&
+            options.enableControlledTool &&
+            message.params?.name === "controlled_echo"
+          ? controlledToolResult(message.params.arguments?.marker, options.onToolCall)
+          : {};
   return new Response(JSON.stringify({ jsonrpc: "2.0", id: message.id, result }), {
     status: 200,
     headers: { "content-type": "application/json", "mcp-session-id": "perf-session" },
   });
+}
+
+function controlledToolResult(marker: string | undefined, onToolCall: () => void) {
+  onToolCall();
+  const output = { marker: marker ?? "missing-marker", ok: marker !== undefined };
+  return {
+    content: [{ type: "text", text: JSON.stringify(output) }],
+    structuredContent: output,
+    isError: marker === undefined,
+  };
+}
+
+function controlledOpenAiToolSse(
+  marker: string,
+  inputTokens: number,
+  outputTokens: number,
+): Response {
+  const encoder = new TextEncoder();
+  const callId = `call_${marker.toLowerCase()}`;
+  const chunks = [
+    {
+      id: "controlled-tool",
+      object: "chat.completion.chunk",
+      model: "controlled-v1",
+      choices: [
+        {
+          index: 0,
+          delta: {
+            role: "assistant",
+            tool_calls: [
+              {
+                index: 0,
+                id: callId,
+                type: "function",
+                function: { name: "controlled_echo", arguments: JSON.stringify({ marker }) },
+              },
+            ],
+          },
+          finish_reason: null,
+        },
+      ],
+    },
+    {
+      id: "controlled-tool",
+      object: "chat.completion.chunk",
+      model: "controlled-v1",
+      choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }],
+      usage: {
+        prompt_tokens: inputTokens,
+        completion_tokens: outputTokens,
+        total_tokens: inputTokens + outputTokens,
+      },
+    },
+  ];
+  return new Response(
+    new ReadableStream<Uint8Array>({
+      async start(controller) {
+        await Bun.sleep(20);
+        for (const chunk of chunks)
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(chunk)}\n\n`));
+        controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+        controller.close();
+      },
+    }),
+    { status: 200, headers: { "content-type": "text/event-stream" } },
+  );
 }
 
 function controlledOpenAiSse(marker: string, inputTokens: number, outputTokens: number): Response {
@@ -825,7 +965,7 @@ function conversation(form: ConversationForm, marker: string): any[] {
   if (form === "S") {
     return [{ id: `u-${marker}`, role: "user", parts: [{ type: "text", text: `echo ${marker}` }] }];
   }
-  return [
+  const history = [
     { id: `u0-${marker}`, role: "user", parts: [{ type: "text", text: `context ${marker}` }] },
     {
       id: `a0-${marker}`,
@@ -856,9 +996,18 @@ function conversation(form: ConversationForm, marker: string): any[] {
     {
       id: `u5-${marker}`,
       role: "user",
-      parts: [{ type: "text", text: `echo ${marker}` }],
+      parts: [
+        {
+          type: "text",
+          text:
+            form === "T"
+              ? `Call controlled_echo once with marker ${marker}, then echo its result.`
+              : `echo ${marker}`,
+        },
+      ],
     },
   ];
+  return history;
 }
 
 async function seedIdentities(

@@ -354,9 +354,10 @@ AI SDK serveur.
 ## 15. État de l'exécution locale au 18 août 2026
 
 Le banc contrôlé S est terminé à 1, 10, 30, 60, 64 et 100, avec cinq répétitions pour les profils
-froid et chaud. Le banc H est terminé à 60, 64 et 100 dans les mêmes conditions. Les récupérations
-à 30, 60 et 120 secondes ont été relevées sur S à 60, 64 et 100. Le coût fixe du chargement Pi a été
-mesuré séparément sur dix processus frais.
+froid et chaud. Les bancs H et T sont terminés à 60, 64 et 100 dans les mêmes conditions. T effectue
+un appel MCP réel et deux appels modèle par conversation. Les récupérations à 30, 60 et 120 secondes
+ont été relevées sur S à 60, 64 et 100. Le coût fixe du chargement Pi a été mesuré séparément sur dix
+processus frais.
 
 Les invariants fonctionnels passent, mais Pi échoue aux seuils locaux de latence et de débit. La
 décision locale est donc NO GO avant canary. La pente mémoire locale reste non concluante et aucune
