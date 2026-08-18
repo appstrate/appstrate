@@ -11,10 +11,12 @@
 
 import { $ } from "bun";
 import {
+  benchmarkHistoryToolPart,
   CHAT_PERFORMANCE_OBSERVATION_VERSION,
   memoryCheckpoints,
   normalizeFetchRequest,
   parseDotEnvValue,
+  repetitionNumbers,
   summarizeDurations,
   summarizeWaveActivity,
   waitForWorkerExit,
@@ -89,6 +91,7 @@ async function runController(args: string[]): Promise<void> {
     .map(Number)
     .filter((value) => Number.isInteger(value) && value > 0);
   const repetitions = numberOption(args, "repetitions", 5);
+  const repetitionStart = numberOption(args, "repetition-start", 1);
   const organizationsOption = numberOption(args, "organizations", 0);
   const piMaxConcurrency = numberOption(args, "pi-cap", 128);
   const recoveryMs = numberOption(args, "recovery-ms", 120_000);
@@ -112,7 +115,7 @@ async function runController(args: string[]): Promise<void> {
   const files: string[] = [];
   for (const form of forms) {
     for (const concurrency of concurrencies) {
-      for (let repetition = 1; repetition <= repetitions; repetition += 1) {
+      for (const repetition of repetitionNumbers(repetitionStart, repetitions)) {
         for (const profile of profiles) {
           for (const engine of engines) {
             const organizations = organizationsOption || concurrency;
@@ -953,14 +956,7 @@ function conversation(form: ConversationForm, marker: string): any[] {
       parts: [
         { type: "reasoning", text: "controlled reasoning" },
         { type: "step-start" },
-        {
-          type: "dynamic-tool",
-          toolName: "controlled_echo",
-          toolCallId: `call-${marker}`,
-          state: "output-available",
-          input: { marker },
-          output: { marker, ok: true },
-        },
+        benchmarkHistoryToolPart(marker),
         { type: "step-start" },
         { type: "text", text: `historical result ${marker}` },
       ],

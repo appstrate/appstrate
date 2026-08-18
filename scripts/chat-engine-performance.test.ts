@@ -2,11 +2,13 @@
 
 import { describe, expect, it } from "bun:test";
 import {
+  benchmarkHistoryToolPart,
   compareCellInvariants,
   memoryCheckpoints,
   normalizeFetchRequest,
   parseDotEnvValue,
   percentile,
+  repetitionNumbers,
   summarizeDurations,
   summarizeWaveActivity,
   waitForWorkerExit,
@@ -92,6 +94,21 @@ describe("chat engine performance observation helpers", () => {
 
     expect(parseDotEnvValue(contents, "MISTRAL_API_KEY")).toBe("mistral-test-key");
     expect(parseDotEnvValue(contents, "ABSENT_API_KEY")).toBeNull();
+  });
+
+  it("numbers independently scheduled benchmark repetitions without collisions", () => {
+    expect(repetitionNumbers(2, 2)).toEqual([2, 3]);
+    expect(() => repetitionNumbers(0, 1)).toThrow();
+  });
+
+  it("uses a platform MCP tool shape in replayed structured history", () => {
+    expect(benchmarkHistoryToolPart("ORG0001_USER0001")).toMatchObject({
+      toolName: "search_operations",
+      toolCallId: "c00010001",
+      state: "output-available",
+      output: { content: [{ type: "text" }] },
+    });
+    expect(benchmarkHistoryToolPart("ORG0001_USER0001").toolCallId).toMatch(/^[A-Za-z0-9]{9}$/);
   });
 
   it("force-stops a benchmark worker that ignores graceful timeout shutdown", async () => {

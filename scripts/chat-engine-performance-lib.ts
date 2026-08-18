@@ -50,6 +50,26 @@ export function parseDotEnvValue(contents: string, name: string): string | null 
   return null;
 }
 
+export function repetitionNumbers(start: number, count: number): number[] {
+  if (!Number.isInteger(start) || start < 1) throw new Error("repetition start must be positive");
+  if (!Number.isInteger(count) || count < 1) throw new Error("repetition count must be positive");
+  return Array.from({ length: count }, (_, index) => start + index);
+}
+
+export function benchmarkHistoryToolPart(marker: string) {
+  const toolCallId = `c${marker.replaceAll(/\D/g, "").slice(-8).padStart(8, "0")}`;
+  return {
+    type: "dynamic-tool",
+    toolName: "search_operations",
+    toolCallId,
+    state: "output-available",
+    input: { query: marker },
+    output: {
+      content: [{ type: "text", text: JSON.stringify({ marker, ok: true }) }],
+    },
+  } as const;
+}
+
 /** Wait for a worker and guarantee that a timed-out process cannot survive its controller. */
 export async function waitForWorkerExit(
   worker: BenchmarkWorker,
