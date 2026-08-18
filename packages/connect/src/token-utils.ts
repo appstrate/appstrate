@@ -124,11 +124,28 @@ export function redactErrorDescription(description: string): string {
 /**
  * Classify an HTTP error response from an OAuth2 token endpoint.
  *
+ * Both 400 and 401 bodies are parsed. RFC 6749 §5.2 lets an authorization
+ * server answer `invalid_client` with EITHER status ("If the client attempted
+ * to authenticate via the Authorization request header field, the
+ * authorization server MUST respond with an HTTP 401"), and providers split
+ * roughly evenly on which they pick. Parsing only 400 dropped the error code
+ * of every 401 on the floor, which is exactly the client-authentication
+ * failure an operator most needs named: a wrong
+ * `token_endpoint_auth_method` in a manifest surfaces as `invalid_client`,
+ * and without the code the whole class is indistinguishable from a network
+ * blip in the logs.
+ *
+ * Only `invalid_grant` maps to `"revoked"` — a dead authorization code or
+ * refresh token, where retrying is pointless and the stored PKCE state should
+ * be dropped. `invalid_client` stays `"transient"`: the grant is untouched, it
+ * is the client credentials that are wrong, and an operator fixing the
+ * registration makes the same connect attempt work.
+ *
  * @param status - HTTP status code of the response
  * @param body - Raw response body (text)
  */
 export function parseTokenErrorResponse(status: number, body: string): TokenErrorClassification {
-  if (status !== 400) {
+  if (status !== 400 && status !== 401) {
     return { kind: "transient" };
   }
   try {

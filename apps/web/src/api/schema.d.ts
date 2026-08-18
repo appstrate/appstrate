@@ -10992,6 +10992,8 @@ export interface operations {
                         allow_undeclared_tools: boolean;
                         active: boolean;
                         block_user_connections: boolean;
+                        /** Format: uri */
+                        platform_redirect_uri: string;
                     };
                 };
             };
@@ -11100,6 +11102,8 @@ export interface operations {
                         allow_undeclared_tools: boolean;
                         active: boolean;
                         block_user_connections: boolean;
+                        /** Format: uri */
+                        platform_redirect_uri: string;
                     };
                 };
             };
@@ -12105,6 +12109,8 @@ export interface operations {
                         allow_undeclared_tools: boolean;
                         active: boolean;
                         block_user_connections: boolean;
+                        /** Format: uri */
+                        platform_redirect_uri: string;
                     };
                 };
             };

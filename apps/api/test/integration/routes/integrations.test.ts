@@ -1240,6 +1240,36 @@ describe("GET /api/integrations/callback (public — no session required)", () =
     expect(body).toContain("window.opener");
   });
 
+  it("refuses a non-code-shaped ?error value instead of rendering it", async () => {
+    // The callback is public and unauthenticated, so the `error` query
+    // parameter is attacker-reachable: a crafted link could otherwise turn the
+    // platform's own origin into a page displaying arbitrary attacker prose.
+    // Anything outside the RFC 6749 error-code shape is dropped, not escaped
+    // and shown.
+    const res = await app.request(
+      `/api/integrations/callback?error=${encodeURIComponent("Your account is suspended, call 555-0100")}`,
+    );
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain("window.close");
+    expect(body).not.toContain("555-0100");
+    expect(body).toContain("refused the authorization request");
+  });
+
+  it("names the OAuth failure class on the error page (transient exchange failure)", async () => {
+    // A forged state never reaches the token endpoint, so there is no provider
+    // error code and no HTTP status — the diagnostic suffix is empty and the
+    // page stays generic. Pinned as the floor: the suffix must never invent a
+    // code for a failure the provider was not even asked about.
+    const res = await app.request(
+      "/api/integrations/callback?code=any-code&state=forged-state-never-stored",
+    );
+    const body = await res.text();
+    expect(body).toMatch(/Could not complete the connection/i);
+    expect(body).not.toMatch(/\(HTTP \d+\)/);
+    expect(body).not.toMatch(/\(invalid_[a-z]+\)/);
+  });
+
   it("rejects an empty state value (cannot bypass CSRF by omitting state)", async () => {
     // ?code=… without ?state=… — caller is treated as missing-params, not
     // exchanged. The route's pre-handler guard at `if (!code || !state)`

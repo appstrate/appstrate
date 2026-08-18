@@ -17,7 +17,6 @@
  * Behaviour is unchanged from the inline route logic it replaces.
  */
 
-import { getEnv } from "@appstrate/env";
 import { decodeJwtPayload } from "@appstrate/core/jwt";
 import {
   initiateIntegrationOAuth,
@@ -26,6 +25,7 @@ import {
   SsrfBlockedError,
 } from "@appstrate/connect";
 import { invalidRequest } from "../../lib/errors.ts";
+import { integrationCallbackUrl } from "../../lib/integration-callback-url.ts";
 import { logger } from "../../lib/logger.ts";
 import { oauthStateStore } from "./oauth-state-store.ts";
 import { toSupportedTokenEndpointAuthMethod } from "../integration-manifest-helpers.ts";
@@ -75,8 +75,11 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
       );
     }
     // Same callback for every integration flow. Computed before client
-    // resolution so auto-DCR registers exactly this redirect URI.
-    const redirectUri = `${getEnv().APP_URL}/api/integrations/callback`;
+    // resolution so auto-DCR registers exactly this redirect URI. Shared
+    // helper, not an inline template: the admin UI displays the very same
+    // string (integration detail `platform_redirect_uri`) so what an admin
+    // registers at the provider cannot drift from what we send.
+    const redirectUri = integrationCallbackUrl();
     // Resolve the client (auto-registering via DCR for remote MCP integrations
     // when unregistered) and the connect endpoints/resource (discovered for
     // MCP, else manifest).

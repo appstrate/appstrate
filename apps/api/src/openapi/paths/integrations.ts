@@ -293,6 +293,7 @@ const integrationDetailSchema = {
     "allow_undeclared_tools",
     "active",
     "block_user_connections",
+    "platform_redirect_uri",
   ],
   properties: {
     manifest: { type: "object", additionalProperties: true },
@@ -325,6 +326,11 @@ const integrationDetailSchema = {
     // Admin gate (`block_user_connections`): when `true`, only org admins
     // may create personal connections. `false` when not activated.
     block_user_connections: { type: "boolean" },
+    // The `redirect_uri` this instance sends to every authorization server —
+    // the exact string an admin must register on their BYO OAuth app at the
+    // provider. Same helper the connect strategy uses, so displayed and sent
+    // can never drift.
+    platform_redirect_uri: { type: "string", format: "uri" },
   },
 } as const;
 

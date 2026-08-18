@@ -7,6 +7,7 @@ import { diffToolSets } from "./tool-diff.ts";
 import { resolveToken, resolveAccessToken, credentialedCount, _resetCredsCache } from "./creds.ts";
 import { remoteUrl, toolsPolicyKeys, allowsUndeclared } from "./remote-parity.ts";
 import { applyAuth, checkAuthLiveness } from "./auth-live.ts";
+import { metadataCandidates, compareAuth } from "./oauth-metadata.ts";
 import { listAllTools } from "./mcp-list.ts";
 import { snapshotSlug, writeSnapshot, readSnapshot } from "./snapshot.ts";
 import { rm, mkdtemp } from "node:fs/promises";
@@ -433,5 +434,185 @@ describe("snapshot", () => {
 
   it("readSnapshot returns null when absent", async () => {
     expect(await readSnapshot(tmpdir(), "@x/does-not-exist-xyz")).toBeNull();
+  });
+});
+
+describe("oauth-metadata — candidate discovery", () => {
+  it("builds both well-known paths from a declared issuer, issuer-trusted", () => {
+    const candidates = metadataCandidates({ type: "oauth2", issuer: "https://auth.example.com" });
+    expect(candidates.map((c) => c.url)).toEqual([
+      "https://auth.example.com/.well-known/openid-configuration",
+      "https://auth.example.com/.well-known/oauth-authorization-server",
+    ]);
+    expect(candidates.every((c) => c.trust === "issuer")).toBe(true);
+  });
+
+  it("strips a trailing slash from the issuer before appending the well-known path", () => {
+    const candidates = metadataCandidates({ type: "oauth2", issuer: "https://auth.example.com/" });
+    expect(candidates[0]!.url).toBe("https://auth.example.com/.well-known/openid-configuration");
+  });
+
+  // Without an issuer the origin is a guess: it may host an unrelated
+  // authorization server (api.hubapi.com publishes metadata for HubSpot's MCP
+  // server, not for classic app OAuth), so everything found this way is
+  // marked `probed` and can only ever warn.
+  it("falls back to probing the token_endpoint origin, marked probed", () => {
+    const candidates = metadataCandidates({
+      type: "oauth2",
+      token_endpoint: "https://api.example.com/oauth/v1/token",
+    });
+    expect(candidates.map((c) => c.url)).toEqual([
+      "https://api.example.com/.well-known/openid-configuration",
+      "https://api.example.com/.well-known/oauth-authorization-server",
+    ]);
+    expect(candidates.every((c) => c.trust === "probed")).toBe(true);
+  });
+
+  it("puts the issuer candidates ahead of the probed ones and never duplicates a URL", () => {
+    const candidates = metadataCandidates({
+      type: "oauth2",
+      issuer: "https://auth.example.com",
+      token_endpoint: "https://auth.example.com/oauth/token",
+    });
+    expect(candidates).toHaveLength(2);
+    expect(candidates.every((c) => c.trust === "issuer")).toBe(true);
+  });
+
+  it("ignores a malformed token_endpoint instead of throwing", () => {
+    expect(metadataCandidates({ type: "oauth2", token_endpoint: "not a url" })).toEqual([]);
+  });
+
+  it("yields nothing when the auth declares neither issuer nor token_endpoint", () => {
+    expect(metadataCandidates({ type: "oauth2" })).toEqual([]);
+  });
+});
+
+describe("oauth-metadata — manifest vs published metadata", () => {
+  const META = "https://auth.example.com/.well-known/openid-configuration";
+
+  it("passes a declared auth method the AS lists as supported", () => {
+    const findings = compareAuth(
+      "@test/pkg",
+      "primary",
+      { type: "oauth2", token_endpoint_auth_method: "client_secret_basic" },
+      { token_endpoint_auth_methods_supported: ["client_secret_basic", "client_secret_post"] },
+      META,
+      "issuer",
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0]!.severity).toBe("info");
+  });
+
+  // The exact defect that shipped: a manifest declaring `client_secret_post`
+  // against an AS that only accepts HTTP Basic. The redirect succeeds and the
+  // token exchange fails with `invalid_client`.
+  it("fails an issuer-bound auth method the AS does not support", () => {
+    const findings = compareAuth(
+      "@test/pkg",
+      "primary",
+      { type: "oauth2", token_endpoint_auth_method: "client_secret_post" },
+      { token_endpoint_auth_methods_supported: ["client_secret_basic"] },
+      META,
+      "issuer",
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0]!.severity).toBe("fail");
+    expect(findings[0]!.message).toContain("invalid_client");
+  });
+
+  it("only warns for the same contradiction on a probed document", () => {
+    const findings = compareAuth(
+      "@test/pkg",
+      "primary",
+      { type: "oauth2", token_endpoint_auth_method: "client_secret_post" },
+      { token_endpoint_auth_methods_supported: ["client_secret_basic"] },
+      META,
+      "probed",
+    );
+    expect(findings[0]!.severity).toBe("warn");
+    expect(findings[0]!.message).toContain("may describe a different authorization server");
+  });
+
+  // RFC 6749 §2.3.1 makes HTTP Basic the method every AS must accept, and it is
+  // also the platform default when a manifest omits the field — so an omitted
+  // declaration must be checked as `client_secret_basic`, not skipped.
+  it("checks an omitted auth method as client_secret_basic", () => {
+    const findings = compareAuth(
+      "@test/pkg",
+      "primary",
+      { type: "oauth2" },
+      { token_endpoint_auth_methods_supported: ["client_secret_post"] },
+      META,
+      "issuer",
+    );
+    expect(findings[0]!.severity).toBe("fail");
+    expect(findings[0]!.message).toContain("client_secret_basic");
+  });
+
+  it("says nothing about the auth method when the AS publishes no list", () => {
+    const findings = compareAuth(
+      "@test/pkg",
+      "primary",
+      { type: "oauth2", token_endpoint_auth_method: "client_secret_post" },
+      {},
+      META,
+      "issuer",
+    );
+    expect(findings).toEqual([]);
+  });
+
+  it("fails an endpoint that contradicts an issuer-bound document", () => {
+    const findings = compareAuth(
+      "@test/pkg",
+      "primary",
+      { type: "oauth2", token_endpoint: "https://old.example.com/token" },
+      { token_endpoint: "https://auth.example.com/token" },
+      META,
+      "issuer",
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0]!.severity).toBe("fail");
+    expect(findings[0]!.message).toContain("token_endpoint");
+  });
+
+  it("warns when the provider offers userinfo and the manifest declares no identity mechanism", () => {
+    const findings = compareAuth(
+      "@test/pkg",
+      "primary",
+      { type: "oauth2" },
+      { userinfo_endpoint: "https://auth.example.com/userinfo" },
+      META,
+      "issuer",
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0]!.severity).toBe("warn");
+    expect(findings[0]!.message).toContain("Connexion N");
+  });
+
+  // An auth mapping `identity_claims` onto `id_token` claims resolves an
+  // account without ever calling userinfo — every Google integration here does
+  // exactly that — so demanding the endpoint too would be pure noise.
+  it("stays silent about userinfo when identity_claims are declared", () => {
+    const findings = compareAuth(
+      "@test/pkg",
+      "primary",
+      { type: "oauth2", identity_claims: { accountId: "$.email" } } as never,
+      { userinfo_endpoint: "https://auth.example.com/userinfo" },
+      META,
+      "issuer",
+    );
+    expect(findings).toEqual([]);
+  });
+
+  it("stays silent about fields the document does not publish", () => {
+    const findings = compareAuth(
+      "@test/pkg",
+      "primary",
+      { type: "oauth2", authorization_endpoint: "https://auth.example.com/authorize" },
+      {},
+      META,
+      "issuer",
+    );
+    expect(findings).toEqual([]);
   });
 });

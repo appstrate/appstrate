@@ -8,7 +8,8 @@
  * Tiers:
  *   - gate  (default) — deterministic, no network/credentials. Local MCP-server
  *                       tool parity. Wired into `bun run check`.
- *   - mcp             — gate + remote MCP parity (requires network/creds).
+ *   - mcp             — gate + remote MCP parity + OAuth AS-metadata conformance
+ *                       (network, no credentials).
  *   - all             — every check including auth-liveness.
  *
  * Static manifest validation (scope_catalog ↔ required_scopes, schema, drift)
@@ -21,6 +22,7 @@ import { loadClassified } from "./load.ts";
 import { checkMcpLocalParity } from "./mcp-local-parity.ts";
 import { checkMcpRemoteParity } from "./remote-parity.ts";
 import { checkAuthLiveness } from "./auth-live.ts";
+import { checkOAuthMetadata } from "./oauth-metadata.ts";
 import { AUTH_PROBES } from "./probes.ts";
 import { credentialedCount } from "./creds.ts";
 import { formatReport, exitCode, type Summary, summarize } from "./report.ts";
@@ -68,6 +70,9 @@ async function main(): Promise<void> {
   // for credential-only integrations.
   const runRemote = args.tier === "mcp" || args.tier === "all";
   const runAuthLive = args.tier === "all";
+  // AS-metadata conformance needs the network but no credentials, so it rides
+  // with `mcp` rather than waiting for the credentialed `all` tier.
+  const runOAuthMetadata = runRemote;
 
   let credIntegrations = 0;
   for (const { entry, klass } of selected) {
@@ -78,6 +83,12 @@ async function main(): Promise<void> {
     } else if (klass === "integration-cred") {
       credIntegrations++;
       if (runAuthLive) findings.push(...(await checkAuthLiveness(entry)));
+    }
+    // Manifest-declared OAuth surface, checked for every integration class —
+    // a remote MCP integration declares an `issuer` and a credential-only one
+    // declares explicit endpoints, and both are transcribed by hand.
+    if (runOAuthMetadata && klass !== "mcp-server-local" && klass !== "other") {
+      findings.push(...(await checkOAuthMetadata(entry)));
     }
   }
 

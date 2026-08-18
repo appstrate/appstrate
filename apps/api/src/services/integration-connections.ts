@@ -53,6 +53,7 @@ import { notFound, conflict, invalidRequest, forbidden } from "../lib/errors.ts"
 import type { ActorScope, AppScope } from "../lib/scope.ts";
 import { actorInsert, actorFilter, actorOrSharedFilter } from "../lib/actor.ts";
 import { getPackageDisplayName } from "../lib/package-helpers.ts";
+import { integrationCallbackUrl } from "../lib/integration-callback-url.ts";
 import type { Actor } from "@appstrate/connect";
 import {
   resolveIntegrationToolCatalog,
@@ -2304,6 +2305,16 @@ export async function getIntegrationAuthStatuses(
    * integration is not activated. Same source as the list endpoint.
    */
   block_user_connections: boolean;
+  /**
+   * The `redirect_uri` this instance sends to every authorization server for
+   * this integration — the exact string an admin must register on their BYO
+   * OAuth app at the provider. Served from the same helper the connect
+   * strategy uses, so the displayed value cannot drift from the sent one.
+   * A `redirect_uri` mismatch is the most common connect failure and providers
+   * reject it with an opaque error, so the UI shows the truth rather than
+   * leaving the admin to reconstruct it.
+   */
+  platform_redirect_uri: string;
 }> {
   await assertApplicationInScope(scope);
   const manifest = await loadManifestOrThrow(scope, packageId);
@@ -2405,6 +2416,7 @@ export async function getIntegrationAuthStatuses(
       (manifest as { allow_undeclared_tools?: boolean }).allow_undeclared_tools === true,
     active: activation.active,
     block_user_connections: activation.blockUserConnections,
+    platform_redirect_uri: integrationCallbackUrl(),
   };
 }
 
