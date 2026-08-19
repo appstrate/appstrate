@@ -105,12 +105,13 @@ Ces seuils ne remplacent pas une décision produit. Un écart de débit sous une
 peut être acceptable si la latence vécue reste bonne et si le dimensionnement cloud offre la marge
 requise.
 
-## Résultats actuels après optimisation
+## Résultats exploratoires après optimisation
 
 ### Banc contrôlé ciblé
 
 Chaque cellule ci-dessous est une répétition chaude, une organisation synthétique par chat, au
-commit validé `fd1c56d4`.
+commit `fd1c56d4`. Cette passe unique est exploratoire. Elle valide le fonctionnement et donne un
+ordre de grandeur, mais elle ne démontre pas une non-infériorité statistique.
 
 | Concurrence | Moteur | p95 premier token | p95 total |         Débit |
 | ----------: | ------ | ----------------: | --------: | ------------: |
@@ -144,7 +145,10 @@ que la différence de débit indique encore du travail local ou de la variance f
 
 ### Abonnements Pi
 
-Ces résultats valident seulement les chemins Pi réels.
+Ces mesures de charge ont été réalisées au commit `c5a35b2d`, avant le passage à Pi 0.84.2. Elles
+restent un historique utile des abonnements à 1, 10 et 30, mais ne mesurent pas la version livrée.
+Les validations fonctionnelles plus bas confirment séparément les chemins Pi 0.84.2 avec Codex et
+Claude Code. Elles ne constituent pas un nouveau benchmark de charge.
 
 | Abonnement             | Concurrence | p95 premier token | p95 total |        Débit |
 | ---------------------- | ----------: | ----------------: | --------: | -----------: |
@@ -211,7 +215,7 @@ Preuve brute :
 
 ## Ce qui a été expliqué et corrigé
 
-Quatre coûts ou défauts Appstrate propres au chemin Pi ont été isolés :
+Cinq coûts ou défauts Appstrate propres au chemin Pi ont été isolés :
 
 1. `ModelRuntime.create()` rafraîchissait tout le catalogue à chaque tour. Le modèle est maintenant
    résolu en amont et la création du runtime reste sous 1 ms en médiane jusqu'à 100 conversations.
@@ -224,6 +228,9 @@ Quatre coûts ou défauts Appstrate propres au chemin Pi ont été isolés :
 4. L'annulation volontaire suivant l'outil terminal `output` pouvait être classée en erreur avec
    certains adaptateurs. Le bridge reconnaît désormais le message d'annulation standard après un
    succès terminal, sans masquer les erreurs fournisseur ordinaires.
+5. Pi 0.84.2 a déplacé et clarifié la normalisation OpenAI compatible des tokens de cache. Le test
+   d'ancrage suit maintenant le fichier réellement distribué et l'adaptateur Appstrate conserve la
+   même partition entre entrée, lecture de cache et écriture de cache sur les deux moteurs.
 
 Le profil CPU attribuait 47,7 % de la vague Pi à la découverte synchrone avant la troisième
 correction. Les accès `realpathSync`, `readFileSync`, `readdirSync`, `statSync` et `existsSync`
@@ -232,7 +239,8 @@ et n'était pas la cause.
 
 ## Coût fixe, coût marginal et récupération
 
-Un microprofil sur dix processus frais mesure le chargement du package Pi au-dessus d'AI SDK :
+Un microprofil sur dix processus frais, au commit historique `9d921a73` avant Pi 0.84.2, mesure le
+chargement du package Pi au-dessus d'AI SDK :
 
 - import médian de 265,0 ms, avec un minimum de 185,9 ms et un maximum de 1 228,9 ms ;
 - delta RSS médian de 265,9 Mio, avec une plage de 71,5 à 360,7 Mio ;
@@ -257,9 +265,10 @@ Limite fournisseur : Mistral n'a produit aucun 429 jusqu'à 100 dans la campagne
 ne garantit aucune capacité permanente. Codex et Claude Code passent à 30, leur capacité à 60
 reste inconnue.
 
-Limite Appstrate : le plafond Pi par défaut est 64. Le test de politique à 100 admet exactement 64
-conversations et renvoie 36 réponses 429 propres, avec `Retry-After` et sans message orphelin. Le
-banc moteur porte temporairement le plafond à 128 pour observer 100 conversations.
+Limite Appstrate : le plafond Pi par défaut reste 6 tant que la capacité cloud n'est pas validée.
+Un test de politique avec un plafond explicitement fixé à 64 et une demande de 100 admet exactement
+64 conversations et renvoie 36 réponses 429 propres, avec `Retry-After` et sans message orphelin.
+Le banc moteur porte temporairement le plafond à 128 pour observer 100 conversations.
 
 Limite cloud : la mémoire et le CPU par réplica, le nombre de réplicas, l'autoscaling, les
 redémarrages, les chats actifs p95 et p99, les rafales et les distributions de tokens et d'outils
@@ -286,9 +295,10 @@ clients, credentials, identités, historiques, signaux d'annulation et flux UI r
 chaque tour. Le `DefaultResourceLoader` actuel ne doit pas être partagé directement, car ses
 factories capturent des valeurs du tour.
 
-Appstrate utilise Pi 0.84.2 sous le namespace `@earendil-works`. La mise à niveau est validée avec
-Mistral, Codex et Claude Code. Elle ne justifie pas l'installation d'une extension et ne remplace
-pas le profilage de notre propre intégration.
+Appstrate utilise Pi 0.84.2 sous le namespace `@earendil-works`. La compatibilité fonctionnelle de
+la mise à niveau est validée avec Mistral, Codex et Claude Code. Les matrices de charge Codex,
+Claude Code et coût fixe restent antérieures à cette version. La mise à niveau ne justifie pas
+l'installation d'une extension et ne remplace pas le profilage de notre propre intégration.
 
 Références utiles : [Pi](https://github.com/earendil-works/pi),
 [pi-chat](https://github.com/earendil-works/pi-chat),

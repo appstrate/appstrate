@@ -3,13 +3,13 @@
   "kind": "unified_pi_pr_performance_summary",
   "date": "2026-08-19",
   "environment": {
-    "commit": "fd1c56d4",
     "machine": "Apple M2 local",
     "database": "isolated_pglite",
     "data_class": "local_synthetic",
     "cloud_capacity_validated": false
   },
   "real_mistral_c60": {
+    "campaign_commit": "fd1c56d4",
     "model": "mistral-small-2603",
     "profile": "warm",
     "repetitions": 1,
@@ -43,6 +43,12 @@
       "continuity_valid": true,
       "isolation_valid": true
     }
+  },
+  "controlled_warm_campaign": {
+    "campaign_commit": "fd1c56d4",
+    "repetitions_per_cell": 1,
+    "status": "exploratory",
+    "missing_optimized_concurrency_levels": [64]
   },
   "controlled_warm": [
     {
@@ -107,6 +113,11 @@
     "continuity_valid": true,
     "isolation_valid": true
   },
+  "subscription_pi_only_campaign": {
+    "campaign_commit": "c5a35b2d",
+    "status": "historical_pre_pi_0_84_2_performance",
+    "current_pi_0_84_2_paths_validated_separately": true
+  },
   "subscription_pi_only": [
     {
       "provider": "codex",
@@ -168,7 +179,9 @@
     "isolation_valid": true,
     "direct_ai_sdk_comparison": false
   },
-  "configured_policy": {
+  "configured_benchmark_policy": {
+    "product_default_concurrency": 6,
+    "explicit_benchmark_concurrency": 64,
     "requested": 100,
     "admitted": 64,
     "rate_limited": 36,
@@ -177,6 +190,8 @@
     "retry_after_present": true
   },
   "fixed_pi_load": {
+    "campaign_commit": "9d921a73",
+    "status": "historical_pre_pi_0_84_2_order_of_magnitude",
     "repetitions": 10,
     "import_duration_ms": {
       "median": 265.028,
@@ -191,7 +206,7 @@
     "note": "Bun memory categories overlap and must not be summed."
   },
   "interpretation": {
-    "user_facing": "The real Mistral c60 pair differs by 31.744 ms at p95 first token and 246.679 ms at p95 total, unlikely to be perceptible in ordinary interaction.",
+    "user_facing": "The single real Mistral c60 pair differs by 31.744 ms at p95 first token and 246.679 ms at p95 total, unlikely to be perceptible in ordinary interaction. This is exploratory, not a statistical non-inferiority result.",
     "capacity": "Pi throughput is lower under simultaneous local bursts. This affects saturation headroom and potential infrastructure sizing, not the observed success or correctness of admitted chats.",
     "cloud": "Replica resources, autoscaling and production traffic distributions were unavailable. Local results do not establish cloud capacity."
   }
