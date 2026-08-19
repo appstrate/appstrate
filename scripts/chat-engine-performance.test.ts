@@ -13,6 +13,7 @@ import {
   repetitionNumbers,
   publishedObservationName,
   summarizeDurations,
+  summarizePiLifecycle,
   summarizeWaveActivity,
   waitForWorkerExit,
   type MemorySample,
@@ -23,6 +24,24 @@ describe("chat engine performance observation helpers", () => {
     expect(percentile([40, 10, 30, 20], 0.5)).toBe(20);
     expect(percentile([40, 10, 30, 20], 0.95)).toBe(40);
     expect(summarizeDurations([40, 10, 30, 20])).toEqual({ p50: 20, p95: 40, p99: 40 });
+  });
+
+  it("aggregates Pi lifecycle stages and their per-turn pre-prompt total", () => {
+    expect(
+      summarizePiLifecycle([
+        { turnId: "turn-a", stage: "mcpTools", durationMs: 10 },
+        { turnId: "turn-a", stage: "modelRuntimeCreate", durationMs: 20 },
+        { turnId: "turn-b", stage: "mcpTools", durationMs: 30 },
+        { turnId: "turn-b", stage: "modelRuntimeCreate", durationMs: 40 },
+      ]),
+    ).toEqual({
+      sampleCount: 2,
+      stagesMs: {
+        mcpTools: { p50: 10, p95: 30, p99: 30 },
+        modelRuntimeCreate: { p50: 20, p95: 40, p99: 40 },
+      },
+      prePromptTotalMs: { p50: 30, p95: 70, p99: 70 },
+    });
   });
 
   it("selects the first sample at or after every recovery checkpoint", () => {

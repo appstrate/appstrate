@@ -92,6 +92,25 @@
         "throughputChatsPerSecond": { "type": "number", "minimum": 0 }
       }
     },
+    "diagnostics": {
+      "type": "object",
+      "required": ["providerDispatchMs"],
+      "properties": {
+        "providerDispatchMs": { "$ref": "#/$defs/percentiles" },
+        "piLifecycle": {
+          "type": "object",
+          "required": ["sampleCount", "stagesMs", "prePromptTotalMs"],
+          "properties": {
+            "sampleCount": { "type": "integer", "minimum": 0 },
+            "stagesMs": {
+              "type": "object",
+              "additionalProperties": { "$ref": "#/$defs/percentiles" }
+            },
+            "prePromptTotalMs": { "$ref": "#/$defs/percentiles" }
+          }
+        }
+      }
+    },
     "outcomes": {
       "type": "object",
       "required": [

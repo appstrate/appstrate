@@ -53,7 +53,11 @@ import {
 import { classifyClientTurnError, clientTurnErrorMarker } from "../turn-error.ts";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 import { buildPiTurnMetadata, piFailureChunks } from "./pi-turn-closure.ts";
-import { ensurePiRuntimeModelApi, type ResolvedPiChatModelBinding } from "./model-binding.ts";
+import {
+  ensurePiRuntimeModelApi,
+  PI_CHAT_MODEL_RUNTIME_CREATE_OPTIONS,
+  type ResolvedPiChatModelBinding,
+} from "./model-binding.ts";
 import { buildStructuredPiTurn, reconstructPiSession } from "./structured-session.ts";
 
 /**
@@ -91,6 +95,22 @@ export interface PiChatInput {
   onError: (error: unknown) => string;
   /** Persist one metered `llm_usage` row for the turn (fire-and-forget). */
   recordUsage: (record: ChatUsageRecord) => void;
+  /** Optional local-benchmark seam. Production callers leave it unset. */
+  onLifecycleTiming?: (timing: PiChatLifecycleTiming) => void;
+}
+
+export type PiChatLifecycleStage =
+  | "mcpTools"
+  | "sdkLoad"
+  | "sessionProjection"
+  | "modelRuntimeCreate"
+  | "credentialSetup"
+  | "resourceReload"
+  | "agentSession";
+
+export interface PiChatLifecycleTiming {
+  stage: PiChatLifecycleStage;
+  durationMs: number;
 }
 
 /**
@@ -136,6 +156,16 @@ export function runPiChat(input: PiChatInput): Response {
       // 10-minute deadline).
       let mcpTools: Awaited<ReturnType<typeof buildPlatformMcpTools>> | undefined;
       let stepCap: ReturnType<typeof createStepCapController> | undefined;
+      let lifecycleStageStartedAt = performance.now();
+      const finishLifecycleStage = (stage: PiChatLifecycleStage): void => {
+        const endedAt = performance.now();
+        try {
+          input.onLifecycleTiming?.({ stage, durationMs: endedAt - lifecycleStageStartedAt });
+        } catch (error) {
+          logger.warn("Pi lifecycle diagnostic callback failed", { error: String(error), stage });
+        }
+        lifecycleStageStartedAt = endedAt;
+      };
       try {
         // Platform meta-tools (search/describe/invoke_operation + run_and_wait).
         // A failure here is a genuine misconfiguration (the chat's value IS the
@@ -154,6 +184,7 @@ export function runPiChat(input: PiChatInput): Response {
             orgId: input.orgId,
           },
         });
+        finishLifecycleStage("mcpTools");
 
         const {
           createAgentSession,
@@ -162,6 +193,7 @@ export function runPiChat(input: PiChatInput): Response {
           SessionManager,
           SettingsManager,
         } = await loadPiCodingAgentSdk();
+        finishLifecycleStage("sdkLoad");
 
         const piModel = model;
         const requestedThinkingLevel = input.generation.reasoningLevel ?? "medium";
@@ -185,13 +217,12 @@ export function runPiChat(input: PiChatInput): Response {
           toolResultCount: projectedTurn.toolResultCount,
           sessionFile: sessionManager.getSessionFile() ?? null,
         });
+        finishLifecycleStage("sessionProjection");
 
         // OAuth uses the real access token in memory. Proxy-routed models use
         // only the inert `proxy` placeholder and replace the stream below.
-        const modelRuntime = await ModelRuntime.create({
-          modelsPath: null,
-          allowModelNetwork: false,
-        });
+        const modelRuntime = await ModelRuntime.create(PI_CHAT_MODEL_RUNTIME_CREATE_OPTIONS);
+        finishLifecycleStage("modelRuntimeCreate");
         if (modelBinding.authMode === "proxy") {
           ensurePiRuntimeModelApi(modelRuntime, modelBinding);
         }
@@ -200,6 +231,7 @@ export function runPiChat(input: PiChatInput): Response {
           modelBinding.provider,
           modelBinding.runtimeApiKey,
         );
+        finishLifecycleStage("credentialSetup");
 
         // MCP server usage guidance is appended to the system prompt, then the
         // (uncacheable) operation index is dropped for providers without a
@@ -237,6 +269,7 @@ export function runPiChat(input: PiChatInput): Response {
           systemPrompt: system,
         });
         await resourceLoader.reload();
+        finishLifecycleStage("resourceReload");
 
         const { session } = await createAgentSession({
           cwd: "/tmp",
@@ -260,6 +293,7 @@ export function runPiChat(input: PiChatInput): Response {
           // only the platform MCP meta-tools (extension tools stay enabled).
           noTools: "builtin",
         });
+        finishLifecycleStage("agentSession");
 
         write(mapper.startChunk(crypto.randomUUID()));
 

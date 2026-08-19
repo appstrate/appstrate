@@ -20,9 +20,11 @@ import {
   parseDotEnvValue,
   repetitionNumbers,
   summarizeDurations,
+  summarizePiLifecycle,
   summarizeWaveActivity,
   waitForWorkerExit,
   type MemorySample,
+  type PiLifecycleSample,
 } from "./chat-engine-performance-lib.ts";
 import type { ChatEnv } from "../packages/module-chat/src/prompt.ts";
 
@@ -384,6 +386,10 @@ async function runWorker(config: WorkerConfig): Promise<void> {
     statuses: { ok: 0, rateLimited: 0, serverError: 0 },
     providerStatuses: { ok: 0, rateLimited: 0, serverError: 0, otherError: 0 },
   };
+  const piLifecycleSamples: PiLifecycleSample[] = [];
+  const turnStartedAtByMarker = new Map<string, number>();
+  const providerDispatchedMarkers = new Set<string>();
+  const providerDispatchMs: number[] = [];
 
   const sharedDispatchOptions = {
     db,
@@ -395,11 +401,16 @@ async function runWorker(config: WorkerConfig): Promise<void> {
     onToolCall: () => {
       if (phase === "wave") counters.waveToolCalls += 1;
     },
-    onInference: (usage: { inputTokens: number; outputTokens: number }) => {
+    onInference: (usage: { marker: string; inputTokens: number; outputTokens: number }) => {
       if (phase !== "wave") return;
       counters.waveModelCalls += 1;
       counters.inputTokens += usage.inputTokens;
       counters.outputTokens += usage.outputTokens;
+      const turnStartedAt = turnStartedAtByMarker.get(usage.marker);
+      if (turnStartedAt !== undefined && !providerDispatchedMarkers.has(usage.marker)) {
+        providerDispatchedMarkers.add(usage.marker);
+        providerDispatchMs.push(performance.now() - turnStartedAt);
+      }
     },
   };
   const dispatch = realAppstrate
@@ -421,7 +432,19 @@ async function runWorker(config: WorkerConfig): Promise<void> {
   const engineRuntime = {
     configuredPiOrgIds: () =>
       config.engine === "pi" ? identities.map((i) => i.orgId).join(",") : "",
-    runPiChat: piEngineModule.runPiChat,
+    runPiChat: (input: Parameters<typeof piEngineModule.runPiChat>[0]) =>
+      piEngineModule.runPiChat({
+        ...input,
+        onLifecycleTiming: (timing) => {
+          input.onLifecycleTiming?.(timing);
+          if (phase !== "wave") return;
+          piLifecycleSamples.push({
+            turnId: input.chatSessionId ?? "ephemeral",
+            stage: timing.stage,
+            durationMs: timing.durationMs,
+          });
+        },
+      }),
   };
 
   const app = new Hono<ChatEnv>();
@@ -445,6 +468,7 @@ async function runWorker(config: WorkerConfig): Promise<void> {
     messages = conversation(config.form, identity.marker),
   ): Promise<TurnObservation> => {
     const startedAt = performance.now();
+    turnStartedAtByMarker.set(identity.marker, startedAt);
     try {
       const headers = {
         "content-type": "application/json",
@@ -669,6 +693,10 @@ async function runWorker(config: WorkerConfig): Promise<void> {
       modelId: config.benchmark === "controlled" ? "controlled-v1" : config.providerModelId,
       statuses: counters.providerStatuses,
     },
+    diagnostics: {
+      providerDispatchMs: summarizeDurations(providerDispatchMs),
+      ...(config.engine === "pi" ? { piLifecycle: summarizePiLifecycle(piLifecycleSamples) } : {}),
+    },
     persistence,
     continuity: {
       status: continuity.status,
@@ -715,7 +743,7 @@ function createControlledDispatch(options: {
   identityByMarker: Map<string, any>;
   form: ConversationForm;
   onToolCall(): void;
-  onInference(usage: { inputTokens: number; outputTokens: number }): void;
+  onInference(usage: { marker: string; inputTokens: number; outputTokens: number }): void;
 }): FetchLike {
   const awaitingToolResult = new Set<string>();
   return async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
@@ -750,7 +778,7 @@ function createControlledDispatch(options: {
       const toolStep = options.form === "T" && !awaitingToolResult.has(marker);
       const inputTokens = toolStep ? 128 : options.form === "T" ? 160 : 128;
       const outputTokens = toolStep ? 16 : 32;
-      options.onInference({ inputTokens, outputTokens });
+      options.onInference({ marker, inputTokens, outputTokens });
       const identity = options.identityByMarker.get(marker);
       const sessionId = options.sessionByMarker.get(marker)!;
       if (identity) {

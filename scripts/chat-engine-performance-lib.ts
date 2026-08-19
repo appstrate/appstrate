@@ -33,6 +33,12 @@ export interface BenchmarkWorker {
   kill(signal: number): void;
 }
 
+export interface PiLifecycleSample {
+  turnId: string;
+  stage: string;
+  durationMs: number;
+}
+
 /** Read one explicitly requested variable from dotenv text without importing the rest. */
 export function parseDotEnvValue(contents: string, name: string): string | null {
   for (const line of contents.split(/\r?\n/)) {
@@ -148,6 +154,28 @@ export function summarizeDurations(values: readonly number[]): {
     p50: percentile(values, 0.5),
     p95: percentile(values, 0.95),
     p99: percentile(values, 0.99),
+  };
+}
+
+export function summarizePiLifecycle(samples: readonly PiLifecycleSample[]): {
+  sampleCount: number;
+  stagesMs: Record<string, ReturnType<typeof summarizeDurations>>;
+  prePromptTotalMs: ReturnType<typeof summarizeDurations>;
+} {
+  const stages = new Map<string, number[]>();
+  const totals = new Map<string, number>();
+  for (const sample of samples) {
+    const durations = stages.get(sample.stage) ?? [];
+    durations.push(sample.durationMs);
+    stages.set(sample.stage, durations);
+    totals.set(sample.turnId, (totals.get(sample.turnId) ?? 0) + sample.durationMs);
+  }
+  return {
+    sampleCount: totals.size,
+    stagesMs: Object.fromEntries(
+      [...stages.entries()].map(([stage, durations]) => [stage, summarizeDurations(durations)]),
+    ),
+    prePromptTotalMs: summarizeDurations([...totals.values()]),
   };
 }
 

@@ -10,6 +10,7 @@ import {
   createPiProxyModelBinding,
   createPiProxyStream,
   ensurePiRuntimeModelApi,
+  PI_CHAT_MODEL_RUNTIME_CREATE_OPTIONS,
   resolvePiChatModelBinding,
   type PiModelStream,
 } from "../src/pi-chat/model-binding.ts";
@@ -49,6 +50,14 @@ function oauthModel(overrides: Partial<SubscriptionChatModel> = {}): Subscriptio
 }
 
 describe("Pi chat model binding", () => {
+  it("skips the redundant full-catalog refresh for an already resolved chat model", () => {
+    expect(PI_CHAT_MODEL_RUNTIME_CREATE_OPTIONS).toEqual({
+      modelsPath: null,
+      allowModelNetwork: false,
+      refreshOnCreate: false,
+    });
+  });
+
   it("maps every API-key family to its native Pi serializer through llm-proxy", () => {
     const cases = [
       ["anthropic-messages", `${ORIGIN}/api/llm-proxy/anthropic-messages`, "anthropic"],

@@ -60,6 +60,17 @@ export interface PiOAuthModelBinding extends PiChatModelBindingBase {
 
 export type ResolvedPiChatModelBinding = PiProxyModelBinding | PiOAuthModelBinding;
 
+/**
+ * Chat already resolves one concrete model before entering Pi. The targeted
+ * credential setup refreshes that provider afterwards, so a full catalog and
+ * availability refresh during every runtime construction is redundant.
+ */
+export const PI_CHAT_MODEL_RUNTIME_CREATE_OPTIONS = {
+  modelsPath: null,
+  allowModelNetwork: false,
+  refreshOnCreate: false,
+} as const;
+
 interface PiModelRuntimeApiRegistration {
   getProvider(providerId: string): { getModels(): ReadonlyArray<{ api: string }> } | undefined;
   registerProvider(providerId: string, config: { api: Api; baseUrl: string }): void;
