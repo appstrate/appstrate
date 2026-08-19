@@ -412,3 +412,12 @@ avant moteur. Le placeholder proxy utilise désormais un fast path synchrone, ta
 credentials OAuth conservent leur synchronisation complète. Les douze observations à 1 et 10 chats
 sont versionnées dans le rapport. La décision locale reste NO GO et la capacité cloud reste
 inconnue.
+
+Le profil CPU ciblé suivant a isolé la découverte synchrone des ressources locales effectuée par Pi
+pour chaque conversation. Ces ressources ne font pas partie de la politique du chat, dont les skills
+et outils arrivent par le MCP Appstrate. Un chargeur propre au chat conserve donc uniquement le
+prompt et les extensions inline du tour, sans partager client, autorisation, session ou historique.
+À 30 chats, le p95 du premier token Pi passe de 1 243 à 271 ms. Une confirmation à 60 et 100, une
+répétition par moteur, conserve tous les invariants et ramène l'écart absolu à 209 et 173 ms. Les neuf
+observations ciblées et les deux résumés CPU sont référencés dans le rapport. Cette passe légère ne
+remplace pas les répétitions nécessaires à une décision de capacité cloud.

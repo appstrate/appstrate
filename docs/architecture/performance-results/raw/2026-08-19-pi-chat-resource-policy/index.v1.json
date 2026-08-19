@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "kind": "chat-engine-performance-raw-index",
+  "generatedAt": "2026-08-19T18:29:45.056Z",
+  "observations": [
+    {
+      "file": "ai-sdk-cpu-diagnostic-c30-reference--ai-sdk-S-warm-c30-o30-r1.json",
+      "sha256": "2414011bd2ae9c4eaffc799a206a825b45af96296dca581617762707804c9eb1",
+      "source": "artifacts/chat-engine-performance/ai-sdk-cpu-diagnostic-c30-reference/ai-sdk-S-warm-c30-o30-r1.json"
+    },
+    {
+      "file": "pi-0842-cpu-diagnostic-c30--pi-S-warm-c30-o30-r1.json",
+      "sha256": "964a9d59aa2cdb79d1c94d06ef0475e3b3037c446ee14d13138e9469a88eb38f",
+      "source": "artifacts/chat-engine-performance/pi-0842-cpu-diagnostic-c30/pi-S-warm-c30-o30-r1.json"
+    },
+    {
+      "file": "pi-0842-cpu-diagnostic-c30-no-discovery--pi-S-warm-c30-o30-r1.json",
+      "sha256": "c8668da167951768b62eb83bcc6292cdb9198d0c5afa6d63517dea6ad670090e",
+      "source": "artifacts/chat-engine-performance/pi-0842-cpu-diagnostic-c30-no-discovery/pi-S-warm-c30-o30-r1.json"
+    },
+    {
+      "file": "pi-0842-no-discovery-controlled-reference-r1--ai-sdk-S-warm-c100-o100-r1.json",
+      "sha256": "4eaed1bcb50e0044f2620b0f4a0b840daab1ba5806a868900067b658adaafcd0",
+      "source": "artifacts/chat-engine-performance/pi-0842-no-discovery-controlled-reference-r1/ai-sdk-S-warm-c100-o100-r1.json"
+    },
+    {
+      "file": "pi-0842-no-discovery-controlled-reference-r1--ai-sdk-S-warm-c60-o60-r1.json",
+      "sha256": "336f81021404f5c02509a09c0eb8d3cbfe6541719d980657c506b11032bbca70",
+      "source": "artifacts/chat-engine-performance/pi-0842-no-discovery-controlled-reference-r1/ai-sdk-S-warm-c60-o60-r1.json"
+    },
+    {
+      "file": "pi-0842-no-discovery-controlled-reference-r1--pi-S-warm-c100-o100-r1.json",
+      "sha256": "444f682c1ce0e7f25a576aae3deaa9f0aac897abe746ef76875d3d9ba59bbc20",
+      "source": "artifacts/chat-engine-performance/pi-0842-no-discovery-controlled-reference-r1/pi-S-warm-c100-o100-r1.json"
+    },
+    {
+      "file": "pi-0842-no-discovery-controlled-reference-r1--pi-S-warm-c60-o60-r1.json",
+      "sha256": "fcc5ba71407559f3f05487570a6fd90653f19e72f498706675a0e6ee38853ed4",
+      "source": "artifacts/chat-engine-performance/pi-0842-no-discovery-controlled-reference-r1/pi-S-warm-c60-o60-r1.json"
+    },
+    {
+      "file": "pi-0842-no-discovery-mistral-c60-r1--ai-sdk-S-warm-c60-o60-r1.json",
+      "sha256": "1ec689d101f61f175d66de94ef55ad97f154ba326588637b8a8ce7be474bf75f",
+      "source": "artifacts/chat-engine-performance/pi-0842-no-discovery-mistral-c60-r1/ai-sdk-S-warm-c60-o60-r1.json"
+    },
+    {
+      "file": "pi-0842-no-discovery-mistral-c60-r1--pi-S-warm-c60-o60-r1.json",
+      "sha256": "658b2dc4eee6356d35de8756e9b5133624e0102c3ccf8da2f1e34628c94ba7c5",
+      "source": "artifacts/chat-engine-performance/pi-0842-no-discovery-mistral-c60-r1/pi-S-warm-c60-o60-r1.json"
+    }
+  ]
+}

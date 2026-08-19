@@ -1,0 +1,464 @@
+{
+  "schemaVersion": 1,
+  "kind": "chat-engine-cpu-wave-profile",
+  "observationId": "pi-S-warm-c30-o30-r1",
+  "commit": "709e9bdae2298aae781c9a09203a6589684e3d83",
+  "window": {
+    "startEpochMs": 1787163888322.1702,
+    "endEpochMs": 1787163888818.4827,
+    "durationMs": 496.3125
+  },
+  "sampledMicros": 496312.5,
+  "functions": [
+    {
+      "functionName": "cloneObject",
+      "scriptId": "0",
+      "url": "",
+      "lineNumber": -1,
+      "columnNumber": -1,
+      "selfMicros": 39228,
+      "selfPercent": 7.903891197582169
+    },
+    {
+      "functionName": "bindIfParam",
+      "scriptId": "330",
+      "url": "file:///Users/olivier/Dev/appstrate/worktrees/chat-pi-unified-engine-phase4/node_modules/.bun/drizzle-orm@0.45.2+aa1015d380484960/node_modules/drizzle-orm/sql/expressions/conditions.cjs",
+      "lineNumber": 53,
+      "columnNumber": 22,
+      "selfMicros": 19211,
+      "selfPercent": 3.8707467573353487
+    },
+    {
+      "functionName": "",
+      "scriptId": "0",
+      "url": "",
+      "lineNumber": -1,
+      "columnNumber": -1,
+      "selfMicros": 19169,
+      "selfPercent": 3.8622843470595645
+    },
+    {
+      "functionName": "",
+      "scriptId": "5",
+      "url": "",
+      "lineNumber": 1,
+      "columnNumber": 11,
+      "selfMicros": 18009,
+      "selfPercent": 3.6285606346807704
+    },
+    {
+      "functionName": "writeSync",
+      "scriptId": "0",
+      "url": "",
+      "lineNumber": -1,
+      "columnNumber": -1,
+      "selfMicros": 16811,
+      "selfPercent": 3.3871804558619822
+    },
+    {
+      "functionName": "/[\\uD800-\\uDBFF](?![\\uDC00-\\uDFFF])|(?<![\\uD800-\\uDBFF])[\\uDC00-\\uDFFF]/g",
+      "scriptId": "0",
+      "url": "",
+      "lineNumber": -1,
+      "columnNumber": -1,
+      "selfMicros": 16371,
+      "selfPercent": 3.298526633925199
+    },
+    {
+      "functionName": "statSync",
+      "scriptId": "0",
+      "url": "",
+      "lineNumber": -1,
+      "columnNumber": -1,
+      "selfMicros": 12068,
+      "selfPercent": 2.4315325525752423
+    },
+    {
+      "functionName": "toArray",
+      "scriptId": "327",
+      "url": "internal:fifo",
+      "lineNumber": 55,
+      "columnNumber": 25,
+      "selfMicros": 11917,
+      "selfPercent": 2.40110817277421
+    },
+    {
+      "functionName": "structuredClone",
+      "scriptId": "0",
+      "url": "",
+      "lineNumber": -1,
+      "columnNumber": -1,
+      "selfMicros": 10777,
+      "selfPercent": 2.171414179574361
+    },
+    {
+      "functionName": "",
+      "scriptId": "5",
+      "url": "",
+      "lineNumber": 7,
+      "columnNumber": 62,
+      "selfMicros": 10578,
+      "selfPercent": 2.131318473743861
+    },
+    {
+      "functionName": "decode",
+      "scriptId": "326",
+      "url": "file:///Users/olivier/Dev/appstrate/worktrees/chat-pi-unified-engine-phase4/node_modules/.bun/openai@6.40.0+4b65e697391ccbcb/node_modules/openai/internal/decoders/line.mjs",
+      "lineNumber": 24,
+      "columnNumber": 139,
+      "selfMicros": 8592,
+      "selfPercent": 1.7311673592746504
+    },
+    {
+      "functionName": "is",
+      "scriptId": "161",
+      "url": "file:///Users/olivier/Dev/appstrate/worktrees/chat-pi-unified-engine-phase4/node_modules/.bun/drizzle-orm@0.45.2+aa1015d380484960/node_modules/drizzle-orm/entity.js",
+      "lineNumber": 18,
+      "columnNumber": 32,
+      "selfMicros": 8213,
+      "selfPercent": 1.654804180833648
+    },
+    {
+      "functionName": "",
+      "scriptId": "2",
+      "url": "",
+      "lineNumber": 9,
+      "columnNumber": 26,
+      "selfMicros": 8101,
+      "selfPercent": 1.6322377534315577
+    },
+    {
+      "functionName": "",
+      "scriptId": "5",
+      "url": "",
+      "lineNumber": 4,
+      "columnNumber": 39,
+      "selfMicros": 7194,
+      "selfPercent": 1.4494899886664148
+    },
+    {
+      "functionName": "decode",
+      "scriptId": "290",
+      "url": "file:///Users/olivier/Dev/appstrate/worktrees/chat-pi-unified-engine-phase4/node_modules/.bun/openai@6.40.0+4b65e697391ccbcb/node_modules/openai/core/streaming.mjs",
+      "lineNumber": 268,
+      "columnNumber": 9,
+      "selfMicros": 6862,
+      "selfPercent": 1.3825966502959326
+    },
+    {
+      "functionName": "streamAssistantResponse",
+      "scriptId": "279",
+      "url": "file:///Users/olivier/Dev/appstrate/worktrees/chat-pi-unified-engine-phase4/node_modules/.bun/@earendil-works+pi-agent-core@0.84.2+c3295df90fbb2edc/node_modules/@earendil-works/pi-agent-core/dist/agent-loop.js",
+      "lineNumber": 220,
+      "columnNumber": 29,
+      "selfMicros": 6428,
+      "selfPercent": 1.295151744112832
+    },
+    {
+      "functionName": "createContext",
+      "scriptId": "282",
+      "url": "file:///Users/olivier/Dev/appstrate/worktrees/chat-pi-unified-engine-phase4/node_modules/.bun/@earendil-works+pi-coding-agent@0.84.2+c3295df90fbb2edc/node_modules/@earendil-works/pi-coding-agent/dist/core/extensions/runner.js",
+      "lineNumber": 462,
+      "columnNumber": 15,
+      "selfMicros": 6413,
+      "selfPercent": 1.2921294547286235
+    },
+    {
+      "functionName": "streamAssistantResponse",
+      "scriptId": "279",
+      "url": "file:///Users/olivier/Dev/appstrate/worktrees/chat-pi-unified-engine-phase4/node_modules/.bun/@earendil-works+pi-agent-core@0.84.2+c3295df90fbb2edc/node_modules/@earendil-works/pi-agent-core/dist/agent-loop.js",
+      "lineNumber": 221,
+      "columnNumber": 27,
+      "selfMicros": 6351,
+      "selfPercent": 1.2796373252738948
+    },
+    {
+      "functionName": "get",
+      "scriptId": "0",
+      "url": "",
+      "lineNumber": -1,
+      "columnNumber": -1,
+      "selfMicros": 6349,
+      "selfPercent": 1.2792343533560004
+    },
+    {
+      "functionName": "",
+      "scriptId": "5",
+      "url": "",
+      "lineNumber": 2,
+      "columnNumber": 154,
+      "selfMicros": 6193,
+      "selfPercent": 1.2478025437602318
+    },
+    {
+      "functionName": "partition",
+      "scriptId": "290",
+      "url": "file:///Users/olivier/Dev/appstrate/worktrees/chat-pi-unified-engine-phase4/node_modules/.bun/openai@6.40.0+4b65e697391ccbcb/node_modules/openai/core/streaming.mjs",
+      "lineNumber": 284,
+      "columnNumber": 21,
+      "selfMicros": 6154,
+      "selfPercent": 1.2399445913612896
+    },
+    {
+      "functionName": "slice",
+      "scriptId": "0",
+      "url": "",
+      "lineNumber": -1,
+      "columnNumber": -1,
+      "selfMicros": 6141,
+      "selfPercent": 1.2373252738949756
+    },
+    {
+      "functionName": "currentModels",
+      "scriptId": "267",
+      "url": "file:///Users/olivier/Dev/appstrate/worktrees/chat-pi-unified-engine-phase4/node_modules/.bun/@earendil-works+pi-ai@0.84.2+c3295df90fbb2edc/node_modules/@earendil-works/pi-ai/dist/models.js",
+      "lineNumber": 433,
+      "columnNumber": 42,
+      "selfMicros": 5871,
+      "selfPercent": 1.1829240649792219
+    },
+    {
+      "functionName": "findDoubleNewlineIndex",
+      "scriptId": "326",
+      "url": "file:///Users/olivier/Dev/appstrate/worktrees/chat-pi-unified-engine-phase4/node_modules/.bun/openai@6.40.0+4b65e697391ccbcb/node_modules/openai/internal/decoders/line.mjs",
+      "lineNumber": -1,
+      "columnNumber": -1,
+      "selfMicros": 5636,
+      "selfPercent": 1.1355748646266213
+    },
+    {
+      "functionName": "emit",
+      "scriptId": "282",
+      "url": "file:///Users/olivier/Dev/appstrate/worktrees/chat-pi-unified-engine-phase4/node_modules/.bun/@earendil-works+pi-coding-agent@0.84.2+c3295df90fbb2edc/node_modules/@earendil-works/pi-coding-agent/dist/core/extensions/runner.js",
+      "lineNumber": 580,
+      "columnNumber": 26,
+      "selfMicros": 5229,
+      "selfPercent": 1.0535700793350964
+    },
+    {
+      "functionName": "",
+      "scriptId": "175",
+      "url": "file:///Users/olivier/Dev/appstrate/worktrees/chat-pi-unified-engine-phase4/node_modules/.bun/ai@7.0.52+68a1e3a0c4588df3/node_modules/ai/dist/index.js",
+      "lineNumber": 6965,
+      "columnNumber": 32,
+      "selfMicros": 5015,
+      "selfPercent": 1.010452084120388
+    },
+    {
+      "functionName": "calculateCost",
+      "scriptId": "267",
+      "url": "file:///Users/olivier/Dev/appstrate/worktrees/chat-pi-unified-engine-phase4/node_modules/.bun/@earendil-works+pi-ai@0.84.2+c3295df90fbb2edc/node_modules/@earendil-works/pi-ai/dist/models.js",
+      "lineNumber": 531,
+      "columnNumber": 30,
+      "selfMicros": 4341,
+      "selfPercent": 0.8746505477899508
+    },
+    {
+      "functionName": "decode",
+      "scriptId": "0",
+      "url": "",
+      "lineNumber": -1,
+      "columnNumber": -1,
+      "selfMicros": 4167,
+      "selfPercent": 0.8395919909331319
+    },
+    {
+      "functionName": "findNewlineIndex",
+      "scriptId": "326",
+      "url": "file:///Users/olivier/Dev/appstrate/worktrees/chat-pi-unified-engine-phase4/node_modules/.bun/openai@6.40.0+4b65e697391ccbcb/node_modules/openai/internal/decoders/line.mjs",
+      "lineNumber": 77,
+      "columnNumber": 43,
+      "selfMicros": 3851,
+      "selfPercent": 0.7759224279058053
+    },
+    {
+      "functionName": ".wasm-function[2115]",
+      "scriptId": "0",
+      "url": "",
+      "lineNumber": -1,
+      "columnNumber": -1,
+      "selfMicros": 3303,
+      "selfPercent": 0.6655081224027201
+    },
+    {
+      "functionName": ".wasm-function[6000]",
+      "scriptId": "0",
+      "url": "",
+      "lineNumber": -1,
+      "columnNumber": -1,
+      "selfMicros": 2952,
+      "selfPercent": 0.5947865508122403
+    },
+    {
+      "functionName": "join",
+      "scriptId": "0",
+      "url": "",
+      "lineNumber": -1,
+      "columnNumber": -1,
+      "selfMicros": 2866,
+      "selfPercent": 0.5774587583427779
+    },
+    {
+      "functionName": "stringify",
+      "scriptId": "0",
+      "url": "",
+      "lineNumber": -1,
+      "columnNumber": -1,
+      "selfMicros": 2815,
+      "selfPercent": 0.5671829744364689
+    },
+    {
+      "functionName": "URL",
+      "scriptId": "0",
+      "url": "",
+      "lineNumber": -1,
+      "columnNumber": -1,
+      "selfMicros": 2806,
+      "selfPercent": 0.5653696008059438
+    },
+    {
+      "functionName": "",
+      "scriptId": "65",
+      "url": "file:///Users/olivier/Dev/appstrate/worktrees/chat-pi-unified-engine-phase4/node_modules/.bun/@electric-sql+pglite@0.5.4/node_modules/@electric-sql/pglite/dist/chunk-SRXPYZFS.js",
+      "lineNumber": 8,
+      "columnNumber": 2259,
+      "selfMicros": 2626,
+      "selfPercent": 0.5291021281954413
+    },
+    {
+      "functionName": "map",
+      "scriptId": "2",
+      "url": "",
+      "lineNumber": 1,
+      "columnNumber": 11,
+      "selfMicros": 2605,
+      "selfPercent": 0.5248709230575495
+    },
+    {
+      "functionName": "bytes",
+      "scriptId": "55",
+      "url": "file:///Users/olivier/Dev/appstrate/worktrees/chat-pi-unified-engine-phase4/node_modules/.bun/@electric-sql+pglite@0.5.4/node_modules/@electric-sql/pglite/dist/chunk-2B24BK54.js",
+      "lineNumber": 1,
+      "columnNumber": 13440,
+      "selfMicros": 2604,
+      "selfPercent": 0.5246694370986021
+    },
+    {
+      "functionName": "fulfillPromise",
+      "scriptId": "0",
+      "url": "",
+      "lineNumber": -1,
+      "columnNumber": -1,
+      "selfMicros": 2596,
+      "selfPercent": 0.5230575494270243
+    },
+    {
+      "functionName": "ie",
+      "scriptId": "55",
+      "url": "file:///Users/olivier/Dev/appstrate/worktrees/chat-pi-unified-engine-phase4/node_modules/.bun/@electric-sql+pglite@0.5.4/node_modules/@electric-sql/pglite/dist/chunk-2B24BK54.js",
+      "lineNumber": 1,
+      "columnNumber": 9636,
+      "selfMicros": 2561,
+      "selfPercent": 0.5160055408638711
+    },
+    {
+      "functionName": ".wasm-function[10059]",
+      "scriptId": "0",
+      "url": "",
+      "lineNumber": -1,
+      "columnNumber": -1,
+      "selfMicros": 2559,
+      "selfPercent": 0.5156025689459766
+    },
+    {
+      "functionName": "driveAsyncFunction",
+      "scriptId": "0",
+      "url": "",
+      "lineNumber": -1,
+      "columnNumber": -1,
+      "selfMicros": 2555,
+      "selfPercent": 0.5147966251101876
+    },
+    {
+      "functionName": "next",
+      "scriptId": "2",
+      "url": "",
+      "lineNumber": 1,
+      "columnNumber": 11,
+      "selfMicros": 2543,
+      "selfPercent": 0.5123787936028208
+    },
+    {
+      "functionName": "PglitePreparedQuery",
+      "scriptId": "165",
+      "url": "file:///Users/olivier/Dev/appstrate/worktrees/chat-pi-unified-engine-phase4/node_modules/.bun/drizzle-orm@0.45.2+aa1015d380484960/node_modules/drizzle-orm/pglite/session.js",
+      "lineNumber": 22,
+      "columnNumber": 10,
+      "selfMicros": 2529,
+      "selfPercent": 0.5095579901775595
+    },
+    {
+      "functionName": "copyDataProperties",
+      "scriptId": "0",
+      "url": "",
+      "lineNumber": -1,
+      "columnNumber": -1,
+      "selfMicros": 2414,
+      "selfPercent": 0.4863871048986274
+    },
+    {
+      "functionName": "at",
+      "scriptId": "55",
+      "url": "file:///Users/olivier/Dev/appstrate/worktrees/chat-pi-unified-engine-phase4/node_modules/.bun/@electric-sql+pglite@0.5.4/node_modules/@electric-sql/pglite/dist/chunk-2B24BK54.js",
+      "lineNumber": 1,
+      "columnNumber": 16534,
+      "selfMicros": 2398,
+      "selfPercent": 0.48316332955547164
+    },
+    {
+      "functionName": "fstatSync",
+      "scriptId": "0",
+      "url": "",
+      "lineNumber": -1,
+      "columnNumber": -1,
+      "selfMicros": 2375,
+      "selfPercent": 0.4785291524996852
+    },
+    {
+      "functionName": "start",
+      "scriptId": "3",
+      "url": "file:///Users/olivier/Dev/appstrate/worktrees/chat-pi-unified-engine-phase4/scripts/chat-engine-performance.ts",
+      "lineNumber": 1095,
+      "columnNumber": 22,
+      "selfMicros": 1820,
+      "selfPercent": 0.3667044452839693
+    },
+    {
+      "functionName": "execProtocolRawSync",
+      "scriptId": "56",
+      "url": "file:///Users/olivier/Dev/appstrate/worktrees/chat-pi-unified-engine-phase4/node_modules/.bun/@electric-sql+pglite@0.5.4/node_modules/@electric-sql/pglite/dist/index.js",
+      "lineNumber": 3,
+      "columnNumber": 285631,
+      "selfMicros": 1743,
+      "selfPercent": 0.3511900264450321
+    },
+    {
+      "functionName": ".wasm-function[10381]",
+      "scriptId": "0",
+      "url": "",
+      "lineNumber": -1,
+      "columnNumber": -1,
+      "selfMicros": 1659,
+      "selfPercent": 0.3342652058934643
+    },
+    {
+      "functionName": "setProvider",
+      "scriptId": "267",
+      "url": "file:///Users/olivier/Dev/appstrate/worktrees/chat-pi-unified-engine-phase4/node_modules/.bun/@earendil-works+pi-ai@0.84.2+c3295df90fbb2edc/node_modules/@earendil-works/pi-ai/dist/models.js",
+      "lineNumber": 37,
+      "columnNumber": 24,
+      "selfMicros": 1560,
+      "selfPercent": 0.31431809595768795
+    }
+  ]
+}

@@ -304,13 +304,15 @@ La priorité dépend donc du stade produit :
    passer les tests de conformité, d'abonnements, de stream, de persistance et d'isolation.
 2. Réalisé à concurrence 1 : rejouer un sous-ensemble Mistral, Codex et Claude Code avant toute
    autre optimisation. La matrice de charge complète reste à rejouer.
-3. Ajouter des durées séparées pour la connexion MCP, `listTools`, le chargement du SDK, le
-   rechargement des ressources, la création de session, le départ de la requête fournisseur et le
-   premier token.
+3. Réalisé : ajouter des durées séparées pour la connexion MCP, `listTools`, le chargement du SDK,
+   le rechargement des ressources, la création de session, le départ de la requête fournisseur et le
+   premier token, puis limiter le profil CPU à la vague mesurée.
 4. Vérifier ensuite une optimisation sans changement sémantique : cache versionné du catalogue et
    des instructions MCP, avec client et autorisation toujours propres au tour.
-5. Désactiver explicitement dans le chargeur du chat les ressources disque qui ne font pas partie
-   de sa politique, après un test prouvant que les skills Appstrate restent accessibles par le MCP.
+5. Réalisé : désactiver explicitement dans le chargeur du chat les ressources disque qui ne font pas
+   partie de sa politique. Un test prouve que le prompt et les extensions inline restent chargés,
+   tandis que les skills locaux et fichiers de contexte restent exclus. Les skills Appstrate passent
+   toujours par le MCP.
 6. Construire un chargeur léger par session à partir d'un snapshot immuable, plutôt que partager un
    runtime d'extensions mutable.
 7. Stabiliser les blocs de mémoire, skills et instructions afin de préserver le cache fournisseur.
@@ -325,7 +327,8 @@ Adopter Pi comme noyau cible reste cohérent avec le bénéfice d'un seul moteur
 skills, mémoire et outils. Les extensions communautaires servent ici de références de conception,
 pas de dépendances à installer.
 
-Le prochain travail utile est le profilage fin du bootstrap commun, puis une optimisation mesurée du
-catalogue MCP et des ressources immuables. La matrice de référence à 1, 10, 30, 60, 64 et 100 devra
-ensuite être rejouée sur Pi 0.84.2. L'optimisation reste souhaitable, mais elle ne constitue pas un
-prérequis pour poursuivre le chantier ou tester le chat avec un petit groupe interne.
+Le profilage fin du bootstrap a identifié puis supprimé la découverte synchrone des ressources
+locales dans le chat. Le prochain travail utile est une optimisation mesurée du catalogue MCP et des
+ressources immuables. La matrice de référence à 1, 10, 30, 60, 64 et 100 ne devra être rejouée que
+pour produire une décision statistique ou dimensionner le cloud. L'optimisation restante ne constitue
+pas un prérequis pour poursuivre le chantier ou tester le chat avec un petit groupe interne.

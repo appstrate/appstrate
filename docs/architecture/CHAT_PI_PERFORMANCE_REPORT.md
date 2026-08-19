@@ -287,6 +287,44 @@ ont été supprimées. Il reste un coût fixe Pi mesurable et une amplification 
 à partir de PGlite. Ils restent néanmoins bloquants pour un canary local tant que le même protocole
 n'a pas été rejoué sur le profil PostgreSQL et réplica cloud réel.
 
+## Diagnostic ciblé du chargeur de ressources du chat
+
+Un profil CPU limité à la vague de 30 chats a identifié la principale amplification locale.
+`DefaultResourceLoader.reload()` parcourait à chaque tour les skills, extensions et fichiers de
+contexte locaux, notamment `~/.agents/skills`, avant d'écarter les ressources que le chat n'utilise
+pas. Les piles chaudes contenaient `realpathSync`, `readFileSync`, `readdirSync`, `statSync` et
+`existsSync`. Ces accès synchrones représentaient 47,7 % des échantillons de la vague Pi avant
+correction.
+
+Le chat utilise maintenant une politique de ressources explicite : prompt fourni par Appstrate et
+extensions inline du tour uniquement. Les skills et outils restent fournis par le MCP Appstrate.
+Le runtime Pi conserve sa découverte complète de ressources. Aucun client MCP, credential, état de
+session, historique ou résultat d'outil n'est partagé entre conversations.
+
+À 30 chats chauds, sur une répétition contrôlée appariée, le p95 du premier token Pi passe de
+1 243 ms à 271 ms et le débit de 18,9 à 60,4 chats par seconde. AI SDK mesure 237 ms et 62,2 chats
+par seconde. Pi atteint donc 97,1 % de son débit, avec un écart de 34 ms au premier token. Le
+rechargement des ressources Pi passe de 53,2 ms à 2,3 ms au p95.
+
+Une confirmation légère, une répétition par moteur et une organisation par chat, donne :
+
+| Concurrence | Moteur | p95 premier token, ms | p95 total, ms | Chats par seconde |
+| ----------: | ------ | --------------------: | ------------: | ----------------: |
+|          60 | AI SDK |                   289 |           562 |             99,32 |
+|          60 | Pi     |                   498 |           755 |             76,11 |
+|         100 | AI SDK |                   560 |           954 |             99,69 |
+|         100 | Pi     |                   733 |         1 108 |             86,06 |
+
+À 100, l'écart absolu du premier token tombe à 173 ms et le débit Pi atteint 86,3 % de celui d'AI
+SDK. À 60, Pi reste en retrait de 209 ms et son débit atteint 76,6 %. Une seule répétition ne remplace
+pas la matrice statistique, mais suffit à confirmer que la découverte locale était causale.
+
+La paire Mistral chaude à 60 ajoute 120 conversations réelles sans 429, erreur, stream incomplet ou
+défaut d'isolation. Son unique répétition mesure 4 663 ms pour AI SDK et 6 467 ms pour Pi au premier
+token. Le débit Pi est légèrement supérieur, 8,70 contre 8,19 chats par seconde. Cette divergence
+entre latence de queue et débit confirme une forte variance fournisseur. Elle valide la compatibilité
+du correctif, pas un nouveau ratio de performance réel.
+
 ## Comparatif Mistral réel
 
 Le comparatif utilise `mistral-small-2603` et traverse le vrai endpoint `/api/chat`,
@@ -487,9 +525,8 @@ la distribution réelle des tokens et outils ne sont pas disponibles. Aucun chif
 
 ## Travail local encore nécessaire
 
-1. Instrumenter la boucle interne Pi après `prompt()` pour séparer conversion de contexte,
-   événements d'extension, préparation de requête et adaptation du stream, puis confirmer sur un
-   profil CPU le surcoût restant à 60, 64 et 100.
+1. Mesurer séparément la découverte du catalogue MCP et tester un snapshot immuable des définitions,
+   sans partager client, autorisation, session, historique ou résultats entre conversations.
 2. Corriger ou documenter la conversion AI SDK d'un historique contenant du raisonnement avant un
    nouvel essai H réel.
 3. Fermer l'interface d'extension qui bloque Chrome Beta, puis terminer le contrôle visuel d'un
@@ -540,6 +577,10 @@ bun scripts/chat-engine-performance-publish.ts --input=artifacts/chat-engine-per
 
 bun scripts/chat-engine-performance.ts controlled --engines=pi --forms=S --profiles=warm --concurrency=10 --repetitions=1 --recovery-ms=0 --cpu-profile=true --output=artifacts/chat-engine-performance/cpu-profile-reproduction-c10
 bun scripts/chat-engine-cpu-profile.ts --profile=artifacts/chat-engine-performance/cpu-profile-reproduction-c10/cpu-profiles/pi-S-warm-c10-o10-r1.cpuprofile --observation=artifacts/chat-engine-performance/cpu-profile-reproduction-c10/pi-S-warm-c10-o10-r1.json --output=artifacts/chat-engine-performance/cpu-profile-reproduction-c10/pi-S-warm-c10-o10-r1-wave-profile.v1.json --limit=30
+
+bun scripts/chat-engine-performance.ts controlled --engines=ai-sdk,pi --forms=S --profiles=warm --concurrency=30 --repetitions=1 --recovery-ms=0 --output=artifacts/chat-engine-performance/resource-policy-c30-r1
+bun scripts/chat-engine-performance.ts controlled --engines=ai-sdk,pi --forms=S --profiles=warm --concurrency=60,100 --repetitions=1 --recovery-ms=0 --output=artifacts/chat-engine-performance/resource-policy-c60-c100-r1
+bun scripts/chat-engine-performance.ts mistral --engines=ai-sdk,pi --env-file=/chemin/absolu/mistral.env --model=mistral-small-2603 --forms=S --profiles=warm --concurrency=60 --repetitions=1 --recovery-ms=0 --output=artifacts/chat-engine-performance/resource-policy-mistral-c60-r1
 
 bun scripts/chat-pi-fixed-load.ts --repetitions=10 --output=artifacts/chat-engine-performance/fixed-load-r10 --summary-output=docs/architecture/performance-results/2026-08-18-pi-fixed-load.v1.json
 
@@ -635,6 +676,9 @@ Le dernier résultat attendu est zéro.
 - Rejeu après suppression du rafraîchissement runtime redondant : [2026-08-19-pi-runtime-refresh-off-controlled-reduced.v1.json](./performance-results/2026-08-19-pi-runtime-refresh-off-controlled-reduced.v1.json)
 - Index et sommes SHA-256 des 18 observations instrumentées : [index.v1.json](./performance-results/raw/2026-08-19-pi-runtime-refresh-off-controlled-reduced/index.v1.json)
 - Index et sommes SHA-256 des 12 observations internes appariées : [index.v1.json](./performance-results/raw/2026-08-19-pi-internal-diagnostics/index.v1.json)
+- Diagnostic du chargeur de ressources du chat : [2026-08-19-pi-chat-resource-policy.v1.json](./performance-results/2026-08-19-pi-chat-resource-policy.v1.json)
+- Profils CPU ciblés : [avant](./performance-results/2026-08-19-pi-chat-resource-scan-c30-before.cpu.v1.json) et [après](./performance-results/2026-08-19-pi-chat-resource-scan-c30-after.cpu.v1.json)
+- Index et sommes SHA-256 des neuf observations ciblées : [index.v1.json](./performance-results/raw/2026-08-19-pi-chat-resource-policy/index.v1.json)
 - Index et sommes SHA-256 de 65 observations réelles : [index.v1.json](./performance-results/raw/2026-08-18-real/index.v1.json)
 
 Les 65 observations réelles sélectionnées sont désormais versionnées sans leur base PGlite. Leur
@@ -699,3 +743,14 @@ Code. Le profil CPU confirme 18,4 % d'accès fichier synchrones dans la vague Pi
 le coût fixe du chargeur et l'amplification composite locale restent mesurables. Les résultats
 PGlite ne déterminent pas la capacité PostgreSQL cloud. Aucun canary, aucune migration de trafic et
 aucune suppression d'AI SDK ne sont autorisés.
+
+**19 août 2026, politique de ressources du chat : contention principale corrigée.** Le profil CPU
+attribue 47,7 % de la vague Pi à la découverte synchrone de ressources locales qui ne font pas partie
+de la politique du chat. Appstrate désactive cette découverte dans le chat uniquement. Les skills et
+outils restent servis par le MCP Appstrate, tandis que le runtime Pi conserve son comportement
+complet. À 30 chats, le p95 du premier token Pi passe de 1 243 à 271 ms et son débit atteint 97,1 %
+de celui d'AI SDK. Une confirmation légère à 60 et 100 réduit l'écart absolu du premier token à 209
+et 173 ms, mais le débit Pi reste à 76,6 % et 86,3 %. Une paire Mistral à 60 passe tous les invariants,
+avec une variance fournisseur trop forte pour conclure sur un seul point. La correction rend Pi
+nettement plus crédible pour l'unification, sans établir la capacité cloud ni autoriser une migration
+de trafic ou la suppression d'AI SDK.
