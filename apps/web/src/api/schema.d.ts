@@ -11160,6 +11160,11 @@ export interface operations {
                             is_default: boolean;
                             auto_provisioned: boolean;
                             has_client_secret: boolean;
+                            /**
+                             * @description Method declared for this client, overriding the manifest's. `none` = PUBLIC client (no secret at the provider). `null` = undeclared.
+                             * @enum {string|null}
+                             */
+                            token_endpoint_auth_method: "client_secret_post" | "client_secret_basic" | "none" | null;
                             redirect_uri: string | null;
                         }[];
                     };
@@ -11390,6 +11395,11 @@ export interface operations {
                             is_default: boolean;
                             auto_provisioned: boolean;
                             has_client_secret: boolean;
+                            /**
+                             * @description Method declared for this client, overriding the manifest's. `none` = PUBLIC client (no secret at the provider). `null` = undeclared.
+                             * @enum {string|null}
+                             */
+                            token_endpoint_auth_method: "client_secret_post" | "client_secret_basic" | "none" | null;
                             redirect_uri: string | null;
                         }[];
                     };
@@ -11423,6 +11433,11 @@ export interface operations {
                     client_id: string;
                     /** @default  */
                     client_secret: string;
+                    /**
+                     * @description Explicit client-authentication method for this client, overriding the manifest's. Send `none` to register a PUBLIC client (no secret at the provider). Omit to leave it undeclared, in which case the manifest's value applies. A blank `client_secret` is recorded as `none`.
+                     * @enum {string}
+                     */
+                    token_endpoint_auth_method?: "client_secret_post" | "client_secret_basic" | "none";
                     /** Format: uri */
                     redirect_uri?: string;
                 };
@@ -11448,6 +11463,11 @@ export interface operations {
                         auth_key: string;
                         client_id: string;
                         has_client_secret: boolean;
+                        /**
+                         * @description Client-authentication method declared for THIS client, overriding the integration manifest's. `none` means a PUBLIC client: the app is registered at the provider without a secret and authenticates by `client_id` alone. `null` means undeclared — the manifest's value applies.
+                         * @enum {string|null}
+                         */
+                        token_endpoint_auth_method: "client_secret_post" | "client_secret_basic" | "none" | null;
                         redirect_uri: string | null;
                         /** Format: date-time */
                         createdAt: string;
@@ -11834,8 +11854,13 @@ export interface operations {
             content: {
                 "application/json": {
                     client_id: string;
-                    /** @default  */
-                    client_secret: string;
+                    /** @description OMIT to preserve the stored secret. An empty string declares the client PUBLIC and clears it. The rotate form submits an empty input whenever only the redirect URI changed, so the two must stay distinguishable. */
+                    client_secret?: string;
+                    /**
+                     * @description Explicit client-authentication method for this client, overriding the manifest's. Send `none` to register a PUBLIC client (no secret at the provider). Omit to leave it undeclared, in which case the manifest's value applies. A blank `client_secret` is recorded as `none`.
+                     * @enum {string}
+                     */
+                    token_endpoint_auth_method?: "client_secret_post" | "client_secret_basic" | "none";
                     /** Format: uri */
                     redirect_uri?: string;
                 };
@@ -11861,6 +11886,11 @@ export interface operations {
                         auth_key: string;
                         client_id: string;
                         has_client_secret: boolean;
+                        /**
+                         * @description Client-authentication method declared for THIS client, overriding the integration manifest's. `none` means a PUBLIC client: the app is registered at the provider without a secret and authenticates by `client_id` alone. `null` means undeclared — the manifest's value applies.
+                         * @enum {string|null}
+                         */
+                        token_endpoint_auth_method: "client_secret_post" | "client_secret_basic" | "none" | null;
                         redirect_uri: string | null;
                         /** Format: date-time */
                         createdAt: string;

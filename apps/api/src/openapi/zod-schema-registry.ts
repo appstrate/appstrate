@@ -85,7 +85,8 @@ import {
   updateSettingsSchema,
   setPinSchema,
   setOrgDefaultSchema,
-  oauthClientSchema,
+  oauthClientCreateSchema,
+  oauthClientUpdateSchema,
   updateConnectionSchema,
 } from "../routes/integrations.ts";
 
@@ -326,13 +327,13 @@ const coreSchemas: OpenApiSchemaEntry[] = [
   {
     method: "POST",
     path: "/api/integrations/{packageId}/auths/{authKey}/oauth-clients",
-    jsonSchema: toJsonSchema(oauthClientSchema),
+    jsonSchema: toJsonSchema(oauthClientCreateSchema),
     description: "Register a custom integration OAuth client",
   },
   {
     method: "PUT",
     path: "/api/integrations/{packageId}/oauth-clients/{clientId}",
-    jsonSchema: toJsonSchema(oauthClientSchema),
+    jsonSchema: toJsonSchema(oauthClientUpdateSchema),
     description: "Rotate a custom integration OAuth client",
   },
   {

@@ -260,6 +260,20 @@
       "when": 1786953950603,
       "tag": "0036_calm_landau",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1787126709781,
+      "tag": "0037_clumsy_mandrill",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1787129303045,
+      "tag": "0038_young_cassandra_nova",
+      "breakpoints": true
     }
   ]
 }

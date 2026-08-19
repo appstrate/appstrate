@@ -2,7 +2,7 @@
 
 /**
  * End-to-end OAuth2 connect flow, driven through the platform's own routes
- * against a CONFORMANT authorization server (`helpers/strict-oauth-provider`).
+ * against a CONFORMANT authorization server (`helpers/strict-authorization-server`).
  *
  * Until this suite existed, no test walked the nominal path at all: the
  * callback tests cover only its failure branches (missing params, `?error=`,
@@ -26,11 +26,11 @@ import { createTestContext, authHeaders, type TestContext } from "../../helpers/
 import { seedPackage } from "../../helpers/seed.ts";
 import { apiIntegrationManifest, httpHeaderDelivery } from "../../helpers/integration-manifests.ts";
 import {
-  createStrictOAuthProvider,
+  createStrictAuthorizationServer,
   allowLoopbackOAuthEgress,
-  type StrictOAuthProvider,
-  type StrictOAuthProviderOptions,
-} from "../../helpers/strict-oauth-provider.ts";
+  type StrictAuthorizationServer,
+  type StrictAuthorizationServerOptions,
+} from "../../helpers/strict-authorization-server.ts";
 import { applicationPackages, integrationConnections } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
 import { decryptCredentialsToStringMap } from "@appstrate/connect";
@@ -62,7 +62,7 @@ afterAll(() => restoreEgress());
  */
 async function setup(
   ctx: TestContext,
-  provider: StrictOAuthProvider,
+  provider: StrictAuthorizationServer,
   manifest: {
     tokenEndpointAuthMethod: "client_secret_post" | "client_secret_basic" | "none";
     authorizationParams?: Record<string, string>;
@@ -195,10 +195,10 @@ async function storedConnection() {
 
 describe("integration OAuth2 flow (conformant provider)", () => {
   let ctx: TestContext;
-  let provider: StrictOAuthProvider;
+  let provider: StrictAuthorizationServer;
 
-  const startProvider = (options: StrictOAuthProviderOptions): StrictOAuthProvider => {
-    provider = createStrictOAuthProvider(options);
+  const startProvider = (options: StrictAuthorizationServerOptions): StrictAuthorizationServer => {
+    provider = createStrictAuthorizationServer(options);
     return provider;
   };
 

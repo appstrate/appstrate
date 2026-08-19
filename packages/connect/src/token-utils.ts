@@ -234,36 +234,63 @@ export function parseTokenResponse(
 }
 
 /**
- * Resolve the client-authentication method a token request will ACTUALLY use,
- * given the method the manifest declares and the secret that was resolved for
- * the registered client.
+ * A client-authentication pair that cannot be correct — thrown by
+ * {@link assertClientAuthCoherent}.
  *
- * An admin registering a BYO OAuth app can leave the secret blank — that is
- * how the UI expresses "public client" (`integration_oauth_clients` stores an
- * empty ciphertext, `has_client_secret: false`). But
- * `token_endpoint_auth_method` is a MANIFEST field with no per-client
- * override, so the declared method stayed `client_secret_post` /
- * `client_secret_basic` and the token request went out carrying an EMPTY
- * credential: `client_secret=` in the body, or `Basic base64("id:")` in the
- * header. Providers split on how they answer that — Airtable tolerated the
- * empty Basic header, Dropbox rejected the empty body secret with
- * `invalid_client` — so the same misconfiguration silently worked for one
- * integration and hard-failed for another.
- *
- * Sending an empty secret is never correct: RFC 6749 §2.3 defines client
- * password authentication in terms of a secret the client HAS, and §3.2.1
- * says a client without one authenticates by `client_id` alone — which is
- * exactly `token_endpoint_auth_method: "none"` (RFC 7591 §2). So an empty
- * secret is downgraded here, at the single choke point every token request
- * passes through, rather than special-cased per provider.
- *
- * @param declared - `token_endpoint_auth_method` from the manifest (or the
- *   AFPS default when absent — resolved by the caller).
- * @param clientSecret - the secret resolved for the registered client.
+ * A distinct type because the refresh path classifies anything that is not a
+ * `RefreshError` as a transient upstream failure and counts it toward the
+ * streak that eventually flags a connection `needs_reconnection`. A
+ * configuration/programming fault must not spend a user's connection health
+ * budget, and must not read in the logs like someone else's outage.
  */
-export function effectiveTokenAuthMethod<T extends OAuthTokenAuthMethod>(
-  declared: T,
+export class ClientAuthInvariantError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ClientAuthInvariantError";
+  }
+}
+
+/**
+ * Refuse to build a token request whose client-authentication method and
+ * secret contradict each other, in EITHER direction.
+ *
+ * `client_secret_post` / `client_secret_basic` mean the client HAS a password
+ * (RFC 6749 §2.3); a client without one authenticates by `client_id` alone,
+ * which is `token_endpoint_auth_method: "none"` (RFC 7591 §2). So:
+ *
+ *   - a secret-based method with no secret is a request that cannot succeed —
+ *     it is how `client_secret=` (present but empty) reached providers that
+ *     reject it: Dropbox answered `invalid_client` while Airtable tolerated
+ *     the equivalent empty Basic header, so one integration silently worked
+ *     and another hard-failed on the same misconfiguration;
+ *   - `"none"` WITH a secret is the mirror fault: a caller that resolved a
+ *     credential and then declared it would not be used. The secret would be
+ *     silently dropped on the wire, which is how a confidential client gets
+ *     quietly downgraded to a public one.
+ *
+ * Callers resolve the pair together — `resolveIntegrationClientById` and
+ * `resolveConnectClient` return the method alongside the credentials it
+ * belongs to — so reaching this throw means a caller built the pair itself and
+ * got it wrong. Loud beats a silent downgrade: a downgrade would paper over
+ * exactly the kind of drift this exists to surface.
+ */
+export function assertClientAuthCoherent(
+  method: OAuthTokenAuthMethod | undefined,
   clientSecret: string | undefined,
-): T | "none" {
-  return clientSecret ? declared : "none";
+  label: string,
+): void {
+  if (method === "none") {
+    if (!clientSecret) return;
+    throw new ClientAuthInvariantError(
+      `${label}: token_endpoint_auth_method='none' declares a public client, but a client_secret ` +
+        `was resolved. Sending it would be ignored and dropping it silently would downgrade a ` +
+        `confidential client — resolve the method and the secret together.`,
+    );
+  }
+  if (method === undefined || clientSecret) return;
+  throw new ClientAuthInvariantError(
+    `${label}: token_endpoint_auth_method='${method}' requires a client_secret, but none was ` +
+      `resolved. A client registered without a secret is a public client and must be resolved ` +
+      `as token_endpoint_auth_method='none'.`,
+  );
 }

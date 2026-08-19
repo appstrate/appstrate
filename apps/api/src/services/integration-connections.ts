@@ -498,10 +498,22 @@ type IntegrationOAuthClientRow = typeof integrationOauthClients.$inferSelect;
  */
 function projectClientWithSecret(row: IntegrationOAuthClientRow): IntegrationOAuthClientWithSecret {
   let secret = "";
+  // Whether the stored ciphertext could be READ. A row whose ciphertext no
+  // longer opens (key rotated without re-encrypt, corruption) has a secret we
+  // cannot see — which is not the same thing as having none. Conflating the
+  // two would report it as a public client and hand the connect flow an empty
+  // credential, the exact substitution this column exists to prevent.
+  let secretReadable = true;
+  // A public client stores no ciphertext at all, so there is nothing to
+  // decrypt — and nothing that could fail to decrypt.
   try {
     secret =
-      decryptCredentials<{ client_secret?: string }>(row.clientSecretEncrypted).client_secret ?? "";
+      row.clientSecretEncrypted === ""
+        ? ""
+        : (decryptCredentials<{ client_secret?: string }>(row.clientSecretEncrypted)
+            .client_secret ?? "");
   } catch (err) {
+    secretReadable = false;
     logger.warn("integration_oauth_client: client_secret decrypt failed", {
       packageId: row.integrationId,
       authKey: row.authKey,
@@ -516,7 +528,15 @@ function projectClientWithSecret(row: IntegrationOAuthClientRow): IntegrationOAu
     auth_key: row.authKey,
     client_id: row.clientId,
     clientSecret: secret,
-    has_client_secret: secret.length > 0,
+    // An unreadable ciphertext still IS a secret — report its presence from the
+    // column, not from what we managed to decrypt.
+    has_client_secret: secretReadable ? secret.length > 0 : row.clientSecretEncrypted.length > 0,
+    // LEGACY: a row written before the column existed encrypted an empty
+    // secret instead of declaring `none`; report it as the public client it is
+    // until the backfill has run. Only ever concluded from a ciphertext we
+    // actually read — never from a decryption that failed.
+    token_endpoint_auth_method:
+      row.tokenEndpointAuthMethod ?? (secretReadable && secret.length === 0 ? "none" : null),
     redirect_uri: row.redirectUri,
     isDefault: row.isDefault,
     autoProvisioned: row.autoProvisioned,
@@ -620,11 +640,59 @@ async function hasDefaultCustomClient(
  * route never sets it; a remote-MCP auth keeps exactly one, enforced by
  * `idx_ioc_one_auto`).
  */
+/**
+ * Encode the (auth method, ciphertext) pair a client row will carry, writing
+ * both halves together so the row can never claim to be public while holding a
+ * secret, or claim a secret-based method while holding none.
+ *
+ * Three inputs, three meanings — and the distinction between the last two is
+ * the point:
+ *
+ *   - `tokenEndpointAuthMethod: "none"` → PUBLIC. No ciphertext is stored.
+ *   - `clientSecret: ""` (a supplied, empty secret) → public too: that is what
+ *     registering an app with no secret means, and it is now RECORDED rather
+ *     than re-inferred on every read.
+ *   - `clientSecret: undefined` (the field was not submitted at all) → PRESERVE.
+ *     Returns `null` so the caller leaves the stored pair untouched. Rotation
+ *     submits an empty secret input when the admin only meant to change the
+ *     redirect URI; without this distinction that keystroke-free edit silently
+ *     destroyed the secret AND flipped a confidential client to public.
+ */
+export function encodeClientAuthForStorage(input: {
+  clientSecret?: string | undefined;
+  tokenEndpointAuthMethod?: string | undefined;
+}): { tokenEndpointAuthMethod: string | null; clientSecretEncrypted: string } | null {
+  if (input.clientSecret === undefined) {
+    // Declaring a client public is a deliberate act and does not need a secret
+    // field; anything else with no secret submitted is a preserve.
+    if (input.tokenEndpointAuthMethod === "none") {
+      return { tokenEndpointAuthMethod: "none", clientSecretEncrypted: "" };
+    }
+    return null;
+  }
+  const secret = input.clientSecret;
+  if (input.tokenEndpointAuthMethod === "none" || secret.length === 0) {
+    // A non-empty secret alongside an explicit `"none"` is refused at the route
+    // (see `oauthClientSchema`), so reaching here with one is not possible.
+    return { tokenEndpointAuthMethod: "none", clientSecretEncrypted: "" };
+  }
+  return {
+    tokenEndpointAuthMethod: input.tokenEndpointAuthMethod ?? null,
+    clientSecretEncrypted: encryptCredentials({ client_secret: secret }),
+  };
+}
+
 export async function createIntegrationOAuthClient(
   scope: AppScope,
   packageId: string,
   authKey: string,
-  input: { clientId: string; clientSecret: string; redirectUri?: string },
+  input: {
+    clientId: string;
+    clientSecret: string;
+    redirectUri?: string;
+    /** Explicit `token_endpoint_auth_method` for this client; `"none"` = public. */
+    tokenEndpointAuthMethod?: string;
+  },
   opts: { autoProvisioned?: boolean } = {},
 ): Promise<IntegrationOAuthClientWithSecret> {
   await assertApplicationInScope(scope);
@@ -643,7 +711,9 @@ export async function createIntegrationOAuthClient(
     ? true
     : !(await hasDefaultCustomClient(scope, packageId, authKey));
 
-  const ciphertext = encryptCredentials({ client_secret: input.clientSecret ?? "" });
+  // Creation always supplies the field (blank means "register a public
+  // client"), so the encoder never returns the preserve sentinel here.
+  const clientAuth = encodeClientAuthForStorage(input)!;
   const now = new Date();
   const [row] = await db
     .insert(integrationOauthClients)
@@ -652,7 +722,8 @@ export async function createIntegrationOAuthClient(
       integrationId: packageId,
       authKey,
       clientId: input.clientId,
-      clientSecretEncrypted: ciphertext,
+      clientSecretEncrypted: clientAuth.clientSecretEncrypted,
+      tokenEndpointAuthMethod: clientAuth.tokenEndpointAuthMethod,
       redirectUri: input.redirectUri ?? null,
       isDefault,
       autoProvisioned,
@@ -676,7 +747,14 @@ export async function createIntegrationOAuthClient(
 export async function updateIntegrationOAuthClient(
   scope: AppScope,
   clientId: string,
-  input: { clientId: string; clientSecret: string; redirectUri?: string },
+  input: {
+    clientId: string;
+    /** Omit to PRESERVE the stored secret; `""` declares the client public. */
+    clientSecret?: string;
+    redirectUri?: string;
+    /** Explicit `token_endpoint_auth_method` for this client; `"none"` = public. */
+    tokenEndpointAuthMethod?: string;
+  },
 ): Promise<IntegrationOAuthClientWithSecret> {
   await assertApplicationInScope(scope);
   const [existing] = await db
@@ -699,12 +777,20 @@ export async function updateIntegrationOAuthClient(
       `OAuth client '${clientId}' is auto-provisioned (DCR/CIMD) and cannot be edited manually; delete it to re-trigger registration.`,
     );
   }
-  const ciphertext = encryptCredentials({ client_secret: input.clientSecret ?? "" });
+  // `null` = the secret field was not submitted → keep the stored credential
+  // and its declared method exactly as they are. Rotating only the redirect URI
+  // must not silently clear the secret (nor flip a confidential client public).
+  const clientAuth = encodeClientAuthForStorage(input);
   const [row] = await db
     .update(integrationOauthClients)
     .set({
       clientId: input.clientId,
-      clientSecretEncrypted: ciphertext,
+      ...(clientAuth
+        ? {
+            clientSecretEncrypted: clientAuth.clientSecretEncrypted,
+            tokenEndpointAuthMethod: clientAuth.tokenEndpointAuthMethod,
+          }
+        : {}),
       redirectUri: input.redirectUri ?? null,
       updatedAt: new Date(),
     })
@@ -733,16 +819,31 @@ export interface ResolvedConnectClient {
   /** Pre-registered redirect URI override, or null to use the platform default. */
   redirectUri: string | null;
   clientRef: string;
+  /**
+   * Client-authentication method this client actually uses, already reconciled
+   * with the secret: `"none"` with an empty secret for a public client, the
+   * declared method with a non-empty one otherwise. `undefined` means the
+   * client declares none and the manifest's value applies.
+   *
+   * Travels WITH the credentials so no caller has to pair a manifest-declared
+   * method with a separately-resolved secret — the mismatch that sent
+   * `client_secret=` (present but empty) to providers that reject it.
+   */
+  tokenEndpointAuthMethod: string | undefined;
 }
 
 /** Project a registered system client into the connect-time resolved shape. */
 function systemConnectClient(def: SystemIntegrationClientDefinition): ResolvedConnectClient {
+  // A system entry configured without a secret IS a public client; it declares
+  // no method of its own, so anything else defers to the manifest.
+  const isPublic = def.clientSecret.length === 0;
   return {
     clientId: def.clientId,
     clientSecret: def.clientSecret,
     // System clients use the platform default redirect URI (no per-client override).
     redirectUri: null,
     clientRef: def.id,
+    tokenEndpointAuthMethod: isPublic ? "none" : undefined,
   };
 }
 
@@ -753,6 +854,9 @@ function customConnectClient(client: IntegrationOAuthClientWithSecret): Resolved
     clientSecret: client.clientSecret,
     redirectUri: client.redirect_uri ?? null,
     clientRef: client.id,
+    // `projectClientWithSecret` already reports a legacy empty-secret row as
+    // `"none"`, so the pair is coherent here without re-deriving anything.
+    tokenEndpointAuthMethod: client.token_endpoint_auth_method ?? undefined,
   };
 }
 
@@ -830,23 +934,40 @@ export function resolveConnectClient(
  * when the id resolves to neither (since-removed client, remapped system entry,
  * cross-scope id) → the caller skips refresh (surfaces needs_reconnection).
  *
- * `tokenEndpointAuthMethod` gates secret resolution: a public client
- * (`"none"`) carries no secret, so the system secret is dropped and the custom
- * ciphertext is never decrypted.
+ * Returns the client-authentication method ALONGSIDE the credentials, and the
+ * two are always coherent: a public client comes back as `"none"` with an
+ * empty secret, a confidential one as its declared method with a non-empty
+ * secret. Callers post what they are given — nothing downstream re-derives the
+ * method, which is how `client_secret=` (present but empty) used to reach
+ * providers that reject it.
+ *
+ * Precedence: the client row's own `token_endpoint_auth_method` (the admin's
+ * explicit declaration) wins over `manifestAuthMethod`, which is the
+ * manifest's `auths.{key}.token_endpoint_auth_method` and stands in when the
+ * row does not declare one.
  */
 export async function resolveIntegrationClientById(
   clientRef: string,
   applicationId: string,
   integrationId: string,
   authKey: string,
-  tokenEndpointAuthMethod: string | undefined,
-): Promise<{ clientId: string; clientSecret: string } | null> {
-  const needsSecret = tokenEndpointAuthMethod !== "none";
-
+  manifestAuthMethod: string | undefined,
+): Promise<{
+  clientId: string;
+  clientSecret: string;
+  tokenEndpointAuthMethod: string | undefined;
+} | null> {
   // 1) System client (env), validated against this (integrationId, authKey).
   const sys = resolveSystemClientForAuth(clientRef, integrationId, authKey);
   if (sys) {
-    return { clientId: sys.clientId, clientSecret: needsSecret ? sys.clientSecret : "" };
+    // A system entry declares no method of its own, so the manifest decides —
+    // except that an entry configured without a secret IS a public client.
+    const method = manifestAuthMethod === "none" || !sys.clientSecret ? "none" : manifestAuthMethod;
+    return {
+      clientId: sys.clientId,
+      clientSecret: method === "none" ? "" : sys.clientSecret,
+      tokenEndpointAuthMethod: method,
+    };
   }
 
   // A custom client id is the row's UUID PK. Anything else — a since-removed
@@ -859,6 +980,7 @@ export async function resolveIntegrationClientById(
     .select({
       clientId: integrationOauthClients.clientId,
       clientSecretEncrypted: integrationOauthClients.clientSecretEncrypted,
+      tokenEndpointAuthMethod: integrationOauthClients.tokenEndpointAuthMethod,
     })
     .from(integrationOauthClients)
     .where(
@@ -872,22 +994,32 @@ export async function resolveIntegrationClientById(
     .limit(1);
   if (!row) return null;
 
-  let clientSecret = "";
-  if (needsSecret) {
-    try {
-      clientSecret =
-        decryptCredentials<{ client_secret?: string }>(row.clientSecretEncrypted).client_secret ??
-        "";
-    } catch (err) {
-      logger.warn("Integration custom client_secret decrypt failed", {
-        integrationId,
-        authKey,
-        error: err instanceof Error ? err.message : String(err),
-      });
-      return null;
-    }
+  // The row's declaration wins; the manifest stands in when it has none.
+  let method = row.tokenEndpointAuthMethod ?? manifestAuthMethod;
+  // A public client stores no ciphertext, so there is nothing to decrypt.
+  if (method === "none" || row.clientSecretEncrypted === "") {
+    return { clientId: row.clientId, clientSecret: "", tokenEndpointAuthMethod: "none" };
   }
-  return { clientId: row.clientId, clientSecret };
+
+  let clientSecret: string;
+  try {
+    clientSecret =
+      decryptCredentials<{ client_secret?: string }>(row.clientSecretEncrypted).client_secret ?? "";
+  } catch (err) {
+    logger.warn("Integration custom client_secret decrypt failed", {
+      integrationId,
+      authKey,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return null;
+  }
+  // LEGACY: rows written before `token_endpoint_auth_method` existed encrypted
+  // an empty secret rather than storing none, so a public client is only
+  // visible after decryption. Normalise here so the pair stays coherent, and
+  // delete this branch once `scripts/backfill-public-oauth-clients.ts` has run
+  // across the fleet and the biconditional CHECK constraint has landed.
+  if (clientSecret === "") method = "none";
+  return { clientId: row.clientId, clientSecret, tokenEndpointAuthMethod: method };
 }
 
 /**
@@ -912,8 +1044,18 @@ export interface IntegrationClientDescriptor {
   is_default: boolean;
   /** True for a DCR/CIMD machine client — read-only in the UI (no manual edit). */
   auto_provisioned: boolean;
-  /** True when the client carries a non-empty secret (private client). */
+  /** True when the client carries a non-empty secret (confidential client). */
   has_client_secret: boolean;
+  /**
+   * `token_endpoint_auth_method` declared for this client, or `null` when
+   * undeclared (the manifest's value applies). `"none"` = PUBLIC client.
+   *
+   * The UI's "public client" checkbox reads THIS rather than
+   * `!has_client_secret`: the two differ for a confidential client whose
+   * secret has simply not been re-entered, and conflating them left the secret
+   * field permanently disabled on such a row.
+   */
+  token_endpoint_auth_method: string | null;
   /** Pre-registered redirect URI override, or null (custom only; system → null). */
   redirect_uri: string | null;
 }
@@ -967,6 +1109,9 @@ export async function listIntegrationClients(
       is_default: false,
       auto_provisioned: false,
       has_client_secret: def.clientSecret.length > 0,
+      // A system entry declares no method; one configured without a secret is
+      // a public client.
+      token_endpoint_auth_method: def.clientSecret.length > 0 ? null : "none",
       redirect_uri: null,
     }),
     mapRow: (row) => ({
@@ -976,6 +1121,7 @@ export async function listIntegrationClients(
       is_default: false,
       auto_provisioned: row.autoProvisioned,
       has_client_secret: row.has_client_secret,
+      token_endpoint_auth_method: row.token_endpoint_auth_method,
       redirect_uri: row.redirect_uri,
     }),
   });

@@ -1,0 +1,1 @@
+ALTER TABLE "integration_oauth_clients" ADD CONSTRAINT "ioc_public_iff_no_secret" CHECK (("integration_oauth_clients"."token_endpoint_auth_method" = 'none' AND "integration_oauth_clients"."client_secret_encrypted" = '') OR ("integration_oauth_clients"."token_endpoint_auth_method" IS DISTINCT FROM 'none' AND "integration_oauth_clients"."client_secret_encrypted" <> ''));

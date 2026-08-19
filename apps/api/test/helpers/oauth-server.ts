@@ -14,7 +14,7 @@
  *
  * For anything that exercises the flow itself — client authentication, PKCE,
  * redirect_uri binding, code reuse, whether a refresh token is issued at all —
- * use `strict-oauth-provider.ts`, which enforces the RFCs and refuses
+ * use `strict-authorization-server.ts`, which enforces the RFCs and refuses
  * non-conformant requests with the same error codes a real provider uses.
  *
  * Uses Bun.serve() on port 0 (random available port).
