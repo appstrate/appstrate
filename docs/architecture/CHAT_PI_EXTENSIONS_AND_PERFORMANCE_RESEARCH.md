@@ -248,10 +248,25 @@ Les optimisations communes devraient donc vivre dans `@appstrate/runner-pi` ou d
 partagé, avec deux profils de politique explicites. Il faut éviter une extension chargée seulement
 dans le chat si elle modifie le prompt, la mémoire ou la boucle agent de façon invisible au runtime.
 
-Une migration vers la version courante de Pi mérite un chantier séparé. L'API récente sépare mieux
-les services du runtime et la session, mais cela ne prouve pas automatiquement un gain de
-performance. Le changement de namespace, les évolutions de types et les extensions doivent être
-validés par les tests Appstrate et par le même benchmark avant toute adoption.
+### Migrer Pi avant l'optimisation
+
+La migration vers Pi 0.84.2 devrait précéder l'optimisation du bootstrap. Cette version remplace le
+transport Mistral fondé sur le SDK généré par un stream HTTP natif afin de supprimer le coût du
+client généré et de son runtime de schémas. Cela touche directement le fournisseur principal du
+benchmark et pourrait réduire le coût fixe observé. La migration rend aussi les extensions
+communautaires modernes techniquement évaluables, sans pour autant autoriser leur installation.
+
+Ce n'est toutefois pas un simple changement de numéro. Depuis 0.73.1, le namespace npm est passé de
+`@mariozechner` à `@earendil-works` et plusieurs contrats ont évolué, notamment les événements de
+stream, les en-têtes des fournisseurs et les registres de modèles. Appstrate possède des adaptateurs
+qui supposent explicitement les formes 0.73.1. La migration doit donc rester un commit atomique,
+faire passer les tests de conformité, puis être mesurée avec le même protocole avant toute
+optimisation locale supplémentaire.
+
+Sources :
+
+- [version Pi 0.84.2](https://github.com/earendil-works/pi/releases/tag/v0.84.2)
+- [changelog du coding agent](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/CHANGELOG.md)
 
 ## Ces optimisations sont elles nécessaires pour une expérience agréable ?
 
@@ -280,21 +295,23 @@ La priorité dépend donc du stade produit :
 
 ## Plan d'expérimentation recommandé
 
-1. Ajouter des durées séparées pour la connexion MCP, `listTools`, le chargement du SDK, le
+1. Migrer les packages Pi vers 0.84.2 dans un commit atomique, adapter les barrels et faire passer
+   les tests de conformité, d'abonnements, de stream, de persistance et d'isolation.
+2. Rejouer un sous-ensemble de référence avant toute autre optimisation afin de mesurer l'effet du
+   transport Mistral natif et des changements du runtime.
+3. Ajouter des durées séparées pour la connexion MCP, `listTools`, le chargement du SDK, le
    rechargement des ressources, la création de session, le départ de la requête fournisseur et le
    premier token.
-2. Vérifier d'abord une optimisation sans changement sémantique : cache versionné du catalogue et
+4. Vérifier ensuite une optimisation sans changement sémantique : cache versionné du catalogue et
    des instructions MCP, avec client et autorisation toujours propres au tour.
-3. Désactiver explicitement dans le chargeur du chat les ressources disque qui ne font pas partie
+5. Désactiver explicitement dans le chargeur du chat les ressources disque qui ne font pas partie
    de sa politique, après un test prouvant que les skills Appstrate restent accessibles par le MCP.
-4. Construire un chargeur léger par session à partir d'un snapshot immuable, plutôt que partager un
+6. Construire un chargeur léger par session à partir d'un snapshot immuable, plutôt que partager un
    runtime d'extensions mutable.
-5. Stabiliser les blocs de mémoire, skills et instructions afin de préserver le cache fournisseur.
-6. Rejouer exactement les mêmes cellules à 1, 10, 30, 60, 64 et 100, avec plusieurs répétitions et
+7. Stabiliser les blocs de mémoire, skills et instructions afin de préserver le cache fournisseur.
+8. Rejouer exactement les mêmes cellules à 1, 10, 30, 60, 64 et 100, avec plusieurs répétitions et
    les mêmes données synthétiques.
-7. Étudier séparément la migration de Pi 0.73.1 vers la version courante. Ne pas confondre cette
-   migration avec l'optimisation elle-même.
-8. Prototyper ensuite un apprentissage différé des skills inspiré de `pi-continuous-learning`, sans
+9. Prototyper ensuite un apprentissage différé des skills inspiré de `pi-continuous-learning`, sans
    écriture automatique et sans ajout de latence au chat.
 
 ## Décision proposée
@@ -303,6 +320,7 @@ Adopter Pi comme noyau cible reste cohérent avec le bénéfice d'un seul moteur
 skills, mémoire et outils. Les extensions communautaires servent ici de références de conception,
 pas de dépendances à installer.
 
-Le prochain travail utile est un profilage fin suivi d'une optimisation du bootstrap commun. Cette
-optimisation est souhaitable, mais elle ne constitue pas un prérequis pour poursuivre le chantier
-ou tester le chat avec un petit groupe interne.
+Le prochain travail utile est la migration contrôlée vers Pi 0.84.2, suivie d'une mesure de
+référence, puis d'un profilage fin et de l'optimisation du bootstrap commun. L'optimisation reste
+souhaitable, mais elle ne constitue pas un prérequis pour poursuivre le chantier ou tester le chat
+avec un petit groupe interne.
