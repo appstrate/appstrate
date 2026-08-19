@@ -649,26 +649,32 @@ async function hasDefaultCustomClient(
  * the point:
  *
  *   - `tokenEndpointAuthMethod: "none"` → PUBLIC. No ciphertext is stored.
- *   - `clientSecret: ""` with NO method declared → public too, and only in that
- *     shape. This is the RFC 7591 §3.2.1 registration answer: an authorization
- *     server that returns no `client_secret` has registered a PUBLIC client, so
- *     `""` here is the protocol's own statement, not a guess about a form
- *     field. The auto-DCR caller below reaches this branch (it registers a
- *     client and passes through whatever the AS returned); the admin route
- *     never does, because `oauthClientCreateSchema` refuses a missing secret
- *     unless `"none"` is declared.
+ *   - `clientSecret: ""` with NO method declared → REFUSED. An empty secret is
+ *     accepted only next to an explicit `"none"`, so the stored row always
+ *     records a declaration somebody made rather than one this function
+ *     inferred. Every production path now declares it: the admin routes refuse
+ *     a missing secret unless `"none"` is sent, and auto-DCR declares `"none"`
+ *     itself after reading the authorization server's own
+ *     `token_endpoint_auth_method`. The throw is therefore unreachable in
+ *     production and exists as a chokepoint for any future direct caller.
  *   - `clientSecret: undefined` (the field was not submitted at all) → PRESERVE.
  *     Returns `null` so the caller leaves the stored pair untouched. Rotation
  *     submits an empty secret input when the admin only meant to change the
  *     redirect URI; without this distinction that keystroke-free edit silently
  *     destroyed the secret AND flipped a confidential client to public.
  *
- * An empty secret NEXT TO an explicitly declared secret-based method is the
- * fourth combination, and it throws. It used to win over the declaration and
- * write `token_endpoint_auth_method = 'none'`: a caller that declared
+ * An empty secret next to an explicitly declared secret-based method throws for
+ * the same reason. It used to win over the declaration and write
+ * `token_endpoint_auth_method = 'none'`: a caller that declared
  * `client_secret_basic` and supplied no secret got a public client and a 201,
  * and the contradiction only surfaced as an HTTP 400 from the provider's token
  * endpoint months later.
+ *
+ * Note that DELETING these guards rather than throwing would be worse than the
+ * inference they replace: falling through to the final return writes a NULL
+ * method beside a ciphertext over an empty secret — exactly the legacy row
+ * shape `scripts/maintenance/backfill-public-oauth-clients.ts` exists to
+ * repair, and which the CHECK constraint cannot recognise.
  */
 export function encodeClientAuthForStorage(input: {
   clientSecret?: string | undefined;
@@ -685,26 +691,24 @@ export function encodeClientAuthForStorage(input: {
   const secret = input.clientSecret;
   if (input.tokenEndpointAuthMethod === "none") {
     // A non-empty secret alongside an explicit `"none"` is refused by
-    // `oauthClientCreateSchema` / `oauthClientUpdateSchema`; the auto-DCR
-    // caller never declares `"none"` itself. Dropping the secret here is
-    // therefore not a downgrade of anything a caller asked to keep.
+    // `oauthClientCreateSchema` / `oauthClientUpdateSchema`, and auto-DCR only
+    // declares `"none"` once it has confirmed the authorization server
+    // registered a public client. Dropping the secret here is therefore not a
+    // downgrade of anything a caller asked to keep.
     return { tokenEndpointAuthMethod: "none", clientSecretEncrypted: "" };
   }
   if (secret.length === 0) {
     // Defence in depth for the callers that bypass the route schema — auto-DCR
     // calls `createIntegrationOAuthClient` directly, so "the route already
-    // refused this" is not a premise this function may rely on. Declaring a
-    // method that needs a password and handing over none is a contradiction
-    // with no safe reading: silently storing `'none'` is what produced a
-    // public client from a confidential declaration.
-    if (input.tokenEndpointAuthMethod !== undefined) {
-      throw invalidRequest(
-        `token_endpoint_auth_method='${input.tokenEndpointAuthMethod}' requires a client_secret, but an empty one was supplied. Send the secret, or declare token_endpoint_auth_method='none' to register a public client.`,
-      );
-    }
-    // No method declared and no secret: a public client by the registration
-    // protocol's own answer (see the header comment).
-    return { tokenEndpointAuthMethod: "none", clientSecretEncrypted: "" };
+    // refused this" is not a premise this function may rely on. An empty
+    // secret is stored only next to an explicit `"none"`; anything else is a
+    // declaration this function would have to invent, and inventing it is what
+    // produced a public client from a confidential registration.
+    throw invalidRequest(
+      input.tokenEndpointAuthMethod !== undefined
+        ? `token_endpoint_auth_method='${input.tokenEndpointAuthMethod}' requires a client_secret, but an empty one was supplied. Send the secret, or declare token_endpoint_auth_method='none' to register a public client.`
+        : `an empty client_secret was supplied with no token_endpoint_auth_method. Declare token_endpoint_auth_method='none' to register a public client, or send the secret with the method it belongs to.`,
+    );
   }
   return {
     tokenEndpointAuthMethod: input.tokenEndpointAuthMethod ?? null,

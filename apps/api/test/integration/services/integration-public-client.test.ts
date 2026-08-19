@@ -164,17 +164,21 @@ describe("public OAuth client is declared, not inferred", () => {
   }
 
   describe("encodeClientAuthForStorage writes both halves together", () => {
-    // A blank secret with NO method declared is the RFC 7591 §3.2.1
-    // registration answer — an authorization server that returns no
-    // `client_secret` registered a PUBLIC client. That is the shape auto-DCR
-    // hands the service directly; the admin route can no longer produce it,
-    // because `oauthClientCreateSchema` refuses a missing secret unless
-    // `"none"` is declared.
-    it("records a blank secret with no declared method as a public client (DCR)", () => {
-      expect(encodeClientAuthForStorage({ clientSecret: "" })).toEqual({
-        tokenEndpointAuthMethod: "none",
-        clientSecretEncrypted: "",
-      });
+    // The last inference, now closed. A blank secret with NO method declared
+    // used to be read as the RFC 7591 §3.2.1 registration answer and stored as
+    // public. Every production path declares the method now — the admin routes
+    // refuse a missing secret unless `"none"` is sent, and auto-DCR declares
+    // `"none"` itself after reading the authorization server's own
+    // `token_endpoint_auth_method` — so this is a chokepoint for future direct
+    // callers rather than a live path.
+    //
+    // Deleting the guard instead of throwing would be worse: the fall-through
+    // writes a NULL method beside a ciphertext over an empty secret, which is
+    // precisely the legacy row the backfill script exists to repair.
+    it("throws when a blank secret arrives with no declared method", () => {
+      expect(() => encodeClientAuthForStorage({ clientSecret: "" })).toThrow(
+        /no token_endpoint_auth_method/,
+      );
     });
 
     // The inference this whole file exists to remove, in its last hiding place:
@@ -215,10 +219,11 @@ describe("public OAuth client is declared, not inferred", () => {
   });
 
   describe("createIntegrationOAuthClient", () => {
-    it("stores 'none' and NO ciphertext for a blank secret", async () => {
+    it("stores 'none' and NO ciphertext for a declared public client", async () => {
       const client = await createIntegrationOAuthClient(scope, INTEGRATION, AUTH_KEY, {
         clientId: "cid",
         clientSecret: "",
+        tokenEndpointAuthMethod: "none",
       });
       const row = await storedRow(client.id);
       expect(row.tokenEndpointAuthMethod).toBe("none");
@@ -244,6 +249,7 @@ describe("public OAuth client is declared, not inferred", () => {
       const client = await createIntegrationOAuthClient(scope, INTEGRATION, AUTH_KEY, {
         clientId: "cid",
         clientSecret: "",
+        tokenEndpointAuthMethod: "none",
       });
       // The manifest says client_secret_post; the client's own declaration wins.
       const resolved = await resolveIntegrationClientById(
@@ -370,6 +376,7 @@ describe("public OAuth client is declared, not inferred", () => {
       const created = await createIntegrationOAuthClient(scope, INTEGRATION, AUTH_KEY, {
         clientId: "cid",
         clientSecret: "",
+        tokenEndpointAuthMethod: "none",
       });
       await expect(
         updateIntegrationOAuthClient(scope, created.id, {
@@ -438,6 +445,7 @@ describe("public OAuth client is declared, not inferred", () => {
       await createIntegrationOAuthClient(scope, INTEGRATION, AUTH_KEY, {
         clientId: "cid",
         clientSecret: "",
+        tokenEndpointAuthMethod: "none",
       });
       const out = await resolveForConnect();
       expect(out.clientSecret).toBe("");
@@ -463,6 +471,7 @@ describe("public OAuth client is declared, not inferred", () => {
     await createIntegrationOAuthClient(scope, INTEGRATION, AUTH_KEY, {
       clientId: "cid",
       clientSecret: "",
+      tokenEndpointAuthMethod: "none",
     });
     const clients = await listIntegrationClients(scope, INTEGRATION, AUTH_KEY);
     const custom = clients.find((c) => c.source === "custom");
