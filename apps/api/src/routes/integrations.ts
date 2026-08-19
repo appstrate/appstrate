@@ -189,8 +189,8 @@ export const updateConnectionSchema = z
 export const oauthClientSchema = z.object({
   client_id: z.string().min(1),
   /**
-   * Shared shape only — both concrete bodies below re-declare this field with
-   * their own semantics (create: required unless public; update: absent means
+   * Shared shape only — the concrete bodies below layer their own semantics on
+   * top with refinements (create: required unless public; update: absent means
    * PRESERVE). Deliberately optional here so no derived schema can inherit a
    * default that manufactures a secret nobody typed.
    */
@@ -212,6 +212,18 @@ export const oauthClientSchema = z.object({
 });
 
 /**
+ * Shared by both bodies below: `"none"` declares a PUBLIC client, so a secret
+ * sent alongside it means the caller resolved a credential and then said it
+ * would not be used.
+ */
+const noSecretWithPublicClient = (b: {
+  token_endpoint_auth_method?: string;
+  client_secret?: string;
+}) => !(b.token_endpoint_auth_method === "none" && (b.client_secret ?? "").length > 0);
+const noSecretWithPublicClientMessage =
+  "token_endpoint_auth_method='none' declares a public client; do not send a client_secret with it";
+
+/**
  * Registration body. A public client is DECLARED
  * (`token_endpoint_auth_method: "none"`), never inferred from an absent or
  * blank `client_secret` — so both directions of the pair are guarded:
@@ -226,10 +238,8 @@ export const oauthClientSchema = z.object({
  *     PUBLIC client back and a token endpoint answering HTTP 400 later.
  */
 export const oauthClientCreateSchema = oauthClientSchema
-  .extend({ client_secret: z.string().optional() })
-  .refine((b) => !(b.token_endpoint_auth_method === "none" && (b.client_secret ?? "").length > 0), {
-    message:
-      "token_endpoint_auth_method='none' declares a public client; do not send a client_secret with it",
+  .refine(noSecretWithPublicClient, {
+    message: noSecretWithPublicClientMessage,
     path: ["client_secret"],
   })
   .refine((b) => b.token_endpoint_auth_method === "none" || (b.client_secret ?? "").length > 0, {
@@ -245,10 +255,8 @@ export const oauthClientCreateSchema = oauthClientSchema
  * credential and flipped the client public.
  */
 export const oauthClientUpdateSchema = oauthClientSchema
-  .extend({ client_secret: z.string().optional() })
-  .refine((b) => !(b.token_endpoint_auth_method === "none" && (b.client_secret ?? "").length > 0), {
-    message:
-      "token_endpoint_auth_method='none' declares a public client; do not send a client_secret with it",
+  .refine(noSecretWithPublicClient, {
+    message: noSecretWithPublicClientMessage,
     path: ["client_secret"],
   })
   // An EXPLICIT empty string is a destructive statement — it clears the stored

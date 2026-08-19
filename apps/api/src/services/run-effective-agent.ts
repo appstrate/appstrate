@@ -22,17 +22,13 @@ import { getPackage } from "./package-catalog.ts";
 import { getExactVersionManifest } from "./package-versions.ts";
 import type { AgentManifest } from "../types/index.ts";
 
-export interface RunEffectiveAgent {
-  /** Package id — stable across draft and pinned reads. */
-  id: string;
-  /** The manifest of the definition the run executes (pinned snapshot or live draft). */
-  manifest: AgentManifest;
-}
-
 /** The definition was read — the run's output contract and dep set are knowable. */
 export interface RunEffectiveAgentFound {
   readonly status: "ok";
-  readonly agent: RunEffectiveAgent;
+  /** Package id — stable across draft and pinned reads. */
+  readonly id: string;
+  /** The manifest of the definition the run executes (pinned snapshot or live draft). */
+  readonly manifest: AgentManifest;
 }
 
 /**
@@ -145,14 +141,11 @@ export async function getRunEffectiveAgent(run: {
   // System agents ship their definition with the platform and have no
   // published versions — the draft row IS the effective definition.
   if (versionRef === "draft" || agent.source === "system") {
-    return { status: "ok", agent: { id: agent.id, manifest: agent.manifest } };
+    return { status: "ok", id: agent.id, manifest: agent.manifest };
   }
 
   const pinned = await getExactVersionManifest(run.packageId, versionRef);
   // Package present, pinned snapshot absent: state A.
   if (!pinned) return { status: "version_deleted", packageId: run.packageId, versionRef };
-  return {
-    status: "ok",
-    agent: { id: agent.id, manifest: pinned as unknown as AgentManifest },
-  };
+  return { status: "ok", id: agent.id, manifest: pinned as unknown as AgentManifest };
 }

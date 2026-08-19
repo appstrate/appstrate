@@ -122,45 +122,6 @@ function stringifyInputs(inputs: Record<string, unknown>): Record<string, string
 /** How long to wait for the connect-run sidecar to mint the session before killing it. */
 const DEFAULT_CONNECT_TIMEOUT_MS = 60_000;
 
-/**
- * The configured execution backend cannot host a connect-run (sidecar-only
- * workload). Thrown BEFORE any boundary is created so the caller gets a
- * clear diagnosis instead of "sidecar exited without emitting a result".
- *
- * It IS an {@link ApiError} so it rides the connect routes' existing
- * `if (err instanceof ApiError) throw err` passthrough and reaches the caller
- * as a 503 — "unavailable, don't retry with other credentials" — instead of
- * collapsing into the opaque `internal_error` 500 every other connect-run
- * failure produced.
- *
- * The public `detail` is deliberately generic. `POST /api/integrations/connect/submit`
- * is the HOSTED end-user form, reachable by someone who is not a member of the
- * organization, and the actual remedy here (`RUN_ADAPTER=docker`) is
- * operator-facing deployment configuration: naming it to that audience leaks
- * deployment shape and gives them nothing they can act on. The remedy is logged
- * at the throw site instead, where the operator reads it.
- */
-class ConnectNotSupportedError extends ApiError {
-  /**
-   * Configured `RUN_ADAPTER`, kept as a machine-readable marker for a catch
-   * site that wants it. It is NOT part of the public `detail` — the throw site
-   * logs the operator-facing remedy separately.
-   */
-  readonly mode: string;
-
-  constructor(mode: string) {
-    super({
-      status: 503,
-      code: "connect_unavailable",
-      title: "Service Unavailable",
-      detail:
-        "This connection method is unavailable on this deployment. Contact your administrator.",
-    });
-    this.name = "ConnectNotSupportedError";
-    this.mode = mode;
-  }
-}
-
 export interface ConnectRunExecutorOptions {
   /** Injectable orchestrator — production defaults to the global singleton. */
   orchestrator?: RunOrchestrator;
@@ -399,7 +360,30 @@ class ConnectRunExecutor implements ConnectToolExecutor {
         mode,
         remedy: `RUN_ADAPTER="${mode}" cannot run a sidecar-only workload — use RUN_ADAPTER=docker (or process) for connect flows.`,
       });
-      throw new ConnectNotSupportedError(mode);
+      // The configured execution backend cannot host a connect-run (sidecar-only
+      // workload). Thrown BEFORE any boundary is created so the caller gets a
+      // clear diagnosis instead of "sidecar exited without emitting a result".
+      //
+      // It IS an `ApiError` so it rides the connect routes' existing
+      // `if (err instanceof ApiError) throw err` passthrough and reaches the
+      // caller as a 503 — "unavailable, don't retry with other credentials" —
+      // instead of collapsing into the opaque `internal_error` 500 every other
+      // connect-run failure produced.
+      //
+      // The public `detail` is deliberately generic.
+      // `POST /api/integrations/connect/submit` is the HOSTED end-user form,
+      // reachable by someone who is not a member of the organization, and the
+      // actual remedy here (`RUN_ADAPTER=docker`) is operator-facing deployment
+      // configuration: naming it to that audience leaks deployment shape and
+      // gives them nothing they can act on. The remedy is logged just above,
+      // where the operator reads it.
+      throw new ApiError({
+        status: 503,
+        code: "connect_unavailable",
+        title: "Service Unavailable",
+        detail:
+          "This connection method is unavailable on this deployment. Contact your administrator.",
+      });
     }
     const orch = this.orchestrator ?? getOrchestrator();
     const connectId = `connect_${randomBytes(12).toString("hex")}`;

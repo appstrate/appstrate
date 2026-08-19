@@ -369,7 +369,7 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
     // have completed fine. The two states are separate values in
     // `RunEffectiveAgentResult` so that collapse cannot happen by accident —
     // do not merge them back.
-  } else if (status === "success" && effective.agent.manifest.output?.schema) {
+  } else if (status === "success" && effective.manifest.output?.schema) {
     // Distinguish two failure shapes that both surface as a schema mismatch:
     //   1. the agent never called `output` (`result.output` is null) — the
     //      empty `{}` only fails because required fields are absent, so a bare
@@ -383,7 +383,7 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
     const outputRecord = isPlainRecord(result.output) ? result.output : {};
     const validation = validateOutput(
       outputRecord,
-      asJSONSchemaObject(effective.agent.manifest.output.schema),
+      asJSONSchemaObject(effective.manifest.output.schema),
     );
     if (!validation.valid) {
       status = "failed";

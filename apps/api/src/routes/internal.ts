@@ -344,14 +344,13 @@ export function createInternalRouter() {
   ): Promise<void> {
     const effective = await getRunEffectiveAgent(run);
     if (effective.status !== "ok") throw runDefinitionGone(effective, runId);
-    const agent = effective.agent;
-    const deps = asRecord(asRecord(agent.manifest).dependencies);
+    const deps = asRecord(asRecord(effective.manifest).dependencies);
     const integrations = asRecord(deps.integrations);
     if (!(packageId in integrations)) {
       logger.warn("Integration credentials request rejected — not declared by agent", {
         runId,
         packageId,
-        agentId: agent.id,
+        agentId: effective.id,
       });
       throw notFound(`Integration '${packageId}' is not a dependency of the running agent`);
     }
@@ -575,8 +574,7 @@ export function createInternalRouter() {
     // `assertAgentDeclaresIntegration` above.
     const effective = await getRunEffectiveAgent(run);
     if (effective.status !== "ok") throw runDefinitionGone(effective, runId);
-    const agent = effective.agent;
-    const deps = asRecord(asRecord(agent.manifest).dependencies);
+    const deps = asRecord(asRecord(effective.manifest).dependencies);
     const integrations = asRecord(deps.integrations);
     for (const integrationId of Object.keys(integrations)) {
       // Same activation rule as everywhere else (installed-and-enabled row, or
@@ -596,7 +594,7 @@ export function createInternalRouter() {
     logger.warn("mcp-server bundle request rejected — not referenced by agent", {
       runId,
       mcpServerId,
-      agentId: agent.id,
+      agentId: effective.id,
     });
     throw notFound(`mcp-server '${mcpServerId}' is not referenced by the running agent`);
   }
