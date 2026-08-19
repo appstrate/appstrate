@@ -92,7 +92,7 @@ export async function downloadVersionZip(
  * so there is no committed transaction to hang an outbox row off, and inventing
  * a standalone insert would not buy the atomicity the outbox exists for. If
  * this best-effort delete fails, the bytes sit unreferenced until the
- * reconciliation scanner (`scripts/storage-orphans.ts`, which now covers
+ * reconciliation scanner (`scripts/maintenance/storage-orphans.ts`, which now covers
  * `agent-packages`) finds them.
  */
 export async function deleteVersionZip(packageId: string, version: string): Promise<void> {

@@ -2,7 +2,7 @@
 
 /**
  * Storage orphan reconciliation — the reusable half of
- * `scripts/storage-orphans.ts`.
+ * `scripts/maintenance/storage-orphans.ts`.
  *
  * The transactional deletion outbox guarantees that a row delete never leaves
  * its bytes behind. Reconciliation is the BACKSTOP for everything that

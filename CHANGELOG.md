@@ -468,7 +468,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   agent in this state was already non-functional against that integration; it
   now fails loudly instead of silently.
 
-  **Before deploying**, run `bun scripts/audit-empty-integration-selections.ts`.
+  **Before deploying**, run `bun scripts/maintenance/audit-empty-integration-selections.ts`.
   It lists every affected artifact and distinguishes active targets from
   explicitly selectable drafts/history. The exit code is 1 only when a normal
   application default or an enabled schedule targets the broken artifact;

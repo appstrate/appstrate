@@ -3,22 +3,22 @@
 /**
  * Pre-deploy audit CLI for the declared-but-empty integration gate.
  *
- *   bun scripts/audit-empty-integration-selections.ts           # human table
- *   bun scripts/audit-empty-integration-selections.ts --json    # machine
+ *   bun scripts/maintenance/audit-empty-integration-selections.ts           # human table
+ *   bun scripts/maintenance/audit-empty-integration-selections.ts --json    # machine
  *
  * Read-only. Exits 1 only when an affected artifact is selected by a normal
  * application default or an enabled schedule. Drafts and historical versions
  * that require an explicit selector remain visible as warnings and exit 0.
  *
  * All logic lives in the service so it resolves its deps and stays testable —
- * same split as `scripts/storage-orphans.ts`.
+ * same split as `scripts/maintenance/storage-orphans.ts`.
  */
 
 import {
   auditEmptyIntegrationSelections,
   isBlocking,
   isReachable,
-} from "../apps/api/src/services/audit-empty-integration-selections.ts";
+} from "../../apps/api/src/services/audit-empty-integration-selections.ts";
 
 const asJson = process.argv.includes("--json");
 const findings = await auditEmptyIntegrationSelections();
