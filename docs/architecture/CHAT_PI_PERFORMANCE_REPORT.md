@@ -67,6 +67,14 @@ disponibilité Pi à chaque conversation. Son enregistrement synchrone fait pass
 gardent leur synchronisation complète. Cette correction réduit un coût certain, sans suffire à
 lever le NO GO aux fortes concurrences déjà mesurées.
 
+Le profil CPU à 30 chats a finalement montré que Pi rescannait les skills, extensions et fichiers
+de contexte locaux à chaque tour, alors que le chat reçoit ses capacités par le MCP Appstrate. La
+politique de ressources du chat ignore maintenant cette découverte, sans modifier le runtime Pi.
+Le p95 Pi à 30 tombe de 1 243 à 267 ms. Sur la confirmation légère, l'écart absolu vaut 264 ms à 60
+et 500 ms à 100. La paire Mistral à 60 ne montre que 32 ms d'écart au premier token, mais le débit
+Pi reste inférieur. Le gain est donc majeur et causal, tandis qu'une décision statistique de capacité
+demande encore plusieurs répétitions ou la télémétrie cloud.
+
 Un smoke Mistral à concurrence 1 a terminé les quatre cellules AI SDK et Pi, froides et chaudes. À
 chaud, Pi a livré le premier token en 617 ms et terminé en 669 ms, contre 627 ms et 690 ms pour AI
 SDK. Claude Code a terminé en 7 068 ms. Le premier essai Codex a révélé un mapping fournisseur hérité
@@ -302,28 +310,29 @@ Le runtime Pi conserve sa découverte complète de ressources. Aucun client MCP,
 session, historique ou résultat d'outil n'est partagé entre conversations.
 
 À 30 chats chauds, sur une répétition contrôlée appariée, le p95 du premier token Pi passe de
-1 243 ms à 271 ms et le débit de 18,9 à 60,4 chats par seconde. AI SDK mesure 237 ms et 62,2 chats
-par seconde. Pi atteint donc 97,1 % de son débit, avec un écart de 34 ms au premier token. Le
+1 243 ms à 267 ms et le débit de 18,9 à 61,4 chats par seconde. AI SDK mesure 174 ms et 73,8 chats
+par seconde. Pi atteint donc 83,1 % de son débit, avec un écart de 93 ms au premier token. Le
 rechargement des ressources Pi passe de 53,2 ms à 2,3 ms au p95.
 
 Une confirmation légère, une répétition par moteur et une organisation par chat, donne :
 
 | Concurrence | Moteur | p95 premier token, ms | p95 total, ms | Chats par seconde |
 | ----------: | ------ | --------------------: | ------------: | ----------------: |
-|          60 | AI SDK |                   289 |           562 |             99,32 |
-|          60 | Pi     |                   498 |           755 |             76,11 |
-|         100 | AI SDK |                   560 |           954 |             99,69 |
-|         100 | Pi     |                   733 |         1 108 |             86,06 |
+|          60 | AI SDK |                   312 |           673 |             82,38 |
+|          60 | Pi     |                   576 |           866 |             66,17 |
+|         100 | AI SDK |                   437 |           968 |             97,26 |
+|         100 | Pi     |                   937 |         1 307 |             73,39 |
 
-À 100, l'écart absolu du premier token tombe à 173 ms et le débit Pi atteint 86,3 % de celui d'AI
-SDK. À 60, Pi reste en retrait de 209 ms et son débit atteint 76,6 %. Une seule répétition ne remplace
+À 100, l'écart absolu du premier token est de 500 ms et le débit Pi atteint 75,5 % de celui d'AI
+SDK. À 60, Pi reste en retrait de 264 ms et son débit atteint 80,3 %. Une seule répétition ne remplace
 pas la matrice statistique, mais suffit à confirmer que la découverte locale était causale.
 
 La paire Mistral chaude à 60 ajoute 120 conversations réelles sans 429, erreur, stream incomplet ou
-défaut d'isolation. Son unique répétition mesure 4 663 ms pour AI SDK et 6 467 ms pour Pi au premier
-token. Le débit Pi est légèrement supérieur, 8,70 contre 8,19 chats par seconde. Cette divergence
-entre latence de queue et débit confirme une forte variance fournisseur. Elle valide la compatibilité
-du correctif, pas un nouveau ratio de performance réel.
+défaut d'isolation. Son unique répétition mesure 2 771 ms pour AI SDK et 2 803 ms pour Pi au premier
+token, puis 2 910 ms et 3 157 ms au total. L'écart réel n'est donc que de 32 ms au premier token et
+247 ms au total sur cette passe. Le débit Pi reste inférieur, 9,24 contre 13,39 chats par seconde.
+Cette divergence entre latence de queue et débit confirme une forte variance fournisseur. Elle
+valide la compatibilité du correctif, pas un nouveau ratio de performance réel.
 
 ## Comparatif Mistral réel
 
@@ -748,9 +757,9 @@ aucune suppression d'AI SDK ne sont autorisés.
 attribue 47,7 % de la vague Pi à la découverte synchrone de ressources locales qui ne font pas partie
 de la politique du chat. Appstrate désactive cette découverte dans le chat uniquement. Les skills et
 outils restent servis par le MCP Appstrate, tandis que le runtime Pi conserve son comportement
-complet. À 30 chats, le p95 du premier token Pi passe de 1 243 à 271 ms et son débit atteint 97,1 %
-de celui d'AI SDK. Une confirmation légère à 60 et 100 réduit l'écart absolu du premier token à 209
-et 173 ms, mais le débit Pi reste à 76,6 % et 86,3 %. Une paire Mistral à 60 passe tous les invariants,
+complet. À 30 chats, le p95 du premier token Pi passe de 1 243 à 267 ms et son débit atteint 83,1 %
+de celui d'AI SDK. Une confirmation légère à 60 et 100 mesure un écart absolu du premier token de 264
+et 500 ms, avec un débit Pi à 80,3 % et 75,5 %. Une paire Mistral à 60 passe tous les invariants,
 avec une variance fournisseur trop forte pour conclure sur un seul point. La correction rend Pi
 nettement plus crédible pour l'unification, sans établir la capacité cloud ni autoriser une migration
 de trafic ou la suppression d'AI SDK.
