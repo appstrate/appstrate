@@ -1167,7 +1167,10 @@ function terminalErrorMessage(errorMessage: string | undefined): string {
  */
 function isProviderNormalizedAbort(errorMessage: string | undefined): boolean {
   if (typeof errorMessage !== "string") return false;
-  const normalized = errorMessage.trim().replace(/\.+$/, "").toLowerCase();
+  const trimmed = errorMessage.trim();
+  let end = trimmed.length;
+  while (end > 0 && trimmed.charCodeAt(end - 1) === 46) end -= 1;
+  const normalized = trimmed.slice(0, end).toLowerCase();
   return normalized === "the operation was aborted" || normalized === "this operation was aborted";
 }
 

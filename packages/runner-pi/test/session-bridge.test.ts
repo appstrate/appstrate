@@ -961,7 +961,7 @@ describe("installSessionBridge — terminal tools (early stop on output)", () =>
     session.pushMessage({
       role: "assistant",
       stopReason: "error",
-      errorMessage: "The operation was aborted.",
+      errorMessage: `This operation was aborted${".".repeat(10_000)}`,
       content: [],
     });
     session.emit({ type: "message_end" });
