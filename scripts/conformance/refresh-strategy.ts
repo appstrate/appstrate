@@ -147,7 +147,7 @@ const OFFLINE_AUTHORIZE_PARAMS: Record<string, ReadonlySet<string>> = {
  * Whether the auth asks for offline access via a RECOGNISED authorize-time
  * parameter set to a value that actually requests it.
  */
-export function requestsOfflineViaAuthorizeParam(auth: OAuthAuth): boolean {
+function requestsOfflineViaAuthorizeParam(auth: OAuthAuth): boolean {
   const params = auth.authorization_params;
   if (!params || typeof params !== "object") return false;
   return Object.entries(params as Record<string, unknown>).some(([name, value]) => {
@@ -157,7 +157,7 @@ export function requestsOfflineViaAuthorizeParam(auth: OAuthAuth): boolean {
 }
 
 /** Whether the auth asks for offline access via a scope. */
-export function hasOfflineScope(auth: OAuthAuth): boolean {
+function hasOfflineScope(auth: OAuthAuth): boolean {
   const scopes = auth.default_scopes;
   if (!Array.isArray(scopes)) return false;
   return scopes.some((s) => typeof s === "string" && OFFLINE_SCOPE_PATTERN.test(s));
@@ -168,7 +168,7 @@ export function hasOfflineScope(auth: OAuthAuth): boolean {
  * An unrecognised value is treated as absent — and reported as such, so a typo
  * (`"none"`, `"n/a"`) cannot silently satisfy the check.
  */
-export function refreshDeclaration(auth: OAuthAuth): string | undefined {
+function refreshDeclaration(auth: OAuthAuth): string | undefined {
   const meta = auth._meta;
   if (!meta || typeof meta !== "object") return undefined;
   const oauthMeta = (meta as Record<string, unknown>)["dev.appstrate/oauth"];
@@ -177,8 +177,8 @@ export function refreshDeclaration(auth: OAuthAuth): string | undefined {
   return typeof value === "string" && REFRESH_DECLARATIONS.has(value) ? value : undefined;
 }
 
-/** Evaluate one auth. Exported for the harness's own unit tests. */
-export function evaluateAuth(packageId: string, authKey: string, auth: OAuthAuth): Finding {
+/** Evaluate one auth. */
+function evaluateAuth(packageId: string, authKey: string, auth: OAuthAuth): Finding {
   if (requestsOfflineViaAuthorizeParam(auth)) {
     return {
       packageId,
@@ -216,7 +216,7 @@ export function evaluateAuth(packageId: string, authKey: string, auth: OAuthAuth
 }
 
 /** Every `"<packageId>:<authKey>"` an oauth2 auth in `entries` resolves to. */
-export function declaredAuthKeys(entries: SystemPackageEntry[]): Set<string> {
+function declaredAuthKeys(entries: SystemPackageEntry[]): Set<string> {
   const keys = new Set<string>();
   for (const entry of entries) {
     for (const [key] of oauthAuths(entry.manifest)) keys.add(`${entry.packageId}:${key}`);

@@ -5,38 +5,23 @@
  * Used by both oauth.ts (initial token exchange) and token-refresh.ts (refresh flow).
  *
  * `OAuthTokenAuthMethod` (= AFPS `token_endpoint_auth_method`) is the single
- * source of truth in @appstrate/core/validation. The token-request body
- * content-type is a wire-level concern with no manifest field in AFPS, so it
- * is owned here as {@link OAuthTokenContentType}.
+ * source of truth in @appstrate/core/validation.
  */
 
 import type { OAuthTokenAuthMethod } from "@appstrate/core/validation";
 
 /**
- * Content type of the OAuth2 token-endpoint request body.
- *
- * Standard OAuth2 (RFC 6749 §4.1.3) is `application/x-www-form-urlencoded`;
- * a few providers (Atlassian/Jira) require `application/json`. Owned by the
- * connect package — AFPS has no manifest field for this; the platform
- * layer passes it through from per-provider config when needed.
- */
-export type OAuthTokenContentType = "application/x-www-form-urlencoded" | "application/json";
-
-/**
  * Build headers for an OAuth2 token endpoint request.
  * When tokenAuthMethod is "client_secret_basic", credentials are sent
  * as an Authorization: Basic header (RFC 6749 §2.3.1) instead of POST body.
- * When tokenContentType is "application/json", the Content-Type is set to JSON
- * (required by providers like Atlassian/Jira that don't accept form-urlencoded).
  */
 export function buildTokenHeaders(
   tokenAuthMethod: OAuthTokenAuthMethod | undefined,
   clientId: string,
   clientSecret: string,
-  tokenContentType?: OAuthTokenContentType,
 ): Record<string, string> {
   const headers: Record<string, string> = {
-    "Content-Type": tokenContentType ?? "application/x-www-form-urlencoded",
+    "Content-Type": "application/x-www-form-urlencoded",
     Accept: "application/json",
   };
   if (tokenAuthMethod === "client_secret_basic") {
@@ -50,17 +35,9 @@ export function buildTokenHeaders(
 }
 
 /**
- * Build the token request body.
- * When tokenContentType is "application/json", returns a JSON string.
- * Otherwise returns a URLSearchParams string (standard form-urlencoded).
+ * Build the token request body (standard form-urlencoded).
  */
-export function buildTokenBody(
-  params: Record<string, string>,
-  tokenContentType?: OAuthTokenContentType,
-): string {
-  if (tokenContentType === "application/json") {
-    return JSON.stringify(params);
-  }
+export function buildTokenBody(params: Record<string, string>): string {
   return new URLSearchParams(params).toString();
 }
 
@@ -116,7 +93,7 @@ export interface TokenErrorClassification {
 const CREDENTIAL_LIKE_RUN = /[A-Za-z0-9._~+/=-]{20,}/g;
 const MAX_ERROR_DESCRIPTION_LEN = 200;
 
-export function redactErrorDescription(description: string): string {
+function redactErrorDescription(description: string): string {
   const stripped = description.replace(CREDENTIAL_LIKE_RUN, "[redacted]");
   return stripped.length > MAX_ERROR_DESCRIPTION_LEN
     ? `${stripped.slice(0, MAX_ERROR_DESCRIPTION_LEN)}…`

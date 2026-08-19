@@ -444,7 +444,6 @@ describe("integration OAuth2 flow (conformant provider)", () => {
       clientId: "cid",
       clientSecret: "shh",
       acceptedAuthMethods: ["client_secret_post"],
-      requirePkce: true,
     });
     await setup(
       ctx,

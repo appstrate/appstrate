@@ -7,10 +7,9 @@ export type { Actor } from "@appstrate/core/platform-types";
  * OAuth2 token-endpoint client-auth methods supported across the connect
  * surface (`token_endpoint_auth_method`). `"none"` is the public-client case
  * (no client_secret). The canonical enum's JWT / mTLS methods are intentionally
- * out of scope here. Single source of truth — re-exported by `token-exchange.ts`
- * as `TokenExchangeAuthMethod`. Declared in this low-level module so it can be
- * referenced without importing `token-exchange.ts` (which would create a cycle,
- * since that module imports `OAuthStateStore` from here).
+ * out of scope here. Single source of truth. Declared in this low-level module
+ * so it can be referenced without importing `token-exchange.ts` (which would
+ * create a cycle, since that module imports `OAuthStateStore` from here).
  */
 export type TokenEndpointAuthMethod = "client_secret_post" | "client_secret_basic" | "none";
 

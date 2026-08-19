@@ -7,7 +7,6 @@ import {
   buildTokenHeaders,
   buildTokenBody,
   assertClientAuthCoherent,
-  type OAuthTokenContentType,
   type ParsedTokenResponse,
 } from "./token-utils.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
@@ -24,8 +23,6 @@ export interface RefreshContext {
   clientSecret: string;
   /** Token endpoint client-auth method (`token_endpoint_auth_method`). */
   tokenEndpointAuthMethod?: OAuthTokenAuthMethod;
-  scopeSeparator?: string;
-  tokenContentType?: OAuthTokenContentType;
   /**
    * Injectable egress fetch. Defaults to the SSRF-guarded `oauthEgressFetch`.
    * Tests inject a stub here rather than patching the global `fetch` — the
@@ -121,7 +118,7 @@ export async function performRefreshTokenExchange(
   }
   // tokenAuthMethod === "client_secret_basic" → headers carry credentials,
   // body stays minimal (grant_type + refresh_token).
-  const body = buildTokenBody(bodyParams, ctx.tokenContentType);
+  const body = buildTokenBody(bodyParams);
 
   let response: Response;
   try {
@@ -131,12 +128,7 @@ export async function performRefreshTokenExchange(
     const doFetch = ctx.fetchImpl ?? oauthEgressFetch;
     response = await doFetch(ctx.tokenEndpoint, {
       method: "POST",
-      headers: buildTokenHeaders(
-        tokenAuthMethod,
-        ctx.clientId,
-        ctx.clientSecret,
-        ctx.tokenContentType,
-      ),
+      headers: buildTokenHeaders(tokenAuthMethod, ctx.clientId, ctx.clientSecret),
       body,
       signal: AbortSignal.timeout(30_000),
     });

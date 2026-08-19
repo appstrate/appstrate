@@ -627,20 +627,6 @@ async function hasDefaultCustomClient(
 }
 
 /**
- * Register a NEW per-application OAuth2 client for an integration auth — one of
- * the N custom (BYO-app) clients (model-provider pattern). Always an INSERT (no
- * upsert): a fresh client id is minted each time so multiple clients coexist.
- *
- * `is_default` is set to `true` only when no other custom client is already the
- * default (mirrors `org-models` first-credential-wins); the DB partial unique
- * `idx_ioc_one_default` is the backstop. Public clients (`tokenAuthMethod=none`)
- * pass `clientSecret: ""`, still encrypted for a uniform table shape.
- *
- * `opts.autoProvisioned` marks a DCR/CIMD machine client (internal — the admin
- * route never sets it; a remote-MCP auth keeps exactly one, enforced by
- * `idx_ioc_one_auto`).
- */
-/**
  * Encode the (auth method, ciphertext) pair a client row will carry, writing
  * both halves together so the row can never claim to be public while holding a
  * secret, or claim a secret-based method while holding none.
@@ -682,6 +668,26 @@ export function encodeClientAuthForStorage(input: {
   };
 }
 
+/**
+ * Register a NEW per-application OAuth2 client for an integration auth — one of
+ * the N custom (BYO-app) clients (model-provider pattern). Always an INSERT (no
+ * upsert): a fresh client id is minted each time so multiple clients coexist.
+ *
+ * `is_default` is set to `true` only when no other custom client is already the
+ * default (mirrors `org-models` first-credential-wins); the DB partial unique
+ * `idx_ioc_one_default` is the backstop.
+ *
+ * Creation always supplies `clientSecret` (blank means "register a public
+ * client"), so `encodeClientAuthForStorage` never returns the preserve
+ * sentinel here. A public client is stored as
+ * `token_endpoint_auth_method = 'none'` with an EMPTY `client_secret_encrypted`
+ * — no ciphertext at all, so "has a secret" is a column read rather than a
+ * decryption. The `ioc_public_iff_no_secret` CHECK enforces that biconditional.
+ *
+ * `opts.autoProvisioned` marks a DCR/CIMD machine client (internal — the admin
+ * route never sets it; a remote-MCP auth keeps exactly one, enforced by
+ * `idx_ioc_one_auto`).
+ */
 export async function createIntegrationOAuthClient(
   scope: AppScope,
   packageId: string,
@@ -1016,7 +1022,7 @@ export async function resolveIntegrationClientById(
   // LEGACY: rows written before `token_endpoint_auth_method` existed encrypted
   // an empty secret rather than storing none, so a public client is only
   // visible after decryption. Normalise here so the pair stays coherent, and
-  // delete this branch once `scripts/backfill-public-oauth-clients.ts` has run
+  // delete this branch once `scripts/maintenance/backfill-public-oauth-clients.ts` has run
   // across the fleet and the biconditional CHECK constraint has landed.
   if (clientSecret === "") method = "none";
   return { clientId: row.clientId, clientSecret, tokenEndpointAuthMethod: method };
