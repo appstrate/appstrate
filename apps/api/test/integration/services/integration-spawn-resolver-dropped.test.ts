@@ -145,6 +145,47 @@ describe("resolveIntegrationSpawns — dropped[] degradation marker", () => {
     expect(dropped[0]!.reason).toBe("not_found");
   });
 
+  it("reports `not_integration` when the declared id resolves to a package of another type", async () => {
+    // The agent depends on `@droporg/svc` as an integration, but that id is a
+    // skill — the mis-declaration a user hits after renaming/retyping a
+    // dependency. The detail names the type actually found, so the operator
+    // does not have to open the package to see the mismatch.
+    await seedPackage({ id: INTEG, orgId: ctx.orgId, type: "skill", source: "local" });
+
+    const { specs, dropped } = await resolve();
+
+    expect(specs).toHaveLength(0);
+    expect(dropped).toHaveLength(1);
+    expect(dropped[0]!.reason).toBe("not_integration");
+    expect(dropped[0]!.detail).toContain("skill");
+  });
+
+  it("reports `invalid_manifest` WITH the schema issues that made it invalid", async () => {
+    // A package of the right type whose manifest fails `integrationManifestSchema`
+    // — the shape a hand-edited or half-migrated manifest takes. `invalid_manifest`
+    // is the one reason whose token alone tells the operator nothing, so the
+    // detail must carry the validation issues.
+    await seedPackage({
+      id: INTEG,
+      orgId: ctx.orgId,
+      type: "integration",
+      source: "local",
+      draftManifest: { schema_version: "0.2", type: "integration", name: INTEG },
+    });
+    await seedInstalledPackage(ctx.defaultAppId, INTEG);
+    await seedConnection();
+
+    const { specs, dropped } = await resolve();
+
+    expect(specs).toHaveLength(0);
+    expect(dropped).toHaveLength(1);
+    expect(dropped[0]!.reason).toBe("invalid_manifest");
+    // `version` is one of the required members the seeded manifest omits; the
+    // assertion is on a field NAME being present, which is the whole point of
+    // the detail — a bare "invalid" verdict would pass a length check.
+    expect(dropped[0]!.detail).toContain("version");
+  });
+
   it("reports `not_installed` when the integration exists but is not installed in the app", async () => {
     await seedServer();
     await seedPackage({

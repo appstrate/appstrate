@@ -279,8 +279,15 @@ async function resolveOne(
         });
         return drop("not_integration", `package type is '${res.failure.actualType}'`);
       case "invalid_manifest":
-        logger.warn("integration manifest fails validation", { integrationId });
-        return drop("invalid_manifest");
+        // The one reason whose token says nothing an operator can act on:
+        // "not_found" and "not_integration" each name a fact, but "the manifest
+        // is invalid" is only a verdict. Carry the schema issues so the marker
+        // names the offending field instead of sending them back to guess.
+        logger.warn("integration manifest fails validation", {
+          integrationId,
+          issues: res.failure.issues,
+        });
+        return drop("invalid_manifest", res.failure.issues);
     }
   }
   const manifest = res.manifest;

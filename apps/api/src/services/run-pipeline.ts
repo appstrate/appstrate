@@ -680,9 +680,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
   // ordered BEFORE the container's own logs; it is the empty-array no-op on
   // every healthy run, and it swallows its own write failures, so it can
   // neither slow down nor fail a normal kickoff.
-  if (droppedIntegrations.length > 0) {
-    await recordDroppedIntegrations({ orgId }, runId, droppedIntegrations);
-  }
+  await recordDroppedIntegrations({ orgId }, runId, droppedIntegrations);
 
   // --- Step 6: Fire-and-forget execution ---
   executeAgentInBackground({

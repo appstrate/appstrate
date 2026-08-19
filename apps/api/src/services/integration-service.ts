@@ -22,6 +22,7 @@ import { isManifestTextFallback } from "../lib/manifest-utils.ts";
 import { pickVersion } from "./run-launcher/db-package-catalog.ts";
 import { VERSION_SELECTOR_DRAFT } from "./agent-version-resolver.ts";
 import { logger } from "../lib/logger.ts";
+import { formatZodIssues } from "../lib/zod-format.ts";
 
 export type { IntegrationSummary };
 
@@ -38,7 +39,14 @@ export type { IntegrationSummary };
 export type IntegrationManifestLoadFailure =
   | { kind: "not_found" }
   | { kind: "not_integration"; actualType: string }
-  | { kind: "invalid_manifest" };
+  /**
+   * `issues` is the manifest's Zod validation failure, rendered `path: message`
+   * (see `formatZodIssues`). Carried on the failure instead of discarded at the
+   * parse site: unlike its two siblings the `invalid_manifest` kind names no
+   * fact of its own, so a caller that surfaces it bare ("the manifest is
+   * invalid") leaves the operator with nothing to go fix.
+   */
+  | { kind: "invalid_manifest"; issues: string };
 
 export type IntegrationManifestLoadResult =
   | { ok: true; manifest: IntegrationManifest }
@@ -97,7 +105,11 @@ async function fetchIntegrationManifestUncached(
     return { ok: false, failure: { kind: "not_integration", actualType: pkgRow.type } };
   }
   const parsed = integrationManifestSchema.safeParse(pkgRow.manifest);
-  if (!parsed.success) return { ok: false, failure: { kind: "invalid_manifest" } };
+  if (!parsed.success)
+    return {
+      ok: false,
+      failure: { kind: "invalid_manifest", issues: formatZodIssues(parsed.error) },
+    };
   return { ok: true, manifest: parsed.data };
 }
 
@@ -397,7 +409,11 @@ export async function readIntegrationManifestAt(
     const sys = getSystemPackages().get(packageId);
     if (!sys) return { ok: false, failure: { kind: "not_found" } };
     const parsed = integrationManifestSchema.safeParse(sys.manifest);
-    if (!parsed.success) return { ok: false, failure: { kind: "invalid_manifest" } };
+    if (!parsed.success)
+      return {
+        ok: false,
+        failure: { kind: "invalid_manifest", issues: formatZodIssues(parsed.error) },
+      };
     return { ok: true, manifest: parsed.data };
   }
 
@@ -413,7 +429,11 @@ export async function readIntegrationManifestAt(
     .limit(1);
   if (!row) return { ok: false, failure: { kind: "not_found" } };
   const parsed = integrationManifestSchema.safeParse(row.manifest);
-  if (!parsed.success) return { ok: false, failure: { kind: "invalid_manifest" } };
+  if (!parsed.success)
+    return {
+      ok: false,
+      failure: { kind: "invalid_manifest", issues: formatZodIssues(parsed.error) },
+    };
   return { ok: true, manifest: parsed.data };
 }
 
