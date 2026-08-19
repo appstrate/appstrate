@@ -394,7 +394,7 @@ function TurnLimitNotice() {
  * THE failure display for a turn — one component, one visual, live or
  * reloaded. The persisted provider-neutral category is localized here and
  * survives reload; the transient assistant-ui marker covers failures that have
- * not reached a finish chunk yet. `errorText` is legacy-message fallback only.
+ * not reached a finish chunk yet.
  */
 function MessageError() {
   const { t } = useChatHost();

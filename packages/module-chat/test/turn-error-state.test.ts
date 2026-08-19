@@ -50,10 +50,12 @@ describe("turnErrorState", () => {
     ).toEqual({ text: "turn.error.rateLimited", retryable: true, requestId: "req_abc123" });
   });
 
-  it("falls back to a legacy turn's own text when it predates the category", () => {
+  it("degrades a legacy category-less turn to the generic failure", () => {
+    // Turns persisted before the category existed carried the provider's own
+    // string. It is no longer read, so nothing unclassified reaches the UI.
     expect(
       turnErrorState(message(turn({ finishReason: "error", errorText: "boom" })), t),
-    ).toMatchObject({ text: "boom" });
+    ).toMatchObject({ text: "turn.error.unknown" });
   });
 
   it("localizes an in-stream failure from its marker", () => {

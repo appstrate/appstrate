@@ -262,7 +262,6 @@ describe("ai-sdk turn deadline", () => {
       errorCategory: "unknown",
       errorRetryable: true,
     });
-    expect(turnMetadataFromMessage(message)?.errorText).toBeUndefined();
   });
 
   it("does not mistake an explicit user stop for a deadline", async () => {
