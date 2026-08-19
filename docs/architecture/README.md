@@ -22,7 +22,7 @@ duplicating the detail.
 
 ## Chat
 
-- [**CHAT_PI_PERFORMANCE_VALIDATION.md**](./CHAT_PI_PERFORMANCE_VALIDATION.md) : protocole A/B à exécuter avant le canary Unified Pi Chat, notamment pour les tests à 60 et 100 conversations et le dimensionnement Appstrate Cloud.
+- [**CHAT_PI_PERFORMANCE_REPORT.md**](./CHAT_PI_PERFORMANCE_REPORT.md) : état canonique, protocole, résultats, optimisations et décisions de performance Unified Pi Chat.
 
 ## Platform posture
 
