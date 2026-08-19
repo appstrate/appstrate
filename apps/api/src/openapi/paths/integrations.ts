@@ -832,7 +832,8 @@ export const integrationsPaths = {
                 type: "https://docs.appstrate.dev/errors/timeout",
                 title: "Gateway Timeout",
                 status: 504,
-                detail: "connect-run timed out after 120000ms",
+                detail:
+                  "The connection attempt timed out after 60000ms — the login did not complete in time. Please try again.",
                 code: "timeout",
                 requestId: "req_def456",
               },
@@ -1096,7 +1097,8 @@ export const integrationsPaths = {
                 type: "https://docs.appstrate.dev/errors/timeout",
                 title: "Gateway Timeout",
                 status: 504,
-                detail: "connect-run timed out after 120000ms",
+                detail:
+                  "The connection attempt timed out after 60000ms — the login did not complete in time. Please try again.",
                 code: "timeout",
                 requestId: "req_def456",
               },

@@ -70,12 +70,58 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **`integration_dropped` — a run that starts without an integration it
+  declared now says so, in the run log** — "run with what you have" is a
+  supported product mode: an agent whose integrations are only partly connected
+  still starts, with the subset that resolved. It started SILENTLY, though. A
+  run missing its Gmail tools looked exactly like a run whose agent simply
+  chose not to call them, and the only trace was a `logger.warn` on the
+  server, which the person reading the run page cannot see. The most common
+  report was "the agent is ignoring my instructions", for a run that never had
+  the tools those instructions name. `resolveIntegrationSpawns` now returns
+  every drop alongside the specs, and the pipeline writes one `warn` `run_logs`
+  row per dropped integration at kickoff — event `integration_dropped`, ordered
+  before the container's own output, carrying `integrationId` and a
+  machine-readable `reason` (`not_found`, `not_integration`,
+  `invalid_manifest`, `not_installed`, `remote_url_missing`,
+  `local_server_ref_missing`, `mcp_server_unresolved`,
+  `mcp_server_not_runnable`, `no_delivery`, `resolve_error`) plus an optional
+  `detail` when the reason alone is not actionable. It rides the same
+  `pg_notify` → SSE path as the container's breadcrumbs, so it shows up live.
+  Nothing about which runs start changes: a healthy run writes zero rows, and
+  the marker swallows its own write failures so it can neither slow down nor
+  fail a kickoff that is otherwise ready.
+
 - **Opt-in observability module (#847)** — OpenTelemetry moves out of core
   behind the `@appstrate/core/telemetry` façade into a workspace module
   `@appstrate/module-observability`. Core ships zero OTel footprint; add the
   module to `MODULES` and set `OTEL_ENABLED` to activate tracing/metrics.
 
 ### Changed
+
+- **A malformed `SYSTEM_INTEGRATIONS` entry now aborts boot instead of being
+  skipped** — `initSystemIntegrations` logged an error and `continue`d past an
+  invalid entry, a duplicate integration id, or a duplicate client id. The
+  platform then came up looking healthy while serving a silently reduced
+  offering, and the consequence surfaced somewhere else entirely: a dropped
+  membership reads as "Integration 'X' is not installed in this application", a
+  dropped client as "Administrator must register OAuth client credentials
+  for …". Both blame application state for what is a typo in an env var, and
+  both are found by whoever tries to connect — not by whoever deployed. A
+  duplicate client id is worse than a drop: client ids are one global keyspace
+  (a connection's `client_ref`), so the loser's connections would pin a ref
+  that resolves to another integration's credentials, and there is no safe
+  winner to pick. All three now throw at boot.
+
+  **Operators: an upgrade against a pre-existing bad `SYSTEM_INTEGRATIONS`
+  refuses to start.** That is the point — the deployment was already broken,
+  just not where it was visible — but it means the fix belongs before the
+  rollout, not after. The error names the entry's position in the array
+  (`entry #2`), its `id` when the value survived far enough to be readable, the
+  exact failing path (`clients[1].auth_key: …`) and, for a nested failure, the
+  offending client by its own id, so a one-line env var does not have to be
+  read by counting braces. Client secrets and system `client_id`s are redacted
+  from the message, so it is safe to paste into a ticket.
 
 - **`@appstrate/core` released as 6.2.0** — 6.1.0 was already published to npm,
   so the four export subpaths added since (`./package-files` and
@@ -108,6 +154,150 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `detect:breaking` reports as 27 response-field removals.
 
 ### Fixed
+
+- **An absent `client_secret` registered a PUBLIC OAuth client nobody asked
+  for, and put `client_secret=` on the wire** — `POST /api/integrations/{packageId}/auths/{authKey}/oauth-clients`
+  declared `client_secret: z.string().default("")`, and the storage encoder
+  read that emptiness back as "this is a public client". So an admin who
+  selected `client_secret_basic` and forgot to paste the secret got `201` and a
+  registered public client, and the failure arrived much later, from the
+  provider: the token request went out carrying `client_secret=` — the
+  parameter PRESENT but empty, which is not the same thing as absent — and
+  Dropbox answers that with `invalid_client`. This was a real customer
+  incident, and every layer of it was an inference nobody had written down.
+  A public client is now DECLARED, never inferred — sending
+  `token_endpoint_auth_method` as `"none"` says the app has no secret at the
+  provider, which is a statement the platform cannot make on the admin's
+  behalf. Both directions of the pair are guarded — `"none"` with a secret is
+  refused (the caller resolved a credential and then said it would not be
+  used), and a secret-based method, or no method at all (which means "the
+  manifest's method applies"), without a secret is refused too. The same rule
+  now governs the env-sourced half of the
+  surface: a `SYSTEM_INTEGRATIONS` client is declarable in exactly the same
+  terms, and refusing there is a boot crash rather than a `400`.
+
+  **Breaking for anything that registers a public client the old way.** A
+  request that omitted `client_secret`, or sent `""`, and relied on the
+  platform inferring a public client now gets `400` instead of `201`; add
+  `"token_endpoint_auth_method": "none"` and drop the secret. On the update
+  route the rules differ deliberately, because absence there means PRESERVE:
+  omitting `client_secret` still leaves the stored secret untouched (the rotate
+  form submits an empty input whenever only the redirect URI changed, so the
+  two must stay distinguishable), while an EXPLICIT empty string clears the
+  stored ciphertext and is accepted only together with
+  `token_endpoint_auth_method: "none"`.
+
+- **A legacy OAuth client row whose meaning lived in its ciphertext is now
+  refused by name instead of guessed at** — before `token_endpoint_auth_method`
+  existed, "public client" was recorded as an ENCRYPTED EMPTY secret. Postgres
+  cannot see through ciphertext, so no migration and no CHECK constraint can
+  recognise such a row, and the read paths went on inferring `none` from it —
+  the exact inference that produced the `client_secret=` incident above. The
+  connect and refresh resolvers now refuse a client that declares no method and
+  holds no secret, naming the row, the integration, the auth key and the
+  command that repairs it; the refresh path logs it as well as throwing,
+  because its callers turn anything non-transient into a `500` body no operator
+  reads. Refusing is the conservative half of the trade: such a client stops
+  working at connect and refresh time until it is canonicalised, where before
+  it "worked" by sending a request the provider rejects.
+
+  **Before deploying**, run `bun scripts/maintenance/backfill-public-oauth-clients.ts --dry-run`
+  to preview, then the same command without the flag to apply. It decrypts each
+  undeclared row and decides it: an empty secret becomes
+  `token_endpoint_auth_method='none'` with the ciphertext cleared, a real
+  secret is left alone (`NULL` correctly means "the manifest decides", which is
+  what a confidential client wants). A row whose ciphertext does not open is
+  reported and skipped, never guessed at — writing `none` there would turn a
+  confidential client public. The exit codes separate "I looked at your data
+  and some rows need attention" from "I never got to look": `0` everything
+  decided, `1` the pass completed but undecryptable rows remain (their remedy
+  is printed; every other row WAS canonicalised), `2` the table or database was
+  unreachable so nothing was examined and nothing written. It is idempotent,
+  and neither `DATABASE_URL` nor `CONNECTION_ENCRYPTION_KEY` is echoed on any
+  path, so the output can go straight into a ticket.
+
+- **A refresh that answered `200` with no `access_token` was recorded as a
+  success — and disarmed every later check** — `performRefreshTokenExchange`
+  substituted the caller's CURRENT access token when the response body carried
+  none (`access_token: raw.access_token ?? opts.accessTokenFallback`). The
+  refresh then "succeeded": it re-persisted the very token it existed to
+  replace, cleared `needsReconnection`, and reset the failure streak. Worse,
+  such a body carries no `expires_in` either, so the row lost its `expiresAt`
+  — after which neither the proactive refresh lead window nor the streak
+  escalation could ever fire again. A dead credential stayed marked healthy,
+  indefinitely, and the only symptom was the agent's own upstream `401`s.
+  Producers of that body are real: IdPs that answer `200 {"error":"invalid_grant"}`,
+  captive-portal JSON, a bare `{}`. The fallback is gone; such a response now
+  fails and increments the streak like any other refresh failure.
+
+  **New failure class for operators**: connections against a provider with that
+  behaviour will start reporting refresh failures and flip to
+  `needsReconnection` where they previously reported nothing. They were already
+  broken — this is the first release in which that is visible. The RFC 6749 §6
+  case is untouched and deliberately so: an omitted `refresh_token` still means
+  "keep the one you have", which non-rotating providers (Google, Slack, GitHub)
+  depend on.
+
+- **A run whose pinned version was deleted mid-flight silently executed the
+  mutable draft** — `getRunEffectiveAgent` fell back to the live draft when the
+  `package_versions` snapshot named by `runs.version_ref` was gone, with a
+  `logger.warn` as the only trace. That fallback decided two things it had no
+  business deciding: the run token's authorization set (what the sidecar may
+  reach) and the run's output contract (what counts as success), both
+  re-derived from a definition the run never agreed to. The internal run-token
+  guards now answer `409 run_definition_gone` and name the deleted version and
+  the remedy — re-publish it, or start a new run against the current
+  definition — and finalize fails a run that would otherwise have landed on
+  `success` against a contract nobody could read. A run that already terminated
+  non-success keeps its own, more specific cause.
+
+  Deleting the AGENT mid-run is a different state and stays benign: `runs.package_id`
+  is `ON DELETE SET NULL` precisely so the run row survives for observability
+  and billing, so such a run still finalizes on whatever status the runner
+  declared, with output validation skipped because there is no contract left to
+  validate against. The internal guards report it as `409 run_agent_deleted`,
+  with a remedy that does not pretend re-publishing a version would help. The
+  two states are distinct values in the result type so they cannot be collapsed
+  by accident — collapsing them would mark every in-flight run of a deleted
+  agent `failed`, a fabricated verdict about work that may have completed fine.
+
+- **Every connect-run failure collapsed into one opaque `500`** — the hosted
+  connect form returned `internal_error` whether the login tool had rejected
+  the user's own password, the deployment could not run a connect-run at all,
+  or the login simply took too long. Nothing in that response told the user
+  whether to retype something, wait, or call an administrator. Failures are now
+  typed by audience: a rejection the LOGIN TOOL itself reported ("wrong
+  password", "MFA required", "captcha") comes back as `400` carrying the tool's
+  own diagnostic, clipped so a runaway upstream body cannot be pasted wholesale
+  into an API response; a backend that cannot host a sidecar-only workload
+  comes back as `503 connect_unavailable`; a login that outlives the timeout
+  comes back as `504 timeout`. Everything else on that channel stays an opaque
+  `500` on purpose — `POST /api/integrations/connect/submit` is reachable by
+  someone who is not a member of the organization, and sidecar-internal
+  messages can carry host paths, namespaces and env-var names. For the same
+  reason the `503` says "contact your administrator" rather than naming
+  `RUN_ADAPTER`; the operator-facing remedy is logged at the throw site
+  instead, where the operator is the one reading.
+
+- **`GET /internal/integration-credentials` answered `200` with an empty
+  payload for three states where a credential was expected** — the sidecar
+  reads an empty payload as "this integration declares no `delivery.http`
+  auths, skip the MITM listener entirely" and boots the run anyway. So a
+  connection that had been deleted or unshared since kickoff, an `auth_key` the
+  run's pinned manifest version no longer declares, or credentials that no
+  longer decrypt all produced a run that started with zero credentials and an
+  agent reporting a phantom upstream outage against a fleet of uncredentialed
+  `401`s. An empty payload now means one thing only: the integration declares
+  no auth. The three broken states fail instead — `404` when there is no
+  connection to resolve (nothing exists to flag, so deliberately not a `410`),
+  `409 integration_auth_undeclared` when the frozen manifest version does not
+  declare the connection's auth (the credential is intact and may be valid
+  under another version, so it is deliberately NOT flagged `needsReconnection`
+  — a `410` there would destroy a working connection over a manifest edit), and
+  `410` when the credential is genuinely dead. A `410` from either endpoint now
+  also stamps the run's `metadata.degraded_integrations[]`, so the finished run
+  shows a reconnect banner instead of the gap living only in the agent's
+  transcript.
 
 - **Saving an integration destroyed its `INTEGRATION.md`** — `draft_content` is
   overloaded for integrations: the importer stores the bundle's
