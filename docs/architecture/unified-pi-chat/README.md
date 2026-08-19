@@ -7,9 +7,9 @@ Branche : `feat/chat-pi-unified-engine-phase4`
 Destinataire : Pierre
 
 Ce fichier est l'unique documentation narrative du chantier de performance Unified Pi Chat. Il
-remplace l'ancien protocole séparé et la note séparée sur les extensions. Une synthèse JSON compacte
-et les preuves fonctionnelles restent versionnées. Les observations brutes sont reproductibles par
-le harness, mais ne font pas partie du diff de revue.
+remplace les anciens comptes rendus séparés. Une synthèse JSON compacte et les preuves
+fonctionnelles restent versionnées. Les observations brutes sont reproductibles par le harness,
+mais ne font pas partie du diff de revue.
 
 ## Conclusion actuelle
 
@@ -42,6 +42,23 @@ Décision : poursuivre le chantier Pi et conserver AI SDK comme chemin disponibl
 validation cloud et le comparatif fournisseur statistique ne sont pas terminés. Aucun canary,
 aucune migration générale de trafic et aucune suppression d'AI SDK ne sont couverts par cette
 décision.
+
+## Support des clés API dans Pi Chat
+
+Le chat ne transmet jamais la clé fournisseur à Pi. Pour un modèle par clé API, la liaison conserve
+l'identifiant du preset Appstrate et choisit le sérialiseur natif Pi correspondant à sa famille :
+OpenAI compatible, Anthropic Messages ou Mistral Conversations. L'URL du modèle pointe vers
+`llm-proxy`, avec une valeur d'authentification inerte requise par Pi.
+
+Juste avant chaque requête fournisseur, une extension Pi injecte un nouveau jeton interne Appstrate.
+Le proxy authentifie ce jeton, résout le vrai modèle et la vraie clé côté serveur, transmet la
+requête, puis conserve l'attribution d'usage et sa persistance. La clé fournisseur ne se retrouve
+donc ni dans le modèle Pi, ni dans la session, ni dans le navigateur. Les annulations du chat sont
+aussi propagées jusqu'à la requête fournisseur.
+
+Codex et Claude Code suivent une autre branche du même contrat : leur jeton d'abonnement est gardé
+en mémoire pour le tour et Pi utilise directement son transport OAuth natif. Ce chemin n'est pas
+présenté comme un comparatif avec AI SDK.
 
 ## Comment lire les métriques
 
@@ -314,40 +331,6 @@ Le banc moteur porte temporairement le plafond à 128 pour observer 100 conversa
 Limite cloud : la mémoire et le CPU par réplica, le nombre de réplicas, l'autoscaling, les
 redémarrages, les chats actifs p95 et p99, les rafales et les distributions de tokens et d'outils
 ne sont pas disponibles. Aucun chiffre local ne doit être présenté comme capacité cloud.
-
-## Extensions communautaires et optimisations retenues
-
-Aucune extension communautaire ne doit être installée directement. `pi-mcp-adapter`, `pi-memory`,
-`pi-cache-optimizer`, `context-mode`, le pi-chat officiel et `pi-continuous-learning` confirment des
-principes utiles, mais ajoutent leur propre MCP, mémoire, stockage ou outils et dupliquent les
-garanties multitenant d'Appstrate.
-
-Les idées à reprendre dans le noyau commun sont :
-
-- garder un préfixe de prompt et un bloc mémoire stables pour préserver le cache fournisseur ;
-- borner et résumer les gros résultats d'outils avant leur réinjection ;
-- analyser les conversations hors du chemin critique pour proposer des améliorations de skills,
-  avec validation humaine avant promotion ;
-- préparer un snapshot versionné du catalogue et des instructions MCP immuables.
-
-Le cache MCP envisagé concerne uniquement le catalogue, les schémas et les instructions immuables.
-Il ne concerne jamais les résultats d'outils, les autorisations ou les états de session. Les
-clients, credentials, identités, historiques, signaux d'annulation et flux UI restent propres à
-chaque tour. Le `DefaultResourceLoader` actuel ne doit pas être partagé directement, car ses
-factories capturent des valeurs du tour.
-
-Appstrate utilise Pi 0.84.2 sous le namespace `@earendil-works`. La compatibilité fonctionnelle de
-la mise à niveau est validée avec Mistral, Codex et Claude Code. Les matrices de charge Codex,
-Claude Code et coût fixe restent antérieures à cette version. La mise à niveau ne justifie pas
-l'installation d'une extension et ne remplace pas le profilage de notre propre intégration.
-
-Références utiles : [Pi](https://github.com/earendil-works/pi),
-[pi-chat](https://github.com/earendil-works/pi-chat),
-[pi-mcp-adapter](https://github.com/nicobailon/pi-mcp-adapter),
-[pi-memory](https://github.com/jayzeng/pi-memory),
-[pi-cache-optimizer](https://github.com/jiangge/pi-cache-optimizer),
-[context-mode](https://github.com/mksglu/context-mode) et
-[pi-continuous-learning](https://github.com/MattDevy/pi-extensions/tree/main/packages/pi-continuous-learning).
 
 ## Prochain travail utile
 
