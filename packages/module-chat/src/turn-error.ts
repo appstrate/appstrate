@@ -108,13 +108,15 @@ export function clientTurnErrorFromMarker(value: unknown): ClientTurnError | und
  * refusals happen BEFORE the stream opens, so they never reach the client as an
  * in-stream marker — see `clientTurnErrorFromProblem`.
  */
-export type ChatProblemCode = "quota_exceeded" | "subscription_blocked" | "needs_reconnection";
+const CHAT_PROBLEM_CODES = [
+  "quota_exceeded",
+  "subscription_blocked",
+  "needs_reconnection",
+] as const;
 
-const PROBLEM_CODE_RETRYABLE: Record<ChatProblemCode, boolean> = {
-  quota_exceeded: false,
-  subscription_blocked: false,
-  needs_reconnection: false,
-};
+export type ChatProblemCode = (typeof CHAT_PROBLEM_CODES)[number];
+
+const KNOWN_PROBLEM_CODES: ReadonlySet<string> = new Set(CHAT_PROBLEM_CODES);
 
 function parseProblemDocument(
   message: string,
@@ -157,9 +159,11 @@ export function clientTurnErrorFromProblem(value: unknown): ClientTurnError | un
     ),
   );
   const code = doc.code;
-  if (code !== undefined && Object.prototype.hasOwnProperty.call(PROBLEM_CODE_RETRYABLE, code)) {
-    const known = code as ChatProblemCode;
-    return { ...classified, code: known, retryable: PROBLEM_CODE_RETRYABLE[known] };
+  // A refusal never clears by retrying — the user has to top up, reactivate or
+  // reconnect first. Pinned here rather than inherited from the status, which a
+  // billing module is free to change.
+  if (code !== undefined && KNOWN_PROBLEM_CODES.has(code)) {
+    return { ...classified, code: code as ChatProblemCode, retryable: false };
   }
   return classified;
 }
