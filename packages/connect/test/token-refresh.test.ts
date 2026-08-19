@@ -228,3 +228,51 @@ describe("performRefreshTokenExchange — failure classification", () => {
     expect((err as RefreshError).kind).toBe("transient");
   });
 });
+
+// A 2xx whose body carries no `access_token` is a FAILED refresh dressed as a
+// success. It used to be absorbed: the caller's current access token was
+// spliced in as a fallback, so the exchange returned "ok" while handing back
+// the very token the refresh existed to replace — and the write-back then
+// cleared `needsReconnection` and the failure streak on a dead credential.
+describe("performRefreshTokenExchange — a 2xx without access_token is a failure", () => {
+  function respondingJson(body: unknown): typeof fetch {
+    return responding(
+      () =>
+        new Response(JSON.stringify(body), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+    );
+  }
+
+  it("throws on an IdP that answers 200 with an error object", async () => {
+    const err = await captureError(respondingJson({ error: "invalid_grant" }));
+    expect(err).toBeInstanceOf(Error);
+    expect(String(err)).toContain("access_token");
+  });
+
+  it("throws on an empty 200 body rather than reusing the previous token", async () => {
+    const err = await captureError(respondingJson({}));
+    expect(err).toBeInstanceOf(Error);
+    expect(String(err)).toContain("access_token");
+  });
+
+  it("throws on a 200 that only rotates the refresh token", async () => {
+    const err = await captureError(respondingJson({ refresh_token: "rt_new", expires_in: 3600 }));
+    expect(err).toBeInstanceOf(Error);
+  });
+
+  // The counterpart that must KEEP working: RFC 6749 §6 lets the server omit
+  // `refresh_token` to mean "keep the one you have", and non-rotating providers
+  // (Google, Slack, GitHub) rely on it. Only the access-token fallback was the
+  // silent substitution.
+  it("still preserves the caller's refresh token when the response omits it", async () => {
+    const { parsed } = await performRefreshTokenExchange(
+      { ...ctx, fetchImpl: respondingJson({ access_token: "at_new", expires_in: 3600 }) },
+      "rt_abc",
+      { label: "refresh" },
+    );
+    expect(parsed.accessToken).toBe("at_new");
+    expect(parsed.refreshToken).toBe("rt_abc");
+  });
+});

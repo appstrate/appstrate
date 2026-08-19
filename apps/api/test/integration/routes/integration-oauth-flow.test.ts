@@ -104,12 +104,19 @@ async function setup(
     .insert(applicationPackages)
     .values({ applicationId: ctx.defaultAppId, packageId: INTEGRATION, config: {} });
 
+  // A secret-less registration must DECLARE itself public: the route refuses a
+  // missing/blank `client_secret` under any other method rather than inferring
+  // "public" from the absence, which is what the admin form's checkbox sends.
   const res = await app.request(
     `/api/integrations/${INTEGRATION}/auths/${AUTH_KEY}/oauth-clients`,
     {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify({ client_id: client.clientId, client_secret: client.clientSecret }),
+      body: JSON.stringify(
+        client.clientSecret === ""
+          ? { client_id: client.clientId, token_endpoint_auth_method: "none" }
+          : { client_id: client.clientId, client_secret: client.clientSecret },
+      ),
     },
   );
   expect(res.status).toBeLessThan(300);
@@ -291,11 +298,11 @@ describe("integration OAuth2 flow (conformant provider)", () => {
 
   // ─── The defect that shipped ───────────────────────────────────────────
 
-  // The admin registers the app WITHOUT a secret (the UI's "public client"
-  // checkbox) while the manifest still declares `client_secret_post`. Before
-  // the fix the exchange posted `client_secret=` and this provider — like
-  // Dropbox — answered `invalid_client`, leaving no connection behind.
-  it("a blank registered secret connects even when the manifest declares client_secret_post", async () => {
+  // The admin registers the app as PUBLIC (the UI's "public client" checkbox)
+  // while the manifest still declares `client_secret_post`. Before the fix the
+  // exchange posted `client_secret=` and this provider — like Dropbox —
+  // answered `invalid_client`, leaving no connection behind.
+  it("a public registered client connects even when the manifest declares client_secret_post", async () => {
     startProvider({ clientId: "cid", acceptedAuthMethods: ["none"] });
     await setup(
       ctx,
@@ -314,7 +321,7 @@ describe("integration OAuth2 flow (conformant provider)", () => {
     expect(request.authorization).toBeUndefined();
   });
 
-  it("a blank registered secret sends no empty Basic header either", async () => {
+  it("a public registered client sends no empty Basic header either", async () => {
     startProvider({ clientId: "cid", acceptedAuthMethods: ["none"] });
     await setup(
       ctx,

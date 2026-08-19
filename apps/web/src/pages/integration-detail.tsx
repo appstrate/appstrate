@@ -174,9 +174,23 @@ function OAuthClientModal({
   const [publicClient, setPublicClient] = useState(
     existing ? existing.token_endpoint_auth_method === "none" : false,
   );
+  // Registration with no secret and no public declaration is refused by the
+  // API (400). Catching it here keeps the refusal on the field it belongs to
+  // rather than in a toast, and — more importantly — stops the form from
+  // sending an inferred `""`, which used to register a PUBLIC client from an
+  // admin who never declared one and then showed the box ticked on reopen.
+  // Rotation is exempt: there an untouched secret field means PRESERVE.
+  const secretMissing = mode === "create" && !publicClient && clientSecret === "";
+  // "Reward early, punish late" (same rule as `useAppForm`'s `showError`): the
+  // message appears once the admin has touched the field or tried to submit,
+  // never on a form they have not filled in yet.
+  const [secretTouched, setSecretTouched] = useState(false);
+  const [attempted, setAttempted] = useState(false);
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
+    setAttempted(true);
+    if (secretMissing) return;
     // Declared, not inferred: the server records `none` instead of guessing
     // from a blank secret. And on rotation an untouched secret field is OMITTED
     // rather than sent as `""` — sending it would clear the stored credential
@@ -188,8 +202,10 @@ function OAuthClientModal({
       ...(redirectUri ? { redirect_uri: redirectUri } : {}),
     };
     if (mode === "create") {
-      // Registration always states the secret; blank declares a public client.
-      const body = { ...common, client_secret: publicClient ? "" : clientSecret };
+      // A public client declares itself with `token_endpoint_auth_method: none`
+      // and sends NO secret; a confidential one sends the typed secret. Neither
+      // branch ships a blank the server would have to interpret.
+      const body = publicClient ? common : { ...common, client_secret: clientSecret };
       create.mutate({ params: { path: { packageId, authKey } }, body }, { onSuccess: onClose });
     } else {
       // Rotation OMITS an untouched secret field rather than sending `""`.
@@ -243,10 +259,19 @@ function OAuthClientModal({
             type="password"
             value={clientSecret}
             onChange={(e) => setClientSecret(e.target.value)}
+            onBlur={() => setSecretTouched(true)}
             disabled={publicClient}
             placeholder={existing?.has_client_secret ? "••••••••" : ""}
             data-testid={`oauth-clientsecret-${authKey}`}
           />
+          {secretMissing && (secretTouched || attempted) && (
+            <p
+              className="text-destructive text-sm"
+              data-testid={`oauth-clientsecret-error-${authKey}`}
+            >
+              {t("integration.oauthClient.clientSecretRequired")}
+            </p>
+          )}
         </div>
         <div className="space-y-1 sm:col-span-2">
           <Label htmlFor={`redir-${authKey}`} className="text-xs">

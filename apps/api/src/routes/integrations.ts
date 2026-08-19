@@ -188,7 +188,13 @@ export const updateConnectionSchema = z
 
 export const oauthClientSchema = z.object({
   client_id: z.string().min(1),
-  client_secret: z.string().default(""),
+  /**
+   * Shared shape only — both concrete bodies below re-declare this field with
+   * their own semantics (create: required unless public; update: absent means
+   * PRESERVE). Deliberately optional here so no derived schema can inherit a
+   * default that manufactures a secret nobody typed.
+   */
+  client_secret: z.string().optional(),
   /**
    * The admin's explicit declaration for THIS client, overriding the
    * manifest's. `"none"` registers a PUBLIC client — the app has no secret at
@@ -206,14 +212,29 @@ export const oauthClientSchema = z.object({
 });
 
 /**
- * Registration body. `client_secret` defaults to `""` — registering an app
- * with no secret is how a PUBLIC client is declared.
+ * Registration body. A public client is DECLARED
+ * (`token_endpoint_auth_method: "none"`), never inferred from an absent or
+ * blank `client_secret` — so both directions of the pair are guarded:
+ *
+ *   - `"none"` WITH a secret → the caller resolved a credential and then said
+ *     it would not be used;
+ *   - a secret-based method (or no method at all, which means "the manifest's
+ *     method applies") WITHOUT a secret → the request that cannot succeed.
+ *     This is the one that used to return 201: `client_secret` defaulted to
+ *     `""` and the storage encoder read that emptiness as "public", so an
+ *     admin who declared `client_secret_basic` and forgot the secret got a
+ *     PUBLIC client back and a token endpoint answering HTTP 400 later.
  */
 export const oauthClientCreateSchema = oauthClientSchema
-  .extend({ client_secret: z.string().default("") })
-  .refine((b) => !(b.token_endpoint_auth_method === "none" && b.client_secret.length > 0), {
+  .extend({ client_secret: z.string().optional() })
+  .refine((b) => !(b.token_endpoint_auth_method === "none" && (b.client_secret ?? "").length > 0), {
     message:
       "token_endpoint_auth_method='none' declares a public client; do not send a client_secret with it",
+    path: ["client_secret"],
+  })
+  .refine((b) => b.token_endpoint_auth_method === "none" || (b.client_secret ?? "").length > 0, {
+    message:
+      "client_secret is required and must not be empty; if the provider registered this app as a public client (no secret at all), declare it with token_endpoint_auth_method='none' instead of omitting the secret",
     path: ["client_secret"],
   });
 
@@ -228,6 +249,15 @@ export const oauthClientUpdateSchema = oauthClientSchema
   .refine((b) => !(b.token_endpoint_auth_method === "none" && (b.client_secret ?? "").length > 0), {
     message:
       "token_endpoint_auth_method='none' declares a public client; do not send a client_secret with it",
+    path: ["client_secret"],
+  })
+  // An EXPLICIT empty string is a destructive statement — it clears the stored
+  // ciphertext — so it is only accepted alongside the declaration that makes it
+  // coherent. Absence stays untouched by this rule: it is the preserve path
+  // above, and the rotate form relies on it.
+  .refine((b) => !(b.client_secret === "" && b.token_endpoint_auth_method !== "none"), {
+    message:
+      "an empty client_secret clears the stored credential and is only accepted together with token_endpoint_auth_method='none'; omit the field entirely to preserve the stored secret",
     path: ["client_secret"],
   });
 
@@ -568,7 +598,10 @@ export function createIntegrationsRouter() {
       }
       const client = await createIntegrationOAuthClient(scope, packageId, authKey, {
         clientId: body.client_id,
-        clientSecret: body.client_secret,
+        // `?? ""` is reachable only for a declared public client: the schema
+        // refuses an absent secret under any other method, so the blank never
+        // stands in for one the admin meant to supply.
+        clientSecret: body.client_secret ?? "",
         ...(body.token_endpoint_auth_method !== undefined
           ? { tokenEndpointAuthMethod: body.token_endpoint_auth_method }
           : {}),

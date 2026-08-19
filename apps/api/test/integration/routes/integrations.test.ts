@@ -1032,6 +1032,112 @@ describe("OAuth client CRUD", () => {
     expect(rows.filter((r) => r.isDefault)).toHaveLength(0);
   });
 
+  // ─── "Public client" is a declaration, never an inference ────────────────
+  //
+  // The create body used to default `client_secret` to `""`, and the storage
+  // encoder read that emptiness as "public". So a POST that declared
+  // `client_secret_basic` and forgot the secret returned 201 and stored a
+  // PUBLIC client: the admin declared one thing and got its opposite, and the
+  // contradiction only surfaced as an HTTP 400 from the provider's token
+  // endpoint on the next connect.
+
+  it("refuses a registration with a secret-based method and no client_secret (400)", async () => {
+    const res = await app.request("/api/integrations/@myorg/gmail/auths/google/oauth-clients", {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({ client_id: "abc", token_endpoint_auth_method: "client_secret_basic" }),
+    });
+    expect(res.status).toBe(400);
+    const problem = (await res.json()) as { detail?: string };
+    // Actionable in both directions: send the secret, or declare the client public.
+    expect(problem.detail).toContain("client_secret is required");
+    expect(problem.detail).toContain("token_endpoint_auth_method='none'");
+    // Nothing was written — the refusal is not a partial registration.
+    const rows = await db
+      .select()
+      .from(integrationOauthClients)
+      .where(eq(integrationOauthClients.integrationId, "@myorg/gmail"));
+    expect(rows).toHaveLength(0);
+  });
+
+  it("refuses a registration with no method and no client_secret (400)", async () => {
+    // No method means "the manifest's method applies" — which for Gmail is a
+    // secret-based one. An omitted secret is not a public-client declaration.
+    const res = await app.request("/api/integrations/@myorg/gmail/auths/google/oauth-clients", {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({ client_id: "abc" }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("refuses a registration with an explicitly empty client_secret (400)", async () => {
+    const res = await app.request("/api/integrations/@myorg/gmail/auths/google/oauth-clients", {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({ client_id: "abc", client_secret: "" }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("registers a DECLARED public client with no secret and stores 'none' (201)", async () => {
+    const res = await app.request("/api/integrations/@myorg/gmail/auths/google/oauth-clients", {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({ client_id: "abc", token_endpoint_auth_method: "none" }),
+    });
+    expect(res.status).toBe(201);
+    const [row] = await db
+      .select()
+      .from(integrationOauthClients)
+      .where(eq(integrationOauthClients.integrationId, "@myorg/gmail"));
+    expect(row!.tokenEndpointAuthMethod).toBe("none");
+    // Public means NO ciphertext at all, not an encrypted empty string.
+    expect(row!.clientSecretEncrypted).toBe("");
+  });
+
+  it("rotation with an ABSENT client_secret preserves the stored one", async () => {
+    const created = await createClient("abc", "shh");
+    expect(created.status).toBe(201);
+    const before = await db
+      .select()
+      .from(integrationOauthClients)
+      .where(eq(integrationOauthClients.id, created.id));
+
+    const rotate = await app.request(`/api/integrations/@myorg/gmail/oauth-clients/${created.id}`, {
+      method: "PUT",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({ client_id: "abc", redirect_uri: "https://example.com/cb" }),
+    });
+    expect(rotate.status).toBe(200);
+
+    const [after] = await db
+      .select()
+      .from(integrationOauthClients)
+      .where(eq(integrationOauthClients.id, created.id));
+    expect(after!.clientSecretEncrypted).toBe(before[0]!.clientSecretEncrypted);
+    expect(after!.tokenEndpointAuthMethod).toBeNull();
+    expect(after!.redirectUri).toBe("https://example.com/cb");
+  });
+
+  it("rotation with an empty client_secret and no public declaration is refused (400)", async () => {
+    const created = await createClient("abc", "shh");
+    const rotate = await app.request(`/api/integrations/@myorg/gmail/oauth-clients/${created.id}`, {
+      method: "PUT",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({ client_id: "abc", client_secret: "" }),
+    });
+    expect(rotate.status).toBe(400);
+    const problem = (await rotate.json()) as { detail?: string };
+    expect(problem.detail).toContain("omit the field entirely to preserve the stored secret");
+    // The credential the caller never asked to destroy is still there.
+    const [after] = await db
+      .select()
+      .from(integrationOauthClients)
+      .where(eq(integrationOauthClients.id, created.id));
+    expect(after!.clientSecretEncrypted.length).toBeGreaterThan(0);
+  });
+
   it("rejects rotating an unknown client id (404)", async () => {
     const res = await app.request(
       "/api/integrations/@myorg/gmail/oauth-clients/11111111-1111-4111-8111-111111111111",

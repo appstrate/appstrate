@@ -83,11 +83,31 @@ describe("public OAuth client is declared, not inferred", () => {
   }
 
   describe("encodeClientAuthForStorage writes both halves together", () => {
-    it("records a supplied blank secret as an explicit public client", () => {
+    // A blank secret with NO method declared is the RFC 7591 §3.2.1
+    // registration answer — an authorization server that returns no
+    // `client_secret` registered a PUBLIC client. That is the shape auto-DCR
+    // hands the service directly; the admin route can no longer produce it,
+    // because `oauthClientCreateSchema` refuses a missing secret unless
+    // `"none"` is declared.
+    it("records a blank secret with no declared method as a public client (DCR)", () => {
       expect(encodeClientAuthForStorage({ clientSecret: "" })).toEqual({
         tokenEndpointAuthMethod: "none",
         clientSecretEncrypted: "",
       });
+    });
+
+    // The inference this whole file exists to remove, in its last hiding place:
+    // `secret.length === 0` used to WIN over the caller's declaration, so a
+    // caller stating `client_secret_basic` and supplying no secret got a public
+    // client written to the row — and a token endpoint answering HTTP 400 much
+    // later. Defence in depth for the callers that bypass the route schema.
+    it("throws when a secret-based method is declared with an empty secret", () => {
+      expect(() =>
+        encodeClientAuthForStorage({
+          clientSecret: "",
+          tokenEndpointAuthMethod: "client_secret_basic",
+        }),
+      ).toThrow(/requires a client_secret/);
     });
 
     it("keeps a confidential client undeclared so the manifest decides", () => {

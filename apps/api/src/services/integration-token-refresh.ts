@@ -171,7 +171,6 @@ async function doRefresh(
   try {
     ({ parsed, raw: tokenData } = await performRefreshTokenExchange(ctx, refreshToken, {
       label: `Integration token refresh for '${packageId}' auth '${authKey}'`,
-      accessTokenFallback: current.access_token,
     }));
   } catch (err) {
     // Flip needsReconnection on a revoked refresh token so the dashboard

@@ -579,15 +579,20 @@ export const integrationsPaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["client_id", "client_secret"],
+              required: ["client_id"],
               properties: {
                 client_id: { type: "string", minLength: 1 },
-                client_secret: { type: "string", default: "" },
+                client_secret: {
+                  type: "string",
+                  minLength: 1,
+                  description:
+                    "REQUIRED unless `token_endpoint_auth_method` is `none`. A public client is declared, never inferred: omitting the secret under any other method is rejected with 400 rather than silently registering a public client.",
+                },
                 token_endpoint_auth_method: {
                   type: "string",
                   enum: ["client_secret_post", "client_secret_basic", "none"],
                   description:
-                    "Explicit client-authentication method for this client, overriding the manifest's. Send `none` to register a PUBLIC client (no secret at the provider). Omit to leave it undeclared, in which case the manifest's value applies. A blank `client_secret` is recorded as `none`.",
+                    "Explicit client-authentication method for this client, overriding the manifest's. Send `none` to register a PUBLIC client (no secret at the provider), and then send no `client_secret`. Omit to leave it undeclared, in which case the manifest's value applies — and a `client_secret` is then mandatory.",
                 },
                 redirect_uri: { type: "string", format: "uri" },
               },
@@ -633,13 +638,13 @@ export const integrationsPaths = {
                 client_secret: {
                   type: "string",
                   description:
-                    "OMIT to preserve the stored secret. An empty string declares the client PUBLIC and clears it. The rotate form submits an empty input whenever only the redirect URI changed, so the two must stay distinguishable.",
+                    "OMIT to preserve the stored secret. An empty string CLEARS it and is accepted only together with `token_endpoint_auth_method: none`; alone it is rejected with 400. The rotate form submits an empty input whenever only the redirect URI changed, so the two must stay distinguishable.",
                 },
                 token_endpoint_auth_method: {
                   type: "string",
                   enum: ["client_secret_post", "client_secret_basic", "none"],
                   description:
-                    "Explicit client-authentication method for this client, overriding the manifest's. Send `none` to register a PUBLIC client (no secret at the provider). Omit to leave it undeclared, in which case the manifest's value applies. A blank `client_secret` is recorded as `none`.",
+                    "Explicit client-authentication method for this client, overriding the manifest's. Send `none` to declare a PUBLIC client (no secret at the provider). Omit to leave it undeclared, in which case the manifest's value applies.",
                 },
                 redirect_uri: { type: "string", format: "uri" },
               },

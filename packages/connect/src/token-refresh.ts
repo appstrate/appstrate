@@ -86,7 +86,7 @@ export interface RefreshExchangeResult {
 export async function performRefreshTokenExchange(
   ctx: RefreshContext,
   refreshToken: string,
-  opts: { label: string; accessTokenFallback?: string },
+  opts: { label: string },
 ): Promise<RefreshExchangeResult> {
   // AFPS default for `token_endpoint_auth_method` is
   // `client_secret_basic` (RFC 8414 §2 / RFC 7591 §2). When the manifest
@@ -162,10 +162,19 @@ export async function performRefreshTokenExchange(
     throw new RefreshError(`${opts.label} returned non-JSON response`, "transient");
   }
 
-  const parsed = parseTokenResponse(
-    { ...raw, access_token: raw.access_token ?? opts.accessTokenFallback },
-    undefined,
-    refreshToken,
-  );
+  // No access-token fallback: a 2xx body without `access_token` is a FAILED
+  // refresh, and `parseTokenResponse` throws on it. Substituting the caller's
+  // current token here recorded the exchange as a success — persisting the very
+  // token the refresh existed to replace, and resetting `needsReconnection` /
+  // the failure streak with it. Real producers of that body exist (IdPs that
+  // answer `200 {"error":"invalid_grant"}`, captive-portal JSON, a bare `{}`),
+  // and with no `expires_in` the row also lost its `expires_at`, after which
+  // neither the proactive lead window nor the failure escalation could fire
+  // again: a dead credential marked healthy, permanently.
+  //
+  // `refreshToken` as the third argument is a DIFFERENT case and stays: RFC
+  // 6749 §6 lets the server omit `refresh_token` to mean "keep the one you
+  // have", so non-rotating providers (Google, Slack, GitHub) depend on it.
+  const parsed = parseTokenResponse(raw, undefined, refreshToken);
   return { parsed, raw };
 }
