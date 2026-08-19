@@ -29,13 +29,17 @@ pour Pi au premier token. L'écart de 32 ms n'est pas perceptible dans ce run. L
 Cette paire ne comporte qu'une répétition et confirme la compatibilité du correctif, pas une
 capacité statistique.
 
-Le banc contrôlé reste plus défavorable à Pi sous forte contention locale. À 60 chats, l'écart du
-premier token est de 264 ms et le débit Pi représente 80,3 % de celui d'AI SDK. À 100 chats,
-l'écart est de 500 ms et le débit représente 75,5 %. Ces chiffres mesurent une rafale simultanée
-sur un Mac M2 avec PGlite, pas le délai habituel de chaque tour ni la capacité cloud.
+Le rejeu contrôlé sur PostgreSQL isolé, avec trois répétitions à chaque niveau, confirme un écart
+local sous forte contention, mais beaucoup plus petit que les secondes observées avec PGlite avant
+les corrections. Le p95 du premier token Pi ajoute 301 ms à 60 chats, 120 ms à 64 et 478 ms à 100.
+Pour une personne,
+cela représente environ 0,12 à 0,48 seconde pendant une rafale simultanée volontairement sévère.
+Le coût propre du cycle Pi avant le prompt reste inférieur à 10 ms au p95. Le reste apparaît quand
+le travail synchrone des premiers tours Pi retarde la persistance et l'ordonnancement communs des
+tours suivants. Ces chiffres locaux ne mesurent ni le délai habituel d'un tour ni la capacité cloud.
 
 Décision : poursuivre le chantier Pi et conserver AI SDK comme chemin disponible tant que la
-validation cloud et le rejeu statistique après correction ne sont pas terminés. Aucun canary,
+validation cloud et le comparatif fournisseur statistique ne sont pas terminés. Aucun canary,
 aucune migration générale de trafic et aucune suppression d'AI SDK ne sont couverts par cette
 décision.
 
@@ -67,9 +71,9 @@ inférieure à 250 ms. Ce scénario volontairement sévère sert à révéler la
 ### Invariants A/B
 
 Chaque paire utilise le même commit, la même machine, le même modèle, les mêmes tokens, prompts,
-historiques, outils, résultats d'outils et réglages. Une base PGlite isolée, des organisations, des
-utilisateurs et des sessions synthétiques sont créés pour chaque cellule. Aucun contenu ou compte
-de production n'est utilisé.
+historiques, outils, résultats d'outils et réglages. Une base PGlite ou PostgreSQL isolée, des
+organisations, des utilisateurs et des sessions synthétiques sont créés pour chaque cellule. Aucun
+contenu ou compte de production n'est utilisé.
 
 Une observation est valide uniquement si elle vérifie :
 
@@ -106,6 +110,40 @@ peut être acceptable si la latence vécue reste bonne et si le dimensionnement 
 requise.
 
 ## Résultats exploratoires après optimisation
+
+### Rejeu contrôlé sur PostgreSQL isolé
+
+Le rejeu au commit `56706ae7` utilise une base PostgreSQL synthétique distincte pour chaque
+cellule. Chaque base reçoit les migrations réelles, puis est supprimée par le contrôleur après les
+vérifications. Les valeurs sont les médianes des p95 de trois répétitions chaudes.
+
+| Concurrence | Moteur | p95 premier token | p95 total |         Débit |
+| ----------: | ------ | ----------------: | --------: | ------------: |
+|          60 | AI SDK |            355 ms |    593 ms | 89,74 chats/s |
+|          60 | Pi     |            656 ms |    880 ms | 64,37 chats/s |
+|          64 | AI SDK |            754 ms |  1 148 ms | 52,39 chats/s |
+|          64 | Pi     |            874 ms |  1 313 ms | 45,91 chats/s |
+|         100 | AI SDK |          1 052 ms |  1 548 ms | 61,08 chats/s |
+|         100 | Pi     |          1 530 ms |  1 882 ms | 46,51 chats/s |
+
+Les 1 590 conversations des 36 cellules terminent. Il n'y a aucun 429, aucune erreur serveur,
+aucun stream incomplet et aucun marqueur incorrect. Les 1 590 appels modèle, les tokens, les
+messages, les parties structurées et les usages persistés correspondent aux attentes. La
+continuité et l'isolation passent, et aucune base `chat_perf_*` ne subsiste.
+
+À 100 chats, l'entrée dans le moteur arrive au p95 à 595 ms pour AI SDK et 1 086 ms pour Pi. Le
+cycle Pi mesuré entre cette entrée et le prompt ne prend que 8,4 ms au p95. Les tours Pi déjà
+entrés dans le moteur ajoutent du travail synchrone sur la boucle événementielle pendant que les
+autres tours attendent leurs écritures PostgreSQL. Cela explique pourquoi le retard est visible
+avant l'entrée des derniers tours sans provenir d'une requête PostgreSQL propre à Pi. Le p95 de la
+boucle vaut 96 ms pour Pi contre 25 ms pour AI SDK à 100, et le CPU de vague vaut 3,10 s contre
+2,54 s.
+
+Une cellule longue à 100 mesure aussi la récupération. Le RSS Pi passe de 239,6 Mio au départ à
+324,9 Mio au pic, puis 95,8 Mio après 30 secondes, 85,7 Mio après 60 et 85,8 Mio après 120. AI SDK
+passe de 147,2 à 279,3 Mio, puis 65,0, 158,4 et 52,9 Mio. Les deux moteurs respectent le seuil de
+récupération. Le chargement fixe observé dans ce processus vaut environ 92 Mio de RSS de plus pour
+Pi, tandis que l'augmentation entre le départ et le pic est plus faible pour Pi dans cette cellule.
 
 ### Banc contrôlé ciblé
 
@@ -251,15 +289,18 @@ chargement du package Pi au-dessus d'AI SDK :
 Les catégories Bun se recouvrent et ne doivent pas être additionnées. Le coût fixe est un ordre de
 grandeur local, pas un budget de réplica.
 
-La pente RSS marginale par conversation n'est pas estimable proprement avec la variance PGlite.
-Les intervalles historiques traversent zéro. Les douze cellules longues possèdent les checkpoints
-initial, pic, fin, 30, 60 et 120 secondes. Leur RSS après 120 secondes respecte le seuil de
-récupération. Heap, mémoire externe et buffers doivent toutefois être lus séparément du RSS.
+La cellule PostgreSQL longue à 100 conversations sépare mieux le coût fixe de l'augmentation de la
+vague. Pi démarre environ 92 Mio au-dessus d'AI SDK, mais ajoute environ 85 Mio entre son état
+initial et son pic contre 132 Mio pour AI SDK. Un seul point ne suffit pas à estimer une pente
+marginale robuste par conversation. Heap, mémoire externe et buffers récupèrent aussi, mais leurs
+catégories doivent être lues séparément du RSS.
 
 ## Limites séparées
 
 Limite moteur : après suppression des scans de ressources, Pi conserve un coût sous forte
-contention contrôlée. Il faut le confirmer à 60, 64 et 100 avec plusieurs répétitions.
+contention contrôlée. Le rejeu PostgreSQL à 60, 64 et 100 le confirme sur trois répétitions. Le
+cycle propre de Pi reste court, mais son CPU cumulé augmente le délai de boucle et réduit la marge
+de saturation pendant une rafale.
 
 Limite fournisseur : Mistral n'a produit aucun 429 jusqu'à 100 dans la campagne historique. Cela
 ne garantit aucune capacité permanente. Codex et Claude Code passent à 30, leur capacité à 60
@@ -310,15 +351,14 @@ Références utiles : [Pi](https://github.com/earendil-works/pi),
 
 ## Prochain travail utile
 
-1. Rejouer après correction S chaud à 60, 64 et 100, avec au moins trois répétitions appariées.
-2. Rejouer Mistral à charge strictement identique si une clé dédiée reste disponible, sans élargir
+1. Rejouer Mistral à charge strictement identique si une clé dédiée reste disponible, sans élargir
    la matrice tant que le résultat ciblé suffit.
-3. Instrumenter la connexion MCP, `listTools` et le taux de réutilisation du catalogue avant de
+2. Instrumenter la connexion MCP, `listTools` et le taux de réutilisation du catalogue avant de
    construire un cache.
-4. Tester un snapshot immuable du catalogue, avec client et autorisation toujours propres au tour.
-5. Corriger ou documenter la conversion AI SDK d'un historique contenant du raisonnement avant un
+3. Tester un snapshot immuable du catalogue, avec client et autorisation toujours propres au tour.
+4. Corriger ou documenter la conversion AI SDK d'un historique contenant du raisonnement avant un
    nouveau comparatif H réel.
-6. Obtenir la télémétrie cloud avant toute conclusion de dimensionnement.
+5. Obtenir la télémétrie cloud avant toute conclusion de dimensionnement.
 
 Le contrôle navigateur doit utiliser Chrome DevTools MCP dans Chrome Beta et le port 3400. Le port
 3000 reste hors périmètre.
@@ -331,7 +371,7 @@ Depuis la racine du worktree :
 TEST_TIER=0 bun test scripts/chat-engine-performance.test.ts scripts/chat-engine-performance-report.test.ts
 bunx tsc --noEmit -p scripts/tsconfig.json
 
-bun scripts/chat-engine-performance.ts controlled --engines=ai-sdk,pi --forms=S --profiles=warm --concurrency=30,60,64,100 --repetitions=3 --recovery-ms=120000 --output=artifacts/chat-engine-performance/pi-current-controlled-r3
+bun scripts/chat-engine-performance.ts controlled --database=postgresql --postgres-container=appstrate-dev-postgres-1 --engines=ai-sdk,pi --forms=S --profiles=warm --concurrency=30,60,64,100 --repetitions=3 --recovery-ms=120000 --output=artifacts/chat-engine-performance/pi-current-controlled-r3
 bun scripts/chat-engine-performance-report.ts --input=artifacts/chat-engine-performance/pi-current-controlled-r3 --output=docs/architecture/unified-pi-chat/performance-results/pi-current-controlled.v1.json
 bun scripts/chat-engine-performance-publish.ts --input=artifacts/chat-engine-performance/pi-current-controlled-r3 --output=docs/architecture/unified-pi-chat/performance-results/raw/pi-current-controlled
 
@@ -372,6 +412,16 @@ Les observations détaillées restent dans les artefacts locaux du banc et peuve
 avec les commandes ci-dessus. Les bases PGlite volumineuses restent hors Git.
 
 ## Journal de décision RFC
+
+**19 août 2026, rejeu PostgreSQL : coût Pi confirmé sans anomalie de persistance.** Trente-six
+cellules contrôlées à 1, 10, 30, 60, 64 et 100 chats, avec trois répétitions par moteur et niveau,
+terminent 1 590 conversations sur 1 590. À 60, 64 et 100, Pi ajoute respectivement 301, 120 et
+478 ms au p95 du premier token. Son cycle interne avant prompt reste sous 10 ms au p95. Le surplus
+se forme surtout par contention de boucle quand les premiers tours Pi s'exécutent pendant la
+persistance des suivants. La récupération mémoire passe à 120 secondes, la continuité et
+l'isolation passent, et chaque base synthétique est supprimée. Ce rejeu confirme la viabilité
+locale de Pi, pas la capacité cloud. AI SDK reste disponible et aucune migration de trafic n'est
+autorisée par cette entrée.
 
 **19 août 2026, politique de ressources du chat : poursuite de l'unification, capacité cloud en
 attente.** Le profil CPU a attribué 47,7 % de la vague Pi à une découverte synchrone de ressources

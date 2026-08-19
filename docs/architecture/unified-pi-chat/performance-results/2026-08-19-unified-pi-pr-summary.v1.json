@@ -5,6 +5,7 @@
   "environment": {
     "machine": "Apple M2 local",
     "database": "isolated_pglite",
+    "additional_database": "isolated_postgresql_per_cell",
     "data_class": "local_synthetic",
     "cloud_capacity_validated": false
   },
@@ -113,6 +114,162 @@
     "continuity_valid": true,
     "isolation_valid": true
   },
+  "controlled_postgresql_campaign": {
+    "campaign_commit": "56706ae7",
+    "database": "isolated_postgresql_per_cell",
+    "profile": "warm",
+    "repetitions_per_cell": 3,
+    "aggregation": "median_of_cell_p95",
+    "status": "complete"
+  },
+  "controlled_postgresql": [
+    {
+      "concurrency": 1,
+      "ai_sdk": {
+        "first_token_p95_ms": 53.144,
+        "total_p95_ms": 197.345,
+        "throughput_chats_per_second": 4.958
+      },
+      "pi": {
+        "first_token_p95_ms": 63.134,
+        "total_p95_ms": 217.879,
+        "throughput_chats_per_second": 4.546
+      },
+      "difference": {
+        "first_token_ms": 9.99,
+        "total_ms": 20.534
+      }
+    },
+    {
+      "concurrency": 10,
+      "ai_sdk": {
+        "first_token_p95_ms": 119.48,
+        "total_p95_ms": 263.777,
+        "throughput_chats_per_second": 33.451
+      },
+      "pi": {
+        "first_token_p95_ms": 208.456,
+        "total_p95_ms": 353.152,
+        "throughput_chats_per_second": 25.656
+      },
+      "difference": {
+        "first_token_ms": 88.976,
+        "total_ms": 89.374
+      }
+    },
+    {
+      "concurrency": 30,
+      "ai_sdk": {
+        "first_token_p95_ms": 282.837,
+        "total_p95_ms": 455.795,
+        "throughput_chats_per_second": 57.592
+      },
+      "pi": {
+        "first_token_p95_ms": 384.546,
+        "total_p95_ms": 541.048,
+        "throughput_chats_per_second": 52.54
+      },
+      "difference": {
+        "first_token_ms": 101.708,
+        "total_ms": 85.252
+      }
+    },
+    {
+      "concurrency": 60,
+      "ai_sdk": {
+        "first_token_p95_ms": 355.339,
+        "total_p95_ms": 592.712,
+        "throughput_chats_per_second": 89.736
+      },
+      "pi": {
+        "first_token_p95_ms": 656.188,
+        "total_p95_ms": 880.09,
+        "throughput_chats_per_second": 64.369
+      },
+      "difference": {
+        "first_token_ms": 300.849,
+        "total_ms": 287.378
+      }
+    },
+    {
+      "concurrency": 64,
+      "ai_sdk": {
+        "first_token_p95_ms": 753.669,
+        "total_p95_ms": 1147.767,
+        "throughput_chats_per_second": 52.386
+      },
+      "pi": {
+        "first_token_p95_ms": 873.666,
+        "total_p95_ms": 1312.566,
+        "throughput_chats_per_second": 45.905
+      },
+      "difference": {
+        "first_token_ms": 119.997,
+        "total_ms": 164.8
+      }
+    },
+    {
+      "concurrency": 100,
+      "ai_sdk": {
+        "first_token_p95_ms": 1052.069,
+        "total_p95_ms": 1547.727,
+        "throughput_chats_per_second": 61.08
+      },
+      "pi": {
+        "first_token_p95_ms": 1530.147,
+        "total_p95_ms": 1882.17,
+        "throughput_chats_per_second": 46.508
+      },
+      "difference": {
+        "first_token_ms": 478.078,
+        "total_ms": 334.444
+      }
+    }
+  ],
+  "controlled_postgresql_invariants": {
+    "requested": 1590,
+    "completed": 1590,
+    "rate_limited": 0,
+    "server_errors": 0,
+    "incomplete_streams": 0,
+    "marker_failures": 0,
+    "model_calls": 1590,
+    "usage_persisted": true,
+    "messages_and_structured_parts_persisted": true,
+    "continuity_valid": true,
+    "isolation_valid": true,
+    "isolated_databases_removed": true
+  },
+  "controlled_postgresql_internal_diagnostics_c100": {
+    "ai_sdk_engine_dispatch_p95_ms": 595.051,
+    "pi_engine_dispatch_p95_ms": 1085.534,
+    "pi_pre_prompt_p95_ms": 8.4,
+    "ai_sdk_event_loop_p95_ms": 25.248,
+    "pi_event_loop_p95_ms": 96.211,
+    "ai_sdk_wave_cpu_ms": 2537.329,
+    "pi_wave_cpu_ms": 3100.877,
+    "interpretation": "Earlier Pi turns execute while later turns persist their user state. Their cumulative synchronous work delays the shared event loop before those later turns enter the engine."
+  },
+  "controlled_postgresql_recovery_c100": {
+    "repetitions": 1,
+    "ai_sdk_rss_mib": {
+      "initial": 147.203,
+      "peak": 279.328,
+      "end": 279.625,
+      "after_30_seconds": 65.047,
+      "after_60_seconds": 158.422,
+      "after_120_seconds": 52.938
+    },
+    "pi_rss_mib": {
+      "initial": 239.625,
+      "peak": 324.859,
+      "end": 325.422,
+      "after_30_seconds": 95.828,
+      "after_60_seconds": 85.656,
+      "after_120_seconds": 85.797
+    },
+    "recovery_threshold_passed": true
+  },
   "subscription_pi_only_campaign": {
     "campaign_commit": "c5a35b2d",
     "status": "historical_pre_pi_0_84_2_performance",
@@ -207,7 +364,7 @@
   },
   "interpretation": {
     "user_facing": "The single real Mistral c60 pair differs by 31.744 ms at p95 first token and 246.679 ms at p95 total, unlikely to be perceptible in ordinary interaction. This is exploratory, not a statistical non-inferiority result.",
-    "capacity": "Pi throughput is lower under simultaneous local bursts. This affects saturation headroom and potential infrastructure sizing, not the observed success or correctness of admitted chats.",
+    "capacity": "The three-repetition PostgreSQL campaign completed all 1,590 chats. Pi added 120 to 478 ms at p95 first token for synchronized bursts of 60 to 100 chats. Its measured pre-prompt lifecycle stayed below 10 ms at p95, while cumulative synchronous work increased event-loop contention and reduced local saturation headroom.",
     "cloud": "Replica resources, autoscaling and production traffic distributions were unavailable. Local results do not establish cloud capacity."
   }
 }
