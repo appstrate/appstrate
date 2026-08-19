@@ -8,7 +8,7 @@
  *   - by the platform proxy adapter (`llm-proxy/openai.ts`), for remote runs and
  *     chat's ai-sdk path — the result is priced by `computeTokenCost` and
  *     written to `llm_usage`;
- *   - by `@earendil-works/pi-ai` (`dist/providers/openai-completions.js`,
+ *   - by `@earendil-works/pi-ai` (`dist/api/openai-completions.js`,
  *     `parseChunkUsage`), for every platform-side Pi run — the result is priced
  *     by the SAME `computeTokenCost` and reaches `llm_usage` through the
  *     `appstrate.metric` side channel.
@@ -22,7 +22,6 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { readFileSync } from "node:fs";
 import { openaiCompletionsAdapter } from "../../src/services/llm-proxy/openai.ts";
 import { computeCostUsd } from "../../src/services/llm-proxy/metering.ts";
 
@@ -36,14 +35,12 @@ interface Buckets {
 
 /**
  * pi-ai's `parseChunkUsage`, transcribed from
- * `node_modules/@earendil-works/pi-ai/dist/providers/openai-completions.js`:
+ * `node_modules/@earendil-works/pi-ai/dist/api/openai-completions.js`:
  *
  *   const promptTokens = rawUsage.prompt_tokens || 0;
- *   const reportedCachedTokens = rawUsage.prompt_tokens_details?.cached_tokens
+ *   const cacheReadTokens = rawUsage.prompt_tokens_details?.cached_tokens
  *     ?? rawUsage.prompt_cache_hit_tokens ?? 0;
  *   const cacheWriteTokens = rawUsage.prompt_tokens_details?.cache_write_tokens || 0;
- *   const cacheReadTokens = cacheWriteTokens > 0
- *     ? Math.max(0, reportedCachedTokens - cacheWriteTokens) : reportedCachedTokens;
  *   const input = Math.max(0, promptTokens - cacheReadTokens - cacheWriteTokens);
  *   const outputTokens = rawUsage.completion_tokens || 0;
  */
@@ -51,13 +48,9 @@ function piAiReference(raw: Record<string, unknown>): Buckets {
   const details = (raw["prompt_tokens_details"] ?? undefined) as
     Record<string, number | undefined> | undefined;
   const promptTokens = (raw["prompt_tokens"] as number | undefined) || 0;
-  const reportedCachedTokens =
+  const cacheReadTokens =
     details?.cached_tokens ?? (raw["prompt_cache_hit_tokens"] as number | undefined) ?? 0;
   const cacheWriteTokens = details?.cache_write_tokens || 0;
-  const cacheReadTokens =
-    cacheWriteTokens > 0
-      ? Math.max(0, reportedCachedTokens - cacheWriteTokens)
-      : reportedCachedTokens;
   const input = Math.max(0, promptTokens - cacheReadTokens - cacheWriteTokens);
   return {
     input,
@@ -156,43 +149,44 @@ describe("openai-compatible usage parity: platform proxy vs pi-ai (runner)", () 
     const cost = { input: 2, output: 8, cacheRead: 0.5, cacheWrite: 2.5 };
     const parsed = openaiCompletionsAdapter.parseJsonUsage({ usage })!;
 
-    // cacheRead = 6M − 4M = 2M; input = 10M − 2M − 4M = 4M.
-    // 4M×2 + 2M×0.5 + 4M×2.5 = 8 + 1 + 10 = 19.
-    expect(computeCostUsd(parsed, cost)).toBeCloseTo(19, 9);
+    // cacheRead = 6M; cacheWrite = 4M; input = 10M − 6M − 4M = 0.
+    // 6M×0.5 + 4M×2.5 = 3 + 10 = 13.
+    expect(computeCostUsd(parsed, cost)).toBeCloseTo(13, 9);
 
-    // Pre-fix behaviour: `cache_write_tokens` unread → the 4M written tokens
-    // stayed in the cacheRead bucket (6M×0.5) and input was prompt − 6M.
-    // 4M×2 + 6M×0.5 = 8 + 3 = 11.
-    const preFix = computeCostUsd(
-      { inputTokens: 4_000_000, outputTokens: 0, cacheReadTokens: 6_000_000 },
+    // Pre-0.84 parity logic subtracted writes from `cached_tokens`, yielding
+    // cacheRead = 2M and input = 4M. That no longer matches Pi's buckets.
+    // 4M×2 + 2M×0.5 + 4M×2.5 = 8 + 1 + 10 = 19.
+    const pre084 = computeCostUsd(
+      {
+        inputTokens: 4_000_000,
+        outputTokens: 0,
+        cacheReadTokens: 2_000_000,
+        cacheWriteTokens: 4_000_000,
+      },
       cost,
     );
-    expect(preFix).toBeCloseTo(11, 9);
-    // Same consumption, $8 more per 10M prompt tokens — the gap this parity
-    // test exists to prevent. On the write bucket alone: 4M billed at 2.5 $/M
-    // instead of 0.5 $/M, a 5× under-charge.
-    expect(computeCostUsd(parsed, cost)).toBeGreaterThan(preFix);
+    expect(pre084).toBeCloseTo(19, 9);
+    expect(computeCostUsd(parsed, cost)).not.toBe(pre084);
   });
 
-  it("library formula unchanged — the transcription above still matches node_modules", () => {
+  it("library formula unchanged — the transcription above still matches node_modules", async () => {
     // Anchors `piAiReference` to the installed library: a pi-ai upgrade that
     // rewrites the normalisation fails HERE (re-read the source, re-transcribe,
     // re-check the adapter) instead of silently reopening the divergence.
-    const source = readFileSync(
+    const source = await Bun.file(
       new URL(
-        "../../../../node_modules/@earendil-works/pi-ai/dist/providers/openai-completions.js",
+        "../../../../node_modules/@earendil-works/pi-ai/dist/api/openai-completions.js",
         import.meta.url,
       ),
-      "utf8",
-    ).replace(/\s+/g, " ");
+    ).text();
+    const normalizedSource = source.replace(/\s+/g, " ");
 
-    expect(source).toContain(
+    expect(normalizedSource).toContain(
       "rawUsage.prompt_tokens_details?.cached_tokens ?? rawUsage.prompt_cache_hit_tokens ?? 0",
     );
-    expect(source).toContain("rawUsage.prompt_tokens_details?.cache_write_tokens || 0");
-    expect(source).toContain(
-      "cacheWriteTokens > 0 ? Math.max(0, reportedCachedTokens - cacheWriteTokens) : reportedCachedTokens",
+    expect(normalizedSource).toContain("rawUsage.prompt_tokens_details?.cache_write_tokens || 0");
+    expect(normalizedSource).toContain(
+      "Math.max(0, promptTokens - cacheReadTokens - cacheWriteTokens)",
     );
-    expect(source).toContain("Math.max(0, promptTokens - cacheReadTokens - cacheWriteTokens)");
   });
 });
