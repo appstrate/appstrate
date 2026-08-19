@@ -805,6 +805,40 @@ export const integrationsPaths = {
         "400": { $ref: "#/components/responses/ValidationError" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
+        "503": {
+          description:
+            "The configured execution backend cannot run a connect-run (sidecar-only workload). Operator configuration; the remedy is logged server-side and deliberately kept out of this response, which an end user can reach.",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+              example: {
+                type: "https://docs.appstrate.dev/errors/connect-unavailable",
+                title: "Service Unavailable",
+                status: 503,
+                detail:
+                  "This connection method is unavailable on this deployment. Contact your administrator.",
+                code: "connect_unavailable",
+                requestId: "req_abc123",
+              },
+            },
+          },
+        },
+        "504": {
+          description: "The connect-run login did not complete within the timeout",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+              example: {
+                type: "https://docs.appstrate.dev/errors/timeout",
+                title: "Gateway Timeout",
+                status: 504,
+                detail: "connect-run timed out after 120000ms",
+                code: "timeout",
+                requestId: "req_def456",
+              },
+            },
+          },
+        },
       },
     },
   },
@@ -1035,6 +1069,40 @@ export const integrationsPaths = {
         },
         "400": { $ref: "#/components/responses/ValidationError" },
         "404": { $ref: "#/components/responses/NotFound" },
+        "503": {
+          description:
+            "The configured execution backend cannot run a connect-run (sidecar-only workload). Operator configuration; the remedy is logged server-side and deliberately kept out of this response, which an end user can reach.",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+              example: {
+                type: "https://docs.appstrate.dev/errors/connect-unavailable",
+                title: "Service Unavailable",
+                status: 503,
+                detail:
+                  "This connection method is unavailable on this deployment. Contact your administrator.",
+                code: "connect_unavailable",
+                requestId: "req_abc123",
+              },
+            },
+          },
+        },
+        "504": {
+          description: "The connect-run login did not complete within the timeout",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+              example: {
+                type: "https://docs.appstrate.dev/errors/timeout",
+                title: "Gateway Timeout",
+                status: 504,
+                detail: "connect-run timed out after 120000ms",
+                code: "timeout",
+                requestId: "req_def456",
+              },
+            },
+          },
+        },
       },
     },
   },
