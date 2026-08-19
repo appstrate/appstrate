@@ -60,6 +60,11 @@ export interface PiOAuthModelBinding extends PiChatModelBindingBase {
 
 export type ResolvedPiChatModelBinding = PiProxyModelBinding | PiOAuthModelBinding;
 
+interface PiModelRuntimeApiRegistration {
+  getProvider(providerId: string): { getModels(): ReadonlyArray<{ api: string }> } | undefined;
+  registerProvider(providerId: string, config: { api: Api; baseUrl: string }): void;
+}
+
 export type PiChatModelBindingResolution =
   | { status: "ready"; binding: ResolvedPiChatModelBinding }
   | { status: "needs-reconnection" }
@@ -175,6 +180,22 @@ export function createPiProxyModelBinding(args: {
     authExtension: createPiProxyAuthExtension(args.mintBearer),
     metering: { kind: "proxy" },
   };
+}
+
+/** Keep the proxy model's declared serializer when Pi's built-in provider uses another API. */
+export function ensurePiRuntimeModelApi(
+  runtime: PiModelRuntimeApiRegistration,
+  binding: PiProxyModelBinding,
+): void {
+  const supportsApi = runtime
+    .getProvider(binding.provider)
+    ?.getModels()
+    .some((model) => model.api === binding.model.api);
+  if (supportsApi) return;
+  runtime.registerProvider(binding.provider, {
+    api: binding.model.api,
+    baseUrl: binding.model.baseUrl,
+  });
 }
 
 export function createPiOAuthModelBinding(model: SubscriptionChatModel): PiOAuthModelBinding {

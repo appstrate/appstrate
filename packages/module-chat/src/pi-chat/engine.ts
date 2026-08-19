@@ -53,7 +53,7 @@ import {
 import { classifyClientTurnError, clientTurnErrorMarker } from "../turn-error.ts";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 import { buildPiTurnMetadata, piFailureChunks } from "./pi-turn-closure.ts";
-import type { ResolvedPiChatModelBinding } from "./model-binding.ts";
+import { ensurePiRuntimeModelApi, type ResolvedPiChatModelBinding } from "./model-binding.ts";
 import { buildStructuredPiTurn, reconstructPiSession } from "./structured-session.ts";
 
 /**
@@ -192,6 +192,9 @@ export function runPiChat(input: PiChatInput): Response {
           modelsPath: null,
           allowModelNetwork: false,
         });
+        if (modelBinding.authMode === "proxy") {
+          ensurePiRuntimeModelApi(modelRuntime, modelBinding);
+        }
         await setPiRuntimeCredential(
           modelRuntime,
           modelBinding.provider,

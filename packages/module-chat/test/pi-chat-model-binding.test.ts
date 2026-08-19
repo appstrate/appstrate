@@ -9,6 +9,7 @@ import {
   createPiProxyAuthExtension,
   createPiProxyModelBinding,
   createPiProxyStream,
+  ensurePiRuntimeModelApi,
   resolvePiChatModelBinding,
   type PiModelStream,
 } from "../src/pi-chat/model-binding.ts";
@@ -151,6 +152,33 @@ describe("Pi chat model binding", () => {
       "x-trace-id": "trace-2",
       authorization: "Bearer bearer-2",
     });
+  });
+
+  it("registers the proxy API when Pi's built-in provider uses another transport", () => {
+    const registrations: Array<{ providerId: string; config: unknown }> = [];
+    const binding = createPiProxyModelBinding({
+      model: orgModel(),
+      origin: ORIGIN,
+      mintBearer: () => "loopback",
+    })!;
+
+    ensurePiRuntimeModelApi(
+      {
+        getProvider: () => ({ getModels: () => [{ api: "openai-responses" }] }),
+        registerProvider: (providerId, config) => registrations.push({ providerId, config }),
+      },
+      binding,
+    );
+
+    expect(registrations).toEqual([
+      {
+        providerId: "openai",
+        config: {
+          api: "openai-completions",
+          baseUrl: `${ORIGIN}/api/llm-proxy/openai-completions/v1`,
+        },
+      },
+    ]);
   });
 
   it("propagates cancellation, timeout, 401, 429 and provider failures unchanged", () => {
