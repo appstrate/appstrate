@@ -185,9 +185,29 @@ describe("Pi chat model binding", () => {
         config: {
           api: "openai-completions",
           baseUrl: `${ORIGIN}/api/llm-proxy/openai-completions/v1`,
+          apiKey: "proxy",
         },
       },
     ]);
+  });
+
+  it("registers the inert proxy credential without refreshing runtime auth state", () => {
+    const registrations: Array<{ providerId: string; config: unknown }> = [];
+    const binding = createPiProxyModelBinding({
+      model: orgModel(),
+      origin: ORIGIN,
+      mintBearer: () => "loopback",
+    })!;
+
+    ensurePiRuntimeModelApi(
+      {
+        getProvider: () => ({ getModels: () => [{ api: "openai-completions" }] }),
+        registerProvider: (providerId, config) => registrations.push({ providerId, config }),
+      },
+      binding,
+    );
+
+    expect(registrations).toEqual([{ providerId: "openai", config: { apiKey: "proxy" } }]);
   });
 
   it("propagates cancellation, timeout, 401, 429 and provider failures unchanged", () => {

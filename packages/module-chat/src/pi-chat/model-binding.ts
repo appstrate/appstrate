@@ -73,7 +73,10 @@ export const PI_CHAT_MODEL_RUNTIME_CREATE_OPTIONS = {
 
 interface PiModelRuntimeApiRegistration {
   getProvider(providerId: string): { getModels(): ReadonlyArray<{ api: string }> } | undefined;
-  registerProvider(providerId: string, config: { api: Api; baseUrl: string }): void;
+  registerProvider(
+    providerId: string,
+    config: { api?: Api; baseUrl?: string; apiKey?: string },
+  ): void;
 }
 
 export type PiChatModelBindingResolution =
@@ -202,10 +205,9 @@ export function ensurePiRuntimeModelApi(
     .getProvider(binding.provider)
     ?.getModels()
     .some((model) => model.api === binding.model.api);
-  if (supportsApi) return;
   runtime.registerProvider(binding.provider, {
-    api: binding.model.api,
-    baseUrl: binding.model.baseUrl,
+    ...(supportsApi ? {} : { api: binding.model.api, baseUrl: binding.model.baseUrl }),
+    apiKey: binding.runtimeApiKey,
   });
 }
 

@@ -262,12 +262,13 @@ export function runPiChat(input: PiChatInput): Response {
         finishLifecycleStage("modelRuntimeCreate");
         if (modelBinding.authMode === "proxy") {
           ensurePiRuntimeModelApi(modelRuntime, modelBinding);
+        } else {
+          await setPiRuntimeCredential(
+            modelRuntime,
+            modelBinding.provider,
+            modelBinding.runtimeApiKey,
+          );
         }
-        await setPiRuntimeCredential(
-          modelRuntime,
-          modelBinding.provider,
-          modelBinding.runtimeApiKey,
-        );
         finishLifecycleStage("credentialSetup");
 
         // MCP server usage guidance is appended to the system prompt, then the
