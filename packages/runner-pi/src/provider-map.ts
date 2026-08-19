@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The Pi `MODEL_API` shape → Pi SDK {@link AuthStorage} provider-key map.
+ * The Pi `MODEL_API` shape → Pi SDK {@link ModelRuntime} provider-key map.
  *
  * Kept in its own module — with NO Pi SDK import — so the boot-critical
  * consumers (`runtime-pi/entrypoint.ts` builds `model.provider` here; the
@@ -22,7 +22,7 @@ export const PROVIDER_BY_API: Record<ModelApiShape, string> = {
   "anthropic-messages": "anthropic",
   "openai-completions": "openai",
   "openai-responses": "openai",
-  "openai-codex-responses": "openai",
+  "openai-codex-responses": "openai-codex",
   "mistral-conversations": "mistral",
   "google-generative-ai": "google",
   "google-vertex": "google-vertex",
@@ -32,7 +32,7 @@ export const PROVIDER_BY_API: Record<ModelApiShape, string> = {
 
 /**
  * Convert a Pi `MODEL_API` string into the provider key the Pi SDK's
- * {@link AuthStorage} uses to look up API keys.
+ * {@link ModelRuntime} uses to select its native provider and look up API keys.
  */
 export function deriveProviderFromApi(api: string): string {
   const provider = (PROVIDER_BY_API as Record<string, string>)[api];

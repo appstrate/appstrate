@@ -77,7 +77,7 @@ async function runAgainstLocalCodex(transport?: Transport): Promise<{
       id: "gpt-5-codex",
       name: "gpt-5-codex",
       api: "openai-codex-responses",
-      provider: "openai",
+      provider: "openai-codex",
       baseUrl: server.url.origin,
       reasoning: false,
       input: ["text"],
@@ -121,13 +121,10 @@ describe("PiRunner provider transport", () => {
   it("keeps the direct auto default and falls back to SSE when WebSocket is unavailable", async () => {
     const result = await runAgainstLocalCodex();
 
-    // Pi 0.84 opens WebSockets through the runtime WebSocket API rather than
-    // an observable fetch upgrade. Bun's test runtime cannot establish one
-    // against this HTTP fixture, so the provider falls back before the POST.
-    expect(result.methods).toEqual(["POST"]);
-    expect(result.paths).toEqual(["/codex/responses"]);
-    expect(result.upgrades).toEqual([null]);
-    expect(result.accepts).toEqual(["application/json"]);
+    expect(result.methods).toEqual(["GET", "POST"]);
+    expect(result.paths).toEqual(["/codex/responses", "/codex/responses"]);
+    expect(result.upgrades).toEqual(["websocket", null]);
+    expect(result.accepts[1]).toBe("text/event-stream");
     expect(result.status).toBe("success");
   });
 
@@ -137,7 +134,7 @@ describe("PiRunner provider transport", () => {
     expect(result.methods).toEqual(["POST"]);
     expect(result.paths).toEqual(["/codex/responses"]);
     expect(result.upgrades).toEqual([null]);
-    expect(result.accepts).toEqual(["application/json"]);
+    expect(result.accepts).toEqual(["text/event-stream"]);
     expect(result.status).toBe("success");
   });
 });

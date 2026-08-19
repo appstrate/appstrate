@@ -159,6 +159,26 @@ export function prepareRequestedThinkingLevel(
   };
 }
 
+/**
+ * Install an ephemeral credential on Pi 0.84's ModelRuntime.
+ *
+ * OpenAI Codex is OAuth-only in Pi's built-in catalog, so `setRuntimeApiKey`
+ * deliberately refuses it. Appstrate already resolves and refreshes that
+ * OAuth bearer outside Pi; a process-local provider overlay exposes the token
+ * as request auth without persisting it or replacing Codex's native serializer.
+ */
+export async function setPiRuntimeCredential(
+  modelRuntime: ModelRuntime,
+  provider: string,
+  apiKey: string,
+): Promise<void> {
+  if (provider === "openai-codex") {
+    modelRuntime.registerProvider(provider, { apiKey });
+    return;
+  }
+  await modelRuntime.setRuntimeApiKey(provider, apiKey);
+}
+
 export interface PiRunnerOptions {
   /** LLM model configuration passed to the Pi SDK. Required. */
   model: PiModelConfig;
@@ -528,7 +548,7 @@ export class PiRunner implements Runner {
     if (!this.opts.modelRuntime && apiKey) {
       // `model.provider` is the Pi SDK's credential key the SDK resolves
       // credentials against; register the key under the same value.
-      await modelRuntime.setRuntimeApiKey(model.provider, apiKey);
+      await setPiRuntimeCredential(modelRuntime, model.provider, apiKey);
     } else if (!this.opts.modelRuntime && !apiKey) {
       // No injected ModelRuntime AND no runtime key — the SDK will call the
       // provider unauthenticated and 401/retry silently (the platform's

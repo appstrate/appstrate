@@ -33,6 +33,7 @@ import {
   loadPiCodingAgentSdk,
   derivePiCompactionSettings,
   prepareRequestedThinkingLevel,
+  setPiRuntimeCredential,
 } from "@appstrate/runner-pi";
 import { CHAT_TOOL_STEP_BUDGET, CHAT_TURN_DEADLINE_MS } from "@appstrate/core/chat-turn-metadata";
 import type { ChatUsageRecord } from "@appstrate/core/chat-contract";
@@ -191,7 +192,11 @@ export function runPiChat(input: PiChatInput): Response {
           modelsPath: null,
           allowModelNetwork: false,
         });
-        await modelRuntime.setRuntimeApiKey(modelBinding.provider, modelBinding.runtimeApiKey);
+        await setPiRuntimeCredential(
+          modelRuntime,
+          modelBinding.provider,
+          modelBinding.runtimeApiKey,
+        );
 
         // MCP server usage guidance is appended to the system prompt, then the
         // (uncacheable) operation index is dropped for providers without a

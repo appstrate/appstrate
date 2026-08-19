@@ -6,6 +6,7 @@ export {
   derivePiCompactionSettings,
   preserveRequestedThinkingLevel,
   prepareRequestedThinkingLevel,
+  setPiRuntimeCredential,
   type PiRunnerOptions,
   type PiModelConfig,
   type BridgeableSession,

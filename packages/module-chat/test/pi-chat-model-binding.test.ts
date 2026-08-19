@@ -92,7 +92,7 @@ describe("Pi chat model binding", () => {
     });
     expect(codex).toMatchObject({
       authMode: "oauth2",
-      provider: "openai",
+      provider: "openai-codex",
       runtimeApiKey: "oauth-secret-in-memory",
       metering: { kind: "inline" },
       model: { id: "gpt-5.3-codex", api: "openai-codex-responses" },
