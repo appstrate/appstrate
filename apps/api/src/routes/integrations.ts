@@ -58,6 +58,7 @@ import {
 } from "../lib/list-query.ts";
 import { setOffsetLinkHeader } from "../lib/pagination-link.ts";
 import { popupHtmlClose, popupHtmlError } from "../lib/oauth-popup-html.ts";
+import { normalizeOAuthErrorCode, oauthDiagnosticSuffix } from "../lib/oauth-error-diagnostic.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { getActor, type Actor } from "../lib/actor.ts";
 import { getAppScope } from "../lib/scope.ts";
@@ -188,8 +189,47 @@ export const updateConnectionSchema = z
 export const oauthClientSchema = z.object({
   client_id: z.string().min(1),
   client_secret: z.string().default(""),
+  /**
+   * The admin's explicit declaration for THIS client, overriding the
+   * manifest's. `"none"` registers a PUBLIC client — the app has no secret at
+   * the provider and authenticates by `client_id` alone.
+   *
+   * Explicit rather than inferred from an empty `client_secret`: that
+   * inference could not tell "declared public" from "secret not supplied", and
+   * silently produced a token request carrying `client_secret=` that providers
+   * like Dropbox reject with `invalid_client`.
+   */
+  token_endpoint_auth_method: z
+    .enum(["client_secret_post", "client_secret_basic", "none"])
+    .optional(),
   redirect_uri: z.url().optional(),
 });
+
+/**
+ * Registration body. `client_secret` defaults to `""` — registering an app
+ * with no secret is how a PUBLIC client is declared.
+ */
+export const oauthClientCreateSchema = oauthClientSchema
+  .extend({ client_secret: z.string().default("") })
+  .refine((b) => !(b.token_endpoint_auth_method === "none" && b.client_secret.length > 0), {
+    message:
+      "token_endpoint_auth_method='none' declares a public client; do not send a client_secret with it",
+    path: ["client_secret"],
+  });
+
+/**
+ * Rotation body. `client_secret` is OPTIONAL and its absence means PRESERVE —
+ * the rotate form submits an empty secret input whenever the admin only meant
+ * to change the redirect URI, and treating that as "clear it" destroyed the
+ * credential and flipped the client public.
+ */
+export const oauthClientUpdateSchema = oauthClientSchema
+  .extend({ client_secret: z.string().optional() })
+  .refine((b) => !(b.token_endpoint_auth_method === "none" && (b.client_secret ?? "").length > 0), {
+    message:
+      "token_endpoint_auth_method='none' declares a public client; do not send a client_secret with it",
+    path: ["client_secret"],
+  });
 
 // ─────────────────────────────────────────────
 // Guards
@@ -304,7 +344,19 @@ export function createIntegrationsRouter() {
     const error = c.req.query("error");
     if (error) {
       logger.warn("Integration OAuth callback received error", { error });
-      return c.html(popupHtmlError(`OAuth error: ${error}`, { state }, 3000));
+      // Authorization-endpoint failure (user denied, unregistered redirect URI,
+      // unknown scope): the provider redirects back with `error` instead of
+      // `code`. Normalized to a code-shaped token before display — the query
+      // string is attacker-reachable, and a page that renders arbitrary text
+      // from it is a phishing surface even when the text is HTML-escaped.
+      const code = normalizeOAuthErrorCode(error);
+      return c.html(
+        popupHtmlError(
+          code ? `OAuth error: ${code}` : "The provider refused the authorization request.",
+          { state },
+          3000,
+        ),
+      );
     }
     if (!code || !state) {
       return c.html(popupHtmlError("Missing required parameters", { state }, 3000));
@@ -314,10 +366,16 @@ export function createIntegrationsRouter() {
       result = await handleIntegrationOAuthCallback(oauthStateStore, code, state);
     } catch (err) {
       if (err instanceof OAuthCallbackError) {
+        // Append the provider's OAuth error code (never its free-text
+        // description — see `oauth-error-diagnostic.ts`). Without it every
+        // token-exchange failure reads identically, and the two an operator
+        // can actually fix — a `redirect_uri` the provider does not know, a
+        // rejected `token_endpoint_auth_method` — are invisible.
+        const diagnostic = oauthDiagnosticSuffix(err.oauthError, err.status);
         const userMessage =
           err.kind === "revoked"
-            ? "The authorization expired before it could be exchanged. Please retry the connection."
-            : "Could not complete the connection. Please try again in a moment.";
+            ? `The authorization expired before it could be exchanged. Please retry the connection.${diagnostic}`
+            : `Could not complete the connection. Please try again in a moment.${diagnostic}`;
         logger.error("Integration OAuth callback failed", {
           subjectId: err.subjectId,
           kind: err.kind,
@@ -494,7 +552,7 @@ export function createIntegrationsRouter() {
       const packageId = c.req.param("packageId")!;
       const authKey = c.req.param("authKey")!;
       const scope = getAppScope(c);
-      const body = await readJsonBody(c, oauthClientSchema);
+      const body = await readJsonBody(c, oauthClientCreateSchema);
       // Reject a manual client on an auto-provisioned (remote MCP) auth. Its
       // token endpoint only accepts a DCR/CIMD-acquired public client, so a
       // hand-entered client_id points at the wrong OAuth server and, once
@@ -511,6 +569,9 @@ export function createIntegrationsRouter() {
       const client = await createIntegrationOAuthClient(scope, packageId, authKey, {
         clientId: body.client_id,
         clientSecret: body.client_secret,
+        ...(body.token_endpoint_auth_method !== undefined
+          ? { tokenEndpointAuthMethod: body.token_endpoint_auth_method }
+          : {}),
         ...(body.redirect_uri !== undefined ? { redirectUri: body.redirect_uri } : {}),
       });
       await recordAuditFromContext(c, {
@@ -534,10 +595,13 @@ export function createIntegrationsRouter() {
         throw notFound(`OAuth client '${clientId}' not found`);
       }
       const scope = getAppScope(c);
-      const body = await readJsonBody(c, oauthClientSchema);
+      const body = await readJsonBody(c, oauthClientUpdateSchema);
       const client = await updateIntegrationOAuthClient(scope, clientId, {
         clientId: body.client_id,
-        clientSecret: body.client_secret,
+        ...(body.client_secret !== undefined ? { clientSecret: body.client_secret } : {}),
+        ...(body.token_endpoint_auth_method !== undefined
+          ? { tokenEndpointAuthMethod: body.token_endpoint_auth_method }
+          : {}),
         ...(body.redirect_uri !== undefined ? { redirectUri: body.redirect_uri } : {}),
       });
       await recordAuditFromContext(c, {

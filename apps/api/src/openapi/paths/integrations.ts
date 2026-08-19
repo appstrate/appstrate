@@ -166,6 +166,7 @@ const integrationClientsListSchema = {
           "is_default",
           "auto_provisioned",
           "has_client_secret",
+          "token_endpoint_auth_method",
           "redirect_uri",
         ],
         properties: {
@@ -179,6 +180,12 @@ const integrationClientsListSchema = {
           is_default: { type: "boolean" },
           auto_provisioned: { type: "boolean" },
           has_client_secret: { type: "boolean" },
+          token_endpoint_auth_method: {
+            type: ["string", "null"],
+            enum: ["client_secret_post", "client_secret_basic", "none", null],
+            description:
+              "Method declared for this client, overriding the manifest's. `none` = PUBLIC client (no secret at the provider). `null` = undeclared.",
+          },
           redirect_uri: { type: ["string", "null"] },
         },
       },
@@ -195,6 +202,7 @@ const oauthClientSchema = {
     "auth_key",
     "client_id",
     "has_client_secret",
+    "token_endpoint_auth_method",
     "redirect_uri",
     "createdAt",
     "updatedAt",
@@ -211,6 +219,12 @@ const oauthClientSchema = {
     auth_key: { type: "string" },
     client_id: { type: "string" },
     has_client_secret: { type: "boolean" },
+    token_endpoint_auth_method: {
+      type: ["string", "null"],
+      enum: ["client_secret_post", "client_secret_basic", "none", null],
+      description:
+        "Client-authentication method declared for THIS client, overriding the integration manifest's. `none` means a PUBLIC client: the app is registered at the provider without a secret and authenticates by `client_id` alone. `null` means undeclared — the manifest's value applies.",
+    },
     redirect_uri: { type: ["string", "null"] },
     createdAt: { type: "string", format: "date-time" },
     updatedAt: { type: "string", format: "date-time" },
@@ -293,6 +307,7 @@ const integrationDetailSchema = {
     "allow_undeclared_tools",
     "active",
     "block_user_connections",
+    "platform_redirect_uri",
   ],
   properties: {
     manifest: { type: "object", additionalProperties: true },
@@ -325,6 +340,12 @@ const integrationDetailSchema = {
     // Admin gate (`block_user_connections`): when `true`, only org admins
     // may create personal connections. `false` when not activated.
     block_user_connections: { type: "boolean" },
+    // The platform's own OAuth callback — what connect sends when the resolved
+    // client declares no `redirect_uri` override of its own. Same helper the
+    // connect strategy uses, so this value cannot drift from the sent one; a
+    // consumer showing "the URI to register at the provider" must still prefer
+    // the default client's override when it has one.
+    platform_redirect_uri: { type: "string", format: "uri" },
   },
 } as const;
 
@@ -562,6 +583,12 @@ export const integrationsPaths = {
               properties: {
                 client_id: { type: "string", minLength: 1 },
                 client_secret: { type: "string", default: "" },
+                token_endpoint_auth_method: {
+                  type: "string",
+                  enum: ["client_secret_post", "client_secret_basic", "none"],
+                  description:
+                    "Explicit client-authentication method for this client, overriding the manifest's. Send `none` to register a PUBLIC client (no secret at the provider). Omit to leave it undeclared, in which case the manifest's value applies. A blank `client_secret` is recorded as `none`.",
+                },
                 redirect_uri: { type: "string", format: "uri" },
               },
             },
@@ -600,10 +627,20 @@ export const integrationsPaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["client_id", "client_secret"],
+              required: ["client_id"],
               properties: {
                 client_id: { type: "string", minLength: 1 },
-                client_secret: { type: "string", default: "" },
+                client_secret: {
+                  type: "string",
+                  description:
+                    "OMIT to preserve the stored secret. An empty string declares the client PUBLIC and clears it. The rotate form submits an empty input whenever only the redirect URI changed, so the two must stay distinguishable.",
+                },
+                token_endpoint_auth_method: {
+                  type: "string",
+                  enum: ["client_secret_post", "client_secret_basic", "none"],
+                  description:
+                    "Explicit client-authentication method for this client, overriding the manifest's. Send `none` to register a PUBLIC client (no secret at the provider). Omit to leave it undeclared, in which case the manifest's value applies. A blank `client_secret` is recorded as `none`.",
+                },
                 redirect_uri: { type: "string", format: "uri" },
               },
             },

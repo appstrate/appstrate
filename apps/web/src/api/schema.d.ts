@@ -9214,7 +9214,14 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description Usage not allowed — a platform admission module (e.g. metering) blocked the turn for a system-provided model (RFC 9457 problem+json). */
+            /** @description The selected model's subscription credential is dead (revoked, or expired beyond refresh), so the turn is refused before inference starts rather than failing upstream. RFC 9457 problem+json with `code: "needs_reconnection"`. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Usage not allowed — a platform admission module (e.g. metering) blocked the turn for a system-provided model. RFC 9457 problem+json; `code` is `quota_exceeded` when the org is out of credits, or `subscription_blocked` when its subscription is suspended or cancelled. */
             402: {
                 headers: {
                     [name: string]: unknown;
@@ -10992,6 +10999,8 @@ export interface operations {
                         allow_undeclared_tools: boolean;
                         active: boolean;
                         block_user_connections: boolean;
+                        /** Format: uri */
+                        platform_redirect_uri: string;
                     };
                 };
             };
@@ -11100,6 +11109,8 @@ export interface operations {
                         allow_undeclared_tools: boolean;
                         active: boolean;
                         block_user_connections: boolean;
+                        /** Format: uri */
+                        platform_redirect_uri: string;
                     };
                 };
             };
@@ -11156,6 +11167,11 @@ export interface operations {
                             is_default: boolean;
                             auto_provisioned: boolean;
                             has_client_secret: boolean;
+                            /**
+                             * @description Method declared for this client, overriding the manifest's. `none` = PUBLIC client (no secret at the provider). `null` = undeclared.
+                             * @enum {string|null}
+                             */
+                            token_endpoint_auth_method: "client_secret_post" | "client_secret_basic" | "none" | null;
                             redirect_uri: string | null;
                         }[];
                     };
@@ -11386,6 +11402,11 @@ export interface operations {
                             is_default: boolean;
                             auto_provisioned: boolean;
                             has_client_secret: boolean;
+                            /**
+                             * @description Method declared for this client, overriding the manifest's. `none` = PUBLIC client (no secret at the provider). `null` = undeclared.
+                             * @enum {string|null}
+                             */
+                            token_endpoint_auth_method: "client_secret_post" | "client_secret_basic" | "none" | null;
                             redirect_uri: string | null;
                         }[];
                     };
@@ -11419,6 +11440,11 @@ export interface operations {
                     client_id: string;
                     /** @default  */
                     client_secret: string;
+                    /**
+                     * @description Explicit client-authentication method for this client, overriding the manifest's. Send `none` to register a PUBLIC client (no secret at the provider). Omit to leave it undeclared, in which case the manifest's value applies. A blank `client_secret` is recorded as `none`.
+                     * @enum {string}
+                     */
+                    token_endpoint_auth_method?: "client_secret_post" | "client_secret_basic" | "none";
                     /** Format: uri */
                     redirect_uri?: string;
                 };
@@ -11444,6 +11470,11 @@ export interface operations {
                         auth_key: string;
                         client_id: string;
                         has_client_secret: boolean;
+                        /**
+                         * @description Client-authentication method declared for THIS client, overriding the integration manifest's. `none` means a PUBLIC client: the app is registered at the provider without a secret and authenticates by `client_id` alone. `null` means undeclared — the manifest's value applies.
+                         * @enum {string|null}
+                         */
+                        token_endpoint_auth_method: "client_secret_post" | "client_secret_basic" | "none" | null;
                         redirect_uri: string | null;
                         /** Format: date-time */
                         createdAt: string;
@@ -11830,8 +11861,13 @@ export interface operations {
             content: {
                 "application/json": {
                     client_id: string;
-                    /** @default  */
-                    client_secret: string;
+                    /** @description OMIT to preserve the stored secret. An empty string declares the client PUBLIC and clears it. The rotate form submits an empty input whenever only the redirect URI changed, so the two must stay distinguishable. */
+                    client_secret?: string;
+                    /**
+                     * @description Explicit client-authentication method for this client, overriding the manifest's. Send `none` to register a PUBLIC client (no secret at the provider). Omit to leave it undeclared, in which case the manifest's value applies. A blank `client_secret` is recorded as `none`.
+                     * @enum {string}
+                     */
+                    token_endpoint_auth_method?: "client_secret_post" | "client_secret_basic" | "none";
                     /** Format: uri */
                     redirect_uri?: string;
                 };
@@ -11857,6 +11893,11 @@ export interface operations {
                         auth_key: string;
                         client_id: string;
                         has_client_secret: boolean;
+                        /**
+                         * @description Client-authentication method declared for THIS client, overriding the integration manifest's. `none` means a PUBLIC client: the app is registered at the provider without a secret and authenticates by `client_id` alone. `null` means undeclared — the manifest's value applies.
+                         * @enum {string|null}
+                         */
+                        token_endpoint_auth_method: "client_secret_post" | "client_secret_basic" | "none" | null;
                         redirect_uri: string | null;
                         /** Format: date-time */
                         createdAt: string;
@@ -12105,6 +12146,8 @@ export interface operations {
                         allow_undeclared_tools: boolean;
                         active: boolean;
                         block_user_connections: boolean;
+                        /** Format: uri */
+                        platform_redirect_uri: string;
                     };
                 };
             };

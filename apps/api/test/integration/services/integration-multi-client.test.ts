@@ -180,6 +180,7 @@ describe("integration multi-client", () => {
       expect(c).toEqual({
         clientId: "sys-client.apps.googleusercontent.com",
         clientSecret: "sys-secret",
+        tokenEndpointAuthMethod: undefined,
       });
     });
 
@@ -192,7 +193,11 @@ describe("integration multi-client", () => {
         AUTH_KEY,
         undefined,
       );
-      expect(c).toEqual({ clientId: "custom-client-id", clientSecret: "custom-secret" });
+      expect(c).toEqual({
+        clientId: "custom-client-id",
+        clientSecret: "custom-secret",
+        tokenEndpointAuthMethod: undefined,
+      });
     });
 
     it("does NOT resolve a custom id belonging to another application (escalation guard)", async () => {
@@ -263,9 +268,12 @@ describe("integration multi-client", () => {
         AUTH_KEY,
         "none",
       );
+      // The method comes back WITH the credentials, and the two agree: no
+      // caller downstream re-derives it from the empty secret.
       expect(c).toEqual({
         clientId: "sys-client.apps.googleusercontent.com",
         clientSecret: "",
+        tokenEndpointAuthMethod: "none",
       });
     });
 
@@ -278,7 +286,11 @@ describe("integration multi-client", () => {
         AUTH_KEY,
         "none",
       );
-      expect(c).toEqual({ clientId: "custom-client-id", clientSecret: "" });
+      expect(c).toEqual({
+        clientId: "custom-client-id",
+        clientSecret: "",
+        tokenEndpointAuthMethod: "none",
+      });
     });
   });
 
@@ -471,6 +483,7 @@ describe("integration multi-client", () => {
             client_id: "org-client-id",
             clientSecret: "org-secret",
             has_client_secret: true,
+            token_endpoint_auth_method: null,
             redirect_uri: null,
             isDefault,
             autoProvisioned: false,
@@ -531,6 +544,7 @@ describe("integration multi-client", () => {
           client_id: s.clientId,
           clientSecret: "secret",
           has_client_secret: true,
+          token_endpoint_auth_method: null,
           redirect_uri: null,
           isDefault: s.isDefault,
           autoProvisioned: false,

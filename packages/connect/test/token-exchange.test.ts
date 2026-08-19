@@ -122,6 +122,45 @@ describe("exchangeAuthorizationCode — client auth method", () => {
     expect(params.get("client_id")).toBe("client-id");
     expect(params.get("client_secret")).toBeNull();
   });
+
+  // Regression: a secret-based method paired with a blank secret used to be
+  // sent anyway, as `client_secret=` in the body or `Basic base64("id:")` in
+  // the header. Dropbox answered `invalid_client` (HTTP 400) and no connection
+  // was created; Airtable tolerated the equivalent empty Basic header, which
+  // is why the class shipped undetected. The pair is now resolved upstream
+  // (`resolveIntegrationClientById` returns the method WITH the secret it
+  // belongs to), so an incoherent pair here can only be a bug — and is
+  // refused rather than silently downgraded, which would hide the same drift.
+  it("refuses client_secret_post with a BLANK secret instead of sending an empty one", async () => {
+    const store = memoryStore();
+    const { fetch: stub, captured } = recordingFetch(jsonResponse({ access_token: "AT" }));
+    await expect(
+      exchangeAuthorizationCode(
+        baseInput(store, {
+          tokenEndpointAuthMethod: "client_secret_post",
+          clientSecret: "",
+          fetchImpl: stub,
+        }),
+      ),
+    ).rejects.toThrow(/requires a client_secret/);
+    // Nothing was put on the wire.
+    expect(captured.value).toBeNull();
+  });
+
+  it("refuses client_secret_basic with a BLANK secret", async () => {
+    const store = memoryStore();
+    const { fetch: stub, captured } = recordingFetch(jsonResponse({ access_token: "AT" }));
+    await expect(
+      exchangeAuthorizationCode(
+        baseInput(store, {
+          tokenEndpointAuthMethod: "client_secret_basic",
+          clientSecret: "",
+          fetchImpl: stub,
+        }),
+      ),
+    ).rejects.toThrow(/requires a client_secret/);
+    expect(captured.value).toBeNull();
+  });
 });
 
 describe("exchangeAuthorizationCode — error classification", () => {

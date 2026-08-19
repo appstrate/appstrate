@@ -5159,7 +5159,8 @@
                     "tool_catalog",
                     "allow_undeclared_tools",
                     "active",
-                    "block_user_connections"
+                    "block_user_connections",
+                    "platform_redirect_uri"
                   ],
                   "properties": {
                     "manifest": {
@@ -5355,6 +5356,10 @@
                     },
                     "block_user_connections": {
                       "type": "boolean"
+                    },
+                    "platform_redirect_uri": {
+                      "type": "string",
+                      "format": "uri"
                     }
                   }
                 }
@@ -5435,7 +5440,8 @@
                     "tool_catalog",
                     "allow_undeclared_tools",
                     "active",
-                    "block_user_connections"
+                    "block_user_connections",
+                    "platform_redirect_uri"
                   ],
                   "properties": {
                     "manifest": {
@@ -5631,6 +5637,10 @@
                     },
                     "block_user_connections": {
                       "type": "boolean"
+                    },
+                    "platform_redirect_uri": {
+                      "type": "string",
+                      "format": "uri"
                     }
                   }
                 }
@@ -7257,7 +7267,8 @@
                     "tool_catalog",
                     "allow_undeclared_tools",
                     "active",
-                    "block_user_connections"
+                    "block_user_connections",
+                    "platform_redirect_uri"
                   ],
                   "properties": {
                     "manifest": {
@@ -7453,6 +7464,10 @@
                     },
                     "block_user_connections": {
                       "type": "boolean"
+                    },
+                    "platform_redirect_uri": {
+                      "type": "string",
+                      "format": "uri"
                     }
                   }
                 }
@@ -16768,7 +16783,7 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["manifest", "content", "lock_version"],
+                "required": ["manifest", "lock_version"],
                 "properties": {
                   "manifest": {
                     "type": "object",
@@ -16952,7 +16967,7 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["manifest", "content", "lock_version"],
+                "required": ["manifest", "lock_version"],
                 "properties": {
                   "manifest": {
                     "type": "object",

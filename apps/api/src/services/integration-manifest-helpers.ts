@@ -101,7 +101,11 @@ export type SupportedTokenEndpointAuthMethod =
  * `client_secret_basic`).
  */
 export function toSupportedTokenEndpointAuthMethod(
-  method: AfpsManifestAuth["token_endpoint_auth_method"],
+  // Widened to `string` so the SAME narrowing serves a value read back from
+  // `integration_oauth_clients.token_endpoint_auth_method` (a text column,
+  // constrained by a CHECK the type system cannot see) as well as one read off
+  // a manifest. One parse point, one set of accepted values.
+  method: AfpsManifestAuth["token_endpoint_auth_method"] | string | undefined,
 ): SupportedTokenEndpointAuthMethod | undefined {
   return method === "client_secret_basic" || method === "client_secret_post" || method === "none"
     ? method

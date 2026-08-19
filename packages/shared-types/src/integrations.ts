@@ -165,8 +165,20 @@ export interface IntegrationOAuthClient {
   integration_package_id: string;
   auth_key: string;
   client_id: string;
-  /** True when the client_secret blob is non-empty (private client). */
+  /** True when the client_secret blob is non-empty (confidential client). */
   has_client_secret: boolean;
+  /**
+   * `token_endpoint_auth_method` declared for THIS client, overriding the
+   * manifest's. `"none"` means the admin registered a PUBLIC client — the app
+   * has no secret at the provider and authenticates by `client_id` alone.
+   * `null` means undeclared: the manifest's value applies.
+   *
+   * Read by the UI's "public client" checkbox, which used to render
+   * `!has_client_secret` — a guess that could not distinguish "declared
+   * public" from "secret not yet entered", and left the secret field disabled
+   * on every revisit of a client saved without one.
+   */
+  token_endpoint_auth_method: string | null;
   redirect_uri: string | null;
   createdAt: string;
   updatedAt: string;

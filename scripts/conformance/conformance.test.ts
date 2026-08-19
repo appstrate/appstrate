@@ -7,6 +7,16 @@ import { diffToolSets } from "./tool-diff.ts";
 import { resolveToken, resolveAccessToken, credentialedCount, _resetCredsCache } from "./creds.ts";
 import { remoteUrl, toolsPolicyKeys, allowsUndeclared } from "./remote-parity.ts";
 import { applyAuth, checkAuthLiveness } from "./auth-live.ts";
+import { metadataCandidates, compareAuth } from "./oauth-metadata.ts";
+import {
+  checkRefreshStrategy,
+  checkUnverifiedBacklog,
+  checkBacklogCeiling,
+  UNVERIFIED,
+  UNVERIFIED_CEILING,
+} from "./refresh-strategy.ts";
+import { declaredIdentityEndpoints, classifyIdentityProbe } from "./identity-endpoint.ts";
+import { buildDiscoveryProbes, discoveryIssuerMatches } from "@appstrate/connect";
 import { listAllTools } from "./mcp-list.ts";
 import { snapshotSlug, writeSnapshot, readSnapshot } from "./snapshot.ts";
 import { rm, mkdtemp } from "node:fs/promises";
@@ -433,5 +443,414 @@ describe("snapshot", () => {
 
   it("readSnapshot returns null when absent", async () => {
     expect(await readSnapshot(tmpdir(), "@x/does-not-exist-xyz")).toBeNull();
+  });
+});
+
+describe("oauth-metadata — candidate discovery", () => {
+  // Probe SHAPES are owned by `buildDiscoveryProbes` in @appstrate/connect and
+  // covered there; what matters here is that this check delegates to it rather
+  // than rebuilding it, and labels the result issuer-trusted.
+  it("delegates issuer probes to the connect engine's builder", () => {
+    const candidates = metadataCandidates({ type: "oauth2", issuer: "https://auth.example.com" });
+    expect(candidates.map((c) => c.url)).toEqual(buildDiscoveryProbes("https://auth.example.com"));
+    expect(candidates.every((c) => c.trust === "issuer")).toBe(true);
+  });
+
+  it("covers the RFC 8414 inserted form for a path-bearing issuer", () => {
+    const urls = metadataCandidates({ type: "oauth2", issuer: "https://example.com/tenant" }).map(
+      (c) => c.url,
+    );
+    expect(urls).toContain("https://example.com/.well-known/oauth-authorization-server/tenant");
+    expect(urls).toContain("https://example.com/tenant/.well-known/openid-configuration");
+  });
+
+  it("emits no duplicate URL", () => {
+    const urls = metadataCandidates({
+      type: "oauth2",
+      issuer: "https://auth.example.com",
+      token_endpoint: "https://api.example.com/oauth/token",
+    }).map((c) => c.url);
+    expect(new Set(urls).size).toBe(urls.length);
+  });
+
+  it("puts the issuer candidates ahead of the probed ones and never duplicates a URL", () => {
+    const candidates = metadataCandidates({
+      type: "oauth2",
+      issuer: "https://auth.example.com",
+      token_endpoint: "https://auth.example.com/oauth/token",
+    });
+    expect(candidates).toHaveLength(2);
+    expect(candidates.every((c) => c.trust === "issuer")).toBe(true);
+  });
+
+  it("ignores a malformed token_endpoint instead of throwing", () => {
+    expect(metadataCandidates({ type: "oauth2", token_endpoint: "not a url" })).toEqual([]);
+  });
+
+  it("yields nothing when the auth declares neither issuer nor token_endpoint", () => {
+    expect(metadataCandidates({ type: "oauth2" })).toEqual([]);
+  });
+});
+
+describe("oauth-metadata — manifest vs published metadata", () => {
+  const META = "https://auth.example.com/.well-known/openid-configuration";
+
+  it("passes a declared auth method the AS lists as supported", () => {
+    const findings = compareAuth(
+      "@test/pkg",
+      "primary",
+      { type: "oauth2", token_endpoint_auth_method: "client_secret_basic" },
+      { token_endpoint_auth_methods_supported: ["client_secret_basic", "client_secret_post"] },
+      META,
+      "issuer",
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0]!.severity).toBe("info");
+  });
+
+  // The exact defect that shipped: a manifest declaring `client_secret_post`
+  // against an AS that only accepts HTTP Basic. The redirect succeeds and the
+  // token exchange fails with `invalid_client`.
+  it("fails an issuer-bound auth method the AS does not support", () => {
+    const findings = compareAuth(
+      "@test/pkg",
+      "primary",
+      { type: "oauth2", token_endpoint_auth_method: "client_secret_post" },
+      { token_endpoint_auth_methods_supported: ["client_secret_basic"] },
+      META,
+      "issuer",
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0]!.severity).toBe("fail");
+    expect(findings[0]!.message).toContain("invalid_client");
+  });
+
+  it("only warns for an auth-method contradiction on a probed document", () => {
+    const findings = compareAuth(
+      "@test/pkg",
+      "primary",
+      { type: "oauth2", token_endpoint_auth_method: "client_secret_post" },
+      { token_endpoint_auth_methods_supported: ["client_secret_basic"] },
+      META,
+      "probed",
+    );
+    expect(findings[0]!.severity).toBe("warn");
+    expect(findings[0]!.message).toContain("may describe a different authorization server");
+  });
+
+  // RFC 6749 §2.3.1 makes HTTP Basic the method every AS must accept, and it is
+  // also the platform default when a manifest omits the field — so an omitted
+  // declaration must be checked as `client_secret_basic`, not skipped.
+  it("checks an omitted auth method as client_secret_basic", () => {
+    const findings = compareAuth(
+      "@test/pkg",
+      "primary",
+      { type: "oauth2" },
+      { token_endpoint_auth_methods_supported: ["client_secret_post"] },
+      META,
+      "issuer",
+    );
+    expect(findings[0]!.severity).toBe("fail");
+    expect(findings[0]!.message).toContain("client_secret_basic");
+  });
+
+  it("says nothing about the auth method when the AS publishes no list", () => {
+    const findings = compareAuth(
+      "@test/pkg",
+      "primary",
+      { type: "oauth2", token_endpoint_auth_method: "client_secret_post" },
+      {},
+      META,
+      "issuer",
+    );
+    expect(findings).toEqual([]);
+  });
+
+  it("fails an endpoint that contradicts an issuer-bound document", () => {
+    const findings = compareAuth(
+      "@test/pkg",
+      "primary",
+      { type: "oauth2", token_endpoint: "https://old.example.com/token" },
+      { token_endpoint: "https://auth.example.com/token" },
+      META,
+      "issuer",
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0]!.severity).toBe("fail");
+    expect(findings[0]!.message).toContain("token_endpoint");
+  });
+
+  // Every endpoint mismatch this check ever reported from a probed document was
+  // a document describing a DIFFERENT authorization server on the same host.
+  // A warning an operator dismisses every week teaches them to dismiss the
+  // file, so the comparison does not run there at all.
+  it("says nothing about endpoints on a probed document", () => {
+    const findings = compareAuth(
+      "@test/pkg",
+      "primary",
+      { type: "oauth2", token_endpoint: "https://old.example.com/token" },
+      { token_endpoint: "https://auth.example.com/token" },
+      META,
+      "probed",
+    );
+    expect(findings).toEqual([]);
+  });
+
+  // The userinfo hint is an opportunity, not an accusation — it holds for
+  // whichever authorization server the document describes, so it survives on a
+  // probed document where the equality checks do not.
+  it("still surfaces a missing identity mechanism from a probed document", () => {
+    const findings = compareAuth(
+      "@test/pkg",
+      "primary",
+      { type: "oauth2" },
+      { userinfo_endpoint: "https://auth.example.com/userinfo" },
+      META,
+      "probed",
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0]!.severity).toBe("warn");
+  });
+
+  it("warns when the provider offers userinfo and the manifest declares no identity mechanism", () => {
+    const findings = compareAuth(
+      "@test/pkg",
+      "primary",
+      { type: "oauth2" },
+      { userinfo_endpoint: "https://auth.example.com/userinfo" },
+      META,
+      "issuer",
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0]!.severity).toBe("warn");
+    expect(findings[0]!.message).toContain("Connexion N");
+  });
+
+  // An auth mapping `identity_claims` onto `id_token` claims resolves an
+  // account without ever calling userinfo — every Google integration here does
+  // exactly that — so demanding the endpoint too would be pure noise.
+  it("stays silent about userinfo when identity_claims are declared", () => {
+    const findings = compareAuth(
+      "@test/pkg",
+      "primary",
+      { type: "oauth2", identity_claims: { accountId: "$.email" } } as never,
+      { userinfo_endpoint: "https://auth.example.com/userinfo" },
+      META,
+      "issuer",
+    );
+    expect(findings).toEqual([]);
+  });
+
+  it("stays silent about fields the document does not publish", () => {
+    const findings = compareAuth(
+      "@test/pkg",
+      "primary",
+      { type: "oauth2", authorization_endpoint: "https://auth.example.com/authorize" },
+      {},
+      META,
+      "issuer",
+    );
+    expect(findings).toEqual([]);
+  });
+});
+
+describe("oauth-metadata — issuer binding (shared with the connect engine)", () => {
+  it("binds a document whose issuer claim matches the declared one", () => {
+    expect(discoveryIssuerMatches("https://auth.example.com", "https://auth.example.com")).toBe(
+      true,
+    );
+  });
+
+  it("ignores a trailing slash on either side", () => {
+    expect(discoveryIssuerMatches("https://auth.example.com/", "https://auth.example.com")).toBe(
+      true,
+    );
+    expect(discoveryIssuerMatches("https://auth.example.com", "https://auth.example.com/")).toBe(
+      true,
+    );
+  });
+
+  it("refuses a document describing a different issuer", () => {
+    expect(discoveryIssuerMatches("https://other.example.com", "https://auth.example.com")).toBe(
+      false,
+    );
+  });
+
+  // RFC 8414 §3.2 makes `issuer` REQUIRED. Accepting a document that omits it
+  // would let an unrelated or malformed file be treated as authoritative — and
+  // issuer trust is exactly what turns a contradiction into a `fail` that opens
+  // an issue against a manifest that may well be correct.
+  it("refuses a document with no issuer claim at all", () => {
+    expect(discoveryIssuerMatches(undefined, "https://auth.example.com")).toBe(false);
+    expect(discoveryIssuerMatches("", "https://auth.example.com")).toBe(false);
+    expect(discoveryIssuerMatches(null, "https://auth.example.com")).toBe(false);
+    expect(discoveryIssuerMatches(42, "https://auth.example.com")).toBe(false);
+  });
+});
+
+describe("identity-endpoint — declaration reading", () => {
+  it("collects every declared userinfo_endpoint with its auth key", () => {
+    expect(
+      declaredIdentityEndpoints({
+        auths: {
+          primary: { type: "oauth2", userinfo_endpoint: "https://api.example.com/me" },
+          pat: { type: "api_key" },
+        },
+      }),
+    ).toEqual([{ authKey: "primary", url: "https://api.example.com/me" }]);
+  });
+
+  it("yields nothing when no auth declares one", () => {
+    expect(declaredIdentityEndpoints({ auths: { primary: { type: "oauth2" } } })).toEqual([]);
+  });
+
+  it("tolerates a missing or foreign auths shape", () => {
+    expect(declaredIdentityEndpoints({})).toEqual([]);
+    expect(declaredIdentityEndpoints({ auths: "nope" })).toEqual([]);
+    expect(declaredIdentityEndpoints({ auths: { primary: null } })).toEqual([]);
+  });
+});
+
+describe("identity-endpoint — probe classification", () => {
+  const probe = (status: number) =>
+    classifyIdentityProbe("@test/pkg", "primary", "https://api.example.com/me", status);
+
+  // 403 is read the same way as 401 even though it is ambiguous — Reddit
+  // returns it for a datacenter-IP block, not for the token. Both readings
+  // agree on the only claim made here: something serves this path.
+  it("treats a refusal as proof the endpoint is live", () => {
+    expect(probe(401).severity).toBe("info");
+    expect(probe(403).severity).toBe("info");
+  });
+
+  // The failure this check exists for: a renamed or retired path degrades every
+  // connection to accountId "default" without raising anything.
+  it("fails a status that means the path is wrong", () => {
+    for (const status of [404, 405, 410]) {
+      const finding = probe(status);
+      expect(finding.severity).toBe("fail");
+      expect(finding.message).toContain("default");
+    }
+  });
+
+  it("fails a 2xx — an invalid token must never be served content", () => {
+    expect(probe(200).severity).toBe("fail");
+    expect(probe(204).severity).toBe("fail");
+  });
+
+  // A third party being down is not a manifest defect, and a check that fails
+  // the run on someone else's outage gets muted.
+  it("only warns on a status that proves nothing", () => {
+    expect(probe(500).severity).toBe("warn");
+    expect(probe(429).severity).toBe("warn");
+    expect(probe(302).severity).toBe("warn");
+  });
+
+  it("names the endpoint it probed in every finding", () => {
+    for (const status of [401, 404, 200, 500]) {
+      expect(probe(status).message).toContain("https://api.example.com/me");
+      expect(probe(status).check).toBe("identity-endpoint");
+    }
+  });
+});
+
+describe("refresh-strategy", () => {
+  const oauth = (auth: Record<string, unknown>): SystemPackageEntry =>
+    entry({
+      packageId: "@appstrate/probe",
+      manifest: { auths: { primary: { type: "oauth2", ...auth } } },
+    });
+
+  it("accepts an authorize-time offline param (Google / Dropbox / Reddit shape)", () => {
+    for (const params of [
+      { access_type: "offline", prompt: "consent" },
+      { token_access_type: "offline" },
+      { duration: "permanent" },
+    ]) {
+      const [finding] = checkRefreshStrategy(oauth({ authorization_params: params }));
+      expect(finding!.severity).toBe("info");
+    }
+  });
+
+  // The first version accepted ANY non-empty authorization_params as evidence,
+  // so a manifest carrying only `prompt` passed while requesting no offline
+  // access at all — the same "looks like it declares something" failure the
+  // check exists to catch.
+  it("rejects an authorize param that does not request offline access", () => {
+    for (const params of [
+      { prompt: "select_account" },
+      { access_type: "online" },
+      { duration: "temporary" },
+      { token_access_type: "legacy" },
+    ]) {
+      const [finding] = checkRefreshStrategy(oauth({ authorization_params: params }));
+      expect(finding!.severity).toBe("fail");
+    }
+  });
+
+  it("accepts an offline scope in every spelling providers use", () => {
+    for (const scope of ["offline_access", "offline", "offline.access"]) {
+      const [finding] = checkRefreshStrategy(oauth({ default_scopes: ["read", scope] }));
+      expect(finding!.severity).toBe("info");
+    }
+  });
+
+  it("accepts an explicit _meta declaration", () => {
+    for (const refresh_token_issuance of ["default", "not_supported"]) {
+      const [finding] = checkRefreshStrategy(
+        oauth({ _meta: { "dev.appstrate/oauth": { refresh_token_issuance } } }),
+      );
+      expect(finding!.severity).toBe("info");
+    }
+  });
+
+  it("keeps the backlog shrink-only", () => {
+    // A ceiling below the current size is what a NEW waiver would look like.
+    expect(UNVERIFIED.size).toBeLessThanOrEqual(UNVERIFIED_CEILING);
+    expect(checkBacklogCeiling()).toEqual([]);
+  });
+
+  // The whole point: a manifest that says nothing about offline access is the
+  // @appstrate/dropbox / @appstrate/youtube shape, and it must not pass.
+  it("fails an auth that declares no refresh strategy at all", () => {
+    const [finding] = checkRefreshStrategy(oauth({ default_scopes: ["files.read"] }));
+    expect(finding!.severity).toBe("fail");
+    expect(finding!.message).toContain("no refresh strategy");
+  });
+
+  it("treats an unrecognised _meta refresh value as absent, not as a waiver", () => {
+    const [finding] = checkRefreshStrategy(
+      oauth({ _meta: { "dev.appstrate/oauth": { refresh_token_issuance: "n/a" } } }),
+    );
+    expect(finding!.severity).toBe("fail");
+  });
+
+  it("ignores empty authorization_params — an empty object asks for nothing", () => {
+    const [finding] = checkRefreshStrategy(oauth({ authorization_params: {} }));
+    expect(finding!.severity).toBe("fail");
+  });
+
+  it("skips non-oauth2 auths entirely", () => {
+    const apiKey = entry({ manifest: { auths: { primary: { type: "api_key" } } } });
+    expect(checkRefreshStrategy(apiKey)).toEqual([]);
+  });
+
+  it("downgrades a listed backlog entry to a warning", () => {
+    const listed = [...UNVERIFIED][0]!;
+    const [packageId, authKey] = listed.split(":") as [string, string];
+    const backlogged = entry({
+      packageId,
+      manifest: { auths: { [authKey]: { type: "oauth2", default_scopes: ["read"] } } },
+    });
+    const [finding] = checkRefreshStrategy(backlogged);
+    expect(finding!.severity).toBe("warn");
+    expect(finding!.message).toContain("unverified backlog");
+  });
+
+  it("fails a backlog entry that no longer matches any auth", () => {
+    const findings = checkUnverifiedBacklog([]);
+    expect(findings.length).toBe(UNVERIFIED.size);
+    expect(findings.every((f) => f.severity === "fail")).toBe(true);
+    expect(findings[0]!.message).toContain("stale UNVERIFIED entry");
   });
 });

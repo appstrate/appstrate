@@ -17,7 +17,6 @@
  * Behaviour is unchanged from the inline route logic it replaces.
  */
 
-import { getEnv } from "@appstrate/env";
 import { decodeJwtPayload } from "@appstrate/core/jwt";
 import {
   initiateIntegrationOAuth,
@@ -26,6 +25,7 @@ import {
   SsrfBlockedError,
 } from "@appstrate/connect";
 import { invalidRequest } from "../../lib/errors.ts";
+import { integrationCallbackUrl } from "../../lib/integration-callback-url.ts";
 import { logger } from "../../lib/logger.ts";
 import { oauthStateStore } from "./oauth-state-store.ts";
 import { toSupportedTokenEndpointAuthMethod } from "../integration-manifest-helpers.ts";
@@ -46,6 +46,30 @@ import type {
   ConnectCompleteInput,
   IntegrationConnectStrategy,
 } from "./strategy.ts";
+
+/**
+ * Ceiling for the identity (`userinfo`) request. Deliberately tighter than the
+ * 30s token-exchange budget: by the time this runs the credential is already
+ * in hand, so waiting longer trades a saved connection for a nicer label.
+ */
+const USERINFO_TIMEOUT_MS = 10_000;
+
+/**
+ * The manifest's `_meta["dev.appstrate/oauth"].refresh_token_issuance`, when it
+ * declares one.
+ *
+ * `"not_supported"` = the authorization server issues access-only tokens by
+ * design (the connection re-authorises at expiry). `"default"` = it issues a
+ * refresh token unconditionally, which needs no special handling here.
+ */
+function refreshTokenIssuance(auth: Record<string, unknown>): string | undefined {
+  const meta = auth._meta;
+  if (!meta || typeof meta !== "object") return undefined;
+  const oauthMeta = (meta as Record<string, unknown>)["dev.appstrate/oauth"];
+  if (!oauthMeta || typeof oauthMeta !== "object") return undefined;
+  const value = (oauthMeta as Record<string, unknown>).refresh_token_issuance;
+  return typeof value === "string" ? value : undefined;
+}
 
 export class OAuth2Strategy implements IntegrationConnectStrategy {
   async begin(ctx: ConnectContext, opts: BeginOptions): Promise<BeginResult> {
@@ -75,8 +99,11 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
       );
     }
     // Same callback for every integration flow. Computed before client
-    // resolution so auto-DCR registers exactly this redirect URI.
-    const redirectUri = `${getEnv().APP_URL}/api/integrations/callback`;
+    // resolution so auto-DCR registers exactly this redirect URI. Shared
+    // helper, not an inline template: the admin UI displays the very same
+    // string (integration detail `platform_redirect_uri`) so what an admin
+    // registers at the provider cannot drift from what we send.
+    const redirectUri = integrationCallbackUrl();
     // Resolve the client (auto-registering via DCR for remote MCP integrations
     // when unregistered) and the connect endpoints/resource (discovered for
     // MCP, else manifest).
@@ -99,6 +126,7 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
       clientSecret,
       redirectUri: clientRedirectUri,
       clientRef,
+      tokenEndpointAuthMethod: clientAuthMethod,
     } = resolveConnectClient(ctx.integrationId, ctx.authKey, manifest, auth, resolved);
     const effectiveRedirectUri = clientRedirectUri ?? redirectUri;
     // Threaded endpoints/resource: discovery result wins, manifest is the
@@ -107,7 +135,14 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
     const authorizationEndpoint = resolved.authorizationEndpoint ?? auth.authorization_endpoint;
     const tokenEndpoint = resolved.tokenEndpoint ?? auth.token_endpoint;
     const resource = resolved.resource ?? auth.resource;
-    const tokenAuthMethod = toSupportedTokenEndpointAuthMethod(auth.token_endpoint_auth_method);
+    // The registered client's own declaration wins over the manifest's: an
+    // admin who registered a PUBLIC client (no secret at the provider) has
+    // said something the manifest cannot know. `resolveConnectClient` returns
+    // the method already reconciled with the secret it hands back, so the two
+    // cannot disagree.
+    const tokenAuthMethod = toSupportedTokenEndpointAuthMethod(
+      clientAuthMethod ?? auth.token_endpoint_auth_method,
+    );
     const result = await initiateIntegrationOAuth(oauthStateStore, {
       packageId: ctx.integrationId,
       authKey: ctx.authKey,
@@ -207,6 +242,15 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
             Accept: "application/json",
             "User-Agent": "Appstrate",
           },
+          // Bounded on purpose — `oauthEgressFetch` imposes no deadline of its
+          // own. This call runs INSIDE the OAuth callback, after the token
+          // exchange has already succeeded, so a provider that accepts the
+          // exchange and then stalls its userinfo endpoint would hold the
+          // callback open and leave the connection unsaved, losing a
+          // credential the user already granted. Identity is best-effort
+          // enrichment (a timeout degrades to accountId "default"); it must
+          // never decide whether the connection persists.
+          signal: AbortSignal.timeout(USERINFO_TIMEOUT_MS),
         });
         if (res.ok) {
           const body = (await res.json()) as unknown;
@@ -267,7 +311,15 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
     // without `access_type=offline` + `prompt=consent`).
     if (result.expiresAt && !refreshToken) {
       let refreshGrantSupported = true; // strict default when capability is unknown
-      if (auth.issuer) {
+      // A manifest that states the provider issues no refresh token at all is
+      // authoritative — it is the same fact discovery would report, written
+      // down for a provider that publishes no metadata. Without this the
+      // declaration was inert: the conformance gate accepted
+      // `refresh_token_issuance: "not_supported"` while this path still refused
+      // the connection, so a manifest could pass CI and fail at consent.
+      if (refreshTokenIssuance(auth) === "not_supported") {
+        refreshGrantSupported = false;
+      } else if (auth.issuer) {
         try {
           const disc = await resolveOAuthEndpoints({
             issuer: auth.issuer,

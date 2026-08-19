@@ -18,6 +18,7 @@ import { oauthEgressFetch } from "./oauth-egress.ts";
 import {
   buildTokenBody,
   buildTokenHeaders,
+  assertClientAuthCoherent,
   parseTokenErrorResponse,
   parseTokenResponse,
   type ParsedTokenResponse,
@@ -104,8 +105,13 @@ export interface ExchangeAuthorizationCodeResult {
 export async function exchangeAuthorizationCode(
   input: ExchangeAuthorizationCodeInput,
 ): Promise<ExchangeAuthorizationCodeResult> {
-  const useBasicAuth = input.tokenEndpointAuthMethod === "client_secret_basic";
-  const isPublicClient = input.tokenEndpointAuthMethod === "none";
+  const authMethod = input.tokenEndpointAuthMethod ?? "client_secret_basic";
+  // The caller resolves the method and the secret together; a pair that
+  // disagrees is a bug, not a state to smooth over. See
+  // `assertClientAuthCoherent`.
+  assertClientAuthCoherent(authMethod, input.clientSecret, input.errorLabel);
+  const useBasicAuth = authMethod === "client_secret_basic";
+  const isPublicClient = authMethod === "none";
 
   const tokenParams: Record<string, string> = {
     grant_type: "authorization_code",
@@ -136,9 +142,7 @@ export async function exchangeAuthorizationCode(
       headers: buildTokenHeaders(
         // "none" maps to "no auth header" — buildTokenHeaders treats
         // anything other than "client_secret_basic" as body-auth.
-        input.tokenEndpointAuthMethod === "none"
-          ? "client_secret_post"
-          : input.tokenEndpointAuthMethod,
+        authMethod === "none" ? "client_secret_post" : authMethod,
         input.clientId,
         input.clientSecret,
         input.tokenContentType,

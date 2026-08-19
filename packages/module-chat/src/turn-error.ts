@@ -96,3 +96,35 @@ export function clientTurnErrorFromMarker(value: unknown): ClientTurnError | und
     ? clientTurnErrorForCategory(category)
     : undefined;
 }
+
+/**
+ * The refusal code a PRE-STREAM failure carries, if it is one.
+ *
+ * A turn refused by the admission gate or by a dead subscription credential
+ * never enters the stream, so no `appstrate:chat-turn-error:` marker is ever
+ * emitted. Instead the AI SDK puts the raw HTTP body in an Error's message and
+ * throws it — `ai/src/ui/http-chat-transport.ts`: `throw new Error(await
+ * response.text())`, on both `sendMessages` and `reconnectToStream`, so the
+ * resumed path lands here too. That body is the `application/problem+json` our
+ * refusals answer with (`chat-stream.ts`), so parsing the message back into a
+ * document recovers what the transport discarded. Its `code` is the
+ * stable machine-readable half of the contract; its `detail` is English prose
+ * for API consumers (as everywhere else in this API) and must NOT be shown in
+ * a localized UI. Return the code so the caller can pick its own sentence.
+ *
+ * Only a REFUSAL carries a code worth displaying: 401/402/403 mean "you must
+ * act". Any other status (a module failing closed with a 500) describes an
+ * internal fault the user can do nothing about.
+ */
+export function refusalCode(value: unknown): string | undefined {
+  let doc: unknown;
+  try {
+    doc = JSON.parse(messageFromError(value));
+  } catch {
+    return undefined;
+  }
+  if (!doc || typeof doc !== "object") return undefined;
+  const { status, code } = doc as { status?: unknown; code?: unknown };
+  if (status !== 401 && status !== 402 && status !== 403) return undefined;
+  return typeof code === "string" && code ? code : undefined;
+}

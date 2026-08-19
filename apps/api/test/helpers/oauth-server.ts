@@ -1,10 +1,23 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Mock OAuth provider server for integration tests.
+ * Canned OAuth token endpoint for tests that need a *response*, not a
+ * *provider*.
  *
- * Uses Bun.serve() on port 0 (random available port) to simulate
- * an external OAuth2 provider's token endpoint.
+ * This server validates nothing: it answers every request with the configured
+ * body and status. That makes it right for asserting how the platform handles
+ * a given token response (a rotated refresh token, a 401, a scope shrink), and
+ * WRONG for asserting that the platform speaks the protocol correctly — a
+ * malformed request is accepted here and rejected by a real provider. Exactly
+ * that gap let a token exchange carrying an empty `client_secret` pass CI and
+ * fail at a customer's consent screen.
+ *
+ * For anything that exercises the flow itself — client authentication, PKCE,
+ * redirect_uri binding, code reuse, whether a refresh token is issued at all —
+ * use `strict-authorization-server.ts`, which enforces the RFCs and refuses
+ * non-conformant requests with the same error codes a real provider uses.
+ *
+ * Uses Bun.serve() on port 0 (random available port).
  */
 
 export interface RecordedRequest {

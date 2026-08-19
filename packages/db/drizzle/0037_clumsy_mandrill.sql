@@ -1,0 +1,2 @@
+ALTER TABLE "integration_oauth_clients" ADD COLUMN "token_endpoint_auth_method" text;--> statement-breakpoint
+ALTER TABLE "integration_oauth_clients" ADD CONSTRAINT "ioc_auth_method_values" CHECK ("integration_oauth_clients"."token_endpoint_auth_method" IS NULL OR "integration_oauth_clients"."token_endpoint_auth_method" IN ('client_secret_post', 'client_secret_basic', 'none'));

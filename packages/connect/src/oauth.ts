@@ -9,7 +9,8 @@ import { type TokenErrorKind } from "./token-utils.ts";
  * revocation handling is symmetric across the two paths that call the OAuth2
  * token endpoint. The discrimination matters because:
  *
- * - `"revoked"` (HTTP 400 + `{ "error": "invalid_grant" }` per RFC 6749 §5.2):
+ * - `"revoked"` (HTTP 400 or 401 + `{ "error": "invalid_grant" }` per RFC 6749
+ *   §5.2):
  *   the authorization code is dead. The user must restart the OAuth flow.
  *   Callers SHOULD surface a structured "please reconnect" message rather than
  *   a generic 400.

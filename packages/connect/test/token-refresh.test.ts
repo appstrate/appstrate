@@ -126,6 +126,52 @@ describe("performRefreshTokenExchange — token_endpoint_auth_method default (R8
     expect(capturedBody).toContain("client_id=my-client-id");
     expect(capturedBody).toContain("client_secret=my-client-secret");
   });
+
+  // Same invariant as the initial exchange: refresh must not post
+  // `client_secret=` either. The pair now arrives already reconciled from
+  // `resolveIntegrationClientById`, so an incoherent one is a bug and is
+  // refused rather than quietly downgraded.
+  it("refuses client_secret_post with a BLANK secret", async () => {
+    const ctxBlank: RefreshContext = {
+      tokenEndpoint: "https://idp.example.com/token",
+      clientId: "my-client-id",
+      clientSecret: "",
+      tokenEndpointAuthMethod: "client_secret_post",
+    };
+    let called = false;
+    await expect(
+      withStub(
+        (async () => {
+          called = true;
+          return new Response("{}", { status: 200 });
+        }) as unknown as typeof fetch,
+        ctxBlank,
+        (ctx) => performRefreshTokenExchange(ctx, "rt_abc", { label: "refresh" }),
+      ),
+    ).rejects.toThrow(/requires a client_secret/);
+    expect(called).toBe(false);
+  });
+
+  it("refuses client_secret_basic with a BLANK secret", async () => {
+    const ctxBlank: RefreshContext = {
+      tokenEndpoint: "https://idp.example.com/token",
+      clientId: "my-client-id",
+      clientSecret: "",
+      tokenEndpointAuthMethod: "client_secret_basic",
+    };
+    let called = false;
+    await expect(
+      withStub(
+        (async () => {
+          called = true;
+          return new Response("{}", { status: 200 });
+        }) as unknown as typeof fetch,
+        ctxBlank,
+        (ctx) => performRefreshTokenExchange(ctx, "rt_abc", { label: "refresh" }),
+      ),
+    ).rejects.toThrow(/requires a client_secret/);
+    expect(called).toBe(false);
+  });
 });
 
 describe("performRefreshTokenExchange — failure classification", () => {

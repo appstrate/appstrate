@@ -6,6 +6,7 @@ import {
   parseTokenErrorResponse,
   buildTokenHeaders,
   buildTokenBody,
+  assertClientAuthCoherent,
   type OAuthTokenContentType,
   type ParsedTokenResponse,
 } from "./token-utils.ts";
@@ -39,10 +40,14 @@ export interface RefreshContext {
  *
  * `kind` discriminates between two cases that callers MUST treat differently:
  *
- * - `"revoked"`: the OAuth server responded with `HTTP 400` + body
- *   `{ "error": "invalid_grant" }` per RFC 6749 §5.2. This is the only
+ * - `"revoked"`: the OAuth server responded with `HTTP 400` or `HTTP 401` +
+ *   body `{ "error": "invalid_grant" }` per RFC 6749 §5.2. This is the only
  *   reliable signal that the refresh token is dead and the user must
- *   reconnect. Callers should set `needsReconnection = true`.
+ *   reconnect. Callers should set `needsReconnection = true`. A 401 carrying
+ *   this code reaches here because §5.2 mandates that status whenever client
+ *   credentials travelled in the `Authorization` header; while 401 bodies went
+ *   unparsed such a response classified as `"transient"`, so a dead token was
+ *   retried until the failure-streak threshold escalated it instead.
  *
  * - `"transient"`: every other failure mode (network error, timeout, 5xx,
  *   non-JSON body, other 4xx, other OAuth error codes). The credential
@@ -100,6 +105,9 @@ export async function performRefreshTokenExchange(
   //     header. RFC 6749 §6 + §3.2.1: a public client MUST authenticate
   //     itself by including its client_id in the request.
   const tokenAuthMethod = ctx.tokenEndpointAuthMethod ?? "client_secret_basic";
+  // Same invariant as the initial exchange: the caller hands us a method and a
+  // secret that belong together, or nothing is sent at all.
+  assertClientAuthCoherent(tokenAuthMethod, ctx.clientSecret, opts.label);
   const bodyParams: Record<string, string> = {
     grant_type: "refresh_token",
     refresh_token: refreshToken,

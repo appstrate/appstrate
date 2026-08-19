@@ -177,6 +177,41 @@ describe("parseTokenErrorResponse", () => {
     expect(parseTokenErrorResponse(403, "").kind).toBe("transient");
   });
 
+  // RFC 6749 §5.2: an AS that gets client credentials in the Authorization
+  // header MUST answer `invalid_client` with 401, so the code only reaches an
+  // operator if 401 bodies are parsed too. A manifest declaring the wrong
+  // `token_endpoint_auth_method` is precisely this failure.
+  it("extracts the OAuth error code from an HTTP 401 body", () => {
+    const result = parseTokenErrorResponse(
+      401,
+      JSON.stringify({
+        error: "invalid_client",
+        error_description: "Client authentication failed",
+      }),
+    );
+    expect(result.kind).toBe("transient");
+    expect(result.error).toBe("invalid_client");
+    expect(result.errorDescription).toBe("Client authentication failed");
+  });
+
+  it("classifies HTTP 401 + invalid_grant as 'revoked'", () => {
+    const result = parseTokenErrorResponse(401, JSON.stringify({ error: "invalid_grant" }));
+    expect(result.kind).toBe("revoked");
+    expect(result.error).toBe("invalid_grant");
+  });
+
+  it("classifies HTTP 401 + non-JSON body as 'transient' with no code", () => {
+    const result = parseTokenErrorResponse(401, "<html>Unauthorized</html>");
+    expect(result.kind).toBe("transient");
+    expect(result.error).toBeUndefined();
+  });
+
+  it("does not parse bodies on statuses other than 400/401", () => {
+    const result = parseTokenErrorResponse(403, JSON.stringify({ error: "invalid_client" }));
+    expect(result.kind).toBe("transient");
+    expect(result.error).toBeUndefined();
+  });
+
   it("classifies empty body as 'transient'", () => {
     expect(parseTokenErrorResponse(400, "").kind).toBe("transient");
   });

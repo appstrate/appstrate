@@ -31,6 +31,7 @@ export {
   parseTokenResponse,
   buildTokenHeaders,
   buildTokenBody,
+  ClientAuthInvariantError,
 } from "./token-utils.ts";
 
 // Credential-proxy primitives (shared between the /api/credential-proxy/proxy
@@ -97,7 +98,11 @@ export type { AfpsHttpDelivery } from "./afps-delivery.ts";
 
 // Discovery-first OAuth endpoint resolution (RFC 8414 / OIDC). Used by the
 // integration OAuth initiate path when an auth declares an `issuer`.
-export { resolveOAuthEndpoints } from "./oauth-discovery.ts";
+export {
+  resolveOAuthEndpoints,
+  buildDiscoveryProbes,
+  discoveryIssuerMatches,
+} from "./oauth-discovery.ts";
 export type { OAuthEndpointResolution, ResolveOAuthEndpointsInput } from "./oauth-discovery.ts";
 
 // OAuth2 user-facing connect flow for integration auths (used by the

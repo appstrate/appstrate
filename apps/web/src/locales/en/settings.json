@@ -801,6 +801,7 @@
   "integration.oauthClient.clientSecret": "Client Secret",
   "integration.oauthClient.publicClient": "Public client (PKCE only, no secret)",
   "integration.oauthClient.redirectUri": "Redirect URI (optional)",
+  "integration.oauthClient.platformRedirectUri": "Redirect URI to register at the provider",
   "integration.oauthClient.callbackUrlHint": "Callback to register at the provider",
   "integration.oauthClient.btnRegister": "Register OAuth client",
   "integration.oauthClient.btnRotate": "Update credentials",
