@@ -12,6 +12,12 @@ export interface ClientTurnError {
   category: ChatTurnErrorCategory;
   retryable: boolean;
   requestId?: string;
+  /**
+   * Set only for a pre-stream refusal whose RFC 9457 `code` we display verbatim
+   * (see `clientTurnErrorFromProblem`). Never persisted — the stored turn
+   * metadata carries `category` alone.
+   */
+  code?: ChatProblemCode;
 }
 
 const ERROR_MARKER_PREFIX = "appstrate:chat-turn-error:";
@@ -95,4 +101,65 @@ export function clientTurnErrorFromMarker(value: unknown): ClientTurnError | und
   return Object.prototype.hasOwnProperty.call(RETRYABLE_BY_CATEGORY, category)
     ? clientTurnErrorForCategory(category)
     : undefined;
+}
+
+/**
+ * Codes an RFC 9457 problem document from `POST /api/chat` can carry. These
+ * refusals happen BEFORE the stream opens, so they never reach the client as an
+ * in-stream marker — see `clientTurnErrorFromProblem`.
+ */
+export type ChatProblemCode = "quota_exceeded" | "subscription_blocked" | "needs_reconnection";
+
+const PROBLEM_CODE_RETRYABLE: Record<ChatProblemCode, boolean> = {
+  quota_exceeded: false,
+  subscription_blocked: false,
+  needs_reconnection: false,
+};
+
+function parseProblemDocument(
+  message: string,
+): { code?: string; status?: number; detail?: string } | undefined {
+  if (!message.startsWith("{")) return undefined;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(message);
+  } catch {
+    return undefined;
+  }
+  if (!parsed || typeof parsed !== "object") return undefined;
+  const doc = parsed as { code?: unknown; status?: unknown; detail?: unknown };
+  return {
+    ...(typeof doc.code === "string" ? { code: doc.code } : {}),
+    ...(typeof doc.status === "number" ? { status: doc.status } : {}),
+    ...(typeof doc.detail === "string" ? { detail: doc.detail } : {}),
+  };
+}
+
+/**
+ * Recover a displayable error from a PRE-STREAM HTTP failure.
+ *
+ * A turn refused by the admission gate (402 `quota_exceeded`), by a suspended
+ * subscription (402 `subscription_blocked`) or by a dead credential (401
+ * `needs_reconnection`) never enters the stream, so the AI SDK transport throws
+ * with the raw response body as its message and no `appstrate:chat-turn-error:`
+ * marker is ever emitted. Parse the problem document back into the same client
+ * contract, keeping its `code` when we have a dedicated message for it and
+ * falling back to the status-based classification otherwise.
+ */
+export function clientTurnErrorFromProblem(value: unknown): ClientTurnError | undefined {
+  const doc = parseProblemDocument(messageFromError(value).trim());
+  if (!doc) return undefined;
+
+  const classified = classifyClientTurnError(
+    Object.assign(
+      new Error(doc.detail ?? ""),
+      doc.status !== undefined ? { status: doc.status } : {},
+    ),
+  );
+  const code = doc.code;
+  if (code !== undefined && Object.prototype.hasOwnProperty.call(PROBLEM_CODE_RETRYABLE, code)) {
+    const known = code as ChatProblemCode;
+    return { ...classified, code: known, retryable: PROBLEM_CODE_RETRYABLE[known] };
+  }
+  return classified;
 }

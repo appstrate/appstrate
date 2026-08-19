@@ -48,7 +48,11 @@ import { IntegrationIcon } from "./integration-icon.tsx";
 import { resolveAttachmentContent } from "./run-events.ts";
 import { stagedImagePreviewUrl } from "./upload.ts";
 import { useChatHost } from "./runtime-context.ts";
-import { clientTurnErrorFromMarker } from "../turn-error.ts";
+import {
+  clientTurnErrorFromMarker,
+  clientTurnErrorFromProblem,
+  type ChatProblemCode,
+} from "../turn-error.ts";
 import {
   DocumentAttachment,
   isImageMime,
@@ -411,6 +415,17 @@ const TURN_ERROR_KEY = {
 } as const;
 
 /**
+ * Messages for the pre-stream refusals that carry their own RFC 9457 `code`.
+ * A refused turn is not a model failure — "check the model configuration" would
+ * send the user to the wrong screen — so each of these gets its own sentence.
+ */
+const PROBLEM_ERROR_KEY: Record<ChatProblemCode, string> = {
+  quota_exceeded: "turn.error.quotaExceeded",
+  subscription_blocked: "turn.error.subscriptionBlocked",
+  needs_reconnection: "turn.error.needsReconnection",
+};
+
+/**
  * THE failure display for a turn — one component, one visual, live or
  * reloaded. The persisted provider-neutral category is localized here and
  * survives reload; the transient assistant-ui marker covers failures that have
@@ -418,8 +433,15 @@ const TURN_ERROR_KEY = {
  */
 function MessageError() {
   const { t } = useChatHost();
-  const errorState = useAuiState(({ message: m }) => {
-    const turn = turnMetadataFromMessage(sourceMessage(m));
+  // The selector IS `useSyncExternalStore`'s getSnapshot: whatever it returns is
+  // compared to the previous snapshot with `Object.is` after every commit. A
+  // fresh object literal never compares equal, so React re-renders forever and
+  // the whole page dies with "Maximum update depth exceeded" — which is what
+  // used to happen on EVERY errored turn, replacing the error we meant to show
+  // with the app's crash screen. Select the store-stable message and derive.
+  const message = useAuiState((s) => s.message);
+  const errorState = React.useMemo(() => {
+    const turn = turnMetadataFromMessage(sourceMessage(message));
     if (turn?.finishReason === "error") {
       const category = turn.errorCategory ?? "unknown";
       return {
@@ -430,17 +452,25 @@ function MessageError() {
         requestId: turn.requestId,
       };
     }
-    if (m.status?.type === "incomplete" && m.status.reason === "error") {
-      const err = m.status.error;
-      const classified = clientTurnErrorFromMarker(err);
+    if (message.status?.type === "incomplete" && message.status.reason === "error") {
+      const err = message.status.error;
+      // Marker first (in-stream failure), then the RFC 9457 body the transport
+      // throws verbatim when the turn was refused before the stream opened.
+      const classified = clientTurnErrorFromMarker(err) ?? clientTurnErrorFromProblem(err);
       return {
-        text: classified ? t(TURN_ERROR_KEY[classified.category]) : t("turn.error.unknown"),
+        text: classified
+          ? t(
+              classified.code
+                ? PROBLEM_ERROR_KEY[classified.code]
+                : TURN_ERROR_KEY[classified.category],
+            )
+          : t("turn.error.unknown"),
         retryable: classified?.retryable ?? true,
-        requestId: undefined,
+        requestId: classified?.requestId,
       };
     }
     return null;
-  });
+  }, [message, t]);
   if (!errorState) return null;
   return (
     <div
