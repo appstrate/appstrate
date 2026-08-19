@@ -158,9 +158,34 @@ Chaque abonnement termine 41 conversations principales sur 41, sans refus ni str
 La persistance, l'usage, la continuité et l'isolation passent. Le niveau 60 n'est pas exécuté faute
 de politique d'abonnement explicitement compatible avec cette rafale.
 
+### Scénario fonctionnel avancé
+
+Une instance locale neuve sur le port 3400 valide les parcours suivants :
+
+1. le chat Pi Mistral lance un run inline, crée un document Markdown, reçoit son URI, le relit avec
+   `read_document` et restitue son contenu exact ;
+2. un chat Pi Codex distinct relit le même document par URI et retrouve son marqueur exact ;
+3. un chat Pi Claude Code lance un run inline sur le modèle API par défaut, reçoit son résultat
+   structuré et restitue son marqueur exact ;
+4. un second tour dans la conversation Mistral retrouve le marqueur sans outil, ce qui valide la
+   continuité et la persistance de quatre messages.
+
+Les deux runs admis terminent `success`. Les cartes `run_and_wait` et `read_document`, leurs entrées,
+sorties et détails sont persistés. Aucun tour n'atteint sa limite de pas. La preuve brute est
+versionnée dans
+[2026-08-19-pi-advanced-chat-functional.v1.json](./performance-results/2026-08-19-pi-advanced-chat-functional.v1.json).
+
+Ce scénario a aussi isolé deux limites sans les confondre avec le moteur. Premièrement, Pi 0.84.2
+peut normaliser l'annulation volontaire suivant l'outil terminal `output` en
+`stopReason: "error"` avec le message standard `The operation was aborted.`. Le bridge reconnaît
+maintenant cette forme précise comme une fin normale, uniquement après le succès d'un outil
+terminal. Deuxièmement, un run explicitement lié à un abonnement OAuth exige le sidecar Docker.
+L'instance `RUN_ADAPTER=process` le refuse avant inférence, tandis que le chat Claude lui-même et
+son orchestration d'un run Mistral fonctionnent avec Pi.
+
 ## Ce qui a été expliqué et corrigé
 
-Trois coûts Appstrate propres au chemin Pi ont été isolés :
+Quatre coûts ou défauts Appstrate propres au chemin Pi ont été isolés :
 
 1. `ModelRuntime.create()` rafraîchissait tout le catalogue à chaque tour. Le modèle est maintenant
    résolu en amont et la création du runtime reste sous 1 ms en médiane jusqu'à 100 conversations.
@@ -170,6 +195,9 @@ Trois coûts Appstrate propres au chemin Pi ont été isolés :
 3. `DefaultResourceLoader.reload()` rescannait les ressources locales à chaque conversation. Le
    chat utilise maintenant un chargeur limité au prompt et aux extensions inline du tour. Le p95
    du rechargement passe de 53,2 à 2,3 ms à 30 conversations.
+4. L'annulation volontaire suivant l'outil terminal `output` pouvait être classée en erreur avec
+   certains adaptateurs. Le bridge reconnaît désormais le message d'annulation standard après un
+   succès terminal, sans masquer les erreurs fournisseur ordinaires.
 
 Le profil CPU attribuait 47,7 % de la vague Pi à la découverte synchrone avant la troisième
 correction. Les accès `realpathSync`, `readFileSync`, `readdirSync`, `statSync` et `existsSync`
@@ -302,6 +330,7 @@ Le second résultat attendu est zéro.
 - Format : [schéma des observations](./performance-observation.schema.json)
 - Résultat courant : [politique de ressources du chat](./performance-results/2026-08-19-pi-chat-resource-policy.v1.json)
 - Profils CPU : [avant](./performance-results/2026-08-19-pi-chat-resource-scan-c30-before.cpu.v1.json) et [après](./performance-results/2026-08-19-pi-chat-resource-scan-c30-after.cpu.v1.json)
+- Parcours chat avancé : [preuve fonctionnelle](./performance-results/2026-08-19-pi-advanced-chat-functional.v1.json)
 - Observations courantes et sommes SHA-256 : [index](./performance-results/raw/2026-08-19-pi-chat-resource-policy/index.v1.json)
 - Toutes les synthèses historiques : [performance-results](./performance-results/)
 
@@ -320,6 +349,14 @@ débit Pi reste inférieur et une répétition ne suffit pas à dimensionner le 
 Pi peut continuer pour les essais internes. AI SDK reste disponible. La capacité cloud exige encore
 un rejeu statistique après correction et la télémétrie des réplicas. Aucun canary, aucune migration
 générale et aucune suppression d'AI SDK ne sont autorisés par cette entrée.
+
+**19 août 2026, validation fonctionnelle avancée : correction de la fin terminale.** Un chat Pi
+Mistral a lancé un run inline, créé et publié un document, puis relu son contenu. Une première
+exécution produisait le bon résultat et le bon document, mais classait l'annulation volontaire
+suivant `output` comme une erreur. La classification reconnaît maintenant cette forme précise et
+le rejeu réel termine `success`. Un chat Pi Codex relit ensuite le document dans une autre session,
+un chat Pi Claude orchestre un run Mistral et la continuité Mistral passe au tour suivant. Cette
+correction ne change ni le modèle d'outils, ni le runtime Pi, ni les permissions multitenant.
 
 La RFC source se trouve hors du worktree autorisé. Cette entrée est prête à y être reportée sans
 modifier le satellite externe.

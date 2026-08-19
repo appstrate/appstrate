@@ -1,0 +1,91 @@
+{
+  "schema_version": 1,
+  "kind": "unified_pi_chat_advanced_functional_validation",
+  "date": "2026-08-19",
+  "environment": {
+    "origin": "http://localhost:3400",
+    "database": "isolated_pglite",
+    "data_class": "local_synthetic",
+    "run_adapter": "process",
+    "pi_version": "0.84.2"
+  },
+  "mistral_document_flow": {
+    "chat_session_id": "chs_1cd56a560f5d446abfdd46f254bb168c",
+    "provider": "mistral",
+    "model": "mistral-small-2603",
+    "engine": "pi",
+    "http_status": 200,
+    "tools": ["run_and_wait", "read_document"],
+    "run_id": "run_3603b047-6aab-4a0d-af9d-c3c2a649e4d4",
+    "run_status": "success",
+    "run_error": null,
+    "run_duration_ms": 3118,
+    "document_id": "doc_f374d194-adbd-4108-aba6-269b99c6d982",
+    "document_name": "validation-pi-unifie-PI-CLEAN-MISTRAL-1787171632016.md",
+    "document_mime": "text/markdown",
+    "document_size_bytes": 55,
+    "marker": "PI-CLEAN-MISTRAL-1787171632016",
+    "marker_verified_after_read": true,
+    "turn_step_count": 3,
+    "token_usage": {
+      "input_tokens": 13733,
+      "output_tokens": 115,
+      "cache_read_input_tokens": 13584,
+      "cache_creation_input_tokens": 0
+    },
+    "continuation": {
+      "http_status": 200,
+      "messages_before": 2,
+      "messages_after": 4,
+      "tools": [],
+      "marker_verified": true,
+      "turn_step_count": 1
+    }
+  },
+  "codex_cross_session_read": {
+    "chat_session_id": "chs_3e7790f5b7fe4d5ca4c11b0d8ff3cf24",
+    "provider": "codex",
+    "model": "gpt-5.6-luna",
+    "access": "subscription",
+    "engine": "pi",
+    "http_status": 200,
+    "tools": ["read_document"],
+    "persisted_messages": 2,
+    "marker_verified": true,
+    "turn_step_count": 2
+  },
+  "claude_orchestration": {
+    "chat_session_id": "chs_3a7c9ca2ad9a4d03807eec704c16494d",
+    "chat_provider": "claude-code",
+    "chat_model": "claude-haiku-4-5",
+    "chat_access": "subscription",
+    "chat_engine": "pi",
+    "http_status": 200,
+    "tools": ["run_and_wait"],
+    "persisted_messages": 2,
+    "marker": "PI-CLEAN-CLAUDE-MISTRAL-RUN-1787171740267",
+    "marker_verified": true,
+    "turn_step_count": 2,
+    "run_id": "run_cfe3ec7a-c33d-43bb-b933-a5ff71862178",
+    "run_model": "mistral-small-2603",
+    "run_status": "success",
+    "run_error": null,
+    "structured_result_persisted": true
+  },
+  "configured_limit": {
+    "scenario": "claude_subscription_model_inside_inline_run",
+    "run_id": "run_3ff5a4e7-49be-4e92-8000-6a05dd2e720d",
+    "status": "failed",
+    "model_calls": 0,
+    "reason": "oauth_subscription_runs_require_docker_sidecar",
+    "classification": "appstrate_configuration_limit",
+    "counted_as_pi_engine_failure": false
+  },
+  "checks": {
+    "structured_parts_persisted": true,
+    "document_persisted": true,
+    "cross_session_document_read": true,
+    "session_continuity": true,
+    "all_admitted_model_calls_completed": true
+  }
+}

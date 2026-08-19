@@ -1160,6 +1160,17 @@ function terminalErrorMessage(errorMessage: string | undefined): string {
     : "The agent's final model turn ended in an error";
 }
 
+/**
+ * Some provider adapters normalize an AbortError into stopReason "error"
+ * instead of "aborted". Keep this deliberately narrow: it is only consulted
+ * after a terminal tool completed successfully.
+ */
+function isProviderNormalizedAbort(errorMessage: string | undefined): boolean {
+  if (typeof errorMessage !== "string") return false;
+  const normalized = errorMessage.trim().replace(/\.+$/, "").toLowerCase();
+  return normalized === "the operation was aborted" || normalized === "this operation was aborted";
+}
+
 export interface SessionBridgeOptions {
   /**
    * Tool names whose first successful `tool_execution_end` marks the run
@@ -1345,7 +1356,10 @@ export function installSessionBridge(
         // status stay consistent).
         if (
           isTerminalErrorStop(last.stopReason) &&
-          !(terminalToolCompleted && last.stopReason === "aborted")
+          !(
+            terminalToolCompleted &&
+            (last.stopReason === "aborted" || isProviderNormalizedAbort(last.errorMessage))
+          )
         ) {
           fire(
             buildError({ runId, timestamp: Date.now() }, terminalErrorMessage(last.errorMessage)),
@@ -1451,7 +1465,11 @@ export function installSessionBridge(
       // never disagree on what counts as a terminal failure.
       // A trailing "aborted" turn AFTER a successful terminal tool is the
       // runner's own early-stop, not a failure.
-      if (terminalToolCompleted && lastAssistantStopReason === "aborted") {
+      if (
+        terminalToolCompleted &&
+        (lastAssistantStopReason === "aborted" ||
+          isProviderNormalizedAbort(lastAssistantErrorMessage))
+      ) {
         return undefined;
       }
       if (!isTerminalErrorStop(lastAssistantStopReason)) {

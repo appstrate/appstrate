@@ -946,6 +946,30 @@ describe("installSessionBridge — terminal tools (early stop on output)", () =>
     expect(bridge.getTerminalError()).toBeUndefined();
   });
 
+  it("treats a provider-normalized abort error after a successful terminal tool as clean", () => {
+    const sink = createInternalCapture();
+    const session = createFakeSession();
+    const bridge = installSessionBridge(session, sink, RUN_ID, {
+      terminalTools: ["output"],
+      onTerminalTool: () => {},
+    });
+
+    session.emit({ type: "tool_execution_end", toolName: "output", result: "ok" });
+
+    // Some providers normalize AbortError into stopReason "error" while
+    // preserving the abort semantics in errorMessage.
+    session.pushMessage({
+      role: "assistant",
+      stopReason: "error",
+      errorMessage: "The operation was aborted.",
+      content: [],
+    });
+    session.emit({ type: "message_end" });
+
+    expect(sink.events.find((e) => e.type === "appstrate.error")).toBeUndefined();
+    expect(bridge.getTerminalError()).toBeUndefined();
+  });
+
   it("still reports a genuine error turn after a successful terminal tool", () => {
     const sink = createInternalCapture();
     const session = createFakeSession();
