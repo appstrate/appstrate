@@ -3,6 +3,7 @@
 import { describe, expect, it } from "bun:test";
 import {
   benchmarkHistoryToolPart,
+  benchmarkWorkerCommand,
   buildPiTurnTimeline,
   completedTurnHasUsage,
   defaultSubscriptionModel,
@@ -103,6 +104,23 @@ describe("chat engine performance observation helpers", () => {
       firstTextToClientMs: 2,
       requestToClientFirstTokenMs: 132,
     });
+  });
+
+  it("builds a worker command with an optional cell-specific CPU profile", () => {
+    expect(
+      benchmarkWorkerCommand({
+        executable: "/usr/bin/bun",
+        script: "/work/chat-engine-performance.ts",
+        cpuProfile: { directory: "/work/artifacts/cpu", name: "pi-c10.cpuprofile" },
+      }),
+    ).toEqual([
+      "/usr/bin/bun",
+      "--cpu-prof",
+      "--cpu-prof-dir=/work/artifacts/cpu",
+      "--cpu-prof-name=pi-c10.cpuprofile",
+      "/work/chat-engine-performance.ts",
+      "--worker",
+    ]);
   });
 
   it("filters CPU samples to the exact benchmark wave", () => {

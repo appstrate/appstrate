@@ -12,6 +12,7 @@
 import { $ } from "bun";
 import {
   benchmarkHistoryToolPart,
+  benchmarkWorkerCommand,
   buildPiTurnTimeline,
   completedTurnHasUsage,
   defaultSubscriptionModel,
@@ -118,6 +119,8 @@ async function runController(args: string[]): Promise<void> {
   const recoveryMs = numberOption(args, "recovery-ms", 120_000);
   const cellTimeoutMs = numberOption(args, "cell-timeout-ms", 15 * 60_000);
   const outputDir = stringOption(args, "output", `artifacts/chat-engine-performance/${command}`);
+  const cpuProfileEnabled = stringOption(args, "cpu-profile", "false") === "true";
+  const cpuProfileDir = `${outputDir}/cpu-profiles`;
   const providerEnvFile = command === "controlled" ? "" : stringOption(args, "env-file", "");
   const providerId = stringOption(
     args,
@@ -155,6 +158,7 @@ async function runController(args: string[]): Promise<void> {
   }
 
   await $`mkdir -p ${outputDir}`.quiet();
+  if (cpuProfileEnabled) await $`mkdir -p ${cpuProfileDir}`.quiet();
   const commit = textCommand(["git", "rev-parse", "HEAD"]);
   const startedAt = new Date().toISOString();
   const files: string[] = [];
@@ -178,28 +182,37 @@ async function runController(args: string[]): Promise<void> {
             const outputFile = `${outputDir}/${id}.json`;
             const databaseDir = `${outputDir}/databases/${id}`;
             await $`mkdir -p ${databaseDir}`.quiet();
-            const child = Bun.spawn([process.execPath, import.meta.path, "--worker"], {
-              cwd: process.cwd(),
-              env: {
-                ...process.env,
-                CHAT_PERF_ENGINE: engine,
-                CHAT_PERF_FORM: form,
-                CHAT_PERF_PROFILE: profile,
-                CHAT_PERF_CONCURRENCY: String(concurrency),
-                CHAT_PERF_ORGANIZATIONS: String(organizations),
-                CHAT_PERF_PI_MAX_CONCURRENCY: String(piMaxConcurrency),
-                CHAT_PERF_REPETITION: String(repetition),
-                CHAT_PERF_RECOVERY_MS: String(recoveryMs),
-                CHAT_PERF_OUTPUT_FILE: outputFile,
-                CHAT_PERF_DATABASE_DIR: databaseDir,
-                CHAT_PERF_BENCHMARK: benchmark,
-                CHAT_PERF_PROVIDER_ENV_FILE: providerEnvFile,
-                CHAT_PERF_PROVIDER_ID: providerId,
-                CHAT_PERF_PROVIDER_MODEL_ID: providerModelId,
+            const child = Bun.spawn(
+              benchmarkWorkerCommand({
+                executable: process.execPath,
+                script: import.meta.path,
+                ...(cpuProfileEnabled
+                  ? { cpuProfile: { directory: cpuProfileDir, name: `${id}.cpuprofile` } }
+                  : {}),
+              }),
+              {
+                cwd: process.cwd(),
+                env: {
+                  ...process.env,
+                  CHAT_PERF_ENGINE: engine,
+                  CHAT_PERF_FORM: form,
+                  CHAT_PERF_PROFILE: profile,
+                  CHAT_PERF_CONCURRENCY: String(concurrency),
+                  CHAT_PERF_ORGANIZATIONS: String(organizations),
+                  CHAT_PERF_PI_MAX_CONCURRENCY: String(piMaxConcurrency),
+                  CHAT_PERF_REPETITION: String(repetition),
+                  CHAT_PERF_RECOVERY_MS: String(recoveryMs),
+                  CHAT_PERF_OUTPUT_FILE: outputFile,
+                  CHAT_PERF_DATABASE_DIR: databaseDir,
+                  CHAT_PERF_BENCHMARK: benchmark,
+                  CHAT_PERF_PROVIDER_ENV_FILE: providerEnvFile,
+                  CHAT_PERF_PROVIDER_ID: providerId,
+                  CHAT_PERF_PROVIDER_MODEL_ID: providerModelId,
+                },
+                stdout: "inherit",
+                stderr: "inherit",
               },
-              stdout: "inherit",
-              stderr: "inherit",
-            });
+            );
             const exitCode = await waitForWorkerExit(child, cellTimeoutMs);
             if (exitCode !== 0) throw new Error(`Benchmark worker failed for ${id}`);
             const observation = (await Bun.file(outputFile).json()) as {
@@ -284,6 +297,7 @@ async function runController(args: string[]): Promise<void> {
       piMaxConcurrency,
       recoveryMs,
       cellTimeoutMs,
+      cpuProfileEnabled,
       provider:
         command === "mistral"
           ? "mistral-api-key"

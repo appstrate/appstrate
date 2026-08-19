@@ -72,6 +72,25 @@ export interface PiTurnTimeline {
   requestToClientFirstTokenMs: number;
 }
 
+export function benchmarkWorkerCommand(input: {
+  executable: string;
+  script: string;
+  cpuProfile?: { directory: string; name: string };
+}): string[] {
+  return [
+    input.executable,
+    ...(input.cpuProfile
+      ? [
+          "--cpu-prof",
+          `--cpu-prof-dir=${input.cpuProfile.directory}`,
+          `--cpu-prof-name=${input.cpuProfile.name}`,
+        ]
+      : []),
+    input.script,
+    "--worker",
+  ];
+}
+
 export interface CpuProfileInput {
   startTime: number;
   nodes: ReadonlyArray<{
