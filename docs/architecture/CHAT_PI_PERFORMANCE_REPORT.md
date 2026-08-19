@@ -52,6 +52,21 @@ mais la variance locale ne permet pas de revendiquer un gain à 100. Le coût do
 situe après l'appel `prompt()`, avant et après l'arrivée chez le fournisseur contrôlé. Le NO GO est
 donc maintenu.
 
+L'instrumentation interne appariée ferme maintenant ce dernier angle mort. À 10 chats, le premier
+token médian vaut 113 ms pour AI SDK et 363 ms pour Pi, soit environ 250 ms perceptibles de plus.
+Sur Pi, 158 à 202 ms se passent avant l'entrée dans le moteur, dans le chemin Appstrate et PGlite.
+La préparation propre à Pi prend 20 à 23 ms, dont 17 à 19 ms de chargement de ressources. Le clone
+et la conversion du contexte prennent ensuite 21 à 31 ms. L'attente du fournisseur synthétique
+sous contention locale prend 98 à 132 ms. Une fois le premier texte produit, son adaptation et sa
+livraison au client prennent seulement 0,05 à 0,15 ms. Le mapper UI n'est donc pas en cause.
+
+Ce diagnostic a aussi trouvé une seconde synchronisation redondante propre à Appstrate. Le
+placeholder d'authentification `proxy` déclenchait une recomposition et des vérifications de
+disponibilité Pi à chaque conversation. Son enregistrement synchrone fait passer cette étape de 24 à
+36 ms à environ 0,1 à 0,2 ms à concurrence 10. Les credentials OAuth réels de Codex et Claude Code
+gardent leur synchronisation complète. Cette correction réduit un coût certain, sans suffire à
+lever le NO GO aux fortes concurrences déjà mesurées.
+
 Un smoke Mistral à concurrence 1 a terminé les quatre cellules AI SDK et Pi, froides et chaudes. À
 chaud, Pi a livré le premier token en 617 ms et terminé en 669 ms, contre 627 ms et 690 ms pour AI
 SDK. Claude Code a terminé en 7 068 ms. Le premier essai Codex a révélé un mapping fournisseur hérité
@@ -216,6 +231,61 @@ Pi déclenchée par `prompt()`, puis dans le retour du stream sous contention lo
 du chargement dynamique du SDK, ni de la projection de session, ni de la création de session, ni
 du credential. Cette mesure prouve un coût moteur local. Elle ne permet pas encore d'attribuer ce
 résidu à une fonction Pi unique sans instrumentation interne supplémentaire.
+
+## Diagnostic interne apparié de Pi
+
+Le rejeu du 19 août au commit `d2aa97ef` utilise S chaud à 1 et 10 chats, trois répétitions par
+moteur. Chaque timeline relie les timestamps d'une même conversation. Les durées sont donc
+additives, contrairement à une soustraction de p50 calculés sur des tours différents. Les douze
+observations brutes sont versionnées avec leurs sommes SHA-256.
+
+| Concurrence | Moteur | Premier token médian, ms | Plage des trois répétitions, ms |
+| ----------: | ------ | -----------------------: | ------------------------------: |
+|           1 | AI SDK |                       41 |                         41 à 44 |
+|           1 | Pi     |                       75 |                         69 à 84 |
+|          10 | AI SDK |                      113 |                        95 à 138 |
+|          10 | Pi     |                      363 |                       360 à 417 |
+
+Pour Pi, les chronologies représentatives donnent les plages suivantes.
+
+| Segment apparié                       | 1 chat, ms | 10 chats, ms | Attribution                            |
+| ------------------------------------- | ---------: | -----------: | -------------------------------------- |
+| Requête vers entrée moteur            |     6 à 14 |    158 à 202 | Appstrate et PGlite local, avant Pi    |
+| Entrée moteur vers `prompt()`         |    25 à 35 |      20 à 23 | Préparation Pi                         |
+| Dont chargement de ressources         |    22 à 29 |      17 à 19 | Coût fixe Pi, accès disque synchrones  |
+| Credential proxy                      |        0,2 |    0,1 à 0,2 | Fast path Appstrate corrigé            |
+| Clone du contexte                     |      0 à 1 |       6 à 11 | Pi, amplifié par la concurrence locale |
+| Conversion et préparation des headers |      0 à 1 |      15 à 20 | Pi, avant la requête fournisseur       |
+| Attente du fournisseur contrôlé       |          2 |     98 à 132 | PGlite et ordonnanceur du banc local   |
+| Stream fournisseur vers premier texte |    31 à 38 |      28 à 32 | 25 ms simulés, puis parsing Pi         |
+| Premier texte Pi vers token client    |       0,12 |  0,05 à 0,15 | Mapper et protocole UI, négligeables   |
+
+Le coût directement mesuré dans Pi à concurrence 1 est dominé par les 22 à 29 ms du
+`DefaultResourceLoader`. À concurrence 10, le clone et la conversion ajoutent environ 21 à 31 ms.
+Le chemin Appstrate avant moteur devient toutefois plus coûteux pour la branche Pi, alors que le
+moteur n'a pas encore commencé. Dans cette base isolée, dix écritures concurrentes de message et
+d'état de stream se sérialisent dans PGlite. Ce temps ne doit pas être présenté comme un coût de la
+bibliothèque Pi ni extrapolé à PostgreSQL cloud.
+
+Une ablation a supprimé uniquement l'écriture `llm_usage` du fournisseur déterministe. L'attente
+entre requête et réponse fournisseur est tombée de 105 à 152 ms à 8 à 9 ms à concurrence 10. Le
+temps s'est ensuite déplacé vers la lecture concurrente des streams, sans amélioration stable du
+premier token total. Le faux fournisseur, PGlite et l'ordonnanceur forment donc un goulot local qui
+redistribue l'attente. Cette ablation n'est pas une configuration de validation fonctionnelle, car
+les campagnes officielles conservent toujours la persistance d'usage.
+
+Le profil CPU limité exactement à la vague de dix chats couvre 565 ms échantillonnés. Les appels
+fichier synchrones `realpathSync`, `readFileSync`, `readdirSync` et `existsSync` représentent 18,4 %
+du CPU propre. Le parsing de lignes SSE OpenAI en représente environ 8 %, `JSON.stringify` 4,5 %,
+le clone d'objets 3,7 % et PGlite 3,7 %. Ce profil confirme la nature composite de l'écart : coût
+fixe du chargeur Pi, sérialisation et parsing Pi, puis contention du banc Appstrate local.
+
+Conclusion : Pi fonctionne, persiste correctement et son mapper n'ajoute pratiquement aucune
+latence. Une partie du surcoût venait bien de notre intégration et deux synchronisations redondantes
+ont été supprimées. Il reste un coût fixe Pi mesurable et une amplification locale composite. Les
+écarts de plusieurs secondes observés à 60, 64 et 100 ne peuvent pas être attribués uniquement à Pi
+à partir de PGlite. Ils restent néanmoins bloquants pour un canary local tant que le même protocole
+n'a pas été rejoué sur le profil PostgreSQL et réplica cloud réel.
 
 ## Comparatif Mistral réel
 
@@ -465,6 +535,12 @@ bun scripts/chat-engine-performance.ts controlled --forms=S --profiles=warm --co
 bun scripts/chat-engine-performance-report.ts --input=artifacts/chat-engine-performance/pi-runtime-refresh-off-reduced-r3-3a1bb53d --output=docs/architecture/performance-results/2026-08-19-pi-runtime-refresh-off-controlled-reduced.v1.json
 bun scripts/chat-engine-performance-publish.ts --input=artifacts/chat-engine-performance/pi-runtime-refresh-off-reduced-r3-3a1bb53d --output=docs/architecture/performance-results/raw/2026-08-19-pi-runtime-refresh-off-controlled-reduced
 
+bun scripts/chat-engine-performance.ts controlled --engines=ai-sdk,pi --forms=S --profiles=warm --concurrency=1,10 --repetitions=3 --recovery-ms=0 --output=artifacts/chat-engine-performance/pi-internal-final-c1-c10-r3-d2aa97ef
+bun scripts/chat-engine-performance-publish.ts --input=artifacts/chat-engine-performance/pi-internal-final-c1-c10-r3-d2aa97ef --output=docs/architecture/performance-results/raw/2026-08-19-pi-internal-diagnostics
+
+bun scripts/chat-engine-performance.ts controlled --engines=pi --forms=S --profiles=warm --concurrency=10 --repetitions=1 --recovery-ms=0 --cpu-profile=true --output=artifacts/chat-engine-performance/cpu-profile-reproduction-c10
+bun scripts/chat-engine-cpu-profile.ts --profile=artifacts/chat-engine-performance/cpu-profile-reproduction-c10/cpu-profiles/pi-S-warm-c10-o10-r1.cpuprofile --observation=artifacts/chat-engine-performance/cpu-profile-reproduction-c10/pi-S-warm-c10-o10-r1.json --output=artifacts/chat-engine-performance/cpu-profile-reproduction-c10/pi-S-warm-c10-o10-r1-wave-profile.v1.json --limit=30
+
 bun scripts/chat-pi-fixed-load.ts --repetitions=10 --output=artifacts/chat-engine-performance/fixed-load-r10 --summary-output=docs/architecture/performance-results/2026-08-18-pi-fixed-load.v1.json
 
 bun scripts/chat-engine-performance-report.ts --input=artifacts/chat-engine-performance/controlled-s-low-r5,artifacts/chat-engine-performance/controlled-s-high-r5,artifacts/chat-engine-performance/controlled-h-high-r5,artifacts/chat-engine-performance/controlled-t-high-r5,artifacts/chat-engine-performance/controlled-s-c100-o10-r5,artifacts/chat-engine-performance/controlled-s-c100-o1-r5 --output=docs/architecture/performance-results/2026-08-18-controlled-summary.v1.json
@@ -558,6 +634,7 @@ Le dernier résultat attendu est zéro.
 - Index et sommes SHA-256 des 18 observations du rejeu : [index.v1.json](./performance-results/raw/2026-08-19-pi-0842-controlled-reduced/index.v1.json)
 - Rejeu après suppression du rafraîchissement runtime redondant : [2026-08-19-pi-runtime-refresh-off-controlled-reduced.v1.json](./performance-results/2026-08-19-pi-runtime-refresh-off-controlled-reduced.v1.json)
 - Index et sommes SHA-256 des 18 observations instrumentées : [index.v1.json](./performance-results/raw/2026-08-19-pi-runtime-refresh-off-controlled-reduced/index.v1.json)
+- Index et sommes SHA-256 des 12 observations internes appariées : [index.v1.json](./performance-results/raw/2026-08-19-pi-internal-diagnostics/index.v1.json)
 - Index et sommes SHA-256 de 65 observations réelles : [index.v1.json](./performance-results/raw/2026-08-18-real/index.v1.json)
 
 Les 65 observations réelles sélectionnées sont désormais versionnées sans leur base PGlite. Leur
@@ -609,3 +686,16 @@ d'environ 1,80, 1,64 et 3,33 secondes au p95 du premier token. L'horodatage de l
 fournisseur place le résidu dans la boucle Pi après `prompt()` et dans le retour du stream sous
 contention locale. La capacité cloud reste inconnue. Aucun canary, aucune migration de trafic et
 aucune suppression du moteur AI SDK ne sont autorisés.
+
+**19 août 2026, diagnostic interne apparié Pi : NO GO maintenu, attribution affinée.** Douze
+observations à 1 et 10 chats relient chaque étape au même tour. À 10 chats, le premier token médian
+vaut 113 ms pour AI SDK et 363 ms pour Pi. Environ 158 à 202 ms précèdent l'entrée dans Pi et
+appartiennent au chemin Appstrate avec PGlite. Pi consomme ensuite 20 à 23 ms de préparation, puis
+21 à 31 ms de clone et conversion du contexte. Le faux fournisseur et sa persistance locale
+absorbent 98 à 132 ms. Le mapper Pi vers le client ne prend que 0,05 à 0,15 ms. Une seconde
+synchronisation Appstrate redondante du placeholder `proxy` est corrigée, ce qui ramène le setup du
+credential de 24 à 36 ms à environ 0,1 à 0,2 ms sans modifier le traitement OAuth de Codex ou Claude
+Code. Le profil CPU confirme 18,4 % d'accès fichier synchrones dans la vague Pi. Pi fonctionne, mais
+le coût fixe du chargeur et l'amplification composite locale restent mesurables. Les résultats
+PGlite ne déterminent pas la capacité PostgreSQL cloud. Aucun canary, aucune migration de trafic et
+aucune suppression d'AI SDK ne sont autorisés.

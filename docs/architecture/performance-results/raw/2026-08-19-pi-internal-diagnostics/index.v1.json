@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "kind": "chat-engine-performance-raw-index",
+  "generatedAt": "2026-08-19T17:59:18.403Z",
+  "observations": [
+    {
+      "file": "pi-internal-final-c1-c10-r3-d2aa97ef--ai-sdk-S-warm-c1-o1-r1.json",
+      "sha256": "82893bf2def74fde09f60cc54b4634b14c3e65c84ca55e3c846ede1b1d3716a0",
+      "source": "artifacts/chat-engine-performance/pi-internal-final-c1-c10-r3-d2aa97ef/ai-sdk-S-warm-c1-o1-r1.json"
+    },
+    {
+      "file": "pi-internal-final-c1-c10-r3-d2aa97ef--ai-sdk-S-warm-c1-o1-r2.json",
+      "sha256": "276f56af1ee68fcd5227893a664b4713ca67cfe594c97c5468a10cc880e91830",
+      "source": "artifacts/chat-engine-performance/pi-internal-final-c1-c10-r3-d2aa97ef/ai-sdk-S-warm-c1-o1-r2.json"
+    },
+    {
+      "file": "pi-internal-final-c1-c10-r3-d2aa97ef--ai-sdk-S-warm-c1-o1-r3.json",
+      "sha256": "76ce1f2245e8df00ed73e52173ad8916572e15c26da0dc7b88ce6882131d4044",
+      "source": "artifacts/chat-engine-performance/pi-internal-final-c1-c10-r3-d2aa97ef/ai-sdk-S-warm-c1-o1-r3.json"
+    },
+    {
+      "file": "pi-internal-final-c1-c10-r3-d2aa97ef--ai-sdk-S-warm-c10-o10-r1.json",
+      "sha256": "e77de79f3e837b4abd385118a9dc2a2e47cfe30fbf071a03ba65a99631fb9286",
+      "source": "artifacts/chat-engine-performance/pi-internal-final-c1-c10-r3-d2aa97ef/ai-sdk-S-warm-c10-o10-r1.json"
+    },
+    {
+      "file": "pi-internal-final-c1-c10-r3-d2aa97ef--ai-sdk-S-warm-c10-o10-r2.json",
+      "sha256": "943bd6f1e38eeb285febea1fe9beecd5e409ad32591d10f058af5918ebce9775",
+      "source": "artifacts/chat-engine-performance/pi-internal-final-c1-c10-r3-d2aa97ef/ai-sdk-S-warm-c10-o10-r2.json"
+    },
+    {
+      "file": "pi-internal-final-c1-c10-r3-d2aa97ef--ai-sdk-S-warm-c10-o10-r3.json",
+      "sha256": "f025401fcf9ada1c50332e1599a595834c6634654794d648d4c5078931d88498",
+      "source": "artifacts/chat-engine-performance/pi-internal-final-c1-c10-r3-d2aa97ef/ai-sdk-S-warm-c10-o10-r3.json"
+    },
+    {
+      "file": "pi-internal-final-c1-c10-r3-d2aa97ef--pi-S-warm-c1-o1-r1.json",
+      "sha256": "61bdbbb8086bc1f37562088b14676589cc80ea145ad627c184b3bd1613891884",
+      "source": "artifacts/chat-engine-performance/pi-internal-final-c1-c10-r3-d2aa97ef/pi-S-warm-c1-o1-r1.json"
+    },
+    {
+      "file": "pi-internal-final-c1-c10-r3-d2aa97ef--pi-S-warm-c1-o1-r2.json",
+      "sha256": "6ff10c7c905af32249a0fb4a70e5a457358fef28607fde147cca0489a6e01578",
+      "source": "artifacts/chat-engine-performance/pi-internal-final-c1-c10-r3-d2aa97ef/pi-S-warm-c1-o1-r2.json"
+    },
+    {
+      "file": "pi-internal-final-c1-c10-r3-d2aa97ef--pi-S-warm-c1-o1-r3.json",
+      "sha256": "f1b6202ba5bc8bee51da9545ee5944a748080aea628fb6e5eab64d6d2c086e01",
+      "source": "artifacts/chat-engine-performance/pi-internal-final-c1-c10-r3-d2aa97ef/pi-S-warm-c1-o1-r3.json"
+    },
+    {
+      "file": "pi-internal-final-c1-c10-r3-d2aa97ef--pi-S-warm-c10-o10-r1.json",
+      "sha256": "3834a23c49a252d8bb50de44409f9aa9b285a58c3a2bc55cd3afa4b2327792c2",
+      "source": "artifacts/chat-engine-performance/pi-internal-final-c1-c10-r3-d2aa97ef/pi-S-warm-c10-o10-r1.json"
+    },
+    {
+      "file": "pi-internal-final-c1-c10-r3-d2aa97ef--pi-S-warm-c10-o10-r2.json",
+      "sha256": "b8733f20d4bd9731bbe314f1b686cd386f5319f089d8e87e67f5ea24ee67ef09",
+      "source": "artifacts/chat-engine-performance/pi-internal-final-c1-c10-r3-d2aa97ef/pi-S-warm-c10-o10-r2.json"
+    },
+    {
+      "file": "pi-internal-final-c1-c10-r3-d2aa97ef--pi-S-warm-c10-o10-r3.json",
+      "sha256": "a541eeddd85867a6d948c96bcfa5a73b040f7c60fc860708b70004024b38005c",
+      "source": "artifacts/chat-engine-performance/pi-internal-final-c1-c10-r3-d2aa97ef/pi-S-warm-c10-o10-r3.json"
+    }
+  ]
+}

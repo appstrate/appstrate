@@ -1,0 +1,584 @@
+{
+  "schemaVersion": 1,
+  "kind": "chat-engine-performance-observation",
+  "benchmark": "controlled",
+  "id": "pi-S-warm-c1-o1-r3",
+  "environment": {
+    "commit": "d2aa97eff57b080236c074d50f2c6d0ac61573d5",
+    "branch": "feat/chat-pi-unified-engine-phase4",
+    "bunVersion": "1.3.10",
+    "platform": "darwin-arm64",
+    "port": 3400,
+    "database": "isolated-pglite",
+    "controlledProviderPersistence": true
+  },
+  "cell": {
+    "engine": "pi",
+    "form": "S",
+    "profile": "warm",
+    "concurrency": 1,
+    "repetition": 3,
+    "distribution": "1-organizations-x-1-chats"
+  },
+  "timing": {
+    "waveStartedAtMs": 3964.4097089999996,
+    "waveEndedAtMs": 4205.221417,
+    "waveStartedAtEpochMs": 1787162324185.9329,
+    "waveEndedAtEpochMs": 1787162324426.7444,
+    "recoveryMs": 0
+  },
+  "memory": {
+    "initial": {
+      "elapsedMs": 4046.3139589999996,
+      "rss": 496877568,
+      "heapUsed": 927153010,
+      "external": 879153305,
+      "arrayBuffers": 455992706,
+      "cpuUserMicros": 4715528,
+      "cpuSystemMicros": 1004293,
+      "eventLoopDelayMs": 0.12845900000002075
+    },
+    "peak": {
+      "elapsedMs": 4046.3139589999996,
+      "rss": 496877568,
+      "heapUsed": 927153010,
+      "external": 879153305,
+      "arrayBuffers": 455992706,
+      "cpuUserMicros": 4715528,
+      "cpuSystemMicros": 1004293,
+      "eventLoopDelayMs": 0.12845900000002075
+    },
+    "end": {
+      "elapsedMs": 4248.542875,
+      "rss": 465928192,
+      "heapUsed": 927303254,
+      "external": 879260203,
+      "arrayBuffers": 456082878,
+      "cpuUserMicros": 4826451,
+      "cpuSystemMicros": 1027672,
+      "eventLoopDelayMs": 2.0440410000001066
+    },
+    "after30s": null,
+    "after60s": null,
+    "after120s": null
+  },
+  "eventLoopDelayMs": {
+    "p50": 0.12845900000002075,
+    "p95": 0.18487499999991996,
+    "p99": 0.18487499999991996
+  },
+  "cpu": {
+    "userMicros": 110923,
+    "systemMicros": 23379
+  },
+  "latency": {
+    "firstTokenMs": {
+      "p50": 69.35129199999983,
+      "p95": 69.35129199999983,
+      "p99": 69.35129199999983
+    },
+    "totalMs": {
+      "p50": 237.08845900000006,
+      "p95": 237.08845900000006,
+      "p99": 237.08845900000006
+    },
+    "throughputChatsPerSecond": 4.152622014540918
+  },
+  "outcomes": {
+    "requested": 1,
+    "completed": 1,
+    "rateLimited": 0,
+    "serverErrors": 0,
+    "incompleteStreams": 0,
+    "markerFailures": 0
+  },
+  "usage": {
+    "modelCalls": 1,
+    "toolCalls": 0,
+    "inputTokens": 128,
+    "outputTokens": 32
+  },
+  "provider": {
+    "id": "deterministic",
+    "modelId": "controlled-v1",
+    "statuses": {
+      "ok": 0,
+      "rateLimited": 0,
+      "serverError": 0,
+      "otherError": 0
+    }
+  },
+  "diagnostics": {
+    "providerDispatchMs": {
+      "p50": 34.88254199999983,
+      "p95": 34.88254199999983,
+      "p99": 34.88254199999983
+    },
+    "chatTurn": {
+      "sampleCount": 1,
+      "milestonesMs": {
+        "bodyParsed": {
+          "p50": 0.06066700000019409,
+          "p95": 0.06066700000019409,
+          "p99": 0.06066700000019409
+        },
+        "sessionEnsured": {
+          "p50": 1.8035420000001068,
+          "p95": 1.8035420000001068,
+          "p99": 1.8035420000001068
+        },
+        "phaseAResolved": {
+          "p50": 2.1984580000003007,
+          "p95": 2.1984580000003007,
+          "p99": 2.1984580000003007
+        },
+        "bindingResolved": {
+          "p50": 2.2226250000003347,
+          "p95": 2.2226250000003347,
+          "p99": 2.2226250000003347
+        },
+        "usageAllowed": {
+          "p50": 2.2239580000000387,
+          "p95": 2.2239580000000387,
+          "p99": 2.2239580000000387
+        },
+        "phaseBResolved": {
+          "p50": 2.2922080000003007,
+          "p95": 2.2922080000003007,
+          "p99": 2.2922080000003007
+        },
+        "admissionAcquired": {
+          "p50": 2.30475000000024,
+          "p95": 2.30475000000024,
+          "p99": 2.30475000000024
+        },
+        "userStatePersisted": {
+          "p50": 6.204083000000082,
+          "p95": 6.204083000000082,
+          "p99": 6.204083000000082
+        },
+        "engineDispatch": {
+          "p50": 6.249500000000353,
+          "p95": 6.249500000000353,
+          "p99": 6.249500000000353
+        }
+      }
+    },
+    "piLifecycle": {
+      "sampleCount": 1,
+      "stagesMs": {
+        "mcpTools": {
+          "p50": 2.3000409999999647,
+          "p95": 2.3000409999999647,
+          "p99": 2.3000409999999647
+        },
+        "sdkLoad": {
+          "p50": 0.040500000000065484,
+          "p95": 0.040500000000065484,
+          "p99": 0.040500000000065484
+        },
+        "sessionProjection": {
+          "p50": 0.08504199999970297,
+          "p95": 0.08504199999970297,
+          "p99": 0.08504199999970297
+        },
+        "modelRuntimeCreate": {
+          "p50": 0.665625000000091,
+          "p95": 0.665625000000091,
+          "p99": 0.665625000000091
+        },
+        "credentialSetup": {
+          "p50": 0.16724999999996726,
+          "p95": 0.16724999999996726,
+          "p99": 0.16724999999996726
+        },
+        "resourceReload": {
+          "p50": 22.138292000000092,
+          "p95": 22.138292000000092,
+          "p99": 22.138292000000092
+        },
+        "agentSession": {
+          "p50": 0.26104099999975006,
+          "p95": 0.26104099999975006,
+          "p99": 0.26104099999975006
+        }
+      },
+      "prePromptTotalMs": {
+        "p50": 25.657790999999634,
+        "p95": 25.657790999999634,
+        "p99": 25.657790999999634
+      }
+    },
+    "piLifecycleSamples": [
+      {
+        "turnId": "chs_92675341a7414eceb132158894ecead7",
+        "stage": "mcpTools",
+        "durationMs": 2.3000409999999647
+      },
+      {
+        "turnId": "chs_92675341a7414eceb132158894ecead7",
+        "stage": "sdkLoad",
+        "durationMs": 0.040500000000065484
+      },
+      {
+        "turnId": "chs_92675341a7414eceb132158894ecead7",
+        "stage": "sessionProjection",
+        "durationMs": 0.08504199999970297
+      },
+      {
+        "turnId": "chs_92675341a7414eceb132158894ecead7",
+        "stage": "modelRuntimeCreate",
+        "durationMs": 0.665625000000091
+      },
+      {
+        "turnId": "chs_92675341a7414eceb132158894ecead7",
+        "stage": "credentialSetup",
+        "durationMs": 0.16724999999996726
+      },
+      {
+        "turnId": "chs_92675341a7414eceb132158894ecead7",
+        "stage": "resourceReload",
+        "durationMs": 22.138292000000092
+      },
+      {
+        "turnId": "chs_92675341a7414eceb132158894ecead7",
+        "stage": "agentSession",
+        "durationMs": 0.26104099999975006
+      }
+    ],
+    "piPrompt": {
+      "sampleCount": 1,
+      "milestonesMs": {
+        "beforeAgentStart": {
+          "p50": 0.051832999999987805,
+          "p95": 0.051832999999987805,
+          "p99": 0.051832999999987805
+        },
+        "agentStart": {
+          "p50": 0.21154099999967002,
+          "p95": 0.21154099999967002,
+          "p99": 0.21154099999967002
+        },
+        "turnStart": {
+          "p50": 0.8188749999999345,
+          "p95": 0.8188749999999345,
+          "p99": 0.8188749999999345
+        },
+        "userMessageStart": {
+          "p50": 1.1880000000001019,
+          "p95": 1.1880000000001019,
+          "p99": 1.1880000000001019
+        },
+        "userMessageEnd": {
+          "p50": 1.3175830000000133,
+          "p95": 1.3175830000000133,
+          "p99": 1.3175830000000133
+        },
+        "contextReady": {
+          "p50": 1.466707999999926,
+          "p95": 1.466707999999926,
+          "p99": 1.466707999999926
+        },
+        "providerHeaders": {
+          "p50": 1.7041659999999865,
+          "p95": 1.7041659999999865,
+          "p99": 1.7041659999999865
+        },
+        "providerRequest": {
+          "p50": 2.4203749999996944,
+          "p95": 2.4203749999996944,
+          "p99": 2.4203749999996944
+        },
+        "providerResponse": {
+          "p50": 4.2222499999998035,
+          "p95": 4.2222499999998035,
+          "p99": 4.2222499999998035
+        },
+        "assistantStart": {
+          "p50": 4.333374999999705,
+          "p95": 4.333374999999705,
+          "p99": 4.333374999999705
+        },
+        "firstText": {
+          "p50": 37.11608299999989,
+          "p95": 37.11608299999989,
+          "p99": 37.11608299999989
+        }
+      }
+    },
+    "piPromptMilestoneSamples": [
+      {
+        "turnId": "chs_92675341a7414eceb132158894ecead7",
+        "milestone": "beforeAgentStart",
+        "elapsedMs": 0.051832999999987805
+      },
+      {
+        "turnId": "chs_92675341a7414eceb132158894ecead7",
+        "milestone": "agentStart",
+        "elapsedMs": 0.21154099999967002
+      },
+      {
+        "turnId": "chs_92675341a7414eceb132158894ecead7",
+        "milestone": "turnStart",
+        "elapsedMs": 0.8188749999999345
+      },
+      {
+        "turnId": "chs_92675341a7414eceb132158894ecead7",
+        "milestone": "userMessageStart",
+        "elapsedMs": 1.1880000000001019
+      },
+      {
+        "turnId": "chs_92675341a7414eceb132158894ecead7",
+        "milestone": "userMessageEnd",
+        "elapsedMs": 1.3175830000000133
+      },
+      {
+        "turnId": "chs_92675341a7414eceb132158894ecead7",
+        "milestone": "contextReady",
+        "elapsedMs": 1.466707999999926
+      },
+      {
+        "turnId": "chs_92675341a7414eceb132158894ecead7",
+        "milestone": "providerHeaders",
+        "elapsedMs": 1.7041659999999865
+      },
+      {
+        "turnId": "chs_92675341a7414eceb132158894ecead7",
+        "milestone": "providerRequest",
+        "elapsedMs": 2.4203749999996944
+      },
+      {
+        "turnId": "chs_92675341a7414eceb132158894ecead7",
+        "milestone": "providerResponse",
+        "elapsedMs": 4.2222499999998035
+      },
+      {
+        "turnId": "chs_92675341a7414eceb132158894ecead7",
+        "milestone": "assistantStart",
+        "elapsedMs": 4.333374999999705
+      },
+      {
+        "turnId": "chs_92675341a7414eceb132158894ecead7",
+        "milestone": "firstText",
+        "elapsedMs": 37.11608299999989
+      }
+    ],
+    "piEngineEntryMs": {
+      "p50": 6.368541999999707,
+      "p95": 6.368541999999707,
+      "p99": 6.368541999999707
+    },
+    "piClientDeliveryAfterFirstTextMs": {
+      "p50": 0.12320799999997689,
+      "p95": 0.12320799999997689,
+      "p99": 0.12320799999997689
+    },
+    "piTurnTimelines": [
+      {
+        "turnId": "chs_92675341a7414eceb132158894ecead7",
+        "routeToEngineMs": 6.370292000000063,
+        "engineToPromptMs": 25.742583999999624,
+        "measuredLifecycleMs": 25.657790999999634,
+        "unmeasuredEngineSetupMs": 0.08479299999999057,
+        "promptToFirstTextMs": 37.115208000000166,
+        "firstTextToClientMs": 0.12320799999997689,
+        "requestToClientFirstTokenMs": 69.35129199999983
+      }
+    ]
+  },
+  "persistence": {
+    "messageCount": 5,
+    "structuredPartCount": 11,
+    "usageRows": 3,
+    "usageOwnershipValid": true,
+    "bySession": {
+      "chs_92675341a7414eceb132158894ecead7": 5
+    }
+  },
+  "continuity": {
+    "status": 200,
+    "complete": true,
+    "markerValid": true,
+    "persistedMessageCount": 5
+  },
+  "isolation": {
+    "foreignSessionRejected": true
+  },
+  "teardown": {
+    "databaseRelease": "process-exit-after-verification"
+  },
+  "turns": [
+    {
+      "marker": "ORG0001_USER0001",
+      "sessionId": "chs_92675341a7414eceb132158894ecead7",
+      "status": 200,
+      "firstTokenMs": 69.35129199999983,
+      "totalMs": 237.08845900000006,
+      "complete": true,
+      "markerValid": true,
+      "error": null
+    }
+  ],
+  "samples": [
+    {
+      "elapsedMs": 0.0301670000000005,
+      "rss": 24592384,
+      "heapUsed": 211394,
+      "external": 27778,
+      "arrayBuffers": 0,
+      "cpuUserMicros": 29,
+      "cpuSystemMicros": 4,
+      "eventLoopDelayMs": 0
+    },
+    {
+      "elapsedMs": 180.884459,
+      "rss": 80003072,
+      "heapUsed": 211394,
+      "external": 136896089,
+      "arrayBuffers": 2194,
+      "cpuUserMicros": 153669,
+      "cpuSystemMicros": 33372,
+      "eventLoopDelayMs": 80.85429199999999
+    },
+    {
+      "elapsedMs": 366.387334,
+      "rss": 477118464,
+      "heapUsed": 295336454,
+      "external": 496237059,
+      "arrayBuffers": 358220563,
+      "cpuUserMicros": 377727,
+      "cpuSystemMicros": 81923,
+      "eventLoopDelayMs": 85.50287500000002
+    },
+    {
+      "elapsedMs": 2073.738042,
+      "rss": 876740608,
+      "heapUsed": 848451595,
+      "external": 1616524220,
+      "arrayBuffers": 1034264379,
+      "cpuUserMicros": 3160443,
+      "cpuSystemMicros": 608117,
+      "eventLoopDelayMs": 1607.3507080000002
+    },
+    {
+      "elapsedMs": 2404.868125,
+      "rss": 666615808,
+      "heapUsed": 1634643901,
+      "external": 1619952655,
+      "arrayBuffers": 1034390813,
+      "cpuUserMicros": 3431116,
+      "cpuSystemMicros": 701490,
+      "eventLoopDelayMs": 231.130083
+    },
+    {
+      "elapsedMs": 2527.2584169999996,
+      "rss": 640106496,
+      "heapUsed": 876236080,
+      "external": 861860599,
+      "arrayBuffers": 455592838,
+      "cpuUserMicros": 3565155,
+      "cpuSystemMicros": 746740,
+      "eventLoopDelayMs": 22.39029199999959
+    },
+    {
+      "elapsedMs": 2674.1449589999997,
+      "rss": 583434240,
+      "heapUsed": 876459971,
+      "external": 862009118,
+      "arrayBuffers": 455664703,
+      "cpuUserMicros": 3693214,
+      "cpuSystemMicros": 768583,
+      "eventLoopDelayMs": 46.88654200000019
+    },
+    {
+      "elapsedMs": 2774.6274169999997,
+      "rss": 583647232,
+      "heapUsed": 876691508,
+      "external": 862226648,
+      "arrayBuffers": 455830881,
+      "cpuUserMicros": 3801557,
+      "cpuSystemMicros": 793597,
+      "eventLoopDelayMs": 0.4824579999999514
+    },
+    {
+      "elapsedMs": 3736.8439169999997,
+      "rss": 530382848,
+      "heapUsed": 876691508,
+      "external": 862302250,
+      "arrayBuffers": 455901611,
+      "cpuUserMicros": 4528132,
+      "cpuSystemMicros": 980563,
+      "eventLoopDelayMs": 862.2165
+    },
+    {
+      "elapsedMs": 3841.2359589999996,
+      "rss": 512344064,
+      "heapUsed": 925801751,
+      "external": 878331586,
+      "arrayBuffers": 455906906,
+      "cpuUserMicros": 4596505,
+      "cpuSystemMicros": 987138,
+      "eventLoopDelayMs": 4.392041999999947
+    },
+    {
+      "elapsedMs": 3946.1854999999996,
+      "rss": 500531200,
+      "heapUsed": 925927087,
+      "external": 878408826,
+      "arrayBuffers": 455944862,
+      "cpuUserMicros": 4641081,
+      "cpuSystemMicros": 991314,
+      "eventLoopDelayMs": 4.949540999999954
+    },
+    {
+      "elapsedMs": 4046.3139589999996,
+      "rss": 496877568,
+      "heapUsed": 927153010,
+      "external": 879153305,
+      "arrayBuffers": 455992706,
+      "cpuUserMicros": 4715528,
+      "cpuSystemMicros": 1004293,
+      "eventLoopDelayMs": 0.12845900000002075
+    },
+    {
+      "elapsedMs": 4146.498834,
+      "rss": 463126528,
+      "heapUsed": 927248570,
+      "external": 879170416,
+      "arrayBuffers": 455998908,
+      "cpuUserMicros": 4740380,
+      "cpuSystemMicros": 1013240,
+      "eventLoopDelayMs": 0.18487499999991996
+    },
+    {
+      "elapsedMs": 4248.542875,
+      "rss": 465928192,
+      "heapUsed": 927303254,
+      "external": 879260203,
+      "arrayBuffers": 456082878,
+      "cpuUserMicros": 4826451,
+      "cpuSystemMicros": 1027672,
+      "eventLoopDelayMs": 2.0440410000001066
+    },
+    {
+      "elapsedMs": 4351.719959,
+      "rss": 466042880,
+      "heapUsed": 928354996,
+      "external": 879813172,
+      "arrayBuffers": 456088173,
+      "cpuUserMicros": 4853775,
+      "cpuSystemMicros": 1029724,
+      "eventLoopDelayMs": 3.1770839999999225
+    },
+    {
+      "elapsedMs": 4439.282499999999,
+      "rss": 439861248,
+      "heapUsed": 928413241,
+      "external": 879834580,
+      "arrayBuffers": 456101078,
+      "cpuUserMicros": 4872613,
+      "cpuSystemMicros": 1031321,
+      "eventLoopDelayMs": 0
+    }
+  ]
+}

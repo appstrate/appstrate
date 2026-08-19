@@ -403,3 +403,12 @@ capacité cloud reste inconnue.
 
 Le rapport, les commandes, le journal de décision prêt à reporter et les artifacts versionnés se
 trouvent dans [CHAT_PI_PERFORMANCE_REPORT.md](./CHAT_PI_PERFORMANCE_REPORT.md).
+
+Le diagnostic interne apparié du 19 août ajoute des jalons communs avant moteur, les étapes du
+prompt Pi, une timeline additive par conversation et un profil CPU limité exactement à la vague.
+Il confirme que le mapper Pi vers le client est négligeable et sépare le chargement de ressources,
+le clone et la conversion Pi, la persistance PGlite du fournisseur contrôlé et le chemin Appstrate
+avant moteur. Le placeholder proxy utilise désormais un fast path synchrone, tandis que les
+credentials OAuth conservent leur synchronisation complète. Les douze observations à 1 et 10 chats
+sont versionnées dans le rapport. La décision locale reste NO GO et la capacité cloud reste
+inconnue.

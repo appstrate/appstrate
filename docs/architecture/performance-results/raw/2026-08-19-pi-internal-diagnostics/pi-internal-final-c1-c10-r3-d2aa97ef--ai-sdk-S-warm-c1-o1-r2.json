@@ -1,0 +1,373 @@
+{
+  "schemaVersion": 1,
+  "kind": "chat-engine-performance-observation",
+  "benchmark": "controlled",
+  "id": "ai-sdk-S-warm-c1-o1-r2",
+  "environment": {
+    "commit": "d2aa97eff57b080236c074d50f2c6d0ac61573d5",
+    "branch": "feat/chat-pi-unified-engine-phase4",
+    "bunVersion": "1.3.10",
+    "platform": "darwin-arm64",
+    "port": 3400,
+    "database": "isolated-pglite",
+    "controlledProviderPersistence": true
+  },
+  "cell": {
+    "engine": "ai-sdk",
+    "form": "S",
+    "profile": "warm",
+    "concurrency": 1,
+    "repetition": 2,
+    "distribution": "1-organizations-x-1-chats"
+  },
+  "timing": {
+    "waveStartedAtMs": 3815.1337500000004,
+    "waveEndedAtMs": 4017.5621250000004,
+    "waveStartedAtEpochMs": 1787162310359.4448,
+    "waveEndedAtEpochMs": 1787162310561.8733,
+    "recoveryMs": 0
+  },
+  "memory": {
+    "initial": {
+      "elapsedMs": 3882.04275,
+      "rss": 374964224,
+      "heapUsed": 1038864868,
+      "external": 1003323438,
+      "arrayBuffers": 523223127,
+      "cpuUserMicros": 4529835,
+      "cpuSystemMicros": 936059,
+      "eventLoopDelayMs": 0.03954199999998309
+    },
+    "peak": {
+      "elapsedMs": 3982.8610000000003,
+      "rss": 375701504,
+      "heapUsed": 1039061444,
+      "external": 1003333595,
+      "arrayBuffers": 523225722,
+      "cpuUserMicros": 4550018,
+      "cpuSystemMicros": 942067,
+      "eventLoopDelayMs": 0.8182500000002619
+    },
+    "end": {
+      "elapsedMs": 4085.699125,
+      "rss": 361250816,
+      "heapUsed": 1039705678,
+      "external": 1003555342,
+      "arrayBuffers": 523306150,
+      "cpuUserMicros": 4609079,
+      "cpuSystemMicros": 946799,
+      "eventLoopDelayMs": 2.8381249999997635
+    },
+    "after30s": null,
+    "after60s": null,
+    "after120s": null
+  },
+  "eventLoopDelayMs": {
+    "p50": 0.03954199999998309,
+    "p95": 0.8182500000002619,
+    "p99": 0.8182500000002619
+  },
+  "cpu": {
+    "userMicros": 79244,
+    "systemMicros": 10740
+  },
+  "latency": {
+    "firstTokenMs": {
+      "p50": 41.11524999999983,
+      "p95": 41.11524999999983,
+      "p99": 41.11524999999983
+    },
+    "totalMs": {
+      "p50": 200.35704199999964,
+      "p95": 200.35704199999964,
+      "p99": 200.35704199999964
+    },
+    "throughputChatsPerSecond": 4.940018907922371
+  },
+  "outcomes": {
+    "requested": 1,
+    "completed": 1,
+    "rateLimited": 0,
+    "serverErrors": 0,
+    "incompleteStreams": 0,
+    "markerFailures": 0
+  },
+  "usage": {
+    "modelCalls": 1,
+    "toolCalls": 0,
+    "inputTokens": 128,
+    "outputTokens": 32
+  },
+  "provider": {
+    "id": "deterministic",
+    "modelId": "controlled-v1",
+    "statuses": {
+      "ok": 0,
+      "rateLimited": 0,
+      "serverError": 0,
+      "otherError": 0
+    }
+  },
+  "diagnostics": {
+    "providerDispatchMs": {
+      "p50": 9.346207999999933,
+      "p95": 9.346207999999933,
+      "p99": 9.346207999999933
+    },
+    "chatTurn": {
+      "sampleCount": 1,
+      "milestonesMs": {
+        "bodyParsed": {
+          "p50": 0.13720800000010058,
+          "p95": 0.13720800000010058,
+          "p99": 0.13720800000010058
+        },
+        "sessionEnsured": {
+          "p50": 3.1760409999997137,
+          "p95": 3.1760409999997137,
+          "p99": 3.1760409999997137
+        },
+        "phaseAResolved": {
+          "p50": 3.4854159999999865,
+          "p95": 3.4854159999999865,
+          "p99": 3.4854159999999865
+        },
+        "bindingResolved": {
+          "p50": 3.5572079999997186,
+          "p95": 3.5572079999997186,
+          "p99": 3.5572079999997186
+        },
+        "usageAllowed": {
+          "p50": 3.5621659999997064,
+          "p95": 3.5621659999997064,
+          "p99": 3.5621659999997064
+        },
+        "phaseBResolved": {
+          "p50": 4.273541000000023,
+          "p95": 4.273541000000023,
+          "p99": 4.273541000000023
+        },
+        "admissionAcquired": {
+          "p50": 4.278416000000107,
+          "p95": 4.278416000000107,
+          "p99": 4.278416000000107
+        },
+        "userStatePersisted": {
+          "p50": 7.648457999999664,
+          "p95": 7.648457999999664,
+          "p99": 7.648457999999664
+        },
+        "engineDispatch": {
+          "p50": 7.748665999999957,
+          "p95": 7.748665999999957,
+          "p99": 7.748665999999957
+        }
+      }
+    }
+  },
+  "persistence": {
+    "messageCount": 5,
+    "structuredPartCount": 8,
+    "usageRows": 3,
+    "usageOwnershipValid": true,
+    "bySession": {
+      "chs_01d57e6aa85e4f74ba35e01d8dc01c53": 5
+    }
+  },
+  "continuity": {
+    "status": 200,
+    "complete": true,
+    "markerValid": true,
+    "persistedMessageCount": 5
+  },
+  "isolation": {
+    "foreignSessionRejected": true
+  },
+  "teardown": {
+    "databaseRelease": "process-exit-after-verification"
+  },
+  "turns": [
+    {
+      "marker": "ORG0001_USER0001",
+      "sessionId": "chs_01d57e6aa85e4f74ba35e01d8dc01c53",
+      "status": 200,
+      "firstTokenMs": 41.11524999999983,
+      "totalMs": 200.35704199999964,
+      "complete": true,
+      "markerValid": true,
+      "error": null
+    }
+  ],
+  "samples": [
+    {
+      "elapsedMs": 0.026500000000000412,
+      "rss": 24526848,
+      "heapUsed": 211394,
+      "external": 27778,
+      "arrayBuffers": 0,
+      "cpuUserMicros": 25,
+      "cpuSystemMicros": 4,
+      "eventLoopDelayMs": 0
+    },
+    {
+      "elapsedMs": 112.30304100000001,
+      "rss": 77168640,
+      "heapUsed": 211394,
+      "external": 747668,
+      "arrayBuffers": 2194,
+      "cpuUserMicros": 113898,
+      "cpuSystemMicros": 21307,
+      "eventLoopDelayMs": 12.276541000000009
+    },
+    {
+      "elapsedMs": 214.626625,
+      "rss": 191266816,
+      "heapUsed": 295324885,
+      "external": 288605375,
+      "arrayBuffers": 150600288,
+      "cpuUserMicros": 321754,
+      "cpuSystemMicros": 51676,
+      "eventLoopDelayMs": 2.3235839999999826
+    },
+    {
+      "elapsedMs": 361.879958,
+      "rss": 464453632,
+      "heapUsed": 440478042,
+      "external": 631830452,
+      "arrayBuffers": 358220563,
+      "cpuUserMicros": 381847,
+      "cpuSystemMicros": 83196,
+      "eventLoopDelayMs": 47.253333
+    },
+    {
+      "elapsedMs": 2257.8135410000004,
+      "rss": 803815424,
+      "heapUsed": 848129704,
+      "external": 1934825209,
+      "arrayBuffers": 1397343815,
+      "cpuUserMicros": 3417292,
+      "cpuSystemMicros": 615026,
+      "eventLoopDelayMs": 1795.9335830000002
+    },
+    {
+      "elapsedMs": 2363.662208,
+      "rss": 751796224,
+      "heapUsed": 1953796263,
+      "external": 995767029,
+      "arrayBuffers": 522508229,
+      "cpuUserMicros": 3449069,
+      "cpuSystemMicros": 628074,
+      "eventLoopDelayMs": 5.84866699999975
+    },
+    {
+      "elapsedMs": 2670.231916,
+      "rss": 662192128,
+      "heapUsed": 1953796263,
+      "external": 995894443,
+      "arrayBuffers": 522635643,
+      "cpuUserMicros": 3708235,
+      "cpuSystemMicros": 714173,
+      "eventLoopDelayMs": 206.569708
+    },
+    {
+      "elapsedMs": 2770.4980830000004,
+      "rss": 644792320,
+      "heapUsed": 1010667904,
+      "external": 996247200,
+      "arrayBuffers": 522873963,
+      "cpuUserMicros": 3857698,
+      "cpuSystemMicros": 750313,
+      "eventLoopDelayMs": 0.2661670000002232
+    },
+    {
+      "elapsedMs": 2873.444875,
+      "rss": 630439936,
+      "heapUsed": 1010955642,
+      "external": 996474487,
+      "arrayBuffers": 522995782,
+      "cpuUserMicros": 3970014,
+      "cpuSystemMicros": 775923,
+      "eventLoopDelayMs": 2.946791999999732
+    },
+    {
+      "elapsedMs": 3580.769916,
+      "rss": 532496384,
+      "heapUsed": 1011107107,
+      "external": 996664270,
+      "arrayBuffers": 523141270,
+      "cpuUserMicros": 4400422,
+      "cpuSystemMicros": 917341,
+      "eventLoopDelayMs": 607.325041
+    },
+    {
+      "elapsedMs": 3680.911833,
+      "rss": 464027648,
+      "heapUsed": 1037883468,
+      "external": 1002963769,
+      "arrayBuffers": 523143641,
+      "cpuUserMicros": 4452017,
+      "cpuSystemMicros": 921813,
+      "eventLoopDelayMs": 0.14191699999992125
+    },
+    {
+      "elapsedMs": 3782.003208,
+      "rss": 407879680,
+      "heapUsed": 1038076143,
+      "external": 1002978620,
+      "arrayBuffers": 523145717,
+      "cpuUserMicros": 4480128,
+      "cpuSystemMicros": 930558,
+      "eventLoopDelayMs": 1.091374999999971
+    },
+    {
+      "elapsedMs": 3882.04275,
+      "rss": 374964224,
+      "heapUsed": 1038864868,
+      "external": 1003323438,
+      "arrayBuffers": 523223127,
+      "cpuUserMicros": 4529835,
+      "cpuSystemMicros": 936059,
+      "eventLoopDelayMs": 0.03954199999998309
+    },
+    {
+      "elapsedMs": 3982.8610000000003,
+      "rss": 375701504,
+      "heapUsed": 1039061444,
+      "external": 1003333595,
+      "arrayBuffers": 523225722,
+      "cpuUserMicros": 4550018,
+      "cpuSystemMicros": 942067,
+      "eventLoopDelayMs": 0.8182500000002619
+    },
+    {
+      "elapsedMs": 4085.699125,
+      "rss": 361250816,
+      "heapUsed": 1039705678,
+      "external": 1003555342,
+      "arrayBuffers": 523306150,
+      "cpuUserMicros": 4609079,
+      "cpuSystemMicros": 946799,
+      "eventLoopDelayMs": 2.8381249999997635
+    },
+    {
+      "elapsedMs": 4186.294875,
+      "rss": 315129856,
+      "heapUsed": 1039861449,
+      "external": 1003568000,
+      "arrayBuffers": 523308745,
+      "cpuUserMicros": 4628074,
+      "cpuSystemMicros": 947967,
+      "eventLoopDelayMs": 0.595749999999498
+    },
+    {
+      "elapsedMs": 4224.102333,
+      "rss": 315211776,
+      "heapUsed": 1039942044,
+      "external": 1003580128,
+      "arrayBuffers": 523316065,
+      "cpuUserMicros": 4639774,
+      "cpuSystemMicros": 948605,
+      "eventLoopDelayMs": 0
+    }
+  ]
+}
