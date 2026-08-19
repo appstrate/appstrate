@@ -172,3 +172,124 @@ export async function backfillPublicOAuthClients(
 
   return report;
 }
+
+// ---------------------------------------------------------------------------
+// Failure classification
+// ---------------------------------------------------------------------------
+
+/**
+ * The run reached the data and some rows need an operator's attention — rows
+ * whose ciphertext did not open were reported and skipped.
+ */
+export const EXIT_ROWS_NEED_ATTENTION = 1;
+
+/**
+ * The run never got to look at the data at all: the table or the database was
+ * not there. DISTINCT from {@link EXIT_ROWS_NEED_ATTENTION} on purpose — "I
+ * inspected your data and some rows need attention" and "I never got to look"
+ * demand different responses, and a wrapper script has no other way to tell
+ * them apart.
+ */
+export const EXIT_COULD_NOT_RUN = 2;
+
+/** A thrown value turned into something an operator can act on. */
+export interface BackfillFailure {
+  /** Ready to print, no trailing newline. Never contains a secret. */
+  message: string;
+  /** What the process should exit with. */
+  exitCode: number;
+}
+
+/** `relation … does not exist` — the table is not in this database. */
+const UNDEFINED_TABLE = "42P01";
+
+/**
+ * Codes that all mean "the database was never reached or never opened":
+ * connection refused, host not resolvable, credentials rejected
+ * (`invalid_password` / `invalid_authorization_specification`), and no such
+ * database (`invalid_catalog_name` — what Postgres and PGlite both answer when
+ * the name in the URL names nothing).
+ */
+const UNREACHABLE = new Set(["ECONNREFUSED", "ENOTFOUND", "28P01", "28000", "3D000"]);
+
+/**
+ * Every `code` along the `cause` chain, outermost first.
+ *
+ * The chain matters: a Drizzle query does not throw the driver's error, it
+ * throws a `DrizzleQueryError` *wrapping* it, and only the wrapped error
+ * carries the SQLSTATE. Checking `err.code` alone sees `undefined` for every
+ * database failure this script can actually hit.
+ */
+function codeChain(err: unknown): string[] {
+  const codes: string[] = [];
+  let cursor: unknown = err;
+  // Bounded: a malformed `cause` cycle must not hang an operator's terminal.
+  for (let depth = 0; cursor !== null && cursor !== undefined && depth < 8; depth += 1) {
+    const code: unknown = (cursor as { code?: unknown }).code;
+    if (typeof code === "string") codes.push(code);
+    cursor = (cursor as { cause?: unknown }).cause;
+  }
+  return codes;
+}
+
+/**
+ * The innermost message in the chain, collapsed onto one line.
+ *
+ * Innermost, because the wrappers restate the query rather than the failure:
+ * `DrizzleQueryError`'s message is the SQL, and the driver error it wraps is
+ * the thing that actually went wrong. Taking the outermost would bury the cause
+ * under 140 characters of SELECT.
+ */
+function rootMessage(err: unknown): string {
+  let message = err instanceof Error ? err.message : String(err);
+  let cursor: unknown = err;
+  for (let depth = 0; cursor !== null && cursor !== undefined && depth < 8; depth += 1) {
+    if (cursor instanceof Error && cursor.message !== "") message = cursor.message;
+    cursor = (cursor as { cause?: unknown }).cause;
+  }
+  return message.replace(/\s+/g, " ").trim();
+}
+
+/**
+ * Explain a failure that stopped the backfill before it could report anything.
+ *
+ * Pure, so the classification is testable without a database — the point being
+ * that the repair script an error message tells an operator to run must not
+ * itself fail as a stack trace into `node_modules`.
+ *
+ * NEVER echoes `DATABASE_URL` or `CONNECTION_ENCRYPTION_KEY`: this output is
+ * exactly what gets pasted into a ticket, and the connection string carries a
+ * password. The remedies name the variable to check, never its value.
+ */
+export function explainBackfillFailure(err: unknown): BackfillFailure {
+  const codes = codeChain(err);
+
+  if (codes.includes(UNDEFINED_TABLE)) {
+    return {
+      exitCode: EXIT_COULD_NOT_RUN,
+      message:
+        `backfill-public-oauth-clients: table \`integration_oauth_clients\` does not exist.\n` +
+        `  The database this connected to is not an Appstrate platform database, or the\n` +
+        `  platform's migrations have never been applied to it. Check which database\n` +
+        `  DATABASE_URL selects. Migrations are applied automatically when the platform\n` +
+        `  boots, so booting the platform once against that database is normally enough.`,
+    };
+  }
+
+  const unreachable = codes.find((code) => UNREACHABLE.has(code));
+  if (unreachable !== undefined) {
+    return {
+      exitCode: EXIT_COULD_NOT_RUN,
+      message:
+        `backfill-public-oauth-clients: could not reach the database (${unreachable}).\n` +
+        `  Check DATABASE_URL — host, port, database name and credentials — and that the\n` +
+        `  server is running and reachable from here. The URL itself is not printed: it\n` +
+        `  carries a password.`,
+    };
+  }
+
+  return {
+    exitCode: EXIT_COULD_NOT_RUN,
+    message: `backfill-public-oauth-clients: ${rootMessage(err)}`,
+  };
+}

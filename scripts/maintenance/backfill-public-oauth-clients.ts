@@ -26,6 +26,18 @@
  * at, and makes this script exit 1 — writing `none` there would silently turn a
  * confidential client into a public one.
  *
+ * Exit codes — an operator (or a wrapper script) must be able to tell "I looked
+ * at your data and some rows need attention" from "I never got to look":
+ *
+ *   0  every undeclared row was decided; nothing needs attention.
+ *   1  the pass completed, but rows could not be decrypted and still carry no
+ *      declaration. Their remedy is printed; the other rows WERE canonicalised.
+ *   2  the pass never ran: the table or the database could not be reached. No
+ *      row was examined and nothing was written. See `explainBackfillFailure`.
+ *
+ * Neither `DATABASE_URL` nor `CONNECTION_ENCRYPTION_KEY` is ever echoed, on any
+ * path — this output is what gets pasted into a ticket.
+ *
  * Idempotent — a second run finds nothing to do. This is REMEDIAL, not
  * cosmetic: the resolvers no longer read a legacy row's meaning out of its
  * ciphertext, so connecting or refreshing such a client fails with an error
@@ -38,13 +50,31 @@
  * can never eliminate. Only this script can.
  *
  * All logic lives in the service so it resolves its deps and stays testable —
- * same split as `scripts/maintenance/storage-orphans.ts`.
+ * same split as `scripts/maintenance/storage-orphans.ts`. That includes the
+ * classification of a failure to even reach the table: the repair script named
+ * by a runtime error must not itself fail as a stack trace into `node_modules`.
  */
 
-import { backfillPublicOAuthClients } from "../../apps/api/src/services/backfill-public-oauth-clients.ts";
+import {
+  backfillPublicOAuthClients,
+  explainBackfillFailure,
+  EXIT_ROWS_NEED_ATTENTION,
+  type BackfillReport,
+} from "../../apps/api/src/services/backfill-public-oauth-clients.ts";
 
 const dryRun = process.argv.includes("--dry-run");
-const report = await backfillPublicOAuthClients({ dryRun });
+
+let report: BackfillReport;
+try {
+  report = await backfillPublicOAuthClients({ dryRun });
+} catch (err) {
+  // Reaching the table is a precondition, not a result: nothing was examined
+  // and nothing was written, so this exits on its own code rather than sharing
+  // the one that means "some rows need attention".
+  const failure = explainBackfillFailure(err);
+  process.stderr.write(`${failure.message}\n`);
+  process.exit(failure.exitCode);
+}
 
 for (const row of report.undecryptable) {
   process.stderr.write(
@@ -67,4 +97,4 @@ if (report.undecryptable.length > 0) {
   );
 }
 
-process.exit(report.undecryptable.length > 0 ? 1 : 0);
+process.exit(report.undecryptable.length > 0 ? EXIT_ROWS_NEED_ATTENTION : 0);
