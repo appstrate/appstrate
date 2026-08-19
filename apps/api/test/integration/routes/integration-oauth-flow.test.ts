@@ -287,7 +287,7 @@ describe("integration OAuth2 flow (conformant provider)", () => {
       ctx,
       provider,
       { tokenEndpointAuthMethod: "none" },
-      { clientId: "cid", clientSecret: "", tokenEndpointAuthMethod: "none" },
+      { clientId: "cid", clientSecret: "" },
     );
     await consentAndCallback(await beginConnect(ctx));
 
@@ -308,7 +308,7 @@ describe("integration OAuth2 flow (conformant provider)", () => {
       ctx,
       provider,
       { tokenEndpointAuthMethod: "client_secret_post" },
-      { clientId: "cid", clientSecret: "", tokenEndpointAuthMethod: "none" },
+      { clientId: "cid", clientSecret: "" },
     );
     await consentAndCallback(await beginConnect(ctx));
 
@@ -327,7 +327,7 @@ describe("integration OAuth2 flow (conformant provider)", () => {
       ctx,
       provider,
       { tokenEndpointAuthMethod: "client_secret_basic" },
-      { clientId: "cid", clientSecret: "", tokenEndpointAuthMethod: "none" },
+      { clientId: "cid", clientSecret: "" },
     );
     await consentAndCallback(await beginConnect(ctx));
 

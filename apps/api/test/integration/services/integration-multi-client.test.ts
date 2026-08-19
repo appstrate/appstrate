@@ -274,7 +274,6 @@ describe("integration multi-client", () => {
         clientId: "sys-client.apps.googleusercontent.com",
         clientSecret: "",
         tokenEndpointAuthMethod: "none",
-        tokenEndpointAuthMethod: "none",
       });
     });
 
@@ -290,7 +289,6 @@ describe("integration multi-client", () => {
       expect(c).toEqual({
         clientId: "custom-client-id",
         clientSecret: "",
-        tokenEndpointAuthMethod: "none",
         tokenEndpointAuthMethod: "none",
       });
     });
