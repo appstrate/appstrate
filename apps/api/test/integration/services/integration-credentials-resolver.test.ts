@@ -580,18 +580,93 @@ describe("resolveLiveIntegrationCredentials", () => {
     expect(await needsReconnection(connId)).toBe(false);
   });
 
-  it("does not resolve another actor's connection (actor-scope isolation)", async () => {
+  it("does not resolve another actor's connection — 404, never a silent empty payload", async () => {
     const other = await createTestUser();
     // The only connection belongs to a DIFFERENT user; it is not shared.
-    await seedConnection({ userId: other.id, accountId: "other-acct" });
+    const foreignId = await seedConnection({ userId: other.id, accountId: "other-acct" });
 
     // No force-refresh: we want to observe selection, not the refresh path.
-    const out = await resolveLiveIntegrationCredentials(INTEGRATION_ID, resolverContext());
-    // No accessible connection → empty credential surface. The foreign row is
-    // never decrypted, never returned (no cross-actor leak).
-    expect(out.auths).toEqual([]);
-    expect(out.deliveryPlans).toEqual({});
+    let err: unknown;
+    try {
+      await resolveLiveIntegrationCredentials(INTEGRATION_ID, resolverContext());
+      throw new Error("expected resolveLiveIntegrationCredentials to throw");
+    } catch (e) {
+      err = e;
+    }
+    // The foreign row is never decrypted and never returned (no cross-actor
+    // leak) — but "no accessible connection" is now a LOUD 404 rather than the
+    // empty payload, which the sidecar read as "this integration declares no
+    // auth, skip the MITM listener" and booted the run uncredentialed.
+    expect((err as { status?: number }).status).toBe(404);
+    expect((err as Error).message).not.toContain("other-acct");
+    // The other actor's connection is untouched — a failed lookup must never
+    // flag a row that belongs to someone else.
+    expect(await needsReconnection(foreignId)).toBe(false);
   });
+
+  it("throws 409 integration_auth_undeclared when the pinned manifest dropped the connection's auth", async () => {
+    // STATE B — the row decrypts fine, but the manifest VERSION this run reads
+    // no longer declares the auth it was created against (renamed/removed).
+    // Reached via the run's `resolved_connections` pin: that is the only
+    // selection path that returns a row whose authKey is outside the declared
+    // set. Without the declaration there is no delivery plan and no
+    // `authorized_uris`, so nothing can be injected.
+    const connId = await seedConnection({ userId: ctx.user.id });
+    await db
+      .update(integrationConnections)
+      .set({ authKey: "legacy_primary" })
+      .where(eq(integrationConnections.id, connId));
+
+    let err: unknown;
+    try {
+      await resolveLiveIntegrationCredentials(INTEGRATION_ID, {
+        ...resolverContext(),
+        resolvedConnections: { [INTEGRATION_ID]: { connectionId: connId, source: "member_pin" } },
+      });
+      throw new Error("expected resolveLiveIntegrationCredentials to throw");
+    } catch (e) {
+      err = e;
+    }
+    expect((err as { status?: number }).status).toBe(409);
+    expect((err as { code?: string }).code).toBe("integration_auth_undeclared");
+    // Names the undeclared key AND what the manifest does declare.
+    expect((err as Error).message).toContain("legacy_primary");
+    expect((err as Error).message).toContain("primary");
+    // NOT flagged: the credential is intact and may be valid under another
+    // manifest version. A manifest edit must not destroy a working connection.
+    expect(await needsReconnection(connId)).toBe(false);
+  });
+
+  it("throws 410 and flags when the stored credentials cannot be decrypted (unforced read)", async () => {
+    // STATE C — a rotated `CONNECTION_ENCRYPTION_KEY` or a corrupted blob. A
+    // credential nobody can read is dead on ANY read, so this is terminal even
+    // without a forced refresh: flag the row, refuse loudly.
+    const connId = await seedConnection({ userId: ctx.user.id });
+    await db
+      .update(integrationConnections)
+      .set({ credentialsEncrypted: "v1:not-a-real-envelope" })
+      .where(eq(integrationConnections.id, connId));
+
+    let err: unknown;
+    try {
+      await resolveLiveIntegrationCredentials(INTEGRATION_ID, resolverContext());
+      throw new Error("expected resolveLiveIntegrationCredentials to throw");
+    } catch (e) {
+      err = e;
+    }
+    expect((err as { status?: number }).status).toBe(410);
+    expect((err as { code?: string }).code).toBe("INTEGRATION_CONNECTION_NEEDS_RECONNECTION");
+    expect((err as Error).message).toMatch(/could not be decrypted/i);
+    expect(await needsReconnection(connId)).toBe(true);
+  });
+
+  // NOTE — the resolver's ONE legitimate empty payload (an integration that
+  // declares no auth) is deliberately untested here: it is unreachable through
+  // a stored manifest. `@afps-spec/schema` requires at least one auth method,
+  // so a zero-auth manifest fails validation in `loadIntegrationManifest` and
+  // the resolver throws 500 before reaching the branch. It is kept in the
+  // source as the correct answer if that rule ever relaxes — and as the
+  // reference the three fail-loud states above are contrasted against.
 
   it("throws 404 when the integration is not installed in the application", async () => {
     // A different integration the agent never declared / installed.

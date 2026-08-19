@@ -35,6 +35,7 @@ import { logger } from "../../lib/logger.ts";
 import {
   assertIntegrationActive,
   selectAccessibleConnection,
+  markIntegrationConnectionNeedsReconnection,
   type ResolvedConnectionRow,
 } from "../integration-connections.ts";
 import { fetchIntegrationManifest } from "../integration-service.ts";
@@ -112,10 +113,17 @@ export async function resolveIntegrationProxyCredentials(
 
 /**
  * Force-refresh the integration connection's OAuth2 token (the proxy's
- * reactive 401-retry path) and rebuild the payload. Returns `null` when
- * the auth is not refreshable (no token URL / no per-app OAuth client /
- * public client). Throws {@link IntegrationCredentialRevokedError} when
- * the refresh token was revoked upstream.
+ * reactive 401-retry path) and rebuild the payload. Throws
+ * {@link IntegrationCredentialRevokedError} when the refresh token was revoked
+ * upstream. Returns `null` in the three not-refreshed cases, which are NOT
+ * equivalent and are told apart by what they leave behind:
+ *
+ *   - transient (discovery blip, upstream 5xx) — row untouched, retry later;
+ *   - not refreshable at all (no accessible connection, non-oauth2 auth) —
+ *     row untouched, there is nothing this path can conclude;
+ *   - TERMINAL (the minting OAuth client is gone / the manifest can never
+ *     yield a token endpoint) — the connection is flagged `needsReconnection`
+ *     before returning, mirroring the sidecar resolver's 410 branch.
  */
 export async function forceRefreshIntegrationProxyCredentials(
   input: ResolveIntegrationProxyInput,
@@ -154,7 +162,31 @@ export async function forceRefreshIntegrationProxyCredentials(
     }
     throw err;
   }
-  if (!refreshContext) return null;
+  if (!refreshContext) {
+    // TERMINAL, not transient: the OAuth client that minted this connection is
+    // gone (deleted row, missing `client_ref`, undecryptable client secret) or
+    // the manifest declares no token endpoint and no issuer to discover one
+    // from. Nothing will ever refresh this token, so mark the connection —
+    // the SAME thing the sidecar path does through `flagTerminalAndThrow`
+    // (`integration-credentials-resolver.ts`). Without the mark, CLI / GitHub
+    // Action / self-hosted-runner users sat in an endless 401 loop with no
+    // reconnect prompt anywhere: the caller sees the upstream 401, the row
+    // stays clean, and the readiness gate has nothing to fire on.
+    await markIntegrationConnectionNeedsReconnection(connection.id);
+    logger.warn("credential-proxy: integration credential unrefreshable — needs re-connection", {
+      integrationId: input.integrationId,
+      authKey: connection.authKey,
+      connectionId: connection.id,
+    });
+    // Still `null`, not a throw. This helper is the proxy's best-effort 401
+    // retry hook, called from `core.ts` inside a `catch {}`: a throw would be
+    // swallowed there and buy nothing, and the proxy's contract is to relay
+    // the upstream response — the caller must keep seeing the real 401 rather
+    // than a platform-substituted error. The persisted `needsReconnection`
+    // flag is what makes this failure legible (degrade-and-mark), and the
+    // dashboard / readiness gate read it.
+    return null;
+  }
 
   // Re-acquisition = fast-path refresh_token POST. `authDef.type` is gated
   // to oauth2 above, so this is the only refreshable auth.

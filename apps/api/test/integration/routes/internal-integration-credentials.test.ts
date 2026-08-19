@@ -99,19 +99,48 @@ describe("GET /internal/integration-credentials/:scope/:name", () => {
     }
   }
 
+  /** Seed a connection for the test user with an explicit auth key + blob. */
+  async function seedConnectionRow(
+    integrationId: string,
+    opts: { authKey?: string; credentialsEncrypted?: string } = {},
+  ): Promise<string> {
+    const [row] = await db
+      .insert(integrationConnections)
+      .values({
+        integrationId: integrationId,
+        authKey: opts.authKey ?? "primary",
+        accountId: "acct-test",
+        applicationId: ctx.defaultAppId,
+        userId: ctx.user.id,
+        endUserId: null,
+        credentialsEncrypted:
+          opts.credentialsEncrypted ??
+          encryptCredentialEnvelope({ outputs: { api_key: "live-secret-value" } }),
+        scopesGranted: [],
+      })
+      .returning({ id: integrationConnections.id });
+    return row!.id;
+  }
+
   /** Seed an api_key connection for the test user on the given integration. */
   async function seedConnection(integrationId: string) {
-    const ciphertext = encryptCredentialEnvelope({ outputs: { api_key: "live-secret-value" } });
-    await db.insert(integrationConnections).values({
-      integrationId: integrationId,
-      authKey: "primary",
-      accountId: "acct-test",
-      applicationId: ctx.defaultAppId,
-      userId: ctx.user.id,
-      endUserId: null,
-      credentialsEncrypted: ciphertext,
-      scopesGranted: [],
-    });
+    await seedConnectionRow(integrationId);
+  }
+
+  /** A connection created against an auth key the manifest no longer declares. */
+  async function seedConnectionWithAuthKey(
+    integrationId: string,
+    authKey: string,
+  ): Promise<string> {
+    return seedConnectionRow(integrationId, { authKey });
+  }
+
+  /**
+   * A connection whose ciphertext no key in this deployment can open — what a
+   * rotated `CONNECTION_ENCRYPTION_KEY` (or a corrupted blob) leaves behind.
+   */
+  async function seedUndecryptableConnection(integrationId: string): Promise<string> {
+    return seedConnectionRow(integrationId, { credentialsEncrypted: "v1:not-a-real-envelope" });
   }
 
   beforeEach(async () => {
@@ -210,27 +239,99 @@ describe("GET /internal/integration-credentials/:scope/:name", () => {
     expect(body.delivery_plans.primary).toBeDefined();
   });
 
-  it("ALLOW: returns empty auths when the integration declares no auths", async () => {
-    // Edge case: an integration manifest can ship without auths (purely
-    // public). The route should return an empty payload rather than 404,
-    // because the dep-and-install gate is what authorises the call.
-    // We test the route shape stays consistent.
+  // NOTE — the one legitimate empty payload (the integration declares no auth
+  // at all) has no route-level test on purpose: it is currently UNREACHABLE
+  // through a stored manifest. `@afps-spec/schema` requires every integration
+  // to declare at least one auth ("integration MUST declare at least one auth
+  // method"), so a zero-auth manifest fails validation on read and this
+  // endpoint answers 500 `invalid_manifest` long before the resolver's empty
+  // return. The branch is kept in `resolveLiveIntegrationCredentials` because
+  // it is the correct category-3 answer if that spec rule ever relaxes — it
+  // just cannot be exercised from here today.
+
+  // ─── Fail-loud: the three states that used to answer 200-with-empty ───
+  //
+  // All three returned the byte-identical payload the no-auth case above
+  // returns, so the sidecar skipped the MITM listener, the agent's tools ran
+  // uncredentialed, and every upstream call 401'd — reported by the agent as a
+  // generic "the API is unavailable", indistinguishable from a real outage.
+
+  it("DENY: 404 when the actor has NO connection for a declared-auth integration", async () => {
+    // STATE A. The integration declares `primary`, but this actor never
+    // connected it (or the connection was deleted). Nothing to inject.
     await seedIntegration(INTEGRATION, true);
-    // No connection seeded — the actor has nothing for this integration.
-    // The resolver returns the empty payload shape (auths=[]) — matches
-    // production behaviour where no connection yet exists.
 
     const res = await app.request(`/internal/integration-credentials/${INTEGRATION}`, {
       headers: { Authorization: `Bearer ${token}` },
     });
 
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as {
-      auths: unknown[];
-      delivery_plans: Record<string, unknown>;
-    };
-    expect(body.auths).toEqual([]);
-    expect(body.delivery_plans).toEqual({});
+    expect(res.status).toBe(404);
+    const body = (await res.json()) as { detail?: string };
+    // Cause AND remedy, both naming the integration.
+    expect(body.detail).toContain("no connection for this run's actor");
+    expect(body.detail).toContain(INTEGRATION);
+    expect(body.detail).toMatch(/relaunch the run/i);
+  });
+
+  it("DENY: 409 integration_auth_undeclared when the pinned manifest dropped the connection's auth", async () => {
+    // STATE B. The connection exists and decrypts, but it was created against
+    // an auth key the manifest no longer declares (renamed/removed). Pinned via
+    // `runs.resolved_connections` — that is the only selection path that can
+    // return a row whose authKey is not in the declared set.
+    await seedIntegration(INTEGRATION, true);
+    const connectionId = await seedConnectionWithAuthKey(INTEGRATION, "legacy_primary");
+    const pinnedRun = await seedRun({
+      packageId: AGENT,
+      orgId: ctx.orgId,
+      applicationId: ctx.defaultAppId,
+      userId: ctx.user.id,
+      status: "running",
+      resolvedConnections: { [INTEGRATION]: { connectionId, source: "member_pin" } },
+    });
+
+    const res = await app.request(`/internal/integration-credentials/${INTEGRATION}`, {
+      headers: { Authorization: `Bearer ${signRunToken(pinnedRun.id)}` },
+    });
+
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as { code?: string; detail?: string };
+    expect(body.code).toBe("integration_auth_undeclared");
+    expect(body.detail).toContain("legacy_primary");
+    // The credential is intact — a manifest edit must never destroy it.
+    const [row] = await db
+      .select()
+      .from(integrationConnections)
+      .where(eq(integrationConnections.id, connectionId));
+    expect(row!.needsReconnection).toBe(false);
+  });
+
+  it("DENY: 410 + flags + records when the stored credentials cannot be decrypted", async () => {
+    // STATE C. A credential nobody can read is dead on ANY read, forced or
+    // not: flag the connection, stamp the run, refuse. The boot GET is where
+    // this state actually surfaces (the sidecar fetches once at spawn).
+    await seedIntegration(INTEGRATION, true);
+    const connectionId = await seedUndecryptableConnection(INTEGRATION);
+
+    const res = await app.request(`/internal/integration-credentials/${INTEGRATION}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    expect(res.status).toBe(410);
+    const body = (await res.json()) as { code?: string; detail?: string };
+    expect(body.code).toBe("INTEGRATION_CONNECTION_NEEDS_RECONNECTION");
+    expect(body.detail).toMatch(/could not be decrypted/i);
+
+    const [row] = await db
+      .select()
+      .from(integrationConnections)
+      .where(eq(integrationConnections.id, connectionId));
+    expect(row!.needsReconnection).toBe(true);
+
+    // The GET now records the terminal failure on the run too — a boot-time
+    // 410 the run never records is a failure only the transcript reveals.
+    const [runRow] = await db.select().from(runs).where(eq(runs.id, runId));
+    const meta = runRow!.metadata as { degraded_integrations?: string[] } | null;
+    expect(meta?.degraded_integrations).toContain(INTEGRATION);
   });
 });
 
@@ -252,18 +353,23 @@ describe("POST /internal/integration-credentials/:scope/:name/refresh", () => {
     }
   }
 
-  async function seedConnection(integrationId: string) {
-    const ciphertext = encryptCredentialEnvelope({ outputs: { api_key: "live-secret-value" } });
-    await db.insert(integrationConnections).values({
-      integrationId: integrationId,
-      authKey: "primary",
-      accountId: "acct-test",
-      applicationId: ctx.defaultAppId,
-      userId: ctx.user.id,
-      endUserId: null,
-      credentialsEncrypted: ciphertext,
-      scopesGranted: [],
-    });
+  async function seedConnection(integrationId: string, credentialsEncrypted?: string) {
+    const [row] = await db
+      .insert(integrationConnections)
+      .values({
+        integrationId: integrationId,
+        authKey: "primary",
+        accountId: "acct-test",
+        applicationId: ctx.defaultAppId,
+        userId: ctx.user.id,
+        endUserId: null,
+        credentialsEncrypted:
+          credentialsEncrypted ??
+          encryptCredentialEnvelope({ outputs: { api_key: "live-secret-value" } }),
+        scopesGranted: [],
+      })
+      .returning({ id: integrationConnections.id });
+    return row!.id;
   }
 
   beforeEach(async () => {
@@ -348,6 +454,48 @@ describe("POST /internal/integration-credentials/:scope/:name/refresh", () => {
       .select()
       .from(integrationConnections)
       .where(eq(integrationConnections.integrationId, INTEGRATION));
+    expect(row!.needsReconnection).toBe(true);
+
+    const [runRow] = await db.select().from(runs).where(eq(runs.id, runId));
+    const meta = runRow!.metadata as { degraded_integrations?: string[] } | null;
+    expect(meta?.degraded_integrations).toContain(INTEGRATION);
+  });
+
+  // ─── A FORCED refresh never answers 200-with-empty ─────
+  //
+  // The forced path only runs after the sidecar saw an upstream 401, so
+  // "nothing to inject, carry on" is the one answer that can never be right
+  // here: it puts the sidecar straight back into the same 401.
+
+  it("DENY: 404 (not 200-with-empty) on a forced refresh with no accessible connection", async () => {
+    await seedIntegration(INTEGRATION, true);
+    // No connection at all — e.g. the run's pinned row was deleted mid-run.
+
+    const res = await app.request(`/internal/integration-credentials/${INTEGRATION}/refresh`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    expect(res.status).toBe(404);
+    expect(JSON.stringify(await res.json())).toContain("no connection for this run's actor");
+  });
+
+  it("DENY: 410 (not 200-with-empty) on a forced refresh of undecryptable credentials", async () => {
+    await seedIntegration(INTEGRATION, true);
+    const connectionId = await seedConnection(INTEGRATION, "v1:not-a-real-envelope");
+
+    const res = await app.request(`/internal/integration-credentials/${INTEGRATION}/refresh`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    expect(res.status).toBe(410);
+    expect(JSON.stringify(await res.json())).toMatch(/could not be decrypted/i);
+
+    const [row] = await db
+      .select()
+      .from(integrationConnections)
+      .where(eq(integrationConnections.id, connectionId));
     expect(row!.needsReconnection).toBe(true);
 
     const [runRow] = await db.select().from(runs).where(eq(runs.id, runId));

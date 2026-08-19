@@ -363,25 +363,62 @@ export function createInternalRouter() {
     }
   }
 
+  /**
+   * A terminal credential failure (410) is recorded on the run exactly once,
+   * from whichever endpoint sees it. `resolveLiveIntegrationCredentials` has
+   * already flagged the CONNECTION `needsReconnection` by the time it throws;
+   * this stamps the RUN's `metadata.degraded_integrations[]` so the finished
+   * run surfaces a reconnect banner instead of only the connection list doing
+   * it. Both endpoints route through here: the boot GET can be terminal too
+   * (undecryptable credentials), and a 410 the run never records is a failure
+   * the user only discovers by re-reading the agent's transcript.
+   */
+  async function recordTerminalCredentialFailure(
+    err: unknown,
+    runId: string,
+    packageId: string,
+  ): Promise<void> {
+    if (err instanceof ApiError && err.status === 410) {
+      await recordRunDegradedIntegration(runId, packageId);
+    }
+  }
+
   // GET /internal/integration-credentials/:scope/:name
   // Sidecar-only. Returns the LIVE credential payload + per-auth HTTP
   // delivery plans for an integration the running agent depends on.
   // OAuth tokens are refreshed proactively if within the lead window;
   // POST .../refresh forces a refresh regardless.
+  //
+  // A 2xx here always carries a usable credential surface: an EMPTY payload
+  // means the integration declares no auth, and nothing else. Every state where
+  // a credential was expected but could not be produced fails loud — 404 (no
+  // connection for the actor / the run's pinned connection is gone), 409
+  // `integration_auth_undeclared` (the pinned manifest version no longer
+  // declares the connection's auth), 410 (dead credential, connection flagged).
+  // The sidecar treats an empty payload as "no `delivery.http` auths, skip the
+  // MITM listener", so answering 200-with-empty for any of those booted the run
+  // with zero credentials and left the agent reporting a phantom upstream
+  // outage.
   router.get(`/integration-credentials/${SCOPED_PACKAGE_ROUTE}`, async (c) => {
     const { runId, run } = await verifyRunToken(c);
     const packageId = `${c.req.param("scope")}/${c.req.param("name")}`;
     await assertAgentDeclaresIntegration(packageId, run, runId);
     const actor: Actor | null = actorFromIds(run.userId, run.endUserId);
-    const result = await resolveLiveIntegrationCredentials(packageId, {
-      runId,
-      orgId: run.orgId,
-      applicationId: run.applicationId,
-      agentPackageId: run.packageId,
-      actor,
-      resolvedConnections: run.resolvedConnections,
-      resolvedIntegrationVersions: run.resolvedIntegrationVersions,
-    });
+    let result;
+    try {
+      result = await resolveLiveIntegrationCredentials(packageId, {
+        runId,
+        orgId: run.orgId,
+        applicationId: run.applicationId,
+        agentPackageId: run.packageId,
+        actor,
+        resolvedConnections: run.resolvedConnections,
+        resolvedIntegrationVersions: run.resolvedIntegrationVersions,
+      });
+    } catch (err) {
+      await recordTerminalCredentialFailure(err, runId, packageId);
+      throw err;
+    }
     logger.info("Integration credentials delivered", {
       runId,
       packageId,
@@ -398,11 +435,9 @@ export function createInternalRouter() {
   // a revoked OAuth refresh token, an unrefreshable OAuth auth, OR any
   // non-OAuth auth (api_key/basic), since there is nothing to refresh after a
   // 401 — `resolveLiveIntegrationCredentials` flags the connection
-  // `needsReconnection` and throws 410. This is the SINGLE place a terminal
-  // auth failure is recorded: we also stamp the run's
-  // `metadata.degraded_integrations[]` so the finished run surfaces a reconnect
-  // banner. The sidecar maps the 410 to "don't retry"; the next-launch
-  // readiness gate + live badge do the user-facing surfacing.
+  // `needsReconnection` and throws 410, which `recordTerminalCredentialFailure`
+  // stamps onto the run. The sidecar maps the 410 to "don't retry"; the
+  // next-launch readiness gate + live badge do the user-facing surfacing.
   router.post(`/integration-credentials/${SCOPED_PACKAGE_ROUTE}/refresh`, async (c) => {
     const { runId, run } = await verifyRunToken(c);
     const packageId = `${c.req.param("scope")}/${c.req.param("name")}`;
@@ -427,9 +462,7 @@ export function createInternalRouter() {
       // 410 = the connection was flagged needsReconnection (terminal). Record
       // it on the run so the run-detail banner can surface it, then re-throw so
       // the sidecar sees the 410 and stops retrying.
-      if (err instanceof ApiError && err.status === 410) {
-        await recordRunDegradedIntegration(runId, packageId);
-      }
+      await recordTerminalCredentialFailure(err, runId, packageId);
       throw err;
     }
     logger.info("Integration credentials refreshed", {

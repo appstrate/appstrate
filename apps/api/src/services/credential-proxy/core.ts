@@ -486,8 +486,12 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
     } catch {
       // Refresh itself failed (invalid_grant, revoked token, network
       // hiccup, …) — surface the original 401 as-is; the caller will
-      // handle re-authentication. `forceRefresh` already flips
-      // `needsReconnection` on revocation.
+      // handle re-authentication. `forceRefresh` flips `needsReconnection`
+      // on BOTH terminal shapes before it gets here: a revoked refresh token
+      // (which throws into this catch) and an unrefreshable OAuth client
+      // (which returns null above, after marking the row). Transient
+      // failures deliberately leave the row untouched — nothing is marked,
+      // and the next call retries.
     }
   }
 
@@ -513,6 +517,10 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
     } catch {
       // Refresh itself failed (invalid_grant, revoked token, etc.) —
       // surface the 401 as-is; the caller will handle re-authentication.
+      // As above, both terminal shapes have already flagged
+      // `needsReconnection` on the connection by this point, so the retry the
+      // caller re-issues is not the only thing standing between the user and
+      // a reconnect prompt.
     }
     return {
       status: res.status,
