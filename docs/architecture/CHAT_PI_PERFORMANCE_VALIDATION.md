@@ -376,5 +376,12 @@ de persistance. Ils ne sont pas un comparatif direct avec AI SDK. Le niveau 60 n
 faute de politique d'abonnement explicitement compatible. Chrome Beta atteint le port 3400, mais
 son contrôle final reste bloqué par une interface d'extension ouverte.
 
+Pi a ensuite été migré de 0.73.1 à 0.84.2. Les smoke tests réels à concurrence 1 passent pour
+Mistral, Claude Code et Codex après adaptation du fournisseur natif Codex et du relais zstd OAuth.
+Le comparatif Mistral chaud donne 617 ms au premier token pour Pi et 627 ms pour AI SDK sur cette
+unique répétition. Ce smoke valide la compatibilité de la mise à niveau, pas une nouvelle décision de
+performance. La matrice existante à 60, 64 et 100 reste la référence jusqu'à son rejeu complet avec
+Pi 0.84.2.
+
 Le rapport, les commandes, le journal de décision prêt à reporter et les artifacts versionnés se
 trouvent dans [CHAT_PI_PERFORMANCE_REPORT.md](./CHAT_PI_PERFORMANCE_REPORT.md).

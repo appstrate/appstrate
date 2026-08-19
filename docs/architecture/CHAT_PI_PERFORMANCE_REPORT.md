@@ -37,6 +37,15 @@ Les essais complémentaires Pi par abonnements sont terminés à 1, 10 et 30. Co
 sur 41 sans refus, plus leurs tours de continuité. Ils ne constituent pas un comparatif avec AI SDK.
 Le niveau 60 n'a pas été tenté, car aucune politique d'abonnement explicite n'autorise cette rafale.
 
+La migration de contrôle vers Pi 0.84.2 est également validée. Un smoke Mistral à concurrence 1 a
+terminé les quatre cellules AI SDK et Pi, froides et chaudes. À chaud, Pi a livré le premier token en
+617 ms et terminé en 669 ms, contre 627 ms et 690 ms pour AI SDK. Pi froid conserve un coût de
+chargement visible, avec 1 793 ms au premier token contre 936 ms pour AI SDK. Claude Code a terminé
+en 7 068 ms. Le premier essai Codex a révélé un mapping fournisseur hérité de Pi 0.73 qui envoyait le
+format OpenAI Responses standard au backend Codex. Après correction vers le fournisseur natif
+`openai-codex` et préservation des corps zstd dans le sidecar OAuth, Codex a terminé en 2 658 ms,
+avec premier token à 2 473 ms, un appel modèle, zéro erreur et persistance valide.
+
 La capacité cloud reste inconnue. Le résultat local suffit cependant à interdire le canary tant que
 la régression de latence propre au moteur n'est pas expliquée et corrigée.
 
@@ -442,6 +451,7 @@ Le dernier résultat attendu est zéro.
 - Mistral principal, dont S chaud et l'anomalie H : [2026-08-18-mistral-main-summary.v1.json](./performance-results/2026-08-18-mistral-main-summary.v1.json)
 - Récupération Mistral à 30, 60 et 120 secondes : [2026-08-18-mistral-recovery.v1.json](./performance-results/2026-08-18-mistral-recovery.v1.json)
 - Abonnements Pi Codex et Claude Code : [2026-08-18-pi-subscriptions.v1.json](./performance-results/2026-08-18-pi-subscriptions.v1.json)
+- Smoke Pi 0.84.2, Mistral, Codex et Claude Code : [2026-08-18-pi-0842-smoke.v1.json](./performance-results/2026-08-18-pi-0842-smoke.v1.json)
 - Index et sommes SHA-256 de 65 observations réelles : [index.v1.json](./performance-results/raw/2026-08-18-real/index.v1.json)
 
 Les 65 observations réelles sélectionnées sont désormais versionnées sans leur base PGlite. Leur
@@ -464,3 +474,11 @@ autorisés à ce stade.
 
 La RFC source se trouve hors du worktree autorisé. Cette entrée est donc fournie ici, prête à être
 reportée dans son journal sans modifier le satellite externe.
+
+**18 août 2026, mise à niveau Pi 0.84.2 : validation locale réussie.** Le namespace npm passe à
+`@earendil-works`. Appstrate utilise désormais `ModelRuntime`, le hook officiel
+`before_provider_headers` et le transport Mistral HTTP natif. Les smoke tests réels Mistral et Claude
+Code passent. Une incompatibilité Codex détectée pendant la validation a été corrigée en séparant le
+fournisseur `openai-codex` du fournisseur `openai` et en conservant byte pour byte les corps zstd dans
+le sidecar OAuth. Le rejeu Codex réel passe ensuite sans erreur. Cette validation ne remplace pas la
+matrice à 60, 64 et 100, ne modifie pas la décision cloud et n'autorise toujours aucun canary.
