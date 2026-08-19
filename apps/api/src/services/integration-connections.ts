@@ -55,6 +55,7 @@ import type { ActorScope, AppScope } from "../lib/scope.ts";
 import { actorInsert, actorFilter, actorOrSharedFilter } from "../lib/actor.ts";
 import { getPackageDisplayName } from "../lib/package-helpers.ts";
 import { integrationCallbackUrl } from "../lib/integration-callback-url.ts";
+import { normalizeOAuthErrorCode, oauthDiagnosticSuffix } from "../lib/oauth-error-diagnostic.ts";
 import type { Actor } from "@appstrate/connect";
 import {
   resolveIntegrationToolCatalog,
@@ -1660,6 +1661,55 @@ export async function ensureIntegrationOAuthClient(
         : {}),
       ...(dcrAuthMethod ? { tokenEndpointAuthMethod: dcrAuthMethod } : {}),
     });
+    // RFC 7591 §3.2.1: the RESPONSE, not the request, states what the server
+    // registered — an AS "MAY replace any invalid values with suitable default
+    // values" and reports what it settled on. This path only ever ASKS for a
+    // public client (`usesAutoProvisionedClient` gates on
+    // `token_endpoint_auth_method: "none"`, so `dcrAuthMethod` is provably
+    // `"none"`), so an answer declaring a secret-based method — or carrying a
+    // `client_secret` at all — is the server registering something the connect
+    // flow cannot drive.
+    //
+    // Refuse it HERE, where the contradiction is first visible and nothing has
+    // been stored. Persisted, it satisfies the `ioc_public_iff_no_secret` CHECK
+    // (a declared method of NULL next to a real ciphertext) and detonates far
+    // away instead: `assertClientAuthCoherent` throws at the OAuth CALLBACK,
+    // reading the manifest's `"none"` against a stored secret — after the user
+    // has already granted consent at the provider, identically on every retry,
+    // on a row no admin can repair through the API (`updateIntegrationOAuthClient`
+    // refuses auto-provisioned clients). The upstream registration is abandoned
+    // unused, exactly as when this call loses the insert race below.
+    const registeredMethod = registration.tokenEndpointAuthMethod;
+    const declaresSecretMethod = registeredMethod !== undefined && registeredMethod !== "none";
+    if (declaresSecretMethod || registration.clientSecret !== undefined) {
+      logger.warn("auto-DCR: authorization server registered a confidential client", {
+        packageId,
+        authKey,
+        registrationEndpoint,
+        clientId: registration.clientId,
+        tokenEndpointAuthMethod: registeredMethod,
+        returnedClientSecret: registration.clientSecret !== undefined,
+      });
+      // The method comes from the same server-controlled JSON body as an OAuth
+      // error code and has the same shape (a short registry token), so it goes
+      // through the same shape guard before being named in an operator-facing
+      // message — one guard rather than a second regex. A non-token-shaped
+      // answer is described by what it produced; the raw value stays on the
+      // warn line above.
+      const method = normalizeOAuthErrorCode(registeredMethod);
+      const did = declaresSecretMethod
+        ? `registered a confidential client${method ? ` (token_endpoint_auth_method='${method}')` : ""}`
+        : "returned a client_secret";
+      return {
+        ...resolved,
+        provisioningFailure: {
+          message:
+            `the authorization server ${did} although Appstrate requested a public client ` +
+            `(token_endpoint_auth_method='none' + PKCE — the only shape automatic registration drives); ` +
+            `register an OAuth client manually for this integration`,
+        },
+      };
+    }
     let client: IntegrationOAuthClientWithSecret;
     try {
       client = await createIntegrationOAuthClient(
@@ -1668,7 +1718,13 @@ export async function ensureIntegrationOAuthClient(
         authKey,
         {
           clientId: registration.clientId,
-          clientSecret: registration.clientSecret ?? "",
+          // Public client, now DECLARED rather than inferred from emptiness.
+          // The guard above proved the AS returned neither a secret nor a
+          // secret-based method, so this pair restates the server's own answer;
+          // it is not the `?? ""` coercion it replaces, which silently dropped
+          // any secret the AS did return and left the method unstated.
+          clientSecret: "",
+          tokenEndpointAuthMethod: "none",
           redirectUri,
         },
         { autoProvisioned: true },
@@ -1711,6 +1767,7 @@ export async function ensureIntegrationOAuthClient(
         authKey,
         registrationEndpoint,
         status: err.status,
+        oauthError: err.errorCode,
         err: err.message,
       });
       // Two distinct DCR failures, authored explicitly (not inferred
@@ -1721,17 +1778,31 @@ export async function ensureIntegrationOAuthClient(
       // echoed into the operator-facing 403 — it stays in the warn log above.
       // No status means a network/timeout/malformed-body failure, where a retry
       // is the remedy.
+      //
+      // On the refusal branch the RFC 6749 §5.2 `error` CODE is appended too,
+      // because the description is OPTIONAL in the RFC and plenty of servers
+      // send only the code: `{"error":"invalid_redirect_uri"}` used to arrive
+      // as the generic sentence plus a bare HTTP status, hiding the one failure
+      // an operator fixes in a minute. Rendered through `oauthDiagnosticSuffix`
+      // — the same shape-guarded, code-only rendering the OAuth callback path
+      // uses, so both paths name the provider's code identically — passing no
+      // status of its own, since `resolveConnectClient` already renders
+      // `status` as its own `(HTTP n)` part.
       const reachedServer = err.status !== undefined;
+      const codeSuffix = oauthDiagnosticSuffix(err.errorCode, undefined);
       return {
         ...resolved,
         provisioningFailure: reachedServer
           ? {
-              message:
+              message: `${
                 err.errorDescription ??
-                "the authorization server rejected dynamic client registration",
+                "the authorization server rejected dynamic client registration"
+              }${codeSuffix}`,
               status: err.status,
             }
           : {
+              // No `codeSuffix` here: with no response there is no body, so the
+              // AS named no code — the branch is defined by that absence.
               message:
                 "could not reach the authorization server to register a client; retry once it is reachable",
             },
