@@ -5,7 +5,7 @@ import {
   classifyClientTurnError,
   clientTurnErrorFromMarker,
   clientTurnErrorMarker,
-  refusalDetail,
+  refusalCode,
 } from "../src/turn-error.ts";
 
 describe("classifyClientTurnError", () => {
@@ -54,42 +54,41 @@ describe("classifyClientTurnError", () => {
   });
 });
 
-describe("refusalDetail", () => {
+describe("refusalCode", () => {
   const problem = (body: Record<string, unknown>) => JSON.stringify(body);
 
-  it("returns the refusal's own sentence, which is what the user must act on", () => {
+  it("recovers the code from the body the transport throws verbatim", () => {
     expect(
-      refusalDetail(
+      refusalCode(
         new Error(
           problem({
             type: "https://docs.appstrate.dev/errors/usage-not-allowed",
             title: "Usage not allowed",
             status: 402,
-            detail: "Votre organisation n'a plus de crédits.",
+            detail: "Credit quota exceeded for org ef820ed9-1db0-4f3c-a4bd-d6941e3b2160",
             code: "quota_exceeded",
           }),
         ),
       ),
-    ).toBe("Votre organisation n'a plus de crédits.");
+    ).toBe("quota_exceeded");
   });
 
   it("reads the same document off a bare string error", () => {
-    expect(refusalDetail(problem({ status: 401, detail: "Reconnectez votre abonnement." }))).toBe(
-      "Reconnectez votre abonnement.",
+    expect(refusalCode(problem({ status: 401, code: "needs_reconnection" }))).toBe(
+      "needs_reconnection",
     );
   });
 
-  it("withholds a non-refusal detail, which carries internal text", () => {
-    // `beforeUsage` failing closed puts the raw thrown message in `detail`.
-    expect(
-      refusalDetail(problem({ status: 500, detail: 'relation "x" does not exist' })),
-    ).toBeUndefined();
+  it("withholds a non-refusal code, which no user action can clear", () => {
+    // `beforeUsage` failing closed rejects with 500 — an internal fault, not
+    // something to hand the user a sentence about.
+    expect(refusalCode(problem({ status: 500, code: "unexpected" }))).toBeUndefined();
   });
 
   it("declines anything that is not a problem document", () => {
-    expect(refusalDetail("Upstream model error (status 503)")).toBeUndefined();
-    expect(refusalDetail("{not json")).toBeUndefined();
-    expect(refusalDetail(problem({ status: 402 }))).toBeUndefined();
-    expect(refusalDetail(undefined)).toBeUndefined();
+    expect(refusalCode("Upstream model error (status 503)")).toBeUndefined();
+    expect(refusalCode("{not json")).toBeUndefined();
+    expect(refusalCode(problem({ status: 402 }))).toBeUndefined();
+    expect(refusalCode(undefined)).toBeUndefined();
   });
 });

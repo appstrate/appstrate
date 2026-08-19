@@ -1152,12 +1152,11 @@ export type BeforeUsageParams =
 export interface UsageRejection {
   code: string;
   /**
-   * USER-FACING. The caller surfaces this verbatim as the RFC 9457 `detail` of
-   * the refusal, and every client renders that field as-is — the SPA turns it
-   * into a toast, the chat thread shows it as the turn's failure. Write product
-   * copy that names the action clearing the refusal; never a thrown error's
-   * message, which leaks internals to the screen. Keep the diagnostic string on
-   * the module's own error object and log it there.
+   * The RFC 9457 `detail` the caller puts on the refusal: English prose for API
+   * consumers, like every other `detail` in this API. It is NOT display copy —
+   * a localized UI keys its sentence off {@link UsageRejection.code}, which is
+   * why that code is the half that must stay stable. Never put a thrown error's
+   * message here either: it reaches API consumers and names internals.
    */
   message: string;
   /** HTTP status hint (e.g. 402 for payment required, 429 for rate limit). Defaults to 403. */

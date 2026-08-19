@@ -98,21 +98,21 @@ export function clientTurnErrorFromMarker(value: unknown): ClientTurnError | und
 }
 
 /**
- * The display sentence a PRE-STREAM refusal carries.
+ * The refusal code a PRE-STREAM failure carries, if it is one.
  *
  * A turn refused by the admission gate or by a dead subscription credential
  * never enters the stream, so no `appstrate:chat-turn-error:` marker is ever
  * emitted — the AI SDK transport throws with the raw response body as its
- * message. That body is an RFC 9457 problem document whose `detail` is the
- * user-facing copy, exactly as everywhere else in the SPA (see
- * `apps/web/src/api/client.ts`). Return it so the refusal says what happened
- * instead of pointing at the model, which is not the problem.
+ * message. That body is an RFC 9457 problem document, and its `code` is the
+ * stable machine-readable half of the contract; its `detail` is English prose
+ * for API consumers (as everywhere else in this API) and must NOT be shown in
+ * a localized UI. Return the code so the caller can pick its own sentence.
  *
- * Only a REFUSAL's detail is displayable: 401/402/403 mean "you must act", and
- * their copy is written for the user. Any other status (a module failing closed
- * with a 500) carries internal text and must not reach the screen.
+ * Only a REFUSAL carries a code worth displaying: 401/402/403 mean "you must
+ * act". Any other status (a module failing closed with a 500) describes an
+ * internal fault the user can do nothing about.
  */
-export function refusalDetail(value: unknown): string | undefined {
+export function refusalCode(value: unknown): string | undefined {
   const message = messageFromError(value).trim();
   if (!message.startsWith("{")) return undefined;
   let doc: unknown;
@@ -122,7 +122,7 @@ export function refusalDetail(value: unknown): string | undefined {
     return undefined;
   }
   if (!doc || typeof doc !== "object") return undefined;
-  const { status, detail } = doc as { status?: unknown; detail?: unknown };
+  const { status, code } = doc as { status?: unknown; code?: unknown };
   if (status !== 401 && status !== 402 && status !== 403) return undefined;
-  return typeof detail === "string" && detail.trim() ? detail : undefined;
+  return typeof code === "string" && code ? code : undefined;
 }

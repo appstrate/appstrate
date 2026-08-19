@@ -90,7 +90,7 @@ function subscriptionReconnectResponse(): Response {
       type: "https://docs.appstrate.dev/errors/subscription-reconnect",
       title: "Reconnection required",
       status: 401,
-      detail: "Reconnectez votre abonnement — la connexion a expiré ou été révoquée.",
+      detail: "The selected model's subscription credential expired or was revoked.",
       code: "needs_reconnection",
       needsReconnection: true,
     }),
