@@ -48,11 +48,7 @@ import { IntegrationIcon } from "./integration-icon.tsx";
 import { resolveAttachmentContent } from "./run-events.ts";
 import { stagedImagePreviewUrl } from "./upload.ts";
 import { useChatHost } from "./runtime-context.ts";
-import {
-  clientTurnErrorFromMarker,
-  clientTurnErrorFromProblem,
-  type ChatProblemCode,
-} from "../turn-error.ts";
+import { clientTurnErrorFromMarker, refusalDetail } from "../turn-error.ts";
 import {
   DocumentAttachment,
   isImageMime,
@@ -415,17 +411,6 @@ const TURN_ERROR_KEY = {
 } as const;
 
 /**
- * Messages for the pre-stream refusals that carry their own RFC 9457 `code`.
- * A refused turn is not a model failure — "check the model configuration" would
- * send the user to the wrong screen — so each of these gets its own sentence.
- */
-const PROBLEM_ERROR_KEY: Record<ChatProblemCode, string> = {
-  quota_exceeded: "turn.error.quotaExceeded",
-  subscription_blocked: "turn.error.subscriptionBlocked",
-  needs_reconnection: "turn.error.needsReconnection",
-};
-
-/**
  * THE failure display for a turn — one component, one visual, live or
  * reloaded. The persisted provider-neutral category is localized here and
  * survives reload; the transient assistant-ui marker covers failures that have
@@ -454,19 +439,20 @@ function MessageError() {
     }
     if (message.status?.type === "incomplete" && message.status.reason === "error") {
       const err = message.status.error;
-      // Marker first (in-stream failure), then the RFC 9457 body the transport
-      // throws verbatim when the turn was refused before the stream opened.
-      const classified = clientTurnErrorFromMarker(err) ?? clientTurnErrorFromProblem(err);
+      // An in-stream failure carries our marker; a turn refused BEFORE the
+      // stream opened carries the RFC 9457 body the transport throws verbatim,
+      // whose `detail` is already the sentence to show. A refusal names an
+      // action the user must take, so retrying cannot clear it.
+      const classified = clientTurnErrorFromMarker(err);
+      const refusal = classified ? undefined : refusalDetail(err);
       return {
         text: classified
-          ? t(
-              classified.code
-                ? PROBLEM_ERROR_KEY[classified.code]
-                : TURN_ERROR_KEY[classified.category],
-            )
-          : t("turn.error.unknown"),
-        retryable: classified?.retryable ?? true,
-        requestId: classified?.requestId,
+          ? t(TURN_ERROR_KEY[classified.category])
+          : (refusal ?? t("turn.error.unknown")),
+        retryable: classified?.retryable ?? refusal === undefined,
+        // The marker carries a category and nothing else; a request id only
+        // ever reaches the client through the persisted turn metadata above.
+        requestId: undefined,
       };
     }
     return null;

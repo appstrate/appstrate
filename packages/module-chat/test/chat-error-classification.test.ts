@@ -4,8 +4,8 @@ import { describe, expect, it } from "bun:test";
 import {
   classifyClientTurnError,
   clientTurnErrorFromMarker,
-  clientTurnErrorFromProblem,
   clientTurnErrorMarker,
+  refusalDetail,
 } from "../src/turn-error.ts";
 
 describe("classifyClientTurnError", () => {
@@ -54,38 +54,42 @@ describe("classifyClientTurnError", () => {
   });
 });
 
-describe("clientTurnErrorFromProblem", () => {
-  const quota = JSON.stringify({
-    type: "https://docs.appstrate.dev/errors/usage-not-allowed",
-    title: "Usage not allowed",
-    status: 402,
-    detail: "Credit quota exceeded for org ef820ed9-1db0-4f3c-a4bd-d6941e3b2160",
-    code: "quota_exceeded",
-  });
+describe("refusalDetail", () => {
+  const problem = (body: Record<string, unknown>) => JSON.stringify(body);
 
-  it("recovers the refusal code from the body the transport throws verbatim", () => {
-    expect(clientTurnErrorFromProblem(new Error(quota))).toEqual({
-      category: "credential_unavailable",
-      retryable: false,
-      code: "quota_exceeded",
-    });
+  it("returns the refusal's own sentence, which is what the user must act on", () => {
+    expect(
+      refusalDetail(
+        new Error(
+          problem({
+            type: "https://docs.appstrate.dev/errors/usage-not-allowed",
+            title: "Usage not allowed",
+            status: 402,
+            detail: "Votre organisation n'a plus de crédits.",
+            code: "quota_exceeded",
+          }),
+        ),
+      ),
+    ).toBe("Votre organisation n'a plus de crédits.");
   });
 
   it("reads the same document off a bare string error", () => {
-    expect(clientTurnErrorFromProblem(quota)?.code).toBe("quota_exceeded");
+    expect(refusalDetail(problem({ status: 401, detail: "Reconnectez votre abonnement." }))).toBe(
+      "Reconnectez votre abonnement.",
+    );
   });
 
-  it("keeps the status classification when the code is one we have no message for", () => {
+  it("withholds a non-refusal detail, which carries internal text", () => {
+    // `beforeUsage` failing closed puts the raw thrown message in `detail`.
     expect(
-      clientTurnErrorFromProblem(
-        JSON.stringify({ status: 429, code: "surprise_new_code", detail: "slow down" }),
-      ),
-    ).toEqual({ category: "rate_limited", retryable: true });
+      refusalDetail(problem({ status: 500, detail: 'relation "x" does not exist' })),
+    ).toBeUndefined();
   });
 
   it("declines anything that is not a problem document", () => {
-    expect(clientTurnErrorFromProblem("Upstream model error (status 503)")).toBeUndefined();
-    expect(clientTurnErrorFromProblem("{not json")).toBeUndefined();
-    expect(clientTurnErrorFromProblem(undefined)).toBeUndefined();
+    expect(refusalDetail("Upstream model error (status 503)")).toBeUndefined();
+    expect(refusalDetail("{not json")).toBeUndefined();
+    expect(refusalDetail(problem({ status: 402 }))).toBeUndefined();
+    expect(refusalDetail(undefined)).toBeUndefined();
   });
 });

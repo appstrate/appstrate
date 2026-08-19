@@ -12,12 +12,6 @@ export interface ClientTurnError {
   category: ChatTurnErrorCategory;
   retryable: boolean;
   requestId?: string;
-  /**
-   * Set only for a pre-stream refusal whose RFC 9457 `code` we display verbatim
-   * (see `clientTurnErrorFromProblem`). Never persisted — the stored turn
-   * metadata carries `category` alone.
-   */
-  code?: ChatProblemCode;
 }
 
 const ERROR_MARKER_PREFIX = "appstrate:chat-turn-error:";
@@ -104,66 +98,31 @@ export function clientTurnErrorFromMarker(value: unknown): ClientTurnError | und
 }
 
 /**
- * Codes an RFC 9457 problem document from `POST /api/chat` can carry. These
- * refusals happen BEFORE the stream opens, so they never reach the client as an
- * in-stream marker — see `clientTurnErrorFromProblem`.
+ * The display sentence a PRE-STREAM refusal carries.
+ *
+ * A turn refused by the admission gate or by a dead subscription credential
+ * never enters the stream, so no `appstrate:chat-turn-error:` marker is ever
+ * emitted — the AI SDK transport throws with the raw response body as its
+ * message. That body is an RFC 9457 problem document whose `detail` is the
+ * user-facing copy, exactly as everywhere else in the SPA (see
+ * `apps/web/src/api/client.ts`). Return it so the refusal says what happened
+ * instead of pointing at the model, which is not the problem.
+ *
+ * Only a REFUSAL's detail is displayable: 401/402/403 mean "you must act", and
+ * their copy is written for the user. Any other status (a module failing closed
+ * with a 500) carries internal text and must not reach the screen.
  */
-const CHAT_PROBLEM_CODES = [
-  "quota_exceeded",
-  "subscription_blocked",
-  "needs_reconnection",
-] as const;
-
-export type ChatProblemCode = (typeof CHAT_PROBLEM_CODES)[number];
-
-const KNOWN_PROBLEM_CODES: ReadonlySet<string> = new Set(CHAT_PROBLEM_CODES);
-
-function parseProblemDocument(
-  message: string,
-): { code?: string; status?: number; detail?: string } | undefined {
+export function refusalDetail(value: unknown): string | undefined {
+  const message = messageFromError(value).trim();
   if (!message.startsWith("{")) return undefined;
-  let parsed: unknown;
+  let doc: unknown;
   try {
-    parsed = JSON.parse(message);
+    doc = JSON.parse(message);
   } catch {
     return undefined;
   }
-  if (!parsed || typeof parsed !== "object") return undefined;
-  const doc = parsed as { code?: unknown; status?: unknown; detail?: unknown };
-  return {
-    ...(typeof doc.code === "string" ? { code: doc.code } : {}),
-    ...(typeof doc.status === "number" ? { status: doc.status } : {}),
-    ...(typeof doc.detail === "string" ? { detail: doc.detail } : {}),
-  };
-}
-
-/**
- * Recover a displayable error from a PRE-STREAM HTTP failure.
- *
- * A turn refused by the admission gate (402 `quota_exceeded`), by a suspended
- * subscription (402 `subscription_blocked`) or by a dead credential (401
- * `needs_reconnection`) never enters the stream, so the AI SDK transport throws
- * with the raw response body as its message and no `appstrate:chat-turn-error:`
- * marker is ever emitted. Parse the problem document back into the same client
- * contract, keeping its `code` when we have a dedicated message for it and
- * falling back to the status-based classification otherwise.
- */
-export function clientTurnErrorFromProblem(value: unknown): ClientTurnError | undefined {
-  const doc = parseProblemDocument(messageFromError(value).trim());
-  if (!doc) return undefined;
-
-  const classified = classifyClientTurnError(
-    Object.assign(
-      new Error(doc.detail ?? ""),
-      doc.status !== undefined ? { status: doc.status } : {},
-    ),
-  );
-  const code = doc.code;
-  // A refusal never clears by retrying — the user has to top up, reactivate or
-  // reconnect first. Pinned here rather than inherited from the status, which a
-  // billing module is free to change.
-  if (code !== undefined && KNOWN_PROBLEM_CODES.has(code)) {
-    return { ...classified, code: code as ChatProblemCode, retryable: false };
-  }
-  return classified;
+  if (!doc || typeof doc !== "object") return undefined;
+  const { status, detail } = doc as { status?: unknown; detail?: unknown };
+  if (status !== 401 && status !== 402 && status !== 403) return undefined;
+  return typeof detail === "string" && detail.trim() ? detail : undefined;
 }
