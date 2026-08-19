@@ -2,7 +2,7 @@
 
 /**
  * Bounded concurrency for the in-process Pi chat engine: the
- * counting gate (cap via CHAT_PI_MAX_CONCURRENCY, default 64), the 429 capacity
+ * counting gate (cap via CHAT_PI_MAX_CONCURRENCY, default 6), the 429 capacity
  * response, and the slot-release stream wrapper. The wrapper is the leak guard
  * — it must fire exactly once on every terminal path: normal completion,
  * downstream cancellation (client disconnected while the persistence drain
@@ -35,9 +35,9 @@ describe("piChatMaxConcurrency", () => {
     delete process.env[ENV_VAR];
   });
 
-  it("defaults to the locally validated safety ceiling of 64", () => {
+  it("defaults to 6 while cloud capacity remains unvalidated", () => {
     delete process.env[ENV_VAR];
-    expect(piChatMaxConcurrency()).toBe(64);
+    expect(piChatMaxConcurrency()).toBe(6);
   });
 
   it("reads a positive integer from the env var", () => {
@@ -48,7 +48,7 @@ describe("piChatMaxConcurrency", () => {
   for (const invalid of ["0", "-3", "abc", ""]) {
     it(`falls back to the default on invalid input ${JSON.stringify(invalid)}`, () => {
       process.env[ENV_VAR] = invalid;
-      expect(piChatMaxConcurrency()).toBe(64);
+      expect(piChatMaxConcurrency()).toBe(6);
     });
   }
 });
