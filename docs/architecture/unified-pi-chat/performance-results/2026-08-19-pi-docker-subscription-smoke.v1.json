@@ -1,0 +1,91 @@
+{
+  "schema_version": 1,
+  "kind": "unified_pi_docker_subscription_smoke",
+  "date": "2026-08-19",
+  "environment": {
+    "origin": "http://chat-pi-unified-engine-phase4.localhost:3400",
+    "database": "isolated_pglite",
+    "data_class": "local_synthetic",
+    "run_adapter": "docker",
+    "pi_version": "0.84.2",
+    "pi_image": {
+      "reference": "appstrate-pi:phase4-pi-0.84.2",
+      "digest": "sha256:256811e7f67b48eba1f6ac546226f14a9b53ce983ca74cfd8af6013358a072b6"
+    },
+    "sidecar_image": {
+      "reference": "appstrate-sidecar:phase4-pi-0.84.2",
+      "digest": "sha256:011457fc3218cd128f9a7ef26e1bfdbd6dc75787b6479b94e9b9851baaabcecb"
+    }
+  },
+  "diagnostic": {
+    "stale_sidecar_reference": "appstrate-sidecar:latest",
+    "stale_sidecar_created_at": "2026-08-08T12:34:14.814753652-04:00",
+    "codex_run_id": "run_3fc218be-ef01-4924-99e4-abadfd7f2c55",
+    "status": "failed",
+    "duration_ms": 2117,
+    "error": "{\"detail\":\"Bad Request\"}",
+    "model_calls": 0,
+    "token_usage": {
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "cache_read_input_tokens": 0,
+      "cache_creation_input_tokens": 0
+    },
+    "cause": "The sidecar image predated commit 8554de4e, which restores the native Codex transport in both runner-pi and the sidecar.",
+    "corrective_action": "Rebuild the sidecar from the current worktree and use a versioned tag aligned with the Pi 0.84.2 runtime image."
+  },
+  "claude_code": {
+    "run_id": "run_d8e2518b-0953-475e-af2a-8bc33b8a219b",
+    "provider": "claude-code",
+    "model": "claude-haiku-4-5",
+    "access": "subscription",
+    "status": "success",
+    "duration_ms": 3320,
+    "runtime_ready_ms": 938,
+    "model_turn_latency_ms": 520,
+    "mcp_connect_ms": 24,
+    "marker": "CLAUDE_DOCKER_OK",
+    "marker_observed": true,
+    "adapter_errors": 0,
+    "terminal_events": 1,
+    "token_usage": {
+      "input_tokens": 10,
+      "output_tokens": 91,
+      "cache_read_input_tokens": 4099,
+      "cache_creation_input_tokens": 0
+    }
+  },
+  "codex": {
+    "run_id": "run_8f74b628-ace4-45dd-b34a-5d56ab86d60d",
+    "provider": "codex",
+    "model": "gpt-5.6-luna",
+    "access": "subscription",
+    "status": "success",
+    "duration_ms": 75374,
+    "runtime_ready_ms": 1006,
+    "model_turn_latency_ms": 72932,
+    "mcp_connect_ms": 19,
+    "marker": "CODEX_DOCKER_OK",
+    "marker_observed": true,
+    "adapter_errors": 0,
+    "terminal_events": 1,
+    "token_usage": {
+      "input_tokens": 2680,
+      "output_tokens": 25,
+      "cache_read_input_tokens": 0,
+      "cache_creation_input_tokens": 0
+    }
+  },
+  "cleanup": {
+    "active_run_containers": 0,
+    "database_reused": true,
+    "storage_reused": true
+  },
+  "conclusion": {
+    "docker_subscription_path_validated": true,
+    "claude_code_validated": true,
+    "codex_validated": true,
+    "full_performance_matrix_replayed": false,
+    "cloud_capacity_known": false
+  }
+}

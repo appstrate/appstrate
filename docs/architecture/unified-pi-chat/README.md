@@ -183,6 +183,31 @@ terminal. Deuxièmement, un run explicitement lié à un abonnement OAuth exige 
 L'instance `RUN_ADAPTER=process` le refuse avant inférence, tandis que le chat Claude lui-même et
 son orchestration d'un run Mistral fonctionnent avec Pi.
 
+### Validation Docker ciblée des abonnements
+
+La même base isolée a ensuite été relancée avec `RUN_ADAPTER=docker`, le runtime
+`appstrate-pi:phase4-pi-0.84.2` et un sidecar reconstruit depuis le même worktree. Deux runs inline
+minimaux valident le chemin qui n'existe pas en mode processus :
+
+| Abonnement             | État    | Runtime prêt | Appel modèle | Durée totale | Marqueur |
+| ---------------------- | ------- | -----------: | -----------: | -----------: | -------- |
+| Claude Code, Haiku 4.5 | success |       938 ms |       520 ms |     3 320 ms | conforme |
+| Codex, GPT 5.6 Luna    | success |     1 006 ms |    72 932 ms |    75 374 ms | conforme |
+
+Les deux runs ont persisté leur usage, un seul événement terminal et aucun `adapter_error`. Aucun
+conteneur de run ne reste actif. Le temps Codex provient presque entièrement de l'appel modèle :
+le runtime Docker était prêt en environ une seconde. Cette observation unique valide le chemin
+fonctionnel, pas une distribution de performance fournisseur.
+
+Le premier essai Codex avec l'ancien tag `appstrate-sidecar:latest`, construit avant le correctif
+`8554de4e`, échouait en 2 117 ms avec `400 Bad Request` et zéro appel modèle. Claude passait déjà,
+ce qui isolait le défaut au transport Codex. La reconstruction du sidecar courant, sans changer le
+modèle ni la requête, fait passer le même scénario. Les images runtime et sidecar doivent donc être
+construites et déployées comme un ensemble cohérent.
+
+Preuve brute :
+[2026-08-19-pi-docker-subscription-smoke.v1.json](./performance-results/2026-08-19-pi-docker-subscription-smoke.v1.json).
+
 ## Ce qui a été expliqué et corrigé
 
 Quatre coûts ou défauts Appstrate propres au chemin Pi ont été isolés :
@@ -331,6 +356,7 @@ Le second résultat attendu est zéro.
 - Résultat courant : [politique de ressources du chat](./performance-results/2026-08-19-pi-chat-resource-policy.v1.json)
 - Profils CPU : [avant](./performance-results/2026-08-19-pi-chat-resource-scan-c30-before.cpu.v1.json) et [après](./performance-results/2026-08-19-pi-chat-resource-scan-c30-after.cpu.v1.json)
 - Parcours chat avancé : [preuve fonctionnelle](./performance-results/2026-08-19-pi-advanced-chat-functional.v1.json)
+- Runs Docker par abonnement : [preuve fonctionnelle](./performance-results/2026-08-19-pi-docker-subscription-smoke.v1.json)
 - Observations courantes et sommes SHA-256 : [index](./performance-results/raw/2026-08-19-pi-chat-resource-policy/index.v1.json)
 - Toutes les synthèses historiques : [performance-results](./performance-results/)
 
@@ -357,6 +383,14 @@ suivant `output` comme une erreur. La classification reconnaît maintenant cette
 le rejeu réel termine `success`. Un chat Pi Codex relit ensuite le document dans une autre session,
 un chat Pi Claude orchestre un run Mistral et la continuité Mistral passe au tour suivant. Cette
 correction ne change ni le modèle d'outils, ni le runtime Pi, ni les permissions multitenant.
+
+**19 août 2026, validation Docker des abonnements : chemin fonctionnel confirmé.** Un run inline
+Claude Code et un run inline Codex terminent `success` avec leurs marqueurs, usages et événements
+terminaux persistés. Le premier essai Codex a révélé une image sidecar plus ancienne que le
+correctif de transport Codex. Un sidecar reconstruit depuis le même worktree que le runtime fait
+passer le scénario sans changement de modèle ni de requête. La contrainte opératoire est de publier
+runtime et sidecar comme un ensemble cohérent. Cette validation ciblée ne rejoue pas la matrice de
+charge et ne permet aucune conclusion sur la capacité cloud.
 
 La RFC source se trouve hors du worktree autorisé. Cette entrée est prête à y être reportée sans
 modifier le satellite externe.
