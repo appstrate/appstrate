@@ -202,8 +202,40 @@ export const integrationOauthClients = pgTable(
       .references(() => packages.id, { onDelete: "cascade" }),
     authKey: text("auth_key").notNull(),
     clientId: text("client_id").notNull(),
-    /** v1 envelope ciphertext over `{ client_secret: "..." }`. Empty for public clients. */
+    /**
+     * v1 envelope ciphertext over `{ client_secret: "..." }`, or the empty
+     * string for a public client.
+     *
+     * Empty means empty — a public client's row carries NO ciphertext, so
+     * "does this client have a secret" is a column read rather than a
+     * decryption. Rows written before `token_endpoint_auth_method` existed
+     * may still hold a ciphertext over an empty secret; the resolver's legacy
+     * branch handles those until the backfill script has run.
+     */
     clientSecretEncrypted: text("client_secret_encrypted").notNull(),
+    /**
+     * Client-authentication method for THIS registered client, overriding the
+     * manifest's `auths.{key}.token_endpoint_auth_method`.
+     *
+     * `NULL` means "not declared — use the manifest's value", which is both
+     * the pre-existing behaviour and the default for a confidential client.
+     * `'none'` is how an admin declares a PUBLIC client: the app is registered
+     * at the provider without a secret and authenticates by `client_id` alone
+     * (RFC 6749 §3.2.1 / RFC 7591 §2).
+     *
+     * A column and not a derivation: "public client" used to be inferred from
+     * an empty secret, an inference asserted in three comments and enforced
+     * nowhere. It sent `client_secret=` (present but empty) to providers that
+     * reject it — Dropbox answered `invalid_client` while Airtable tolerated
+     * the equivalent empty Basic header, so the same misconfiguration silently
+     * worked for one integration and hard-failed for another. The admin's
+     * intent is now stored, not guessed.
+     *
+     * Widened beyond a boolean deliberately: `NULL` distinguishes "undeclared"
+     * from "declared confidential", and the column also houses the method a
+     * DCR registration negotiated, which a boolean could not express.
+     */
+    tokenEndpointAuthMethod: text("token_endpoint_auth_method"),
     /** Optional pre-registered redirect URI; falls back to the platform default at connect time. */
     redirectUri: text("redirect_uri"),
     // Whether this custom (BYO-app) client is the default for new connections.
@@ -239,6 +271,15 @@ export const integrationOauthClients = pgTable(
     uniqueIndex("idx_ioc_one_auto")
       .on(table.applicationId, table.integrationId, table.authKey)
       .where(sql`${table.autoProvisioned}`),
+    // Values are the three methods `@appstrate/connect` implements. The
+    // stronger invariant — public client IFF no ciphertext — needs every
+    // legacy row backfilled first (the DB cannot see through the ciphertext to
+    // tell an empty secret from a real one), so it lands in a follow-up
+    // migration once `scripts/backfill-public-oauth-clients.ts` has run.
+    check(
+      "ioc_auth_method_values",
+      sql`${table.tokenEndpointAuthMethod} IS NULL OR ${table.tokenEndpointAuthMethod} IN ('client_secret_post', 'client_secret_basic', 'none')`,
+    ),
     index("idx_integration_oauth_clients_app").on(table.applicationId),
     index("idx_integration_oauth_clients_package").on(table.integrationId),
     // Hot path: the connect resolver + clients list enumerate every custom

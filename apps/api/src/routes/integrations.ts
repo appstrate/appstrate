@@ -189,6 +189,19 @@ export const updateConnectionSchema = z
 export const oauthClientSchema = z.object({
   client_id: z.string().min(1),
   client_secret: z.string().default(""),
+  /**
+   * The admin's explicit declaration for THIS client, overriding the
+   * manifest's. `"none"` registers a PUBLIC client — the app has no secret at
+   * the provider and authenticates by `client_id` alone.
+   *
+   * Explicit rather than inferred from an empty `client_secret`: that
+   * inference could not tell "declared public" from "secret not supplied", and
+   * silently produced a token request carrying `client_secret=` that providers
+   * like Dropbox reject with `invalid_client`.
+   */
+  token_endpoint_auth_method: z
+    .enum(["client_secret_post", "client_secret_basic", "none"])
+    .optional(),
   redirect_uri: z.url().optional(),
 });
 
@@ -530,6 +543,9 @@ export function createIntegrationsRouter() {
       const client = await createIntegrationOAuthClient(scope, packageId, authKey, {
         clientId: body.client_id,
         clientSecret: body.client_secret,
+        ...(body.token_endpoint_auth_method !== undefined
+          ? { tokenEndpointAuthMethod: body.token_endpoint_auth_method }
+          : {}),
         ...(body.redirect_uri !== undefined ? { redirectUri: body.redirect_uri } : {}),
       });
       await recordAuditFromContext(c, {
@@ -557,6 +573,9 @@ export function createIntegrationsRouter() {
       const client = await updateIntegrationOAuthClient(scope, clientId, {
         clientId: body.client_id,
         clientSecret: body.client_secret,
+        ...(body.token_endpoint_auth_method !== undefined
+          ? { tokenEndpointAuthMethod: body.token_endpoint_auth_method }
+          : {}),
         ...(body.redirect_uri !== undefined ? { redirectUri: body.redirect_uri } : {}),
       });
       await recordAuditFromContext(c, {

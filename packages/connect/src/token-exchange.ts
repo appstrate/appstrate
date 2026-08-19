@@ -18,7 +18,7 @@ import { oauthEgressFetch } from "./oauth-egress.ts";
 import {
   buildTokenBody,
   buildTokenHeaders,
-  effectiveTokenAuthMethod,
+  assertClientAuthCoherent,
   parseTokenErrorResponse,
   parseTokenResponse,
   type ParsedTokenResponse,
@@ -105,13 +105,11 @@ export interface ExchangeAuthorizationCodeResult {
 export async function exchangeAuthorizationCode(
   input: ExchangeAuthorizationCodeInput,
 ): Promise<ExchangeAuthorizationCodeResult> {
-  // An admin-registered client with a blank secret IS a public client, whatever
-  // the manifest declares — see `effectiveTokenAuthMethod`. Resolved once here
-  // so the body shape and the header agree.
-  const authMethod = effectiveTokenAuthMethod(
-    input.tokenEndpointAuthMethod ?? "client_secret_basic",
-    input.clientSecret,
-  );
+  const authMethod = input.tokenEndpointAuthMethod ?? "client_secret_basic";
+  // The caller resolves the method and the secret together; a pair that
+  // disagrees is a bug, not a state to smooth over. See
+  // `assertClientAuthCoherent`.
+  assertClientAuthCoherent(authMethod, input.clientSecret, input.errorLabel);
   const useBasicAuth = authMethod === "client_secret_basic";
   const isPublicClient = authMethod === "none";
 

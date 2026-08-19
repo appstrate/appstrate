@@ -30,7 +30,6 @@ import type { Actor, OAuthStateRecord, OAuthStateStore, TokenEndpointAuthMethod 
 import { OAuthCallbackError } from "./oauth.ts";
 import { randomBase64Url, sha256Base64Url } from "./pkce.ts";
 import { exchangeAuthorizationCode } from "./token-exchange.ts";
-import { effectiveTokenAuthMethod } from "./token-utils.ts";
 import { resolveOAuthEndpoints, type OAuthEndpointResolution } from "./oauth-discovery.ts";
 
 const OAUTH_STATE_TTL_SECONDS = 10 * 60;
@@ -168,14 +167,7 @@ export async function initiateIntegrationOAuth(
   // AFPS (CC-10, §7.3): default-when-missing flipped from
   // `"client_secret_post"` to `"client_secret_basic"` — RFC 8414 §2 /
   // RFC 7591 §2 default. Manifest-explicit values continue to work.
-  // A registered client with a BLANK secret is a public client whatever the
-  // manifest declares (`effectiveTokenAuthMethod`), so the state record — which
-  // is what the callback's token exchange reads back — carries the EFFECTIVE
-  // method, not the declared one.
-  const tokenAuthMethod = effectiveTokenAuthMethod(
-    input.tokenEndpointAuthMethod ?? "client_secret_basic",
-    input.clientSecret,
-  );
+  const tokenAuthMethod = input.tokenEndpointAuthMethod ?? "client_secret_basic";
   const scopeSeparator = input.scopeSeparator ?? " ";
   const uniqueScopes = [...new Set(input.scopes ?? [])];
   const scopeString = uniqueScopes.join(scopeSeparator);

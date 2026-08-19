@@ -166,13 +166,23 @@ function OAuthClientModal({
   // publisher hint below must agree, and they diverge the moment the same
   // expression is spelled out twice.
   const effectiveRedirectUri = redirectUri.trim() || platformRedirectUri;
-  const [publicClient, setPublicClient] = useState(existing ? !existing.has_client_secret : false);
+  // The admin's own declaration, read back from the row — NOT re-derived from
+  // the absence of a secret. The old `!has_client_secret` guess could not tell
+  // "declared public" from "secret not entered yet", so reopening a client
+  // saved without one came back checked with the secret field disabled, and a
+  // secret typed after that was never sent.
+  const [publicClient, setPublicClient] = useState(
+    existing ? existing.token_endpoint_auth_method === "none" : false,
+  );
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     const body = {
       client_id: clientId,
       client_secret: publicClient ? "" : clientSecret,
+      // Declared, not inferred: the server records `none` instead of guessing
+      // from the blank secret.
+      token_endpoint_auth_method: publicClient ? ("none" as const) : undefined,
       ...(redirectUri ? { redirect_uri: redirectUri } : {}),
     };
     if (mode === "create") {

@@ -109,6 +109,7 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
       clientSecret,
       redirectUri: clientRedirectUri,
       clientRef,
+      tokenEndpointAuthMethod: clientAuthMethod,
     } = resolveConnectClient(ctx.integrationId, ctx.authKey, manifest, auth, resolved);
     const effectiveRedirectUri = clientRedirectUri ?? redirectUri;
     // Threaded endpoints/resource: discovery result wins, manifest is the
@@ -117,7 +118,14 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
     const authorizationEndpoint = resolved.authorizationEndpoint ?? auth.authorization_endpoint;
     const tokenEndpoint = resolved.tokenEndpoint ?? auth.token_endpoint;
     const resource = resolved.resource ?? auth.resource;
-    const tokenAuthMethod = toSupportedTokenEndpointAuthMethod(auth.token_endpoint_auth_method);
+    // The registered client's own declaration wins over the manifest's: an
+    // admin who registered a PUBLIC client (no secret at the provider) has
+    // said something the manifest cannot know. `resolveConnectClient` returns
+    // the method already reconciled with the secret it hands back, so the two
+    // cannot disagree.
+    const tokenAuthMethod = toSupportedTokenEndpointAuthMethod(
+      clientAuthMethod ?? auth.token_endpoint_auth_method,
+    );
     const result = await initiateIntegrationOAuth(oauthStateStore, {
       packageId: ctx.integrationId,
       authKey: ctx.authKey,

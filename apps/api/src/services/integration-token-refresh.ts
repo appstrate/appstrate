@@ -28,6 +28,7 @@ import type {
   RefreshExchangeResult,
 } from "@appstrate/connect";
 import type { AfpsManifestAuth } from "./integration-manifest-helpers.ts";
+import { toSupportedTokenEndpointAuthMethod } from "./integration-manifest-helpers.ts";
 import { logger } from "../lib/logger.ts";
 import { dedupedRefresh } from "../lib/deduped-refresh.ts";
 import { OAUTH_REFRESH_LEAD_MS } from "@appstrate/core/sidecar-types";
@@ -376,7 +377,7 @@ export async function buildIntegrationOAuthRefreshContext(
     });
     return null;
   }
-  const tokenEndpointAuthMethod = afpsAuth.token_endpoint_auth_method;
+  const manifestAuthMethod = afpsAuth.token_endpoint_auth_method;
 
   // INVARIANT: an oauth2 connection always pins its minting client. A null here
   // means a non-oauth2 row reached this oauth2-only path — a bug, not a state to
@@ -398,7 +399,7 @@ export async function buildIntegrationOAuthRefreshContext(
     applicationId,
     packageId,
     authKey,
-    tokenEndpointAuthMethod,
+    manifestAuthMethod,
   );
   if (!client) {
     logger.info("Integration auth refresh skipped — pinned client unresolved", {
@@ -408,7 +409,11 @@ export async function buildIntegrationOAuthRefreshContext(
     });
     return null;
   }
-  const { clientId, clientSecret } = client;
+  // The resolver returns the method already paired with the secret it hands
+  // back — a public client comes back as `"none"` with no secret — so refresh
+  // posts what it was given rather than re-deriving from the manifest.
+  const { clientId, clientSecret, tokenEndpointAuthMethod } = client;
+  const supportedAuthMethod = toSupportedTokenEndpointAuthMethod(tokenEndpointAuthMethod);
   // AFPS: `scope_separator` moved under `_meta["dev.appstrate/oauth"]`.
   const oauthMeta = (afpsAuth._meta?.["dev.appstrate/oauth"] ?? undefined) as
     { scope_separator?: string } | undefined;
@@ -416,7 +421,7 @@ export async function buildIntegrationOAuthRefreshContext(
     tokenEndpoint,
     clientId,
     clientSecret,
-    ...(tokenEndpointAuthMethod ? { tokenEndpointAuthMethod } : {}),
+    ...(supportedAuthMethod ? { tokenEndpointAuthMethod: supportedAuthMethod } : {}),
     ...(oauthMeta?.scope_separator ? { scopeSeparator: oauthMeta.scope_separator } : {}),
   };
 }
