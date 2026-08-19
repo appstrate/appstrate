@@ -100,6 +100,8 @@ interface AuthSpec {
   tokenEndpointAuthMethod?: "client_secret_post" | "client_secret_basic" | "none";
   /** AFPS `authorization_params` — extra static query params on the authorize URL. */
   authorizationParams?: Record<string, string>;
+  /** `_meta["dev.appstrate/oauth"].refresh_token_issuance` — provider refresh behaviour. */
+  refreshTokenIssuance?: "default" | "not_supported";
   resource?: string;
   codeChallengeMethodsSupported?: string[];
   scopeSeparator?: string;
@@ -131,8 +133,12 @@ function buildAuth(spec: AuthSpec): Record<string, unknown> {
     if (spec.codeChallengeMethodsSupported)
       auth.code_challenge_methods_supported = spec.codeChallengeMethodsSupported;
     if (spec.identityClaims) auth.identity_claims = spec.identityClaims;
-    if (spec.scopeSeparator) {
-      auth._meta = { "dev.appstrate/oauth": { scope_separator: spec.scopeSeparator } };
+    const oauthMeta: Record<string, unknown> = {
+      ...(spec.scopeSeparator ? { scope_separator: spec.scopeSeparator } : {}),
+      ...(spec.refreshTokenIssuance ? { refresh_token_issuance: spec.refreshTokenIssuance } : {}),
+    };
+    if (Object.keys(oauthMeta).length > 0) {
+      auth._meta = { "dev.appstrate/oauth": oauthMeta };
     }
   } else {
     auth.credentials = {

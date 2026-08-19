@@ -54,6 +54,23 @@ import type {
  */
 const USERINFO_TIMEOUT_MS = 10_000;
 
+/**
+ * The manifest's `_meta["dev.appstrate/oauth"].refresh_token_issuance`, when it
+ * declares one.
+ *
+ * `"not_supported"` = the authorization server issues access-only tokens by
+ * design (the connection re-authorises at expiry). `"default"` = it issues a
+ * refresh token unconditionally, which needs no special handling here.
+ */
+function refreshTokenIssuance(auth: Record<string, unknown>): string | undefined {
+  const meta = auth._meta;
+  if (!meta || typeof meta !== "object") return undefined;
+  const oauthMeta = (meta as Record<string, unknown>)["dev.appstrate/oauth"];
+  if (!oauthMeta || typeof oauthMeta !== "object") return undefined;
+  const value = (oauthMeta as Record<string, unknown>).refresh_token_issuance;
+  return typeof value === "string" ? value : undefined;
+}
+
 export class OAuth2Strategy implements IntegrationConnectStrategy {
   async begin(ctx: ConnectContext, opts: BeginOptions): Promise<BeginResult> {
     const { manifest, auth: rawAuth } = await readIntegrationAuth(
@@ -294,7 +311,15 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
     // without `access_type=offline` + `prompt=consent`).
     if (result.expiresAt && !refreshToken) {
       let refreshGrantSupported = true; // strict default when capability is unknown
-      if (auth.issuer) {
+      // A manifest that states the provider issues no refresh token at all is
+      // authoritative — it is the same fact discovery would report, written
+      // down for a provider that publishes no metadata. Without this the
+      // declaration was inert: the conformance gate accepted
+      // `refresh_token_issuance: "not_supported"` while this path still refused
+      // the connection, so a manifest could pass CI and fail at consent.
+      if (refreshTokenIssuance(auth) === "not_supported") {
+        refreshGrantSupported = false;
+      } else if (auth.issuer) {
         try {
           const disc = await resolveOAuthEndpoints({
             issuer: auth.issuer,

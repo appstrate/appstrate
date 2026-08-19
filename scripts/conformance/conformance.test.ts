@@ -8,7 +8,13 @@ import { resolveToken, resolveAccessToken, credentialedCount, _resetCredsCache }
 import { remoteUrl, toolsPolicyKeys, allowsUndeclared } from "./remote-parity.ts";
 import { applyAuth, checkAuthLiveness } from "./auth-live.ts";
 import { metadataCandidates, compareAuth } from "./oauth-metadata.ts";
-import { checkRefreshStrategy, checkUnverifiedBacklog, UNVERIFIED } from "./refresh-strategy.ts";
+import {
+  checkRefreshStrategy,
+  checkUnverifiedBacklog,
+  checkBacklogCeiling,
+  UNVERIFIED,
+  UNVERIFIED_CEILING,
+} from "./refresh-strategy.ts";
 import { declaredIdentityEndpoints, classifyIdentityProbe } from "./identity-endpoint.ts";
 import { buildDiscoveryProbes, discoveryIssuerMatches } from "@appstrate/connect";
 import { listAllTools } from "./mcp-list.ts";
@@ -766,6 +772,22 @@ describe("refresh-strategy", () => {
     }
   });
 
+  // The first version accepted ANY non-empty authorization_params as evidence,
+  // so a manifest carrying only `prompt` passed while requesting no offline
+  // access at all — the same "looks like it declares something" failure the
+  // check exists to catch.
+  it("rejects an authorize param that does not request offline access", () => {
+    for (const params of [
+      { prompt: "select_account" },
+      { access_type: "online" },
+      { duration: "temporary" },
+      { token_access_type: "legacy" },
+    ]) {
+      const [finding] = checkRefreshStrategy(oauth({ authorization_params: params }));
+      expect(finding!.severity).toBe("fail");
+    }
+  });
+
   it("accepts an offline scope in every spelling providers use", () => {
     for (const scope of ["offline_access", "offline", "offline.access"]) {
       const [finding] = checkRefreshStrategy(oauth({ default_scopes: ["read", scope] }));
@@ -774,12 +796,18 @@ describe("refresh-strategy", () => {
   });
 
   it("accepts an explicit _meta declaration", () => {
-    for (const refresh of ["default", "not_supported"]) {
+    for (const refresh_token_issuance of ["default", "not_supported"]) {
       const [finding] = checkRefreshStrategy(
-        oauth({ _meta: { "dev.appstrate/oauth": { refresh } } }),
+        oauth({ _meta: { "dev.appstrate/oauth": { refresh_token_issuance } } }),
       );
       expect(finding!.severity).toBe("info");
     }
+  });
+
+  it("keeps the backlog shrink-only", () => {
+    // A ceiling below the current size is what a NEW waiver would look like.
+    expect(UNVERIFIED.size).toBeLessThanOrEqual(UNVERIFIED_CEILING);
+    expect(checkBacklogCeiling()).toEqual([]);
   });
 
   // The whole point: a manifest that says nothing about offline access is the
@@ -792,7 +820,7 @@ describe("refresh-strategy", () => {
 
   it("treats an unrecognised _meta refresh value as absent, not as a waiver", () => {
     const [finding] = checkRefreshStrategy(
-      oauth({ _meta: { "dev.appstrate/oauth": { refresh: "n/a" } } }),
+      oauth({ _meta: { "dev.appstrate/oauth": { refresh_token_issuance: "n/a" } } }),
     );
     expect(finding!.severity).toBe("fail");
   });
