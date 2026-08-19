@@ -462,9 +462,12 @@ describe("GET /internal/integration-credentials — version-pinned runs", () => 
     expect(JSON.stringify(await res.json())).toMatch(/not a dependency/i);
   });
 
-  it("FALLBACK: a version_ref whose snapshot is gone degrades to the draft dep set", async () => {
-    // The pinned version row was deleted after kickoff — the guard falls back
-    // to the draft (which declares INTEGRATION), preserving pre-fix behavior.
+  it("a version_ref whose snapshot is gone FAILS LOUD — it never degrades to the draft dep set", async () => {
+    // The pinned version row was deleted after kickoff. The draft declares
+    // INTEGRATION, so the old draft fallback answered 200 and handed a live run
+    // token credentials its pinned definition may never have authorized. The
+    // guard now refuses: 409 `run_definition_gone`, naming the deleted version
+    // and the package instead of the false "Agent not found".
     await seedAgent({
       id: AGENT,
       orgId: ctx.orgId,
@@ -479,6 +482,12 @@ describe("GET /internal/integration-credentials — version-pinned runs", () => 
       headers: { Authorization: `Bearer ${token}` },
     });
 
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as { code?: string; detail?: string };
+    expect(body.code).toBe("run_definition_gone");
+    // The detail must name the real cause (the deleted pinned version) and the
+    // package it belongs to — not the agent row, which is still present.
+    expect(body.detail).toContain("9.9.9");
+    expect(body.detail).toContain(AGENT);
   });
 });

@@ -346,8 +346,21 @@ function descriptorToResolved(d: SpawnVersionDescriptor): ResolvedIntegrationVer
     : { version: null, source: d.kind };
 }
 
-/** Map a frozen snapshot entry back into the descriptor the readers consume. */
+/**
+ * Map a frozen snapshot entry back into the descriptor the readers consume.
+ *
+ * `source: "version"` with a null `version` is an impossible shape:
+ * {@link descriptorToResolved} is the only writer and it always pairs that
+ * source with a concrete semver, so a null there means the stored snapshot is
+ * corrupt. It used to substitute `{ kind: "draft" }` — which does NOT mean
+ * "the latest published" as the comment claimed, but the MUTABLE draft
+ * (`fetchIntegrationManifestUncached`). A run pinned to a version would then
+ * have silently spawned and authorized against whatever the draft says today.
+ * Throw instead: an unreadable pin is not a degraded read, it is an
+ * unanswerable question.
+ */
 export function resolvedIntegrationVersionToDescriptor(
+  packageId: string,
   entry: ResolvedIntegrationVersion,
 ): SpawnVersionDescriptor {
   switch (entry.source) {
@@ -356,9 +369,15 @@ export function resolvedIntegrationVersionToDescriptor(
     case "system":
       return { kind: "system" };
     case "version":
-      // A `version` source always froze a concrete version; fall back to the
-      // latest published only if the snapshot is somehow malformed.
-      return entry.version ? { kind: "version", version: entry.version } : { kind: "draft" };
+      if (!entry.version) {
+        throw new Error(
+          `Corrupt frozen integration version for '${packageId}': source "version" with no ` +
+            `version (entry: ${JSON.stringify(entry)}). The run's ` +
+            `resolved_integration_versions snapshot cannot be honored; re-launch the run to ` +
+            `re-freeze it.`,
+        );
+      }
+      return { kind: "version", version: entry.version };
   }
 }
 
@@ -415,7 +434,10 @@ export function readIntegrationManifestForRun(
   cache?: IntegrationManifestCache,
 ): Promise<IntegrationManifestLoadResult> {
   return frozen
-    ? readIntegrationManifestAt(packageId, resolvedIntegrationVersionToDescriptor(frozen))
+    ? readIntegrationManifestAt(
+        packageId,
+        resolvedIntegrationVersionToDescriptor(packageId, frozen),
+      )
     : fetchIntegrationManifest(packageId, cache);
 }
 

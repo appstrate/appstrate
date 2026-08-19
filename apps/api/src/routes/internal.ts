@@ -30,12 +30,13 @@ import {
   MAX_MEMORY_CONTENT,
 } from "../services/state/package-persistence.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
-import { getRunEffectiveAgent } from "../services/run-effective-agent.ts";
+import { getRunEffectiveAgent, runDefinitionGoneDetail } from "../services/run-effective-agent.ts";
 import {
   ApiError,
   unauthorized,
   forbidden,
   notFound,
+  conflict,
   invalidRequest,
   internalError,
 } from "../lib/errors.ts";
@@ -320,7 +321,7 @@ export function createInternalRouter() {
     runId: string,
   ): Promise<void> {
     const agent = await getRunEffectiveAgent(run);
-    if (!agent) throw notFound("Agent not found");
+    if (!agent) throw runDefinitionGone(run, runId);
     const deps = asRecord(asRecord(agent.manifest).dependencies);
     const integrations = asRecord(deps.integrations);
     if (!(packageId in integrations)) {
@@ -517,7 +518,7 @@ export function createInternalRouter() {
     // when `version_ref` is a concrete semver) — same rationale as
     // `assertAgentDeclaresIntegration` above.
     const agent = await getRunEffectiveAgent(run);
-    if (!agent) throw notFound("Agent not found");
+    if (!agent) throw runDefinitionGone(run, runId);
     const deps = asRecord(asRecord(agent.manifest).dependencies);
     const integrations = asRecord(deps.integrations);
     for (const integrationId of Object.keys(integrations)) {
@@ -544,6 +545,34 @@ export function createInternalRouter() {
   }
 
   return router;
+}
+
+/**
+ * The definition the run executes can no longer be read — its pinned
+ * `package_versions` snapshot (or the package row itself) was deleted while
+ * the run was in flight. Both run-token guards above depend on that manifest
+ * to decide what this token may reach, so there is nothing to fall back to:
+ * reading the mutable draft instead would silently re-derive a live run's
+ * authorization set from a definition it never agreed to.
+ *
+ * 409, NOT 410: `410` is already load-bearing on
+ * `/internal/integration-credentials/*` with "the credential was revoked
+ * upstream, stop retrying and reconnect" semantics — the sidecar branches on
+ * the bare status (`doRefresh` in `integration-credentials-source.ts`) and
+ * would mislabel a deleted agent version as a dead connection. The dedicated
+ * `run_definition_gone` code is what distinguishes this from the plain
+ * `not_found` of an integration that was never declared.
+ */
+function runDefinitionGone(
+  run: { packageId: string; versionRef: string | null },
+  runId: string,
+): ApiError {
+  logger.warn("run's executed definition is no longer readable", {
+    runId,
+    packageId: run.packageId,
+    versionRef: run.versionRef,
+  });
+  return conflict("run_definition_gone", runDefinitionGoneDetail(run));
 }
 
 /**

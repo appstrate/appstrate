@@ -18,7 +18,6 @@
  * pinned run may enumerate.
  */
 
-import { logger } from "../lib/logger.ts";
 import { getPackage } from "./package-catalog.ts";
 import { getExactVersionManifest } from "./package-versions.ts";
 import type { AgentManifest } from "../types/index.ts";
@@ -28,8 +27,26 @@ export interface RunEffectiveAgent {
   id: string;
   /** The manifest of the definition the run executes (pinned snapshot or live draft). */
   manifest: AgentManifest;
-  /** Which definition backed `manifest` — `"version"` iff the pinned snapshot loaded. */
-  manifestSource: "version" | "draft";
+}
+
+/**
+ * Detail string for "the definition this run executes can no longer be read".
+ * Shared by every caller so the sidecar, the mcp-server bundle guard and
+ * finalize all name the SAME cause and the SAME remedy — the previous
+ * "Agent not found" named a cause that was never true (the agent row is
+ * usually still there; it is the pinned `package_versions` snapshot that is
+ * gone).
+ */
+export function runDefinitionGoneDetail(run: {
+  packageId: string;
+  versionRef: string | null;
+}): string {
+  return (
+    `The definition this run executes is no longer readable: version ` +
+    `'${run.versionRef ?? "draft"}' of package '${run.packageId}' was deleted while ` +
+    `the run was in flight. Re-publish that version to make the pinned definition ` +
+    `readable again, or start a new run against the current definition.`
+  );
 }
 
 /**
@@ -38,11 +55,17 @@ export interface RunEffectiveAgent {
  * - `version_ref = "draft"` (editor runs, system agents, inline shadow
  *   packages, legacy rows) → the live draft.
  * - concrete semver → the `package_versions` snapshot for that exact
- *   version. When the row is gone (version deleted after kickoff) the draft
- *   is served as a last resort with a warning — the pre-helper behavior.
+ *   version.
  *
- * Returns null when the package row itself is gone (agent deleted mid-run;
- * `package_versions` rows cascade with it).
+ * Returns null when that definition is no longer readable — either the
+ * package row is gone (agent deleted mid-run; `package_versions` rows cascade
+ * with it) or the pinned version row is gone (version deleted after kickoff).
+ * There is deliberately NO draft fallback for the pinned case: serving the
+ * mutable draft is exactly the substitution the module header forbids, and it
+ * did so silently — a run token's authorization set and a run's output
+ * contract would both have been quietly re-derived from a definition the run
+ * never agreed to. Callers MUST treat null as fatal for the operation at
+ * hand and surface {@link runDefinitionGoneDetail}.
  */
 export async function getRunEffectiveAgent(run: {
   packageId: string;
@@ -57,16 +80,10 @@ export async function getRunEffectiveAgent(run: {
   // System agents ship their definition with the platform and have no
   // published versions — the draft row IS the effective definition.
   if (versionRef === "draft" || agent.source === "system") {
-    return { id: agent.id, manifest: agent.manifest, manifestSource: "draft" };
+    return { id: agent.id, manifest: agent.manifest };
   }
 
   const pinned = await getExactVersionManifest(run.packageId, versionRef);
-  if (!pinned) {
-    logger.warn("run's pinned version manifest is missing — falling back to draft", {
-      packageId: run.packageId,
-      versionRef,
-    });
-    return { id: agent.id, manifest: agent.manifest, manifestSource: "draft" };
-  }
-  return { id: agent.id, manifest: pinned as unknown as AgentManifest, manifestSource: "version" };
+  if (!pinned) return null;
+  return { id: agent.id, manifest: pinned as unknown as AgentManifest };
 }

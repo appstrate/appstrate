@@ -237,6 +237,15 @@ export const internalPaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
+        "409": {
+          description:
+            "The definition this run executes is no longer readable (`run_definition_gone`) — the pinned `package_versions` snapshot named by `runs.version_ref`, or the package row itself, was deleted while the run was in flight. There is deliberately no draft fallback: the run's authorization set may never be re-derived from the mutable draft. Distinct from `410`, which on this endpoint means the credential was revoked upstream.",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
         "410": {
           description:
             "Refresh token revoked upstream — the integration connection has been flagged `needsReconnection` and the sidecar should surface this to the integration's MCP client as a 401. Matches the model-provider token endpoint's revoked semantics.",
@@ -283,6 +292,15 @@ export const internalPaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
+        "409": {
+          description:
+            "The definition this run executes is no longer readable (`run_definition_gone`) — the pinned `package_versions` snapshot named by `runs.version_ref`, or the package row itself, was deleted while the run was in flight. There is deliberately no draft fallback: the run's authorization set may never be re-derived from the mutable draft. Distinct from `410`, which on this endpoint means the credential was revoked upstream.",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
         "410": {
           description: "Refresh token revoked upstream — same semantics as the GET endpoint.",
           content: {
@@ -338,6 +356,15 @@ export const internalPaths = {
         "404": {
           description:
             "Agent does not reference this mcp-server through an installed integration, or no published version exists.",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
+        "409": {
+          description:
+            "The definition this run executes is no longer readable (`run_definition_gone`) — the pinned `package_versions` snapshot named by `runs.version_ref`, or the package row itself, was deleted while the run was in flight. The dependency set that authorises this fetch cannot be enumerated, and is never re-derived from the mutable draft.",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },

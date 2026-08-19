@@ -48,7 +48,7 @@ import {
   CHECKPOINT_KEY,
 } from "./state/package-persistence.ts";
 import { actorFromIds } from "../lib/actor.ts";
-import { getRunEffectiveAgent } from "./run-effective-agent.ts";
+import { getRunEffectiveAgent, runDefinitionGoneDetail } from "./run-effective-agent.ts";
 import { validateOutput } from "./schema.ts";
 import { asJSONSchemaObject } from "@appstrate/core/form";
 import { emitEvent } from "../lib/modules/module-loader.ts";
@@ -340,7 +340,23 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
   let errorMessage: string | null = result.error?.message ?? null;
   let outputValidationErrors: string[] | null = null;
 
-  if (status === "success" && agent?.manifest.output?.schema) {
+  if (!agent) {
+    // The definition this run EXECUTED is gone (its pinned `package_versions`
+    // snapshot, or the package row itself, was deleted mid-run), so its output
+    // contract cannot be read. Optional chaining here used to skip validation
+    // entirely and let the run land on `success` — a verdict rendered against a
+    // contract nobody read. Fail it instead, naming the same cause the run-token
+    // guards name. Only a `success` verdict is rewritten: a run that already
+    // terminated non-success carries its own, more specific cause (watchdog
+    // kill, cancellation, runner-declared failure) and must keep it.
+    if (status === "success") {
+      status = "failed";
+      errorMessage = runDefinitionGoneDetail({
+        packageId: run.packageId,
+        versionRef: run.versionRef,
+      });
+    }
+  } else if (status === "success" && agent.manifest.output?.schema) {
     // Distinguish two failure shapes that both surface as a schema mismatch:
     //   1. the agent never called `output` (`result.output` is null) — the
     //      empty `{}` only fails because required fields are absent, so a bare
