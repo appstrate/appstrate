@@ -64,6 +64,11 @@ export interface TurnErrorState {
  * `null` when the turn did not fail. Two sources, in order of durability: the
  * persisted provider-neutral category, which survives reload, then the
  * transient assistant-ui error for a failure that never reached a finish chunk.
+ *
+ * Every path localizes a category — the client never renders provider text. A
+ * turn persisted before the category existed carries none, so it degrades to
+ * the generic failure instead of surfacing the raw upstream string its
+ * `errorText` used to hold.
  */
 export function turnErrorState(
   message: AssistantState["message"],
@@ -71,11 +76,8 @@ export function turnErrorState(
 ): TurnErrorState | null {
   const turn = turnMetadataFromMessage(sourceMessage(message));
   if (turn?.finishReason === "error") {
-    const category = turn.errorCategory ?? "unknown";
     return {
-      text: turn.errorCategory
-        ? t(TURN_ERROR_KEY[category])
-        : (turn.errorText ?? t("turn.error.unknown")),
+      text: t(TURN_ERROR_KEY[turn.errorCategory ?? "unknown"]),
       retryable: turn.errorRetryable !== false,
       requestId: turn.requestId,
     };

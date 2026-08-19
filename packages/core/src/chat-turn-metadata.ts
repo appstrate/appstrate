@@ -121,9 +121,13 @@ export function formatTurnBudgetNote(input: { remainingMs: number; stepsUsed: nu
 export interface AppstrateTurnMetadata {
   engine: ChatTurnEngine;
   finishReason?: ChatTurnFinishReason;
-  /** Legacy client-safe failure copy; new turns persist a category for localization. */
-  errorText?: string;
-  /** Stable, provider-neutral class for retry UI + telemetry. */
+  /**
+   * Stable, provider-neutral class for retry UI + telemetry.
+   *
+   * Absent on a turn persisted before this field existed, when the failure copy
+   * was the provider's own unclassified string (`errorText`, removed): such a
+   * turn reads as `unknown` rather than rendering raw upstream text.
+   */
   errorCategory?: ChatTurnErrorCategory;
   /** Whether retrying later may succeed without changing the request. */
   errorRetryable?: boolean;
