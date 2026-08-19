@@ -66,6 +66,7 @@ async function setup(
   manifest: {
     tokenEndpointAuthMethod: "client_secret_post" | "client_secret_basic" | "none";
     authorizationParams?: Record<string, string>;
+    refreshTokenIssuance?: "default" | "not_supported";
   },
   client: { clientId: string; clientSecret: string },
 ): Promise<void> {
@@ -86,6 +87,9 @@ async function setup(
           codeChallengeMethodsSupported: ["S256"],
           ...(manifest.authorizationParams
             ? { authorizationParams: manifest.authorizationParams }
+            : {}),
+          ...(manifest.refreshTokenIssuance
+            ? { refreshTokenIssuance: manifest.refreshTokenIssuance }
             : {}),
           delivery: httpHeaderDelivery({
             name: "Authorization",
@@ -381,6 +385,56 @@ describe("integration OAuth2 flow (conformant provider)", () => {
     expect(decryptCredentialsToStringMap(connection!.credentialsEncrypted).refresh_token).toBe(
       provider.issuedRefreshTokens[0],
     );
+  });
+
+  // A provider that issues access-only tokens BY DESIGN (many remote MCP
+  // servers) is not a misconfiguration. Before this, the manifest could say so
+  // and be ignored: the conformance gate accepted the declaration while this
+  // path still refused the connection, so a manifest passed CI and failed at a
+  // user's consent screen.
+  it("persists an access-only connection when the manifest declares refresh_token_issuance=not_supported", async () => {
+    startProvider({
+      clientId: "cid",
+      clientSecret: "shh",
+      acceptedAuthMethods: ["client_secret_post"],
+      // Gated on a flag the manifest deliberately does not send → no refresh token.
+      offlineParam: { name: "token_access_type", value: "offline" },
+    });
+    await setup(
+      ctx,
+      provider,
+      { tokenEndpointAuthMethod: "client_secret_post", refreshTokenIssuance: "not_supported" },
+      { clientId: "cid", clientSecret: "shh" },
+    );
+    await consentAndCallback(await beginConnect(ctx));
+
+    expect(provider.issuedRefreshTokens).toHaveLength(0);
+    const connection = await storedConnection();
+    // Persisted, not refused — it re-authorises at expiry, by design.
+    expect(connection).not.toBeNull();
+    expect(decryptCredentialsToStringMap(connection!.credentialsEncrypted).refresh_token).toBe(
+      undefined,
+    );
+  });
+
+  // The declaration is authoritative only for "not_supported". A manifest that
+  // says nothing still gets the strict refusal, which is what caught
+  // @appstrate/dropbox.
+  it("still refuses when the manifest declares nothing", async () => {
+    startProvider({
+      clientId: "cid",
+      clientSecret: "shh",
+      acceptedAuthMethods: ["client_secret_post"],
+      offlineParam: { name: "token_access_type", value: "offline" },
+    });
+    await setup(
+      ctx,
+      provider,
+      { tokenEndpointAuthMethod: "client_secret_post" },
+      { clientId: "cid", clientSecret: "shh" },
+    );
+    await consentAndCallback(await beginConnect(ctx));
+    expect(await storedConnection()).toBeNull();
   });
 
   // ─── Protocol discipline the provider enforces for us ──────────────────
