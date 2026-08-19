@@ -232,3 +232,38 @@ export function parseTokenResponse(
 
   return { accessToken, refreshToken, expiresAt, scopesGranted, scopeShortfall, scopeCreep };
 }
+
+/**
+ * Resolve the client-authentication method a token request will ACTUALLY use,
+ * given the method the manifest declares and the secret that was resolved for
+ * the registered client.
+ *
+ * An admin registering a BYO OAuth app can leave the secret blank — that is
+ * how the UI expresses "public client" (`integration_oauth_clients` stores an
+ * empty ciphertext, `has_client_secret: false`). But
+ * `token_endpoint_auth_method` is a MANIFEST field with no per-client
+ * override, so the declared method stayed `client_secret_post` /
+ * `client_secret_basic` and the token request went out carrying an EMPTY
+ * credential: `client_secret=` in the body, or `Basic base64("id:")` in the
+ * header. Providers split on how they answer that — Airtable tolerated the
+ * empty Basic header, Dropbox rejected the empty body secret with
+ * `invalid_client` — so the same misconfiguration silently worked for one
+ * integration and hard-failed for another.
+ *
+ * Sending an empty secret is never correct: RFC 6749 §2.3 defines client
+ * password authentication in terms of a secret the client HAS, and §3.2.1
+ * says a client without one authenticates by `client_id` alone — which is
+ * exactly `token_endpoint_auth_method: "none"` (RFC 7591 §2). So an empty
+ * secret is downgraded here, at the single choke point every token request
+ * passes through, rather than special-cased per provider.
+ *
+ * @param declared - `token_endpoint_auth_method` from the manifest (or the
+ *   AFPS default when absent — resolved by the caller).
+ * @param clientSecret - the secret resolved for the registered client.
+ */
+export function effectiveTokenAuthMethod<T extends OAuthTokenAuthMethod>(
+  declared: T,
+  clientSecret: string | undefined,
+): T | "none" {
+  return clientSecret ? declared : "none";
+}

@@ -1,6 +1,6 @@
 {
   "name": "@appstrate/reddit",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "type": "integration",
   "schema_version": "0.1",
   "display_name": "Reddit (API)",
@@ -32,6 +32,9 @@
         "name": "$.name"
       },
       "default_scopes": ["identity", "read", "history"],
+      "authorization_params": {
+        "duration": "permanent"
+      },
       "token_endpoint_auth_method": "client_secret_basic",
       "scope_catalog": [
         {

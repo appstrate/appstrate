@@ -23,6 +23,7 @@ import { checkMcpLocalParity } from "./mcp-local-parity.ts";
 import { checkMcpRemoteParity } from "./remote-parity.ts";
 import { checkAuthLiveness } from "./auth-live.ts";
 import { checkOAuthMetadata } from "./oauth-metadata.ts";
+import { checkRefreshStrategy, checkUnverifiedBacklog } from "./refresh-strategy.ts";
 import { checkIdentityEndpoints } from "./identity-endpoint.ts";
 import { AUTH_PROBES } from "./probes.ts";
 import { credentialedCount } from "./creds.ts";
@@ -85,6 +86,13 @@ async function main(): Promise<void> {
       credIntegrations++;
       if (runAuthLive) findings.push(...(await checkAuthLiveness(entry)));
     }
+    // Deterministic, credential-free, network-free → every tier, including
+    // `gate`. Whether an oauth2 auth can keep its connection alive is decided
+    // entirely by what the manifest declares.
+    if (klass !== "mcp-server-local" && klass !== "other") {
+      findings.push(...checkRefreshStrategy(entry));
+    }
+
     // Manifest-declared OAuth surface, checked for every integration class —
     // a remote MCP integration declares an `issuer` and a credential-only one
     // declares explicit endpoints, and both are transcribed by hand.
@@ -95,6 +103,12 @@ async function main(): Promise<void> {
       // degrades connections to accountId "default" in silence.
       findings.push(...(await checkIdentityEndpoints(entry)));
     }
+  }
+
+  // Only meaningful over the full set: with `--pkg` every entry outside the
+  // filter would read as stale.
+  if (!args.pkg) {
+    findings.push(...checkUnverifiedBacklog(selected.map((p) => p.entry)));
   }
 
   console.log(formatReport(findings));

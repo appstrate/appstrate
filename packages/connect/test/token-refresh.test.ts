@@ -126,6 +126,63 @@ describe("performRefreshTokenExchange — token_endpoint_auth_method default (R8
     expect(capturedBody).toContain("client_id=my-client-id");
     expect(capturedBody).toContain("client_secret=my-client-secret");
   });
+
+  // Regression, same class as the initial-exchange one: a BYO client saved
+  // without a secret is a public client, but the manifest keeps declaring a
+  // secret-based method. Refresh must not post `client_secret=` either — the
+  // provider that rejects the empty secret at exchange time rejects it at
+  // refresh time too, which would surface as a spurious `needs_reconnection`.
+  it("a BLANK secret degrades client_secret_post to a public-client refresh", async () => {
+    let capturedHeaders: Headers | undefined;
+    let capturedBody: string | undefined;
+    const ctxBlank: RefreshContext = {
+      tokenEndpoint: "https://idp.example.com/token",
+      clientId: "my-client-id",
+      clientSecret: "",
+      tokenEndpointAuthMethod: "client_secret_post",
+    };
+    await withStub(
+      (async (_url, init) => {
+        capturedHeaders = new Headers(init?.headers as HeadersInit);
+        capturedBody = init?.body as string;
+        return new Response(JSON.stringify({ access_token: "new", token_type: "Bearer" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }) as unknown as typeof fetch,
+      ctxBlank,
+      (ctx) => performRefreshTokenExchange(ctx, "rt_abc", { label: "refresh" }),
+    );
+    expect(capturedHeaders?.get("Authorization")).toBeNull();
+    expect(capturedBody).toContain("client_id=my-client-id");
+    expect(capturedBody).not.toContain("client_secret");
+  });
+
+  it("a BLANK secret degrades client_secret_basic to a public-client refresh", async () => {
+    let capturedHeaders: Headers | undefined;
+    let capturedBody: string | undefined;
+    const ctxBlank: RefreshContext = {
+      tokenEndpoint: "https://idp.example.com/token",
+      clientId: "my-client-id",
+      clientSecret: "",
+      tokenEndpointAuthMethod: "client_secret_basic",
+    };
+    await withStub(
+      (async (_url, init) => {
+        capturedHeaders = new Headers(init?.headers as HeadersInit);
+        capturedBody = init?.body as string;
+        return new Response(JSON.stringify({ access_token: "new", token_type: "Bearer" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }) as unknown as typeof fetch,
+      ctxBlank,
+      (ctx) => performRefreshTokenExchange(ctx, "rt_abc", { label: "refresh" }),
+    );
+    expect(capturedHeaders?.get("Authorization")).toBeNull();
+    expect(capturedBody).toContain("client_id=my-client-id");
+    expect(capturedBody).not.toContain("client_secret");
+  });
 });
 
 describe("performRefreshTokenExchange — failure classification", () => {

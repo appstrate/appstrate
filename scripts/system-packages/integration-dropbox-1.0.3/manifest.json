@@ -1,6 +1,6 @@
 {
   "name": "@appstrate/dropbox",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "type": "integration",
   "schema_version": "0.1",
   "display_name": "Dropbox (API)",
@@ -26,6 +26,9 @@
       "authorization_endpoint": "https://www.dropbox.com/oauth2/authorize",
       "token_endpoint": "https://api.dropboxapi.com/oauth2/token",
       "default_scopes": ["account_info.read", "files.metadata.read", "files.content.read"],
+      "authorization_params": {
+        "token_access_type": "offline"
+      },
       "token_endpoint_auth_method": "client_secret_post",
       "code_challenge_methods_supported": ["S256"],
       "scope_catalog": [

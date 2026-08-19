@@ -6,6 +6,7 @@ import {
   parseTokenErrorResponse,
   buildTokenHeaders,
   buildTokenBody,
+  effectiveTokenAuthMethod,
   type OAuthTokenContentType,
   type ParsedTokenResponse,
 } from "./token-utils.ts";
@@ -103,7 +104,15 @@ export async function performRefreshTokenExchange(
   //   - none (public client): client_id in body, NO client_secret, NO Basic
   //     header. RFC 6749 §6 + §3.2.1: a public client MUST authenticate
   //     itself by including its client_id in the request.
-  const tokenAuthMethod = ctx.tokenEndpointAuthMethod ?? "client_secret_basic";
+  //
+  // A registered client with a BLANK secret is a public client whatever the
+  // manifest declares — `effectiveTokenAuthMethod` downgrades it so refresh
+  // never posts an empty `client_secret` (or an empty Basic header) the way
+  // the initial exchange used to.
+  const tokenAuthMethod = effectiveTokenAuthMethod(
+    ctx.tokenEndpointAuthMethod ?? "client_secret_basic",
+    ctx.clientSecret,
+  );
   const bodyParams: Record<string, string> = {
     grant_type: "refresh_token",
     refresh_token: refreshToken,

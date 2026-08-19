@@ -1,6 +1,6 @@
 {
   "name": "@appstrate/youtube",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "type": "integration",
   "schema_version": "0.1",
   "display_name": "YouTube (API)",
@@ -35,6 +35,10 @@
       "token_endpoint": "https://oauth2.googleapis.com/token",
       "callback_url_hint": "Champ « Authorized redirect URIs » de l'ID client OAuth — enregistrer exactement : {{callback_url}}",
       "default_scopes": ["https://www.googleapis.com/auth/youtube.readonly"],
+      "authorization_params": {
+        "access_type": "offline",
+        "prompt": "consent"
+      },
       "token_endpoint_auth_method": "client_secret_post",
       "scope_catalog": [
         {

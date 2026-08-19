@@ -122,6 +122,49 @@ describe("exchangeAuthorizationCode — client auth method", () => {
     expect(params.get("client_id")).toBe("client-id");
     expect(params.get("client_secret")).toBeNull();
   });
+
+  // Regression: the UI expresses "public client" by saving a BLANK secret, but
+  // `token_endpoint_auth_method` is a manifest field with no per-client
+  // override — so the declared method stayed `client_secret_post` and the POST
+  // carried `client_secret=`. Dropbox answered `invalid_client` (HTTP 400) and
+  // no connection was ever created; Airtable happened to tolerate the
+  // equivalent empty Basic header, which is why the class shipped undetected.
+  it("client_secret_post with a BLANK secret degrades to a public client", async () => {
+    const store = memoryStore();
+    const { fetch: stub, captured } = recordingFetch(jsonResponse({ access_token: "AT" }));
+    await exchangeAuthorizationCode(
+      baseInput(store, {
+        tokenEndpointAuthMethod: "client_secret_post",
+        clientSecret: "",
+        fetchImpl: stub,
+      }),
+    );
+    const params = new URLSearchParams(captured.value!.body);
+    expect(params.get("client_id")).toBe("client-id");
+    // The empty-string secret must NOT be present as an empty parameter.
+    expect(params.has("client_secret")).toBe(false);
+    const authHeader =
+      captured.value!.headers["Authorization"] ?? captured.value!.headers["authorization"];
+    expect(authHeader).toBeUndefined();
+  });
+
+  it("client_secret_basic with a BLANK secret sends no empty Basic header", async () => {
+    const store = memoryStore();
+    const { fetch: stub, captured } = recordingFetch(jsonResponse({ access_token: "AT" }));
+    await exchangeAuthorizationCode(
+      baseInput(store, {
+        tokenEndpointAuthMethod: "client_secret_basic",
+        clientSecret: "",
+        fetchImpl: stub,
+      }),
+    );
+    const authHeader =
+      captured.value!.headers["Authorization"] ?? captured.value!.headers["authorization"];
+    expect(authHeader).toBeUndefined();
+    const params = new URLSearchParams(captured.value!.body);
+    expect(params.get("client_id")).toBe("client-id");
+    expect(params.has("client_secret")).toBe(false);
+  });
 });
 
 describe("exchangeAuthorizationCode — error classification", () => {
