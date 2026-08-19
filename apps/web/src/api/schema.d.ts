@@ -20829,6 +20829,15 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            /** @description The definition this run executes is no longer readable (`run_definition_gone`) — the pinned `package_versions` snapshot named by `runs.version_ref`, or the package row itself, was deleted while the run was in flight. There is deliberately no draft fallback: the run's authorization set may never be re-derived from the mutable draft. Distinct from `410`, which on this endpoint means the credential was revoked upstream. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
             /** @description Refresh token revoked upstream — the integration connection has been flagged `needsReconnection` and the sidecar should surface this to the integration's MCP client as a 401. Matches the model-provider token endpoint's revoked semantics. */
             410: {
                 headers: {
@@ -20876,6 +20885,15 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            /** @description The definition this run executes is no longer readable (`run_definition_gone`) — the pinned `package_versions` snapshot named by `runs.version_ref`, or the package row itself, was deleted while the run was in flight. There is deliberately no draft fallback: the run's authorization set may never be re-derived from the mutable draft. Distinct from `410`, which on this endpoint means the credential was revoked upstream. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
             /** @description Refresh token revoked upstream — same semantics as the GET endpoint. */
             410: {
                 headers: {
@@ -20927,6 +20945,15 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             /** @description Agent does not reference this mcp-server through an installed integration, or no published version exists. */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description The definition this run executes is no longer readable (`run_definition_gone`) — the pinned `package_versions` snapshot named by `runs.version_ref`, or the package row itself, was deleted while the run was in flight. The dependency set that authorises this fetch cannot be enumerated, and is never re-derived from the mutable draft. */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
