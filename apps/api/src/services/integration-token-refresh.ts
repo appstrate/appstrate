@@ -19,6 +19,7 @@ import { integrationConnections } from "@appstrate/db/schema";
 import { db } from "@appstrate/db/client";
 import {
   RefreshError,
+  ClientAuthInvariantError,
   performRefreshTokenExchange,
   decryptCredentialsToStringMap,
   resolveOAuthEndpoints,
@@ -176,7 +177,19 @@ async function doRefresh(
     // Flip needsReconnection on a revoked refresh token so the dashboard
     // prompts re-connect. The wire mechanics + classification live in the
     // shared exchange; only the table write-back is integration-side.
-    if (err instanceof RefreshError && err.kind === "revoked") {
+    if (err instanceof ClientAuthInvariantError) {
+      // A contradictory (method, secret) pair is a configuration/programming
+      // fault, not an upstream blip. Counting it toward the transient-failure
+      // streak would spend a healthy connection's budget and eventually flag it
+      // `needs_reconnection` — user-visible damage from a code bug, with the
+      // real cause buried in the logs. Surface it and leave the row alone.
+      logger.error("Integration refresh aborted — incoherent client auth", {
+        packageId,
+        authKey,
+        connectionId,
+        err: String(err),
+      });
+    } else if (err instanceof RefreshError && err.kind === "revoked") {
       await markIntegrationConnectionNeedsReconnection(connectionId);
     } else {
       // Transient failure (network / 5xx / parse). A single transient error is

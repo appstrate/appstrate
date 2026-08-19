@@ -627,10 +627,14 @@ export const integrationsPaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["client_id", "client_secret"],
+              required: ["client_id"],
               properties: {
                 client_id: { type: "string", minLength: 1 },
-                client_secret: { type: "string", default: "" },
+                client_secret: {
+                  type: "string",
+                  description:
+                    "OMIT to preserve the stored secret. An empty string declares the client PUBLIC and clears it. The rotate form submits an empty input whenever only the redirect URI changed, so the two must stay distinguishable.",
+                },
                 token_endpoint_auth_method: {
                   type: "string",
                   enum: ["client_secret_post", "client_secret_basic", "none"],

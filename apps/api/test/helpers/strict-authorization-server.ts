@@ -30,7 +30,7 @@
  *
  * That last row is the modelled half of the second defect: Google gates a
  * refresh token on `access_type=offline`, Dropbox on `token_access_type=offline`,
- * Reddit on `duration=permanent`. Configure {@link StrictOAuthProviderOptions.offlineParam}
+ * Reddit on `duration=permanent`. Configure {@link StrictAuthorizationServerOptions.offlineParam}
  * with the flag this provider requires and the server behaves like it —
  * short-lived access token, no refresh token — when the authorize request
  * omits it.
@@ -63,7 +63,7 @@ export interface RecordedAuthorizeRequest {
   error?: string;
 }
 
-export interface StrictOAuthProviderOptions {
+export interface StrictAuthorizationServerOptions {
   /** Client id registered at this provider. */
   clientId?: string;
   /**
@@ -90,7 +90,7 @@ export interface StrictOAuthProviderOptions {
   requirePkce?: boolean;
 }
 
-export interface StrictOAuthProvider {
+export interface StrictAuthorizationServer {
   /** Base URL, e.g. "http://localhost:54321". */
   url: string;
   authorizationEndpoint: string;
@@ -169,9 +169,9 @@ export function allowLoopbackOAuthEgress(): () => void {
  * error code, so a test asserts on the platform's behaviour rather than on a
  * mock's recorded bytes.
  */
-export function createStrictOAuthProvider(
-  options: StrictOAuthProviderOptions = {},
-): StrictOAuthProvider {
+export function createStrictAuthorizationServer(
+  options: StrictAuthorizationServerOptions = {},
+): StrictAuthorizationServer {
   const clientId = options.clientId ?? "test-client-id";
   const registeredSecret = options.clientSecret;
   const accepted = new Set(

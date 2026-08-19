@@ -165,7 +165,7 @@ export interface IntegrationOAuthClient {
   integration_package_id: string;
   auth_key: string;
   client_id: string;
-  /** True when the client_secret blob is non-empty (private client). */
+  /** True when the client_secret blob is non-empty (confidential client). */
   has_client_secret: boolean;
   /**
    * `token_endpoint_auth_method` declared for THIS client, overriding the

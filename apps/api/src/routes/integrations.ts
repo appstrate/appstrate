@@ -205,6 +205,32 @@ export const oauthClientSchema = z.object({
   redirect_uri: z.url().optional(),
 });
 
+/**
+ * Registration body. `client_secret` defaults to `""` — registering an app
+ * with no secret is how a PUBLIC client is declared.
+ */
+export const oauthClientCreateSchema = oauthClientSchema
+  .extend({ client_secret: z.string().default("") })
+  .refine((b) => !(b.token_endpoint_auth_method === "none" && b.client_secret.length > 0), {
+    message:
+      "token_endpoint_auth_method='none' declares a public client; do not send a client_secret with it",
+    path: ["client_secret"],
+  });
+
+/**
+ * Rotation body. `client_secret` is OPTIONAL and its absence means PRESERVE —
+ * the rotate form submits an empty secret input whenever the admin only meant
+ * to change the redirect URI, and treating that as "clear it" destroyed the
+ * credential and flipped the client public.
+ */
+export const oauthClientUpdateSchema = oauthClientSchema
+  .extend({ client_secret: z.string().optional() })
+  .refine((b) => !(b.token_endpoint_auth_method === "none" && (b.client_secret ?? "").length > 0), {
+    message:
+      "token_endpoint_auth_method='none' declares a public client; do not send a client_secret with it",
+    path: ["client_secret"],
+  });
+
 // ─────────────────────────────────────────────
 // Guards
 // ─────────────────────────────────────────────
@@ -526,7 +552,7 @@ export function createIntegrationsRouter() {
       const packageId = c.req.param("packageId")!;
       const authKey = c.req.param("authKey")!;
       const scope = getAppScope(c);
-      const body = await readJsonBody(c, oauthClientSchema);
+      const body = await readJsonBody(c, oauthClientCreateSchema);
       // Reject a manual client on an auto-provisioned (remote MCP) auth. Its
       // token endpoint only accepts a DCR/CIMD-acquired public client, so a
       // hand-entered client_id points at the wrong OAuth server and, once
@@ -569,10 +595,10 @@ export function createIntegrationsRouter() {
         throw notFound(`OAuth client '${clientId}' not found`);
       }
       const scope = getAppScope(c);
-      const body = await readJsonBody(c, oauthClientSchema);
+      const body = await readJsonBody(c, oauthClientUpdateSchema);
       const client = await updateIntegrationOAuthClient(scope, clientId, {
         clientId: body.client_id,
-        clientSecret: body.client_secret,
+        ...(body.client_secret !== undefined ? { clientSecret: body.client_secret } : {}),
         ...(body.token_endpoint_auth_method !== undefined
           ? { tokenEndpointAuthMethod: body.token_endpoint_auth_method }
           : {}),

@@ -11854,8 +11854,8 @@ export interface operations {
             content: {
                 "application/json": {
                     client_id: string;
-                    /** @default  */
-                    client_secret: string;
+                    /** @description OMIT to preserve the stored secret. An empty string declares the client PUBLIC and clears it. The rotate form submits an empty input whenever only the redirect URI changed, so the two must stay distinguishable. */
+                    client_secret?: string;
                     /**
                      * @description Explicit client-authentication method for this client, overriding the manifest's. Send `none` to register a PUBLIC client (no secret at the provider). Omit to leave it undeclared, in which case the manifest's value applies. A blank `client_secret` is recorded as `none`.
                      * @enum {string}

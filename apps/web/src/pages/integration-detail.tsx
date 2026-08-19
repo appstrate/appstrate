@@ -177,17 +177,30 @@ function OAuthClientModal({
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
-    const body = {
+    // Declared, not inferred: the server records `none` instead of guessing
+    // from a blank secret. And on rotation an untouched secret field is OMITTED
+    // rather than sent as `""` — sending it would clear the stored credential
+    // and flip a confidential client public, for an edit that only meant to
+    // change the redirect URI.
+    const common = {
       client_id: clientId,
-      client_secret: publicClient ? "" : clientSecret,
-      // Declared, not inferred: the server records `none` instead of guessing
-      // from the blank secret.
-      token_endpoint_auth_method: publicClient ? ("none" as const) : undefined,
+      ...(publicClient ? { token_endpoint_auth_method: "none" as const } : {}),
       ...(redirectUri ? { redirect_uri: redirectUri } : {}),
     };
     if (mode === "create") {
+      // Registration always states the secret; blank declares a public client.
+      const body = { ...common, client_secret: publicClient ? "" : clientSecret };
       create.mutate({ params: { path: { packageId, authKey } }, body }, { onSuccess: onClose });
     } else {
+      // Rotation OMITS an untouched secret field rather than sending `""`.
+      const body = {
+        ...common,
+        ...(publicClient
+          ? { client_secret: "" }
+          : clientSecret
+            ? { client_secret: clientSecret }
+            : {}),
+      };
       rotate.mutate(
         { params: { path: { packageId, clientId: existing!.client_ref } }, body },
         { onSuccess: onClose },

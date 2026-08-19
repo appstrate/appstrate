@@ -234,18 +234,39 @@ export function parseTokenResponse(
 }
 
 /**
+ * A client-authentication pair that cannot be correct — thrown by
+ * {@link assertClientAuthCoherent}.
+ *
+ * A distinct type because the refresh path classifies anything that is not a
+ * `RefreshError` as a transient upstream failure and counts it toward the
+ * streak that eventually flags a connection `needs_reconnection`. A
+ * configuration/programming fault must not spend a user's connection health
+ * budget, and must not read in the logs like someone else's outage.
+ */
+export class ClientAuthInvariantError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ClientAuthInvariantError";
+  }
+}
+
+/**
  * Refuse to build a token request whose client-authentication method and
- * secret disagree.
+ * secret contradict each other, in EITHER direction.
  *
  * `client_secret_post` / `client_secret_basic` mean the client HAS a password
  * (RFC 6749 §2.3); a client without one authenticates by `client_id` alone,
- * which is `token_endpoint_auth_method: "none"` (RFC 7591 §2). Pairing a
- * secret-based method with an empty secret is therefore not a degraded state
- * to be smoothed over — it is a request that cannot be correct, and sending it
- * anyway is how `client_secret=` (present but empty) reached providers that
- * reject it: Dropbox answered `invalid_client` while Airtable tolerated the
- * equivalent empty Basic header, so one integration silently worked and
- * another hard-failed on the same misconfiguration.
+ * which is `token_endpoint_auth_method: "none"` (RFC 7591 §2). So:
+ *
+ *   - a secret-based method with no secret is a request that cannot succeed —
+ *     it is how `client_secret=` (present but empty) reached providers that
+ *     reject it: Dropbox answered `invalid_client` while Airtable tolerated
+ *     the equivalent empty Basic header, so one integration silently worked
+ *     and another hard-failed on the same misconfiguration;
+ *   - `"none"` WITH a secret is the mirror fault: a caller that resolved a
+ *     credential and then declared it would not be used. The secret would be
+ *     silently dropped on the wire, which is how a confidential client gets
+ *     quietly downgraded to a public one.
  *
  * Callers resolve the pair together — `resolveIntegrationClientById` and
  * `resolveConnectClient` return the method alongside the credentials it
@@ -258,9 +279,16 @@ export function assertClientAuthCoherent(
   clientSecret: string | undefined,
   label: string,
 ): void {
-  if (method === undefined || method === "none") return;
-  if (clientSecret) return;
-  throw new Error(
+  if (method === "none") {
+    if (!clientSecret) return;
+    throw new ClientAuthInvariantError(
+      `${label}: token_endpoint_auth_method='none' declares a public client, but a client_secret ` +
+        `was resolved. Sending it would be ignored and dropping it silently would downgrade a ` +
+        `confidential client — resolve the method and the secret together.`,
+    );
+  }
+  if (method === undefined || clientSecret) return;
+  throw new ClientAuthInvariantError(
     `${label}: token_endpoint_auth_method='${method}' requires a client_secret, but none was ` +
       `resolved. A client registered without a secret is a public client and must be resolved ` +
       `as token_endpoint_auth_method='none'.`,

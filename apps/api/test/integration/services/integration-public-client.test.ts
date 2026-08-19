@@ -22,8 +22,9 @@ import { integrationOauthClients } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
 import {
   createIntegrationOAuthClient,
+  updateIntegrationOAuthClient,
   resolveIntegrationClientById,
-  normaliseClientAuth,
+  encodeClientAuthForStorage,
   listIntegrationClients,
 } from "../../../src/services/integration-connections.ts";
 import { __resetSystemIntegrationsForTest } from "../../../src/services/integration-client-registry.ts";
@@ -81,26 +82,34 @@ describe("public OAuth client is declared, not inferred", () => {
     return row!;
   }
 
-  describe("normaliseClientAuth writes both halves together", () => {
-    it("records a blank secret as an explicit public client", () => {
-      expect(normaliseClientAuth({ clientSecret: "" })).toEqual({
+  describe("encodeClientAuthForStorage writes both halves together", () => {
+    it("records a supplied blank secret as an explicit public client", () => {
+      expect(encodeClientAuthForStorage({ clientSecret: "" })).toEqual({
         tokenEndpointAuthMethod: "none",
         clientSecretEncrypted: "",
       });
     });
 
     it("keeps a confidential client undeclared so the manifest decides", () => {
-      const out = normaliseClientAuth({ clientSecret: "shh" });
+      const out = encodeClientAuthForStorage({ clientSecret: "shh" })!;
       expect(out.tokenEndpointAuthMethod).toBeNull();
       expect(out.clientSecretEncrypted.length).toBeGreaterThan(0);
     });
 
-    it("an explicit 'none' discards a supplied secret rather than storing both", () => {
-      // Otherwise the row would claim to be public while holding a secret —
-      // the incoherent state this column exists to make impossible.
-      expect(
-        normaliseClientAuth({ clientSecret: "ignored", tokenEndpointAuthMethod: "none" }),
-      ).toEqual({ tokenEndpointAuthMethod: "none", clientSecretEncrypted: "" });
+    // The distinction that stops a rotation from destroying a credential: an
+    // ABSENT secret field is not the same statement as an empty one. Rotation
+    // submits an empty input when the admin only meant to change the redirect
+    // URI, and that keystroke-free edit used to clear the secret AND flip the
+    // client public.
+    it("preserves the stored pair when no secret field was submitted", () => {
+      expect(encodeClientAuthForStorage({})).toBeNull();
+    });
+
+    it("still declares public when 'none' is explicit and no secret is sent", () => {
+      expect(encodeClientAuthForStorage({ tokenEndpointAuthMethod: "none" })).toEqual({
+        tokenEndpointAuthMethod: "none",
+        clientSecretEncrypted: "",
+      });
     });
   });
 
@@ -197,6 +206,66 @@ describe("public OAuth client is declared, not inferred", () => {
         tokenEndpointAuthMethod: "none",
       });
     });
+  });
+
+  describe("rotation never destroys a credential it was not asked to change", () => {
+    // Found by an adversarial review: the rotate form initialises the secret
+    // input EMPTY, so an admin changing only the redirect URI submitted `""`.
+    // Read as "declare public", that cleared the stored secret and flipped a
+    // confidential client to public — silently.
+    it("preserves the stored secret when the field is not submitted", async () => {
+      const created = await createIntegrationOAuthClient(scope, INTEGRATION, AUTH_KEY, {
+        clientId: "cid",
+        clientSecret: "shh",
+      });
+      const rotated = await updateIntegrationOAuthClient(scope, created.id, {
+        clientId: "cid",
+        redirectUri: "https://example.com/cb",
+      });
+      expect(rotated.has_client_secret).toBe(true);
+      expect(rotated.token_endpoint_auth_method).toBeNull();
+      const row = await storedRow(created.id);
+      expect(row.clientSecretEncrypted.length).toBeGreaterThan(0);
+      expect(row.redirectUri).toBe("https://example.com/cb");
+    });
+
+    it("still lets an explicit public declaration clear it", async () => {
+      const created = await createIntegrationOAuthClient(scope, INTEGRATION, AUTH_KEY, {
+        clientId: "cid",
+        clientSecret: "shh",
+      });
+      const rotated = await updateIntegrationOAuthClient(scope, created.id, {
+        clientId: "cid",
+        tokenEndpointAuthMethod: "none",
+      });
+      expect(rotated.has_client_secret).toBe(false);
+      expect(rotated.token_endpoint_auth_method).toBe("none");
+      expect((await storedRow(created.id)).clientSecretEncrypted).toBe("");
+    });
+  });
+
+  // Also from the review: `projectClientWithSecret` swallowed a decryption
+  // failure into an empty secret, which the legacy fallback then reported as a
+  // public client — handing the connect flow an empty credential for a row
+  // that actually holds a secret nobody can read.
+  it("never reports an unreadable ciphertext as a public client", async () => {
+    const [row] = await db
+      .insert(integrationOauthClients)
+      .values({
+        applicationId: ctx.defaultAppId,
+        integrationId: INTEGRATION,
+        authKey: AUTH_KEY,
+        clientId: "corrupt-cid",
+        // Structurally a ciphertext (satisfies the biconditional CHECK) but
+        // not one this key can open.
+        clientSecretEncrypted: "v1.notarealkid.bm90LWEtcmVhbC1jaXBoZXJ0ZXh0",
+        isDefault: true,
+      })
+      .returning({ id: integrationOauthClients.id });
+    const clients = await listIntegrationClients(scope, INTEGRATION, AUTH_KEY);
+    const custom = clients.find((c) => c.client_ref === row!.id);
+    expect(custom?.token_endpoint_auth_method).toBeNull();
+    expect(custom?.has_client_secret).toBe(true);
   });
 
   it("surfaces the declaration in the client list the UI reads", async () => {

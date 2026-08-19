@@ -232,8 +232,8 @@ export const integrationOauthClients = pgTable(
      * intent is now stored, not guessed.
      *
      * Widened beyond a boolean deliberately: `NULL` distinguishes "undeclared"
-     * from "declared confidential", and the column also houses the method a
-     * DCR registration negotiated, which a boolean could not express.
+     * from "declared confidential", and the three-value shape can carry a
+     * per-client Basic-vs-POST difference that a boolean could not express.
      */
     tokenEndpointAuthMethod: text("token_endpoint_auth_method"),
     /** Optional pre-registered redirect URI; falls back to the platform default at connect time. */
@@ -271,14 +271,25 @@ export const integrationOauthClients = pgTable(
     uniqueIndex("idx_ioc_one_auto")
       .on(table.applicationId, table.integrationId, table.authKey)
       .where(sql`${table.autoProvisioned}`),
-    // Values are the three methods `@appstrate/connect` implements. The
-    // stronger invariant — public client IFF no ciphertext — needs every
-    // legacy row backfilled first (the DB cannot see through the ciphertext to
-    // tell an empty secret from a real one), so it lands in a follow-up
-    // migration once `scripts/backfill-public-oauth-clients.ts` has run.
+    // Values are the three methods `@appstrate/connect` implements.
     check(
       "ioc_auth_method_values",
       sql`${table.tokenEndpointAuthMethod} IS NULL OR ${table.tokenEndpointAuthMethod} IN ('client_secret_post', 'client_secret_basic', 'none')`,
+    ),
+    // Public client IFF no stored ciphertext — the state this column exists to
+    // make unrepresentable: a row can no longer claim to be public while
+    // holding a secret, nor name a secret-based method while holding none.
+    //
+    // This does NOT have to wait for the backfill, which was the original
+    // reading. A legacy public row is structurally `NULL` + a ciphertext (of an
+    // empty secret), which satisfies the second branch — Postgres cannot see
+    // through the ciphertext, so it cannot recognise that row as public either
+    // way. No existing row violates this, so it lands VALID immediately. The
+    // backfill still runs, to canonicalise those rows' MEANING and let the
+    // legacy read paths be deleted.
+    check(
+      "ioc_public_iff_no_secret",
+      sql`(${table.tokenEndpointAuthMethod} = 'none' AND ${table.clientSecretEncrypted} = '') OR (${table.tokenEndpointAuthMethod} IS DISTINCT FROM 'none' AND ${table.clientSecretEncrypted} <> '')`,
     ),
     index("idx_integration_oauth_clients_app").on(table.applicationId),
     index("idx_integration_oauth_clients_package").on(table.integrationId),
