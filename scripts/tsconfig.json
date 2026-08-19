@@ -4,19 +4,9 @@
     "types": ["bun"]
   },
   "include": [
-    "check-consumer-versions.ts",
-    "maintenance/audit-empty-integration-selections.ts",
-    "maintenance/storage-orphans.ts",
-    "test/check-consumer-versions.test.ts",
     "verify-module-contract.ts",
     "verify-package-resolves.ts",
-    // The maintenance wrappers pull `apps/api/src` into this program, and part
-    // of it (`lib/modules/module-loader.ts`) is typed against the
-    // `ModuleResources` interface that each built-in module augments. The
-    // augmentations are only ever loaded dynamically, so nothing imports them
-    // statically: without these entrypoints in the program `ModuleResources`
-    // stays empty, `ModulePermissionContribution` resolves to `never`, and the
-    // loader reports errors that the `apps/api` project does not have.
-    "../apps/api/src/modules/*/index.ts"
+    "check-consumer-versions.ts",
+    "test/check-consumer-versions.test.ts"
   ]
 }

@@ -208,14 +208,10 @@ export const integrationOauthClients = pgTable(
      *
      * Empty means empty — a public client's row carries NO ciphertext, so
      * "does this client have a secret" is a column read rather than a
-     * decryption. Rows written before `token_endpoint_auth_method` existed may
-     * still hold a ciphertext over an empty secret. Nothing reads that state as
-     * a public client any more — the connect and refresh resolvers reject such
-     * a row by name and print the `UPDATE … SET token_endpoint_auth_method =
-     * 'none', client_secret_encrypted = '' WHERE id = …` that canonicalises it.
-     * A human runs it, because only a human knows whether the client really is
-     * public: Postgres cannot see through the ciphertext, so no migration and
-     * no CHECK can tell that row apart from a confidential one.
+     * decryption, and `ioc_public_iff_no_secret` holds that biconditional. The
+     * emptiness is never re-derived by decrypting: inferring "public" from a
+     * secret that opens to `""` is what put `client_secret=` (present but
+     * empty) on the wire, which providers such as Dropbox reject.
      */
     clientSecretEncrypted: text("client_secret_encrypted").notNull(),
     /**
@@ -285,16 +281,12 @@ export const integrationOauthClients = pgTable(
     // make unrepresentable: a row can no longer claim to be public while
     // holding a secret, nor name a secret-based method while holding none.
     //
-    // This does NOT have to wait for any repair of the legacy rows, which was
-    // the original reading. A legacy public row is structurally `NULL` + a
-    // ciphertext (of an empty secret), which satisfies the second branch —
-    // Postgres cannot see through the ciphertext, so it cannot recognise that
-    // row as public either way. No existing row violates this, so it lands
-    // VALID immediately — and by the same token it can never eliminate one,
-    // which is why the legacy read paths were replaced by a loud refusal rather
-    // than by a migration. The refusal prints the `UPDATE` that fixes the row's
-    // MEANING; a human runs it, because only a human can tell that row from a
-    // confidential one.
+    // What it does NOT guarantee is anything about the PLAINTEXT: the check is
+    // over `client_secret_encrypted <> ''`, and Postgres cannot see through
+    // ciphertext. So "declares no method and stores a ciphertext" is accepted
+    // whatever that ciphertext decrypts to. The write path closes that gap
+    // instead — `encodeClientAuthForStorage` refuses an empty secret unless it
+    // comes with an explicit `'none'`, which is stored as no ciphertext at all.
     check(
       "ioc_public_iff_no_secret",
       sql`(${table.tokenEndpointAuthMethod} = 'none' AND ${table.clientSecretEncrypted} = '') OR (${table.tokenEndpointAuthMethod} IS DISTINCT FROM 'none' AND ${table.clientSecretEncrypted} <> '')`,

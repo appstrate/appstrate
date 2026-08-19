@@ -37,7 +37,6 @@ import {
   discoverProtectedResourceMetadata,
   registerDynamicClient,
   DynamicClientRegistrationError,
-  ClientAuthInvariantError,
 } from "@appstrate/connect";
 import { getEnv } from "@appstrate/env";
 import { guardedFetch, isBlockedUrl } from "@appstrate/core/ssrf";
@@ -545,11 +544,9 @@ function projectClientWithSecret(row: IntegrationOAuthClientRow): IntegrationOAu
     // column, not from what we managed to decrypt.
     has_client_secret: secretReadable ? secret.length > 0 : row.clientSecretEncrypted.length > 0,
     // `null` = the row declares nothing, so the manifest's method applies. That
-    // is the ONLY reading; the method is never re-derived from the secret. A
-    // row that decrypts to an empty secret while holding a ciphertext is a
-    // legacy row (written before this column existed), and inferring `"none"`
-    // from that emptiness is exactly the inference that put `client_secret=`
-    // (present but empty) on the wire. The acting paths reject it by name.
+    // is the ONLY reading; the method is never re-derived from the secret.
+    // Inferring `"none"` from an empty decrypt is exactly the inference that
+    // put `client_secret=` (present but empty) on the wire.
     token_endpoint_auth_method: row.tokenEndpointAuthMethod ?? null,
     redirect_uri: row.redirectUri,
     isDefault: row.isDefault,
@@ -672,11 +669,12 @@ async function hasDefaultCustomClient(
  *
  * Note that DELETING these guards rather than throwing would be worse than the
  * inference they replace: falling through to the final return writes a NULL
- * method beside a ciphertext over an empty secret — exactly the legacy row
- * shape that the CHECK constraint cannot recognise, and that the connect and
- * refresh resolvers can only refuse and hand back to a human with an UPDATE to
- * run. Manufacturing new instances of a state whose only repair is manual is
- * not a trade worth making.
+ * method beside a ciphertext over an EMPTY secret — a row
+ * `ioc_public_iff_no_secret` accepts, because the CHECK reads the ciphertext's
+ * length and cannot see through it. Nothing reads such a row as a public
+ * client, so the only place it surfaces is the provider's token endpoint,
+ * long after the `201`. This is the one write path that can still tell the
+ * difference; it refuses here rather than deferring the answer.
  */
 export function encodeClientAuthForStorage(input: {
   clientSecret?: string | undefined;
@@ -949,69 +947,27 @@ function systemConnectClient(def: SystemIntegrationClientDefinition): ResolvedCo
 }
 
 /**
- * The legacy-client refusal, in ONE place. Two paths reject the same row shape
- * for the same reason — the connect-time guard (`assertConnectClientUsable`)
- * and the refresh resolver (`resolveIntegrationClientById`) — and each used to
- * carry its own hand-copied transcription of this paragraph, character-identical
- * down to the remedy at the end. Two copies of an operator remedy is one copy
- * too many: the next edit to the remedy updates whichever one the author
- * happened to be reading and leaves the other quietly wrong.
+ * Refuse a stored client whose ciphertext cannot be read — at RESOLUTION time,
+ * which is the earliest moment the answer is knowable.
  *
- * The remedy is a statement, not a tool. Both callers reach this only AFTER
- * decrypting the row and finding an empty secret, so "this ciphertext means
- * public" is already established for THIS row — which makes naming the id and
- * the exact UPDATE safe, and makes a script that re-derives the same fact for a
- * whole table redundant. The two exits mirror the sibling
- * unreadable-ciphertext refusal above: canonicalise the row, or re-register the
- * client. What we will not do is pick between them on the operator's behalf.
- *
- * `clientRef` is the client's id; `where` its `'<integration>' auth '<key>'`
- * locator, which the two callers assemble from different fields.
- */
-function legacyUndeclaredPublicClientMessage(clientRef: string, where: string): string {
-  return (
-    `OAuth client '${clientRef}' for ${where} is a public client recorded as a confidential ` +
-    `one: it predates token_endpoint_auth_method and stored an encrypted EMPTY secret ` +
-    `instead of declaring 'none'. Refusing to guess — inferring 'none' from that emptiness ` +
-    `is what put 'client_secret=' (present but empty) on the wire, which providers such as ` +
-    `Dropbox reject with invalid_client. Decide it by hand: if this client really is public, ` +
-    `canonicalise the row with \`UPDATE integration_oauth_clients SET ` +
-    `token_endpoint_auth_method = 'none', client_secret_encrypted = '' WHERE id = ` +
-    `'${clientRef}';\` — if it is confidential, re-register it with its secret from the ` +
-    `integration's OAuth clients admin screen.`
-  );
-}
-
-/**
- * Refuse a stored client that cannot produce a correct token request — at
- * RESOLUTION time, which is the earliest moment the answer is knowable.
- *
- * Timing is the whole point. Both states below used to travel all the way
- * through `OAuth2Strategy.begin`: the user was redirected, consented at the
- * provider, came back, and only then did the token exchange fail — with a
- * message about an incoherent pair that named neither the row nor a remedy.
- * And in one case it did not fail at all: a manifest declaring
+ * Timing is the whole point. The state used to travel all the way through
+ * `OAuth2Strategy.begin`: the user was redirected, consented at the provider,
+ * came back, and only then did the token exchange fail — with a message about
+ * an incoherent pair that named neither the row nor a remedy. And in one case
+ * it did not fail at all: a manifest declaring
  * `token_endpoint_auth_method: "none"` made `assertClientAuthCoherent` return
  * early, so a confidential client whose secret could not be read went out on
  * the wire as a PUBLIC one — the silent substitution this column exists to
  * prevent.
  *
- * The two states, both properties of the row rather than of the caller:
+ * The state is a property of the row rather than of the caller:
+ * `has_client_secret` WITH an empty `clientSecret` means the ciphertext did not
+ * open (key rotated without re-encrypt, corruption). Only a failed decrypt can
+ * produce that pair — `ioc_public_iff_no_secret` makes "declares a
+ * secret-based method while storing none" unrepresentable, so no write path
+ * reaches it.
  *
- *   - `has_client_secret` WITH an empty `clientSecret`: the ciphertext did not
- *     open (key rotated without re-encrypt, corruption). Only a failed decrypt
- *     can produce that pair — `ioc_public_iff_no_secret` makes "declares a
- *     secret-based method while storing none" unrepresentable, so the state is
- *     unreachable by any write path.
- *   - no declared method AND no readable secret: a LEGACY row, written before
- *     `token_endpoint_auth_method` existed, which encrypted an EMPTY secret
- *     instead of declaring `none`. The CHECK cannot see through ciphertext, so
- *     the constraint accepts it and no migration can canonicalise it blindly —
- *     only somebody who knows whether the client is really public can, which
- *     is why the throw hands them the exact UPDATE rather than running it.
- *     Under the CHECK this pair means nothing else.
- *
- * The admin client list deliberately keeps rendering both (see
+ * The admin client list deliberately keeps rendering the row (see
  * `projectClientWithSecret`): the admin has to see the broken row to fix it.
  */
 function assertConnectClientUsable(client: IntegrationOAuthClientWithSecret): void {
@@ -1023,9 +979,6 @@ function assertConnectClientUsable(client: IntegrationOAuthClientWithSecret): vo
         `silently downgrade a confidential one. Restore the CONNECTION_ENCRYPTION_KEY this ` +
         `client was registered with, or re-register the client with its secret.`,
     );
-  }
-  if (client.token_endpoint_auth_method === null && !client.has_client_secret) {
-    throw forbidden(legacyUndeclaredPublicClientMessage(client.id, where));
   }
 }
 
@@ -1119,11 +1072,14 @@ export function resolveConnectClient(
  * cross-scope id) → the caller skips refresh (surfaces needs_reconnection).
  *
  * Returns the client-authentication method ALONGSIDE the credentials, and the
- * two are always coherent: a public client comes back as `"none"` with an
- * empty secret, a confidential one as its declared method with a non-empty
+ * two are coherent for every representable row: `ioc_public_iff_no_secret`
+ * makes "public with a ciphertext" and "secret-based method with none"
+ * unrepresentable, so a public client comes back as `"none"` with an empty
+ * secret and a confidential one as its declared method with a non-empty
  * secret. Callers post what they are given — nothing downstream re-derives the
  * method, which is how `client_secret=` (present but empty) used to reach
- * providers that reject it.
+ * providers that reject it. An incoherent pair that somehow got past the CHECK
+ * is refused downstream by `assertClientAuthCoherent`, never smoothed over.
  *
  * Precedence: the client row's own `token_endpoint_auth_method` (the admin's
  * explicit declaration) wins over `manifestAuthMethod`, which is the
@@ -1131,9 +1087,8 @@ export function resolveConnectClient(
  * row does not declare one.
  *
  * `null` is reserved for "no such client here" (since-removed, remapped,
- * cross-scope) — a row that EXISTS but cannot yield a coherent pair throws
- * `ClientAuthInvariantError` instead, so a configuration fault is never
- * laundered into the same "skip refresh" outcome as a missing client.
+ * cross-scope) and for a ciphertext that will not open — the caller skips the
+ * refresh, which surfaces as `needs_reconnection` at expiry.
  */
 export async function resolveIntegrationClientById(
   clientRef: string,
@@ -1205,39 +1160,13 @@ export async function resolveIntegrationClientById(
     });
     return null;
   }
-  if (clientSecret === "") {
-    // A ciphertext that opens to an EMPTY secret. No write path can produce
-    // this: `encodeClientAuthForStorage` maps every empty-secret input to
-    // `'none'` + no ciphertext, and the `ioc_public_iff_no_secret` CHECK holds
-    // the pair together afterwards. It is a LEGACY row, written before
-    // `token_endpoint_auth_method` existed — and Postgres cannot see through
-    // ciphertext, so the CHECK accepts it and no migration can canonicalise it.
-    //
-    // This used to normalise `method = "none"` and carry on. That is the same
-    // inference the column was added to delete: it is what sent
-    // `client_secret=` (present but empty) to providers that reject it, and
-    // when the manifest declares no method at all it would hand the exchange
-    // an empty secret with no method, which `assertClientAuthCoherent` waves
-    // through. Fail loud, name the row, print the statement that repairs it.
-    const message = legacyUndeclaredPublicClientMessage(
-      clientRef,
-      `'${integrationId}' auth '${authKey}'`,
-    );
-    // Logged as well as thrown: this resolver runs on the machine-driven
-    // refresh path, whose callers rethrow anything that is not a transient
-    // `RefreshError`, so the message would otherwise only surface as a 500
-    // body the operator never reads.
-    logger.error("Integration client resolution aborted — legacy undeclared public client", {
-      integrationId,
-      authKey,
-      clientRef,
-    });
-    // `ClientAuthInvariantError` rather than a bare Error: the refresh path
-    // classifies unknown throws as transient upstream failures and counts them
-    // toward the streak that flags a connection `needs_reconnection`. A
-    // configuration fault must not spend a user's connection health budget.
-    throw new ClientAuthInvariantError(message);
-  }
+  // A ciphertext that opens to an EMPTY secret is not normalised to `"none"`
+  // here — that inference is what sent `client_secret=` (present but empty) to
+  // providers that reject it. The pair travels on as it was stored, and the
+  // refresh path refuses it: `performRefreshTokenExchange` resolves an absent
+  // method to `client_secret_basic` before calling `assertClientAuthCoherent`,
+  // so a secret-based (or unstated) method with no secret throws
+  // `ClientAuthInvariantError` before anything reaches the wire.
   return { clientId: row.clientId, clientSecret, tokenEndpointAuthMethod: method };
 }
 

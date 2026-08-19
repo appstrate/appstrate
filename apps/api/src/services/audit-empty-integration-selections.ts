@@ -23,7 +23,7 @@
  * This calls the same callability validator as every freeze point, which in
  * turn calls the runtime's version and tool-catalog resolvers. Read-only.
  *
- * CLI wrapper: `scripts/maintenance/audit-empty-integration-selections.ts`.
+ * CLI wrapper: `scripts/audit-empty-integration-selections.ts`.
  */
 
 import { parseManifestIntegrations } from "@appstrate/core/dependencies";

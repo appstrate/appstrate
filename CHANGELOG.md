@@ -187,36 +187,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   stored ciphertext and is accepted only together with
   `token_endpoint_auth_method: "none"`.
 
-- **A legacy OAuth client row whose meaning lived in its ciphertext is now
-  refused by name instead of guessed at** — before `token_endpoint_auth_method`
-  existed, "public client" was recorded as an ENCRYPTED EMPTY secret. Postgres
-  cannot see through ciphertext, so no migration and no CHECK constraint can
-  recognise such a row, and the read paths went on inferring `none` from it —
-  the exact inference that produced the `client_secret=` incident above. The
-  connect and refresh resolvers now refuse a client that declares no method and
-  holds no secret, naming the row, the integration, the auth key and the repair
-  that fixes it; the refresh path logs it as well as throwing, because its
-  callers turn anything non-transient into a `500` body no operator reads.
-  Refusing is the conservative half of the trade: such a client stops working at
-  connect and refresh time until it is canonicalised, where before it "worked"
-  by sending a request the provider rejects.
-
-  No pre-deploy step is needed, and none is offered. The refusal fires per row,
-  at the moment that row is used, and by then it has already been decrypted —
-  so the message can name the id and print the statement:
-
-  ```sql
-  UPDATE integration_oauth_clients
-     SET token_endpoint_auth_method = 'none', client_secret_encrypted = ''
-   WHERE id = '<id>';
-  ```
-
-  Run it only if that client really is public; if it is confidential,
-  re-register it with its secret from the integration's OAuth clients admin
-  screen instead. That choice is the reason this is a human decision and not a
-  sweep: `NULL` means "the manifest decides", which is exactly what a
-  confidential client wants, and blanket canonicalisation would publish one.
-
 - **A refresh that answered `200` with no `access_token` was recorded as a
   success — and disarmed every later check** — `performRefreshTokenExchange`
   substituted the caller's CURRENT access token when the response body carried
@@ -659,7 +629,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   agent in this state was already non-functional against that integration; it
   now fails loudly instead of silently.
 
-  **Before deploying**, run `bun scripts/maintenance/audit-empty-integration-selections.ts`.
+  **Before deploying**, run `bun scripts/audit-empty-integration-selections.ts`.
   It lists every affected artifact and distinguishes active targets from
   explicitly selectable drafts/history. The exit code is 1 only when a normal
   application default or an enabled schedule targets the broken artifact;

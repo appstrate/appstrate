@@ -17,7 +17,6 @@ import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage } from "../../helpers/seed.ts";
-import { encryptCredentials, ClientAuthInvariantError } from "@appstrate/connect";
 import { integrationOauthClients } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
 import {
@@ -106,31 +105,9 @@ describe("public OAuth client is declared, not inferred", () => {
   }
 
   /**
-   * A row exactly as it was written before `token_endpoint_auth_method`
-   * existed: no declaration, and a ciphertext over an EMPTY secret. Structurally
-   * `NULL` + non-empty ciphertext, so it satisfies `ioc_public_iff_no_secret` —
-   * which is precisely why the CHECK cannot eliminate it and only a human
-   * running the `UPDATE` the refusal prints can.
-   */
-  async function seedLegacyPublicRow(clientId = "legacy-cid"): Promise<string> {
-    const [row] = await db
-      .insert(integrationOauthClients)
-      .values({
-        applicationId: ctx.defaultAppId,
-        integrationId: INTEGRATION,
-        authKey: AUTH_KEY,
-        clientId,
-        clientSecretEncrypted: encryptCredentials({ client_secret: "" }),
-        isDefault: true,
-      })
-      .returning({ id: integrationOauthClients.id });
-    return row!.id;
-  }
-
-  /**
    * A row holding a secret nobody can read — structurally a ciphertext (so the
-   * biconditional CHECK accepts it) but not one this key opens. A DIFFERENT
-   * state from the legacy row above: it HAS a secret.
+   * biconditional CHECK accepts it) but not one this key opens. The state a
+   * rotated `CONNECTION_ENCRYPTION_KEY` leaves behind.
    */
   async function seedUnreadableRow(clientId = "corrupt-cid"): Promise<string> {
     const [row] = await db
@@ -174,9 +151,10 @@ describe("public OAuth client is declared, not inferred", () => {
     // callers rather than a live path.
     //
     // Deleting the guard instead of throwing would be worse: the fall-through
-    // writes a NULL method beside a ciphertext over an empty secret — a fresh
-    // instance of the legacy row whose only repair is a human running an
-    // `UPDATE`, which is not a state worth manufacturing more of.
+    // writes a NULL method beside a ciphertext over an empty secret — a row
+    // `ioc_public_iff_no_secret` accepts (it cannot see through ciphertext) and
+    // that nothing downstream can read as public, so the connection it backs
+    // would only fail at the token endpoint.
     it("throws when a blank secret arrives with no declared method", () => {
       expect(() => encodeClientAuthForStorage({ clientSecret: "" })).toThrow(
         /no token_endpoint_auth_method/,
@@ -286,38 +264,6 @@ describe("public OAuth client is declared, not inferred", () => {
         tokenEndpointAuthMethod: "client_secret_post",
       });
     });
-
-    // The inverse of the case this file used to assert. A row written before
-    // the column encrypted an EMPTY secret instead of declaring `none`, and the
-    // resolver re-derived `"none"` from the emptiness. That inference is the
-    // one the column exists to delete, so the row is now refused by name — and
-    // the message carries the repair, because nothing automatic can fix it
-    // (Postgres cannot see through the ciphertext, so no migration can).
-    it("refuses a legacy row that encrypted an empty secret", async () => {
-      const id = await seedLegacyPublicRow();
-      const attempt = resolveIntegrationClientById(
-        id,
-        ctx.defaultAppId,
-        INTEGRATION,
-        AUTH_KEY,
-        "client_secret_post",
-      );
-      // The remedy names THIS row: an operator must be able to paste it.
-      await expect(attempt).rejects.toThrow(
-        new RegExp(`UPDATE integration_oauth_clients .* WHERE id = '${id}';`),
-      );
-      await expect(attempt).rejects.toThrow(ClientAuthInvariantError);
-    });
-
-    // The manifest declaring nothing is the WORSE half of the same state: with
-    // `method === undefined`, `assertClientAuthCoherent` returns early, so the
-    // exchange used to go out with an empty secret and no method at all.
-    it("refuses a legacy row even when the manifest declares no method", async () => {
-      const id = await seedLegacyPublicRow();
-      await expect(
-        resolveIntegrationClientById(id, ctx.defaultAppId, INTEGRATION, AUTH_KEY, undefined),
-      ).rejects.toThrow(ClientAuthInvariantError);
-    });
   });
 
   describe("rotation never destroys a credential it was not asked to change", () => {
@@ -424,26 +370,6 @@ describe("public OAuth client is declared, not inferred", () => {
       await expect(resolveForConnect(PUBLIC_AUTH)).rejects.toThrow(/cannot be decrypted/);
     });
 
-    // Both exits belong in the message. Canonicalising a row that is actually
-    // confidential would publish it, so the refusal offers the UPDATE *and* the
-    // re-registration and lets the operator pick — the same pair the
-    // unreadable-ciphertext refusal above offers.
-    it("refuses a legacy row, naming the SQL repair and the re-registration", async () => {
-      const id = await seedLegacyPublicRow();
-      await expect(resolveForConnect()).rejects.toThrow(
-        new RegExp(
-          `UPDATE integration_oauth_clients SET token_endpoint_auth_method = 'none', ` +
-            `client_secret_encrypted = '' WHERE id = '${id}';`,
-        ),
-      );
-      await expect(resolveForConnect()).rejects.toThrow(/re-register it with its secret/);
-      const clients = await listIntegrationClients(scope, INTEGRATION, AUTH_KEY);
-      const custom = clients.find((c) => c.client_ref === id);
-      // The list's marker for the state: no declaration AND no readable secret.
-      expect(custom?.has_client_secret).toBe(false);
-      expect(custom?.token_endpoint_auth_method).toBeNull();
-    });
-
     it("still resolves a healthy confidential client", async () => {
       await createIntegrationOAuthClient(scope, INTEGRATION, AUTH_KEY, {
         clientId: "cid",
@@ -467,11 +393,10 @@ describe("public OAuth client is declared, not inferred", () => {
   });
 
   // Also from the review: `projectClientWithSecret` swallowed a decryption
-  // failure into an empty secret, which the legacy fallback then reported as a
-  // public client — handing the connect flow an empty credential for a row
-  // that actually holds a secret nobody can read. A DIFFERENT state from the
-  // legacy row (`secretReadable === false`, and the client HAS a secret), and
-  // the projection must keep telling them apart.
+  // failure into an empty secret, which used to be read back as a public
+  // client — handing the connect flow an empty credential for a row that
+  // actually holds a secret nobody can read. `has_client_secret` is the column,
+  // not the decrypt result, so the projection keeps the two apart.
   it("never reports an unreadable ciphertext as a public client", async () => {
     const id = await seedUnreadableRow();
     const clients = await listIntegrationClients(scope, INTEGRATION, AUTH_KEY);

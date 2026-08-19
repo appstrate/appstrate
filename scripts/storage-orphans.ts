@@ -4,7 +4,7 @@
 /**
  * Storage orphan reconciliation (operator one-shot, NOT a permanent scanner).
  *
- *   bun scripts/maintenance/storage-orphans.ts [--delete] [--min-age-hours=N] [--bucket=NAME]
+ *   bun scripts/storage-orphans.ts [--delete] [--min-age-hours=N] [--bucket=NAME]
  *
  * For every bucket with a DB-backed known-set, lists the objects it physically
  * contains (via the storage `listObjects` primitive — S3 ListObjectsV2 /
@@ -55,7 +55,7 @@ import {
   orphanScanBuckets,
   diffBucket,
   enqueueOrphanDeletions,
-} from "../../apps/api/src/services/storage-orphans.ts";
+} from "../apps/api/src/services/storage-orphans.ts";
 
 function out(line: string): void {
   process.stdout.write(`${line}\n`);
@@ -76,9 +76,7 @@ async function main(): Promise<number> {
   const buckets = orphanScanBuckets();
 
   if (values.help) {
-    out(
-      "Usage: bun scripts/maintenance/storage-orphans.ts [--delete] [--min-age-hours=N] [--bucket=NAME]",
-    );
+    out("Usage: bun scripts/storage-orphans.ts [--delete] [--min-age-hours=N] [--bucket=NAME]");
     out("  Diffs each storage bucket against the DB rows that should own its objects.");
     out("  Default: dry-run (report only). --delete: enqueue deletion jobs.");
     out("  --min-age-hours=N: skip objects modified within the last N hours (default 24).");
