@@ -28,13 +28,13 @@ chaque conversation. Cette optimisation ne nécessite pas une extension communau
 
 ## État de l'écosystème et compatibilité
 
-Le dépôt Pi historique redirige désormais vers `earendil-works/pi`. Le dépôt courant contient
-`@earendil-works/pi-coding-agent` 0.84.2, alors qu'Appstrate est épinglé sur
-`@mariozechner/pi-coding-agent` 0.73.1. Le paquet 0.73.1 installé expose déjà une séparation
+Le dépôt Pi historique redirige désormais vers `earendil-works/pi`. Appstrate utilisait
+`@mariozechner/pi-coding-agent` 0.73.1 au début de cette recherche et utilise maintenant
+`@earendil-works/pi-coding-agent` 0.84.2 sur la branche. Le paquet 0.73.1 exposait déjà une séparation
 explicite entre la création des services liés au runtime et celle d'une session :
 `createAgentSessionServices()` puis `createAgentSessionFromServices()`. Appstrate passe encore par
 `createAgentSession()` et son barrel `@appstrate/runner-pi` n'expose pas ces deux fonctions. La
-piste peut donc être prototypée sur la version épinglée, sans attendre une migration de Pi.
+piste de partage contrôlé des services reste donc une optimisation distincte de la migration.
 
 Sources :
 
@@ -45,9 +45,10 @@ Sources :
 - [Création de session dans la version 0.73.1](https://github.com/earendil-works/pi/blob/v0.73.1/packages/coding-agent/src/core/sdk.ts)
 - [Chargement des ressources dans la version 0.73.1](https://github.com/earendil-works/pi/blob/v0.73.1/packages/coding-agent/src/core/resource-loader.ts)
 
-La différence de version reste déterminante pour les extensions tierces. Les extensions modernes
+La différence de version était déterminante pour les extensions tierces. Les extensions modernes
 les plus intéressantes déclarent généralement Pi 0.74, 0.81, 0.82 ou 0.84 comme version minimale.
-Elles ne peuvent donc pas être ajoutées proprement au chat actuel sans migration préalable de Pi.
+La migration lève cet obstacle technique, mais pas les incompatibilités de politique, d'isolation
+et de responsabilité décrites ci-dessous.
 
 ## Popularité observable
 
@@ -250,9 +251,9 @@ Les optimisations communes devraient donc vivre dans `@appstrate/runner-pi` ou d
 partagé, avec deux profils de politique explicites. Il faut éviter une extension chargée seulement
 dans le chat si elle modifie le prompt, la mémoire ou la boucle agent de façon invisible au runtime.
 
-### Migrer Pi avant l'optimisation
+### Migration Pi réalisée avant l'optimisation
 
-La migration vers Pi 0.84.2 précède l'optimisation du bootstrap. Cette version remplace le
+La migration vers Pi 0.84.2 a été réalisée avant l'optimisation du bootstrap. Cette version remplace le
 transport Mistral fondé sur le SDK généré par un stream HTTP natif afin de supprimer le coût du
 client généré et de son runtime de schémas. Cela touche directement le fournisseur principal du
 benchmark et pourrait réduire le coût fixe observé. La migration rend aussi les extensions
@@ -263,8 +264,9 @@ Ce n'était toutefois pas un simple changement de numéro. Depuis 0.73.1, le nam
 stream, les en-têtes des fournisseurs et les registres de modèles. Appstrate possède des adaptateurs
 qui supposaient explicitement les formes 0.73.1. La migration est conservée dans un commit atomique.
 Elle adapte `ModelRuntime`, les en-têtes fournisseurs et le chemin Codex, puis fait passer les tests
-de conformité avant toute optimisation locale supplémentaire. Le même protocole de performance doit
-maintenant mesurer son effet.
+de conformité avant toute optimisation locale supplémentaire. Un smoke réel à concurrence 1 valide
+Mistral, Codex et Claude Code. La matrice complète doit encore être rejouée pour mesurer l'effet de la
+migration à forte concurrence.
 
 Sources :
 
@@ -298,10 +300,10 @@ La priorité dépend donc du stade produit :
 
 ## Plan d'expérimentation recommandé
 
-1. Migrer les packages Pi vers 0.84.2 dans un commit atomique, adapter les barrels et faire passer
-   les tests de conformité, d'abonnements, de stream, de persistance et d'isolation.
-2. Rejouer un sous-ensemble de référence avant toute autre optimisation afin de mesurer l'effet du
-   transport Mistral natif et des changements du runtime.
+1. Réalisé : migrer les packages Pi vers 0.84.2 dans un commit atomique, adapter les barrels et faire
+   passer les tests de conformité, d'abonnements, de stream, de persistance et d'isolation.
+2. Réalisé à concurrence 1 : rejouer un sous-ensemble Mistral, Codex et Claude Code avant toute
+   autre optimisation. La matrice de charge complète reste à rejouer.
 3. Ajouter des durées séparées pour la connexion MCP, `listTools`, le chargement du SDK, le
    rechargement des ressources, la création de session, le départ de la requête fournisseur et le
    premier token.
@@ -323,7 +325,7 @@ Adopter Pi comme noyau cible reste cohérent avec le bénéfice d'un seul moteur
 skills, mémoire et outils. Les extensions communautaires servent ici de références de conception,
 pas de dépendances à installer.
 
-Le prochain travail utile est la migration contrôlée vers Pi 0.84.2, suivie d'une mesure de
-référence, puis d'un profilage fin et de l'optimisation du bootstrap commun. L'optimisation reste
-souhaitable, mais elle ne constitue pas un prérequis pour poursuivre le chantier ou tester le chat
-avec un petit groupe interne.
+Le prochain travail utile est le profilage fin du bootstrap commun, puis une optimisation mesurée du
+catalogue MCP et des ressources immuables. La matrice de référence à 1, 10, 30, 60, 64 et 100 devra
+ensuite être rejouée sur Pi 0.84.2. L'optimisation reste souhaitable, mais elle ne constitue pas un
+prérequis pour poursuivre le chantier ou tester le chat avec un petit groupe interne.
