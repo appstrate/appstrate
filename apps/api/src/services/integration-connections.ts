@@ -930,17 +930,44 @@ export interface ResolvedConnectClient {
 
 /** Project a registered system client into the connect-time resolved shape. */
 function systemConnectClient(def: SystemIntegrationClientDefinition): ResolvedConnectClient {
-  // A system entry configured without a secret IS a public client; it declares
-  // no method of its own, so anything else defers to the manifest.
-  const isPublic = def.clientSecret.length === 0;
   return {
     clientId: def.clientId,
-    clientSecret: def.clientSecret,
+    // `?? ""` is reachable only for a DECLARED public client: the registry
+    // schema refuses an absent secret under any other method (boot crash), so
+    // the blank never stands in for one the operator meant to supply.
+    clientSecret: def.clientSecret ?? "",
     // System clients use the platform default redirect URI (no per-client override).
     redirectUri: null,
     clientRef: def.id,
-    tokenEndpointAuthMethod: isPublic ? "none" : undefined,
+    // The entry's own declaration; `undefined` defers to the manifest. NOT
+    // derived from the secret's emptiness — that inference is what sent
+    // `client_secret=` (present but empty) to providers that reject it.
+    tokenEndpointAuthMethod: def.tokenEndpointAuthMethod,
   };
+}
+
+/**
+ * The legacy-client refusal, in ONE place. Two paths reject the same row shape
+ * for the same reason — the connect-time guard (`assertConnectClientUsable`)
+ * and the refresh resolver (`resolveIntegrationClientById`) — and each used to
+ * carry its own hand-copied transcription of this paragraph, character-identical
+ * down to the maintenance-script path. Two copies of an operator remedy is one
+ * copy too many: the next edit to the command updates whichever one the author
+ * happened to be reading and leaves the other quietly wrong.
+ *
+ * `clientRef` is the client's id; `where` its `'<integration>' auth '<key>'`
+ * locator, which the two callers assemble from different fields.
+ */
+function legacyUndeclaredPublicClientMessage(clientRef: string, where: string): string {
+  return (
+    `OAuth client '${clientRef}' for ${where} is a public client recorded as a confidential ` +
+    `one: it predates token_endpoint_auth_method and stored an encrypted EMPTY secret ` +
+    `instead of declaring 'none'. Refusing to guess — inferring 'none' from that emptiness ` +
+    `is what put 'client_secret=' (present but empty) on the wire, which providers such as ` +
+    `Dropbox reject with invalid_client. Canonicalise it: ` +
+    `\`bun scripts/maintenance/backfill-public-oauth-clients.ts --dry-run\` to preview, then ` +
+    `\`bun scripts/maintenance/backfill-public-oauth-clients.ts\` to apply.`
+  );
 }
 
 /**
@@ -984,15 +1011,7 @@ function assertConnectClientUsable(client: IntegrationOAuthClientWithSecret): vo
     );
   }
   if (client.token_endpoint_auth_method === null && !client.has_client_secret) {
-    throw forbidden(
-      `OAuth client '${client.id}' for ${where} is a public client recorded as a confidential ` +
-        `one: it predates token_endpoint_auth_method and stored an encrypted EMPTY secret ` +
-        `instead of declaring 'none'. Refusing to guess — inferring 'none' from that emptiness ` +
-        `is what put 'client_secret=' (present but empty) on the wire, which providers such as ` +
-        `Dropbox reject with invalid_client. Canonicalise it: ` +
-        `\`bun scripts/maintenance/backfill-public-oauth-clients.ts --dry-run\` to preview, then ` +
-        `\`bun scripts/maintenance/backfill-public-oauth-clients.ts\` to apply.`,
-    );
+    throw forbidden(legacyUndeclaredPublicClientMessage(client.id, where));
   }
 }
 
@@ -1116,12 +1135,15 @@ export async function resolveIntegrationClientById(
   // 1) System client (env), validated against this (integrationId, authKey).
   const sys = resolveSystemClientForAuth(clientRef, integrationId, authKey);
   if (sys) {
-    // A system entry declares no method of its own, so the manifest decides —
-    // except that an entry configured without a secret IS a public client.
-    const method = manifestAuthMethod === "none" || !sys.clientSecret ? "none" : manifestAuthMethod;
+    // The entry's own declaration wins; the manifest stands in when it has
+    // none — the same precedence as the custom branch below. Never re-derived
+    // from an empty secret: `SYSTEM_INTEGRATIONS` refuses to boot on a client
+    // that omits its secret without declaring `"none"`, so emptiness here is
+    // always a declaration, never a gap.
+    const method = sys.tokenEndpointAuthMethod ?? manifestAuthMethod;
     return {
       clientId: sys.clientId,
-      clientSecret: method === "none" ? "" : sys.clientSecret,
+      clientSecret: method === "none" ? "" : (sys.clientSecret ?? ""),
       tokenEndpointAuthMethod: method,
     };
   }
@@ -1183,14 +1205,10 @@ export async function resolveIntegrationClientById(
     // when the manifest declares no method at all it would hand the exchange
     // an empty secret with no method, which `assertClientAuthCoherent` waves
     // through. Fail loud, name the row, name the command.
-    const message =
-      `OAuth client '${clientRef}' for '${integrationId}' auth '${authKey}' is a public client ` +
-      `recorded as a confidential one: it predates token_endpoint_auth_method and stored an ` +
-      `encrypted EMPTY secret instead of declaring 'none'. Refusing to guess — inferring 'none' ` +
-      `from that emptiness is what put 'client_secret=' (present but empty) on the wire, which ` +
-      `providers such as Dropbox reject with invalid_client. Canonicalise it: ` +
-      `\`bun scripts/maintenance/backfill-public-oauth-clients.ts --dry-run\` to preview, then ` +
-      `\`bun scripts/maintenance/backfill-public-oauth-clients.ts\` to apply.`;
+    const message = legacyUndeclaredPublicClientMessage(
+      clientRef,
+      `'${integrationId}' auth '${authKey}'`,
+    );
     // Logged as well as thrown: this resolver runs on the machine-driven
     // refresh path, whose callers rethrow anything that is not a transient
     // `RefreshError`, so the message would otherwise only surface as a 500
@@ -1295,10 +1313,11 @@ export async function listIntegrationClients(
       client_id: fingerprintSystemClientId(def.clientId),
       is_default: false,
       auto_provisioned: false,
-      has_client_secret: def.clientSecret.length > 0,
-      // A system entry declares no method; one configured without a secret is
-      // a public client.
-      token_endpoint_auth_method: def.clientSecret.length > 0 ? null : "none",
+      has_client_secret: def.clientSecret !== undefined,
+      // The entry's own declaration, `null` when it defers to the manifest —
+      // mirroring the custom row's nullable column below. Same rule as every
+      // other consumer: read the declaration, never infer it from the secret.
+      token_endpoint_auth_method: def.tokenEndpointAuthMethod ?? null,
       redirect_uri: null,
     }),
     mapRow: (row) => ({

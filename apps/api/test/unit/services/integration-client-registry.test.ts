@@ -77,11 +77,93 @@ describe("integration-client-registry", () => {
       expect(listSystemIntegrationClientsFor(MCP, "oauth")).toEqual([]);
     });
 
-    it("defaults an absent client_secret to empty (public client)", () => {
+    it("aborts boot on a client with no secret and no declared auth method", () => {
+      // The empty-secret INFERENCE, deleted. A `client_secret` left out used to
+      // default to `""` and silently produce a public client, so an operator who
+      // simply forgot the secret got `invalid_client` from the provider instead
+      // of a boot crash naming the env var they mistyped.
+      let message = "";
+      try {
+        initSystemIntegrations([
+          { id: GMAIL, clients: [{ id: "pub", auth_key: "google", client_id: "pub-client" }] },
+        ]);
+      } catch (e) {
+        message = (e as Error).message;
+      }
+      expect(message).toContain(`SYSTEM_INTEGRATIONS entry #0 ("${GMAIL}") is invalid`);
+      expect(message).toContain("clients[0].client_secret:");
+      expect(message).toContain("token_endpoint_auth_method='none'");
+      expect(message).toContain('(client "pub")');
+    });
+
+    it("accepts a public client that DECLARES token_endpoint_auth_method 'none'", () => {
       initSystemIntegrations([
-        { id: GMAIL, clients: [{ id: "pub", auth_key: "google", client_id: "pub-client" }] },
+        {
+          id: GMAIL,
+          clients: [
+            {
+              id: "pub",
+              auth_key: "google",
+              client_id: "pub-client",
+              token_endpoint_auth_method: "none",
+            },
+          ],
+        },
       ]);
-      expect(getSystemIntegrationClientById("pub")!.clientSecret).toBe("");
+      const def = getSystemIntegrationClientById("pub")!;
+      // No secret at all — not an empty string standing in for one.
+      expect(def.clientSecret).toBeUndefined();
+      expect(def.tokenEndpointAuthMethod).toBe("none");
+    });
+
+    it("aborts boot on a declared public client that also carries a secret", () => {
+      // The other direction of the pair: the operator resolved a credential and
+      // then said it would not be used. One of the two is a mistake and the
+      // registry cannot tell which.
+      expect(() =>
+        initSystemIntegrations([
+          {
+            id: GMAIL,
+            clients: [
+              {
+                id: "pub",
+                auth_key: "google",
+                client_id: "pub-client",
+                token_endpoint_auth_method: "none",
+                client_secret: "leftover",
+              },
+            ],
+          },
+        ]),
+      ).toThrow(/do not send a client_secret with it/);
+    });
+
+    it("carries a declared secret-based method through to the definition", () => {
+      initSystemIntegrations([
+        {
+          id: GMAIL,
+          clients: [
+            {
+              id: "basic",
+              auth_key: "google",
+              client_id: "c1",
+              client_secret: "s1",
+              token_endpoint_auth_method: "client_secret_basic",
+            },
+          ],
+        },
+      ]);
+      expect(getSystemIntegrationClientById("basic")!.tokenEndpointAuthMethod).toBe(
+        "client_secret_basic",
+      );
+      // Declaring nothing leaves the manifest's method to apply.
+      initSystemIntegrations([
+        {
+          id: GMAIL,
+          clients: [{ id: "undeclared", auth_key: "google", client_id: "c1", client_secret: "s1" }],
+        },
+      ]);
+      expect(getSystemIntegrationClientById("undeclared")!.tokenEndpointAuthMethod).toBeUndefined();
     });
 
     it("throws on an invalid entry, naming its index and the failing field", () => {
@@ -89,14 +171,24 @@ describe("integration-client-registry", () => {
       // resurface as an unrelated "not installed" / "no OAuth client" error.
       expect(() =>
         initSystemIntegrations([
-          { id: GMAIL, clients: [{ id: "good", auth_key: "google", client_id: "c1" }] },
+          {
+            id: GMAIL,
+            clients: [{ id: "good", auth_key: "google", client_id: "c1", client_secret: "s1" }],
+          },
           // missing entry id
-          { clients: [{ id: "bad-no-entry-id", auth_key: "google", client_id: "c5" }] },
+          {
+            clients: [
+              { id: "bad-no-entry-id", auth_key: "google", client_id: "c5", client_secret: "s5" },
+            ],
+          },
         ]),
       ).toThrow(/SYSTEM_INTEGRATIONS entry #1 is invalid: id:/);
       // A clientless member is still VALID (DCR) — membership only.
       initSystemIntegrations([
-        { id: GMAIL, clients: [{ id: "good", auth_key: "google", client_id: "c1" }] },
+        {
+          id: GMAIL,
+          clients: [{ id: "good", auth_key: "google", client_id: "c1", client_secret: "s1" }],
+        },
         { id: MCP },
       ]);
       expect(isSystemIntegration(GMAIL)).toBe(true);
@@ -110,15 +202,25 @@ describe("integration-client-registry", () => {
       let message = "";
       try {
         initSystemIntegrations([
-          { id: GMAIL, clients: [{ id: "good", auth_key: "google", client_id: "c1" }] },
-          { id: DRIVE, clients: [{ id: "bad-authkey", auth_key: "Google!", client_id: "c2" }] },
+          {
+            id: GMAIL,
+            clients: [{ id: "good", auth_key: "google", client_id: "c1", client_secret: "s1" }],
+          },
+          {
+            id: DRIVE,
+            clients: [
+              { id: "bad-authkey", auth_key: "Google!", client_id: "c2", client_secret: "sek" },
+            ],
+          },
         ]);
       } catch (e) {
         message = (e as Error).message;
       }
       expect(message).toContain(`SYSTEM_INTEGRATIONS entry #1 ("${DRIVE}") is invalid`);
-      expect(message).toContain('clients[0].auth_key (client "bad-authkey")');
-      expect(message).toContain("auth_key must match ^[a-z][a-z0-9_]*$");
+      // Bracket path (`formatZodIssues` -> `renderFieldPath`), then the
+      // client-id annotation the shared renderer knows nothing about.
+      expect(message).toContain("clients[0].auth_key: auth_key must match ^[a-z][a-z0-9_]*$");
+      expect(message).toContain('(client "bad-authkey")');
       // The redacted entry is safe to surface: no client_id / client_secret.
       expect(message).not.toContain("c2");
     });
@@ -126,8 +228,14 @@ describe("integration-client-registry", () => {
     it("throws on a duplicate integration id instead of keeping the first", () => {
       expect(() =>
         initSystemIntegrations([
-          { id: GMAIL, clients: [{ id: "first", auth_key: "google", client_id: "ca" }] },
-          { id: GMAIL, clients: [{ id: "second", auth_key: "google", client_id: "cb" }] },
+          {
+            id: GMAIL,
+            clients: [{ id: "first", auth_key: "google", client_id: "ca", client_secret: "sa" }],
+          },
+          {
+            id: GMAIL,
+            clients: [{ id: "second", auth_key: "google", client_id: "cb", client_secret: "sb" }],
+          },
         ]),
       ).toThrow(`SYSTEM_INTEGRATIONS entry #1 re-declares integration id "${GMAIL}"`);
     });
@@ -135,8 +243,14 @@ describe("integration-client-registry", () => {
     it("throws on a duplicate client id across entries (client_ref keyspace is global)", () => {
       expect(() =>
         initSystemIntegrations([
-          { id: GMAIL, clients: [{ id: "dup", auth_key: "google", client_id: "first" }] },
-          { id: DRIVE, clients: [{ id: "dup", auth_key: "google", client_id: "second" }] },
+          {
+            id: GMAIL,
+            clients: [{ id: "dup", auth_key: "google", client_id: "first", client_secret: "sa" }],
+          },
+          {
+            id: DRIVE,
+            clients: [{ id: "dup", auth_key: "google", client_id: "second", client_secret: "sb" }],
+          },
         ]),
       ).toThrow(
         `SYSTEM_INTEGRATIONS entry #1 ("${DRIVE}") declares client id "dup", already registered ` +
@@ -149,8 +263,8 @@ describe("integration-client-registry", () => {
         {
           id: GMAIL,
           clients: [
-            { id: "a", auth_key: "google", client_id: "ca" },
-            { id: "b", auth_key: "google", client_id: "cb" },
+            { id: "a", auth_key: "google", client_id: "ca", client_secret: "sa" },
+            { id: "b", auth_key: "google", client_id: "cb", client_secret: "sb" },
           ],
         },
       ]);
@@ -177,7 +291,12 @@ describe("integration-client-registry", () => {
 
     it("resolves a system client by id when it serves this (integration, authKey)", () => {
       initSystemIntegrations([
-        { id: GMAIL, clients: [{ id: "gmail-system", auth_key: "google", client_id: "c1" }] },
+        {
+          id: GMAIL,
+          clients: [
+            { id: "gmail-system", auth_key: "google", client_id: "c1", client_secret: "s1" },
+          ],
+        },
       ]);
       expect(resolveSystemClientForAuth("gmail-system", GMAIL, "google")?.clientId).toBe("c1");
     });
@@ -189,7 +308,12 @@ describe("integration-client-registry", () => {
     it("returns null when the id was remapped to a different integration/auth", () => {
       // Escalation guard: an operator reused the id under another integration.
       initSystemIntegrations([
-        { id: DRIVE, clients: [{ id: "gmail-system", auth_key: "google", client_id: "c1" }] },
+        {
+          id: DRIVE,
+          clients: [
+            { id: "gmail-system", auth_key: "google", client_id: "c1", client_secret: "s1" },
+          ],
+        },
       ]);
       expect(resolveSystemClientForAuth("gmail-system", GMAIL, "google")).toBeNull();
       expect(resolveSystemClientForAuth("gmail-system", DRIVE, "other")).toBeNull();

@@ -23,6 +23,10 @@
  *     { "id": "@appstrate/gmail",
  *       "clients": [{ "id": "gmail-sys", "auth_key": "google",
  *                     "client_id": "…", "client_secret": "…" }] },
+ *     // shared PUBLIC client — DECLARED, never inferred from a missing secret:
+ *     { "id": "@appstrate/dropbox",
+ *       "clients": [{ "id": "dropbox-sys", "auth_key": "dropbox",
+ *                     "client_id": "…", "token_endpoint_auth_method": "none" }] },
  *     // DCR remote MCP — offered by default, no static client:
  *     { "id": "@appstrate/foo-mcp" }
  *   ]
@@ -44,11 +48,22 @@ import { z } from "zod";
 import { getEnv } from "@appstrate/env";
 import { CREDENTIAL_KEY_RE } from "@appstrate/core/naming";
 import { logger } from "../lib/logger.ts";
+import { formatZodIssues } from "../lib/zod-format.ts";
 
 // `integration_connections.client_ref` is a flat client id — the env id of a
 // system client or the `integration_oauth_clients.id` (UUID) of a custom client.
 // No prefix/sentinel scheme: resolution is system-first then DB-by-id, mirroring
 // the model-provider credential pattern (`loadInferenceCredentials`).
+
+const SYSTEM_CLIENT_AUTH_METHODS = ["client_secret_post", "client_secret_basic", "none"] as const;
+
+/**
+ * The RFC 7591 §2 methods a system entry may declare — the same set the API's
+ * per-application client body accepts (`oauthClientSchema`,
+ * `routes/integrations.ts`), so the env-sourced and DB-sourced halves of the
+ * same credential surface stay declarable in exactly the same terms.
+ */
+export type SystemIntegrationClientAuthMethod = (typeof SYSTEM_CLIENT_AUTH_METHODS)[number];
 
 export interface SystemIntegrationClientDefinition {
   /** Stable id — the connection's `client_ref` when this client mints it. */
@@ -59,26 +74,75 @@ export interface SystemIntegrationClientDefinition {
   authKey: string;
   /** OAuth2 client id registered with the upstream IdP. */
   clientId: string;
-  /** OAuth2 client secret. Empty string for public clients. */
-  clientSecret: string;
+  /**
+   * OAuth2 client secret, or `undefined` when the entry declared itself PUBLIC
+   * (`token_endpoint_auth_method: "none"`). Never the empty string: the schema
+   * refuses a blank secret, so "no secret here" cannot be confused with "the
+   * operator left the field out".
+   */
+  clientSecret: string | undefined;
+  /**
+   * Client-authentication method this entry DECLARES, or `undefined` when it
+   * declares none and the manifest's `auths.{key}.token_endpoint_auth_method`
+   * applies. Read directly by every consumer — nothing derives it from the
+   * secret's presence, which is the inference that put `client_secret=`
+   * (present but empty) on the wire.
+   */
+  tokenEndpointAuthMethod: SystemIntegrationClientAuthMethod | undefined;
 }
 
 // Per-client entry, nested under an integration. Wire keys are snake_case
 // (env JSON, per CASING_CONVENTIONS); mapped to camelCase internally.
-const rawSystemIntegrationClientSchema = z.object({
-  // Constrained to the same charset the wire `client_ref` accepts (`^[\w.-]+$`)
-  // so every configured client is explicitly selectable at connect time — the
-  // registry-admissible id set == the API-addressable set. MUST NOT be
-  // UUID-shaped: ids are resolved system-first, so a system id colliding with a
-  // custom `integration_oauth_clients.id` (UUID) would shadow the custom row.
-  id: z.string().regex(/^[\w.-]+$/, "id must match ^[\\w.-]+$"),
-  // AFPS §7.2: auth keys match `^[a-z][a-z0-9_]*$` — mirror the manifest gate
-  // via the canonical `CREDENTIAL_KEY_RE` (@appstrate/core/naming).
-  auth_key: z.string().regex(CREDENTIAL_KEY_RE, "auth_key must match ^[a-z][a-z0-9_]*$"),
-  client_id: z.string().min(1),
-  // Public clients (`token_endpoint_auth_method: "none"`) carry an empty secret.
-  client_secret: z.string().default(""),
-});
+const rawSystemIntegrationClientSchema = z
+  .object({
+    // Constrained to the same charset the wire `client_ref` accepts (`^[\w.-]+$`)
+    // so every configured client is explicitly selectable at connect time — the
+    // registry-admissible id set == the API-addressable set. MUST NOT be
+    // UUID-shaped: ids are resolved system-first, so a system id colliding with a
+    // custom `integration_oauth_clients.id` (UUID) would shadow the custom row.
+    id: z.string().regex(/^[\w.-]+$/, "id must match ^[\\w.-]+$"),
+    // AFPS §7.2: auth keys match `^[a-z][a-z0-9_]*$` — mirror the manifest gate
+    // via the canonical `CREDENTIAL_KEY_RE` (@appstrate/core/naming).
+    auth_key: z.string().regex(CREDENTIAL_KEY_RE, "auth_key must match ^[a-z][a-z0-9_]*$"),
+    client_id: z.string().min(1),
+    /**
+     * OPTIONAL and never defaulted. `z.string().default("")` used to live here,
+     * and it is exactly the inference the per-application client body deleted
+     * (`oauthClientSchema`, `routes/integrations.ts`): a blank secret cannot tell
+     * "declared public" from "operator forgot the secret", so an entry missing
+     * its `client_secret` became a silently PUBLIC client whose token request the
+     * provider answers with `invalid_client`. The `.refine` below makes the
+     * declaration mandatory instead.
+     */
+    client_secret: z.string().min(1).optional(),
+    /**
+     * The entry's explicit declaration, overriding the manifest's for this
+     * client. `"none"` registers a PUBLIC client — the app has no secret at the
+     * provider and authenticates by `client_id` alone.
+     */
+    token_endpoint_auth_method: z.enum(SYSTEM_CLIENT_AUTH_METHODS).optional(),
+  })
+  // Both directions of the pair, mirroring `oauthClientCreateSchema`'s two
+  // refines exactly — an operator must be able to declare the same client the
+  // same way whether it arrives by env or by API.
+  //
+  // No secret AND no `"none"` (including "no method at all", which means "the
+  // manifest's method applies"): the token request cannot succeed. Boot crash
+  // beats the alternative, which is the provider answering `invalid_client`
+  // months later on a flow nobody changed.
+  .refine((c) => c.client_secret !== undefined || c.token_endpoint_auth_method === "none", {
+    message:
+      "client_secret is required and must not be empty; if the provider registered this app as a public client (no secret at all), declare it with token_endpoint_auth_method='none' instead of omitting the secret",
+    path: ["client_secret"],
+  })
+  // `"none"` WITH a secret: the operator resolved a credential and then said it
+  // would not be used. One of the two is a mistake and the registry cannot tell
+  // which, so it refuses rather than silently discarding a real secret.
+  .refine((c) => !(c.token_endpoint_auth_method === "none" && c.client_secret !== undefined), {
+    message:
+      "token_endpoint_auth_method='none' declares a public client; do not send a client_secret with it",
+    path: ["client_secret"],
+  });
 
 // One offered integration. `clients` optional/empty → DCR remote MCP (offered
 // by default, no static client). Entry `id` is a package id (`@scope/name`),
@@ -129,11 +193,11 @@ export function initSystemIntegrations(rawOverride?: unknown[]): void {
       // installed in this application", a dropped client as "Administrator must
       // register OAuth client credentials for …". The entry schema embeds
       // `clients` and validates atomically, so ONE mistyped nested client takes
-      // its integration's membership down with it: `describeIssue` names the
+      // its integration's membership down with it: `describeIssues` names the
       // exact failing path (and client) rather than just "this entry".
       throw new Error(
         `[integration-client-registry] SYSTEM_INTEGRATIONS entry #${index}${describeEntryId(entry)} ` +
-          `is invalid: ${describeIssue(entry, parsed.error.issues[0])}. Fix or remove it — a declared ` +
+          `is invalid: ${describeIssues(entry, parsed.error)}. Fix or remove it — a declared ` +
           `integration that was silently dropped fails later at connect time with an unrelated error ` +
           `blaming application state. Entry (secrets redacted): ${JSON.stringify(redactEntry(entry))}`,
       );
@@ -171,6 +235,7 @@ export function initSystemIntegrations(rawOverride?: unknown[]): void {
         authKey: c.auth_key,
         clientId: c.client_id,
         clientSecret: c.client_secret,
+        tokenEndpointAuthMethod: c.token_endpoint_auth_method,
       });
     }
   }
@@ -216,32 +281,43 @@ function describeEntryId(entry: unknown): string {
 }
 
 /**
- * Render a Zod issue as `path: message`, naming the offending nested client by
- * its own id when the failure is inside `clients[n]`. `rawSystemIntegrationSchema`
- * embeds the client array and validates it atomically, so a single mistyped
- * `auth_key` rejects the whole entry; without the path the operator would only
- * learn that "the Gmail entry" is bad, not which of its clients. Naming the bad
- * client needs no schema restructuring — the issue already carries the path.
+ * The ids of the nested clients an issue set points at, in path order, deduped.
+ * `rawSystemIntegrationSchema` embeds the client array and validates it
+ * atomically, so a single mistyped `auth_key` rejects the whole entry; without
+ * this the operator would only learn that "the Gmail entry" is bad, not which
+ * of its clients. It needs no schema restructuring — the issue path already
+ * carries the index.
+ *
+ * The client id is not a secret (unlike client_id/client_secret, which
+ * `redactEntry` drops) — it is the `client_ref` the API exposes.
  */
-function describeIssue(entry: unknown, issue: z.core.$ZodIssue | undefined): string {
-  if (!issue) return "unknown validation error";
-  // ["clients", 0, "auth_key"] → "clients[0].auth_key"
-  const path = issue.path
-    .map((p) => (typeof p === "number" ? `[${p}]` : `.${String(p)}`))
-    .join("")
-    .replace(/^\./, "");
-  let where = path.length > 0 ? path : "(entry root)";
-  const [head, idx] = issue.path;
-  if (head === "clients" && typeof idx === "number") {
-    const rawClients = (entry as { clients?: unknown } | null | undefined)?.clients;
-    const clientId = Array.isArray(rawClients)
-      ? (rawClients[idx] as { id?: unknown } | null | undefined)?.id
-      : undefined;
-    // The client id is not a secret (unlike client_id/client_secret, which
-    // `redactEntry` drops) — it is the `client_ref` the API exposes.
-    if (typeof clientId === "string" && clientId.length > 0) where += ` (client "${clientId}")`;
+function namedClientIds(entry: unknown, issues: readonly z.core.$ZodIssue[]): string[] {
+  const rawClients = (entry as { clients?: unknown } | null | undefined)?.clients;
+  if (!Array.isArray(rawClients)) return [];
+  const out: string[] = [];
+  for (const issue of issues) {
+    const [head, idx] = issue.path;
+    if (head !== "clients" || typeof idx !== "number") continue;
+    const id = (rawClients[idx] as { id?: unknown } | null | undefined)?.id;
+    if (typeof id === "string" && id.length > 0 && !out.includes(id)) out.push(id);
   }
-  return `${where}: ${issue.message}`;
+  return out;
+}
+
+/**
+ * Render a rejected entry as `path: message` segments through `formatZodIssues`
+ * — the same renderer the sibling boot-time env validators (`run-limits`,
+ * `proxy-limits`) use, so every fail-fast env crash reads the same way and
+ * `clients[0].auth_key` never becomes `clients.0.auth_key` in one of them. The
+ * only thing added on top is the client-id annotation, which exists nowhere
+ * else because no other env var nests a named record inside an array.
+ */
+function describeIssues(entry: unknown, error: z.ZodError): string {
+  const detail = formatZodIssues(error);
+  const clients = namedClientIds(entry, error.issues);
+  if (clients.length === 0) return detail;
+  const label = clients.length === 1 ? "client" : "clients";
+  return `${detail} (${label} ${clients.map((id) => `"${id}"`).join(", ")})`;
 }
 
 function ensureInitialized(): {
