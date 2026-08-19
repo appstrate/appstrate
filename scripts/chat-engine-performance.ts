@@ -12,6 +12,7 @@
 import { $ } from "bun";
 import {
   benchmarkHistoryToolPart,
+  buildPiTurnTimeline,
   completedTurnHasUsage,
   defaultSubscriptionModel,
   CHAT_PERFORMANCE_OBSERVATION_VERSION,
@@ -20,11 +21,16 @@ import {
   parseDotEnvValue,
   repetitionNumbers,
   summarizeDurations,
+  summarizeChatTurnMilestones,
   summarizePiLifecycle,
+  summarizePiPromptMilestones,
   summarizeWaveActivity,
   waitForWorkerExit,
   type MemorySample,
+  type ChatTurnMilestoneSample,
   type PiLifecycleSample,
+  type PiPromptMilestoneSample,
+  type PiTurnTimeline,
 } from "./chat-engine-performance-lib.ts";
 import type { ChatEnv } from "../packages/module-chat/src/prompt.ts";
 
@@ -48,6 +54,7 @@ interface WorkerConfig {
   providerEnvFile: string | null;
   providerId: string;
   providerModelId: string;
+  controlledProviderPersistence: boolean;
 }
 
 interface TurnObservation {
@@ -387,9 +394,19 @@ async function runWorker(config: WorkerConfig): Promise<void> {
     providerStatuses: { ok: 0, rateLimited: 0, serverError: 0, otherError: 0 },
   };
   const piLifecycleSamples: PiLifecycleSample[] = [];
+  const piPromptMilestoneSamples: PiPromptMilestoneSample[] = [];
+  const chatTurnMilestoneSamples: ChatTurnMilestoneSample[] = [];
   const turnStartedAtByMarker = new Map<string, number>();
+  const turnStartedAtBySession = new Map<string, number>();
   const providerDispatchedMarkers = new Set<string>();
   const providerDispatchMs: number[] = [];
+  const piEngineEntryMs: number[] = [];
+  const piEngineEnteredAtBySession = new Map<string, number>();
+  const piPromptStartedAtBySession = new Map<string, number>();
+  const piFirstTextAtBySession = new Map<string, number>();
+  const piClientDeliveryAfterFirstTextMs: number[] = [];
+  const piLifecycleTotalBySession = new Map<string, number>();
+  const piTurnTimelines: PiTurnTimeline[] = [];
 
   const sharedDispatchOptions = {
     db,
@@ -398,6 +415,7 @@ async function runWorker(config: WorkerConfig): Promise<void> {
     identityByOrg,
     identityByMarker,
     form: config.form,
+    persistProviderUsage: config.controlledProviderPersistence,
     onToolCall: () => {
       if (phase === "wave") counters.waveToolCalls += 1;
     },
@@ -432,8 +450,29 @@ async function runWorker(config: WorkerConfig): Promise<void> {
   const engineRuntime = {
     configuredPiOrgIds: () =>
       config.engine === "pi" ? identities.map((i) => i.orgId).join(",") : "",
-    runPiChat: (input: Parameters<typeof piEngineModule.runPiChat>[0]) =>
-      piEngineModule.runPiChat({
+    onTurnMilestone: (timing: {
+      chatSessionId: string | null;
+      milestone: string;
+      elapsedMs: number;
+    }) => {
+      if (phase !== "wave") return;
+      chatTurnMilestoneSamples.push({
+        turnId: timing.chatSessionId ?? "ephemeral",
+        milestone: timing.milestone,
+        elapsedMs: timing.elapsedMs,
+      });
+    },
+    runPiChat: (input: Parameters<typeof piEngineModule.runPiChat>[0]) => {
+      const turnStartedAt = input.chatSessionId
+        ? turnStartedAtBySession.get(input.chatSessionId)
+        : undefined;
+      if (phase === "wave" && turnStartedAt !== undefined) {
+        piEngineEntryMs.push(performance.now() - turnStartedAt);
+      }
+      if (phase === "wave" && input.chatSessionId) {
+        piEngineEnteredAtBySession.set(input.chatSessionId, performance.now());
+      }
+      return piEngineModule.runPiChat({
         ...input,
         onLifecycleTiming: (timing) => {
           input.onLifecycleTiming?.(timing);
@@ -443,8 +482,31 @@ async function runWorker(config: WorkerConfig): Promise<void> {
             stage: timing.stage,
             durationMs: timing.durationMs,
           });
+          if (input.chatSessionId) {
+            piLifecycleTotalBySession.set(
+              input.chatSessionId,
+              (piLifecycleTotalBySession.get(input.chatSessionId) ?? 0) + timing.durationMs,
+            );
+          }
         },
-      }),
+        onPromptMilestone: (timing) => {
+          input.onPromptMilestone?.(timing);
+          if (phase !== "wave") return;
+          const observedAt = performance.now();
+          if (input.chatSessionId && !piPromptStartedAtBySession.has(input.chatSessionId)) {
+            piPromptStartedAtBySession.set(input.chatSessionId, observedAt - timing.elapsedMs);
+          }
+          if (timing.milestone === "firstText" && input.chatSessionId) {
+            piFirstTextAtBySession.set(input.chatSessionId, observedAt);
+          }
+          piPromptMilestoneSamples.push({
+            turnId: input.chatSessionId ?? "ephemeral",
+            milestone: timing.milestone,
+            elapsedMs: timing.elapsedMs,
+          });
+        },
+      });
+    },
   };
 
   const app = new Hono<ChatEnv>();
@@ -469,6 +531,7 @@ async function runWorker(config: WorkerConfig): Promise<void> {
   ): Promise<TurnObservation> => {
     const startedAt = performance.now();
     turnStartedAtByMarker.set(identity.marker, startedAt);
+    turnStartedAtBySession.set(identity.sessionId, startedAt);
     try {
       const headers = {
         "content-type": "application/json",
@@ -489,6 +552,31 @@ async function runWorker(config: WorkerConfig): Promise<void> {
       else if (response.status === 429) counters.statuses.rateLimited += 1;
       else if (response.status >= 500) counters.statuses.serverError += 1;
       const streamed = await readUiStream(response, startedAt);
+      const piFirstTextAt = piFirstTextAtBySession.get(identity.sessionId);
+      if (phase === "wave" && streamed.firstTokenMs !== null && piFirstTextAt !== undefined) {
+        const clientFirstTokenAt = startedAt + streamed.firstTokenMs;
+        piClientDeliveryAfterFirstTextMs.push(clientFirstTokenAt - piFirstTextAt);
+        const engineEnteredAt = piEngineEnteredAtBySession.get(identity.sessionId);
+        const promptStartedAt = piPromptStartedAtBySession.get(identity.sessionId);
+        const lifecycleTotalMs = piLifecycleTotalBySession.get(identity.sessionId);
+        if (
+          engineEnteredAt !== undefined &&
+          promptStartedAt !== undefined &&
+          lifecycleTotalMs !== undefined
+        ) {
+          piTurnTimelines.push(
+            buildPiTurnTimeline({
+              turnId: identity.sessionId,
+              requestStartedAt: startedAt,
+              engineEnteredAt,
+              promptStartedAt,
+              firstTextAt: piFirstTextAt,
+              clientFirstTokenAt,
+              lifecycleTotalMs,
+            }),
+          );
+        }
+      }
       return {
         marker: identity.marker,
         sessionId: identity.sessionId,
@@ -531,7 +619,9 @@ async function runWorker(config: WorkerConfig): Promise<void> {
     ? await selectUsageIds(db, schema, identities)
     : new Set<string>();
   phase = "wave";
-  const waveStartedAtMs = performance.now() - processStartedAt;
+  const waveStartedAt = performance.now();
+  const waveStartedAtMs = waveStartedAt - processStartedAt;
+  const waveStartedAtEpochMs = performance.timeOrigin + waveStartedAt;
   const turns = await Promise.all(identities.map((identity) => runTurn(identity)));
   await Promise.all(
     identities.map((identity, index) =>
@@ -558,7 +648,9 @@ async function runWorker(config: WorkerConfig): Promise<void> {
       (turn) => turn.status === 200 && turn.error !== null,
     ).length;
   }
-  const waveEndedAtMs = performance.now() - processStartedAt;
+  const waveEndedAt = performance.now();
+  const waveEndedAtMs = waveEndedAt - processStartedAt;
+  const waveEndedAtEpochMs = performance.timeOrigin + waveEndedAt;
 
   phase = "continuity";
   const usageCountBeforeContinuity = realAppstrate
@@ -650,6 +742,7 @@ async function runWorker(config: WorkerConfig): Promise<void> {
       platform: `${process.platform}-${process.arch}`,
       port: 3400,
       database: "isolated-pglite",
+      controlledProviderPersistence: config.controlledProviderPersistence,
     },
     cell: {
       engine: config.engine,
@@ -659,7 +752,13 @@ async function runWorker(config: WorkerConfig): Promise<void> {
       repetition: config.repetition,
       distribution: `${config.organizations}-organizations-x-${config.concurrency / config.organizations}-chats`,
     },
-    timing: { waveStartedAtMs, waveEndedAtMs, recoveryMs: config.recoveryMs },
+    timing: {
+      waveStartedAtMs,
+      waveEndedAtMs,
+      waveStartedAtEpochMs,
+      waveEndedAtEpochMs,
+      recoveryMs: config.recoveryMs,
+    },
     memory: memoryCheckpoints(samples, { waveStartedAtMs, waveEndedAtMs }),
     eventLoopDelayMs: waveActivity.eventLoopDelayMs,
     cpu: waveActivity.cpu,
@@ -695,7 +794,18 @@ async function runWorker(config: WorkerConfig): Promise<void> {
     },
     diagnostics: {
       providerDispatchMs: summarizeDurations(providerDispatchMs),
-      ...(config.engine === "pi" ? { piLifecycle: summarizePiLifecycle(piLifecycleSamples) } : {}),
+      chatTurn: summarizeChatTurnMilestones(chatTurnMilestoneSamples),
+      ...(config.engine === "pi"
+        ? {
+            piLifecycle: summarizePiLifecycle(piLifecycleSamples),
+            piLifecycleSamples,
+            piPrompt: summarizePiPromptMilestones(piPromptMilestoneSamples),
+            piPromptMilestoneSamples,
+            piEngineEntryMs: summarizeDurations(piEngineEntryMs),
+            piClientDeliveryAfterFirstTextMs: summarizeDurations(piClientDeliveryAfterFirstTextMs),
+            piTurnTimelines,
+          }
+        : {}),
     },
     persistence,
     continuity: {
@@ -742,6 +852,7 @@ function createControlledDispatch(options: {
   identityByOrg: Map<string, any>;
   identityByMarker: Map<string, any>;
   form: ConversationForm;
+  persistProviderUsage: boolean;
   onToolCall(): void;
   onInference(usage: { marker: string; inputTokens: number; outputTokens: number }): void;
 }): FetchLike {
@@ -781,7 +892,7 @@ function createControlledDispatch(options: {
       options.onInference({ marker, inputTokens, outputTokens });
       const identity = options.identityByMarker.get(marker);
       const sessionId = options.sessionByMarker.get(marker)!;
-      if (identity) {
+      if (identity && options.persistProviderUsage) {
         await options.db.insert(options.schema.llmUsage).values({
           source: "proxy",
           orgId: identity.orgId,
@@ -1441,6 +1552,7 @@ function workerConfigFromEnvironment(): WorkerConfig {
     providerEnvFile: process.env.CHAT_PERF_PROVIDER_ENV_FILE || null,
     providerId: process.env.CHAT_PERF_PROVIDER_ID || "mistral",
     providerModelId: process.env.CHAT_PERF_PROVIDER_MODEL_ID || "mistral-small-2603",
+    controlledProviderPersistence: process.env.CHAT_PERF_CONTROLLED_PERSISTENCE !== "false",
   };
 }
 

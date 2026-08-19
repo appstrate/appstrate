@@ -38,7 +38,8 @@
         "bunVersion": { "type": "string" },
         "platform": { "type": "string" },
         "port": { "const": 3400 },
-        "database": { "type": "string" }
+        "database": { "type": "string" },
+        "controlledProviderPersistence": { "type": "boolean" }
       }
     },
     "cell": {
@@ -59,6 +60,8 @@
       "properties": {
         "waveStartedAtMs": { "type": "number", "minimum": 0 },
         "waveEndedAtMs": { "type": "number", "minimum": 0 },
+        "waveStartedAtEpochMs": { "type": "number", "minimum": 0 },
+        "waveEndedAtEpochMs": { "type": "number", "minimum": 0 },
         "recoveryMs": { "type": "number", "minimum": 0 }
       }
     },
@@ -97,6 +100,69 @@
       "required": ["providerDispatchMs"],
       "properties": {
         "providerDispatchMs": { "$ref": "#/$defs/percentiles" },
+        "chatTurn": {
+          "type": "object",
+          "required": ["sampleCount", "milestonesMs"],
+          "properties": {
+            "sampleCount": { "type": "integer", "minimum": 0 },
+            "milestonesMs": {
+              "type": "object",
+              "additionalProperties": { "$ref": "#/$defs/percentiles" }
+            }
+          }
+        },
+        "piEngineEntryMs": { "$ref": "#/$defs/percentiles" },
+        "piClientDeliveryAfterFirstTextMs": { "$ref": "#/$defs/percentiles" },
+        "piTurnTimelines": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "turnId",
+              "routeToEngineMs",
+              "engineToPromptMs",
+              "measuredLifecycleMs",
+              "unmeasuredEngineSetupMs",
+              "promptToFirstTextMs",
+              "firstTextToClientMs",
+              "requestToClientFirstTokenMs"
+            ],
+            "properties": {
+              "turnId": { "type": "string" },
+              "routeToEngineMs": { "type": "number" },
+              "engineToPromptMs": { "type": "number" },
+              "measuredLifecycleMs": { "type": "number" },
+              "unmeasuredEngineSetupMs": { "type": "number" },
+              "promptToFirstTextMs": { "type": "number" },
+              "firstTextToClientMs": { "type": "number" },
+              "requestToClientFirstTokenMs": { "type": "number" }
+            }
+          }
+        },
+        "piLifecycleSamples": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["turnId", "stage", "durationMs"],
+            "properties": {
+              "turnId": { "type": "string" },
+              "stage": { "type": "string" },
+              "durationMs": { "type": "number" }
+            }
+          }
+        },
+        "piPromptMilestoneSamples": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["turnId", "milestone", "elapsedMs"],
+            "properties": {
+              "turnId": { "type": "string" },
+              "milestone": { "type": "string" },
+              "elapsedMs": { "type": "number" }
+            }
+          }
+        },
         "piLifecycle": {
           "type": "object",
           "required": ["sampleCount", "stagesMs", "prePromptTotalMs"],
@@ -107,6 +173,17 @@
               "additionalProperties": { "$ref": "#/$defs/percentiles" }
             },
             "prePromptTotalMs": { "$ref": "#/$defs/percentiles" }
+          }
+        },
+        "piPrompt": {
+          "type": "object",
+          "required": ["sampleCount", "milestonesMs"],
+          "properties": {
+            "sampleCount": { "type": "integer", "minimum": 0 },
+            "milestonesMs": {
+              "type": "object",
+              "additionalProperties": { "$ref": "#/$defs/percentiles" }
+            }
           }
         }
       }

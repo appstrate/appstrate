@@ -97,6 +97,8 @@ export interface PiChatInput {
   recordUsage: (record: ChatUsageRecord) => void;
   /** Optional local-benchmark seam. Production callers leave it unset. */
   onLifecycleTiming?: (timing: PiChatLifecycleTiming) => void;
+  /** Optional prompt milestone seam, expressed from the `prompt()` call boundary. */
+  onPromptMilestone?: (milestone: PiChatPromptMilestoneTiming) => void;
 }
 
 export type PiChatLifecycleStage =
@@ -111,6 +113,24 @@ export type PiChatLifecycleStage =
 export interface PiChatLifecycleTiming {
   stage: PiChatLifecycleStage;
   durationMs: number;
+}
+
+export type PiChatPromptMilestone =
+  | "beforeAgentStart"
+  | "agentStart"
+  | "turnStart"
+  | "userMessageStart"
+  | "userMessageEnd"
+  | "contextReady"
+  | "providerRequest"
+  | "providerHeaders"
+  | "providerResponse"
+  | "assistantStart"
+  | "firstText";
+
+export interface PiChatPromptMilestoneTiming {
+  milestone: PiChatPromptMilestone;
+  elapsedMs: number;
 }
 
 /**
@@ -156,6 +176,23 @@ export function runPiChat(input: PiChatInput): Response {
       // 10-minute deadline).
       let mcpTools: Awaited<ReturnType<typeof buildPlatformMcpTools>> | undefined;
       let stepCap: ReturnType<typeof createStepCapController> | undefined;
+      let promptStartedAt: number | undefined;
+      const emittedPromptMilestones = new Set<PiChatPromptMilestone>();
+      const emitPromptMilestone = (milestone: PiChatPromptMilestone): void => {
+        if (
+          promptStartedAt === undefined ||
+          emittedPromptMilestones.has(milestone) ||
+          !input.onPromptMilestone
+        ) {
+          return;
+        }
+        emittedPromptMilestones.add(milestone);
+        try {
+          input.onPromptMilestone({ milestone, elapsedMs: performance.now() - promptStartedAt });
+        } catch (error) {
+          logger.warn("Pi prompt diagnostic callback failed", { error: String(error), milestone });
+        }
+      };
       let lifecycleStageStartedAt = performance.now();
       const finishLifecycleStage = (stage: PiChatLifecycleStage): void => {
         const endedAt = performance.now();
@@ -254,6 +291,27 @@ export function runPiChat(input: PiChatInput): Response {
               ];
         const authExtensions =
           modelBinding.authMode === "proxy" ? [modelBinding.authExtension] : [];
+        const diagnosticExtensions = input.onPromptMilestone
+          ? [
+              (pi: import("@appstrate/runner-pi").ExtensionAPI) => {
+                pi.on("before_agent_start", () => {
+                  emitPromptMilestone("beforeAgentStart");
+                });
+                pi.on("context", () => {
+                  emitPromptMilestone("contextReady");
+                });
+                pi.on("before_provider_request", () => {
+                  emitPromptMilestone("providerRequest");
+                });
+                pi.on("before_provider_headers", () => {
+                  emitPromptMilestone("providerHeaders");
+                });
+                pi.on("after_provider_response", () => {
+                  emitPromptMilestone("providerResponse");
+                });
+              },
+            ]
+          : [];
         const resourceLoader = new DefaultResourceLoader({
           cwd: "/tmp",
           agentDir: "/tmp/pi-chat",
@@ -262,6 +320,7 @@ export function runPiChat(input: PiChatInput): Response {
             ...mcpTools.extensionFactories,
             ...authExtensions,
             ...generationExtensions,
+            ...diagnosticExtensions,
           ],
           noExtensions: false,
           noPromptTemplates: true,
@@ -308,7 +367,35 @@ export function runPiChat(input: PiChatInput): Response {
         stepCap.attach(typedSession);
 
         typedSession.subscribe((raw) => {
-          for (const chunk of mapper.map(raw as AgentSessionEvent)) write(chunk);
+          const event = raw as AgentSessionEvent;
+          const assistantEvent =
+            "assistantMessageEvent" in event ? event.assistantMessageEvent : undefined;
+          const message = "message" in event ? event.message : undefined;
+          const messageRole =
+            message !== null && typeof message === "object" && "role" in message
+              ? message.role
+              : undefined;
+          if (event.type === "agent_start") emitPromptMilestone("agentStart");
+          if (event.type === "turn_start") emitPromptMilestone("turnStart");
+          if (event.type === "message_start" && messageRole === "user") {
+            emitPromptMilestone("userMessageStart");
+          }
+          if (event.type === "message_end" && messageRole === "user") {
+            emitPromptMilestone("userMessageEnd");
+          }
+          if (event.type === "message_start" && messageRole === "assistant") {
+            emitPromptMilestone("assistantStart");
+          }
+          if (
+            event.type === "message_update" &&
+            assistantEvent !== null &&
+            typeof assistantEvent === "object" &&
+            "type" in assistantEvent &&
+            assistantEvent.type === "text_delta"
+          ) {
+            emitPromptMilestone("firstText");
+          }
+          for (const chunk of mapper.map(event)) write(chunk);
         });
 
         const abortPromise = new Promise<never>((_resolve, reject) => {
@@ -318,6 +405,7 @@ export function runPiChat(input: PiChatInput): Response {
         });
 
         try {
+          promptStartedAt = performance.now();
           await Promise.race([typedSession.prompt(projectedTurn.prompt), abortPromise]);
           // Early-stopping generate: the tool loop was cut at
           // CHAT_TOOL_STEP_BUDGET, so spend the last step on ONE tool-less model

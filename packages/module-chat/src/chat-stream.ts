@@ -227,6 +227,24 @@ const ENGINE_LOOPBACK_TTL_MS = 30 * 60_000;
 export interface ChatEngineRuntime {
   configuredPiOrgIds(): string | undefined;
   runPiChat(input: PiChatInput): Response;
+  onTurnMilestone?(timing: ChatTurnMilestoneTiming): void;
+}
+
+export type ChatTurnMilestone =
+  | "bodyParsed"
+  | "sessionEnsured"
+  | "phaseAResolved"
+  | "bindingResolved"
+  | "usageAllowed"
+  | "phaseBResolved"
+  | "admissionAcquired"
+  | "userStatePersisted"
+  | "engineDispatch";
+
+export interface ChatTurnMilestoneTiming {
+  chatSessionId: string | null;
+  milestone: ChatTurnMilestone;
+  elapsedMs: number;
 }
 
 const defaultChatEngineRuntime: ChatEngineRuntime = {
@@ -438,10 +456,26 @@ export async function handleChatStream(
   deps: ChatPlatformDeps,
   engineRuntime: ChatEngineRuntime = defaultChatEngineRuntime,
 ): Promise<Response> {
+  const handlingStartedAt = performance.now();
+  let diagnosticSessionId: string | null = null;
+  const emitTurnMilestone = (milestone: ChatTurnMilestone): void => {
+    if (!engineRuntime.onTurnMilestone) return;
+    try {
+      engineRuntime.onTurnMilestone({
+        chatSessionId: diagnosticSessionId,
+        milestone,
+        elapsedMs: performance.now() - handlingStartedAt,
+      });
+    } catch (error) {
+      logger.warn("chat turn diagnostic callback failed", { error: String(error) });
+    }
+  };
   const orgId = c.get("orgId");
   const user = c.get("user");
   const orgRole = c.get("orgRole") ?? "member";
   const body = parseBody(chatStreamSchema, await c.req.json().catch(() => null));
+  diagnosticSessionId = body.id ?? null;
+  emitTurnMilestone("bodyParsed");
   const messages = body.messages as UIMessage[];
   logger.info("chat turn", { turns: messages.length });
 
@@ -468,6 +502,7 @@ export async function handleChatStream(
   if (sessionId && lastMessage?.id) {
     await ensureSession(sessionId, orgId, user.id);
   }
+  emitTurnMilestone("sessionEnsured");
 
   const origin = selfOrigin();
   const headers = forwardedHeaders(c);
@@ -544,6 +579,7 @@ export async function handleChatStream(
     throw error;
   }
   const phaseAMs = Date.now() - phaseAStart;
+  emitTurnMilestone("phaseAResolved");
   logger.info("model resolved", {
     model: chosen.id,
     modelId: chosen.modelId,
@@ -593,6 +629,7 @@ export async function handleChatStream(
     configuredOrgIds: engineRuntime.configuredPiOrgIds(),
   });
   const usePiEngine = selectedEngine === "pi";
+  emitTurnMilestone("bindingResolved");
 
   // Admission gate — EVERY turn, whichever engine serves it. The platform
   // resolves system-provided vs. org-owned server-side and dispatches
@@ -617,6 +654,7 @@ export async function handleChatStream(
     subscription: isSubscription,
   });
   if (rejection) return usageRejectionResponse(rejection);
+  emitTurnMilestone("usageAllowed");
 
   // ── Preamble phase B (parallel) ──────────────────────────────────────────
   // The caller-context block (both paths) and the platform MCP probe (ai-sdk
@@ -676,6 +714,7 @@ export async function handleChatStream(
     contextBlock = block;
   }
   const phaseBMs = Date.now() - phaseBStart;
+  emitTurnMilestone("phaseBResolved");
 
   // Assemble the system prompt. Pi path: tool-grounding prompt, no
   // inline instructions (the SDK's own MCP handshake delivers them). ai-sdk
@@ -722,6 +761,7 @@ export async function handleChatStream(
     }
     piAdmission = { slot, binding: modelBindingResolution.binding };
   }
+  emitTurnMilestone("admissionAcquired");
 
   // ── Server-authoritative persistence + resumable streaming ───────────────
   // Persist the user turn BEFORE inference; the assistant turn is persisted when
@@ -754,6 +794,7 @@ export async function handleChatStream(
       throw err;
     }
   }
+  emitTurnMilestone("userStatePersisted");
 
   // Generation abort is DECOUPLED from the request connection: a client
   // disconnect must NOT cancel generation (that was the data-loss bug). Only an
@@ -835,6 +876,7 @@ export async function handleChatStream(
     };
     if (applicationId) mcpHeaders["x-application-id"] = applicationId;
     try {
+      emitTurnMilestone("engineDispatch");
       return await finalize(
         engineRuntime.runPiChat({
           slot: piAdmission.slot,
@@ -900,6 +942,7 @@ export async function handleChatStream(
     const turnDeadline = armTurnDeadline(generation, turnDeadlineAt);
     armedDeadline = turnDeadline;
 
+    emitTurnMilestone("engineDispatch");
     const result = streamText({
       model,
       ...(typeof generationSettings.temperature === "number"

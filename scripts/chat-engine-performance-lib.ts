@@ -39,6 +39,49 @@ export interface PiLifecycleSample {
   durationMs: number;
 }
 
+export interface PiPromptMilestoneSample {
+  turnId: string;
+  milestone: string;
+  elapsedMs: number;
+}
+
+export interface ChatTurnMilestoneSample {
+  turnId: string;
+  milestone: string;
+  elapsedMs: number;
+}
+
+export interface PiTurnTimelineInput {
+  turnId: string;
+  requestStartedAt: number;
+  engineEnteredAt: number;
+  promptStartedAt: number;
+  firstTextAt: number;
+  clientFirstTokenAt: number;
+  lifecycleTotalMs: number;
+}
+
+export interface PiTurnTimeline {
+  turnId: string;
+  routeToEngineMs: number;
+  engineToPromptMs: number;
+  measuredLifecycleMs: number;
+  unmeasuredEngineSetupMs: number;
+  promptToFirstTextMs: number;
+  firstTextToClientMs: number;
+  requestToClientFirstTokenMs: number;
+}
+
+export interface CpuProfileInput {
+  startTime: number;
+  nodes: ReadonlyArray<{
+    id: number;
+    callFrame: { functionName: string; url: string; lineNumber: number };
+  }>;
+  samples: readonly number[];
+  timeDeltas: readonly number[];
+}
+
 /** Read one explicitly requested variable from dotenv text without importing the rest. */
 export function parseDotEnvValue(contents: string, name: string): string | null {
   for (const line of contents.split(/\r?\n/)) {
@@ -176,6 +219,103 @@ export function summarizePiLifecycle(samples: readonly PiLifecycleSample[]): {
       [...stages.entries()].map(([stage, durations]) => [stage, summarizeDurations(durations)]),
     ),
     prePromptTotalMs: summarizeDurations([...totals.values()]),
+  };
+}
+
+export function summarizePiPromptMilestones(samples: readonly PiPromptMilestoneSample[]): {
+  sampleCount: number;
+  milestonesMs: Record<string, ReturnType<typeof summarizeDurations>>;
+} {
+  const milestones = new Map<string, number[]>();
+  const turns = new Set<string>();
+  for (const sample of samples) {
+    turns.add(sample.turnId);
+    const elapsed = milestones.get(sample.milestone) ?? [];
+    elapsed.push(sample.elapsedMs);
+    milestones.set(sample.milestone, elapsed);
+  }
+  return {
+    sampleCount: turns.size,
+    milestonesMs: Object.fromEntries(
+      [...milestones.entries()].map(([milestone, elapsed]) => [
+        milestone,
+        summarizeDurations(elapsed),
+      ]),
+    ),
+  };
+}
+
+export function summarizeChatTurnMilestones(samples: readonly ChatTurnMilestoneSample[]): {
+  sampleCount: number;
+  milestonesMs: Record<string, ReturnType<typeof summarizeDurations>>;
+} {
+  return summarizePiPromptMilestones(samples);
+}
+
+export function buildPiTurnTimeline(input: PiTurnTimelineInput): PiTurnTimeline {
+  const engineToPromptMs = input.promptStartedAt - input.engineEnteredAt;
+  return {
+    turnId: input.turnId,
+    routeToEngineMs: input.engineEnteredAt - input.requestStartedAt,
+    engineToPromptMs,
+    measuredLifecycleMs: input.lifecycleTotalMs,
+    unmeasuredEngineSetupMs: engineToPromptMs - input.lifecycleTotalMs,
+    promptToFirstTextMs: input.firstTextAt - input.promptStartedAt,
+    firstTextToClientMs: input.clientFirstTokenAt - input.firstTextAt,
+    requestToClientFirstTokenMs: input.clientFirstTokenAt - input.requestStartedAt,
+  };
+}
+
+export function summarizeCpuProfileWindow(
+  profile: CpuProfileInput,
+  window: { startEpochMs: number; endEpochMs: number },
+): {
+  sampledMicros: number;
+  functions: Array<{
+    functionName: string;
+    url: string;
+    lineNumber: number;
+    selfMicros: number;
+    selfPercent: number;
+  }>;
+} {
+  const startMicros = window.startEpochMs * 1_000;
+  const endMicros = window.endEpochMs * 1_000;
+  const nodes = new Map(profile.nodes.map((node) => [node.id, node.callFrame]));
+  const functions = new Map<
+    string,
+    { functionName: string; url: string; lineNumber: number; selfMicros: number }
+  >();
+  let sampledMicros = 0;
+  let sampleStartedAt = profile.startTime;
+
+  for (let index = 0; index < profile.samples.length; index += 1) {
+    const sampleEndedAt = sampleStartedAt + (profile.timeDeltas[index] ?? 0);
+    const overlapMicros = Math.max(
+      0,
+      Math.min(sampleEndedAt, endMicros) - Math.max(sampleStartedAt, startMicros),
+    );
+    if (overlapMicros > 0) {
+      const frame = nodes.get(profile.samples[index]!);
+      if (frame) {
+        const key = `${frame.functionName}\u0000${frame.url}\u0000${frame.lineNumber}`;
+        const aggregate = functions.get(key) ?? { ...frame, selfMicros: 0 };
+        aggregate.selfMicros += overlapMicros;
+        functions.set(key, aggregate);
+        sampledMicros += overlapMicros;
+      }
+    }
+    sampleStartedAt = sampleEndedAt;
+  }
+
+  return {
+    sampledMicros,
+    functions: [...functions.values()]
+      .sort((left, right) => right.selfMicros - left.selfMicros)
+      .map((entry) => ({
+        ...entry,
+        selfPercent: sampledMicros === 0 ? 0 : (entry.selfMicros / sampledMicros) * 100,
+      })),
   };
 }
 

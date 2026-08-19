@@ -3,6 +3,7 @@
 import { describe, expect, it } from "bun:test";
 import {
   benchmarkHistoryToolPart,
+  buildPiTurnTimeline,
   completedTurnHasUsage,
   defaultSubscriptionModel,
   compareCellInvariants,
@@ -13,7 +14,10 @@ import {
   repetitionNumbers,
   publishedObservationName,
   summarizeDurations,
+  summarizeCpuProfileWindow,
+  summarizeChatTurnMilestones,
   summarizePiLifecycle,
+  summarizePiPromptMilestones,
   summarizeWaveActivity,
   waitForWorkerExit,
   type MemorySample,
@@ -42,6 +46,87 @@ describe("chat engine performance observation helpers", () => {
       },
       prePromptTotalMs: { p50: 30, p95: 70, p99: 70 },
     });
+  });
+
+  it("aggregates Pi prompt milestones as absolute offsets from prompt start", () => {
+    expect(
+      summarizePiPromptMilestones([
+        { turnId: "turn-a", milestone: "beforeAgentStart", elapsedMs: 5 },
+        { turnId: "turn-a", milestone: "providerRequest", elapsedMs: 20 },
+        { turnId: "turn-b", milestone: "beforeAgentStart", elapsedMs: 7 },
+        { turnId: "turn-b", milestone: "providerRequest", elapsedMs: 30 },
+      ]),
+    ).toEqual({
+      sampleCount: 2,
+      milestonesMs: {
+        beforeAgentStart: { p50: 5, p95: 7, p99: 7 },
+        providerRequest: { p50: 20, p95: 30, p99: 30 },
+      },
+    });
+  });
+
+  it("aggregates common chat milestones as absolute offsets from request handling", () => {
+    expect(
+      summarizeChatTurnMilestones([
+        { turnId: "turn-a", milestone: "bodyParsed", elapsedMs: 2 },
+        { turnId: "turn-a", milestone: "engineDispatch", elapsedMs: 40 },
+        { turnId: "turn-b", milestone: "bodyParsed", elapsedMs: 3 },
+        { turnId: "turn-b", milestone: "engineDispatch", elapsedMs: 60 },
+      ]),
+    ).toEqual({
+      sampleCount: 2,
+      milestonesMs: {
+        bodyParsed: { p50: 2, p95: 3, p99: 3 },
+        engineDispatch: { p50: 40, p95: 60, p99: 60 },
+      },
+    });
+  });
+
+  it("builds an additive Pi timeline from timestamps belonging to the same turn", () => {
+    expect(
+      buildPiTurnTimeline({
+        turnId: "turn-a",
+        requestStartedAt: 100,
+        engineEnteredAt: 140,
+        promptStartedAt: 200,
+        firstTextAt: 230,
+        clientFirstTokenAt: 232,
+        lifecycleTotalMs: 50,
+      }),
+    ).toEqual({
+      turnId: "turn-a",
+      routeToEngineMs: 40,
+      engineToPromptMs: 60,
+      measuredLifecycleMs: 50,
+      unmeasuredEngineSetupMs: 10,
+      promptToFirstTextMs: 30,
+      firstTextToClientMs: 2,
+      requestToClientFirstTokenMs: 132,
+    });
+  });
+
+  it("filters CPU samples to the exact benchmark wave", () => {
+    const summary = summarizeCpuProfileWindow(
+      {
+        startTime: 1_000_000,
+        nodes: [
+          { id: 1, callFrame: { functionName: "alpha", url: "a.ts", lineNumber: 1 } },
+          { id: 2, callFrame: { functionName: "beta", url: "b.ts", lineNumber: 2 } },
+        ],
+        samples: [1, 2, 2, 1],
+        timeDeltas: [1_000, 1_000, 1_000, 1_000],
+      },
+      { startEpochMs: 1_001, endEpochMs: 1_004 },
+    );
+
+    expect(summary.sampledMicros).toBe(3_000);
+    expect(
+      summary.functions.map(({ functionName, selfMicros }) => [functionName, selfMicros]),
+    ).toEqual([
+      ["beta", 2_000],
+      ["alpha", 1_000],
+    ]);
+    expect(summary.functions[0]?.selfPercent).toBeCloseTo(66.67, 2);
   });
 
   it("selects the first sample at or after every recovery checkpoint", () => {
