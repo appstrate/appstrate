@@ -8,13 +8,18 @@
  *   - the spec it hands `createSidecar` carries CONNECT_LOGIN_JSON-worthy data
  *     (connectLoginSpec + integrations) with the right connectLogin block;
  *   - it parses the `APPSTRATE_CONNECT_RESULT:` sentinel into a CredentialBundle;
- *   - it throws on the `APPSTRATE_CONNECT_ERROR:` sentinel and on timeout;
+ *   - it throws on the `APPSTRATE_CONNECT_ERROR:` sentinel and on timeout, and
+ *     that each failure is typed by AUDIENCE: a login-tool rejection becomes a
+ *     caller-visible `ApiError` (400) carrying the tool's diagnostic, a timeout a
+ *     504, an unsupported backend a generic 503 — while every sidecar-internal
+ *     fault stays a plain Error the routes collapse into an opaque 500;
  *   - it tears down (removeWorkload + removeIsolationBoundary) in `finally`,
  *     even on error.
  */
 
 import { describe, it, expect, beforeAll } from "bun:test";
 import { createCipheriv, randomBytes } from "node:crypto";
+import { ApiError } from "../../../src/lib/errors.ts";
 import { _resetCacheForTesting } from "@appstrate/env";
 import {
   registerOrchestrator,
@@ -253,6 +258,17 @@ describe("buildConnectLoginSpec", () => {
   });
 });
 
+/** Run `fn` and return whatever it threw (never a value) — lets a test inspect
+ *  the error's TYPE and status, which `expect().toThrow()` cannot. */
+function catchErr(fn: () => unknown): unknown {
+  try {
+    fn();
+  } catch (err) {
+    return err;
+  }
+  throw new Error("expected the call to throw");
+}
+
 describe("parseConnectResult", () => {
   const KEY = randomBytes(32);
 
@@ -269,6 +285,77 @@ describe("parseConnectResult", () => {
     expect(() => parseConnectResult(["APPSTRATE_CONNECT_ERROR:login tool 500"], KEY)).toThrow(
       /connect-run failed: login tool 500/,
     );
+  });
+
+  // ─── failure legibility ───
+  // The sentinel is a catch-all: `runtime-pi/sidecar/server.ts` writes the
+  // message of ANY throw in connect mode onto it. Only the subset the LOGIN TOOL
+  // itself authored is caller-safe, so only that subset becomes a 4xx the routes
+  // pass through; everything else stays a plain Error → generic 500.
+
+  it("surfaces a login-tool rejection as a 400 ApiError carrying the tool's diagnostic", () => {
+    const err = catchErr(() =>
+      parseConnectResult(
+        [
+          "APPSTRATE_CONNECT_ERROR:connect-login: login tool reported an error: Invalid password for user a@b.c",
+        ],
+        KEY,
+      ),
+    );
+    expect(err).toBeInstanceOf(ApiError);
+    const api = err as ApiError;
+    expect(api.status).toBe(400);
+    expect(api.param).toBe("credentials");
+    // Cause…
+    expect(api.message).toContain("Invalid password for user a@b.c");
+    // …and remedy.
+    expect(api.message).toContain("Check the credentials you submitted");
+  });
+
+  it("falls back to a neutral diagnostic when the login tool reported no text", () => {
+    const err = catchErr(() =>
+      parseConnectResult(
+        ["APPSTRATE_CONNECT_ERROR:connect-login: login tool reported an error"],
+        KEY,
+      ),
+    );
+    expect(err).toBeInstanceOf(ApiError);
+    expect((err as ApiError).status).toBe(400);
+    expect((err as ApiError).message).toContain("rejected the submitted credentials");
+  });
+
+  it("clips a runaway integration-authored diagnostic", () => {
+    const err = catchErr(() =>
+      parseConnectResult(
+        [
+          `APPSTRATE_CONNECT_ERROR:connect-login: login tool reported an error: ${"x".repeat(5000)}`,
+        ],
+        KEY,
+      ),
+    );
+    expect(err).toBeInstanceOf(ApiError);
+    expect((err as ApiError).message.length).toBeLessThan(500);
+    expect((err as ApiError).message).toContain("…");
+  });
+
+  it("keeps a sidecar-internal sentinel a plain Error (generic 500, nothing leaked)", () => {
+    // Spawn / MITM / CA faults land on the SAME sentinel and their text can
+    // carry host paths and namespaces — they must not become a caller-visible
+    // 4xx. Plain Error → the routes' `internalError()`.
+    for (const internal of [
+      "runConnectOnce: spec has no manifest.server to spawn",
+      "connect-login: no upstream client registered for namespace 'connect-it'",
+      "connect-run: CONNECT_RESULT_KEY missing — refusing to emit bundle",
+    ]) {
+      const err = catchErr(() => parseConnectResult([`APPSTRATE_CONNECT_ERROR:${internal}`], KEY));
+      expect(err).toBeInstanceOf(Error);
+      expect(err).not.toBeInstanceOf(ApiError);
+    }
+  });
+
+  it("keeps bundle-framing corruption a plain Error (generic 500)", () => {
+    const err = catchErr(() => parseConnectResult(["APPSTRATE_CONNECT_RESULT:garbage"], KEY));
+    expect(err).not.toBeInstanceOf(ApiError);
   });
 
   it("throws when no sentinel was emitted", () => {
@@ -356,7 +443,17 @@ describe("createConnectRunExecutor.run", () => {
       resolveMcpServer: fakeMcpResolver,
     });
 
-    await expect(executor.run(execution())).rejects.toThrow(/timed out after 30ms/);
+    // A timeout is an upstream failure, not a server bug — 504 with the budget
+    // named, so the caller knows retrying is the right move (was a flat 500).
+    const err = (await executor.run(execution()).then(
+      () => null,
+      (e: unknown) => e,
+    )) as ApiError | null;
+    expect(err).toBeInstanceOf(ApiError);
+    expect(err!.status).toBe(504);
+    expect(err!.code).toBe("timeout");
+    expect(err!.message).toMatch(/timed out after 30ms/);
+    expect(err!.message).toContain("Please try again");
     expect(calls.removedWorkloads).toBe(1);
     expect(calls.removedBoundaries).toBe(1);
   });
@@ -381,9 +478,21 @@ describe("createConnectRunExecutor.run", () => {
     _resetCacheForTesting();
     try {
       const executor = createConnectRunExecutor({ resolveMcpServer: fakeMcpResolver });
-      await expect(executor.run(execution())).rejects.toThrow(
-        /connect-runs are not supported with RUN_ADAPTER="fake-vm"/,
-      );
+      // INVERTED (failure-legibility): the throw used to carry the operator
+      // remedy `RUN_ADAPTER="fake-vm" … use RUN_ADAPTER=docker` in its message,
+      // which the routes turned into a flat 500 for everyone — including an end
+      // user on the hosted connect form, who must never be shown deployment
+      // configuration. It is now an ApiError 503 with a generic detail; the
+      // remedy is logged operator-side instead.
+      const err = (await executor.run(execution()).then(
+        () => null,
+        (e: unknown) => e,
+      )) as ApiError | null;
+      expect(err).toBeInstanceOf(ApiError);
+      expect(err!.status).toBe(503);
+      expect(err!.code).toBe("connect_unavailable");
+      expect(err!.message).not.toContain("RUN_ADAPTER");
+      expect(err!.message).not.toContain("fake-vm");
     } finally {
       if (prevAdapter === undefined) delete process.env.RUN_ADAPTER;
       else process.env.RUN_ADAPTER = prevAdapter;

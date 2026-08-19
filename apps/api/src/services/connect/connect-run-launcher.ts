@@ -39,6 +39,7 @@
 
 import { createDecipheriv, randomBytes } from "node:crypto";
 
+import { ApiError, invalidRequest } from "../../lib/errors.ts";
 import { logger } from "../../lib/logger.ts";
 import { signRunToken } from "../../lib/run-token.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
@@ -65,6 +66,43 @@ const RESULT_SENTINEL = "APPSTRATE_CONNECT_RESULT:";
 const ERROR_SENTINEL = "APPSTRATE_CONNECT_ERROR:";
 
 /**
+ * Prefix the sidecar's connect-login primitive puts on a failure the LOGIN TOOL
+ * ITSELF reported (`runtime-pi/sidecar/connect-login.ts` — an `isError: true`
+ * CallToolResult carrying the tool's own text). That is the ONE error class on
+ * this channel written for the person logging in: "wrong password", "MFA
+ * required", "captcha".
+ *
+ * `APPSTRATE_CONNECT_ERROR:` itself is a catch-all — `runtime-pi/sidecar/server.ts`
+ * puts `err.message` of ANY throw in connect mode on it, including runner-spawn
+ * failures, CA/MITM faults and bundle-framing errors whose text can carry host
+ * paths, namespaces and env-var names. Those must NOT reach the caller of the
+ * hosted end-user form, so only the marked subset is surfaced (see
+ * {@link loginToolDiagnostic}); everything else stays an opaque 500 with the raw
+ * text in the platform logs.
+ */
+const LOGIN_TOOL_ERROR_MARKER = "connect-login: login tool reported an error";
+
+/** Cap on the integration-authored diagnostic we echo back to the caller. */
+const MAX_DIAGNOSTIC_CHARS = 300;
+
+/**
+ * Extract the caller-safe login diagnostic from a raw `APPSTRATE_CONNECT_ERROR:`
+ * message, or `null` when the message is a sidecar-internal fault (which the
+ * caller must never see). Returns a sentence — the tool's own text when it
+ * carried one, a neutral fallback when it did not.
+ */
+function loginToolDiagnostic(msg: string): string | null {
+  if (!msg.startsWith(LOGIN_TOOL_ERROR_MARKER)) return null;
+  const detail = msg.slice(LOGIN_TOOL_ERROR_MARKER.length).replace(/^:\s*/, "").trim();
+  if (!detail) return "the integration rejected the submitted credentials.";
+  // The text is authored by the integration package — clip it so a runaway
+  // upstream body can't be pasted wholesale into an API response.
+  const clipped =
+    detail.length > MAX_DIAGNOSTIC_CHARS ? `${detail.slice(0, MAX_DIAGNOSTIC_CHARS)}…` : detail;
+  return /[.!?…]$/.test(clipped) ? clipped : `${clipped}.`;
+}
+
+/**
  * Coerce a credential bag's values to strings. The sidecar's MITM substitutes
  * `{{name}}` placeholders only on strings (a URL or header value template
  * has no notion of "substitute a number"), so non-string credential values
@@ -88,14 +126,38 @@ const DEFAULT_CONNECT_TIMEOUT_MS = 60_000;
  * The configured execution backend cannot host a connect-run (sidecar-only
  * workload). Thrown BEFORE any boundary is created so the caller gets a
  * clear diagnosis instead of "sidecar exited without emitting a result".
+ *
+ * It IS an {@link ApiError} so it rides the connect routes' existing
+ * `if (err instanceof ApiError) throw err` passthrough and reaches the caller
+ * as a 503 — "unavailable, don't retry with other credentials" — instead of
+ * collapsing into the opaque `internal_error` 500 every other connect-run
+ * failure produced.
+ *
+ * The public `detail` is deliberately generic. `POST /api/integrations/connect/submit`
+ * is the HOSTED end-user form, reachable by someone who is not a member of the
+ * organization, and the actual remedy here (`RUN_ADAPTER=docker`) is
+ * operator-facing deployment configuration: naming it to that audience leaks
+ * deployment shape and gives them nothing they can act on. The remedy is logged
+ * at the throw site instead, where the operator reads it.
  */
-class ConnectNotSupportedError extends Error {
+class ConnectNotSupportedError extends ApiError {
+  /**
+   * Configured `RUN_ADAPTER`, kept as a machine-readable marker for a catch
+   * site that wants it. It is NOT part of the public `detail` — the throw site
+   * logs the operator-facing remedy separately.
+   */
+  readonly mode: string;
+
   constructor(mode: string) {
-    super(
-      `connect-runs are not supported with RUN_ADAPTER="${mode}" — this backend cannot ` +
-        `run a sidecar-only workload. Use RUN_ADAPTER=docker (or process) for connect flows.`,
-    );
+    super({
+      status: 503,
+      code: "connect_unavailable",
+      title: "Service Unavailable",
+      detail:
+        "This connection method is unavailable on this deployment. Contact your administrator.",
+    });
     this.name = "ConnectNotSupportedError";
+    this.mode = mode;
   }
 }
 
@@ -249,8 +311,17 @@ function decryptConnectResult(payloadB64: string, resultKey: Buffer): string {
  * Parse the connect-run sidecar's stdout for the result sentinel. Returns the
  * {@link CredentialBundle} on `APPSTRATE_CONNECT_RESULT:` (decrypting its
  * ciphertext payload with `resultKey`), throws on `APPSTRATE_CONNECT_ERROR:`
- * (carrying the sidecar's plaintext message) or when neither sentinel was
- * emitted (sidecar died before producing a result).
+ * or when neither sentinel was emitted (sidecar died before producing a result).
+ *
+ * The throw is typed by audience, not by convenience:
+ *   - a login-tool rejection (see {@link LOGIN_TOOL_ERROR_MARKER}) throws an
+ *     `ApiError` 400 carrying the tool's diagnostic — the routes' existing
+ *     `if (err instanceof ApiError) throw err` passthrough hands it to the
+ *     caller verbatim;
+ *   - every other failure (bad bundle framing, decrypt failure, malformed
+ *     payload, sidecar-internal fault) throws a PLAIN Error, which the routes
+ *     log and collapse into the generic 500 — sidecar internals must never
+ *     reach an end user on the hosted connect form.
  */
 export function parseConnectResult(lines: readonly string[], resultKey: Buffer): CredentialBundle {
   // Scan from the end — the sentinel is the last meaningful line the sidecar
@@ -286,6 +357,20 @@ export function parseConnectResult(lines: readonly string[], resultKey: Buffer):
     const errIdx = line.indexOf(ERROR_SENTINEL);
     if (errIdx !== -1) {
       const msg = line.slice(errIdx + ERROR_SENTINEL.length).trim();
+      const diagnostic = loginToolDiagnostic(msg);
+      if (diagnostic !== null) {
+        // The login tool rejected the caller's OWN credentials — a 4xx about
+        // their input, not a server fault. Surface the tool's diagnostic so the
+        // connect form can say "wrong password" / "MFA required" instead of
+        // "An internal error occurred", and name the remedy.
+        throw invalidRequest(
+          `Login failed: ${diagnostic} Check the credentials you submitted and try again.`,
+          "credentials",
+        );
+      }
+      // Anything else on this channel is a sidecar-internal fault: stay a plain
+      // Error so the routes map it to a generic 500 (the raw text is logged
+      // there) rather than exposing sidecar internals to a hosted-form caller.
       throw new Error(`connect-run failed: ${msg || "unknown error"}`);
     }
   }
@@ -307,7 +392,14 @@ class ConnectRunExecutor implements ConnectToolExecutor {
     // Capability gate on the GLOBAL backend only — an injected orchestrator
     // (tests) is the caller's contract to honour.
     if (!this.orchestrator && !orchestratorSupportsSidecarOnly(getExecutionMode())) {
-      throw new ConnectNotSupportedError(getExecutionMode());
+      const mode = getExecutionMode();
+      // The caller (possibly an end user on the hosted form) gets the generic
+      // 503 detail; the operator-facing remedy lands here, in the logs.
+      logger.error("connect-run unsupported by the configured execution backend", {
+        mode,
+        remedy: `RUN_ADAPTER="${mode}" cannot run a sidecar-only workload — use RUN_ADAPTER=docker (or process) for connect flows.`,
+      });
+      throw new ConnectNotSupportedError(mode);
     }
     const orch = this.orchestrator ?? getOrchestrator();
     const connectId = `connect_${randomBytes(12).toString("hex")}`;
@@ -405,7 +497,17 @@ class ConnectRunExecutor implements ConnectToolExecutor {
       await logStream;
 
       if (timedOut) {
-        throw new Error(`connect-run timed out after ${this.timeoutMs}ms`);
+        // Not a server bug: the login dance did not finish inside the budget
+        // (slow provider, an interactive step the tool cannot complete). A
+        // gateway-timeout tells the caller retrying is the right move, where the
+        // generic 500 told them nothing.
+        logger.warn("connect-run timed out", { timeoutMs: this.timeoutMs });
+        throw new ApiError({
+          status: 504,
+          code: "timeout",
+          title: "Gateway Timeout",
+          detail: `The connection attempt timed out after ${this.timeoutMs}ms — the login did not complete in time. Please try again.`,
+        });
       }
       // Parse regardless of exit code: on a non-zero exit the sidecar emits
       // the ERROR sentinel before exiting 1, which carries the real cause.
