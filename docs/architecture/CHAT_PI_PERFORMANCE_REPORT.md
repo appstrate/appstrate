@@ -37,14 +37,19 @@ Les essais complémentaires Pi par abonnements sont terminés à 1, 10 et 30. Co
 sur 41 sans refus, plus leurs tours de continuité. Ils ne constituent pas un comparatif avec AI SDK.
 Le niveau 60 n'a pas été tenté, car aucune politique d'abonnement explicite n'autorise cette rafale.
 
-La migration de contrôle vers Pi 0.84.2 est également validée. Un smoke Mistral à concurrence 1 a
-terminé les quatre cellules AI SDK et Pi, froides et chaudes. À chaud, Pi a livré le premier token en
-617 ms et terminé en 669 ms, contre 627 ms et 690 ms pour AI SDK. Pi froid conserve un coût de
-chargement visible, avec 1 793 ms au premier token contre 936 ms pour AI SDK. Claude Code a terminé
-en 7 068 ms. Le premier essai Codex a révélé un mapping fournisseur hérité de Pi 0.73 qui envoyait le
-format OpenAI Responses standard au backend Codex. Après correction vers le fournisseur natif
-`openai-codex` et préservation des corps zstd dans le sidecar OAuth, Codex a terminé en 2 658 ms,
-avec premier token à 2 473 ms, un appel modèle, zéro erreur et persistance valide.
+La migration de contrôle vers Pi 0.84.2 est validée, puis la matrice déterministe réduite a été
+rejouée sur S chaud à 60, 64 et 100, trois répétitions appariées. Les 1 344 conversations ont terminé
+et tous les invariants fonctionnels passent. Pi échoue encore aux trois seuils à chaque niveau. Son
+p95 au premier token vaut 4,53 à 5,57 fois celui d'AI SDK, sa durée totale 2,79 à 3,23 fois celle
+d'AI SDK et son débit seulement 32,2 % à 37,2 % du débit AI SDK. La mise à niveau ne justifie donc
+pas de modifier la décision locale.
+
+Un smoke Mistral à concurrence 1 a terminé les quatre cellules AI SDK et Pi, froides et chaudes. À
+chaud, Pi a livré le premier token en 617 ms et terminé en 669 ms, contre 627 ms et 690 ms pour AI
+SDK. Claude Code a terminé en 7 068 ms. Le premier essai Codex a révélé un mapping fournisseur hérité
+de Pi 0.73. Après correction vers le fournisseur natif `openai-codex` et préservation des corps zstd
+dans le sidecar OAuth, Codex a terminé en 2 658 ms, avec premier token à 2 473 ms, un appel modèle,
+zéro erreur et persistance valide.
 
 La capacité cloud reste inconnue. Le résultat local suffit cependant à interdire le canary tant que
 la régression de latence propre au moteur n'est pas expliquée et corrigée.
@@ -90,8 +95,9 @@ absents. Le lancement simultané de chaque vague couvre le profil rafale sous 25
 Chaque mesure utilise une base PGlite dédiée et migrée. Le PostgreSQL local sur 5423 sert uniquement
 de source aux credentials d'abonnement déjà connectés. Le harness copie leur enveloppe chiffrée
 dans la base synthétique, sans copier de données conversationnelles. Le test navigateur Chrome Beta
-a atteint la page du port 3400, mais l'automatisation visuelle est restée bloquée par une interface
-d'extension ouverte.
+a atteint la page du port 3400. Le contrôle a été retenté le 19 août après redémarrage de la stack :
+l'inscription locale s'affiche et les champs synthétiques peuvent être remplis, mais le clic final
+reste bloqué par une interface d'extension Chrome ouverte. Aucun autre navigateur n'a été utilisé.
 
 Les fichiers bruts ont été produits avant les derniers commits de rapport. Chaque observation
 contient son commit exact. Les synthèses versionnées conservent le chemin de chaque observation
@@ -123,6 +129,45 @@ Les écarts par rapport à AI SDK sont les suivants.
 |         100 | chaud  |                   5,26 |           4,05 |              25,2 % |
 
 Tous ces points échouent au seuil de premier token, au seuil de durée totale et au seuil de débit.
+
+## Rejeu réduit avec Pi 0.84.2
+
+Le rejeu du 19 août reprend le cœur décisionnel déterministe avec le même fournisseur, la même forme
+S chaude, une organisation synthétique par conversation et trois répétitions appariées.
+
+| Concurrence | Moteur | p95 premier token, ms | p95 total, ms | Chats par seconde | Pic RSS, Mio |
+| ----------: | ------ | --------------------: | ------------: | ----------------: | -----------: |
+|          60 | AI SDK |                   436 |         1 004 |             56,50 |        727,7 |
+|          60 | Pi     |                 2 431 |         2 800 |             21,04 |        747,9 |
+|          64 | AI SDK |                   578 |         1 061 |             57,73 |        694,0 |
+|          64 | Pi     |                 2 619 |         2 994 |             21,02 |        804,7 |
+|         100 | AI SDK |                   753 |         1 470 |             64,39 |        805,8 |
+|         100 | Pi     |                 3 948 |         4 748 |             20,71 |        839,5 |
+
+| Concurrence | Ratio Pi premier token | Ratio Pi total | Débit Pi sur AI SDK |
+| ----------: | ---------------------: | -------------: | ------------------: |
+|          60 |                   5,57 |           2,79 |              37,2 % |
+|          64 |                   4,53 |           2,82 |              36,4 % |
+|         100 |                   5,24 |           3,23 |              32,2 % |
+
+Les 1 344 conversations correspondent à 1 344 appels modèle, 172 032 tokens d'entrée et 43 008
+tokens de sortie. Il n'y a eu aucun 429, aucune erreur serveur, aucun stream incomplet et aucun
+marqueur incorrect. Les messages, parties structurées et lignes d'usage sont persistés. La
+continuité de session et l'isolation entre organisations et utilisateurs passent dans les 18
+observations.
+
+Le premier lancement a détecté un défaut du harness après la mise à niveau : le fournisseur
+déterministe simulait uniquement Chat Completions, tandis que le fournisseur OpenAI intégré à Pi
+0.84 utilise Responses par défaut. Appstrate enregistre désormais explicitement l'API déclarée par
+le modèle proxy quand le fournisseur Pi intégré ne la supporte pas. Le repro minimal à une
+conversation et les 18 cellules passent après cette correction. Ce défaut ne concernait pas les
+smoke tests Mistral, Codex ou Claude, qui utilisent leurs transports natifs.
+
+La variabilité locale reste forte, notamment pour AI SDK. Le rejeu ne démontre donc pas une tendance
+fine entre Pi 0.73 et Pi 0.84. Il démontre en revanche que Pi 0.84 échoue encore largement aux seuils
+de non-infériorité dans le banc qui isole le coût du moteur. Le comparatif Mistral complet à 60, 64
+et 100 n'a pas été rejoué après la mise à niveau, car la clé temporaire n'est plus disponible dans
+l'environnement. Le smoke Mistral post-migration à concurrence 1 reste valide.
 
 ## Comparatif Mistral réel
 
@@ -363,6 +408,10 @@ bun scripts/chat-engine-performance.ts controlled --forms=S --profiles=cold,warm
 bun scripts/chat-engine-performance.ts controlled --engines=pi --forms=S --profiles=cold --concurrency=100 --organizations=100 --pi-cap=64 --repetitions=1 --recovery-ms=0 --output=artifacts/chat-engine-performance/policy-pi-c100-cap64
 bun scripts/chat-engine-performance.ts controlled --forms=S --profiles=cold,warm --concurrency=60,64,100 --repetitions=1 --recovery-ms=120000 --output=artifacts/chat-engine-performance/controlled-s-recovery-120s
 
+bun scripts/chat-engine-performance.ts controlled --forms=S --profiles=warm --concurrency=60,64,100 --repetitions=3 --recovery-ms=0 --output=artifacts/chat-engine-performance/pi-0842-controlled-reduced-r3-49b4a641
+bun scripts/chat-engine-performance-report.ts --input=artifacts/chat-engine-performance/pi-0842-controlled-reduced-r3-49b4a641 --output=docs/architecture/performance-results/2026-08-19-pi-0842-controlled-reduced.v1.json
+bun scripts/chat-engine-performance-publish.ts --input=artifacts/chat-engine-performance/pi-0842-controlled-reduced-r3-49b4a641 --output=docs/architecture/performance-results/raw/2026-08-19-pi-0842-controlled-reduced
+
 bun scripts/chat-pi-fixed-load.ts --repetitions=10 --output=artifacts/chat-engine-performance/fixed-load-r10 --summary-output=docs/architecture/performance-results/2026-08-18-pi-fixed-load.v1.json
 
 bun scripts/chat-engine-performance-report.ts --input=artifacts/chat-engine-performance/controlled-s-low-r5,artifacts/chat-engine-performance/controlled-s-high-r5,artifacts/chat-engine-performance/controlled-h-high-r5,artifacts/chat-engine-performance/controlled-t-high-r5,artifacts/chat-engine-performance/controlled-s-c100-o10-r5,artifacts/chat-engine-performance/controlled-s-c100-o1-r5 --output=docs/architecture/performance-results/2026-08-18-controlled-summary.v1.json
@@ -452,6 +501,8 @@ Le dernier résultat attendu est zéro.
 - Récupération Mistral à 30, 60 et 120 secondes : [2026-08-18-mistral-recovery.v1.json](./performance-results/2026-08-18-mistral-recovery.v1.json)
 - Abonnements Pi Codex et Claude Code : [2026-08-18-pi-subscriptions.v1.json](./performance-results/2026-08-18-pi-subscriptions.v1.json)
 - Smoke Pi 0.84.2, Mistral, Codex et Claude Code : [2026-08-18-pi-0842-smoke.v1.json](./performance-results/2026-08-18-pi-0842-smoke.v1.json)
+- Rejeu contrôlé réduit Pi 0.84.2 : [2026-08-19-pi-0842-controlled-reduced.v1.json](./performance-results/2026-08-19-pi-0842-controlled-reduced.v1.json)
+- Index et sommes SHA-256 des 18 observations du rejeu : [index.v1.json](./performance-results/raw/2026-08-19-pi-0842-controlled-reduced/index.v1.json)
 - Index et sommes SHA-256 de 65 observations réelles : [index.v1.json](./performance-results/raw/2026-08-18-real/index.v1.json)
 
 Les 65 observations réelles sélectionnées sont désormais versionnées sans leur base PGlite. Leur
@@ -472,8 +523,8 @@ inconnues. Le contrôle Chrome Beta est encore bloqué par une interface d'exten
 reste déployable. Aucun canary, aucune migration de trafic et aucune suppression d'AI SDK ne sont
 autorisés à ce stade.
 
-La RFC source se trouve hors du worktree autorisé. Cette entrée est donc fournie ici, prête à être
-reportée dans son journal sans modifier le satellite externe.
+La RFC source se trouve hors du worktree autorisé. Ces entrées sont donc fournies ici, prêtes à être
+reportées dans son journal sans modifier le satellite externe.
 
 **18 août 2026, mise à niveau Pi 0.84.2 : validation locale réussie.** Le namespace npm passe à
 `@earendil-works`. Appstrate utilise désormais `ModelRuntime`, le hook officiel
@@ -482,3 +533,12 @@ Code passent. Une incompatibilité Codex détectée pendant la validation a ét�
 fournisseur `openai-codex` du fournisseur `openai` et en conservant byte pour byte les corps zstd dans
 le sidecar OAuth. Le rejeu Codex réel passe ensuite sans erreur. Cette validation ne remplace pas la
 matrice à 60, 64 et 100, ne modifie pas la décision cloud et n'autorise toujours aucun canary.
+
+**19 août 2026, rejeu déterministe réduit Pi 0.84.2 : NO GO maintenu.** La forme S chaude a été
+rejouée à 60, 64 et 100, trois répétitions par moteur. Les 1 344 conversations et tous les invariants
+fonctionnels passent, mais le débit Pi ne représente que 37,2 %, 36,4 % et 32,2 % du débit AI SDK.
+Pi échoue aussi aux seuils de premier token et de durée totale à chaque niveau. Le premier lancement
+a révélé puis permis de corriger un défaut de compatibilité du harness avec la sélection d'API de Pi
+0.84. Le comparatif Mistral complet post-migration reste à rejouer lorsqu'une clé dédiée sera de
+nouveau injectée. La capacité cloud reste inconnue. Aucun canary, aucune migration de trafic et
+aucune suppression du moteur AI SDK ne sont autorisés.

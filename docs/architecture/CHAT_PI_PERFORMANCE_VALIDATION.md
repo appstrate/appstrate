@@ -374,7 +374,9 @@ que Pi termine la même conversation.
 Les essais Pi complémentaires Codex et Claude Code sont terminés à 1, 10 et 30, sans refus ni perte
 de persistance. Ils ne sont pas un comparatif direct avec AI SDK. Le niveau 60 n'a pas été tenté
 faute de politique d'abonnement explicitement compatible. Chrome Beta atteint le port 3400, mais
-son contrôle final reste bloqué par une interface d'extension ouverte.
+son contrôle final reste bloqué par une interface d'extension ouverte. Une nouvelle tentative le 19
+août a affiché l'inscription et rempli les champs synthétiques, puis le clic final a rencontré le
+même blocage Chrome. Aucun autre navigateur n'a été utilisé.
 
 Pi a ensuite été migré de 0.73.1 à 0.84.2. Les smoke tests réels à concurrence 1 passent pour
 Mistral, Claude Code et Codex après adaptation du fournisseur natif Codex et du relais zstd OAuth.
@@ -382,6 +384,13 @@ Le comparatif Mistral chaud donne 617 ms au premier token pour Pi et 627 ms pour
 unique répétition. Ce smoke valide la compatibilité de la mise à niveau, pas une nouvelle décision de
 performance. La matrice existante à 60, 64 et 100 reste la référence jusqu'à son rejeu complet avec
 Pi 0.84.2.
+
+Le 19 août, la matrice déterministe réduite S chaude a été rejouée avec Pi 0.84.2 à 60, 64 et 100,
+trois répétitions appariées. Les 1 344 conversations terminent et les invariants de persistance,
+d'usage, de continuité et d'isolation passent. Pi échoue néanmoins aux trois seuils à chaque niveau :
+son débit représente respectivement 37,2 %, 36,4 % et 32,2 % du débit AI SDK. La décision locale
+reste NO GO. Le comparatif Mistral complet post-migration reste à rejouer avec une clé dédiée. Le
+smoke Mistral à concurrence 1 reste vert.
 
 Le rapport, les commandes, le journal de décision prêt à reporter et les artifacts versionnés se
 trouvent dans [CHAT_PI_PERFORMANCE_REPORT.md](./CHAT_PI_PERFORMANCE_REPORT.md).
