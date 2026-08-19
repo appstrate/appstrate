@@ -102,8 +102,12 @@ export function clientTurnErrorFromMarker(value: unknown): ClientTurnError | und
  *
  * A turn refused by the admission gate or by a dead subscription credential
  * never enters the stream, so no `appstrate:chat-turn-error:` marker is ever
- * emitted — the AI SDK transport throws with the raw response body as its
- * message. That body is an RFC 9457 problem document, and its `code` is the
+ * emitted. Instead the AI SDK puts the raw HTTP body in an Error's message and
+ * throws it — `ai/src/ui/http-chat-transport.ts`: `throw new Error(await
+ * response.text())`, on both `sendMessages` and `reconnectToStream`, so the
+ * resumed path lands here too. That body is the `application/problem+json` our
+ * refusals answer with (`chat-stream.ts`), so parsing the message back into a
+ * document recovers what the transport discarded. Its `code` is the
  * stable machine-readable half of the contract; its `detail` is English prose
  * for API consumers (as everywhere else in this API) and must NOT be shown in
  * a localized UI. Return the code so the caller can pick its own sentence.
