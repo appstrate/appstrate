@@ -106,12 +106,14 @@ async function publishAndResolve(
     .where(and(eq(packageVersions.packageId, agentId), eq(packageVersions.version, "1.0.0")))
     .limit(1);
 
-  return resolveIntegrationSpawns({
-    orgId: ctx.orgId,
-    applicationId: ctx.defaultAppId,
-    actor: { type: "user", id: ctx.user.id },
-    agentManifest: stored!.manifest as Record<string, unknown>,
-  });
+  return (
+    await resolveIntegrationSpawns({
+      orgId: ctx.orgId,
+      applicationId: ctx.defaultAppId,
+      actor: { type: "user", id: ctx.user.id },
+      agentManifest: stored!.manifest as Record<string, unknown>,
+    })
+  ).specs;
 }
 
 describe("publish → resolveIntegrationSpawns (prompt-only agent, e2e)", () => {
