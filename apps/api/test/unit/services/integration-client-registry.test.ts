@@ -84,44 +84,64 @@ describe("integration-client-registry", () => {
       expect(getSystemIntegrationClientById("pub")!.clientSecret).toBe("");
     });
 
-    it("skips invalid entries without throwing and keeps the valid ones", () => {
+    it("throws on an invalid entry, naming its index and the failing field", () => {
+      // Declared-but-invalid = boot crash: an entry silently dropped here would
+      // resurface as an unrelated "not installed" / "no OAuth client" error.
+      expect(() =>
+        initSystemIntegrations([
+          { id: GMAIL, clients: [{ id: "good", auth_key: "google", client_id: "c1" }] },
+          // missing entry id
+          { clients: [{ id: "bad-no-entry-id", auth_key: "google", client_id: "c5" }] },
+        ]),
+      ).toThrow(/SYSTEM_INTEGRATIONS entry #1 is invalid: id:/);
+      // A clientless member is still VALID (DCR) — membership only.
       initSystemIntegrations([
         { id: GMAIL, clients: [{ id: "good", auth_key: "google", client_id: "c1" }] },
-        // missing entry id
-        { clients: [{ id: "bad-no-entry-id", auth_key: "google", client_id: "c5" }] },
-        // a clientless member is VALID (DCR) — counts toward membership only
         { id: MCP },
-        // entry with a bad nested client: whole entry rejected (Zod validates the
-        // entry atomically), so neither the entry nor its client land.
-        { id: DRIVE, clients: [{ id: "bad-authkey", auth_key: "Google!", client_id: "c2" }] },
       ]);
-      expect(getSystemIntegrationClients().size).toBe(1);
-      expect(getSystemIntegrationClientById("good")).not.toBeNull();
       expect(isSystemIntegration(GMAIL)).toBe(true);
       expect(isSystemIntegration(MCP)).toBe(true);
-      expect(isSystemIntegration(DRIVE)).toBe(false);
+      expect(getSystemIntegrationClients().size).toBe(1);
     });
 
-    it("skips a duplicate integration id (first wins)", () => {
-      initSystemIntegrations([
-        { id: GMAIL, clients: [{ id: "first", auth_key: "google", client_id: "ca" }] },
-        { id: GMAIL, clients: [{ id: "second", auth_key: "google", client_id: "cb" }] },
-      ]);
-      expect(getSystemIntegrationClients().size).toBe(1);
-      expect(getSystemIntegrationClientById("first")).not.toBeNull();
-      expect(getSystemIntegrationClientById("second")).toBeNull();
+    it("throws on a bad nested client, naming the entry AND the offending client", () => {
+      // The entry schema validates `clients` atomically, so one mistyped
+      // auth_key rejects the whole entry — the message must say WHICH client.
+      let message = "";
+      try {
+        initSystemIntegrations([
+          { id: GMAIL, clients: [{ id: "good", auth_key: "google", client_id: "c1" }] },
+          { id: DRIVE, clients: [{ id: "bad-authkey", auth_key: "Google!", client_id: "c2" }] },
+        ]);
+      } catch (e) {
+        message = (e as Error).message;
+      }
+      expect(message).toContain(`SYSTEM_INTEGRATIONS entry #1 ("${DRIVE}") is invalid`);
+      expect(message).toContain('clients[0].auth_key (client "bad-authkey")');
+      expect(message).toContain("auth_key must match ^[a-z][a-z0-9_]*$");
+      // The redacted entry is safe to surface: no client_id / client_secret.
+      expect(message).not.toContain("c2");
     });
 
-    it("skips a duplicate client id across entries (client_ref keyspace is global)", () => {
-      initSystemIntegrations([
-        { id: GMAIL, clients: [{ id: "dup", auth_key: "google", client_id: "first" }] },
-        { id: DRIVE, clients: [{ id: "dup", auth_key: "google", client_id: "second" }] },
-      ]);
-      // Both integrations are members; only the first client keeps the id.
-      expect(isSystemIntegration(GMAIL)).toBe(true);
-      expect(isSystemIntegration(DRIVE)).toBe(true);
-      expect(getSystemIntegrationClients().size).toBe(1);
-      expect(getSystemIntegrationClientById("dup")!.clientId).toBe("first");
+    it("throws on a duplicate integration id instead of keeping the first", () => {
+      expect(() =>
+        initSystemIntegrations([
+          { id: GMAIL, clients: [{ id: "first", auth_key: "google", client_id: "ca" }] },
+          { id: GMAIL, clients: [{ id: "second", auth_key: "google", client_id: "cb" }] },
+        ]),
+      ).toThrow(`SYSTEM_INTEGRATIONS entry #1 re-declares integration id "${GMAIL}"`);
+    });
+
+    it("throws on a duplicate client id across entries (client_ref keyspace is global)", () => {
+      expect(() =>
+        initSystemIntegrations([
+          { id: GMAIL, clients: [{ id: "dup", auth_key: "google", client_id: "first" }] },
+          { id: DRIVE, clients: [{ id: "dup", auth_key: "google", client_id: "second" }] },
+        ]),
+      ).toThrow(
+        `SYSTEM_INTEGRATIONS entry #1 ("${DRIVE}") declares client id "dup", already registered ` +
+          `by integration "${GMAIL}"`,
+      );
     });
 
     it("returns multiple clients for the same (integration, authKey) in env order", () => {

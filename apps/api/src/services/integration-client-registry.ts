@@ -101,9 +101,10 @@ function authIndexKey(integrationId: string, authKey: string): string {
 
 /**
  * Parse + validate `SYSTEM_INTEGRATIONS` and populate the module-static
- * registry. Invalid entries (and invalid nested clients) are skipped with a
- * logged error — one bad entry never blocks the rest, exactly like
- * `initSystemModelProviderKeys`. Call once at boot, before any connect/refresh
+ * registry. Every declared entry MUST be valid and uniquely identified: an
+ * invalid entry, a duplicate integration id or a duplicate client id THROWS and
+ * aborts boot (same rule as `initSystemModelProviderKeys`' strict branch — see
+ * the rationale on each throw). Call once at boot, before any connect/refresh
  * path runs.
  */
 export function initSystemIntegrations(rawOverride?: unknown[]): void {
@@ -115,23 +116,37 @@ export function initSystemIntegrations(rawOverride?: unknown[]): void {
   const ids = new Set<string>();
   const clients = new Map<string, SystemIntegrationClientDefinition>();
 
-  for (const entry of entries) {
+  // Indexed so an error can point at a position in the env array: the entry id
+  // is itself what may be missing or malformed, so it cannot be the only handle.
+  for (const [index, entry] of entries.entries()) {
     const parsed = rawSystemIntegrationSchema.safeParse(entry);
     if (!parsed.success) {
-      logger.error("[integration-client-registry] SYSTEM_INTEGRATIONS: skipping invalid entry", {
-        error: parsed.error.issues[0]?.message,
-        // Drop nested client secrets before logging.
-        entry: redactEntry(entry),
-      });
-      continue;
+      // ENFORCED INVARIANT: every declared SYSTEM_INTEGRATIONS entry is valid.
+      // Declared-but-invalid = boot crash (throw, not skip): silently dropping
+      // the entry would leave the operator believing the integration is offered
+      // while every downstream failure blames application state instead of the
+      // env var — a dropped membership surfaces as "Integration 'X' is not
+      // installed in this application", a dropped client as "Administrator must
+      // register OAuth client credentials for …". The entry schema embeds
+      // `clients` and validates atomically, so ONE mistyped nested client takes
+      // its integration's membership down with it: `describeIssue` names the
+      // exact failing path (and client) rather than just "this entry".
+      throw new Error(
+        `[integration-client-registry] SYSTEM_INTEGRATIONS entry #${index}${describeEntryId(entry)} ` +
+          `is invalid: ${describeIssue(entry, parsed.error.issues[0])}. Fix or remove it — a declared ` +
+          `integration that was silently dropped fails later at connect time with an unrelated error ` +
+          `blaming application state. Entry (secrets redacted): ${JSON.stringify(redactEntry(entry))}`,
+      );
     }
     const { id, clients: rawClients } = parsed.data;
     if (ids.has(id)) {
-      logger.error(
-        "[integration-client-registry] SYSTEM_INTEGRATIONS: skipping duplicate integration id",
-        { id },
+      // Same reasoning: keeping the first and dropping the rest would strip the
+      // later entry's clients while the operator reads both in the env var.
+      throw new Error(
+        `[integration-client-registry] SYSTEM_INTEGRATIONS entry #${index} re-declares integration id ` +
+          `"${id}", already declared by an earlier entry. Merge their clients into a single entry — ` +
+          `dropping the duplicate would silently discard everything the later one configures.`,
       );
-      continue;
     }
     ids.add(id);
 
@@ -139,12 +154,16 @@ export function initSystemIntegrations(rawOverride?: unknown[]): void {
       if (clients.has(c.id)) {
         // Client ids are the `client_ref` keyspace and resolved globally
         // (system-first by id) — they must be unique across ALL integrations,
-        // not just within one entry.
-        logger.error(
-          "[integration-client-registry] SYSTEM_INTEGRATIONS: skipping duplicate client id",
-          { id: c.id, integrationId: id },
+        // not just within one entry. A collision has no safe resolution: the
+        // loser's connections would pin a `client_ref` that resolves to another
+        // integration's credentials (`resolveSystemClientForAuth` then returns
+        // null and the connect path reports a missing OAuth client). Refuse to
+        // boot instead of picking a winner behind the operator's back.
+        throw new Error(
+          `[integration-client-registry] SYSTEM_INTEGRATIONS entry #${index} ("${id}") declares client id ` +
+            `"${c.id}", already registered by integration "${clients.get(c.id)!.integrationId}". Client ids ` +
+            `form one global keyspace (the connection's client_ref) — rename one of them.`,
         );
-        continue;
       }
       clients.set(c.id, {
         id: c.id,
@@ -165,11 +184,12 @@ export function initSystemIntegrations(rawOverride?: unknown[]): void {
 }
 
 /**
- * Redact nested client credentials from a raw entry before logging. Drops BOTH
+ * Redact nested client credentials from a raw entry before it is logged or
+ * embedded in a boot error message. Drops BOTH
  * `client_secret` and `client_id`: the system client_id is a deployment secret
  * (never returned to the front — only an opaque fingerprint is, see
  * `fingerprintSystemClientId` in integration-connections.ts), so it must not
- * land in logs either.
+ * land in logs — or in a crash stack trace — either.
  */
 function redactEntry(entry: unknown): unknown {
   if (!entry || typeof entry !== "object") return entry;
@@ -182,6 +202,46 @@ function redactEntry(entry: unknown): unknown {
       )
     : e.clients;
   return { ...e, clients };
+}
+
+/**
+ * ` ("@scope/name")` when the raw entry carries a usable string id, `""`
+ * otherwise. The entry id is the operator's own handle on the entry, so quote
+ * it whenever it survived far enough to be readable — the array index alone
+ * makes them count braces in a one-line env var.
+ */
+function describeEntryId(entry: unknown): string {
+  const id = (entry as { id?: unknown } | null | undefined)?.id;
+  return typeof id === "string" && id.length > 0 ? ` ("${id}")` : "";
+}
+
+/**
+ * Render a Zod issue as `path: message`, naming the offending nested client by
+ * its own id when the failure is inside `clients[n]`. `rawSystemIntegrationSchema`
+ * embeds the client array and validates it atomically, so a single mistyped
+ * `auth_key` rejects the whole entry; without the path the operator would only
+ * learn that "the Gmail entry" is bad, not which of its clients. Naming the bad
+ * client needs no schema restructuring — the issue already carries the path.
+ */
+function describeIssue(entry: unknown, issue: z.core.$ZodIssue | undefined): string {
+  if (!issue) return "unknown validation error";
+  // ["clients", 0, "auth_key"] → "clients[0].auth_key"
+  const path = issue.path
+    .map((p) => (typeof p === "number" ? `[${p}]` : `.${String(p)}`))
+    .join("")
+    .replace(/^\./, "");
+  let where = path.length > 0 ? path : "(entry root)";
+  const [head, idx] = issue.path;
+  if (head === "clients" && typeof idx === "number") {
+    const rawClients = (entry as { clients?: unknown } | null | undefined)?.clients;
+    const clientId = Array.isArray(rawClients)
+      ? (rawClients[idx] as { id?: unknown } | null | undefined)?.id
+      : undefined;
+    // The client id is not a secret (unlike client_id/client_secret, which
+    // `redactEntry` drops) — it is the `client_ref` the API exposes.
+    if (typeof clientId === "string" && clientId.length > 0) where += ` (client "${clientId}")`;
+  }
+  return `${where}: ${issue.message}`;
 }
 
 function ensureInitialized(): {
