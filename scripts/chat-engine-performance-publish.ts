@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { $ } from "bun";
-import { resolve } from "node:path";
 import { publishedObservationName } from "./chat-engine-performance-lib.ts";
 
 const args = Bun.argv.slice(2);
@@ -19,10 +18,10 @@ if (inputs.length === 0 || !output) {
 await $`mkdir -p ${output}`.quiet();
 const published: Array<{ file: string; sha256: string; source: string }> = [];
 for (const input of inputs) {
-  const directory = resolve(input);
+  const directory = input;
   const glob = new Bun.Glob("*-r*.json");
   for await (const filename of glob.scan({ cwd: directory, onlyFiles: true })) {
-    const source = resolve(directory, filename);
+    const source = `${directory}/${filename}`;
     const contents = await Bun.file(source).text();
     const observation = JSON.parse(contents) as { schemaVersion?: unknown; kind?: unknown };
     if (

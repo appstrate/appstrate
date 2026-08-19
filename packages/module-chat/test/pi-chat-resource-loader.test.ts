@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { $ } from "bun";
 import { afterEach, describe, expect, it } from "bun:test";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 
 import { loadPiCodingAgentSdk } from "@appstrate/runner-pi";
 
@@ -12,28 +10,25 @@ import { createPiChatResourceLoader } from "../src/pi-chat/resource-loader.ts";
 const temporaryDirectories: string[] = [];
 
 afterEach(async () => {
-  await Promise.all(
-    temporaryDirectories
-      .splice(0)
-      .map((directory) => rm(directory, { recursive: true, force: true })),
-  );
+  for (const directory of temporaryDirectories.splice(0)) {
+    await $`rm -r ${directory}`.quiet();
+  }
 });
 
 describe("Pi chat resource policy", () => {
   it("loads inline chat extensions without discovering local skills or context files", async () => {
-    const cwd = await mkdtemp(join(tmpdir(), "appstrate-pi-chat-resources-"));
+    const cwd = (await $`mktemp -d /tmp/appstrate-pi-chat-resources.XXXXXX`.text()).trim();
     temporaryDirectories.push(cwd);
-    const agentDir = join(cwd, ".pi", "agent");
-    const skillDirectory = join(cwd, ".agents", "skills", "local-only");
-    const extensionDirectory = join(agentDir, "extensions");
-    await mkdir(skillDirectory, { recursive: true });
-    await mkdir(extensionDirectory, { recursive: true });
-    await writeFile(join(skillDirectory, "SKILL.md"), "# Local only\n");
-    await writeFile(
-      join(extensionDirectory, "local-only.ts"),
+    const agentDir = `${cwd}/.pi/agent`;
+    const skillDirectory = `${cwd}/.agents/skills/local-only`;
+    const extensionDirectory = `${agentDir}/extensions`;
+    await $`mkdir -p ${skillDirectory} ${extensionDirectory}`.quiet();
+    await Bun.write(`${skillDirectory}/SKILL.md`, "# Local only\n");
+    await Bun.write(
+      `${extensionDirectory}/local-only.ts`,
       'throw new Error("local extension must not load");\n',
     );
-    await writeFile(join(cwd, "AGENTS.md"), "LOCAL CONTEXT MUST NOT LOAD\n");
+    await Bun.write(`${cwd}/AGENTS.md`, "LOCAL CONTEXT MUST NOT LOAD\n");
 
     const sdk = await loadPiCodingAgentSdk();
     const resourceLoader = await createPiChatResourceLoader({
