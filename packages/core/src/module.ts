@@ -1151,6 +1151,14 @@ export type BeforeUsageParams =
 /** Structured rejection returned by `beforeUsage` when a module blocks usage. */
 export interface UsageRejection {
   code: string;
+  /**
+   * USER-FACING. The caller surfaces this verbatim as the RFC 9457 `detail` of
+   * the refusal, and every client renders that field as-is — the SPA turns it
+   * into a toast, the chat thread shows it as the turn's failure. Write product
+   * copy that names the action clearing the refusal; never a thrown error's
+   * message, which leaks internals to the screen. Keep the diagnostic string on
+   * the module's own error object and log it there.
+   */
   message: string;
   /** HTTP status hint (e.g. 402 for payment required, 429 for rate limit). Defaults to 403. */
   status?: number;
