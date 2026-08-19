@@ -23,7 +23,11 @@ import { checkMcpLocalParity } from "./mcp-local-parity.ts";
 import { checkMcpRemoteParity } from "./remote-parity.ts";
 import { checkAuthLiveness } from "./auth-live.ts";
 import { checkOAuthMetadata } from "./oauth-metadata.ts";
-import { checkRefreshStrategy, checkUnverifiedBacklog } from "./refresh-strategy.ts";
+import {
+  checkRefreshStrategy,
+  checkUnverifiedBacklog,
+  checkBacklogCeiling,
+} from "./refresh-strategy.ts";
 import { checkIdentityEndpoints } from "./identity-endpoint.ts";
 import { AUTH_PROBES } from "./probes.ts";
 import { credentialedCount } from "./creds.ts";
@@ -109,6 +113,7 @@ async function main(): Promise<void> {
   // filter would read as stale.
   if (!args.pkg) {
     findings.push(...checkUnverifiedBacklog(selected.map((p) => p.entry)));
+    findings.push(...checkBacklogCeiling());
   }
 
   console.log(formatReport(findings));

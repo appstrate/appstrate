@@ -33,7 +33,7 @@
  *      access explicitly (Google / Dropbox / Reddit shape).
  *   2. `default_scopes` carries an offline-ish scope (`offline_access`,
  *      `offline`) — the Microsoft / Salesforce / Xero shape.
- *   3. `_meta["dev.appstrate/oauth"].refresh` states the provider needs
+ *   3. `_meta["dev.appstrate/oauth"].refresh_token_issuance` states the provider needs
  *      neither: `"default"` (issues a refresh token unconditionally) or
  *      `"not_supported"` (issues no refresh token at all — the connection
  *      re-authorises at expiry, by design).
@@ -59,7 +59,7 @@ const CHECK = "refresh-strategy";
  */
 const OFFLINE_SCOPE_PATTERN = /(^|[/.:])offline([_.]access)?$/i;
 
-/** Accepted values of `_meta["dev.appstrate/oauth"].refresh`. */
+/** Accepted values of `_meta["dev.appstrate/oauth"].refresh_token_issuance`. */
 const REFRESH_DECLARATIONS = new Set(["default", "not_supported"]);
 
 /**
@@ -69,7 +69,7 @@ const REFRESH_DECLARATIONS = new Set(["default", "not_supported"]);
  *
  * This list only ever shrinks. To remove an entry: read the provider's OAuth
  * docs, then either add the authorize param / scope it requires, or record
- * `_meta["dev.appstrate/oauth"].refresh` in the manifest. Do NOT add a new
+ * `_meta["dev.appstrate/oauth"].refresh_token_issuance` in the manifest. Do NOT add a new
  * integration here — a new manifest's author is the one person who has the
  * provider's docs open.
  */
@@ -122,10 +122,38 @@ function oauthAuths(manifest: Record<string, unknown>): Array<[string, OAuthAuth
   );
 }
 
-/** Whether the auth asks for offline access via an authorize-time parameter. */
-export function hasAuthorizeParam(auth: OAuthAuth): boolean {
+/**
+ * Authorize-time parameters that actually ask a provider for offline access,
+ * as `name` → accepted values. Every entry is transcribed from that provider's
+ * documentation; a parameter absent from this table proves nothing about
+ * refresh tokens.
+ *
+ * Named explicitly BECAUSE the first version of this check accepted any
+ * non-empty `authorization_params` as evidence — so a manifest carrying only
+ * `prompt: "select_account"` passed while requesting no offline access at all.
+ * That is the same "looks like it declares something" failure the check exists
+ * to catch.
+ */
+const OFFLINE_AUTHORIZE_PARAMS: Record<string, ReadonlySet<string>> = {
+  // Google (gmail, drive, calendar, sheets, forms, contacts, youtube).
+  access_type: new Set(["offline"]),
+  // Dropbox.
+  token_access_type: new Set(["offline"]),
+  // Reddit.
+  duration: new Set(["permanent"]),
+};
+
+/**
+ * Whether the auth asks for offline access via a RECOGNISED authorize-time
+ * parameter set to a value that actually requests it.
+ */
+export function requestsOfflineViaAuthorizeParam(auth: OAuthAuth): boolean {
   const params = auth.authorization_params;
-  return !!params && typeof params === "object" && Object.keys(params as object).length > 0;
+  if (!params || typeof params !== "object") return false;
+  return Object.entries(params as Record<string, unknown>).some(([name, value]) => {
+    const accepted = OFFLINE_AUTHORIZE_PARAMS[name];
+    return accepted !== undefined && typeof value === "string" && accepted.has(value);
+  });
 }
 
 /** Whether the auth asks for offline access via a scope. */
@@ -145,18 +173,18 @@ export function refreshDeclaration(auth: OAuthAuth): string | undefined {
   if (!meta || typeof meta !== "object") return undefined;
   const oauthMeta = (meta as Record<string, unknown>)["dev.appstrate/oauth"];
   if (!oauthMeta || typeof oauthMeta !== "object") return undefined;
-  const value = (oauthMeta as Record<string, unknown>).refresh;
+  const value = (oauthMeta as Record<string, unknown>).refresh_token_issuance;
   return typeof value === "string" && REFRESH_DECLARATIONS.has(value) ? value : undefined;
 }
 
 /** Evaluate one auth. Exported for the harness's own unit tests. */
 export function evaluateAuth(packageId: string, authKey: string, auth: OAuthAuth): Finding {
-  if (hasAuthorizeParam(auth)) {
+  if (requestsOfflineViaAuthorizeParam(auth)) {
     return {
       packageId,
       check: CHECK,
       severity: "info",
-      message: `${authKey}: refresh requested via authorization_params`,
+      message: `${authKey}: refresh requested via a recognised authorization parameter`,
     };
   }
   if (hasOfflineScope(auth)) {
@@ -179,7 +207,7 @@ export function evaluateAuth(packageId: string, authKey: string, auth: OAuthAuth
   const message =
     `${authKey}: no refresh strategy — the auth requests no offline access ` +
     `(authorization_params / offline scope) and declares no ` +
-    `_meta["dev.appstrate/oauth"].refresh ("default" | "not_supported"). ` +
+    `_meta["dev.appstrate/oauth"].refresh_token_issuance ("default" | "not_supported"). ` +
     `A provider that mints short-lived tokens will return none, and the ` +
     `connection is refused at connect time.`;
   return UNVERIFIED.has(`${packageId}:${authKey}`)
@@ -194,6 +222,34 @@ export function declaredAuthKeys(entries: SystemPackageEntry[]): Set<string> {
     for (const [key] of oauthAuths(entry.manifest)) keys.add(`${entry.packageId}:${key}`);
   }
   return keys;
+}
+
+/**
+ * Ceiling on the backlog. Lower it — never raise it — as entries are verified
+ * and removed.
+ *
+ * Without a ceiling the waiver list is a TODO in a nicer shell: it can grow
+ * silently, and 29 permanent warnings train everyone to stop reading the
+ * report. The repo already ratchets `verify:type-coverage --at-least 98` for
+ * the same reason; this is that pattern applied to provider knowledge.
+ */
+export const UNVERIFIED_CEILING = 29;
+
+/** Fail when the backlog grows past its ceiling. */
+export function checkBacklogCeiling(): Finding[] {
+  if (UNVERIFIED.size <= UNVERIFIED_CEILING) return [];
+  return [
+    {
+      packageId: "(conformance)",
+      check: CHECK,
+      severity: "fail",
+      message:
+        `UNVERIFIED holds ${UNVERIFIED.size} entries, above the ceiling of ` +
+        `${UNVERIFIED_CEILING}. A new integration must declare its refresh strategy, ` +
+        `not join the backlog — the list only ever shrinks. If an entry was genuinely ` +
+        `verified away, lower UNVERIFIED_CEILING to match.`,
+    },
+  ];
 }
 
 /**
