@@ -109,7 +109,8 @@ describe("public OAuth client is declared, not inferred", () => {
    * A row exactly as it was written before `token_endpoint_auth_method`
    * existed: no declaration, and a ciphertext over an EMPTY secret. Structurally
    * `NULL` + non-empty ciphertext, so it satisfies `ioc_public_iff_no_secret` —
-   * which is precisely why the CHECK cannot eliminate it and the backfill must.
+   * which is precisely why the CHECK cannot eliminate it and only a human
+   * running the `UPDATE` the refusal prints can.
    */
   async function seedLegacyPublicRow(clientId = "legacy-cid"): Promise<string> {
     const [row] = await db
@@ -173,8 +174,9 @@ describe("public OAuth client is declared, not inferred", () => {
     // callers rather than a live path.
     //
     // Deleting the guard instead of throwing would be worse: the fall-through
-    // writes a NULL method beside a ciphertext over an empty secret, which is
-    // precisely the legacy row the backfill script exists to repair.
+    // writes a NULL method beside a ciphertext over an empty secret — a fresh
+    // instance of the legacy row whose only repair is a human running an
+    // `UPDATE`, which is not a state worth manufacturing more of.
     it("throws when a blank secret arrives with no declared method", () => {
       expect(() => encodeClientAuthForStorage({ clientSecret: "" })).toThrow(
         /no token_endpoint_auth_method/,
@@ -288,8 +290,8 @@ describe("public OAuth client is declared, not inferred", () => {
     // The inverse of the case this file used to assert. A row written before
     // the column encrypted an EMPTY secret instead of declaring `none`, and the
     // resolver re-derived `"none"` from the emptiness. That inference is the
-    // one the column exists to delete, so the row is now refused by name — with
-    // the backfill command in the message, because nothing else can fix it
+    // one the column exists to delete, so the row is now refused by name — and
+    // the message carries the repair, because nothing automatic can fix it
     // (Postgres cannot see through the ciphertext, so no migration can).
     it("refuses a legacy row that encrypted an empty secret", async () => {
       const id = await seedLegacyPublicRow();
@@ -300,7 +302,10 @@ describe("public OAuth client is declared, not inferred", () => {
         AUTH_KEY,
         "client_secret_post",
       );
-      await expect(attempt).rejects.toThrow(/backfill-public-oauth-clients\.ts/);
+      // The remedy names THIS row: an operator must be able to paste it.
+      await expect(attempt).rejects.toThrow(
+        new RegExp(`UPDATE integration_oauth_clients .* WHERE id = '${id}';`),
+      );
       await expect(attempt).rejects.toThrow(ClientAuthInvariantError);
     });
 
@@ -419,11 +424,19 @@ describe("public OAuth client is declared, not inferred", () => {
       await expect(resolveForConnect(PUBLIC_AUTH)).rejects.toThrow(/cannot be decrypted/);
     });
 
-    it("refuses a legacy row, naming the backfill command", async () => {
+    // Both exits belong in the message. Canonicalising a row that is actually
+    // confidential would publish it, so the refusal offers the UPDATE *and* the
+    // re-registration and lets the operator pick — the same pair the
+    // unreadable-ciphertext refusal above offers.
+    it("refuses a legacy row, naming the SQL repair and the re-registration", async () => {
       const id = await seedLegacyPublicRow();
       await expect(resolveForConnect()).rejects.toThrow(
-        /bun scripts\/maintenance\/backfill-public-oauth-clients\.ts --dry-run/,
+        new RegExp(
+          `UPDATE integration_oauth_clients SET token_endpoint_auth_method = 'none', ` +
+            `client_secret_encrypted = '' WHERE id = '${id}';`,
+        ),
       );
+      await expect(resolveForConnect()).rejects.toThrow(/re-register it with its secret/);
       const clients = await listIntegrationClients(scope, INTEGRATION, AUTH_KEY);
       const custom = clients.find((c) => c.client_ref === id);
       // The list's marker for the state: no declaration AND no readable secret.

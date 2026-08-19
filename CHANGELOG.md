@@ -194,27 +194,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   recognise such a row, and the read paths went on inferring `none` from it —
   the exact inference that produced the `client_secret=` incident above. The
   connect and refresh resolvers now refuse a client that declares no method and
-  holds no secret, naming the row, the integration, the auth key and the
-  command that repairs it; the refresh path logs it as well as throwing,
-  because its callers turn anything non-transient into a `500` body no operator
-  reads. Refusing is the conservative half of the trade: such a client stops
-  working at connect and refresh time until it is canonicalised, where before
-  it "worked" by sending a request the provider rejects.
+  holds no secret, naming the row, the integration, the auth key and the repair
+  that fixes it; the refresh path logs it as well as throwing, because its
+  callers turn anything non-transient into a `500` body no operator reads.
+  Refusing is the conservative half of the trade: such a client stops working at
+  connect and refresh time until it is canonicalised, where before it "worked"
+  by sending a request the provider rejects.
 
-  **Before deploying**, run `bun scripts/maintenance/backfill-public-oauth-clients.ts --dry-run`
-  to preview, then the same command without the flag to apply. It decrypts each
-  undeclared row and decides it: an empty secret becomes
-  `token_endpoint_auth_method='none'` with the ciphertext cleared, a real
-  secret is left alone (`NULL` correctly means "the manifest decides", which is
-  what a confidential client wants). A row whose ciphertext does not open is
-  reported and skipped, never guessed at — writing `none` there would turn a
-  confidential client public. The exit codes separate "I looked at your data
-  and some rows need attention" from "I never got to look": `0` everything
-  decided, `1` the pass completed but undecryptable rows remain (their remedy
-  is printed; every other row WAS canonicalised), `2` the table or database was
-  unreachable so nothing was examined and nothing written. It is idempotent,
-  and neither `DATABASE_URL` nor `CONNECTION_ENCRYPTION_KEY` is echoed on any
-  path, so the output can go straight into a ticket.
+  No pre-deploy step is needed, and none is offered. The refusal fires per row,
+  at the moment that row is used, and by then it has already been decrypted —
+  so the message can name the id and print the statement:
+
+  ```sql
+  UPDATE integration_oauth_clients
+     SET token_endpoint_auth_method = 'none', client_secret_encrypted = ''
+   WHERE id = '<id>';
+  ```
+
+  Run it only if that client really is public; if it is confidential,
+  re-register it with its secret from the integration's OAuth clients admin
+  screen instead. That choice is the reason this is a human decision and not a
+  sweep: `NULL` means "the manifest decides", which is exactly what a
+  confidential client wants, and blanket canonicalisation would publish one.
 
 - **A refresh that answered `200` with no `access_token` was recorded as a
   success — and disarmed every later check** — `performRefreshTokenExchange`

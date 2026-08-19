@@ -210,10 +210,12 @@ export const integrationOauthClients = pgTable(
      * "does this client have a secret" is a column read rather than a
      * decryption. Rows written before `token_endpoint_auth_method` existed may
      * still hold a ciphertext over an empty secret. Nothing reads that state as
-     * a public client any more — the connect and refresh resolvers reject it by
-     * name and point at `scripts/maintenance/backfill-public-oauth-clients.ts`,
-     * which is the only thing that can canonicalise it (Postgres cannot see
-     * through the ciphertext, so no migration can).
+     * a public client any more — the connect and refresh resolvers reject such
+     * a row by name and print the `UPDATE … SET token_endpoint_auth_method =
+     * 'none', client_secret_encrypted = '' WHERE id = …` that canonicalises it.
+     * A human runs it, because only a human knows whether the client really is
+     * public: Postgres cannot see through the ciphertext, so no migration and
+     * no CHECK can tell that row apart from a confidential one.
      */
     clientSecretEncrypted: text("client_secret_encrypted").notNull(),
     /**
@@ -283,14 +285,16 @@ export const integrationOauthClients = pgTable(
     // make unrepresentable: a row can no longer claim to be public while
     // holding a secret, nor name a secret-based method while holding none.
     //
-    // This does NOT have to wait for the backfill, which was the original
-    // reading. A legacy public row is structurally `NULL` + a ciphertext (of an
-    // empty secret), which satisfies the second branch — Postgres cannot see
-    // through the ciphertext, so it cannot recognise that row as public either
-    // way. No existing row violates this, so it lands VALID immediately — and
-    // by the same token it can never eliminate one, which is why the legacy
-    // read paths were replaced by a loud refusal rather than by a migration.
-    // The backfill still runs, to canonicalise those rows' MEANING.
+    // This does NOT have to wait for any repair of the legacy rows, which was
+    // the original reading. A legacy public row is structurally `NULL` + a
+    // ciphertext (of an empty secret), which satisfies the second branch —
+    // Postgres cannot see through the ciphertext, so it cannot recognise that
+    // row as public either way. No existing row violates this, so it lands
+    // VALID immediately — and by the same token it can never eliminate one,
+    // which is why the legacy read paths were replaced by a loud refusal rather
+    // than by a migration. The refusal prints the `UPDATE` that fixes the row's
+    // MEANING; a human runs it, because only a human can tell that row from a
+    // confidential one.
     check(
       "ioc_public_iff_no_secret",
       sql`(${table.tokenEndpointAuthMethod} = 'none' AND ${table.clientSecretEncrypted} = '') OR (${table.tokenEndpointAuthMethod} IS DISTINCT FROM 'none' AND ${table.clientSecretEncrypted} <> '')`,

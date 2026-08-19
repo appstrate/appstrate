@@ -673,8 +673,10 @@ async function hasDefaultCustomClient(
  * Note that DELETING these guards rather than throwing would be worse than the
  * inference they replace: falling through to the final return writes a NULL
  * method beside a ciphertext over an empty secret — exactly the legacy row
- * shape `scripts/maintenance/backfill-public-oauth-clients.ts` exists to
- * repair, and which the CHECK constraint cannot recognise.
+ * shape that the CHECK constraint cannot recognise, and that the connect and
+ * refresh resolvers can only refuse and hand back to a human with an UPDATE to
+ * run. Manufacturing new instances of a state whose only repair is manual is
+ * not a trade worth making.
  */
 export function encodeClientAuthForStorage(input: {
   clientSecret?: string | undefined;
@@ -951,9 +953,17 @@ function systemConnectClient(def: SystemIntegrationClientDefinition): ResolvedCo
  * for the same reason — the connect-time guard (`assertConnectClientUsable`)
  * and the refresh resolver (`resolveIntegrationClientById`) — and each used to
  * carry its own hand-copied transcription of this paragraph, character-identical
- * down to the maintenance-script path. Two copies of an operator remedy is one
- * copy too many: the next edit to the command updates whichever one the author
+ * down to the remedy at the end. Two copies of an operator remedy is one copy
+ * too many: the next edit to the remedy updates whichever one the author
  * happened to be reading and leaves the other quietly wrong.
+ *
+ * The remedy is a statement, not a tool. Both callers reach this only AFTER
+ * decrypting the row and finding an empty secret, so "this ciphertext means
+ * public" is already established for THIS row — which makes naming the id and
+ * the exact UPDATE safe, and makes a script that re-derives the same fact for a
+ * whole table redundant. The two exits mirror the sibling
+ * unreadable-ciphertext refusal above: canonicalise the row, or re-register the
+ * client. What we will not do is pick between them on the operator's behalf.
  *
  * `clientRef` is the client's id; `where` its `'<integration>' auth '<key>'`
  * locator, which the two callers assemble from different fields.
@@ -964,9 +974,11 @@ function legacyUndeclaredPublicClientMessage(clientRef: string, where: string): 
     `one: it predates token_endpoint_auth_method and stored an encrypted EMPTY secret ` +
     `instead of declaring 'none'. Refusing to guess — inferring 'none' from that emptiness ` +
     `is what put 'client_secret=' (present but empty) on the wire, which providers such as ` +
-    `Dropbox reject with invalid_client. Canonicalise it: ` +
-    `\`bun scripts/maintenance/backfill-public-oauth-clients.ts --dry-run\` to preview, then ` +
-    `\`bun scripts/maintenance/backfill-public-oauth-clients.ts\` to apply.`
+    `Dropbox reject with invalid_client. Decide it by hand: if this client really is public, ` +
+    `canonicalise the row with \`UPDATE integration_oauth_clients SET ` +
+    `token_endpoint_auth_method = 'none', client_secret_encrypted = '' WHERE id = ` +
+    `'${clientRef}';\` — if it is confidential, re-register it with its secret from the ` +
+    `integration's OAuth clients admin screen.`
   );
 }
 
@@ -994,8 +1006,10 @@ function legacyUndeclaredPublicClientMessage(clientRef: string, where: string): 
  *   - no declared method AND no readable secret: a LEGACY row, written before
  *     `token_endpoint_auth_method` existed, which encrypted an EMPTY secret
  *     instead of declaring `none`. The CHECK cannot see through ciphertext, so
- *     the constraint accepts it and no migration can canonicalise it — only
- *     the backfill script can. Under the CHECK this pair means nothing else.
+ *     the constraint accepts it and no migration can canonicalise it blindly —
+ *     only somebody who knows whether the client is really public can, which
+ *     is why the throw hands them the exact UPDATE rather than running it.
+ *     Under the CHECK this pair means nothing else.
  *
  * The admin client list deliberately keeps rendering both (see
  * `projectClientWithSecret`): the admin has to see the broken row to fix it.
@@ -1204,7 +1218,7 @@ export async function resolveIntegrationClientById(
     // `client_secret=` (present but empty) to providers that reject it, and
     // when the manifest declares no method at all it would hand the exchange
     // an empty secret with no method, which `assertClientAuthCoherent` waves
-    // through. Fail loud, name the row, name the command.
+    // through. Fail loud, name the row, print the statement that repairs it.
     const message = legacyUndeclaredPublicClientMessage(
       clientRef,
       `'${integrationId}' auth '${authKey}'`,

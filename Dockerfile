@@ -125,11 +125,6 @@ COPY --from=build --parents /app/./packages/*/src /app/./packages/*/package.json
 COPY --from=build /app/packages/core/schema ./packages/core/schema
 COPY --from=build /app/packages/db/drizzle ./packages/db/drizzle
 
-# Operator-facing maintenance scripts. Runtime errors name these by path
-# (e.g. the pre-`token_endpoint_auth_method` OAuth-client backfill), so an
-# error that says "run X" must point at a file that is actually here.
-COPY --from=build /app/scripts/maintenance ./scripts/maintenance
-
 # Built frontend
 COPY --from=build /app/apps/web/dist ./apps/web/dist
 

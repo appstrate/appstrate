@@ -6,7 +6,6 @@
   "include": [
     "check-consumer-versions.ts",
     "maintenance/audit-empty-integration-selections.ts",
-    "maintenance/backfill-public-oauth-clients.ts",
     "maintenance/storage-orphans.ts",
     "test/check-consumer-versions.test.ts",
     "verify-module-contract.ts",

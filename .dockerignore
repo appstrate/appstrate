@@ -51,10 +51,6 @@ conformance-snapshot/
 # Documentation and configs (not needed in images)
 docs/
 scripts/
-# …except operator-facing maintenance scripts: runtime error messages tell an
-# operator to RUN these, so they must exist in the production image. Everything
-# else under scripts/ is build/CI-only and stays out of the context.
-!scripts/maintenance/
 .github/
 .husky/
 CLAUDE.md
