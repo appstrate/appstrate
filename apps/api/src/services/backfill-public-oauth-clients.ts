@@ -9,8 +9,7 @@
  * comments and enforced nowhere, which sent `client_secret=` (present but
  * empty) to providers that reject it. The column now stores the admin's
  * declaration, but legacy rows still encrypt an EMPTY secret rather than
- * declaring `none`, so the resolver keeps a legacy branch that decrypts to find
- * out.
+ * declaring `none`.
  *
  * Postgres cannot do this itself: `client_secret_encrypted` is ciphertext, so a
  * SQL migration cannot tell an empty secret from a real one. Hence a service
@@ -24,9 +23,11 @@
  *     decides", which is what a confidential client wants.
  *   - undecryptable → REPORTED and skipped, never guessed at.
  *
- * Idempotent — a second run finds nothing to do. Once every deployment has run
- * it, the resolver's legacy branch and `projectClientWithSecret`'s legacy
- * fallback can be deleted.
+ * Idempotent — a second run finds nothing to do. The resolvers no longer carry
+ * a branch that reads a legacy row's meaning out of its ciphertext: connect and
+ * refresh both REFUSE such a row and name this script as the remedy. So running
+ * it is what makes those clients usable again, not merely tidier — and this is
+ * the only thing that can, since Postgres cannot see through the ciphertext.
  *
  * This module decides and writes; it never prints. The caller owns the report
  * and the exit code — same split as `./storage-orphans.ts` and

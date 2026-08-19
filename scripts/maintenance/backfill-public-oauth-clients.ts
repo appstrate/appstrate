@@ -10,8 +10,7 @@
  * inference asserted in comments and enforced nowhere, which sent
  * `client_secret=` (present but empty) to providers that reject it. The column
  * now stores the admin's declaration, but legacy rows still encrypt an EMPTY
- * secret rather than declaring `none`, so the resolver keeps a legacy branch
- * that decrypts to find out.
+ * secret rather than declaring `none`.
  *
  * Postgres cannot do this itself: `client_secret_encrypted` is ciphertext, so
  * a SQL migration cannot tell an empty secret from a real one. Hence a script,
@@ -27,12 +26,16 @@
  * at, and makes this script exit 1 — writing `none` there would silently turn a
  * confidential client into a public one.
  *
- * Idempotent — a second run finds nothing to do. Once every deployment has run
- * it, the resolver's legacy branch and `projectClientWithSecret`'s legacy
- * fallback can be deleted. The biconditional CHECK (`ioc_public_iff_no_secret`,
- * public IFF no ciphertext) does NOT wait on this script and is already in
- * place: a legacy public row is `NULL` + a ciphertext of an empty secret, which
- * the constraint cannot see through and therefore already accepts.
+ * Idempotent — a second run finds nothing to do. This is REMEDIAL, not
+ * cosmetic: the resolvers no longer read a legacy row's meaning out of its
+ * ciphertext, so connecting or refreshing such a client fails with an error
+ * naming this command until it has run.
+ *
+ * The biconditional CHECK (`ioc_public_iff_no_secret`, public IFF no
+ * ciphertext) does NOT wait on this script and is already in place: a legacy
+ * public row is `NULL` + a ciphertext of an empty secret, which the constraint
+ * cannot see through and therefore already accepts — and, by the same token,
+ * can never eliminate. Only this script can.
  *
  * All logic lives in the service so it resolves its deps and stays testable —
  * same split as `scripts/maintenance/storage-orphans.ts`.
