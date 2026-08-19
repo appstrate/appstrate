@@ -134,7 +134,7 @@ describe("resolveIntegrationSpawns — delivery.files (CC-5)", () => {
       client_key: "-----BEGIN PRIVATE KEY-----\nXYZ\n-----END PRIVATE KEY-----",
     });
 
-    const specs = await resolveIntegrationSpawns({
+    const { specs } = await resolveIntegrationSpawns({
       orgId: ctx.orgId,
       applicationId: ctx.defaultAppId,
       actor: { type: "user", id: ctx.user.id },
@@ -175,7 +175,7 @@ describe("resolveIntegrationSpawns — delivery.files (CC-5)", () => {
       client_key: "key-bytes",
     });
 
-    const specs = await resolveIntegrationSpawns({
+    const { specs } = await resolveIntegrationSpawns({
       orgId: ctx.orgId,
       applicationId: ctx.defaultAppId,
       actor: { type: "user", id: ctx.user.id },
@@ -199,7 +199,7 @@ describe("resolveIntegrationSpawns — delivery.files (CC-5)", () => {
     await seedServer(ctx);
     await seedConnection(ctx, { client_cert: "c", client_key: "k" });
 
-    const specs = await resolveIntegrationSpawns({
+    const { specs } = await resolveIntegrationSpawns({
       orgId: ctx.orgId,
       applicationId: ctx.defaultAppId,
       actor: { type: "user", id: ctx.user.id },
@@ -238,7 +238,7 @@ describe("resolveIntegrationSpawns — delivery.files (CC-5)", () => {
     await seedServer(ctx);
     await seedConnection(ctx, { api_key: "k-1" });
 
-    const specs = await resolveIntegrationSpawns({
+    const { specs } = await resolveIntegrationSpawns({
       orgId: ctx.orgId,
       applicationId: ctx.defaultAppId,
       actor: { type: "user", id: ctx.user.id },

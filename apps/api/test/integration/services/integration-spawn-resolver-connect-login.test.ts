@@ -123,7 +123,7 @@ describe("resolveIntegrationSpawns — connect.tool run-start", () => {
       credentials: { identifiant: "user1", mot_de_passe: "s3cr3t" },
     });
 
-    const specs = await resolveIntegrationSpawns({
+    const { specs } = await resolveIntegrationSpawns({
       orgId: ctx.orgId,
       applicationId: ctx.defaultAppId,
       actor: { type: "user", id: ctx.user.id },
@@ -187,7 +187,7 @@ describe("resolveIntegrationSpawns — connect.tool run-start", () => {
       updatedAt: new Date(),
     });
 
-    const specs = await resolveIntegrationSpawns({
+    const { specs } = await resolveIntegrationSpawns({
       orgId: ctx.orgId,
       applicationId: ctx.defaultAppId,
       actor: { type: "user", id: ctx.user.id },
@@ -254,7 +254,7 @@ describe("resolveIntegrationSpawns — connect.tool run-start", () => {
       credentials: { identifiant: "user1", mot_de_passe: "s3cr3t" },
     });
 
-    const specs = await resolveIntegrationSpawns({
+    const { specs } = await resolveIntegrationSpawns({
       orgId: ctx.orgId,
       applicationId: ctx.defaultAppId,
       actor: { type: "user", id: ctx.user.id },
@@ -341,7 +341,7 @@ describe("resolveIntegrationSpawns — connect.tool run-start", () => {
       integrations_configuration: { [INTEG]: { tools: "*" } },
     };
 
-    const specs = await resolveIntegrationSpawns({
+    const { specs } = await resolveIntegrationSpawns({
       orgId: ctx.orgId,
       applicationId: ctx.defaultAppId,
       actor: { type: "user", id: ctx.user.id },

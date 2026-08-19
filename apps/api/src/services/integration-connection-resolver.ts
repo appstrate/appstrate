@@ -32,10 +32,12 @@ import type {
   IntegrationPinRow as PinRow,
 } from "@appstrate/db/schema";
 import {
+  isToolsWildcard,
   parseManifestIntegrations,
   type ManifestIntegrationEntry,
 } from "@appstrate/core/dependencies";
 import {
+  resolveEffectiveToolSelection,
   missingScopesForConnection,
   manifestAuthKeySet,
   manifestHasRequiredAuth,
@@ -66,10 +68,14 @@ export interface IntegrationRequirement {
   integrationId: string;
   manifest: IntegrationManifest;
   /**
-   * True when the agent's `tools[]` selection is non-empty OR the wildcard
+   * True when the EFFECTIVE tool selection is non-empty OR the wildcard
    * literal `"*"` — i.e. the integration is actually used at run time.
-   * Empty-selection integrations are declared-but-inert and skipped by the
-   * resolver.
+   * Effective = the agent's `integrations_configuration[id].tools` when it
+   * declared one, otherwise the integration manifest's `default_tools`
+   * (AFPS §4.4) — the same `resolveEffectiveToolSelection` the spawn resolver
+   * applies, so "will be spawned" and "needs a connection verdict" cannot
+   * drift apart. Only a genuinely empty effective selection is
+   * declared-but-inert and skipped by the resolver.
    */
   hasSelectedTools: boolean;
   /**
@@ -186,8 +192,12 @@ export function resolveConnections(input: ResolveConnectionsInput): ConnectionRe
   const { adminPins, memberPins } = indexPins(input.pins, input.actorUserId ?? null);
 
   for (const req of input.requirements) {
-    // Inert only when the agent picked neither tools nor scopes AND the
-    // integration declares no required auth. apiCall integrations expose no
+    // Inert only when the EFFECTIVE selection (agent's `tools[]`, else the
+    // integration's `default_tools` — see `hasSelectedTools`) is empty, the
+    // agent picked no scopes, AND the integration declares no required auth.
+    // Anything the spawn resolver will start is non-inert here by
+    // construction, so it always carries a verdict into
+    // `runs.resolved_connections`. apiCall integrations expose no
     // tools, so scope selection keeps them active; an auth marked
     // `_meta["dev.appstrate/auth"].required` keeps a declared dependency active
     // even with no selection, so a missing connection still blocks the run. The
@@ -706,12 +716,35 @@ async function buildRequirement(
   // agent opted into every upstream tool); thread the literal through so
   // `requiredScopesForAgent` can branch to the auth's `default_scopes`.
   const wildcard = entry.tools === "*";
-  const hasArrayTools = Array.isArray(entry.tools) && entry.tools.length > 0;
+  // "Is this integration actually used at run time?" MUST be answered by the
+  // SAME function the spawn resolver answers it with
+  // (`resolveEffectiveToolSelection`, integration-spawn-resolver.ts). The two
+  // used to disagree: this site read the RAW `integrations_configuration[id]
+  // .tools` (left `undefined` by `parseManifestIntegrations` when the agent
+  // declares `dependencies.integrations` only), while the spawn resolver read
+  // the EFFECTIVE selection, which inherits the integration manifest's
+  // `default_tools`. An agent with a bare dependency declaration was therefore
+  // INERT here (no cascade verdict, no `runs.resolved_connections` entry) and
+  // ACTIVE there — and the spawn resolver's `resolvedConnection ?? null`
+  // collapses "no verdict for this integration" into "no snapshot at all",
+  // which falls through to `pickAnyAccessibleConnection` and its
+  // `rows.find(ownsRow) ?? rows[0]` tiebreaker. Admin pins, enforced org
+  // defaults, run/schedule overrides and member pins were all bypassed and the
+  // run silently executed against an arbitrary shared-with-org account. One
+  // definition of "used" is the fix: every integration that will be spawned now
+  // gets a verdict here — a resolved connection, or a loud 412.
+  const effectiveTools = resolveEffectiveToolSelection(entry.tools, res.manifest);
+  const hasSelectedTools =
+    isToolsWildcard(effectiveTools) || (Array.isArray(effectiveTools) && effectiveTools.length > 0);
   return {
     integrationId: entry.id,
     manifest: res.manifest,
-    hasSelectedTools: wildcard || hasArrayTools,
+    hasSelectedTools,
     hasRequiredAuth: manifestHasRequiredAuth(res.manifest),
+    // Scope INFERENCE deliberately stays on the agent's own selection: it
+    // drives the stricter `insufficient_scopes` gate, and widening it to the
+    // inherited defaults would newly 412 runs whose connection works today.
+    // Activeness (above) and scope requirements are different questions.
     agentTools: wildcard ? "*" : (entry.tools ?? []),
     agentScopes: entry.scopes ?? [],
     ...(entry.auth_key !== undefined ? { requiredAuthKey: entry.auth_key } : {}),

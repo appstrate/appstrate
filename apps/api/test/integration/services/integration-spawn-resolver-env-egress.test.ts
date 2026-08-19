@@ -119,7 +119,7 @@ describe("resolveIntegrationSpawns — env-delivery egress signal (#543)", () =>
   it("raises needsEgress (no fake httpDeliveryAuths) and delivers env creds", async () => {
     await seedAll(ctx, integManifest());
 
-    const specs = await resolveIntegrationSpawns({
+    const { specs } = await resolveIntegrationSpawns({
       orgId: ctx.orgId,
       applicationId: ctx.defaultAppId,
       actor: { type: "user", id: ctx.user.id },
@@ -144,7 +144,7 @@ describe("resolveIntegrationSpawns — env-delivery egress signal (#543)", () =>
   it("also signals egress for an allow_all_uris env integration", async () => {
     await seedAll(ctx, integManifest({ allowAllUris: true }));
 
-    const specs = await resolveIntegrationSpawns({
+    const { specs } = await resolveIntegrationSpawns({
       orgId: ctx.orgId,
       applicationId: ctx.defaultAppId,
       actor: { type: "user", id: ctx.user.id },

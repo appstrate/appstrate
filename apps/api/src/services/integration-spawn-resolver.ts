@@ -20,10 +20,12 @@
  *      named in `from`).
  *
  * Integrations that are declared but not installed / not connected are
- * skipped with a structured warning rather than aborting the run — the
- * agent still spins up without the missing integration's tools. The
- * sidecar surfaces the same gap via its own `failed[]` log line, which
- * gives the operator two-sided diagnosis.
+ * skipped rather than aborting the run — the agent still spins up without
+ * the missing integration's tools. That degradation is never silent: every
+ * skip is returned to the caller as a {@link DroppedIntegration} so the run
+ * pipeline can persist a `run_logs` marker the operator (and the API) can
+ * read back. The sidecar surfaces the same gap via its own `failed[]` log
+ * line, which gives the operator two-sided diagnosis.
  */
 
 import {
@@ -111,30 +113,91 @@ export interface ResolveIntegrationsInput {
 }
 
 /**
+ * Machine-readable reason a declared integration did NOT make it into the
+ * run's spawn set. One value per drop site in {@link resolveOne} — the run
+ * marker persists it verbatim, so an operator reading `run_logs` gets the
+ * same discrimination the server-side log has instead of a prose blob.
+ */
+export type IntegrationDropReason =
+  | "not_found"
+  | "not_integration"
+  | "invalid_manifest"
+  | "not_installed"
+  | "remote_url_missing"
+  | "local_server_ref_missing"
+  | "mcp_server_unresolved"
+  | "mcp_server_not_runnable"
+  | "no_delivery"
+  | "resolve_error";
+
+/** One declared integration the run will start WITHOUT, plus why. */
+export interface DroppedIntegration {
+  readonly integrationId: string;
+  readonly reason: IntegrationDropReason;
+  /**
+   * Operator-facing detail when the reason alone is not actionable — the
+   * thrown error's message, the unresolvable referenced package id, etc.
+   * Omitted when `reason` already says everything.
+   */
+  readonly detail?: string;
+}
+
+/**
+ * The resolver's full verdict: what will spawn, and what was declared but
+ * will not. `dropped` is the degradation MARKER — a run that starts without
+ * an integration it declared is otherwise indistinguishable from an agent
+ * that simply never called that integration's tools.
+ */
+export interface ResolveIntegrationSpawnsResult {
+  readonly specs: IntegrationSpawnSpec[];
+  readonly dropped: DroppedIntegration[];
+}
+
+/** Internal per-integration outcome — mirrors `fetchIntegrationManifest`'s shape. */
+type ResolveOneResult =
+  | { ok: true; spec: IntegrationSpawnSpec }
+  | { ok: false; reason: IntegrationDropReason; detail?: string };
+
+/** Terse `{ ok: false }` constructor, so each drop site stays one line. */
+function drop(reason: IntegrationDropReason, detail?: string): ResolveOneResult {
+  return { ok: false, reason, ...(detail !== undefined ? { detail } : {}) };
+}
+
+/**
  * Return one `IntegrationSpawnSpec` per integration that's (a) declared
  * on the agent, (b) installed in the application, AND (c) connected by
- * the actor. Other integrations are dropped with a warning.
+ * the actor, ALONGSIDE one {@link DroppedIntegration} per integration that
+ * failed any of those checks.
+ *
+ * Dropping is a deliberate degradation — the product supports running an
+ * agent whose integrations are only partly connected (the pre-flight picker
+ * models it explicitly via `IntegrationPickStatus`), so this must not throw.
+ * But the caller MUST carry `dropped` somewhere the user can see it;
+ * `run-context-builder.ts` → `run-pipeline.ts` turns each entry into a
+ * `warn` run log. This function itself stays pure of DB writes so it remains
+ * unit-testable without a run row.
  */
 export async function resolveIntegrationSpawns(
   input: ResolveIntegrationsInput,
-): Promise<IntegrationSpawnSpec[]> {
+): Promise<ResolveIntegrationSpawnsResult> {
   const { orgId, applicationId, actor, agentManifest, resolvedConnections } = input;
   // No actor → no actor-scoped connections to resolve. Scheduled runs are
   // fail-fasted upstream when actor-less + integrations are declared (#735,
-  // scheduler.ts `scheduleCannotResolveIntegrations`); request-triggered runs
-  // always carry an actor (`getActor` is non-null), so this stays an empty
-  // return rather than a throw.
-  if (!actor) return [];
+  // scheduler.ts `isScheduleActorValid`, which disables the schedule and
+  // records a VISIBLE failed run); request-triggered runs always carry an
+  // actor (`getActor` is non-null), so this stays an empty return rather than
+  // a throw.
+  if (!actor) return { specs: [], dropped: [] };
 
   const entries = parseManifestIntegrations(agentManifest);
-  if (entries.length === 0) return [];
+  if (entries.length === 0) return { specs: [], dropped: [] };
   // Resolve every declared integration concurrently — each resolution is an
   // independent chain of DB reads + storage fetch + credential decrypt, and
   // the sequential version paid their latencies back-to-back on the run
   // kickoff critical path. Declaration order is preserved by mapping then
   // compacting.
-  const specs = await Promise.all(
-    entries.map(async (entry) => {
+  const outcomes = await Promise.all(
+    entries.map(async (entry): Promise<ResolveOneResult> => {
       try {
         return await resolveOne(
           entry.id,
@@ -152,18 +215,37 @@ export async function resolveIntegrationSpawns(
         // raises a DEPENDENCY_UNRESOLVED BundleError for it; let it propagate so
         // the pipeline maps it to a structured 422 (#686), matching the skill
         // closure (#666). Every other failure (not installed / not connected /
-        // missing referenced package) stays a per-integration warn-and-skip.
+        // missing referenced package) stays a per-integration skip — now a
+        // MARKED one: the reason travels back to the caller in `dropped`.
         if (err instanceof BundleError && err.code === "DEPENDENCY_UNRESOLVED") throw err;
+        // The server-side log stays: it carries `applicationId` and fires even
+        // for callers that ignore `dropped` (the credential proxy, tests). The
+        // run-visible marker is additive, not a replacement.
         logger.warn("integration resolve failed; skipping", {
           integrationId: entry.id,
           applicationId,
           error: err instanceof Error ? err.message : String(err),
         });
-        return null;
+        return drop("resolve_error", err instanceof Error ? err.message : String(err));
       }
     }),
   );
-  return specs.filter((s): s is IntegrationSpawnSpec => s !== null);
+
+  const specs: IntegrationSpawnSpec[] = [];
+  const dropped: DroppedIntegration[] = [];
+  // Declaration order is preserved on both lists (map-then-partition).
+  outcomes.forEach((outcome, i) => {
+    if (outcome.ok) {
+      specs.push(outcome.spec);
+      return;
+    }
+    dropped.push({
+      integrationId: entries[i]!.id,
+      reason: outcome.reason,
+      ...(outcome.detail !== undefined ? { detail: outcome.detail } : {}),
+    });
+  });
+  return { specs, dropped };
 }
 
 async function resolveOne(
@@ -175,7 +257,7 @@ async function resolveOne(
   resolvedConnection: ResolvedConnection | null,
   requiredAuthKey: string | undefined,
   manifestCache?: IntegrationManifestCache,
-): Promise<IntegrationSpawnSpec | null> {
+): Promise<ResolveOneResult> {
   // (a) Package exists + integration type. The manifest is read through the
   // per-run `manifestCache`, which `resolveRunIntegrationVersions` seeds at
   // kickoff (#686) with the manifest AT the version the
@@ -189,16 +271,16 @@ async function resolveOne(
     switch (res.failure.kind) {
       case "not_found":
         logger.info("integration not found", { integrationId });
-        return null;
+        return drop("not_found");
       case "not_integration":
         logger.warn("dependency declared as integration but package is different type", {
           integrationId,
           type: res.failure.actualType,
         });
-        return null;
+        return drop("not_integration", `package type is '${res.failure.actualType}'`);
       case "invalid_manifest":
         logger.warn("integration manifest fails validation", { integrationId });
-        return null;
+        return drop("invalid_manifest");
     }
   }
   const manifest = res.manifest;
@@ -217,7 +299,7 @@ async function resolveOne(
       integrationId,
       applicationId,
     });
-    return null;
+    return drop("not_installed");
   }
 
   // (c) Resolve connections + build spawnEnv from delivery.env mappings
@@ -295,7 +377,7 @@ async function resolveOne(
     const remote = getRemoteSource(manifest);
     if (!remote) {
       logger.warn("remote-source integration missing remote.url; skipping", { integrationId });
-      return null;
+      return drop("remote_url_missing");
     }
     // P0-2 — SSRF floor on the manifest-supplied remote MCP URL. The sidecar
     // opens a credential-bearing Streamable HTTP / SSE client against this URL,
@@ -343,7 +425,7 @@ async function resolveOne(
     const ref = getLocalServerRef(manifest);
     if (!ref) {
       logger.warn("local-source integration missing source.server; skipping", { integrationId });
-      return null;
+      return drop("local_server_ref_missing");
     }
     // Resolve the referenced mcp-server to ONE concrete version, honoring the
     // `source.server.version` pin, and read THAT version's manifest. The
@@ -377,7 +459,10 @@ async function resolveOne(
         pin: ref.version,
         reason: resolution.reason,
       });
-      return null;
+      return drop(
+        "mcp_server_unresolved",
+        `referenced mcp-server '${ref.name}' (${resolution.reason})`,
+      );
     }
     const mcpServer = resolution.manifest;
     referencedMcpServer = mcpServer;
@@ -390,7 +475,7 @@ async function resolveOne(
         integrationId,
         mcpServerId: ref.name,
       });
-      return null;
+      return drop("mcp_server_not_runnable", `referenced mcp-server '${ref.name}'`);
     }
     // The Appstrate runtime override (`_meta["dev.appstrate/mcp-server"].runtime`)
     // wins over the MCPB `server.type`. MCPB has no `bun` type, so a bun-native
@@ -429,9 +514,11 @@ async function resolveOne(
     requiredAuthKey,
   );
   if (!deliveries) {
-    // resolveDeliveries already logged the reason (missing connection,
-    // decrypt failure, no delivery mapping); skip without surfacing further.
-    return null;
+    // resolveDeliveries already logged the fine-grained reason (missing
+    // connection, decrypt failure, no delivery mapping) server-side; the
+    // run-visible marker collapses them to one actionable bucket — from the
+    // operator's seat every one of them means "no usable credential".
+    return drop("no_delivery");
   }
 
   // Namespace = the manifest name's slug portion, normalised by the
@@ -483,7 +570,7 @@ async function resolveOne(
   // wires only the api_call tool(s), if any).
   const specSourceKind: "local" | "remote" | "none" = sourceKind ?? "none";
 
-  return {
+  const spec: IntegrationSpawnSpec = {
     integrationId,
     namespace,
     sourceKind: specSourceKind,
@@ -567,6 +654,7 @@ async function resolveOne(
       ? resolveWorkspaceMount(integrationId, referencedMcpServer)
       : {}),
   };
+  return { ok: true, spec };
 }
 
 /**

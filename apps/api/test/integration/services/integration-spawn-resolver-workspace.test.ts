@@ -122,7 +122,7 @@ describe("resolveIntegrationSpawns — _meta.workspace propagation", () => {
     await seedMcpServer(ctx, { mount: "/workspace", access: "rw" });
     await seedConnection(ctx);
 
-    const specs = await resolveIntegrationSpawns({
+    const { specs } = await resolveIntegrationSpawns({
       orgId: ctx.orgId,
       applicationId: ctx.defaultAppId,
       actor: { type: "user", id: ctx.user.id },
@@ -144,7 +144,7 @@ describe("resolveIntegrationSpawns — _meta.workspace propagation", () => {
     await seedMcpServer(ctx); // no workspace declaration
     await seedConnection(ctx);
 
-    const specs = await resolveIntegrationSpawns({
+    const { specs } = await resolveIntegrationSpawns({
       orgId: ctx.orgId,
       applicationId: ctx.defaultAppId,
       actor: { type: "user", id: ctx.user.id },
@@ -166,7 +166,7 @@ describe("resolveIntegrationSpawns — _meta.workspace propagation", () => {
     await seedMcpServer(ctx, { mount: "/scratch" });
     await seedConnection(ctx);
 
-    const specs = await resolveIntegrationSpawns({
+    const { specs } = await resolveIntegrationSpawns({
       orgId: ctx.orgId,
       applicationId: ctx.defaultAppId,
       actor: { type: "user", id: ctx.user.id },
@@ -206,7 +206,7 @@ describe("resolveIntegrationSpawns — _meta.workspace propagation", () => {
     await seedMcpServer(ctx, { mount: "/workspace", access: "rw" });
     await seedConnection(ctx);
 
-    const specs = await resolveIntegrationSpawns({
+    const { specs } = await resolveIntegrationSpawns({
       orgId: ctx.orgId,
       applicationId: ctx.defaultAppId,
       actor: { type: "user", id: ctx.user.id },
@@ -228,7 +228,7 @@ describe("resolveIntegrationSpawns — _meta.workspace propagation", () => {
     await seedMcpServer(ctx, { access: "rw" });
     await seedConnection(ctx);
 
-    const specs = await resolveIntegrationSpawns({
+    const { specs } = await resolveIntegrationSpawns({
       orgId: ctx.orgId,
       applicationId: ctx.defaultAppId,
       actor: { type: "user", id: ctx.user.id },
