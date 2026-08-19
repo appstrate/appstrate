@@ -1,0 +1,97 @@
+{
+  "schemaVersion": 1,
+  "kind": "chat-engine-performance-raw-index",
+  "generatedAt": "2026-08-19T13:01:59.383Z",
+  "observations": [
+    {
+      "file": "pi-runtime-refresh-off-reduced-r3-3a1bb53d--ai-sdk-S-warm-c100-o100-r1.json",
+      "sha256": "5a00a2c6738f8444297a54fe3b1478b3fa0ac90d60935d5e77f426f9e3e67587",
+      "source": "artifacts/chat-engine-performance/pi-runtime-refresh-off-reduced-r3-3a1bb53d/ai-sdk-S-warm-c100-o100-r1.json"
+    },
+    {
+      "file": "pi-runtime-refresh-off-reduced-r3-3a1bb53d--ai-sdk-S-warm-c100-o100-r2.json",
+      "sha256": "a42c0e525d45c53c081d96b31d5f2d82f6285edb092167628e2d0c4ff99bb8d0",
+      "source": "artifacts/chat-engine-performance/pi-runtime-refresh-off-reduced-r3-3a1bb53d/ai-sdk-S-warm-c100-o100-r2.json"
+    },
+    {
+      "file": "pi-runtime-refresh-off-reduced-r3-3a1bb53d--ai-sdk-S-warm-c100-o100-r3.json",
+      "sha256": "b397a81fae8fb4f12dc5cf79deb37c2b2ac3e290a1e1530b30bdb39aae911b7d",
+      "source": "artifacts/chat-engine-performance/pi-runtime-refresh-off-reduced-r3-3a1bb53d/ai-sdk-S-warm-c100-o100-r3.json"
+    },
+    {
+      "file": "pi-runtime-refresh-off-reduced-r3-3a1bb53d--ai-sdk-S-warm-c60-o60-r1.json",
+      "sha256": "d488700782cfaf0f914d0d827283ba30c66873c2ef8b7e4eac7d2e749f481b66",
+      "source": "artifacts/chat-engine-performance/pi-runtime-refresh-off-reduced-r3-3a1bb53d/ai-sdk-S-warm-c60-o60-r1.json"
+    },
+    {
+      "file": "pi-runtime-refresh-off-reduced-r3-3a1bb53d--ai-sdk-S-warm-c60-o60-r2.json",
+      "sha256": "49df5403bf4e5b5e56ce9e1767e7b3fe610f555c6b14a8c12177e0b2698f841a",
+      "source": "artifacts/chat-engine-performance/pi-runtime-refresh-off-reduced-r3-3a1bb53d/ai-sdk-S-warm-c60-o60-r2.json"
+    },
+    {
+      "file": "pi-runtime-refresh-off-reduced-r3-3a1bb53d--ai-sdk-S-warm-c60-o60-r3.json",
+      "sha256": "8fc28f1682afa8da10a5c67c1997275d051200d9e1f24ff547e9abd9338cfb8d",
+      "source": "artifacts/chat-engine-performance/pi-runtime-refresh-off-reduced-r3-3a1bb53d/ai-sdk-S-warm-c60-o60-r3.json"
+    },
+    {
+      "file": "pi-runtime-refresh-off-reduced-r3-3a1bb53d--ai-sdk-S-warm-c64-o64-r1.json",
+      "sha256": "6ad17369da1af9d50ed1969c253c8964dc04602070b019e91f92b12957be6446",
+      "source": "artifacts/chat-engine-performance/pi-runtime-refresh-off-reduced-r3-3a1bb53d/ai-sdk-S-warm-c64-o64-r1.json"
+    },
+    {
+      "file": "pi-runtime-refresh-off-reduced-r3-3a1bb53d--ai-sdk-S-warm-c64-o64-r2.json",
+      "sha256": "44d06877b77486ef455cc52a42ec4028d9d41e95c12c9ac518bc4c8be76e2d07",
+      "source": "artifacts/chat-engine-performance/pi-runtime-refresh-off-reduced-r3-3a1bb53d/ai-sdk-S-warm-c64-o64-r2.json"
+    },
+    {
+      "file": "pi-runtime-refresh-off-reduced-r3-3a1bb53d--ai-sdk-S-warm-c64-o64-r3.json",
+      "sha256": "56698699c6323b3cc6e998255880d039297edcd85f605528a84646ef38fa578a",
+      "source": "artifacts/chat-engine-performance/pi-runtime-refresh-off-reduced-r3-3a1bb53d/ai-sdk-S-warm-c64-o64-r3.json"
+    },
+    {
+      "file": "pi-runtime-refresh-off-reduced-r3-3a1bb53d--pi-S-warm-c100-o100-r1.json",
+      "sha256": "49b808dc12baa4b28076009233596f7ff9ff1be8dce57bc557a416aa4c57d759",
+      "source": "artifacts/chat-engine-performance/pi-runtime-refresh-off-reduced-r3-3a1bb53d/pi-S-warm-c100-o100-r1.json"
+    },
+    {
+      "file": "pi-runtime-refresh-off-reduced-r3-3a1bb53d--pi-S-warm-c100-o100-r2.json",
+      "sha256": "389c970e7b7c7333d90b14c9900797eb1a4871865bda95465299aeb428d97f9c",
+      "source": "artifacts/chat-engine-performance/pi-runtime-refresh-off-reduced-r3-3a1bb53d/pi-S-warm-c100-o100-r2.json"
+    },
+    {
+      "file": "pi-runtime-refresh-off-reduced-r3-3a1bb53d--pi-S-warm-c100-o100-r3.json",
+      "sha256": "82c3d104cc3ccb52dea6ae670b6777434e9a8cd73b34d14fe26046b0bafb20af",
+      "source": "artifacts/chat-engine-performance/pi-runtime-refresh-off-reduced-r3-3a1bb53d/pi-S-warm-c100-o100-r3.json"
+    },
+    {
+      "file": "pi-runtime-refresh-off-reduced-r3-3a1bb53d--pi-S-warm-c60-o60-r1.json",
+      "sha256": "4ad30032f0ff750ee9bb365a24af17727b9b5e597012faa3de28164cd8f7524a",
+      "source": "artifacts/chat-engine-performance/pi-runtime-refresh-off-reduced-r3-3a1bb53d/pi-S-warm-c60-o60-r1.json"
+    },
+    {
+      "file": "pi-runtime-refresh-off-reduced-r3-3a1bb53d--pi-S-warm-c60-o60-r2.json",
+      "sha256": "d3c74c2312d108a7f6682816859f3cc443bad906a64d5d32aae12a0a22b0f3b2",
+      "source": "artifacts/chat-engine-performance/pi-runtime-refresh-off-reduced-r3-3a1bb53d/pi-S-warm-c60-o60-r2.json"
+    },
+    {
+      "file": "pi-runtime-refresh-off-reduced-r3-3a1bb53d--pi-S-warm-c60-o60-r3.json",
+      "sha256": "f0ef8dfa5291278dec783dfd1dfeaa407050cc2c6acbf1b9d4c7e6b88210fd97",
+      "source": "artifacts/chat-engine-performance/pi-runtime-refresh-off-reduced-r3-3a1bb53d/pi-S-warm-c60-o60-r3.json"
+    },
+    {
+      "file": "pi-runtime-refresh-off-reduced-r3-3a1bb53d--pi-S-warm-c64-o64-r1.json",
+      "sha256": "7adefe8bfa8fe9fa117632e2de9b5a5345db4e58ce832e5db73686fb31950b9e",
+      "source": "artifacts/chat-engine-performance/pi-runtime-refresh-off-reduced-r3-3a1bb53d/pi-S-warm-c64-o64-r1.json"
+    },
+    {
+      "file": "pi-runtime-refresh-off-reduced-r3-3a1bb53d--pi-S-warm-c64-o64-r2.json",
+      "sha256": "8c50f7b553cb540b9f17b499cb52427e0a90243b924fa68c63288b64fa13f01d",
+      "source": "artifacts/chat-engine-performance/pi-runtime-refresh-off-reduced-r3-3a1bb53d/pi-S-warm-c64-o64-r2.json"
+    },
+    {
+      "file": "pi-runtime-refresh-off-reduced-r3-3a1bb53d--pi-S-warm-c64-o64-r3.json",
+      "sha256": "babeded26b2853fb816eee93a7a1495ae457f91544c7bacbb28e3923e39f3d16",
+      "source": "artifacts/chat-engine-performance/pi-runtime-refresh-off-reduced-r3-3a1bb53d/pi-S-warm-c64-o64-r3.json"
+    }
+  ]
+}

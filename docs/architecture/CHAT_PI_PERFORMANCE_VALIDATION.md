@@ -392,5 +392,14 @@ son débit représente respectivement 37,2 %, 36,4 % et 32,2 % du débit AI SDK.
 reste NO GO. Le comparatif Mistral complet post-migration reste à rejouer avec une clé dédiée. Le
 smoke Mistral à concurrence 1 reste vert.
 
+Le diagnostic suivant a instrumenté le cycle de vie Pi et la frontière d'arrivée chez le fournisseur
+contrôlé. Il a isolé un rafraîchissement complet redondant dans `ModelRuntime.create()`, amplifié par
+la concurrence. Appstrate utilise désormais `refreshOnCreate: false` pour le chat, sans mutualiser
+runtime ou credential entre utilisateurs. La création du runtime tombe sous 1 ms en médiane. Le
+rejeu apparié ajoute 1 344 conversations valides à 60, 64 et 100. Pi reste toutefois plus lent au
+p95 du premier token d'environ 1,80, 1,64 et 3,33 secondes. Le coût restant se situe principalement
+après `prompt()`, avant et après la frontière fournisseur. La décision locale reste NO GO et la
+capacité cloud reste inconnue.
+
 Le rapport, les commandes, le journal de décision prêt à reporter et les artifacts versionnés se
 trouvent dans [CHAT_PI_PERFORMANCE_REPORT.md](./CHAT_PI_PERFORMANCE_REPORT.md).

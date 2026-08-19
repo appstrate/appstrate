@@ -44,6 +44,14 @@ p95 au premier token vaut 4,53 à 5,57 fois celui d'AI SDK, sa durée totale 2,7
 d'AI SDK et son débit seulement 32,2 % à 37,2 % du débit AI SDK. La mise à niveau ne justifie donc
 pas de modifier la décision locale.
 
+L'instrumentation du cycle de vie a ensuite isolé une anomalie Appstrate : chaque tour demandait à
+Pi un rafraîchissement complet du catalogue alors que le modèle était déjà résolu. Sa suppression
+fait tomber la création du runtime sous 1 ms. Le nouveau rejeu réduit ajoute 1 344 conversations
+valides. Le gain de premier token Pi est visible à 60 et 64, environ 0,27 et 0,29 seconde au p95,
+mais la variance locale ne permet pas de revendiquer un gain à 100. Le coût dominant restant se
+situe après l'appel `prompt()`, avant et après l'arrivée chez le fournisseur contrôlé. Le NO GO est
+donc maintenu.
+
 Un smoke Mistral à concurrence 1 a terminé les quatre cellules AI SDK et Pi, froides et chaudes. À
 chaud, Pi a livré le premier token en 617 ms et terminé en 669 ms, contre 627 ms et 690 ms pour AI
 SDK. Claude Code a terminé en 7 068 ms. Le premier essai Codex a révélé un mapping fournisseur hérité
@@ -168,6 +176,46 @@ fine entre Pi 0.73 et Pi 0.84. Il démontre en revanche que Pi 0.84 échoue enco
 de non-infériorité dans le banc qui isole le coût du moteur. Le comparatif Mistral complet à 60, 64
 et 100 n'a pas été rejoué après la mise à niveau, car la clé temporaire n'est plus disponible dans
 l'environnement. Le smoke Mistral post-migration à concurrence 1 reste valide.
+
+## Diagnostic du cycle de vie et rafraîchissement du runtime
+
+Le diagnostic du 19 août mesure séparément MCP, chargement SDK, projection de session, création du
+runtime, credential, ressources et création de session. Avant correction, à concurrence 10,
+`ModelRuntime.create()` coûtait 156 ms en médiane et 290 ms au p95, contre 5 à 10 ms à concurrence
+
+1. Le credential ne coûtait qu'environ 2,5 ms. La cause était le rafraîchissement global déclenché
+   par défaut lors de chaque création concurrente.
+
+Appstrate passe maintenant `refreshOnCreate: false`. Cette option est sûre dans ce flux : le modèle
+concret est résolu avant Pi, le réseau catalogue est déjà désactivé et l'installation du credential
+resynchronise ensuite le seul fournisseur ciblé. Aucun runtime ni credential n'est partagé entre
+utilisateurs. Après correction, la création du runtime reste sous 1 ms en médiane jusqu'à 100
+conversations.
+
+Le rejeu publiable utilise S chaud, trois répétitions appariées et le commit `3a1bb53d`.
+
+| Concurrence | Moteur | p95 premier token, ms | p95 total, ms | Chats par seconde | Pic RSS, Mio |
+| ----------: | ------ | --------------------: | ------------: | ----------------: | -----------: |
+|          60 | AI SDK |                   368 |           869 |             63,57 |        713,6 |
+|          60 | Pi     |                 2 164 |         2 580 |             22,63 |        794,3 |
+|          64 | AI SDK |                   688 |         1 543 |             40,17 |        734,8 |
+|          64 | Pi     |                 2 331 |         2 685 |             23,34 |        754,3 |
+|         100 | AI SDK |                   837 |         1 614 |             59,34 |        824,1 |
+|         100 | Pi     |                 4 162 |         4 914 |             19,96 |        829,0 |
+
+En temps humain, l'écart de premier token est donc d'environ 1,80 seconde à 60, 1,64 seconde à 64
+et 3,33 secondes à 100. Le débit Pi représente respectivement 35,6 %, 58,1 % et 33,6 % du débit AI
+SDK. Les 1 344 conversations, 1 344 appels modèle, 172 032 tokens d'entrée et 43 008 tokens de
+sortie passent sans 429, erreur, stream incomplet, contamination ni défaut de persistance.
+
+Le harness horodate aussi la frontière fournisseur, après lecture de la requête contrôlée et avant
+l'écriture d'usage synthétique. Sur les répétitions médianes Pi, le fournisseur est atteint vers
+1,25 seconde à 60, 1,41 seconde à 64 et 2,29 secondes à 100. La préparation Pi explicitement
+instrumentée ne représente qu'environ 80 à 90 ms. Le résidu principal se trouve donc dans la boucle
+Pi déclenchée par `prompt()`, puis dans le retour du stream sous contention locale. Il ne vient ni
+du chargement dynamique du SDK, ni de la projection de session, ni de la création de session, ni
+du credential. Cette mesure prouve un coût moteur local. Elle ne permet pas encore d'attribuer ce
+résidu à une fonction Pi unique sans instrumentation interne supplémentaire.
 
 ## Comparatif Mistral réel
 
@@ -369,8 +417,9 @@ la distribution réelle des tokens et outils ne sont pas disponibles. Aucun chif
 
 ## Travail local encore nécessaire
 
-1. Diagnostiquer la contention de boucle événementielle Pi observée dans le banc contrôlé et le
-   surcoût réel restant à 60, 64 et 100.
+1. Instrumenter la boucle interne Pi après `prompt()` pour séparer conversion de contexte,
+   événements d'extension, préparation de requête et adaptation du stream, puis confirmer sur un
+   profil CPU le surcoût restant à 60, 64 et 100.
 2. Corriger ou documenter la conversion AI SDK d'un historique contenant du raisonnement avant un
    nouvel essai H réel.
 3. Fermer l'interface d'extension qui bloque Chrome Beta, puis terminer le contrôle visuel d'un
@@ -411,6 +460,10 @@ bun scripts/chat-engine-performance.ts controlled --forms=S --profiles=cold,warm
 bun scripts/chat-engine-performance.ts controlled --forms=S --profiles=warm --concurrency=60,64,100 --repetitions=3 --recovery-ms=0 --output=artifacts/chat-engine-performance/pi-0842-controlled-reduced-r3-49b4a641
 bun scripts/chat-engine-performance-report.ts --input=artifacts/chat-engine-performance/pi-0842-controlled-reduced-r3-49b4a641 --output=docs/architecture/performance-results/2026-08-19-pi-0842-controlled-reduced.v1.json
 bun scripts/chat-engine-performance-publish.ts --input=artifacts/chat-engine-performance/pi-0842-controlled-reduced-r3-49b4a641 --output=docs/architecture/performance-results/raw/2026-08-19-pi-0842-controlled-reduced
+
+bun scripts/chat-engine-performance.ts controlled --forms=S --profiles=warm --concurrency=60,64,100 --repetitions=3 --recovery-ms=0 --output=artifacts/chat-engine-performance/pi-runtime-refresh-off-reduced-r3-3a1bb53d
+bun scripts/chat-engine-performance-report.ts --input=artifacts/chat-engine-performance/pi-runtime-refresh-off-reduced-r3-3a1bb53d --output=docs/architecture/performance-results/2026-08-19-pi-runtime-refresh-off-controlled-reduced.v1.json
+bun scripts/chat-engine-performance-publish.ts --input=artifacts/chat-engine-performance/pi-runtime-refresh-off-reduced-r3-3a1bb53d --output=docs/architecture/performance-results/raw/2026-08-19-pi-runtime-refresh-off-controlled-reduced
 
 bun scripts/chat-pi-fixed-load.ts --repetitions=10 --output=artifacts/chat-engine-performance/fixed-load-r10 --summary-output=docs/architecture/performance-results/2026-08-18-pi-fixed-load.v1.json
 
@@ -503,6 +556,8 @@ Le dernier résultat attendu est zéro.
 - Smoke Pi 0.84.2, Mistral, Codex et Claude Code : [2026-08-18-pi-0842-smoke.v1.json](./performance-results/2026-08-18-pi-0842-smoke.v1.json)
 - Rejeu contrôlé réduit Pi 0.84.2 : [2026-08-19-pi-0842-controlled-reduced.v1.json](./performance-results/2026-08-19-pi-0842-controlled-reduced.v1.json)
 - Index et sommes SHA-256 des 18 observations du rejeu : [index.v1.json](./performance-results/raw/2026-08-19-pi-0842-controlled-reduced/index.v1.json)
+- Rejeu après suppression du rafraîchissement runtime redondant : [2026-08-19-pi-runtime-refresh-off-controlled-reduced.v1.json](./performance-results/2026-08-19-pi-runtime-refresh-off-controlled-reduced.v1.json)
+- Index et sommes SHA-256 des 18 observations instrumentées : [index.v1.json](./performance-results/raw/2026-08-19-pi-runtime-refresh-off-controlled-reduced/index.v1.json)
 - Index et sommes SHA-256 de 65 observations réelles : [index.v1.json](./performance-results/raw/2026-08-18-real/index.v1.json)
 
 Les 65 observations réelles sélectionnées sont désormais versionnées sans leur base PGlite. Leur
@@ -541,4 +596,16 @@ Pi échoue aussi aux seuils de premier token et de durée totale à chaque nivea
 a révélé puis permis de corriger un défaut de compatibilité du harness avec la sélection d'API de Pi
 0.84. Le comparatif Mistral complet post-migration reste à rejouer lorsqu'une clé dédiée sera de
 nouveau injectée. La capacité cloud reste inconnue. Aucun canary, aucune migration de trafic et
+aucune suppression du moteur AI SDK ne sont autorisés.
+
+**19 août 2026, diagnostic du runtime Pi : NO GO maintenu après correction locale.** Le harness
+localise une contention certaine dans le rafraîchissement complet effectué par
+`ModelRuntime.create()` à chaque tour. Appstrate le désactive, sans partager runtime ni credential,
+car le modèle est déjà résolu et le fournisseur ciblé est resynchronisé ensuite. La création du
+runtime tombe sous 1 ms. Un rejeu apparié de 1 344 conversations à 60, 64 et 100 passe tous les
+invariants. Le gain de premier token Pi est d'environ 0,27 seconde à 60 et 0,29 seconde à 64 par
+rapport au rejeu précédent, sans gain démontrable à 100 en raison de la variance. Pi reste plus lent
+d'environ 1,80, 1,64 et 3,33 secondes au p95 du premier token. L'horodatage de la frontière
+fournisseur place le résidu dans la boucle Pi après `prompt()` et dans le retour du stream sous
+contention locale. La capacité cloud reste inconnue. Aucun canary, aucune migration de trafic et
 aucune suppression du moteur AI SDK ne sont autorisés.
