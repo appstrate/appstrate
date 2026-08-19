@@ -8,6 +8,7 @@ import { resolveToken, resolveAccessToken, credentialedCount, _resetCredsCache }
 import { remoteUrl, toolsPolicyKeys, allowsUndeclared } from "./remote-parity.ts";
 import { applyAuth, checkAuthLiveness } from "./auth-live.ts";
 import { metadataCandidates, compareAuth } from "./oauth-metadata.ts";
+import { checkRefreshStrategy, checkUnverifiedBacklog, UNVERIFIED } from "./refresh-strategy.ts";
 import { declaredIdentityEndpoints, classifyIdentityProbe } from "./identity-endpoint.ts";
 import { buildDiscoveryProbes, discoveryIssuerMatches } from "@appstrate/connect";
 import { listAllTools } from "./mcp-list.ts";
@@ -744,5 +745,84 @@ describe("identity-endpoint — probe classification", () => {
       expect(probe(status).message).toContain("https://api.example.com/me");
       expect(probe(status).check).toBe("identity-endpoint");
     }
+  });
+});
+
+describe("refresh-strategy", () => {
+  const oauth = (auth: Record<string, unknown>): SystemPackageEntry =>
+    entry({
+      packageId: "@appstrate/probe",
+      manifest: { auths: { primary: { type: "oauth2", ...auth } } },
+    });
+
+  it("accepts an authorize-time offline param (Google / Dropbox / Reddit shape)", () => {
+    for (const params of [
+      { access_type: "offline", prompt: "consent" },
+      { token_access_type: "offline" },
+      { duration: "permanent" },
+    ]) {
+      const [finding] = checkRefreshStrategy(oauth({ authorization_params: params }));
+      expect(finding!.severity).toBe("info");
+    }
+  });
+
+  it("accepts an offline scope in every spelling providers use", () => {
+    for (const scope of ["offline_access", "offline", "offline.access"]) {
+      const [finding] = checkRefreshStrategy(oauth({ default_scopes: ["read", scope] }));
+      expect(finding!.severity).toBe("info");
+    }
+  });
+
+  it("accepts an explicit _meta declaration", () => {
+    for (const refresh of ["default", "not_supported"]) {
+      const [finding] = checkRefreshStrategy(
+        oauth({ _meta: { "dev.appstrate/oauth": { refresh } } }),
+      );
+      expect(finding!.severity).toBe("info");
+    }
+  });
+
+  // The whole point: a manifest that says nothing about offline access is the
+  // @appstrate/dropbox / @appstrate/youtube shape, and it must not pass.
+  it("fails an auth that declares no refresh strategy at all", () => {
+    const [finding] = checkRefreshStrategy(oauth({ default_scopes: ["files.read"] }));
+    expect(finding!.severity).toBe("fail");
+    expect(finding!.message).toContain("no refresh strategy");
+  });
+
+  it("treats an unrecognised _meta refresh value as absent, not as a waiver", () => {
+    const [finding] = checkRefreshStrategy(
+      oauth({ _meta: { "dev.appstrate/oauth": { refresh: "n/a" } } }),
+    );
+    expect(finding!.severity).toBe("fail");
+  });
+
+  it("ignores empty authorization_params — an empty object asks for nothing", () => {
+    const [finding] = checkRefreshStrategy(oauth({ authorization_params: {} }));
+    expect(finding!.severity).toBe("fail");
+  });
+
+  it("skips non-oauth2 auths entirely", () => {
+    const apiKey = entry({ manifest: { auths: { primary: { type: "api_key" } } } });
+    expect(checkRefreshStrategy(apiKey)).toEqual([]);
+  });
+
+  it("downgrades a listed backlog entry to a warning", () => {
+    const listed = [...UNVERIFIED][0]!;
+    const [packageId, authKey] = listed.split(":") as [string, string];
+    const backlogged = entry({
+      packageId,
+      manifest: { auths: { [authKey]: { type: "oauth2", default_scopes: ["read"] } } },
+    });
+    const [finding] = checkRefreshStrategy(backlogged);
+    expect(finding!.severity).toBe("warn");
+    expect(finding!.message).toContain("unverified backlog");
+  });
+
+  it("fails a backlog entry that no longer matches any auth", () => {
+    const findings = checkUnverifiedBacklog([]);
+    expect(findings.length).toBe(UNVERIFIED.size);
+    expect(findings.every((f) => f.severity === "fail")).toBe(true);
+    expect(findings[0]!.message).toContain("stale UNVERIFIED entry");
   });
 });

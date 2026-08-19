@@ -31,6 +31,7 @@ export {
   parseTokenResponse,
   buildTokenHeaders,
   buildTokenBody,
+  effectiveTokenAuthMethod,
 } from "./token-utils.ts";
 
 // Credential-proxy primitives (shared between the /api/credential-proxy/proxy

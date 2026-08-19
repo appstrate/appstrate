@@ -18,6 +18,7 @@ import { oauthEgressFetch } from "./oauth-egress.ts";
 import {
   buildTokenBody,
   buildTokenHeaders,
+  effectiveTokenAuthMethod,
   parseTokenErrorResponse,
   parseTokenResponse,
   type ParsedTokenResponse,
@@ -104,8 +105,15 @@ export interface ExchangeAuthorizationCodeResult {
 export async function exchangeAuthorizationCode(
   input: ExchangeAuthorizationCodeInput,
 ): Promise<ExchangeAuthorizationCodeResult> {
-  const useBasicAuth = input.tokenEndpointAuthMethod === "client_secret_basic";
-  const isPublicClient = input.tokenEndpointAuthMethod === "none";
+  // An admin-registered client with a blank secret IS a public client, whatever
+  // the manifest declares — see `effectiveTokenAuthMethod`. Resolved once here
+  // so the body shape and the header agree.
+  const authMethod = effectiveTokenAuthMethod(
+    input.tokenEndpointAuthMethod ?? "client_secret_basic",
+    input.clientSecret,
+  );
+  const useBasicAuth = authMethod === "client_secret_basic";
+  const isPublicClient = authMethod === "none";
 
   const tokenParams: Record<string, string> = {
     grant_type: "authorization_code",
@@ -136,9 +144,7 @@ export async function exchangeAuthorizationCode(
       headers: buildTokenHeaders(
         // "none" maps to "no auth header" — buildTokenHeaders treats
         // anything other than "client_secret_basic" as body-auth.
-        input.tokenEndpointAuthMethod === "none"
-          ? "client_secret_post"
-          : input.tokenEndpointAuthMethod,
+        authMethod === "none" ? "client_secret_post" : authMethod,
         input.clientId,
         input.clientSecret,
         input.tokenContentType,
