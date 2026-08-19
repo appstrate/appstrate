@@ -30,7 +30,12 @@ import {
   MAX_MEMORY_CONTENT,
 } from "../services/state/package-persistence.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
-import { getRunEffectiveAgent, runDefinitionGoneDetail } from "../services/run-effective-agent.ts";
+import {
+  getRunEffectiveAgent,
+  runAgentGoneDetail,
+  runPinnedVersionGoneDetail,
+} from "../services/run-effective-agent.ts";
+import type { RunAgentGone, RunPinnedVersionGone } from "../services/run-effective-agent.ts";
 import {
   ApiError,
   unauthorized,
@@ -108,6 +113,13 @@ async function verifyRunToken(c: Context): Promise<{
   const rows = await db
     .select({
       packageId: runs.packageId,
+      // The INSERT-time `@scope/name` snapshot. `runs.package_id` is
+      // `ON DELETE SET NULL` (schema/runs.ts), so deleting the agent mid-run
+      // nulls the column while the run keeps executing — and this token stays
+      // valid until the run leaves `running`. Without the snapshot the guards
+      // below would report the agent id as `null`.
+      agentScope: runs.agentScope,
+      agentName: runs.agentName,
       userId: runs.userId,
       endUserId: runs.endUserId,
       orgId: runs.orgId,
@@ -135,7 +147,17 @@ async function verifyRunToken(c: Context): Promise<{
   return {
     runId,
     run: {
-      packageId: run.packageId!,
+      // Recover the agent identity the same way `getRunSinkContext` does: the
+      // live `package_id` when the row is still there, else the INSERT-time
+      // snapshot, else the neutral sentinel (pre-snapshot legacy rows). The
+      // previous `run.packageId!` asserted away a null that this endpoint can
+      // genuinely see, and it reached `getRunEffectiveAgent` — which now
+      // reports `agent_deleted` and needs a printable id for its message.
+      packageId:
+        run.packageId ??
+        (run.agentScope && run.agentName
+          ? `@${run.agentScope}/${run.agentName}`
+          : "@deleted/unknown"),
       userId: run.userId,
       endUserId: run.endUserId,
       orgId: run.orgId,
@@ -320,8 +342,9 @@ export function createInternalRouter() {
     run: { packageId: string; orgId: string; applicationId: string; versionRef: string | null },
     runId: string,
   ): Promise<void> {
-    const agent = await getRunEffectiveAgent(run);
-    if (!agent) throw runDefinitionGone(run, runId);
+    const effective = await getRunEffectiveAgent(run);
+    if (effective.status !== "ok") throw runDefinitionGone(effective, runId);
+    const agent = effective.agent;
     const deps = asRecord(asRecord(agent.manifest).dependencies);
     const integrations = asRecord(deps.integrations);
     if (!(packageId in integrations)) {
@@ -517,8 +540,9 @@ export function createInternalRouter() {
     // Enumerate the deps of the definition the run EXECUTES (pinned snapshot
     // when `version_ref` is a concrete semver) — same rationale as
     // `assertAgentDeclaresIntegration` above.
-    const agent = await getRunEffectiveAgent(run);
-    if (!agent) throw runDefinitionGone(run, runId);
+    const effective = await getRunEffectiveAgent(run);
+    if (effective.status !== "ok") throw runDefinitionGone(effective, runId);
+    const agent = effective.agent;
     const deps = asRecord(asRecord(agent.manifest).dependencies);
     const integrations = asRecord(deps.integrations);
     for (const integrationId of Object.keys(integrations)) {
@@ -548,31 +572,48 @@ export function createInternalRouter() {
 }
 
 /**
- * The definition the run executes can no longer be read — its pinned
- * `package_versions` snapshot (or the package row itself) was deleted while
- * the run was in flight. Both run-token guards above depend on that manifest
- * to decide what this token may reach, so there is nothing to fall back to:
+ * The definition the run executes can no longer be read. Both run-token
+ * guards above depend on that manifest to decide what this token may reach,
+ * so BOTH absent states throw here: there is nothing to fall back to, and
  * reading the mutable draft instead would silently re-derive a live run's
  * authorization set from a definition it never agreed to.
  *
- * 409, NOT 410: `410` is already load-bearing on
+ * The two states are NOT the same error, though, and this is the single
+ * place allowed to translate them — each branch is narrowed before its
+ * detail builder runs, so neither cause can be described with the other's
+ * sentence:
+ *
+ *   - `version_deleted` → 409 `run_definition_gone`. The agent row is still
+ *     there; the pinned `package_versions` snapshot is not.
+ *   - `agent_deleted` → 409 `run_agent_deleted`. The package row itself is
+ *     gone (`runs.package_id` is `ON DELETE SET NULL`; the run survives for
+ *     observability). Nothing will restore this definition, so the remedy
+ *     differs and the code has to as well.
+ *
+ * 409 for both, NOT 410 and NOT 404. `410` is already load-bearing on
  * `/internal/integration-credentials/*` with "the credential was revoked
  * upstream, stop retrying and reconnect" semantics — the sidecar branches on
  * the bare status (`doRefresh` in `integration-credentials-source.ts`) and
- * would mislabel a deleted agent version as a dead connection. The dedicated
- * `run_definition_gone` code is what distinguishes this from the plain
- * `not_found` of an integration that was never declared.
+ * would mislabel a gone definition as a dead connection. `404` is what this
+ * same endpoint already returns for "that integration is not a dependency of
+ * the running agent" / "not installed", so reusing it for a deleted agent
+ * would put two unrelated causes behind one status — the illegibility this
+ * whole path exists to remove (the pre-existing `notFound("Agent not
+ * found")` was exactly that). Keeping one status and splitting the code
+ * leaves the sidecar's status branching untouched while still naming the
+ * cause.
  */
-function runDefinitionGone(
-  run: { packageId: string; versionRef: string | null },
-  runId: string,
-): ApiError {
+function runDefinitionGone(gone: RunPinnedVersionGone | RunAgentGone, runId: string): ApiError {
   logger.warn("run's executed definition is no longer readable", {
     runId,
-    packageId: run.packageId,
-    versionRef: run.versionRef,
+    packageId: gone.packageId,
+    cause: gone.status,
+    ...(gone.status === "version_deleted" ? { versionRef: gone.versionRef } : {}),
   });
-  return conflict("run_definition_gone", runDefinitionGoneDetail(run));
+  if (gone.status === "agent_deleted") {
+    return conflict("run_agent_deleted", runAgentGoneDetail(gone));
+  }
+  return conflict("run_definition_gone", runPinnedVersionGoneDetail(gone));
 }
 
 /**

@@ -239,7 +239,7 @@ export const internalPaths = {
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
           description:
-            "The definition this run executes is no longer readable (`run_definition_gone`) — the pinned `package_versions` snapshot named by `runs.version_ref`, or the package row itself, was deleted while the run was in flight. There is deliberately no draft fallback: the run's authorization set may never be re-derived from the mutable draft. Distinct from `410`, which on this endpoint means the credential was revoked upstream.",
+            "The definition this run executes is no longer readable, so the run token's authorization set cannot be decided. Two distinct causes, told apart by the problem `code`: `run_definition_gone` — the `package_versions` snapshot pinned by `runs.version_ref` was deleted while the run was in flight (the agent row is still there; re-publishing that version restores it); `run_agent_deleted` — the agent package itself was deleted mid-run (`runs.package_id` is `ON DELETE SET NULL`, so the run survives for observability) and nothing will restore that definition. There is deliberately no draft fallback in either case: the run's authorization set may never be re-derived from the mutable draft. Both are `409`, not `410`, which on this endpoint means the credential was revoked upstream, and not `404`, which here means the integration is not a dependency of the running agent or not installed.",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -294,7 +294,7 @@ export const internalPaths = {
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
           description:
-            "The definition this run executes is no longer readable (`run_definition_gone`) — the pinned `package_versions` snapshot named by `runs.version_ref`, or the package row itself, was deleted while the run was in flight. There is deliberately no draft fallback: the run's authorization set may never be re-derived from the mutable draft. Distinct from `410`, which on this endpoint means the credential was revoked upstream.",
+            "The definition this run executes is no longer readable, so the run token's authorization set cannot be decided. Two distinct causes, told apart by the problem `code`: `run_definition_gone` — the `package_versions` snapshot pinned by `runs.version_ref` was deleted while the run was in flight (the agent row is still there; re-publishing that version restores it); `run_agent_deleted` — the agent package itself was deleted mid-run (`runs.package_id` is `ON DELETE SET NULL`, so the run survives for observability) and nothing will restore that definition. There is deliberately no draft fallback in either case: the run's authorization set may never be re-derived from the mutable draft. Both are `409`, not `410`, which on this endpoint means the credential was revoked upstream, and not `404`, which here means the integration is not a dependency of the running agent or not installed.",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -364,7 +364,7 @@ export const internalPaths = {
         },
         "409": {
           description:
-            "The definition this run executes is no longer readable (`run_definition_gone`) — the pinned `package_versions` snapshot named by `runs.version_ref`, or the package row itself, was deleted while the run was in flight. The dependency set that authorises this fetch cannot be enumerated, and is never re-derived from the mutable draft.",
+            "The definition this run executes is no longer readable, so the dependency set that authorises this fetch cannot be enumerated — and is never re-derived from the mutable draft. Two distinct causes, told apart by the problem `code`: `run_definition_gone` (the `package_versions` snapshot pinned by `runs.version_ref` was deleted while the run was in flight) and `run_agent_deleted` (the agent package itself was deleted mid-run).",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },

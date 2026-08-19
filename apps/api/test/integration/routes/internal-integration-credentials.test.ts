@@ -32,7 +32,7 @@ import {
   httpHeaderDelivery,
 } from "../../helpers/integration-manifests.ts";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
-import { integrationConnections, runs } from "@appstrate/db/schema";
+import { integrationConnections, packages, runs } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
 
 const app = getTestApp();
@@ -401,6 +401,11 @@ describe("GET /internal/integration-credentials — version-pinned runs", () => 
       userId: ctx.user.id,
       status: "running",
       versionRef,
+      // The INSERT-time identity snapshot real kickoff stamps
+      // (`extractRunAgentDenorm`). It is what survives when the agent row is
+      // deleted mid-run and `runs.package_id` goes NULL.
+      agentScope: "credsorg",
+      agentName: "Creds Test Agent",
     });
     return signRunToken(run.id);
   }
@@ -489,5 +494,46 @@ describe("GET /internal/integration-credentials — version-pinned runs", () => 
     // package it belongs to — not the agent row, which is still present.
     expect(body.detail).toContain("9.9.9");
     expect(body.detail).toContain(AGENT);
+  });
+
+  it("a run whose AGENT row is gone is refused with the deleted-agent cause, not the deleted-version one", async () => {
+    // `runs.package_id` is `ON DELETE SET NULL`, so deleting the agent mid-run
+    // leaves the run `running` with a still-valid token — the guard keeps
+    // getting hit. It must refuse (the dep set that authorises this fetch is
+    // unknowable either way) but name THIS cause: no version will come back, so
+    // state A's "re-publish that version" remedy is a lie here.
+    await seedAgent({
+      id: AGENT,
+      orgId: ctx.orgId,
+      createdBy: ctx.user.id,
+      draftManifest: buildAgentManifest([INTEGRATION]),
+    });
+    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, AGENT);
+    await seedPackageVersion({
+      packageId: AGENT,
+      version: "1.0.0",
+      manifest: buildAgentManifest([INTEGRATION]),
+    });
+    await seedIntegration(INTEGRATION);
+    const token = await seedPinnedRun("1.0.0");
+
+    // Delete the agent itself. The `package_versions` snapshot cascades with
+    // it, so the pinned version is unreadable too — the guard must still report
+    // the agent, which is the cause that actually explains the other one.
+    await db.delete(packages).where(eq(packages.id, AGENT));
+
+    const res = await app.request(`/internal/integration-credentials/${INTEGRATION}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as { code?: string; detail?: string };
+    expect(body.code).toBe("run_agent_deleted");
+    // Identity recovered from the INSERT-time snapshot, not a bare `null`.
+    expect(body.detail).toContain("@credsorg/Creds Test Agent");
+    expect(body.detail).toMatch(/deleted while the run/i);
+    // Not state A's message: there is no version to re-publish.
+    expect(body.detail).not.toMatch(/re-publish/i);
+    expect(body.detail).not.toContain("1.0.0");
   });
 });
