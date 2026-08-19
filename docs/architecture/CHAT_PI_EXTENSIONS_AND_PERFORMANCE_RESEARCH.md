@@ -3,7 +3,9 @@
 Date de recherche : 18 août 2026  
 Périmètre : sources primaires, dépôts originaux, documentation officielle et registres npm ou
 GitHub  
-Version Appstrate observée : `@mariozechner/pi-coding-agent` 0.73.1
+Version au début de la recherche : `@mariozechner/pi-coding-agent` 0.73.1.
+
+Version migrée et validée sur la branche : `@earendil-works/pi-coding-agent` 0.84.2.
 
 ## Conclusion
 
@@ -250,18 +252,19 @@ dans le chat si elle modifie le prompt, la mémoire ou la boucle agent de façon
 
 ### Migrer Pi avant l'optimisation
 
-La migration vers Pi 0.84.2 devrait précéder l'optimisation du bootstrap. Cette version remplace le
+La migration vers Pi 0.84.2 précède l'optimisation du bootstrap. Cette version remplace le
 transport Mistral fondé sur le SDK généré par un stream HTTP natif afin de supprimer le coût du
 client généré et de son runtime de schémas. Cela touche directement le fournisseur principal du
 benchmark et pourrait réduire le coût fixe observé. La migration rend aussi les extensions
 communautaires modernes techniquement évaluables, sans pour autant autoriser leur installation.
 
-Ce n'est toutefois pas un simple changement de numéro. Depuis 0.73.1, le namespace npm est passé de
+Ce n'était toutefois pas un simple changement de numéro. Depuis 0.73.1, le namespace npm est passé de
 `@mariozechner` à `@earendil-works` et plusieurs contrats ont évolué, notamment les événements de
 stream, les en-têtes des fournisseurs et les registres de modèles. Appstrate possède des adaptateurs
-qui supposent explicitement les formes 0.73.1. La migration doit donc rester un commit atomique,
-faire passer les tests de conformité, puis être mesurée avec le même protocole avant toute
-optimisation locale supplémentaire.
+qui supposaient explicitement les formes 0.73.1. La migration est conservée dans un commit atomique.
+Elle adapte `ModelRuntime`, les en-têtes fournisseurs et le chemin Codex, puis fait passer les tests
+de conformité avant toute optimisation locale supplémentaire. Le même protocole de performance doit
+maintenant mesurer son effet.
 
 Sources :
 

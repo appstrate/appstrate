@@ -12,7 +12,7 @@
  *
  * Usage normalisation — PARITY WITH THE RUNNER. The same upstream reply is
  * normalised twice in this product: here (remote runs + chat's ai-sdk path,
- * which go through this proxy) and inside `@mariozechner/pi-ai`
+ * which go through this proxy) and inside `@earendil-works/pi-ai`
  * (`dist/providers/openai-completions.js:795-818`, `parseChunkUsage`), which
  * every platform-side Pi run uses. The two MUST agree bucket for bucket or the
  * same consumption is billed differently depending on where the run executed.

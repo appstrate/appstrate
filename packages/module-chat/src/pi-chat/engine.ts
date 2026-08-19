@@ -3,8 +3,8 @@
 /**
  * `runPiChat` is the single in-process server engine for Pi-selected chat turns.
  *
- * Runs a `@mariozechner/pi-coding-agent` session in the `apps/api` process,
- * driven by the Pi SDK (`@mariozechner/pi-ai`), which natively emits each
+ * Runs a `@earendil-works/pi-coding-agent` session in the `apps/api` process,
+ * driven by the Pi SDK (`@earendil-works/pi-ai`), which natively emits each
  * provider's request shape from either a real OAuth token or the llm-proxy
  * transport. OAuth examples include the
  * Anthropic OAuth fingerprint (`sk-ant-oat…` → beta + claude-cli UA + system
@@ -14,7 +14,7 @@
  * provider rides this one loop.
  *
  * The chat runs server-side, so a real OAuth token is registered
- * directly in an in-memory {@link AuthStorage} (never persisted, never handed to
+ * directly in an in-memory {@link ModelRuntime} (never persisted, never handed to
  * the client) — no sidecar/gateway bearer-swap is needed (that only exists for
  * containerised RUNS, where the token must stay out of the agent container).
  *
@@ -155,10 +155,9 @@ export function runPiChat(input: PiChatInput): Response {
         });
 
         const {
-          AuthStorage,
           createAgentSession,
           DefaultResourceLoader,
-          ModelRegistry,
+          ModelRuntime,
           SessionManager,
           SettingsManager,
         } = await loadPiCodingAgentSdk();
@@ -188,9 +187,11 @@ export function runPiChat(input: PiChatInput): Response {
 
         // OAuth uses the real access token in memory. Proxy-routed models use
         // only the inert `proxy` placeholder and replace the stream below.
-        const authStorage = AuthStorage.inMemory();
-        authStorage.setRuntimeApiKey(modelBinding.provider, modelBinding.runtimeApiKey);
-        const modelRegistry = ModelRegistry.create(authStorage);
+        const modelRuntime = await ModelRuntime.create({
+          modelsPath: null,
+          allowModelNetwork: false,
+        });
+        await modelRuntime.setRuntimeApiKey(modelBinding.provider, modelBinding.runtimeApiKey);
 
         // MCP server usage guidance is appended to the system prompt, then the
         // (uncacheable) operation index is dropped for providers without a
@@ -211,11 +212,17 @@ export function runPiChat(input: PiChatInput): Response {
                   });
                 },
               ];
+        const authExtensions =
+          modelBinding.authMode === "proxy" ? [modelBinding.authExtension] : [];
         const resourceLoader = new DefaultResourceLoader({
           cwd: "/tmp",
           agentDir: "/tmp/pi-chat",
           settingsManager: SettingsManager.inMemory(),
-          extensionFactories: [...mcpTools.extensionFactories, ...generationExtensions],
+          extensionFactories: [
+            ...mcpTools.extensionFactories,
+            ...authExtensions,
+            ...generationExtensions,
+          ],
           noExtensions: false,
           noPromptTemplates: true,
           noThemes: true,
@@ -228,8 +235,7 @@ export function runPiChat(input: PiChatInput): Response {
           agentDir: "/tmp/pi-chat",
           model: sessionModel,
           thinkingLevel,
-          authStorage,
-          modelRegistry,
+          modelRuntime,
           resourceLoader,
           sessionManager,
           settingsManager: SettingsManager.inMemory({
@@ -246,10 +252,6 @@ export function runPiChat(input: PiChatInput): Response {
           // only the platform MCP meta-tools (extension tools stay enabled).
           noTools: "builtin",
         });
-
-        if (modelBinding.authMode === "proxy") {
-          session.agent.streamFn = modelBinding.stream;
-        }
 
         write(mapper.startChunk(crypto.randomUUID()));
 

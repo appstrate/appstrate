@@ -8,7 +8,7 @@
  *   - `anthropic-messages` + an oauth `claude-code` credential → Pi chat engine.
  *   - `openai-codex-responses` (codex) → Pi chat engine.
  *
- * The Pi chat engine drives `@mariozechner/pi-coding-agent` in-process; pi-ai
+ * The Pi chat engine drives `@earendil-works/pi-coding-agent` in-process; pi-ai
  * emits each provider's subscription request shape natively from the real token
  * (anthropic detects `sk-ant-oat`; codex decodes `chatgpt_account_id`), so the
  * platform forges nothing.

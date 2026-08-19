@@ -196,7 +196,7 @@ Most-touched optional vars: `MODULES` (default `oidc,webhooks,mcp,core-providers
 - **Reference manifest**: system package ZIPs in `system-packages/`. Validation: `services/schema.ts`.
 - **JSON Schema `required`**: top-level `required: ["field1"]` array — NOT `required: true` on properties.
 - **Schema wrapper convention**: input/output/config use an AFPS wrapper — NOT raw JSON Schema. Structure: `{ schema: JSONSchemaObject, file_constraints?, ui_hints?, property_order? }` (snake_case, AFPS §3.4). `schema` member MUST be pure JSON Schema 2020-12. File fields: `{ type: "string", format: "uri", contentMediaType: "..." }` (single) or array of same (multiple) — NEVER `type: "file"`. Detect via `isFileField()` / `isMultipleFileField()` from `@appstrate/core/form`.
-- **Extension import**: `@mariozechner/pi-coding-agent` (NOT `pi-agent`).
+- **Extension import**: `@earendil-works/pi-coding-agent` (NOT `pi-agent`).
 - **Extension `execute` signature**: `(_toolCallId, params, signal)` — `params` is the **second** arg.
 - **Extension return type**: `{ content: [{ type: "text", text: "..." }] }` — NOT a plain string.
 - **Skills**: YAML frontmatter (`name`, `description`) in `SKILL.md`. Container path `.pi/skills/{id}/SKILL.md`.

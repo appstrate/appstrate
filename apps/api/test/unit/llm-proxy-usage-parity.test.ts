@@ -8,7 +8,7 @@
  *   - by the platform proxy adapter (`llm-proxy/openai.ts`), for remote runs and
  *     chat's ai-sdk path — the result is priced by `computeTokenCost` and
  *     written to `llm_usage`;
- *   - by `@mariozechner/pi-ai` (`dist/providers/openai-completions.js`,
+ *   - by `@earendil-works/pi-ai` (`dist/providers/openai-completions.js`,
  *     `parseChunkUsage`), for every platform-side Pi run — the result is priced
  *     by the SAME `computeTokenCost` and reaches `llm_usage` through the
  *     `appstrate.metric` side channel.
@@ -36,7 +36,7 @@ interface Buckets {
 
 /**
  * pi-ai's `parseChunkUsage`, transcribed from
- * `node_modules/@mariozechner/pi-ai/dist/providers/openai-completions.js:795-818`:
+ * `node_modules/@earendil-works/pi-ai/dist/providers/openai-completions.js`:
  *
  *   const promptTokens = rawUsage.prompt_tokens || 0;
  *   const reportedCachedTokens = rawUsage.prompt_tokens_details?.cached_tokens
@@ -180,7 +180,7 @@ describe("openai-compatible usage parity: platform proxy vs pi-ai (runner)", () 
     // re-check the adapter) instead of silently reopening the divergence.
     const source = readFileSync(
       new URL(
-        "../../../../node_modules/@mariozechner/pi-ai/dist/providers/openai-completions.js",
+        "../../../../node_modules/@earendil-works/pi-ai/dist/providers/openai-completions.js",
         import.meta.url,
       ),
       "utf8",

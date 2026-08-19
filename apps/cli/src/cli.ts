@@ -26,7 +26,7 @@
  */
 
 // MUST be the first import — sets PI_PACKAGE_DIR before any module that
-// transitively loads `@mariozechner/pi-coding-agent` runs its top-level
+// transitively loads `@earendil-works/pi-coding-agent` runs its top-level
 // `JSON.parse(readFileSync(...package.json...))`. Without this, the
 // curl-installed standalone binary crashes at startup with ENOENT.
 import "./lib/pi-binary-shim.ts";

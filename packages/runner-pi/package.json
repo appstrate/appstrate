@@ -51,11 +51,11 @@
     "ajv": "^8.20.0"
   },
   "peerDependencies": {
-    "@mariozechner/pi-coding-agent": "0.73.1",
-    "@mariozechner/pi-ai": "0.73.1"
+    "@earendil-works/pi-coding-agent": "0.84.2",
+    "@earendil-works/pi-ai": "0.84.2"
   },
   "devDependencies": {
-    "@mariozechner/pi-coding-agent": "0.73.1",
-    "@mariozechner/pi-ai": "0.73.1"
+    "@earendil-works/pi-coding-agent": "0.84.2",
+    "@earendil-works/pi-ai": "0.84.2"
   }
 }

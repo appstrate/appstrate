@@ -18,7 +18,7 @@ custom-skill/
 
 1. **`SKILL.md`** describes the skill's purpose in YAML frontmatter (`name`, `description`). The agent reads this file to understand what the skill does and when to invoke it.
 
-2. **`skill.ts`** exports an extension factory compatible with the Pi Coding Agent SDK (`@mariozechner/pi-coding-agent`). The `execute` function receives tool call parameters and returns a result.
+2. **`skill.ts`** exports an extension factory compatible with the Pi Coding Agent SDK (`@earendil-works/pi-coding-agent`). The `execute` function receives tool call parameters and returns a result.
 
 3. When an agent runs, the platform injects skill files into the agent container. The agent discovers available skills and can call their tools based on the agent prompt context.
 
@@ -78,4 +78,4 @@ Import from the dashboard (Agents > Import Package) or via the API.
 - Real skill/mcp-server/integration manifests: `scripts/system-packages/*/manifest.json`
 - AFPS specification: <https://github.com/appstrate/afps-spec/blob/main/spec.md>
 - Manifest validation source of truth: `packages/core/src/validation.ts`
-- Pi Coding Agent SDK: `@mariozechner/pi-coding-agent`
+- Pi Coding Agent SDK: `@earendil-works/pi-coding-agent`

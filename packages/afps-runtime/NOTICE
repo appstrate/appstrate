@@ -34,10 +34,10 @@ Referenced, not bundled
 External runners built on top of this package typically depend on
 the MIT-licensed Pi Coding Agent SDK for real LLM execution:
 
-- @mariozechner/pi-coding-agent (MIT) — Copyright (c) 2025 Mario Zechner
-- @mariozechner/pi-ai          (MIT) — Copyright (c) 2025 Mario Zechner
-- @mariozechner/pi-agent-core  (MIT) — Copyright (c) 2025 Mario Zechner
-- @mariozechner/pi-tui         (MIT) — Copyright (c) 2025 Mario Zechner
+- @earendil-works/pi-coding-agent (MIT) — Copyright (c) 2025 Mario Zechner
+- @earendil-works/pi-ai          (MIT) — Copyright (c) 2025 Mario Zechner
+- @earendil-works/pi-agent-core  (MIT) — Copyright (c) 2025 Mario Zechner
+- @earendil-works/pi-tui         (MIT) — Copyright (c) 2025 Mario Zechner
 
   Upstream: https://github.com/badlogic/pi-mono
 

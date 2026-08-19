@@ -6,7 +6,7 @@
  * Kept in its own module — with NO Pi SDK import — so the boot-critical
  * consumers (`runtime-pi/entrypoint.ts` builds `model.provider` here; the
  * `appstrate` CLI resolves the same key) can pull it WITHOUT dragging
- * `pi-runner.ts` and, through it, the heavy `@mariozechner/pi-coding-agent`
+ * `pi-runner.ts` and, through it, the heavy `@earendil-works/pi-coding-agent`
  * module. `pi-runner.ts` and the package barrel re-export from here so every
  * existing import path (`@appstrate/runner-pi`) keeps working.
  */

@@ -21,6 +21,7 @@ import {
   type Api,
   type AssistantMessageEventStream,
   type Context,
+  type ExtensionFactory,
   type Model,
   type SimpleStreamOptions,
 } from "@appstrate/runner-pi";
@@ -43,8 +44,8 @@ export interface PiProxyModelBinding extends PiChatModelBindingBase {
   authMode: "proxy";
   /** Inert value required by provider serializers. */
   runtimeApiKey: "proxy";
-  /** Per-request bearer-injecting transport. */
-  stream: PiModelStream;
+  /** Per-request bearer injection through Pi's provider-header lifecycle hook. */
+  authExtension: ExtensionFactory;
   /** llm-proxy owns usage attribution and persistence. */
   metering: { kind: "proxy" };
 }
@@ -121,7 +122,10 @@ export function createPiProxyStream(options: {
 }): PiModelStream {
   const delegate = options.stream ?? streamSimple;
   return (model, context, streamOptions) => {
-    const headers = new Headers(streamOptions?.headers);
+    const headers = new Headers();
+    for (const [name, value] of Object.entries(streamOptions?.headers ?? {})) {
+      if (value !== null) headers.set(name, value);
+    }
     headers.set("authorization", `Bearer ${options.mintBearer()}`);
     return delegate(model, context, {
       ...streamOptions,
@@ -131,11 +135,19 @@ export function createPiProxyStream(options: {
   };
 }
 
+/** Inject a fresh process-local bearer into every provider request. */
+export function createPiProxyAuthExtension(mintBearer: () => string): ExtensionFactory {
+  return (pi) => {
+    pi.on("before_provider_headers", (event) => {
+      event.headers.authorization = `Bearer ${mintBearer()}`;
+    });
+  };
+}
+
 export function createPiProxyModelBinding(args: {
   model: OrgModel;
   origin: string;
   mintBearer: () => string;
-  stream?: PiModelStream;
 }): PiProxyModelBinding | null {
   const baseUrl = proxyBaseUrl(args.origin, args.model.apiShape);
   if (!baseUrl) return null;
@@ -160,7 +172,7 @@ export function createPiProxyModelBinding(args: {
     model,
     provider: model.provider,
     runtimeApiKey: "proxy",
-    stream: createPiProxyStream({ mintBearer: args.mintBearer, stream: args.stream }),
+    authExtension: createPiProxyAuthExtension(args.mintBearer),
     metering: { kind: "proxy" },
   };
 }
@@ -192,7 +204,6 @@ export function resolvePiChatModelBinding(args: {
   subscription: SubscriptionChatResolution;
   origin: string;
   mintBearer: () => string;
-  stream?: PiModelStream;
 }): PiChatModelBindingResolution {
   if (args.subscription.subscription) {
     if ("needsReconnection" in args.subscription) return { status: "needs-reconnection" };

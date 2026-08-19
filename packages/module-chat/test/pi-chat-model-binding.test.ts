@@ -2,10 +2,11 @@
 
 import { describe, expect, it } from "bun:test";
 import type { SubscriptionChatModel } from "@appstrate/core/chat-contract";
-import type { AssistantMessageEventStream } from "@appstrate/runner-pi";
+import type { ExtensionAPI } from "@appstrate/runner-pi";
 import type { OrgModel } from "../src/llm.ts";
 import {
   createPiOAuthModelBinding,
+  createPiProxyAuthExtension,
   createPiProxyModelBinding,
   createPiProxyStream,
   resolvePiChatModelBinding,
@@ -45,8 +46,6 @@ function oauthModel(overrides: Partial<SubscriptionChatModel> = {}): Subscriptio
     ...overrides,
   };
 }
-
-const fakeEventStream = {} as AssistantMessageEventStream;
 
 describe("Pi chat model binding", () => {
   it("maps every API-key family to its native Pi serializer through llm-proxy", () => {
@@ -127,45 +126,31 @@ describe("Pi chat model binding", () => {
     expect(reconnect).toEqual({ status: "needs-reconnection" });
   });
 
-  it("mints a fresh bearer for every request and preserves operational options", () => {
-    const authorizations: string[] = [];
-    const signals: AbortSignal[] = [];
-    const timeouts: number[] = [];
+  it("mints a fresh bearer for every provider request", () => {
     let minted = 0;
-    const controller = new AbortController();
-    const delegate: PiModelStream = (_model, _context, options) => {
-      authorizations.push(options?.headers?.authorization ?? "");
-      if (options?.signal) signals.push(options.signal);
-      if (options?.timeoutMs !== undefined) timeouts.push(options.timeoutMs);
-      expect(options?.headers?.["x-trace-id"]).toBe("trace-1");
-      expect(options?.apiKey).toBe("proxy");
-      expect(options?.maxRetries).toBe(0);
-      return fakeEventStream;
-    };
-    const stream = createPiProxyStream({
-      mintBearer: () => `bearer-${++minted}`,
-      stream: delegate,
-    });
-    const binding = createPiProxyModelBinding({
-      model: orgModel(),
-      origin: ORIGIN,
-      mintBearer: () => "unused",
-    })!;
-    const context = { messages: [] };
-    const options = {
-      headers: { "x-trace-id": "trace-1", authorization: "stale" },
-      signal: controller.signal,
-      timeoutMs: 1_234,
-      maxRetries: 0,
-    };
+    let handler: ((event: { headers: Record<string, string | null> }) => void) | undefined;
+    const extension = createPiProxyAuthExtension(() => `bearer-${++minted}`);
+    extension({
+      on(event, candidate) {
+        expect(event).toBe("before_provider_headers");
+        handler = candidate as typeof handler;
+      },
+    } as ExtensionAPI);
 
-    stream(binding.model, context, options);
-    stream(binding.model, context, options);
+    const first = { headers: { "x-trace-id": "trace-1", authorization: "stale" } };
+    const second = { headers: { "x-trace-id": "trace-2" } };
+    handler?.(first);
+    handler?.(second);
 
     expect(minted).toBe(2);
-    expect(authorizations).toEqual(["Bearer bearer-1", "Bearer bearer-2"]);
-    expect(signals).toEqual([controller.signal, controller.signal]);
-    expect(timeouts).toEqual([1_234, 1_234]);
+    expect(first.headers).toEqual({
+      "x-trace-id": "trace-1",
+      authorization: "Bearer bearer-1",
+    });
+    expect(second.headers).toEqual({
+      "x-trace-id": "trace-2",
+      authorization: "Bearer bearer-2",
+    });
   });
 
   it("propagates cancellation, timeout, 401, 429 and provider failures unchanged", () => {

@@ -2,7 +2,7 @@
 
 /**
  * Single import surface ("barrel") for the Pi Coding Agent SDK
- * (`@mariozechner/pi-ai`, `@mariozechner/pi-coding-agent`) inside the
+ * (`@earendil-works/pi-ai`, `@earendil-works/pi-coding-agent`) inside the
  * `runtime-pi` container image.
  *
  * This is the ONLY file under `runtime-pi/` allowed to import from the Pi
@@ -17,8 +17,8 @@
  */
 
 // --- values ---
-export { Type } from "@mariozechner/pi-ai";
+export { Type } from "@earendil-works/pi-ai";
 
 // --- types ---
-export type { ExtensionAPI, ExtensionFactory } from "@mariozechner/pi-coding-agent";
-export type { Api, Model } from "@mariozechner/pi-ai";
+export type { ExtensionAPI, ExtensionFactory } from "@earendil-works/pi-coding-agent";
+export type { Api, Model } from "@earendil-works/pi-ai";

@@ -16,7 +16,7 @@
  * allowlist `http://localhost:PORT/...` redirect_uris baked into the
  * official CLIs. Any platform-hosted callback is rejected. The CLI
  * (`appstrate connect`) does the loopback dance locally via
- * @mariozechner/pi-ai and POSTs the resulting tokens to
+ * @earendil-works/pi-ai and POSTs the resulting tokens to
  * `/api/model-providers-oauth/pair/redeem`, which calls
  * `importOAuthModelProviderConnection()` below.
  *
