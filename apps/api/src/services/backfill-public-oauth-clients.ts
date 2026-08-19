@@ -53,7 +53,9 @@ export interface UndeclaredClientRow {
  * `undecryptable` is a verdict of its own and NOT a public client: a row whose
  * ciphertext no longer opens (key rotated without re-encrypt, corruption) holds
  * a secret nobody can read, and writing `none` for it would silently turn a
- * confidential client into a public one.
+ * confidential client into a public one. It is also the answer for a row whose
+ * ciphertext is ABSENT — same reasoning, since a missing secret is as
+ * consistent with data loss as with a public client.
  */
 export type ClientVerdict =
   { verdict: "public" } | { verdict: "confidential" } | { verdict: "undecryptable"; error: string };
@@ -76,7 +78,7 @@ export interface BackfillReport {
   declaredPublic: number;
   /** Rows left undeclared because they hold a real secret. */
   leftConfidential: number;
-  /** Rows whose ciphertext did not open — decided by nobody, changed by nothing. */
+  /** Rows this pass refused to decide — decided by nobody, changed by nothing. */
   undecryptable: UndecryptableClient[];
 }
 
@@ -90,10 +92,24 @@ export function decideUndeclaredClient(
   decrypt: (ciphertext: string) => { client_secret?: string } = (ciphertext) =>
     decryptCredentials<{ client_secret?: string }>(ciphertext),
 ): ClientVerdict {
-  // Already stored the new way — nothing to decrypt. Unreachable while the
-  // `ioc_public_iff_no_secret` CHECK holds (it forbids an undeclared row from
-  // carrying an empty ciphertext), and kept for a database that predates it.
-  if (row.clientSecretEncrypted === "") return { verdict: "public" };
+  // An undeclared row carrying NO ciphertext is the one shape
+  // `ioc_public_iff_no_secret` forbids, so reaching this line means the
+  // database predates the constraint — which is precisely the database where
+  // this row's meaning cannot be proven. "No ciphertext" reads equally as "a
+  // public client stored literally" and as "a confidential client whose secret
+  // was lost" (blanked by a botched key rotation, truncated by a partial
+  // restore), and only the second is destructive: declaring `none` would make
+  // the casualty indistinguishable from a legitimate public client forever.
+  //
+  // So this reports rather than decides, like every other guard on this branch
+  // — and it costs the operator nothing, because unlike a ciphertext this shape
+  // is fully visible to SQL: a plain UPDATE can repair it once a human has
+  // decided what the row meant. The row reaches no UPDATE here.
+  if (row.clientSecretEncrypted === "")
+    return {
+      verdict: "undecryptable",
+      error: "empty ciphertext with no declared method — violates ioc_public_iff_no_secret",
+    };
 
   let secret: string;
   try {
@@ -105,8 +121,14 @@ export function decideUndeclaredClient(
   return secret.length > 0 ? { verdict: "confidential" } : { verdict: "public" };
 }
 
-/** Every row that has not declared its client-authentication method yet. */
-export async function listUndeclaredClients(): Promise<UndeclaredClientRow[]> {
+/**
+ * Every row that has not declared its client-authentication method yet.
+ *
+ * Module-private: the candidate query is how `backfillPublicOAuthClients` finds
+ * its work, not a capability offered to callers — nothing outside this file has
+ * a reason to enumerate undeclared rows without deciding them.
+ */
+async function listUndeclaredClients(): Promise<UndeclaredClientRow[]> {
   return db
     .select({
       id: integrationOauthClients.id,
@@ -192,14 +214,6 @@ export const EXIT_ROWS_NEED_ATTENTION = 1;
  */
 export const EXIT_COULD_NOT_RUN = 2;
 
-/** A thrown value turned into something an operator can act on. */
-export interface BackfillFailure {
-  /** Ready to print, no trailing newline. Never contains a secret. */
-  message: string;
-  /** What the process should exit with. */
-  exitCode: number;
-}
-
 /** `relation … does not exist` — the table is not in this database. */
 const UNDEFINED_TABLE = "42P01";
 
@@ -252,44 +266,43 @@ function rootMessage(err: unknown): string {
 
 /**
  * Explain a failure that stopped the backfill before it could report anything.
+ * Returns a message ready to print, without a trailing newline.
  *
  * Pure, so the classification is testable without a database — the point being
  * that the repair script an error message tells an operator to run must not
  * itself fail as a stack trace into `node_modules`.
  *
+ * The exit code is NOT part of this: every failure that lands here is the same
+ * outcome — nothing was examined, nothing was written — so the caller exits
+ * {@link EXIT_COULD_NOT_RUN} unconditionally. Returning a per-failure code
+ * would suggest the classification picks one, which it never does.
+ *
  * NEVER echoes `DATABASE_URL` or `CONNECTION_ENCRYPTION_KEY`: this output is
  * exactly what gets pasted into a ticket, and the connection string carries a
  * password. The remedies name the variable to check, never its value.
  */
-export function explainBackfillFailure(err: unknown): BackfillFailure {
+export function explainBackfillFailure(err: unknown): string {
   const codes = codeChain(err);
 
   if (codes.includes(UNDEFINED_TABLE)) {
-    return {
-      exitCode: EXIT_COULD_NOT_RUN,
-      message:
-        `backfill-public-oauth-clients: table \`integration_oauth_clients\` does not exist.\n` +
-        `  The database this connected to is not an Appstrate platform database, or the\n` +
-        `  platform's migrations have never been applied to it. Check which database\n` +
-        `  DATABASE_URL selects. Migrations are applied automatically when the platform\n` +
-        `  boots, so booting the platform once against that database is normally enough.`,
-    };
+    return (
+      `backfill-public-oauth-clients: table \`integration_oauth_clients\` does not exist.\n` +
+      `  The database this connected to is not an Appstrate platform database, or the\n` +
+      `  platform's migrations have never been applied to it. Check which database\n` +
+      `  DATABASE_URL selects. Migrations are applied automatically when the platform\n` +
+      `  boots, so booting the platform once against that database is normally enough.`
+    );
   }
 
   const unreachable = codes.find((code) => UNREACHABLE.has(code));
   if (unreachable !== undefined) {
-    return {
-      exitCode: EXIT_COULD_NOT_RUN,
-      message:
-        `backfill-public-oauth-clients: could not reach the database (${unreachable}).\n` +
-        `  Check DATABASE_URL — host, port, database name and credentials — and that the\n` +
-        `  server is running and reachable from here. The URL itself is not printed: it\n` +
-        `  carries a password.`,
-    };
+    return (
+      `backfill-public-oauth-clients: could not reach the database (${unreachable}).\n` +
+      `  Check DATABASE_URL — host, port, database name and credentials — and that the\n` +
+      `  server is running and reachable from here. The URL itself is not printed: it\n` +
+      `  carries a password.`
+    );
   }
 
-  return {
-    exitCode: EXIT_COULD_NOT_RUN,
-    message: `backfill-public-oauth-clients: ${rootMessage(err)}`,
-  };
+  return `backfill-public-oauth-clients: ${rootMessage(err)}`;
 }

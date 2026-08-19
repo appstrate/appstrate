@@ -22,15 +22,16 @@
  *   - real secret   → left untouched: `NULL` correctly means "the manifest
  *     decides", which is what a confidential client wants.
  *
- * A row whose ciphertext does not open is REPORTED and skipped, never guessed
- * at, and makes this script exit 1 — writing `none` there would silently turn a
- * confidential client into a public one.
+ * A row whose ciphertext does not open — or has none at all, a shape the CHECK
+ * forbids and no decryption can disambiguate — is REPORTED and skipped, never
+ * guessed at, and makes this script exit 1. Writing `none` there would silently
+ * turn a confidential client into a public one.
  *
  * Exit codes — an operator (or a wrapper script) must be able to tell "I looked
  * at your data and some rows need attention" from "I never got to look":
  *
  *   0  every undeclared row was decided; nothing needs attention.
- *   1  the pass completed, but rows could not be decrypted and still carry no
+ *   1  the pass completed, but rows could not be decided and still carry no
  *      declaration. Their remedy is printed; the other rows WERE canonicalised.
  *   2  the pass never ran: the table or the database could not be reached. No
  *      row was examined and nothing was written. See `explainBackfillFailure`.
@@ -58,6 +59,7 @@
 import {
   backfillPublicOAuthClients,
   explainBackfillFailure,
+  EXIT_COULD_NOT_RUN,
   EXIT_ROWS_NEED_ATTENTION,
   type BackfillReport,
 } from "../../apps/api/src/services/backfill-public-oauth-clients.ts";
@@ -70,15 +72,16 @@ try {
 } catch (err) {
   // Reaching the table is a precondition, not a result: nothing was examined
   // and nothing was written, so this exits on its own code rather than sharing
-  // the one that means "some rows need attention".
-  const failure = explainBackfillFailure(err);
-  process.stderr.write(`${failure.message}\n`);
-  process.exit(failure.exitCode);
+  // the one that means "some rows need attention". Every failure on this path
+  // is that same outcome, so the code is fixed here and the classifier's only
+  // job is to say WHICH precondition failed, legibly.
+  process.stderr.write(`${explainBackfillFailure(err)}\n`);
+  process.exit(EXIT_COULD_NOT_RUN);
 }
 
 for (const row of report.undecryptable) {
   process.stderr.write(
-    `  ! ${row.integrationId}#${row.authKey} (${row.id}): decrypt failed — skipped (${row.error})\n`,
+    `  ! ${row.integrationId}#${row.authKey} (${row.id}): undecided — skipped (${row.error})\n`,
   );
 }
 
@@ -91,9 +94,9 @@ process.stdout.write(
 
 if (report.undecryptable.length > 0) {
   process.stderr.write(
-    `\n${report.undecryptable.length} row(s) could not be decrypted and still carry no ` +
-      `declaration. Re-register those clients, or restore the encryption key they were written ` +
-      `with, then run this again.\n`,
+    `\n${report.undecryptable.length} row(s) could not be decided and still carry no ` +
+      `declaration — see the reason printed against each. Re-register those clients, or restore ` +
+      `the encryption key they were written with, then run this again.\n`,
   );
 }
 

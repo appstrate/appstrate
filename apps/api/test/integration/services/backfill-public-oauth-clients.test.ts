@@ -193,11 +193,21 @@ describe("decideUndeclaredClient", () => {
     expect(decision).toEqual({ verdict: "undecryptable", error: "unknown key id" });
   });
 
-  it("treats an already-empty ciphertext as public without decrypting", () => {
-    expect(
-      decideUndeclaredClient({ clientSecretEncrypted: "" }, () => {
-        throw new Error("must not be called");
-      }),
-    ).toEqual({ verdict: "public" });
+  it("refuses an empty ciphertext rather than guessing it is public", () => {
+    // The one shape `ioc_public_iff_no_secret` forbids for an undeclared row,
+    // so reaching it means a database that predates the CHECK — exactly the
+    // database where the row cannot be proven to mean anything. A missing
+    // ciphertext reads as "public client" and as "confidential client whose
+    // secret was lost" alike, and this is the only decision that causes an
+    // UPDATE, so it reports instead. The injected decrypt throws to pin that
+    // the refusal comes from the shape, not from a failed decryption.
+    const decision = decideUndeclaredClient({ clientSecretEncrypted: "" }, () => {
+      throw new Error("must not be called");
+    });
+
+    expect(decision).toEqual({
+      verdict: "undecryptable",
+      error: "empty ciphertext with no declared method — violates ioc_public_iff_no_secret",
+    });
   });
 });
