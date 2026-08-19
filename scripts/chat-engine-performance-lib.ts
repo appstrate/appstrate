@@ -72,6 +72,34 @@ export interface PiTurnTimeline {
   requestToClientFirstTokenMs: number;
 }
 
+export function postgresCellDatabase(input: { baseUrl: string; runId: string; cellId: string }): {
+  databaseName: string;
+  databaseUrl: string;
+  adminUrl: string;
+} {
+  const base = new URL(input.baseUrl);
+  if (base.protocol !== "postgres:" && base.protocol !== "postgresql:") {
+    throw new Error("PostgreSQL benchmark URL must use postgres:// or postgresql://");
+  }
+  const suffix = `${input.runId}_${input.cellId}`
+    .toLowerCase()
+    .replaceAll(/[^a-z0-9_]+/g, "_")
+    .replaceAll(/^_+|_+$/g, "");
+  const databaseName = `chat_perf_${suffix}`.slice(0, 63);
+  if (!/^chat_perf_[a-z0-9_]+$/.test(databaseName)) {
+    throw new Error("Could not derive a safe PostgreSQL benchmark database name");
+  }
+  const database = new URL(base);
+  database.pathname = `/${databaseName}`;
+  const admin = new URL(base);
+  admin.pathname = "/postgres";
+  return {
+    databaseName,
+    databaseUrl: database.toString(),
+    adminUrl: admin.toString(),
+  };
+}
+
 export function benchmarkWorkerCommand(input: {
   executable: string;
   script: string;

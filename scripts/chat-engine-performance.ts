@@ -20,6 +20,7 @@ import {
   memoryCheckpoints,
   normalizeFetchRequest,
   parseDotEnvValue,
+  postgresCellDatabase,
   repetitionNumbers,
   summarizeDurations,
   summarizeChatTurnMilestones,
@@ -39,6 +40,7 @@ type Engine = "ai-sdk" | "pi";
 type ConversationForm = "S" | "H" | "T";
 type Profile = "cold" | "warm";
 type Benchmark = "controlled" | "mistral-real" | "subscription-real";
+type DatabaseBackend = "pglite" | "postgresql";
 
 interface WorkerConfig {
   benchmark: Benchmark;
@@ -52,6 +54,8 @@ interface WorkerConfig {
   recoveryMs: number;
   outputFile: string;
   databaseDir: string;
+  databaseBackend: DatabaseBackend;
+  databaseUrl: string | null;
   providerEnvFile: string | null;
   providerId: string;
   providerModelId: string;
@@ -119,6 +123,12 @@ async function runController(args: string[]): Promise<void> {
   const recoveryMs = numberOption(args, "recovery-ms", 120_000);
   const cellTimeoutMs = numberOption(args, "cell-timeout-ms", 15 * 60_000);
   const outputDir = stringOption(args, "output", `artifacts/chat-engine-performance/${command}`);
+  const databaseBackend = stringOption(args, "database", "pglite") as DatabaseBackend;
+  if (databaseBackend !== "pglite" && databaseBackend !== "postgresql") {
+    throw new Error(`Unsupported benchmark database: ${databaseBackend}`);
+  }
+  const postgresBaseUrl = databaseBackend === "postgresql" ? resolvePostgresBaseUrl(args) : null;
+  const postgresRunId = crypto.randomUUID().replaceAll("-", "").slice(0, 12);
   const cpuProfileEnabled = stringOption(args, "cpu-profile", "false") === "true";
   const cpuProfileDir = `${outputDir}/cpu-profiles`;
   const providerEnvFile = command === "controlled" ? "" : stringOption(args, "env-file", "");
@@ -182,97 +192,108 @@ async function runController(args: string[]): Promise<void> {
             const outputFile = `${outputDir}/${id}.json`;
             const databaseDir = `${outputDir}/databases/${id}`;
             await $`mkdir -p ${databaseDir}`.quiet();
-            const child = Bun.spawn(
-              benchmarkWorkerCommand({
-                executable: process.execPath,
-                script: import.meta.path,
-                ...(cpuProfileEnabled
-                  ? { cpuProfile: { directory: cpuProfileDir, name: `${id}.cpuprofile` } }
-                  : {}),
-              }),
-              {
-                cwd: process.cwd(),
-                env: {
-                  ...process.env,
-                  CHAT_PERF_ENGINE: engine,
-                  CHAT_PERF_FORM: form,
-                  CHAT_PERF_PROFILE: profile,
-                  CHAT_PERF_CONCURRENCY: String(concurrency),
-                  CHAT_PERF_ORGANIZATIONS: String(organizations),
-                  CHAT_PERF_PI_MAX_CONCURRENCY: String(piMaxConcurrency),
-                  CHAT_PERF_REPETITION: String(repetition),
-                  CHAT_PERF_RECOVERY_MS: String(recoveryMs),
-                  CHAT_PERF_OUTPUT_FILE: outputFile,
-                  CHAT_PERF_DATABASE_DIR: databaseDir,
-                  CHAT_PERF_BENCHMARK: benchmark,
-                  CHAT_PERF_PROVIDER_ENV_FILE: providerEnvFile,
-                  CHAT_PERF_PROVIDER_ID: providerId,
-                  CHAT_PERF_PROVIDER_MODEL_ID: providerModelId,
+            const postgresCell = postgresBaseUrl
+              ? postgresCellDatabase({ baseUrl: postgresBaseUrl, runId: postgresRunId, cellId: id })
+              : null;
+            if (postgresCell) await createPostgresDatabase(postgresCell);
+            try {
+              const child = Bun.spawn(
+                benchmarkWorkerCommand({
+                  executable: process.execPath,
+                  script: import.meta.path,
+                  ...(cpuProfileEnabled
+                    ? { cpuProfile: { directory: cpuProfileDir, name: `${id}.cpuprofile` } }
+                    : {}),
+                }),
+                {
+                  cwd: process.cwd(),
+                  env: {
+                    ...process.env,
+                    CHAT_PERF_ENGINE: engine,
+                    CHAT_PERF_FORM: form,
+                    CHAT_PERF_PROFILE: profile,
+                    CHAT_PERF_CONCURRENCY: String(concurrency),
+                    CHAT_PERF_ORGANIZATIONS: String(organizations),
+                    CHAT_PERF_PI_MAX_CONCURRENCY: String(piMaxConcurrency),
+                    CHAT_PERF_REPETITION: String(repetition),
+                    CHAT_PERF_RECOVERY_MS: String(recoveryMs),
+                    CHAT_PERF_OUTPUT_FILE: outputFile,
+                    CHAT_PERF_DATABASE_DIR: databaseDir,
+                    CHAT_PERF_DATABASE_BACKEND: databaseBackend,
+                    CHAT_PERF_DATABASE_URL: postgresCell?.databaseUrl ?? "",
+                    CHAT_PERF_BENCHMARK: benchmark,
+                    CHAT_PERF_PROVIDER_ENV_FILE: providerEnvFile,
+                    CHAT_PERF_PROVIDER_ID: providerId,
+                    CHAT_PERF_PROVIDER_MODEL_ID: providerModelId,
+                  },
+                  stdout: "inherit",
+                  stderr: "inherit",
                 },
-                stdout: "inherit",
-                stderr: "inherit",
-              },
-            );
-            const exitCode = await waitForWorkerExit(child, cellTimeoutMs);
-            if (exitCode !== 0) throw new Error(`Benchmark worker failed for ${id}`);
-            const observation = (await Bun.file(outputFile).json()) as {
-              outcomes: {
-                requested: number;
-                completed: number;
-                rateLimited: number;
-                incompleteStreams: number;
-                markerFailures: number;
+              );
+              const exitCode = await waitForWorkerExit(child, cellTimeoutMs);
+              if (exitCode !== 0) throw new Error(`Benchmark worker failed for ${id}`);
+              const observation = (await Bun.file(outputFile).json()) as {
+                outcomes: {
+                  requested: number;
+                  completed: number;
+                  rateLimited: number;
+                  incompleteStreams: number;
+                  markerFailures: number;
+                };
+                isolation: { foreignSessionRejected: boolean };
+                continuity: { complete: boolean; markerValid: boolean };
+                usage: {
+                  modelCalls: number;
+                  toolCalls: number;
+                  inputTokens: number;
+                  outputTokens: number;
+                };
+                persistence: { bySession: Record<string, number> };
+                turns: Array<{ sessionId: string; status: number }>;
               };
-              isolation: { foreignSessionRejected: boolean };
-              continuity: { complete: boolean; markerValid: boolean };
-              usage: {
-                modelCalls: number;
-                toolCalls: number;
-                inputTokens: number;
-                outputTokens: number;
-              };
-              persistence: { bySession: Record<string, number> };
-              turns: Array<{ sessionId: string; status: number }>;
-            };
-            const expectedCompleted =
-              engine === "pi" ? Math.min(concurrency, piMaxConcurrency) : concurrency;
-            const expectedRateLimited = concurrency - expectedCompleted;
-            const expectedUsage =
-              form === "T"
-                ? {
-                    modelCalls: expectedCompleted * 2,
-                    toolCalls: expectedCompleted,
-                    inputTokens: expectedCompleted * 288,
-                    outputTokens: expectedCompleted * 48,
-                  }
-                : {
-                    modelCalls: expectedCompleted,
-                    toolCalls: 0,
-                    inputTokens: expectedCompleted * 128,
-                    outputTokens: expectedCompleted * 32,
-                  };
-            const rejectedMessagePersisted = observation.turns.some(
-              (turn) =>
-                turn.status === 429 && (observation.persistence.bySession[turn.sessionId] ?? 0) > 0,
-            );
-            if (
-              benchmark === "controlled" &&
-              (observation.outcomes.completed !== expectedCompleted ||
-                observation.outcomes.rateLimited !== expectedRateLimited ||
-                observation.outcomes.incompleteStreams !== 0 ||
-                observation.outcomes.markerFailures !== 0 ||
-                !observation.isolation.foreignSessionRejected ||
-                !observation.continuity.complete ||
-                !observation.continuity.markerValid ||
-                observation.usage.modelCalls !== expectedUsage.modelCalls ||
-                observation.usage.toolCalls !== expectedUsage.toolCalls ||
-                observation.usage.inputTokens !== expectedUsage.inputTokens ||
-                observation.usage.outputTokens !== expectedUsage.outputTokens ||
-                rejectedMessagePersisted)
-            ) {
-              throw new Error(`Controlled benchmark invariants failed for ${id}`);
+              const expectedCompleted =
+                engine === "pi" ? Math.min(concurrency, piMaxConcurrency) : concurrency;
+              const expectedRateLimited = concurrency - expectedCompleted;
+              const expectedUsage =
+                form === "T"
+                  ? {
+                      modelCalls: expectedCompleted * 2,
+                      toolCalls: expectedCompleted,
+                      inputTokens: expectedCompleted * 288,
+                      outputTokens: expectedCompleted * 48,
+                    }
+                  : {
+                      modelCalls: expectedCompleted,
+                      toolCalls: 0,
+                      inputTokens: expectedCompleted * 128,
+                      outputTokens: expectedCompleted * 32,
+                    };
+              const rejectedMessagePersisted = observation.turns.some(
+                (turn) =>
+                  turn.status === 429 &&
+                  (observation.persistence.bySession[turn.sessionId] ?? 0) > 0,
+              );
+              if (
+                benchmark === "controlled" &&
+                (observation.outcomes.completed !== expectedCompleted ||
+                  observation.outcomes.rateLimited !== expectedRateLimited ||
+                  observation.outcomes.incompleteStreams !== 0 ||
+                  observation.outcomes.markerFailures !== 0 ||
+                  !observation.isolation.foreignSessionRejected ||
+                  !observation.continuity.complete ||
+                  !observation.continuity.markerValid ||
+                  observation.usage.modelCalls !== expectedUsage.modelCalls ||
+                  observation.usage.toolCalls !== expectedUsage.toolCalls ||
+                  observation.usage.inputTokens !== expectedUsage.inputTokens ||
+                  observation.usage.outputTokens !== expectedUsage.outputTokens ||
+                  rejectedMessagePersisted)
+              ) {
+                throw new Error(`Controlled benchmark invariants failed for ${id}`);
+              }
+              files.push(outputFile);
+            } finally {
+              if (postgresCell) await dropPostgresDatabase(postgresCell);
             }
-            files.push(outputFile);
           }
         }
       }
@@ -298,6 +319,7 @@ async function runController(args: string[]): Promise<void> {
       recoveryMs,
       cellTimeoutMs,
       cpuProfileEnabled,
+      databaseBackend,
       provider:
         command === "mistral"
           ? "mistral-api-key"
@@ -338,8 +360,7 @@ async function runWorker(config: WorkerConfig): Promise<void> {
   takeSample();
   const sampler = setInterval(takeSample, 100);
 
-  const { applyCorePGliteMigrations } = await import("../apps/api/src/lib/pglite-migrate.ts");
-  await applyCorePGliteMigrations("packages/db/drizzle");
+  await migrateBenchmarkDatabase(config);
   const [
     { Hono },
     { eq },
@@ -755,7 +776,7 @@ async function runWorker(config: WorkerConfig): Promise<void> {
       bunVersion: Bun.version,
       platform: `${process.platform}-${process.arch}`,
       port: 3400,
-      database: "isolated-pglite",
+      database: config.databaseBackend === "postgresql" ? "isolated-postgresql" : "isolated-pglite",
       controlledProviderPersistence: config.controlledProviderPersistence,
     },
     cell: {
@@ -829,7 +850,12 @@ async function runWorker(config: WorkerConfig): Promise<void> {
       persistedMessageCount: persistence.bySession[continuityIdentity.sessionId] ?? 0,
     },
     isolation: { foreignSessionRejected },
-    teardown: { databaseRelease: "process-exit-after-verification" },
+    teardown: {
+      databaseRelease:
+        config.databaseBackend === "postgresql"
+          ? "controller-drops-isolated-database-after-verification"
+          : "process-exit-after-verification",
+    },
     turns,
     samples,
   };
@@ -839,9 +865,14 @@ async function runWorker(config: WorkerConfig): Promise<void> {
 }
 
 function configureIsolatedEnvironment(config: WorkerConfig, encryptionKey?: string): void {
-  delete process.env.DATABASE_URL;
+  if (config.databaseBackend === "postgresql") {
+    process.env.DATABASE_URL = config.databaseUrl!;
+    delete process.env.PGLITE_DATA_DIR;
+  } else {
+    delete process.env.DATABASE_URL;
+    process.env.PGLITE_DATA_DIR = config.databaseDir;
+  }
   delete process.env.REDIS_URL;
-  process.env.PGLITE_DATA_DIR = config.databaseDir;
   process.env.FS_STORAGE_PATH = `${config.databaseDir}/storage`;
   process.env.BETTER_AUTH_SECRET = "performance-test-secret-at-least-32-characters";
   process.env.UPLOAD_SIGNING_SECRET = "performance-upload-secret-at-least-16";
@@ -1545,6 +1576,81 @@ async function loadProviderKey(config: WorkerConfig): Promise<string> {
   return key;
 }
 
+function resolvePostgresBaseUrl(args: string[]): string {
+  const configured = process.env.CHAT_PERF_POSTGRES_URL;
+  if (configured) return configured;
+  const container = stringOption(args, "postgres-container", "");
+  if (!container) {
+    throw new Error(
+      "PostgreSQL benchmarks require CHAT_PERF_POSTGRES_URL or --postgres-container=<name>",
+    );
+  }
+  const inspected = Bun.spawnSync(["docker", "inspect", container], {
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  if (inspected.exitCode !== 0) {
+    throw new Error(`Could not inspect PostgreSQL container ${container}`);
+  }
+  const [details] = JSON.parse(inspected.stdout.toString()) as Array<{
+    Config?: { Env?: string[] };
+    NetworkSettings?: {
+      Ports?: Record<string, Array<{ HostIp: string; HostPort: string }> | null>;
+    };
+  }>;
+  const containerEnv = Object.fromEntries(
+    (details?.Config?.Env ?? []).flatMap((entry) => {
+      const separator = entry.indexOf("=");
+      return separator > 0 ? [[entry.slice(0, separator), entry.slice(separator + 1)]] : [];
+    }),
+  );
+  const port = details?.NetworkSettings?.Ports?.["5432/tcp"]?.[0]?.HostPort;
+  const user = containerEnv.POSTGRES_USER;
+  const password = containerEnv.POSTGRES_PASSWORD;
+  const database = containerEnv.POSTGRES_DB;
+  if (!port || !user || password === undefined || !database) {
+    throw new Error(`Container ${container} does not expose a usable PostgreSQL configuration`);
+  }
+  const url = new URL("postgresql://127.0.0.1");
+  url.port = port;
+  url.username = user;
+  url.password = password;
+  url.pathname = `/${database}`;
+  return url.toString();
+}
+
+type PostgresCell = ReturnType<typeof postgresCellDatabase>;
+
+async function createPostgresDatabase(cell: PostgresCell): Promise<void> {
+  const { default: postgres } = await import("../packages/db/node_modules/postgres");
+  const admin = postgres(cell.adminUrl, { max: 1 });
+  try {
+    await admin.unsafe(`CREATE DATABASE "${cell.databaseName}" TEMPLATE template0`);
+  } finally {
+    await admin.end();
+  }
+}
+
+async function dropPostgresDatabase(cell: PostgresCell): Promise<void> {
+  const { default: postgres } = await import("../packages/db/node_modules/postgres");
+  const admin = postgres(cell.adminUrl, { max: 1 });
+  try {
+    await admin.unsafe(`DROP DATABASE IF EXISTS "${cell.databaseName}" WITH (FORCE)`);
+  } finally {
+    await admin.end();
+  }
+}
+
+async function migrateBenchmarkDatabase(config: WorkerConfig): Promise<void> {
+  if (config.databaseBackend === "pglite") {
+    const { applyCorePGliteMigrations } = await import("../apps/api/src/lib/pglite-migrate.ts");
+    await applyCorePGliteMigrations("packages/db/drizzle");
+    return;
+  }
+  if (!config.databaseUrl) throw new Error("PostgreSQL benchmark worker is missing its database");
+  await import("../packages/db/src/migrate.ts");
+}
+
 function workerConfigFromEnvironment(): WorkerConfig {
   const required = (name: string): string => {
     const value = process.env[name];
@@ -1563,6 +1669,8 @@ function workerConfigFromEnvironment(): WorkerConfig {
     recoveryMs: Number(required("CHAT_PERF_RECOVERY_MS")),
     outputFile: required("CHAT_PERF_OUTPUT_FILE"),
     databaseDir: required("CHAT_PERF_DATABASE_DIR"),
+    databaseBackend: (process.env.CHAT_PERF_DATABASE_BACKEND || "pglite") as DatabaseBackend,
+    databaseUrl: process.env.CHAT_PERF_DATABASE_URL || null,
     providerEnvFile: process.env.CHAT_PERF_PROVIDER_ENV_FILE || null,
     providerId: process.env.CHAT_PERF_PROVIDER_ID || "mistral",
     providerModelId: process.env.CHAT_PERF_PROVIDER_MODEL_ID || "mistral-small-2603",

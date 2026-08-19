@@ -12,6 +12,7 @@ import {
   normalizeFetchRequest,
   parseDotEnvValue,
   percentile,
+  postgresCellDatabase,
   repetitionNumbers,
   publishedObservationName,
   summarizeDurations,
@@ -121,6 +122,21 @@ describe("chat engine performance observation helpers", () => {
       "/work/chat-engine-performance.ts",
       "--worker",
     ]);
+  });
+
+  it("derives one isolated PostgreSQL database per benchmark cell", () => {
+    expect(
+      postgresCellDatabase({
+        baseUrl: "postgresql://bench:secret@127.0.0.1:5423/appstrate?sslmode=disable",
+        runId: "run-1234",
+        cellId: "pi-S-warm-c10-o10-r2",
+      }),
+    ).toEqual({
+      databaseName: "chat_perf_run_1234_pi_s_warm_c10_o10_r2",
+      databaseUrl:
+        "postgresql://bench:secret@127.0.0.1:5423/chat_perf_run_1234_pi_s_warm_c10_o10_r2?sslmode=disable",
+      adminUrl: "postgresql://bench:secret@127.0.0.1:5423/postgres?sslmode=disable",
+    });
   });
 
   it("filters CPU samples to the exact benchmark wave", () => {
