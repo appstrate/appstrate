@@ -7,8 +7,9 @@ Branche : `feat/chat-pi-unified-engine-phase4`
 Destinataire : Pierre
 
 Ce fichier est l'unique documentation narrative du chantier de performance Unified Pi Chat. Il
-remplace l'ancien protocole séparé et la note séparée sur les extensions. Les observations JSON,
-leur schéma et leurs sommes SHA-256 restent versionnés comme preuves techniques.
+remplace l'ancien protocole séparé et la note séparée sur les extensions. Une synthèse JSON compacte
+et les preuves fonctionnelles restent versionnées. Les observations brutes sont reproductibles par
+le harness, mais ne font pas partie du diff de revue.
 
 ## Conclusion actuelle
 
@@ -353,16 +354,12 @@ Le second résultat attendu est zéro.
 ## Preuves versionnées
 
 - Format : [schéma des observations](./performance-observation.schema.json)
-- Résultat courant : [politique de ressources du chat](./performance-results/2026-08-19-pi-chat-resource-policy.v1.json)
-- Profils CPU : [avant](./performance-results/2026-08-19-pi-chat-resource-scan-c30-before.cpu.v1.json) et [après](./performance-results/2026-08-19-pi-chat-resource-scan-c30-after.cpu.v1.json)
+- Résultats de performance utiles à la PR : [synthèse compacte](./performance-results/2026-08-19-unified-pi-pr-summary.v1.json)
 - Parcours chat avancé : [preuve fonctionnelle](./performance-results/2026-08-19-pi-advanced-chat-functional.v1.json)
 - Runs Docker par abonnement : [preuve fonctionnelle](./performance-results/2026-08-19-pi-docker-subscription-smoke.v1.json)
-- Observations courantes et sommes SHA-256 : [index](./performance-results/raw/2026-08-19-pi-chat-resource-policy/index.v1.json)
-- Toutes les synthèses historiques : [performance-results](./performance-results/)
 
-Les synthèses historiques restent des preuves de causalité et de non-régression. Leurs ratios
-antérieurs à la politique de ressources ne décrivent plus la performance actuelle. Les bases
-PGlite volumineuses restent hors Git.
+Les observations détaillées restent dans les artefacts locaux du banc et peuvent être régénérées
+avec les commandes ci-dessus. Les bases PGlite volumineuses restent hors Git.
 
 ## Journal de décision RFC
 
