@@ -22,7 +22,7 @@ duplicating the detail.
 
 ## Chat
 
-- [**CHAT_PI_PERFORMANCE_REPORT.md**](./CHAT_PI_PERFORMANCE_REPORT.md) : état canonique, protocole, résultats, optimisations et décisions de performance Unified Pi Chat.
+- [**Unified Pi Chat**](./unified-pi-chat/) : état canonique, protocole, résultats, optimisations et décisions de performance.
 
 ## Platform posture
 

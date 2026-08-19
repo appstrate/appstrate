@@ -268,8 +268,8 @@ TEST_TIER=0 bun test scripts/chat-engine-performance.test.ts scripts/chat-engine
 bunx tsc --noEmit -p scripts/tsconfig.json
 
 bun scripts/chat-engine-performance.ts controlled --engines=ai-sdk,pi --forms=S --profiles=warm --concurrency=30,60,64,100 --repetitions=3 --recovery-ms=120000 --output=artifacts/chat-engine-performance/pi-current-controlled-r3
-bun scripts/chat-engine-performance-report.ts --input=artifacts/chat-engine-performance/pi-current-controlled-r3 --output=docs/architecture/performance-results/pi-current-controlled.v1.json
-bun scripts/chat-engine-performance-publish.ts --input=artifacts/chat-engine-performance/pi-current-controlled-r3 --output=docs/architecture/performance-results/raw/pi-current-controlled
+bun scripts/chat-engine-performance-report.ts --input=artifacts/chat-engine-performance/pi-current-controlled-r3 --output=docs/architecture/unified-pi-chat/performance-results/pi-current-controlled.v1.json
+bun scripts/chat-engine-performance-publish.ts --input=artifacts/chat-engine-performance/pi-current-controlled-r3 --output=docs/architecture/unified-pi-chat/performance-results/raw/pi-current-controlled
 
 bun scripts/chat-engine-performance.ts mistral --engines=ai-sdk,pi --env-file=/chemin/absolu/mistral.env --model=mistral-small-2603 --forms=S --profiles=warm --concurrency=60,64,100 --repetitions=3 --recovery-ms=120000 --output=artifacts/chat-engine-performance/pi-current-mistral-r3
 
@@ -299,7 +299,7 @@ Le second résultat attendu est zéro.
 
 ## Preuves versionnées
 
-- Format : [schéma des observations](./CHAT_PI_PERFORMANCE_OBSERVATION.schema.json)
+- Format : [schéma des observations](./performance-observation.schema.json)
 - Résultat courant : [politique de ressources du chat](./performance-results/2026-08-19-pi-chat-resource-policy.v1.json)
 - Profils CPU : [avant](./performance-results/2026-08-19-pi-chat-resource-scan-c30-before.cpu.v1.json) et [après](./performance-results/2026-08-19-pi-chat-resource-scan-c30-after.cpu.v1.json)
 - Observations courantes et sommes SHA-256 : [index](./performance-results/raw/2026-08-19-pi-chat-resource-policy/index.v1.json)
