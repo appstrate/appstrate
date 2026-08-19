@@ -5,6 +5,7 @@ import {
   classifyClientTurnError,
   clientTurnErrorFromMarker,
   clientTurnErrorMarker,
+  refusalCode,
 } from "../src/turn-error.ts";
 
 describe("classifyClientTurnError", () => {
@@ -50,5 +51,51 @@ describe("classifyClientTurnError", () => {
     const marker = clientTurnErrorMarker(classified);
     expect(marker).not.toContain("private opaque backend details");
     expect(clientTurnErrorFromMarker(marker)).toEqual({ category: "unknown", retryable: true });
+  });
+});
+
+describe("refusalCode", () => {
+  const problem = (body: Record<string, unknown>) => JSON.stringify(body);
+
+  it("recovers the code from the body the transport throws verbatim", () => {
+    expect(
+      refusalCode(
+        new Error(
+          problem({
+            type: "https://docs.appstrate.dev/errors/usage-not-allowed",
+            title: "Usage not allowed",
+            status: 402,
+            detail: "Credit quota exceeded for org ef820ed9-1db0-4f3c-a4bd-d6941e3b2160",
+            code: "quota_exceeded",
+          }),
+        ),
+      ),
+    ).toBe("quota_exceeded");
+  });
+
+  it("reads the same document off a bare string error", () => {
+    expect(refusalCode(problem({ status: 401, code: "needs_reconnection" }))).toBe(
+      "needs_reconnection",
+    );
+  });
+
+  it("withholds a non-refusal code, which no user action can clear", () => {
+    // `beforeUsage` failing closed rejects with 500 — an internal fault, not
+    // something to hand the user a sentence about.
+    expect(refusalCode(problem({ status: 500, code: "unexpected" }))).toBeUndefined();
+  });
+
+  it("declines anything that is not a problem document", () => {
+    expect(refusalCode("Upstream model error (status 503)")).toBeUndefined();
+    expect(refusalCode("{not json")).toBeUndefined();
+    expect(refusalCode(undefined)).toBeUndefined();
+    // Valid JSON that is not an object, or an object without the two fields
+    // that make a refusal: the status guard is what rejects these, which is
+    // why sniffing the string for a leading brace bought nothing.
+    expect(refusalCode("503")).toBeUndefined();
+    expect(refusalCode("null")).toBeUndefined();
+    expect(refusalCode("[402]")).toBeUndefined();
+    expect(refusalCode(problem({ status: 402 }))).toBeUndefined();
+    expect(refusalCode(problem({ code: "quota_exceeded" }))).toBeUndefined();
   });
 });

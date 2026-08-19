@@ -1151,6 +1151,13 @@ export type BeforeUsageParams =
 /** Structured rejection returned by `beforeUsage` when a module blocks usage. */
 export interface UsageRejection {
   code: string;
+  /**
+   * The RFC 9457 `detail` the caller puts on the refusal: English prose for API
+   * consumers, like every other `detail` in this API. It is NOT display copy —
+   * a localized UI keys its sentence off {@link UsageRejection.code}, which is
+   * why that code is the half that must stay stable. Never put a thrown error's
+   * message here either: it reaches API consumers and names internals.
+   */
   message: string;
   /** HTTP status hint (e.g. 402 for payment required, 429 for rate limit). Defaults to 403. */
   status?: number;

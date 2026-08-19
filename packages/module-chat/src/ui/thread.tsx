@@ -17,7 +17,6 @@ import {
   ActionBarPrimitive,
   AuiIf,
   useAuiState,
-  getExternalStoreMessages,
 } from "@assistant-ui/react";
 import {
   AlertTriangleIcon,
@@ -31,7 +30,7 @@ import {
   SquareIcon,
   XIcon,
 } from "lucide-react";
-import { turnLimitReached, turnMetadataFromMessage } from "@appstrate/core/chat-turn-metadata";
+import { turnLimitReached } from "@appstrate/core/chat-turn-metadata";
 import { formatBytes } from "@appstrate/core/format";
 import { Button } from "./button.tsx";
 import { MarkdownText } from "./markdown-text.tsx";
@@ -48,7 +47,7 @@ import { IntegrationIcon } from "./integration-icon.tsx";
 import { resolveAttachmentContent } from "./run-events.ts";
 import { stagedImagePreviewUrl } from "./upload.ts";
 import { useChatHost } from "./runtime-context.ts";
-import { clientTurnErrorFromMarker } from "../turn-error.ts";
+import { sourceMessage, turnErrorState } from "./turn-error-state.ts";
 import {
   DocumentAttachment,
   isImageMime,
@@ -380,17 +379,6 @@ function ThinkingIndicator() {
   );
 }
 
-/**
- * The ORIGINAL AI-SDK message behind an assistant-ui message. assistant-ui
- * normalizes `ThreadMessage.metadata` to its own shape ({custom, steps, …}) and
- * DROPS unknown keys — so the persisted `appstrate` turn metadata is only
- * reachable on the source message. Falls back to the message itself when no
- * source is bound.
- */
-function sourceMessage(m: unknown): unknown {
-  return (getExternalStoreMessages(m as never) as unknown[])[0] ?? m;
-}
-
 function TurnLimitNotice() {
   const reached = useAuiState((s) => turnLimitReached(sourceMessage(s.message)));
   if (!reached) return null;
@@ -402,14 +390,6 @@ function TurnLimitNotice() {
   );
 }
 
-const TURN_ERROR_KEY = {
-  credential_unavailable: "turn.error.credentialUnavailable",
-  rate_limited: "turn.error.rateLimited",
-  upstream_unavailable: "turn.error.upstreamUnavailable",
-  invalid_request: "turn.error.invalidRequest",
-  unknown: "turn.error.unknown",
-} as const;
-
 /**
  * THE failure display for a turn — one component, one visual, live or
  * reloaded. The persisted provider-neutral category is localized here and
@@ -418,29 +398,10 @@ const TURN_ERROR_KEY = {
  */
 function MessageError() {
   const { t } = useChatHost();
-  const errorState = useAuiState(({ message: m }) => {
-    const turn = turnMetadataFromMessage(sourceMessage(m));
-    if (turn?.finishReason === "error") {
-      const category = turn.errorCategory ?? "unknown";
-      return {
-        text: turn.errorCategory
-          ? t(TURN_ERROR_KEY[category])
-          : (turn.errorText ?? t("turn.error.unknown")),
-        retryable: turn.errorRetryable !== false,
-        requestId: turn.requestId,
-      };
-    }
-    if (m.status?.type === "incomplete" && m.status.reason === "error") {
-      const err = m.status.error;
-      const classified = clientTurnErrorFromMarker(err);
-      return {
-        text: classified ? t(TURN_ERROR_KEY[classified.category]) : t("turn.error.unknown"),
-        retryable: classified?.retryable ?? true,
-        requestId: undefined,
-      };
-    }
-    return null;
-  });
+  // Select a plain field, never a derived object: this selector IS
+  // `useSyncExternalStore`'s getSnapshot. See `turn-error-state.ts`.
+  const message = useAuiState((s) => s.message);
+  const errorState = React.useMemo(() => turnErrorState(message, t), [message, t]);
   if (!errorState) return null;
   return (
     <div

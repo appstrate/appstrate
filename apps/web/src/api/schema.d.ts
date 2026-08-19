@@ -9214,7 +9214,14 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description Usage not allowed — a platform admission module (e.g. metering) blocked the turn for a system-provided model (RFC 9457 problem+json). */
+            /** @description The selected model's subscription credential is dead (revoked, or expired beyond refresh), so the turn is refused before inference starts rather than failing upstream. RFC 9457 problem+json with `code: "needs_reconnection"`. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Usage not allowed — a platform admission module (e.g. metering) blocked the turn for a system-provided model. RFC 9457 problem+json; `code` is `quota_exceeded` when the org is out of credits, or `subscription_blocked` when its subscription is suspended or cancelled. */
             402: {
                 headers: {
                     [name: string]: unknown;
