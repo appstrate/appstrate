@@ -59,6 +59,7 @@ import {
   type ResolvedPiChatModelBinding,
 } from "./model-binding.ts";
 import { buildStructuredPiTurn, reconstructPiSession } from "./structured-session.ts";
+import { createPiChatResourceLoader } from "./resource-loader.ts";
 
 /**
  * Wall-clock ceiling for a single chat turn. A turn fans out into up to
@@ -313,22 +314,19 @@ export function runPiChat(input: PiChatInput): Response {
               },
             ]
           : [];
-        const resourceLoader = new DefaultResourceLoader({
+        const resourceLoader = await createPiChatResourceLoader({
+          DefaultResourceLoader,
+          SettingsManager,
           cwd: "/tmp",
           agentDir: "/tmp/pi-chat",
-          settingsManager: SettingsManager.inMemory(),
           extensionFactories: [
             ...mcpTools.extensionFactories,
             ...authExtensions,
             ...generationExtensions,
             ...diagnosticExtensions,
           ],
-          noExtensions: false,
-          noPromptTemplates: true,
-          noThemes: true,
           systemPrompt: system,
         });
-        await resourceLoader.reload();
         finishLifecycleStage("resourceReload");
 
         const { session } = await createAgentSession({
