@@ -113,11 +113,9 @@ export function clientTurnErrorFromMarker(value: unknown): ClientTurnError | und
  * internal fault the user can do nothing about.
  */
 export function refusalCode(value: unknown): string | undefined {
-  const message = messageFromError(value).trim();
-  if (!message.startsWith("{")) return undefined;
   let doc: unknown;
   try {
-    doc = JSON.parse(message);
+    doc = JSON.parse(messageFromError(value));
   } catch {
     return undefined;
   }

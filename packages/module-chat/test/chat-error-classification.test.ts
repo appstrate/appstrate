@@ -88,7 +88,14 @@ describe("refusalCode", () => {
   it("declines anything that is not a problem document", () => {
     expect(refusalCode("Upstream model error (status 503)")).toBeUndefined();
     expect(refusalCode("{not json")).toBeUndefined();
-    expect(refusalCode(problem({ status: 402 }))).toBeUndefined();
     expect(refusalCode(undefined)).toBeUndefined();
+    // Valid JSON that is not an object, or an object without the two fields
+    // that make a refusal: the status guard is what rejects these, which is
+    // why sniffing the string for a leading brace bought nothing.
+    expect(refusalCode("503")).toBeUndefined();
+    expect(refusalCode("null")).toBeUndefined();
+    expect(refusalCode("[402]")).toBeUndefined();
+    expect(refusalCode(problem({ status: 402 }))).toBeUndefined();
+    expect(refusalCode(problem({ code: "quota_exceeded" }))).toBeUndefined();
   });
 });
