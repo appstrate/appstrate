@@ -19,6 +19,7 @@ import { rateLimitByBearer } from "../middleware/rate-limit.ts";
 import {
   getRecentRuns,
   recordRunDegradedIntegration,
+  runAgentIdentity,
   RUN_HISTORY_FIELDS,
   type RunHistoryField,
 } from "../services/state/runs.ts";
@@ -30,12 +31,18 @@ import {
   MAX_MEMORY_CONTENT,
 } from "../services/state/package-persistence.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
-import { getRunEffectiveAgent } from "../services/run-effective-agent.ts";
+import {
+  getRunEffectiveAgent,
+  runAgentGoneDetail,
+  runPinnedVersionGoneDetail,
+} from "../services/run-effective-agent.ts";
+import type { RunAgentGone, RunPinnedVersionGone } from "../services/run-effective-agent.ts";
 import {
   ApiError,
   unauthorized,
   forbidden,
   notFound,
+  conflict,
   invalidRequest,
   internalError,
 } from "../lib/errors.ts";
@@ -107,6 +114,13 @@ async function verifyRunToken(c: Context): Promise<{
   const rows = await db
     .select({
       packageId: runs.packageId,
+      // The INSERT-time `@scope/name` snapshot. `runs.package_id` is
+      // `ON DELETE SET NULL` (schema/runs.ts), so deleting the agent mid-run
+      // nulls the column while the run keeps executing — and this token stays
+      // valid until the run leaves `running`. Without the snapshot the guards
+      // below would report the agent id as `null`.
+      agentScope: runs.agentScope,
+      agentName: runs.agentName,
       userId: runs.userId,
       endUserId: runs.endUserId,
       orgId: runs.orgId,
@@ -134,7 +148,11 @@ async function verifyRunToken(c: Context): Promise<{
   return {
     runId,
     run: {
-      packageId: run.packageId!,
+      // Shared with `getRunSinkContext` (one fallback chain, one sentinel). The
+      // previous `run.packageId!` asserted away a null that this endpoint can
+      // genuinely see, and it reached `getRunEffectiveAgent` — which now
+      // reports `agent_deleted` and needs a printable id for its message.
+      packageId: runAgentIdentity(run),
       userId: run.userId,
       endUserId: run.endUserId,
       orgId: run.orgId,
@@ -319,15 +337,15 @@ export function createInternalRouter() {
     run: { packageId: string; orgId: string; applicationId: string; versionRef: string | null },
     runId: string,
   ): Promise<void> {
-    const agent = await getRunEffectiveAgent(run);
-    if (!agent) throw notFound("Agent not found");
-    const deps = asRecord(asRecord(agent.manifest).dependencies);
+    const effective = await getRunEffectiveAgent(run);
+    if (effective.status !== "ok") throw runDefinitionGone(effective, runId);
+    const deps = asRecord(asRecord(effective.manifest).dependencies);
     const integrations = asRecord(deps.integrations);
     if (!(packageId in integrations)) {
       logger.warn("Integration credentials request rejected — not declared by agent", {
         runId,
         packageId,
-        agentId: agent.id,
+        agentId: effective.id,
       });
       throw notFound(`Integration '${packageId}' is not a dependency of the running agent`);
     }
@@ -339,25 +357,62 @@ export function createInternalRouter() {
     }
   }
 
+  /**
+   * A terminal credential failure (410) is recorded on the run exactly once,
+   * from whichever endpoint sees it. `resolveLiveIntegrationCredentials` has
+   * already flagged the CONNECTION `needsReconnection` by the time it throws;
+   * this stamps the RUN's `metadata.degraded_integrations[]` so the finished
+   * run surfaces a reconnect banner instead of only the connection list doing
+   * it. Both endpoints route through here: the boot GET can be terminal too
+   * (undecryptable credentials), and a 410 the run never records is a failure
+   * the user only discovers by re-reading the agent's transcript.
+   */
+  async function recordTerminalCredentialFailure(
+    err: unknown,
+    runId: string,
+    packageId: string,
+  ): Promise<void> {
+    if (err instanceof ApiError && err.status === 410) {
+      await recordRunDegradedIntegration(runId, packageId);
+    }
+  }
+
   // GET /internal/integration-credentials/:scope/:name
   // Sidecar-only. Returns the LIVE credential payload + per-auth HTTP
   // delivery plans for an integration the running agent depends on.
   // OAuth tokens are refreshed proactively if within the lead window;
   // POST .../refresh forces a refresh regardless.
+  //
+  // A 2xx here always carries a usable credential surface: an EMPTY payload
+  // means the integration declares no auth, and nothing else. Every state where
+  // a credential was expected but could not be produced fails loud — 404 (no
+  // connection for the actor / the run's pinned connection is gone), 409
+  // `integration_auth_undeclared` (the pinned manifest version no longer
+  // declares the connection's auth), 410 (dead credential, connection flagged).
+  // The sidecar treats an empty payload as "no `delivery.http` auths, skip the
+  // MITM listener", so answering 200-with-empty for any of those booted the run
+  // with zero credentials and left the agent reporting a phantom upstream
+  // outage.
   router.get(`/integration-credentials/${SCOPED_PACKAGE_ROUTE}`, async (c) => {
     const { runId, run } = await verifyRunToken(c);
     const packageId = `${c.req.param("scope")}/${c.req.param("name")}`;
     await assertAgentDeclaresIntegration(packageId, run, runId);
     const actor: Actor | null = actorFromIds(run.userId, run.endUserId);
-    const result = await resolveLiveIntegrationCredentials(packageId, {
-      runId,
-      orgId: run.orgId,
-      applicationId: run.applicationId,
-      agentPackageId: run.packageId,
-      actor,
-      resolvedConnections: run.resolvedConnections,
-      resolvedIntegrationVersions: run.resolvedIntegrationVersions,
-    });
+    let result;
+    try {
+      result = await resolveLiveIntegrationCredentials(packageId, {
+        runId,
+        orgId: run.orgId,
+        applicationId: run.applicationId,
+        agentPackageId: run.packageId,
+        actor,
+        resolvedConnections: run.resolvedConnections,
+        resolvedIntegrationVersions: run.resolvedIntegrationVersions,
+      });
+    } catch (err) {
+      await recordTerminalCredentialFailure(err, runId, packageId);
+      throw err;
+    }
     logger.info("Integration credentials delivered", {
       runId,
       packageId,
@@ -374,11 +429,9 @@ export function createInternalRouter() {
   // a revoked OAuth refresh token, an unrefreshable OAuth auth, OR any
   // non-OAuth auth (api_key/basic), since there is nothing to refresh after a
   // 401 — `resolveLiveIntegrationCredentials` flags the connection
-  // `needsReconnection` and throws 410. This is the SINGLE place a terminal
-  // auth failure is recorded: we also stamp the run's
-  // `metadata.degraded_integrations[]` so the finished run surfaces a reconnect
-  // banner. The sidecar maps the 410 to "don't retry"; the next-launch
-  // readiness gate + live badge do the user-facing surfacing.
+  // `needsReconnection` and throws 410, which `recordTerminalCredentialFailure`
+  // stamps onto the run. The sidecar maps the 410 to "don't retry"; the
+  // next-launch readiness gate + live badge do the user-facing surfacing.
   router.post(`/integration-credentials/${SCOPED_PACKAGE_ROUTE}/refresh`, async (c) => {
     const { runId, run } = await verifyRunToken(c);
     const packageId = `${c.req.param("scope")}/${c.req.param("name")}`;
@@ -403,9 +456,7 @@ export function createInternalRouter() {
       // 410 = the connection was flagged needsReconnection (terminal). Record
       // it on the run so the run-detail banner can surface it, then re-throw so
       // the sidecar sees the 410 and stops retrying.
-      if (err instanceof ApiError && err.status === 410) {
-        await recordRunDegradedIntegration(runId, packageId);
-      }
+      await recordTerminalCredentialFailure(err, runId, packageId);
       throw err;
     }
     logger.info("Integration credentials refreshed", {
@@ -516,9 +567,9 @@ export function createInternalRouter() {
     // Enumerate the deps of the definition the run EXECUTES (pinned snapshot
     // when `version_ref` is a concrete semver) — same rationale as
     // `assertAgentDeclaresIntegration` above.
-    const agent = await getRunEffectiveAgent(run);
-    if (!agent) throw notFound("Agent not found");
-    const deps = asRecord(asRecord(agent.manifest).dependencies);
+    const effective = await getRunEffectiveAgent(run);
+    if (effective.status !== "ok") throw runDefinitionGone(effective, runId);
+    const deps = asRecord(asRecord(effective.manifest).dependencies);
     const integrations = asRecord(deps.integrations);
     for (const integrationId of Object.keys(integrations)) {
       // Same activation rule as everywhere else (installed-and-enabled row, or
@@ -538,12 +589,42 @@ export function createInternalRouter() {
     logger.warn("mcp-server bundle request rejected — not referenced by agent", {
       runId,
       mcpServerId,
-      agentId: agent.id,
+      agentId: effective.id,
     });
     throw notFound(`mcp-server '${mcpServerId}' is not referenced by the running agent`);
   }
 
   return router;
+}
+
+/**
+ * Both absent states throw here: the run-token guards above need the manifest
+ * to decide what the token may reach. The only place allowed to translate them.
+ *
+ * 409 for both, NOT 410 and NOT 404. `410` is already load-bearing on
+ * `/internal/integration-credentials/*` with "the credential was revoked
+ * upstream, stop retrying and reconnect" semantics — the sidecar branches on
+ * the bare status (`doRefresh` in `integration-credentials-source.ts`) and
+ * would mislabel a gone definition as a dead connection. `404` is what this
+ * same endpoint already returns for "that integration is not a dependency of
+ * the running agent" / "not installed", so reusing it for a deleted agent
+ * would put two unrelated causes behind one status — the illegibility this
+ * whole path exists to remove (the pre-existing `notFound("Agent not
+ * found")` was exactly that). Keeping one status and splitting the code
+ * leaves the sidecar's status branching untouched while still naming the
+ * cause.
+ */
+function runDefinitionGone(gone: RunPinnedVersionGone | RunAgentGone, runId: string): ApiError {
+  logger.warn("run's executed definition is no longer readable", {
+    runId,
+    packageId: gone.packageId,
+    cause: gone.status,
+    ...(gone.status === "version_deleted" ? { versionRef: gone.versionRef } : {}),
+  });
+  if (gone.status === "agent_deleted") {
+    return conflict("run_agent_deleted", runAgentGoneDetail(gone));
+  }
+  return conflict("run_definition_gone", runPinnedVersionGoneDetail(gone));
 }
 
 /**

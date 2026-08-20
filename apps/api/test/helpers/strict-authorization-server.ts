@@ -86,13 +86,9 @@ export interface StrictAuthorizationServerOptions {
   offlineParam?: { name: string; value: string };
   /** Access-token lifetime. Defaults to 1h, the common short-lived case. */
   expiresIn?: number;
-  /** Require PKCE (RFC 7636). Defaults to true — every flow here is a code+PKCE flow. */
-  requirePkce?: boolean;
 }
 
 export interface StrictAuthorizationServer {
-  /** Base URL, e.g. "http://localhost:54321". */
-  url: string;
   authorizationEndpoint: string;
   tokenEndpoint: string;
   stop: () => void;
@@ -102,7 +98,6 @@ export interface StrictAuthorizationServer {
   issuedAccessTokens: string[];
   /** Every refresh token this server has minted, in order. */
   issuedRefreshTokens: string[];
-  reset: () => void;
 }
 
 /** Pending authorization code, bound to the request that created it. */
@@ -179,7 +174,6 @@ export function createStrictAuthorizationServer(
       (registeredSecret ? ["client_secret_post", "client_secret_basic"] : ["none"]),
   );
   const expiresIn = options.expiresIn ?? 3600;
-  const requirePkce = options.requirePkce ?? true;
 
   const codes = new Map<string, CodeGrant>();
   const refreshTokens = new Map<string, { scope: string }>();
@@ -301,11 +295,9 @@ export function createStrictAuthorizationServer(
     if (params.response_type !== "code") return deny("unsupported_response_type", "expected code");
     if (!params.redirect_uri) return deny("invalid_request", "redirect_uri is required");
     if (!params.state) return deny("invalid_request", "state is required");
-    if (requirePkce) {
-      if (!params.code_challenge) return deny("invalid_request", "code_challenge is required");
-      if (params.code_challenge_method !== "S256") {
-        return deny("invalid_request", "code_challenge_method must be S256");
-      }
+    if (!params.code_challenge) return deny("invalid_request", "code_challenge is required");
+    if (params.code_challenge_method !== "S256") {
+      return deny("invalid_request", "code_challenge_method must be S256");
     }
 
     const offline = options.offlineParam
@@ -420,7 +412,6 @@ export function createStrictAuthorizationServer(
 
   const base = `http://localhost:${server.port}`;
   return {
-    url: base,
     authorizationEndpoint: `${base}/authorize`,
     tokenEndpoint: `${base}/token`,
     stop: () => server.stop(true),
@@ -428,13 +419,5 @@ export function createStrictAuthorizationServer(
     authorizeRequests,
     issuedAccessTokens,
     issuedRefreshTokens,
-    reset: () => {
-      codes.clear();
-      refreshTokens.clear();
-      tokenRequests.length = 0;
-      authorizeRequests.length = 0;
-      issuedAccessTokens.length = 0;
-      issuedRefreshTokens.length = 0;
-    },
   };
 }

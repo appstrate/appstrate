@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Types
-export type { Actor, OAuthStateRecord, OAuthStateStore } from "./types.ts";
+export type { Actor, OAuthStateRecord, OAuthStateStore, TokenEndpointAuthMethod } from "./types.ts";
 // Encryption
 export {
   encrypt,

@@ -262,7 +262,7 @@ describe("resolveRunIntegrationVersions — integration manifest pin (#686)", ()
     // it must see 1.5.0, identical to what the spawn cache was seeded with.
     const manifest = await readIntegrationManifestAt(
       INTEG,
-      resolvedIntegrationVersionToDescriptor(frozen),
+      resolvedIntegrationVersionToDescriptor(INTEG, frozen),
     );
     expect(manifest.ok).toBe(true);
     if (manifest.ok) expect(manifest.manifest.version).toBe("1.5.0");

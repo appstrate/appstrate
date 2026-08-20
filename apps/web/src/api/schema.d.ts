@@ -4437,7 +4437,7 @@ export interface paths {
         };
         /**
          * Fetch live credentials + HTTP delivery plans for an installed integration
-         * @description Sidecar-only. Auth via Bearer run token. Backs the MITM `MitmCredentialSource.current()` + `.deliveryPlans()` calls — returns per-auth resolved credentials + `HttpDeliveryPlan` derived from the integration's `manifest.auths.{key}.delivery.http` declaration. OAuth2 tokens are proactively refreshed when within `OAUTH_REFRESH_LEAD_MS` of expiry. Verifies that the run's agent declares this integration in `dependencies.integrations` AND that the integration is installed on the run's application.
+         * @description Sidecar-only. Auth via Bearer run token. Backs the MITM `MitmCredentialSource.current()` + `.deliveryPlans()` calls — returns per-auth resolved credentials + `HttpDeliveryPlan` derived from the integration's `manifest.auths.{key}.delivery.http` declaration. OAuth2 tokens are proactively refreshed when within `OAUTH_REFRESH_LEAD_MS` of expiry. Verifies that the run's agent declares this integration in `dependencies.integrations` AND that the integration is installed on the run's application. A `200` with an EMPTY `auths` array means one thing only: the integration declares no auth. Every state where a credential was expected but could not be produced fails instead — `404` when the actor has no connection (or the connection this run pinned at kickoff was deleted/unshared since), `409` when the pinned manifest version no longer declares the connection's auth, `410` when the credential is dead. The sidecar reads an empty payload as *no `delivery.http` auths, skip the MITM listener*, so answering `200` for a broken state boots the run with zero credentials and every upstream call leaves uncredentialed.
          */
         get: operations["getIntegrationCredentials"];
         put?: never;
@@ -10909,6 +10909,44 @@ export interface operations {
             };
             400: components["responses"]["ValidationError"];
             404: components["responses"]["NotFound"];
+            /** @description The configured execution backend cannot run a connect-run (sidecar-only workload). Operator configuration; the remedy is logged server-side and deliberately kept out of this response, which an end user can reach. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "type": "https://docs.appstrate.dev/errors/connect-unavailable",
+                     *       "title": "Service Unavailable",
+                     *       "status": 503,
+                     *       "detail": "This connection method is unavailable on this deployment. Contact your administrator.",
+                     *       "code": "connect_unavailable",
+                     *       "requestId": "req_abc123"
+                     *     }
+                     */
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description The connect-run login did not complete within the timeout */
+            504: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "type": "https://docs.appstrate.dev/errors/timeout",
+                     *       "title": "Gateway Timeout",
+                     *       "status": 504,
+                     *       "detail": "The connection attempt timed out after 60000ms — the login did not complete in time. Please try again.",
+                     *       "code": "timeout",
+                     *       "requestId": "req_def456"
+                     *     }
+                     */
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
         };
     };
     getIntegration: {
@@ -11253,6 +11291,44 @@ export interface operations {
             400: components["responses"]["ValidationError"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            /** @description The configured execution backend cannot run a connect-run (sidecar-only workload). Operator configuration; the remedy is logged server-side and deliberately kept out of this response, which an end user can reach. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "type": "https://docs.appstrate.dev/errors/connect-unavailable",
+                     *       "title": "Service Unavailable",
+                     *       "status": 503,
+                     *       "detail": "This connection method is unavailable on this deployment. Contact your administrator.",
+                     *       "code": "connect_unavailable",
+                     *       "requestId": "req_abc123"
+                     *     }
+                     */
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description The connect-run login did not complete within the timeout */
+            504: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "type": "https://docs.appstrate.dev/errors/timeout",
+                     *       "title": "Gateway Timeout",
+                     *       "status": 504,
+                     *       "detail": "The connection attempt timed out after 60000ms — the login did not complete in time. Please try again.",
+                     *       "code": "timeout",
+                     *       "requestId": "req_def456"
+                     *     }
+                     */
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
         };
     };
     initiateIntegrationOAuth: {
@@ -11438,10 +11514,10 @@ export interface operations {
             content: {
                 "application/json": {
                     client_id: string;
-                    /** @default  */
-                    client_secret: string;
+                    /** @description REQUIRED unless `token_endpoint_auth_method` is `none`. A public client is declared, never inferred: omitting the secret under any other method is rejected with 400 rather than silently registering a public client. */
+                    client_secret?: string;
                     /**
-                     * @description Explicit client-authentication method for this client, overriding the manifest's. Send `none` to register a PUBLIC client (no secret at the provider). Omit to leave it undeclared, in which case the manifest's value applies. A blank `client_secret` is recorded as `none`.
+                     * @description Explicit client-authentication method for this client, overriding the manifest's. Send `none` to register a PUBLIC client (no secret at the provider), and then send no `client_secret`. Omit to leave it undeclared, in which case the manifest's value applies — and a `client_secret` is then mandatory.
                      * @enum {string}
                      */
                     token_endpoint_auth_method?: "client_secret_post" | "client_secret_basic" | "none";
@@ -11861,10 +11937,10 @@ export interface operations {
             content: {
                 "application/json": {
                     client_id: string;
-                    /** @description OMIT to preserve the stored secret. An empty string declares the client PUBLIC and clears it. The rotate form submits an empty input whenever only the redirect URI changed, so the two must stay distinguishable. */
+                    /** @description OMIT to preserve the stored secret. An empty string CLEARS it and is accepted only together with `token_endpoint_auth_method: none`; alone it is rejected with 400. The rotate form submits an empty input whenever only the redirect URI changed, so the two must stay distinguishable. */
                     client_secret?: string;
                     /**
-                     * @description Explicit client-authentication method for this client, overriding the manifest's. Send `none` to register a PUBLIC client (no secret at the provider). Omit to leave it undeclared, in which case the manifest's value applies. A blank `client_secret` is recorded as `none`.
+                     * @description Explicit client-authentication method for this client, overriding the manifest's. Send `none` to declare a PUBLIC client (no secret at the provider). Omit to leave it undeclared, in which case the manifest's value applies.
                      * @enum {string}
                      */
                     token_endpoint_auth_method?: "client_secret_post" | "client_secret_basic" | "none";
@@ -20829,7 +20905,16 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            /** @description Refresh token revoked upstream — the integration connection has been flagged `needsReconnection` and the sidecar should surface this to the integration's MCP client as a 401. Matches the model-provider token endpoint's revoked semantics. */
+            /** @description The definition this run executes is no longer readable, so the run token's authorization set cannot be decided. Two distinct causes, told apart by the problem `code`: `run_definition_gone` — the `package_versions` snapshot pinned by `runs.version_ref` was deleted while the run was in flight (the agent row is still there; re-publishing that version restores it); `run_agent_deleted` — the agent package itself was deleted mid-run (`runs.package_id` is `ON DELETE SET NULL`, so the run survives for observability) and nothing will restore that definition. There is deliberately no draft fallback in either case: the run's authorization set may never be re-derived from the mutable draft. Both are `409`, not `410`, which on this endpoint means the credential was revoked upstream, and not `404`, which here means the integration is not a dependency of the running agent or not installed. A third cause shares the status on this endpoint: `integration_auth_undeclared` — the integration manifest VERSION frozen for this run (`runs.resolved_integration_versions`) does not declare the `auth_key` the run's connection was created against (the auth was renamed or removed after the connection was made). Nothing can be injected without that declaration, and the credential is deliberately NOT flagged `needsReconnection`: it is intact and may still be valid under another manifest version, so `410` would both mislabel it and destroy a working connection over a manifest edit. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description The credential is dead and the integration connection has been flagged `needsReconnection`. Three causes, all terminal: the refresh token was revoked upstream; a forced refresh hit an auth that can never be refreshed (no OAuth client / token endpoint, or a non-OAuth auth); or the stored credentials could not be decrypted at all (rotated `CONNECTION_ENCRYPTION_KEY`, corrupted blob) — which is terminal on the plain read too, not only on a forced refresh. The sidecar stops retrying and surfaces this to the integration's MCP client as a 401; the run's `metadata.degraded_integrations[]` is stamped so the finished run shows a reconnect banner. Matches the model-provider token endpoint's revoked semantics. */
             410: {
                 headers: {
                     [name: string]: unknown;
@@ -20876,7 +20961,16 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            /** @description Refresh token revoked upstream — same semantics as the GET endpoint. */
+            /** @description The definition this run executes is no longer readable, so the run token's authorization set cannot be decided. Two distinct causes, told apart by the problem `code`: `run_definition_gone` — the `package_versions` snapshot pinned by `runs.version_ref` was deleted while the run was in flight (the agent row is still there; re-publishing that version restores it); `run_agent_deleted` — the agent package itself was deleted mid-run (`runs.package_id` is `ON DELETE SET NULL`, so the run survives for observability) and nothing will restore that definition. There is deliberately no draft fallback in either case: the run's authorization set may never be re-derived from the mutable draft. Both are `409`, not `410`, which on this endpoint means the credential was revoked upstream, and not `404`, which here means the integration is not a dependency of the running agent or not installed. A third cause shares the status on this endpoint: `integration_auth_undeclared` — the integration manifest VERSION frozen for this run (`runs.resolved_integration_versions`) does not declare the `auth_key` the run's connection was created against (the auth was renamed or removed after the connection was made). Nothing can be injected without that declaration, and the credential is deliberately NOT flagged `needsReconnection`: it is intact and may still be valid under another manifest version, so `410` would both mislabel it and destroy a working connection over a manifest edit. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description The credential is dead and the connection has been flagged `needsReconnection` — same semantics and same three causes as the GET endpoint. */
             410: {
                 headers: {
                     [name: string]: unknown;
@@ -20927,6 +21021,15 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             /** @description Agent does not reference this mcp-server through an installed integration, or no published version exists. */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description The definition this run executes is no longer readable, so the dependency set that authorises this fetch cannot be enumerated — and is never re-derived from the mutable draft. Two distinct causes, told apart by the problem `code`: `run_definition_gone` (the `package_versions` snapshot pinned by `runs.version_ref` was deleted while the run was in flight) and `run_agent_deleted` (the agent package itself was deleted mid-run). */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

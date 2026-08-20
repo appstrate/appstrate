@@ -354,6 +354,57 @@ const baseResponseHeaders = {
   "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
 } as const;
 
+/**
+ * The `503`/`504` pair every connect-run-backed connect operation answers with
+ * (the programmatic `connectIntegrationFields` and the hosted form's
+ * `submitConnectPage`). Spread at both sites so the two cannot drift: they
+ * describe the SAME two failures of the SAME machinery — an execution backend
+ * that cannot run a sidecar-only workload, and a login that never completed —
+ * down to the `example` bodies a client codegens against.
+ *
+ * Module-local const, NOT a `#/components/responses/*` $ref: the spread is
+ * inlined at serialization time, so the emitted spec stays byte-identical to
+ * the hand-written pair it replaces. Same technique as `paths/documents.ts`'s
+ * `pipelineResponses`.
+ */
+const connectRunResponses = {
+  "503": {
+    description:
+      "The configured execution backend cannot run a connect-run (sidecar-only workload). Operator configuration; the remedy is logged server-side and deliberately kept out of this response, which an end user can reach.",
+    content: {
+      "application/problem+json": {
+        schema: { $ref: "#/components/schemas/ProblemDetail" },
+        example: {
+          type: "https://docs.appstrate.dev/errors/connect-unavailable",
+          title: "Service Unavailable",
+          status: 503,
+          detail:
+            "This connection method is unavailable on this deployment. Contact your administrator.",
+          code: "connect_unavailable",
+          requestId: "req_abc123",
+        },
+      },
+    },
+  },
+  "504": {
+    description: "The connect-run login did not complete within the timeout",
+    content: {
+      "application/problem+json": {
+        schema: { $ref: "#/components/schemas/ProblemDetail" },
+        example: {
+          type: "https://docs.appstrate.dev/errors/timeout",
+          title: "Gateway Timeout",
+          status: 504,
+          detail:
+            "The connection attempt timed out after 60000ms — the login did not complete in time. Please try again.",
+          code: "timeout",
+          requestId: "req_def456",
+        },
+      },
+    },
+  },
+} as const;
+
 export const integrationsPaths = {
   "/api/integrations": {
     get: {
@@ -579,15 +630,20 @@ export const integrationsPaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["client_id", "client_secret"],
+              required: ["client_id"],
               properties: {
                 client_id: { type: "string", minLength: 1 },
-                client_secret: { type: "string", default: "" },
+                client_secret: {
+                  type: "string",
+                  minLength: 1,
+                  description:
+                    "REQUIRED unless `token_endpoint_auth_method` is `none`. A public client is declared, never inferred: omitting the secret under any other method is rejected with 400 rather than silently registering a public client.",
+                },
                 token_endpoint_auth_method: {
                   type: "string",
                   enum: ["client_secret_post", "client_secret_basic", "none"],
                   description:
-                    "Explicit client-authentication method for this client, overriding the manifest's. Send `none` to register a PUBLIC client (no secret at the provider). Omit to leave it undeclared, in which case the manifest's value applies. A blank `client_secret` is recorded as `none`.",
+                    "Explicit client-authentication method for this client, overriding the manifest's. Send `none` to register a PUBLIC client (no secret at the provider), and then send no `client_secret`. Omit to leave it undeclared, in which case the manifest's value applies — and a `client_secret` is then mandatory.",
                 },
                 redirect_uri: { type: "string", format: "uri" },
               },
@@ -633,13 +689,13 @@ export const integrationsPaths = {
                 client_secret: {
                   type: "string",
                   description:
-                    "OMIT to preserve the stored secret. An empty string declares the client PUBLIC and clears it. The rotate form submits an empty input whenever only the redirect URI changed, so the two must stay distinguishable.",
+                    "OMIT to preserve the stored secret. An empty string CLEARS it and is accepted only together with `token_endpoint_auth_method: none`; alone it is rejected with 400. The rotate form submits an empty input whenever only the redirect URI changed, so the two must stay distinguishable.",
                 },
                 token_endpoint_auth_method: {
                   type: "string",
                   enum: ["client_secret_post", "client_secret_basic", "none"],
                   description:
-                    "Explicit client-authentication method for this client, overriding the manifest's. Send `none` to register a PUBLIC client (no secret at the provider). Omit to leave it undeclared, in which case the manifest's value applies. A blank `client_secret` is recorded as `none`.",
+                    "Explicit client-authentication method for this client, overriding the manifest's. Send `none` to declare a PUBLIC client (no secret at the provider). Omit to leave it undeclared, in which case the manifest's value applies.",
                 },
                 redirect_uri: { type: "string", format: "uri" },
               },
@@ -800,6 +856,7 @@ export const integrationsPaths = {
         "400": { $ref: "#/components/responses/ValidationError" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
+        ...connectRunResponses,
       },
     },
   },
@@ -1030,6 +1087,7 @@ export const integrationsPaths = {
         },
         "400": { $ref: "#/components/responses/ValidationError" },
         "404": { $ref: "#/components/responses/NotFound" },
+        ...connectRunResponses,
       },
     },
   },

@@ -33,7 +33,7 @@ import { OAUTH_REFRESH_LEAD_MS } from "@appstrate/core/sidecar-types";
 import type { AfpsManifestAuth } from "./integration-manifest-helpers.ts";
 
 import { logger } from "../lib/logger.ts";
-import { notFound, gone, internalError, badGateway } from "../lib/errors.ts";
+import { notFound, gone, conflict, internalError, badGateway } from "../lib/errors.ts";
 import type { Actor } from "../lib/actor.ts";
 import {
   buildIntegrationOAuthRefreshContext,
@@ -64,12 +64,27 @@ export interface ResolveLiveCredentialsOptions {
 }
 
 /**
+ * An EMPTY payload from this function means exactly one thing: the integration
+ * declares no auth at all. Every state in which a credential was expected but
+ * could not be produced throws — because the sidecar reads an empty payload as
+ * "no `delivery.http` auths, skip the MITM listener entirely" and boots the run
+ * anyway, so a silent empty return turns a broken connection into an agent
+ * reporting "the API is unavailable" against a fleet of uncredentialed 401s.
+ *
  * Throws ApiError on:
  *   - 404: integration not declared by the agent, not installed, or no
- *     connection for the actor.
- *   - 410: connection's refresh token was revoked upstream (sidecar
- *     should propagate as 401 to the integration so the LLM sees a
- *     clean "please re-connect" surface).
+ *     connection for the actor (including a run-pinned connection that has
+ *     since been deleted or unshared). Nothing exists to flag, so this is
+ *     deliberately NOT the 410 below.
+ *   - 409 `integration_auth_undeclared`: the connection's `auth_key` is not
+ *     declared by the manifest VERSION this run is pinned to (auth renamed or
+ *     removed since the connection was made). The credential is intact and may
+ *     be valid under another version, so it is NOT flagged.
+ *   - 410: the credential is dead and the connection has been flagged
+ *     `needsReconnection` — refresh token revoked upstream, an unrefreshable
+ *     auth on a forced refresh, or stored credentials that cannot be
+ *     decrypted. The sidecar propagates it as a 401 to the integration so the
+ *     LLM sees a clean "please re-connect" surface, and stops retrying.
  *   - 502: transient OAuth refresh failure (network, upstream 5xx, etc).
  *     The cached credential may still be valid; the sidecar treats it as
  *     retry-later and the listener's `refreshOnUnauthorized` cooldown
@@ -117,6 +132,12 @@ export async function resolveLiveIntegrationCredentials(
 
   const auths = (manifest.auths ?? {}) as Record<string, AfpsManifestAuth>;
   if (Object.keys(auths).length === 0) {
+    // The ONLY legitimate empty payload on this endpoint: the integration
+    // genuinely declares no auth, so there is nothing to inject and nothing
+    // has failed. Every other empty-looking state below is a broken one and
+    // throws — an empty payload tells the sidecar "no `delivery.http` auths,
+    // skip the MITM listener", which for a broken state means the run boots
+    // and every upstream call goes out uncredentialed.
     return { auths: [], deliveryPlans: {}, expiresAtEpochMs: {} };
   }
 
@@ -138,49 +159,116 @@ export async function resolveLiveIntegrationCredentials(
     { applicationId: context.applicationId, actor: context.actor },
   );
   if (!connection) {
-    return out;
+    // STATE A — nothing to decrypt. Either the row the run PINNED at kickoff is
+    // no longer reachable (deleted, unshared, moved to another application), or
+    // the actor never connected this integration at all. Both are 404: the
+    // doc comment above already promises "no connection for the actor", there
+    // is no row to flag `needsReconnection` on, and 410 would lie about one
+    // having been flagged. Returning the empty payload here (the old
+    // behaviour) was indistinguishable from "declares no auth" — the sidecar
+    // skipped the MITM listener, every upstream call left uncredentialed, and
+    // the agent reported a generic "the API is unavailable".
+    logger.warn("Integration credentials unavailable — no accessible connection", {
+      runId: context.runId,
+      integrationId,
+      declaredAuthKeys: Object.keys(auths),
+      ...(snapshotEntry ? { pinnedConnectionId: snapshotEntry.connectionId } : {}),
+      ...(snapshotEntry ? { pinnedSource: snapshotEntry.source } : {}),
+    });
+    throw notFound(
+      snapshotEntry
+        ? `Integration '${integrationId}': the connection pinned for this run ` +
+            `(${snapshotEntry.connectionId}, source '${snapshotEntry.source}') is no longer ` +
+            `reachable — it was deleted, unshared, or moved to another application after the ` +
+            `run started. Re-connect '${integrationId}' and relaunch the run.`
+        : `Integration '${integrationId}' has no connection for this run's actor ` +
+            `(declared auths: ${Object.keys(auths).join(", ")}). Connect '${integrationId}' ` +
+            `for this user, then relaunch the run.`,
+    );
   }
 
   const authKey = connection.authKey;
   const authDef = auths[authKey];
-  // Falls through to the empty `out` when the connection's authKey no longer
-  // maps to a declared auth (manifest renamed since the connection was created).
-  if (!authDef) return out;
+  if (!authDef) {
+    // STATE B — the connection exists and is readable, but the manifest VERSION
+    // this run is pinned to no longer declares the auth it was created against
+    // (renamed/removed auth key). Nothing can be injected: without the
+    // declaration there is no `delivery.http` plan and no `authorized_uris`.
+    //
+    // 409, matching the vocabulary the run-definition guards in
+    // `routes/internal.ts` already established for "the state this run was
+    // pinned to no longer lines up" (`run_definition_gone` / `run_agent_deleted`).
+    // NOT 410: the credential itself is intact and may still be valid under
+    // another manifest version, so flagging `needsReconnection` — which 410
+    // promises — would destroy a working connection over a manifest edit.
+    // NOT 404: 404 on this endpoint already means "not a dependency / not
+    // installed", and stacking a third unrelated cause behind it is exactly the
+    // illegibility this path exists to remove.
+    logger.warn("Integration connection's auth key is not declared by the pinned manifest", {
+      runId: context.runId,
+      integrationId,
+      authKey,
+      declaredAuthKeys: Object.keys(auths),
+      manifestVersion: pinnedManifestVersionLabel(context, integrationId),
+    });
+    throw conflict(
+      "integration_auth_undeclared",
+      `Integration '${integrationId}' version ${pinnedManifestVersionLabel(context, integrationId)} ` +
+        `does not declare auth '${authKey}', which this run's connection was created against ` +
+        `(declared auths: ${Object.keys(auths).join(", ")}). The auth was renamed or removed ` +
+        `after the connection was made: re-connect '${integrationId}' against a declared auth, ` +
+        `or pin the run to an integration version that still declares '${authKey}'.`,
+    );
+  }
+
+  // The credential is terminally unusable and the connection must be re-made.
+  // Two entry classes, one behaviour so they cannot drift:
+  //   • a FORCED refresh (the sidecar already saw an upstream 401) that cannot
+  //     recover the credential — an oauth2 auth with no refresh client, or any
+  //     non-oauth2 auth, which has nothing to refresh;
+  //   • a credential nobody can decrypt (below), on ANY read — forced or not.
+  // Both flag the connection for re-connect and surface 410 so the sidecar
+  // stops retrying and the next-launch readiness gate fires. (A revoked refresh
+  // token is handled inline further down, with the same flag + status.)
+  const flagTerminalAndThrow = async (reason: string): Promise<never> => {
+    await markIntegrationConnectionNeedsReconnection(connection.id);
+    logger.warn("Integration credential terminally unusable — flagging needsReconnection", {
+      runId: context.runId,
+      integrationId,
+      authKey,
+      connectionId: connection.id,
+      forced: options.forceRefresh === true,
+      reason,
+    });
+    throw gone(
+      "INTEGRATION_CONNECTION_NEEDS_RECONNECTION",
+      `Integration '${integrationId}' auth '${authKey}' is unusable (${reason}) — ` +
+        `the connection has been flagged as needing re-connection. Re-connect ` +
+        `'${integrationId}' and relaunch the run.`,
+    );
+  };
 
   let fields = decryptIntegrationConnectionFields(
     connection.credentialsEncrypted,
     integrationId,
     authKey,
   );
-  if (!fields) return out;
+  if (!fields) {
+    // STATE C — the stored ciphertext cannot be decrypted (rotated
+    // `CONNECTION_ENCRYPTION_KEY` without re-encrypting, corrupted blob, an
+    // envelope this build cannot read). A credential nobody can read is dead
+    // regardless of how we got here, so this is the terminal path: flag +
+    // 410. The old silent empty return made this state answer 200 even on a
+    // FORCED refresh — i.e. the sidecar had already seen a 401 and we told it
+    // "nothing to inject, carry on".
+    // `return` rather than a bare `await`: the helper's `Promise<never>` does
+    // not narrow `fields` on its own, and everything below reads it non-null.
+    return flagTerminalAndThrow("stored credentials could not be decrypted");
+  }
 
   let expiresAtEpochMs: number | null = connection.expiresAt
     ? connection.expiresAt.getTime()
     : null;
-
-  // A FORCED refresh only ever happens after the sidecar saw an upstream 401.
-  // When the credential cannot be recovered (a revoked refresh token is handled
-  // inline below; here: an oauth2 auth with no refresh client, or any
-  // non-oauth2 auth which has nothing to refresh), the credential is dead:
-  // flag the connection for re-connect and surface 410 so the sidecar stops
-  // retrying and the next-launch readiness gate fires. Shared by both terminal
-  // branches so they cannot drift.
-  const flagTerminalAndThrow = async (reason: string): Promise<never> => {
-    await markIntegrationConnectionNeedsReconnection(connection.id);
-    logger.warn(
-      "Integration credential unrefreshable on forced refresh — flagging needsReconnection",
-      {
-        runId: context.runId,
-        integrationId,
-        authKey,
-        reason,
-      },
-    );
-    throw gone(
-      "INTEGRATION_CONNECTION_NEEDS_RECONNECTION",
-      `Integration '${integrationId}' auth '${authKey}' could not be refreshed (${reason}) — needs re-connection`,
-    );
-  };
 
   // Decide whether to refresh.
   const needsRefresh =
@@ -374,11 +462,34 @@ async function loadIntegrationManifest(
     case "not_integration":
       throw notFound(`Package '${integrationId}' is not an integration`);
     case "invalid_manifest":
+      // The response stays a bare 500 (the caller is the sidecar, not a human,
+      // and the manifest is the platform's own data — a broken one is a server
+      // fault). The Zod issues ride the log line instead of being dropped two
+      // statements from the data: the operator reading this warning is the one
+      // who has to go fix the field it names.
       logger.warn("integration manifest fails validation in credentials resolver", {
         integrationId,
+        issues: res.failure.issues,
       });
       throw internalError();
   }
+}
+
+/**
+ * Printable label for the integration manifest version this run reads (#686):
+ * the semver frozen at kickoff, or the snapshot's `source` (`draft`/`system`,
+ * which carry no semver), or `"draft"` when nothing was frozen at all (legacy /
+ * soft-resolved runs). Used in the error messages that report a
+ * manifest/connection mismatch, where naming the version IS the diagnosis —
+ * "auth 'primary' is not declared" is unactionable without knowing by what.
+ */
+function pinnedManifestVersionLabel(
+  context: { resolvedIntegrationVersions?: Record<string, ResolvedIntegrationVersion> | null },
+  integrationId: string,
+): string {
+  const entry = context.resolvedIntegrationVersions?.[integrationId] ?? null;
+  if (!entry) return "draft";
+  return entry.version ?? entry.source;
 }
 
 function isWithinLeadWindow(expiresAt: Date | null): boolean {

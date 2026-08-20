@@ -22,6 +22,7 @@ import { isManifestTextFallback } from "../lib/manifest-utils.ts";
 import { pickVersion } from "./run-launcher/db-package-catalog.ts";
 import { VERSION_SELECTOR_DRAFT } from "./agent-version-resolver.ts";
 import { logger } from "../lib/logger.ts";
+import { formatZodIssues } from "../lib/zod-format.ts";
 
 export type { IntegrationSummary };
 
@@ -38,7 +39,14 @@ export type { IntegrationSummary };
 export type IntegrationManifestLoadFailure =
   | { kind: "not_found" }
   | { kind: "not_integration"; actualType: string }
-  | { kind: "invalid_manifest" };
+  /**
+   * `issues` is the manifest's Zod validation failure, rendered `path: message`
+   * (see `formatZodIssues`). Carried on the failure instead of discarded at the
+   * parse site: unlike its two siblings the `invalid_manifest` kind names no
+   * fact of its own, so a caller that surfaces it bare ("the manifest is
+   * invalid") leaves the operator with nothing to go fix.
+   */
+  | { kind: "invalid_manifest"; issues: string };
 
 export type IntegrationManifestLoadResult =
   | { ok: true; manifest: IntegrationManifest }
@@ -97,7 +105,11 @@ async function fetchIntegrationManifestUncached(
     return { ok: false, failure: { kind: "not_integration", actualType: pkgRow.type } };
   }
   const parsed = integrationManifestSchema.safeParse(pkgRow.manifest);
-  if (!parsed.success) return { ok: false, failure: { kind: "invalid_manifest" } };
+  if (!parsed.success)
+    return {
+      ok: false,
+      failure: { kind: "invalid_manifest", issues: formatZodIssues(parsed.error) },
+    };
   return { ok: true, manifest: parsed.data };
 }
 
@@ -346,8 +358,21 @@ function descriptorToResolved(d: SpawnVersionDescriptor): ResolvedIntegrationVer
     : { version: null, source: d.kind };
 }
 
-/** Map a frozen snapshot entry back into the descriptor the readers consume. */
+/**
+ * Map a frozen snapshot entry back into the descriptor the readers consume.
+ *
+ * `source: "version"` with a null `version` is an impossible shape:
+ * {@link descriptorToResolved} is the only writer and it always pairs that
+ * source with a concrete semver, so a null there means the stored snapshot is
+ * corrupt. It used to substitute `{ kind: "draft" }` — which does NOT mean
+ * "the latest published" as the comment claimed, but the MUTABLE draft
+ * (`fetchIntegrationManifestUncached`). A run pinned to a version would then
+ * have silently spawned and authorized against whatever the draft says today.
+ * Throw instead: an unreadable pin is not a degraded read, it is an
+ * unanswerable question.
+ */
 export function resolvedIntegrationVersionToDescriptor(
+  packageId: string,
   entry: ResolvedIntegrationVersion,
 ): SpawnVersionDescriptor {
   switch (entry.source) {
@@ -356,9 +381,15 @@ export function resolvedIntegrationVersionToDescriptor(
     case "system":
       return { kind: "system" };
     case "version":
-      // A `version` source always froze a concrete version; fall back to the
-      // latest published only if the snapshot is somehow malformed.
-      return entry.version ? { kind: "version", version: entry.version } : { kind: "draft" };
+      if (!entry.version) {
+        throw new Error(
+          `Corrupt frozen integration version for '${packageId}': source "version" with no ` +
+            `version (entry: ${JSON.stringify(entry)}). The run's ` +
+            `resolved_integration_versions snapshot cannot be honored; re-launch the run to ` +
+            `re-freeze it.`,
+        );
+      }
+      return { kind: "version", version: entry.version };
   }
 }
 
@@ -378,7 +409,11 @@ export async function readIntegrationManifestAt(
     const sys = getSystemPackages().get(packageId);
     if (!sys) return { ok: false, failure: { kind: "not_found" } };
     const parsed = integrationManifestSchema.safeParse(sys.manifest);
-    if (!parsed.success) return { ok: false, failure: { kind: "invalid_manifest" } };
+    if (!parsed.success)
+      return {
+        ok: false,
+        failure: { kind: "invalid_manifest", issues: formatZodIssues(parsed.error) },
+      };
     return { ok: true, manifest: parsed.data };
   }
 
@@ -394,7 +429,11 @@ export async function readIntegrationManifestAt(
     .limit(1);
   if (!row) return { ok: false, failure: { kind: "not_found" } };
   const parsed = integrationManifestSchema.safeParse(row.manifest);
-  if (!parsed.success) return { ok: false, failure: { kind: "invalid_manifest" } };
+  if (!parsed.success)
+    return {
+      ok: false,
+      failure: { kind: "invalid_manifest", issues: formatZodIssues(parsed.error) },
+    };
   return { ok: true, manifest: parsed.data };
 }
 
@@ -415,7 +454,10 @@ export function readIntegrationManifestForRun(
   cache?: IntegrationManifestCache,
 ): Promise<IntegrationManifestLoadResult> {
   return frozen
-    ? readIntegrationManifestAt(packageId, resolvedIntegrationVersionToDescriptor(frozen))
+    ? readIntegrationManifestAt(
+        packageId,
+        resolvedIntegrationVersionToDescriptor(packageId, frozen),
+      )
     : fetchIntegrationManifest(packageId, cache);
 }
 

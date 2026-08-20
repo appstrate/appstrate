@@ -22,7 +22,10 @@
 
 import { resolveAfpsHttpDelivery, type AfpsHttpDelivery } from "@appstrate/connect/afps-delivery";
 import type { CredentialBundle } from "@appstrate/connect/connect";
-import type { ManifestDeliveryHttp } from "@appstrate/core/sidecar-types";
+import {
+  CONNECT_LOGIN_TOOL_ERROR_PREFIX,
+  type ManifestDeliveryHttp,
+} from "@appstrate/core/sidecar-types";
 import type { McpHost } from "./mcp-host.ts";
 import type { IntegrationCredentialsSource } from "./integration-credentials-source.ts";
 import { logger } from "./logger.ts";
@@ -197,7 +200,7 @@ function parseLoginToolResult(result: {
       errFirst && errFirst.type === "text" && typeof errFirst.text === "string"
         ? errFirst.text
         : "";
-    throw new Error(`connect-login: login tool reported an error${detail ? `: ${detail}` : ""}`);
+    throw new Error(`${CONNECT_LOGIN_TOOL_ERROR_PREFIX}${detail ? `: ${detail}` : ""}`);
   }
   const first = result.content?.[0];
   if (!first || first.type !== "text" || typeof first.text !== "string") {

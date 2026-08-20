@@ -113,6 +113,52 @@ describe("registerDynamicClient (RFC 7591)", () => {
     expect(reg.registrationClientUri).toBe("https://as/register/c2");
   });
 
+  // RFC 7591 §3.2.1 lets the AS "replace any invalid values with suitable
+  // default values" and state the substitution in the response. Discarding that
+  // statement is how a `"none"` request came back registered as a confidential
+  // client and was persisted as a public one — the contradiction then surfaced
+  // at the OAuth callback, after the user had already consented.
+  it("surfaces the token_endpoint_auth_method the AS registered, not the one requested", async () => {
+    let body: Record<string, unknown> = {};
+    const fetchImpl = (async (_url: string, init?: RequestInit) => {
+      body = JSON.parse(String(init?.body));
+      return jsonResponse({
+        client_id: "c-substituted",
+        client_secret: "s3cr3t",
+        token_endpoint_auth_method: "client_secret_basic",
+      });
+    }) as unknown as typeof fetch;
+
+    const reg = await registerDynamicClient({
+      registrationEndpoint: "https://as/register",
+      redirectUri: "https://app/cb",
+      clientName: "X",
+      tokenEndpointAuthMethod: "none",
+      fetchImpl,
+    });
+    // Asked for a public client…
+    expect(body.token_endpoint_auth_method).toBe("none");
+    // …and the answer is reported as the AS gave it, so the caller can refuse.
+    expect(reg.tokenEndpointAuthMethod).toBe("client_secret_basic");
+    expect(reg.clientSecret).toBe("s3cr3t");
+  });
+
+  it("leaves tokenEndpointAuthMethod undefined when the AS omits it", async () => {
+    // Absent is a distinct answer from `"none"`: the field is optional in the
+    // response, so a caller must be able to tell "the AS said public" from "the
+    // AS said nothing" rather than have the omission read as agreement.
+    const fetchImpl = (async () =>
+      jsonResponse({ client_id: "c-silent" })) as unknown as typeof fetch;
+    const reg = await registerDynamicClient({
+      registrationEndpoint: "https://as/register",
+      redirectUri: "https://app/cb",
+      clientName: "X",
+      fetchImpl,
+    });
+    expect(reg.tokenEndpointAuthMethod).toBeUndefined();
+    expect(reg.clientSecret).toBeUndefined();
+  });
+
   it("throws on non-2xx with the status attached", async () => {
     const fetchImpl = (async () =>
       new Response("nope", { status: 403 })) as unknown as typeof fetch;
@@ -145,7 +191,33 @@ describe("registerDynamicClient (RFC 7591)", () => {
     ).rejects.toMatchObject({
       name: "DynamicClientRegistrationError",
       status: 400,
+      errorCode: "invalid_request",
       errorDescription: "Your integration is not currently allowlisted.",
+    });
+  });
+
+  it("captures the RFC 6749 error code when the rejection carries no description", async () => {
+    // `error_description` is OPTIONAL in RFC 6749 §5.2 / RFC 7591 §3.2.2, and a
+    // code-only rejection is the common shape. Reading only the description
+    // turned `{"error":"invalid_redirect_uri"}` — the one failure an operator
+    // fixes in a minute — into a generic line plus a bare HTTP status.
+    const fetchImpl = (async () =>
+      new Response(JSON.stringify({ error: "invalid_redirect_uri" }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      })) as unknown as typeof fetch;
+    await expect(
+      registerDynamicClient({
+        registrationEndpoint: "https://as/register",
+        redirectUri: "https://app/cb",
+        clientName: "X",
+        fetchImpl,
+      }),
+    ).rejects.toMatchObject({
+      name: "DynamicClientRegistrationError",
+      status: 400,
+      errorCode: "invalid_redirect_uri",
+      errorDescription: undefined,
     });
   });
 
@@ -165,6 +237,7 @@ describe("registerDynamicClient (RFC 7591)", () => {
       const dcrErr = err as DynamicClientRegistrationError;
       expect(dcrErr.status).toBe(400);
       expect(dcrErr.errorDescription).toBeUndefined();
+      expect(dcrErr.errorCode).toBeUndefined();
     }
   });
 

@@ -171,7 +171,6 @@ async function doRefresh(
   try {
     ({ parsed, raw: tokenData } = await performRefreshTokenExchange(ctx, refreshToken, {
       label: `Integration token refresh for '${packageId}' auth '${authKey}'`,
-      accessTokenFallback: current.access_token,
     }));
   } catch (err) {
     // Flip needsReconnection on a revoked refresh token so the dashboard
@@ -427,14 +426,10 @@ export async function buildIntegrationOAuthRefreshContext(
   // posts what it was given rather than re-deriving from the manifest.
   const { clientId, clientSecret, tokenEndpointAuthMethod } = client;
   const supportedAuthMethod = toSupportedTokenEndpointAuthMethod(tokenEndpointAuthMethod);
-  // AFPS: `scope_separator` moved under `_meta["dev.appstrate/oauth"]`.
-  const oauthMeta = (afpsAuth._meta?.["dev.appstrate/oauth"] ?? undefined) as
-    { scope_separator?: string } | undefined;
   return {
     tokenEndpoint,
     clientId,
     clientSecret,
     ...(supportedAuthMethod ? { tokenEndpointAuthMethod: supportedAuthMethod } : {}),
-    ...(oauthMeta?.scope_separator ? { scopeSeparator: oauthMeta.scope_separator } : {}),
   };
 }

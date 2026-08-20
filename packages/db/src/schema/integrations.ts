@@ -208,9 +208,10 @@ export const integrationOauthClients = pgTable(
      *
      * Empty means empty — a public client's row carries NO ciphertext, so
      * "does this client have a secret" is a column read rather than a
-     * decryption. Rows written before `token_endpoint_auth_method` existed
-     * may still hold a ciphertext over an empty secret; the resolver's legacy
-     * branch handles those until the backfill script has run.
+     * decryption, and `ioc_public_iff_no_secret` holds that biconditional. The
+     * emptiness is never re-derived by decrypting: inferring "public" from a
+     * secret that opens to `""` is what put `client_secret=` (present but
+     * empty) on the wire, which providers such as Dropbox reject.
      */
     clientSecretEncrypted: text("client_secret_encrypted").notNull(),
     /**
@@ -280,13 +281,12 @@ export const integrationOauthClients = pgTable(
     // make unrepresentable: a row can no longer claim to be public while
     // holding a secret, nor name a secret-based method while holding none.
     //
-    // This does NOT have to wait for the backfill, which was the original
-    // reading. A legacy public row is structurally `NULL` + a ciphertext (of an
-    // empty secret), which satisfies the second branch — Postgres cannot see
-    // through the ciphertext, so it cannot recognise that row as public either
-    // way. No existing row violates this, so it lands VALID immediately. The
-    // backfill still runs, to canonicalise those rows' MEANING and let the
-    // legacy read paths be deleted.
+    // What it does NOT guarantee is anything about the PLAINTEXT: the check is
+    // over `client_secret_encrypted <> ''`, and Postgres cannot see through
+    // ciphertext. So "declares no method and stores a ciphertext" is accepted
+    // whatever that ciphertext decrypts to. The write path closes that gap
+    // instead — `encodeClientAuthForStorage` refuses an empty secret unless it
+    // comes with an explicit `'none'`, which is stored as no ciphertext at all.
     check(
       "ioc_public_iff_no_secret",
       sql`(${table.tokenEndpointAuthMethod} = 'none' AND ${table.clientSecretEncrypted} = '') OR (${table.tokenEndpointAuthMethod} IS DISTINCT FROM 'none' AND ${table.clientSecretEncrypted} <> '')`,

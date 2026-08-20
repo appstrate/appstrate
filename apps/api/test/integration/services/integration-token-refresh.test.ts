@@ -418,6 +418,35 @@ describe("integration refresh-failure escalation", () => {
     expect(row.needsReconnection).toBe(false);
   });
 
+  // A 2xx whose body carries no `access_token` used to be absorbed: the current
+  // access token was spliced in as a fallback, so the exchange "succeeded", the
+  // dead token was re-persisted, and `needsReconnection` / the streak were
+  // RESET. Worse, with no `expires_in` the row also lost its `expires_at`,
+  // after which neither the proactive lead window nor this escalation could
+  // ever fire again — a dead credential marked healthy, permanently.
+  it("treats a 2xx without access_token as a failure and increments the counter", async () => {
+    const connId = await seedConn({
+      expiresAt: new Date(Date.now() - HOUR_MS),
+      refreshFailureCount: 1,
+    });
+    // The real shape: an IdP answering 200 with an OAuth error object.
+    token.setResponse({ error: "invalid_grant" }, 200);
+
+    await expect(
+      forceRefreshIntegrationConnection(
+        connId,
+        PACKAGE_ID,
+        "primary",
+        (await fetchEncrypted(connId))!,
+        { tokenEndpoint: token.url, clientId: "cid", clientSecret: "csec" },
+      ),
+    ).rejects.toThrow(/access_token/);
+
+    const row = await readRow(connId);
+    expect(row.refreshFailureCount).toBe(2);
+    expect(row.lastRefreshFailureAt).not.toBeNull();
+  });
+
   it("a transient upstream failure during refresh increments the counter and rethrows", async () => {
     const connId = await seedConn({ expiresAt: new Date(Date.now() - HOUR_MS) });
     token.setResponse({ error: "temporarily_unavailable" }, 503); // 5xx → transient

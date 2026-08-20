@@ -33,7 +33,7 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
-import { seedAgent, seedPackage } from "../../helpers/seed.ts";
+import { seedAgent, seedMcpServer, seedPackage, seedPackageVersion } from "../../helpers/seed.ts";
 import { installPackage } from "../../../src/services/application-packages.ts";
 import { integrationConnections, applicationPackages } from "@appstrate/db/schema";
 import { and, eq } from "drizzle-orm";
@@ -589,6 +589,148 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
 
     // Not the 412 envelope — readiness passed. (Downstream model-config
     // errors may still 400; that's a different code path.)
+    if (res.status === 412) {
+      const body = (await res.json()) as ProblemDetails;
+      expect(body.code).not.toBe("missing_integration_connection");
+    }
+  });
+
+  // ─── Bare `dependencies.integrations` (no integrations_configuration) ─
+  //
+  // The cascade and the spawn resolver used to disagree about which
+  // integrations need a connection verdict. `parseManifestIntegrations` leaves
+  // `tools: undefined` when the agent declares NO `integrations_configuration`
+  // entry; the cascade read that raw value and skipped the integration as
+  // inert, while the spawn resolver read the EFFECTIVE selection, which
+  // inherits the integration's `default_tools` — so it spawned the thing
+  // anyway. With no snapshot entry, `resolvedConnection ?? null` collapsed
+  // "no verdict" into "no snapshot", and the spawn path auto-picked
+  // `rows.find(ownsRow) ?? rows[0]` — bypassing admin pins, enforced org
+  // defaults, run/schedule overrides and member pins. The run executed against
+  // an arbitrary account, silently. Both sites now call
+  // `resolveEffectiveToolSelection`, so anything that will be spawned gets a
+  // verdict or a loud 412.
+
+  /** Same integration, plus the `default_tools` an agent inherits with no config. */
+  function buildDefaultToolsIntegrationManifest(id: string) {
+    const m = buildIntegrationManifest(id) as unknown as Record<string, unknown>;
+    m.default_tools = ["search"];
+    return m as unknown as ReturnType<typeof buildIntegrationManifest>;
+  }
+
+  /** Declares the dependency ONLY — no `integrations_configuration` entry at all. */
+  function buildAgentManifestBareDependency(id: string): Record<string, unknown> {
+    return {
+      name: AGENT,
+      version: "1.0.0",
+      type: "agent",
+      schema_version: "0.2",
+      display_name: "Bare-Dependency Agent",
+      dependencies: { integrations: { [id]: "^1.0.0" } },
+    };
+  }
+
+  /**
+   * Seeds the integration, a PUBLISHED version of it, and its referenced
+   * mcp-server — the whole chain the run kickoff walks. The other suites here
+   * skip all that because they 412 at readiness first; these tests must be
+   * able to get PAST readiness when the fix is absent, otherwise the control
+   * fails on an unrelated `422 dependency_unresolved` and proves nothing about
+   * the silent auto-pick.
+   */
+  async function seedDefaultToolsIntegration(id: string) {
+    await seedMcpServer({ id: MCP_SERVER, orgId: ctx.orgId });
+    const manifest = buildDefaultToolsIntegrationManifest(id);
+    await seedPackage({
+      id,
+      orgId: ctx.orgId,
+      type: "integration",
+      source: "local",
+      draftManifest: manifest,
+    });
+    await seedPackageVersion({
+      packageId: id,
+      version: "1.0.0",
+      manifest: manifest as unknown as Record<string, unknown>,
+    });
+    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, id);
+  }
+
+  it("412s an agent that declares the dependency only, when the integration's default_tools make it active", async () => {
+    await seedAgent({
+      id: AGENT,
+      orgId: ctx.orgId,
+      createdBy: ctx.user.id,
+      draftManifest: buildAgentManifestBareDependency(INTEGRATION),
+    });
+    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, AGENT);
+    await seedDefaultToolsIntegration(INTEGRATION);
+    // No connection — the integration WILL be spawned (default_tools), so the
+    // cascade must demand a connection instead of treating it as inert.
+
+    const res = await app.request(`/api/agents/${AGENT}/run?version=draft`, {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+
+    expect(res.status).toBe(412);
+    const body = (await res.json()) as ProblemDetails;
+    expect(body.code).toBe("missing_integration_connection");
+    expect(body.errors).toHaveLength(1);
+    expect(body.errors![0]!.field).toBe(`integrations.${INTEGRATION}`);
+    expect(body.errors![0]!.code).toBe("not_connected");
+  });
+
+  it("412s must_choose_connection instead of silently auto-picking, for a bare dependency with 2 candidates", async () => {
+    // The wrong-account bug in its purest form: two accessible connections and
+    // no verdict meant the spawn resolver picked one on its own. The run must
+    // stop and ask instead.
+    await seedAgent({
+      id: AGENT,
+      orgId: ctx.orgId,
+      createdBy: ctx.user.id,
+      draftManifest: buildAgentManifestBareDependency(INTEGRATION),
+    });
+    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, AGENT);
+    await seedDefaultToolsIntegration(INTEGRATION);
+    const conn1 = await seedConnection(INTEGRATION, ctx.user.id);
+    const conn2 = await seedConnection(INTEGRATION, ctx.user.id);
+
+    const res = await app.request(`/api/agents/${AGENT}/run?version=draft`, {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+
+    expect(res.status).toBe(412);
+    const body = (await res.json()) as ProblemDetails;
+    const err = body.errors!.find((e) => e.field === `integrations.${INTEGRATION}`);
+    expect(err).toBeDefined();
+    expect(err!.code).toBe("must_choose_connection");
+    expect(err!.candidate_connection_ids!.sort()).toEqual([conn1, conn2].sort());
+  });
+
+  it("keeps a bare dependency INERT when the integration declares no default_tools", async () => {
+    // The other side of the same definition: with no explicit selection AND no
+    // `default_tools`, the effective selection is empty, nothing will be
+    // spawned, and demanding a connection would be a false alarm.
+    await seedAgent({
+      id: AGENT,
+      orgId: ctx.orgId,
+      createdBy: ctx.user.id,
+      draftManifest: buildAgentManifestBareDependency(INTEGRATION),
+    });
+    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, AGENT);
+    await seedIntegration(INTEGRATION);
+    // No connection — and none required.
+
+    const res = await app.request(`/api/agents/${AGENT}/run?version=draft`, {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+
     if (res.status === 412) {
       const body = (await res.json()) as ProblemDetails;
       expect(body.code).not.toBe("missing_integration_connection");

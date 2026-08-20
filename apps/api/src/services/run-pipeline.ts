@@ -8,9 +8,11 @@
 import { logger } from "../lib/logger.ts";
 import {
   buildRunContext,
+  recordDroppedIntegrations,
   ModelNotConfiguredError,
   ModelCredentialMissingError,
 } from "./run-context-builder.ts";
+import type { DroppedIntegration } from "./integration-spawn-resolver.ts";
 import { toBundleApiError } from "./run-launcher/bundle-error-mapping.ts";
 import { createRun, appendRunLog } from "./state/runs.ts";
 import { materializeRunUploads, type PendingUploadMaterialization } from "./documents.ts";
@@ -463,6 +465,10 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
   let modelSource: string | null;
   let modelCost: ModelCost | null;
   let generationConfig: ModelGenerationSettings;
+  // Declared integrations this run will start WITHOUT. Persisted as run logs
+  // after `createRun` below — the `run_logs.run_id` FK forbids writing them
+  // any earlier.
+  let droppedIntegrations: DroppedIntegration[];
   let contextMs: number;
   const contextStart = Date.now();
   try {
@@ -477,6 +483,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
       modelSource,
       modelCost,
       generationConfig,
+      droppedIntegrations,
     } = await runWithSpan("appstrate.run.context", { attributes: spanAttributes }, () =>
       buildRunContext({
         runId,
@@ -664,6 +671,16 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
       error: getErrorMessage(err),
     });
   });
+
+  // Degradation marker — one `warn` run log per integration the agent
+  // declared but that could not be resolved (not installed / not connected /
+  // unresolvable reference). Without it a run that started with a subset of
+  // its tools is indistinguishable from an agent that chose not to call them.
+  // Awaited (not fire-and-forget like the breadcrumbs above) so the marker is
+  // ordered BEFORE the container's own logs; it is the empty-array no-op on
+  // every healthy run, and it swallows its own write failures, so it can
+  // neither slow down nor fail a normal kickoff.
+  await recordDroppedIntegrations({ orgId }, runId, droppedIntegrations);
 
   // --- Step 6: Fire-and-forget execution ---
   executeAgentInBackground({

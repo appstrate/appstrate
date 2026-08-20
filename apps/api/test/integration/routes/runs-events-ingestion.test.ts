@@ -2212,10 +2212,12 @@ describe("POST /api/runs/:runId/events/finalize — output-schema validation per
     expect(row?.error).toMatch(/without calling the required `output` tool/);
   });
 
-  it("pinned run whose version row is gone falls back to the draft schema", async () => {
-    // `version_ref` names a version that was deleted after kickoff — the
-    // helper degrades to the draft (which requires `answer`), preserving the
-    // pre-fix behavior instead of skipping validation entirely.
+  it("pinned run whose version row is gone FAILS LOUD — it never falls back to the draft schema", async () => {
+    // `version_ref` names a version that was deleted after kickoff. The output
+    // contract the run agreed to is unreadable, so finalize cannot render a
+    // verdict against it: the run fails naming that cause. It must NOT be
+    // judged against the draft (the old degradation), and it must not slip
+    // through as `success` with validation silently skipped.
     const runId = await seedRunWithSink(ctx, "@test/schema-agent", { versionRef: "9.9.9" });
 
     const res = await postFinalize(runId, {
@@ -2227,6 +2229,37 @@ describe("POST /api/runs/:runId/events/finalize — output-schema validation per
 
     const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
     expect(row?.status).toBe("failed");
-    expect(row?.error).toMatch(/without calling the required `output` tool/);
+    expect(row?.error).toMatch(/no longer readable/i);
+    expect(row?.error).toContain("9.9.9");
+    expect(row?.error).toContain("@test/schema-agent");
+    // Not the draft-schema verdict — the draft was never consulted.
+    expect(row?.error).not.toMatch(/without calling the required `output` tool/);
+  });
+
+  it("run whose AGENT row is gone finalizes NORMALLY — output validation is skipped, not failed", async () => {
+    // Deleting an agent mid-run is a designed state, not an anomaly:
+    // `runs.package_id` is `ON DELETE SET NULL` and the run survives for
+    // observability/billing. There is no contract left to validate against, so
+    // finalize honours the runner's verdict instead of manufacturing a failure.
+    // Contrast with the pinned-version case above, where the agent still exists
+    // and its unreadable contract IS the anomaly.
+    //
+    // The draft seeded in beforeEach requires `answer` and this finalize emits
+    // no output, so the very same run WITH its agent present fails (see "output
+    // tool never called"). Deleting the agent must not be what decides that.
+    const runId = await seedRunWithSink(ctx, "@test/schema-agent");
+    await db.delete(packages).where(eq(packages.id, "@test/schema-agent"));
+
+    const res = await postFinalize(runId, {
+      status: "success",
+      durationMs: 100,
+      usage: { input_tokens: 100, output_tokens: 50 },
+    });
+    expect(res.status).toBe(200);
+
+    const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+    expect(row?.status).toBe("success");
+    expect(row?.error).toBeNull();
+    expect(row?.packageId).toBeNull();
   });
 });

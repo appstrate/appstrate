@@ -17,7 +17,6 @@ import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage } from "../../helpers/seed.ts";
-import { encryptCredentials } from "@appstrate/connect";
 import { integrationOauthClients } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
 import {
@@ -26,10 +25,13 @@ import {
   resolveIntegrationClientById,
   encodeClientAuthForStorage,
   listIntegrationClients,
+  ensureIntegrationOAuthClient,
+  resolveConnectClient,
 } from "../../../src/services/integration-connections.ts";
 import { __resetSystemIntegrationsForTest } from "../../../src/services/integration-client-registry.ts";
 import type { AppScope } from "../../../src/lib/scope.ts";
 import type { IntegrationManifest } from "@appstrate/core/integration";
+import type { AfpsManifestAuth } from "../../../src/services/integration-manifest-helpers.ts";
 
 const INTEGRATION = "@myorg/probe";
 const AUTH_KEY = "primary";
@@ -53,6 +55,26 @@ const MANIFEST = {
     },
   },
 } as unknown as IntegrationManifest;
+
+/** The manifest's auth, as `OAuth2Strategy.begin` hands it to the resolver. */
+const OAUTH2_AUTH = {
+  type: "oauth2",
+  authorization_endpoint: "https://idp.example.com/authorize",
+  token_endpoint: "https://idp.example.com/token",
+  token_endpoint_auth_method: "client_secret_post",
+} as AfpsManifestAuth;
+
+/**
+ * The same auth declaring `token_endpoint_auth_method: "none"` — the
+ * declaration that made `assertClientAuthCoherent` return early, so an
+ * unreadable confidential client used to go out on the wire as a PUBLIC one.
+ */
+const PUBLIC_AUTH = {
+  type: "oauth2",
+  authorization_endpoint: "https://idp.example.com/authorize",
+  token_endpoint: "https://idp.example.com/token",
+  token_endpoint_auth_method: "none",
+} as AfpsManifestAuth;
 
 describe("public OAuth client is declared, not inferred", () => {
   let ctx: TestContext;
@@ -82,12 +104,75 @@ describe("public OAuth client is declared, not inferred", () => {
     return row!;
   }
 
+  /**
+   * A row holding a secret nobody can read — structurally a ciphertext (so the
+   * biconditional CHECK accepts it) but not one this key opens. The state a
+   * rotated `CONNECTION_ENCRYPTION_KEY` leaves behind.
+   */
+  async function seedUnreadableRow(clientId = "corrupt-cid"): Promise<string> {
+    const [row] = await db
+      .insert(integrationOauthClients)
+      .values({
+        applicationId: ctx.defaultAppId,
+        integrationId: INTEGRATION,
+        authKey: AUTH_KEY,
+        clientId,
+        clientSecretEncrypted: "v1.notarealkid.bm90LWEtcmVhbC1jaXBoZXJ0ZXh0",
+        isDefault: true,
+      })
+      .returning({ id: integrationOauthClients.id });
+    return row!.id;
+  }
+
+  /**
+   * The real connect-time client resolution — the same two calls
+   * `OAuth2Strategy.begin` makes before it builds the authorize redirect. A
+   * throw here is a failure the user never sees as a provider consent screen.
+   */
+  async function resolveForConnect(auth: AfpsManifestAuth = OAUTH2_AUTH) {
+    const resolved = await ensureIntegrationOAuthClient(
+      scope,
+      INTEGRATION,
+      AUTH_KEY,
+      MANIFEST,
+      auth,
+      "https://app.example.com/callback",
+    );
+    return resolveConnectClient(INTEGRATION, AUTH_KEY, MANIFEST, auth, resolved);
+  }
+
   describe("encodeClientAuthForStorage writes both halves together", () => {
-    it("records a supplied blank secret as an explicit public client", () => {
-      expect(encodeClientAuthForStorage({ clientSecret: "" })).toEqual({
-        tokenEndpointAuthMethod: "none",
-        clientSecretEncrypted: "",
-      });
+    // The last inference, now closed. A blank secret with NO method declared
+    // used to be read as the RFC 7591 §3.2.1 registration answer and stored as
+    // public. Every production path declares the method now — the admin routes
+    // refuse a missing secret unless `"none"` is sent, and auto-DCR declares
+    // `"none"` itself after reading the authorization server's own
+    // `token_endpoint_auth_method` — so this is a chokepoint for future direct
+    // callers rather than a live path.
+    //
+    // Deleting the guard instead of throwing would be worse: the fall-through
+    // writes a NULL method beside a ciphertext over an empty secret — a row
+    // `ioc_public_iff_no_secret` accepts (it cannot see through ciphertext) and
+    // that nothing downstream can read as public, so the connection it backs
+    // would only fail at the token endpoint.
+    it("throws when a blank secret arrives with no declared method", () => {
+      expect(() => encodeClientAuthForStorage({ clientSecret: "" })).toThrow(
+        /no token_endpoint_auth_method/,
+      );
+    });
+
+    // The inference this whole file exists to remove, in its last hiding place:
+    // `secret.length === 0` used to WIN over the caller's declaration, so a
+    // caller stating `client_secret_basic` and supplying no secret got a public
+    // client written to the row — and a token endpoint answering HTTP 400 much
+    // later. Defence in depth for the callers that bypass the route schema.
+    it("throws when a secret-based method is declared with an empty secret", () => {
+      expect(() =>
+        encodeClientAuthForStorage({
+          clientSecret: "",
+          tokenEndpointAuthMethod: "client_secret_basic",
+        }),
+      ).toThrow(/requires a client_secret/);
     });
 
     it("keeps a confidential client undeclared so the manifest decides", () => {
@@ -114,10 +199,11 @@ describe("public OAuth client is declared, not inferred", () => {
   });
 
   describe("createIntegrationOAuthClient", () => {
-    it("stores 'none' and NO ciphertext for a blank secret", async () => {
+    it("stores 'none' and NO ciphertext for a declared public client", async () => {
       const client = await createIntegrationOAuthClient(scope, INTEGRATION, AUTH_KEY, {
         clientId: "cid",
         clientSecret: "",
+        tokenEndpointAuthMethod: "none",
       });
       const row = await storedRow(client.id);
       expect(row.tokenEndpointAuthMethod).toBe("none");
@@ -143,6 +229,7 @@ describe("public OAuth client is declared, not inferred", () => {
       const client = await createIntegrationOAuthClient(scope, INTEGRATION, AUTH_KEY, {
         clientId: "cid",
         clientSecret: "",
+        tokenEndpointAuthMethod: "none",
       });
       // The manifest says client_secret_post; the client's own declaration wins.
       const resolved = await resolveIntegrationClientById(
@@ -175,35 +262,6 @@ describe("public OAuth client is declared, not inferred", () => {
         clientId: "cid",
         clientSecret: "shh",
         tokenEndpointAuthMethod: "client_secret_post",
-      });
-    });
-
-    // LEGACY: rows written before the column encrypted an empty secret rather
-    // than declaring `none`. Delete this case together with the resolver's
-    // legacy branch, once the backfill has run everywhere.
-    it("a legacy row that encrypted an empty secret still resolves as public", async () => {
-      const [row] = await db
-        .insert(integrationOauthClients)
-        .values({
-          applicationId: ctx.defaultAppId,
-          integrationId: INTEGRATION,
-          authKey: AUTH_KEY,
-          clientId: "legacy-cid",
-          clientSecretEncrypted: encryptCredentials({ client_secret: "" }),
-          isDefault: true,
-        })
-        .returning({ id: integrationOauthClients.id });
-      const resolved = await resolveIntegrationClientById(
-        row!.id,
-        ctx.defaultAppId,
-        INTEGRATION,
-        AUTH_KEY,
-        "client_secret_post",
-      );
-      expect(resolved).toEqual({
-        clientId: "legacy-cid",
-        clientSecret: "",
-        tokenEndpointAuthMethod: "none",
       });
     });
   });
@@ -242,28 +300,105 @@ describe("public OAuth client is declared, not inferred", () => {
       expect(rotated.token_endpoint_auth_method).toBe("none");
       expect((await storedRow(created.id)).clientSecretEncrypted).toBe("");
     });
+
+    // The residual hole on the other side of the preserve sentinel: an ABSENT
+    // secret next to an explicitly declared secret-based method is a change
+    // request, not a preserve. It used to return the sentinel, skip both
+    // columns and answer 200 — the admin saw success on a row that never moved.
+    it("applies a declared method against the stored secret when none is re-typed", async () => {
+      const created = await createIntegrationOAuthClient(scope, INTEGRATION, AUTH_KEY, {
+        clientId: "cid",
+        clientSecret: "shh",
+      });
+      const before = (await storedRow(created.id)).clientSecretEncrypted;
+      const updated = await updateIntegrationOAuthClient(scope, created.id, {
+        clientId: "cid",
+        tokenEndpointAuthMethod: "client_secret_basic",
+      });
+      expect(updated.token_endpoint_auth_method).toBe("client_secret_basic");
+      expect(updated.has_client_secret).toBe(true);
+      const row = await storedRow(created.id);
+      expect(row.tokenEndpointAuthMethod).toBe("client_secret_basic");
+      // Changing the TRANSPORT must not re-encrypt or disturb the credential.
+      expect(row.clientSecretEncrypted).toBe(before);
+    });
+
+    it("refuses to make a public client confidential without a secret", async () => {
+      const created = await createIntegrationOAuthClient(scope, INTEGRATION, AUTH_KEY, {
+        clientId: "cid",
+        clientSecret: "",
+        tokenEndpointAuthMethod: "none",
+      });
+      await expect(
+        updateIntegrationOAuthClient(scope, created.id, {
+          clientId: "cid",
+          tokenEndpointAuthMethod: "client_secret_post",
+        }),
+      ).rejects.toThrow(/Send the client_secret together with the method/);
+      // Refused, not half-applied.
+      const row = await storedRow(created.id);
+      expect(row.tokenEndpointAuthMethod).toBe("none");
+      expect(row.clientSecretEncrypted).toBe("");
+    });
+  });
+
+  /**
+   * A client that cannot produce a correct token request is refused at
+   * RESOLUTION, before `OAuth2Strategy.begin` builds the authorize redirect —
+   * not after the user has consented at the provider. The admin list keeps
+   * rendering the same row, because the admin has to see it to fix it.
+   */
+  describe("the connect path refuses an unusable client before any redirect", () => {
+    it("refuses an unreadable ciphertext, naming the key and the re-registration", async () => {
+      await seedUnreadableRow();
+      await expect(resolveForConnect()).rejects.toThrow(/cannot be decrypted/);
+      await expect(resolveForConnect()).rejects.toThrow(/CONNECTION_ENCRYPTION_KEY/);
+      await expect(resolveForConnect()).rejects.toThrow(/re-register the client/);
+      // The other half of the contract — the admin list still rendering this
+      // row, marked — has its own test ("never reports an unreadable ciphertext
+      // as a public client") below.
+    });
+
+    // The silent downgrade: with the manifest declaring `"none"`,
+    // `assertClientAuthCoherent` returned early and the exchange went out as a
+    // PUBLIC client — a confidential client substituted, which is the exact
+    // thing `token_endpoint_auth_method` was added to make impossible.
+    it("refuses an unreadable ciphertext even when the manifest declares 'none'", async () => {
+      await seedUnreadableRow();
+      await expect(resolveForConnect(PUBLIC_AUTH)).rejects.toThrow(/cannot be decrypted/);
+    });
+
+    it("still resolves a healthy confidential client", async () => {
+      await createIntegrationOAuthClient(scope, INTEGRATION, AUTH_KEY, {
+        clientId: "cid",
+        clientSecret: "shh",
+      });
+      const out = await resolveForConnect();
+      expect(out.clientId).toBe("cid");
+      expect(out.clientSecret).toBe("shh");
+    });
+
+    it("still resolves a declared public client", async () => {
+      await createIntegrationOAuthClient(scope, INTEGRATION, AUTH_KEY, {
+        clientId: "cid",
+        clientSecret: "",
+        tokenEndpointAuthMethod: "none",
+      });
+      const out = await resolveForConnect();
+      expect(out.clientSecret).toBe("");
+      expect(out.tokenEndpointAuthMethod).toBe("none");
+    });
   });
 
   // Also from the review: `projectClientWithSecret` swallowed a decryption
-  // failure into an empty secret, which the legacy fallback then reported as a
-  // public client — handing the connect flow an empty credential for a row
-  // that actually holds a secret nobody can read.
+  // failure into an empty secret, which used to be read back as a public
+  // client — handing the connect flow an empty credential for a row that
+  // actually holds a secret nobody can read. `has_client_secret` is the column,
+  // not the decrypt result, so the projection keeps the two apart.
   it("never reports an unreadable ciphertext as a public client", async () => {
-    const [row] = await db
-      .insert(integrationOauthClients)
-      .values({
-        applicationId: ctx.defaultAppId,
-        integrationId: INTEGRATION,
-        authKey: AUTH_KEY,
-        clientId: "corrupt-cid",
-        // Structurally a ciphertext (satisfies the biconditional CHECK) but
-        // not one this key can open.
-        clientSecretEncrypted: "v1.notarealkid.bm90LWEtcmVhbC1jaXBoZXJ0ZXh0",
-        isDefault: true,
-      })
-      .returning({ id: integrationOauthClients.id });
+    const id = await seedUnreadableRow();
     const clients = await listIntegrationClients(scope, INTEGRATION, AUTH_KEY);
-    const custom = clients.find((c) => c.client_ref === row!.id);
+    const custom = clients.find((c) => c.client_ref === id);
     expect(custom?.token_endpoint_auth_method).toBeNull();
     expect(custom?.has_client_secret).toBe(true);
   });
@@ -272,6 +407,7 @@ describe("public OAuth client is declared, not inferred", () => {
     await createIntegrationOAuthClient(scope, INTEGRATION, AUTH_KEY, {
       clientId: "cid",
       clientSecret: "",
+      tokenEndpointAuthMethod: "none",
     });
     const clients = await listIntegrationClients(scope, INTEGRATION, AUTH_KEY);
     const custom = clients.find((c) => c.source === "custom");

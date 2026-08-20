@@ -128,7 +128,7 @@ describe("resolveIntegrationSpawns — delivery.env.user_config_key (CC-4)", () 
       { api_key: "secret-123" },
     );
 
-    const specs = await resolveIntegrationSpawns({
+    const { specs } = await resolveIntegrationSpawns({
       orgId: ctx.orgId,
       applicationId: ctx.defaultAppId,
       actor: { type: "user", id: ctx.user.id },
@@ -155,7 +155,7 @@ describe("resolveIntegrationSpawns — delivery.env.user_config_key (CC-4)", () 
       { api_key: "fallback-default" },
     );
 
-    const specs = await resolveIntegrationSpawns({
+    const { specs } = await resolveIntegrationSpawns({
       orgId: ctx.orgId,
       applicationId: ctx.defaultAppId,
       actor: { type: "user", id: ctx.user.id },
@@ -180,7 +180,7 @@ describe("resolveIntegrationSpawns — delivery.env.user_config_key (CC-4)", () 
       { api_key: "integration-wins" },
     );
 
-    const specs = await resolveIntegrationSpawns({
+    const { specs } = await resolveIntegrationSpawns({
       orgId: ctx.orgId,
       applicationId: ctx.defaultAppId,
       actor: { type: "user", id: ctx.user.id },
@@ -204,7 +204,7 @@ describe("resolveIntegrationSpawns — delivery.env.user_config_key (CC-4)", () 
       { api_key: "live-secret" },
     );
 
-    const specs = await resolveIntegrationSpawns({
+    const { specs } = await resolveIntegrationSpawns({
       orgId: ctx.orgId,
       applicationId: ctx.defaultAppId,
       actor: { type: "user", id: ctx.user.id },
@@ -229,7 +229,7 @@ describe("resolveIntegrationSpawns — delivery.env.user_config_key (CC-4)", () 
       { api_key: "k" },
     );
 
-    const specs = await resolveIntegrationSpawns({
+    const { specs } = await resolveIntegrationSpawns({
       orgId: ctx.orgId,
       applicationId: ctx.defaultAppId,
       actor: { type: "user", id: ctx.user.id },

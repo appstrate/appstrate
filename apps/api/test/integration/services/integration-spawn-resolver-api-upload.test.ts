@@ -105,7 +105,7 @@ async function seedAndResolve(
   });
   await seedInstalledPackage(ctx.defaultAppId, INTEG);
   await seedConnection(ctx);
-  const specs = await resolveIntegrationSpawns({
+  const { specs } = await resolveIntegrationSpawns({
     orgId: ctx.orgId,
     applicationId: ctx.defaultAppId,
     actor: { type: "user", id: ctx.user.id },
@@ -218,7 +218,7 @@ describe("resolveIntegrationSpawns — api_upload companion (#881)", () => {
     });
     await seedInstalledPackage(ctx.defaultAppId, INTEG);
     await seedConnection(ctx, longAuthKey);
-    const specs = await resolveIntegrationSpawns({
+    const { specs } = await resolveIntegrationSpawns({
       orgId: ctx.orgId,
       applicationId: ctx.defaultAppId,
       actor: { type: "user", id: ctx.user.id },

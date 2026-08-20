@@ -24,19 +24,7 @@ import {
   type ParsedTokenResponse,
 } from "./token-utils.ts";
 import type { OAuthStateStore, TokenEndpointAuthMethod } from "./types.ts";
-import type { OAuthTokenContentType } from "./token-utils.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
-
-/**
- * The token-endpoint auth methods this exchange helper implements — a narrowed
- * subset of `OAuthTokenAuthMethod` (`@appstrate/core/validation`). `"none"` is
- * the public-client case (no client_secret); the canonical enum's JWT / mTLS
- * methods are intentionally unsupported here.
- *
- * Alias of the canonical {@link TokenEndpointAuthMethod} (`./types.ts`) — the
- * single source of truth for this union across the connect surface.
- */
-export type TokenExchangeAuthMethod = TokenEndpointAuthMethod;
 
 export interface ExchangeAuthorizationCodeInput {
   /** Token endpoint URL (`auths.{key}.token_endpoint`). */
@@ -49,9 +37,7 @@ export interface ExchangeAuthorizationCodeInput {
    */
   clientSecret: string;
   /** Token endpoint client-auth method (`token_endpoint_auth_method`). */
-  tokenEndpointAuthMethod: TokenExchangeAuthMethod;
-  /** Body content type — defaults to `application/x-www-form-urlencoded`. */
-  tokenContentType?: OAuthTokenContentType;
+  tokenEndpointAuthMethod: TokenEndpointAuthMethod;
   /**
    * PKCE `code_verifier`. Optional so the helper stays usable for a
    * PKCE-disabled exchange; the integration OAuth flow always supplies it.
@@ -129,7 +115,7 @@ export async function exchangeAuthorizationCode(
     ...(input.extraTokenParams ?? {}),
   };
 
-  const tokenBody = buildTokenBody(tokenParams, input.tokenContentType);
+  const tokenBody = buildTokenBody(tokenParams);
 
   let response: Response;
   try {
@@ -139,14 +125,7 @@ export async function exchangeAuthorizationCode(
     const doFetch = input.fetchImpl ?? oauthEgressFetch;
     response = await doFetch(input.tokenEndpoint, {
       method: "POST",
-      headers: buildTokenHeaders(
-        // "none" maps to "no auth header" — buildTokenHeaders treats
-        // anything other than "client_secret_basic" as body-auth.
-        authMethod === "none" ? "client_secret_post" : authMethod,
-        input.clientId,
-        input.clientSecret,
-        input.tokenContentType,
-      ),
+      headers: buildTokenHeaders(authMethod, input.clientId, input.clientSecret),
       body: tokenBody,
       signal: AbortSignal.timeout(30_000),
     });

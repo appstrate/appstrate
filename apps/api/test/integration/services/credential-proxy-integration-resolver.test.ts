@@ -265,6 +265,66 @@ describe("credential-proxy integration-resolver", () => {
     expect(await forceRefreshIntegrationProxyCredentials(input())).toBeNull();
   });
 
+  it("flags needsReconnection when the minting OAuth client is gone (terminal, not transient)", async () => {
+    // `buildIntegrationOAuthRefreshContext` returns null for a set of TERMINAL
+    // conditions — deleted OAuth client, missing `client_ref`, undecryptable
+    // client secret, no token endpoint and no issuer to discover one from.
+    // Nothing will ever refresh this token again. The sidecar path flags the
+    // connection here (`flagTerminalAndThrow` → 410); this path used to just
+    // `return null`, so CLI / GitHub Action / self-hosted-runner users looped
+    // on 401 forever with no reconnect prompt anywhere.
+    const connId = await seedConnection({ userId: ctx.user.id });
+    await db
+      .delete(integrationOauthClients)
+      .where(eq(integrationOauthClients.integrationId, INTEGRATION_ID));
+
+    // Still null — the proxy must relay the upstream 401 rather than
+    // substitute its own error — but the row is now marked.
+    expect(await forceRefreshIntegrationProxyCredentials(input())).toBeNull();
+
+    const [row] = await db
+      .select({ needsReconnection: integrationConnections.needsReconnection })
+      .from(integrationConnections)
+      .where(eq(integrationConnections.id, connId));
+    expect(row!.needsReconnection).toBe(true);
+  });
+
+  it("does NOT flag on a transient token-endpoint discovery failure", async () => {
+    // Control for the test above: transient must stay category-3 (nothing
+    // persisted, retry later). Flagging here would brick a live connection on
+    // a routine IdP blip.
+    const origin = token.url.replace(/\/token$/, "");
+    const issuerOnly = gmailManifest(token.url);
+    (issuerOnly.auths as Record<string, Record<string, unknown>>).primary = {
+      type: "oauth2",
+      issuer: origin,
+      token_endpoint_auth_method: "client_secret_post",
+      authorized_uris: ["https://api.example.com/*"],
+      delivery: {
+        http: {
+          in: "header",
+          name: "Authorization",
+          prefix: "Bearer ",
+          value: "{$credential.access_token}",
+        },
+      },
+    };
+    await db
+      .update(packages)
+      .set({ draftManifest: issuerOnly })
+      .where(eq(packages.id, INTEGRATION_ID));
+    const connId = await seedConnection({ userId: ctx.user.id });
+    token.setResponse({ not: "a discovery doc" }); // well-known probes → no issuer match
+
+    expect(await forceRefreshIntegrationProxyCredentials(input())).toBeNull();
+
+    const [row] = await db
+      .select({ needsReconnection: integrationConnections.needsReconnection })
+      .from(integrationConnections)
+      .where(eq(integrationConnections.id, connId));
+    expect(row!.needsReconnection).toBe(false);
+  });
+
   it("does not resolve another actor's connection (actor isolation, never leaks B's credentials)", async () => {
     const other = await createTestUser();
     // Connection belongs to actor B (not shared). Actor A resolves.

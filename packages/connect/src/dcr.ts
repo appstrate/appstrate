@@ -60,6 +60,22 @@ export interface DynamicClientRegistration {
   clientId: string;
   /** Present only when the AS issues a confidential client. */
   clientSecret?: string;
+  /**
+   * `token_endpoint_auth_method` **as the authorization server registered it**
+   * — its answer, not the request's echo. RFC 7591 §3.2.1 explicitly allows an
+   * AS to "replace any invalid values with suitable default values", and to
+   * state the substitution in the response, so a `"none"` request can come back
+   * registered as `client_secret_basic`. Discarding this field is how a
+   * confidential registration used to be stored as a public client and only
+   * detonate at the OAuth callback, after the user had already consented.
+   *
+   * Deliberately a raw `string`, not {@link TokenEndpointAuthMethod}: narrowing
+   * here would map exactly the answers a caller must react to (an unsupported
+   * or contradictory method) onto `undefined`, i.e. back onto "the AS said
+   * nothing" — the inference this field exists to remove. Absent only when the
+   * AS genuinely omitted it.
+   */
+  tokenEndpointAuthMethod?: string;
   /** RFC 7592 management credentials (when the AS supports client management). */
   registrationAccessToken?: string;
   registrationClientUri?: string;
@@ -74,25 +90,47 @@ export class DynamicClientRegistrationError extends Error {
    * an allowlist notice). The actionable part to surface to the operator.
    */
   readonly errorDescription?: string;
-  constructor(message: string, status?: number, errorDescription?: string) {
+  /**
+   * RFC 6749 §5.2 / RFC 7591 §3.2.2 `error` — the short registry token naming
+   * the failure CLASS (`invalid_redirect_uri`, `invalid_client_metadata`, …).
+   * The description is optional in both RFCs, so an AS may answer with the code
+   * alone; when it does, this is the only thing separating "the redirect URI
+   * you registered is not the one you use" — a one-minute fix — from an opaque
+   * refusal. Machine-readable and credential-free by construction, unlike the
+   * free-text description.
+   */
+  readonly errorCode?: string;
+  constructor(message: string, status?: number, errorDescription?: string, errorCode?: string) {
     super(message);
     this.name = "DynamicClientRegistrationError";
     this.status = status;
     this.errorDescription = errorDescription;
+    this.errorCode = errorCode;
   }
 }
 
 /**
- * Best-effort extraction of the RFC 6749/7591 `error_description` from a
- * registration error body. Returns `undefined` when the body isn't a JSON error
- * object — the caller keeps the raw status/text.
+ * Best-effort extraction of the RFC 6749/7591 error members from a registration
+ * error body. BOTH halves are read, because they fail independently: the
+ * `error_description` is the human-readable reason (an allowlist notice, a
+ * malformed-metadata hint) and is optional, while the `error` code names the
+ * failure class in the protocol's own vocabulary. A server answering
+ * `{"error":"invalid_redirect_uri"}` with no description carries all of its
+ * diagnosis in the code, so reading only the description turns that answer into
+ * a generic line plus a bare HTTP status. Returns an empty object when the body
+ * isn't a JSON error object — the caller keeps the raw status/text.
  */
-function parseOAuthErrorDescription(body: string): string | undefined {
+function parseOAuthErrorBody(body: string): { error?: string; errorDescription?: string } {
   try {
-    const json = JSON.parse(body) as { error_description?: unknown };
-    return typeof json.error_description === "string" ? json.error_description : undefined;
+    const json = JSON.parse(body) as { error?: unknown; error_description?: unknown };
+    return {
+      ...(typeof json.error === "string" ? { error: json.error } : {}),
+      ...(typeof json.error_description === "string"
+        ? { errorDescription: json.error_description }
+        : {}),
+    };
   } catch {
-    return undefined;
+    return {};
   }
 }
 
@@ -110,6 +148,8 @@ const guardedDcrFetch = ((input: string | URL, init?: RequestInit) =>
 interface RawRegistrationResponse {
   client_id?: unknown;
   client_secret?: unknown;
+  /** RFC 7591 §3.2.1 — the method the AS registered, which may not be the one asked for. */
+  token_endpoint_auth_method?: unknown;
   registration_access_token?: unknown;
   registration_client_uri?: unknown;
 }
@@ -155,10 +195,12 @@ export async function registerDynamicClient(
     } catch {
       // ignore — status is enough.
     }
+    const oauthError = parseOAuthErrorBody(detail);
     throw new DynamicClientRegistrationError(
       `Dynamic client registration returned ${res.status}${detail ? `: ${detail}` : ""}`,
       res.status,
-      parseOAuthErrorDescription(detail),
+      oauthError.errorDescription,
+      oauthError.error,
     );
   }
 
@@ -183,6 +225,10 @@ export async function registerDynamicClient(
     clientId: json.client_id,
     ...(typeof json.client_secret === "string" && json.client_secret.length > 0
       ? { clientSecret: json.client_secret }
+      : {}),
+    ...(typeof json.token_endpoint_auth_method === "string" &&
+    json.token_endpoint_auth_method.length > 0
+      ? { tokenEndpointAuthMethod: json.token_endpoint_auth_method }
       : {}),
     ...(typeof json.registration_access_token === "string"
       ? { registrationAccessToken: json.registration_access_token }

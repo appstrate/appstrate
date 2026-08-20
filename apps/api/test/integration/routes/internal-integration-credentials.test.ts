@@ -32,7 +32,7 @@ import {
   httpHeaderDelivery,
 } from "../../helpers/integration-manifests.ts";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
-import { integrationConnections, runs } from "@appstrate/db/schema";
+import { integrationConnections, packages, runs } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
 
 const app = getTestApp();
@@ -99,19 +99,48 @@ describe("GET /internal/integration-credentials/:scope/:name", () => {
     }
   }
 
+  /** Seed a connection for the test user with an explicit auth key + blob. */
+  async function seedConnectionRow(
+    integrationId: string,
+    opts: { authKey?: string; credentialsEncrypted?: string } = {},
+  ): Promise<string> {
+    const [row] = await db
+      .insert(integrationConnections)
+      .values({
+        integrationId: integrationId,
+        authKey: opts.authKey ?? "primary",
+        accountId: "acct-test",
+        applicationId: ctx.defaultAppId,
+        userId: ctx.user.id,
+        endUserId: null,
+        credentialsEncrypted:
+          opts.credentialsEncrypted ??
+          encryptCredentialEnvelope({ outputs: { api_key: "live-secret-value" } }),
+        scopesGranted: [],
+      })
+      .returning({ id: integrationConnections.id });
+    return row!.id;
+  }
+
   /** Seed an api_key connection for the test user on the given integration. */
   async function seedConnection(integrationId: string) {
-    const ciphertext = encryptCredentialEnvelope({ outputs: { api_key: "live-secret-value" } });
-    await db.insert(integrationConnections).values({
-      integrationId: integrationId,
-      authKey: "primary",
-      accountId: "acct-test",
-      applicationId: ctx.defaultAppId,
-      userId: ctx.user.id,
-      endUserId: null,
-      credentialsEncrypted: ciphertext,
-      scopesGranted: [],
-    });
+    await seedConnectionRow(integrationId);
+  }
+
+  /** A connection created against an auth key the manifest no longer declares. */
+  async function seedConnectionWithAuthKey(
+    integrationId: string,
+    authKey: string,
+  ): Promise<string> {
+    return seedConnectionRow(integrationId, { authKey });
+  }
+
+  /**
+   * A connection whose ciphertext no key in this deployment can open — what a
+   * rotated `CONNECTION_ENCRYPTION_KEY` (or a corrupted blob) leaves behind.
+   */
+  async function seedUndecryptableConnection(integrationId: string): Promise<string> {
+    return seedConnectionRow(integrationId, { credentialsEncrypted: "v1:not-a-real-envelope" });
   }
 
   beforeEach(async () => {
@@ -210,27 +239,103 @@ describe("GET /internal/integration-credentials/:scope/:name", () => {
     expect(body.delivery_plans.primary).toBeDefined();
   });
 
-  it("ALLOW: returns empty auths when the integration declares no auths", async () => {
-    // Edge case: an integration manifest can ship without auths (purely
-    // public). The route should return an empty payload rather than 404,
-    // because the dep-and-install gate is what authorises the call.
-    // We test the route shape stays consistent.
+  // NOTE — the one legitimate empty payload (the integration declares no auth
+  // at all) has no route-level test on purpose: it is currently UNREACHABLE
+  // through a stored manifest. `@afps-spec/schema` requires every integration
+  // to declare at least one auth ("integration MUST declare at least one auth
+  // method"), so a zero-auth manifest fails validation on read and this
+  // endpoint answers 500 `invalid_manifest` long before the resolver's empty
+  // return. The branch is kept in `resolveLiveIntegrationCredentials` because
+  // it is the correct category-3 answer if that spec rule ever relaxes — it
+  // just cannot be exercised from here today.
+
+  // ─── Fail-loud: the three states that used to answer 200-with-empty ───
+  //
+  // All three returned the byte-identical payload the no-auth case above
+  // returns, so the sidecar skipped the MITM listener, the agent's tools ran
+  // uncredentialed, and every upstream call 401'd — reported by the agent as a
+  // generic "the API is unavailable", indistinguishable from a real outage.
+
+  it("DENY: 404 when the actor has NO connection for a declared-auth integration", async () => {
+    // STATE A. The integration declares `primary`, but this actor never
+    // connected it (or the connection was deleted). Nothing to inject.
     await seedIntegration(INTEGRATION, true);
-    // No connection seeded — the actor has nothing for this integration.
-    // The resolver returns the empty payload shape (auths=[]) — matches
-    // production behaviour where no connection yet exists.
 
     const res = await app.request(`/internal/integration-credentials/${INTEGRATION}`, {
       headers: { Authorization: `Bearer ${token}` },
     });
 
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as {
-      auths: unknown[];
-      delivery_plans: Record<string, unknown>;
-    };
-    expect(body.auths).toEqual([]);
-    expect(body.delivery_plans).toEqual({});
+    expect(res.status).toBe(404);
+    const body = (await res.json()) as { detail?: string };
+    // Cause AND remedy, both naming the integration.
+    expect(body.detail).toContain("no connection for this run's actor");
+    expect(body.detail).toContain(INTEGRATION);
+    expect(body.detail).toMatch(/relaunch the run/i);
+  });
+
+  it("DENY: 409 integration_auth_undeclared when the pinned manifest dropped the connection's auth", async () => {
+    // STATE B. The connection exists and decrypts, but it was created against
+    // an auth key the manifest no longer declares (renamed/removed). Pinned via
+    // `runs.resolved_connections` — that is the only selection path that can
+    // return a row whose authKey is not in the declared set.
+    await seedIntegration(INTEGRATION, true);
+    const connectionId = await seedConnectionWithAuthKey(INTEGRATION, "legacy_primary");
+    const pinnedRun = await seedRun({
+      packageId: AGENT,
+      orgId: ctx.orgId,
+      applicationId: ctx.defaultAppId,
+      userId: ctx.user.id,
+      status: "running",
+      resolvedConnections: { [INTEGRATION]: { connectionId, source: "member_pin" } },
+    });
+
+    const res = await app.request(`/internal/integration-credentials/${INTEGRATION}`, {
+      headers: { Authorization: `Bearer ${signRunToken(pinnedRun.id)}` },
+    });
+
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as { code?: string; detail?: string };
+    expect(body.code).toBe("integration_auth_undeclared");
+    // Names the undeclared key AND what the manifest does declare. The
+    // declared-auths list needs its prefix: a bare `toContain("primary")` is
+    // satisfied by the `legacy_primary` substring and proves nothing.
+    expect(body.detail).toContain("legacy_primary");
+    expect(body.detail).toContain("declared auths: primary");
+    // The credential is intact — a manifest edit must never destroy it.
+    const [row] = await db
+      .select()
+      .from(integrationConnections)
+      .where(eq(integrationConnections.id, connectionId));
+    expect(row!.needsReconnection).toBe(false);
+  });
+
+  it("DENY: 410 + flags + records when the stored credentials cannot be decrypted", async () => {
+    // STATE C. A credential nobody can read is dead on ANY read, forced or
+    // not: flag the connection, stamp the run, refuse. The boot GET is where
+    // this state actually surfaces (the sidecar fetches once at spawn).
+    await seedIntegration(INTEGRATION, true);
+    const connectionId = await seedUndecryptableConnection(INTEGRATION);
+
+    const res = await app.request(`/internal/integration-credentials/${INTEGRATION}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    expect(res.status).toBe(410);
+    const body = (await res.json()) as { code?: string; detail?: string };
+    expect(body.code).toBe("INTEGRATION_CONNECTION_NEEDS_RECONNECTION");
+    expect(body.detail).toMatch(/could not be decrypted/i);
+
+    const [row] = await db
+      .select()
+      .from(integrationConnections)
+      .where(eq(integrationConnections.id, connectionId));
+    expect(row!.needsReconnection).toBe(true);
+
+    // The GET now records the terminal failure on the run too — a boot-time
+    // 410 the run never records is a failure only the transcript reveals.
+    const [runRow] = await db.select().from(runs).where(eq(runs.id, runId));
+    const meta = runRow!.metadata as { degraded_integrations?: string[] } | null;
+    expect(meta?.degraded_integrations).toContain(INTEGRATION);
   });
 });
 
@@ -401,6 +506,11 @@ describe("GET /internal/integration-credentials — version-pinned runs", () => 
       userId: ctx.user.id,
       status: "running",
       versionRef,
+      // The INSERT-time identity snapshot real kickoff stamps
+      // (`extractRunAgentDenorm`). It is what survives when the agent row is
+      // deleted mid-run and `runs.package_id` goes NULL.
+      agentScope: "credsorg",
+      agentName: "Creds Test Agent",
     });
     return signRunToken(run.id);
   }
@@ -462,9 +572,12 @@ describe("GET /internal/integration-credentials — version-pinned runs", () => 
     expect(JSON.stringify(await res.json())).toMatch(/not a dependency/i);
   });
 
-  it("FALLBACK: a version_ref whose snapshot is gone degrades to the draft dep set", async () => {
-    // The pinned version row was deleted after kickoff — the guard falls back
-    // to the draft (which declares INTEGRATION), preserving pre-fix behavior.
+  it("a version_ref whose snapshot is gone FAILS LOUD — it never degrades to the draft dep set", async () => {
+    // The pinned version row was deleted after kickoff. The draft declares
+    // INTEGRATION, so the old draft fallback answered 200 and handed a live run
+    // token credentials its pinned definition may never have authorized. The
+    // guard now refuses: 409 `run_definition_gone`, naming the deleted version
+    // and the package instead of the false "Agent not found".
     await seedAgent({
       id: AGENT,
       orgId: ctx.orgId,
@@ -479,6 +592,53 @@ describe("GET /internal/integration-credentials — version-pinned runs", () => 
       headers: { Authorization: `Bearer ${token}` },
     });
 
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as { code?: string; detail?: string };
+    expect(body.code).toBe("run_definition_gone");
+    // The detail must name the real cause (the deleted pinned version) and the
+    // package it belongs to — not the agent row, which is still present.
+    expect(body.detail).toContain("9.9.9");
+    expect(body.detail).toContain(AGENT);
+  });
+
+  it("a run whose AGENT row is gone is refused with the deleted-agent cause, not the deleted-version one", async () => {
+    // `runs.package_id` is `ON DELETE SET NULL`, so deleting the agent mid-run
+    // leaves the run `running` with a still-valid token — the guard keeps
+    // getting hit. It must refuse (the dep set that authorises this fetch is
+    // unknowable either way) but name THIS cause: no version will come back, so
+    // state A's "re-publish that version" remedy is a lie here.
+    await seedAgent({
+      id: AGENT,
+      orgId: ctx.orgId,
+      createdBy: ctx.user.id,
+      draftManifest: buildAgentManifest([INTEGRATION]),
+    });
+    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, AGENT);
+    await seedPackageVersion({
+      packageId: AGENT,
+      version: "1.0.0",
+      manifest: buildAgentManifest([INTEGRATION]),
+    });
+    await seedIntegration(INTEGRATION);
+    const token = await seedPinnedRun("1.0.0");
+
+    // Delete the agent itself. The `package_versions` snapshot cascades with
+    // it, so the pinned version is unreadable too — the guard must still report
+    // the agent, which is the cause that actually explains the other one.
+    await db.delete(packages).where(eq(packages.id, AGENT));
+
+    const res = await app.request(`/internal/integration-credentials/${INTEGRATION}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as { code?: string; detail?: string };
+    expect(body.code).toBe("run_agent_deleted");
+    // Identity recovered from the INSERT-time snapshot, not a bare `null`.
+    expect(body.detail).toContain("@credsorg/Creds Test Agent");
+    expect(body.detail).toMatch(/deleted while the run/i);
+    // Not state A's message: there is no version to re-publish.
+    expect(body.detail).not.toMatch(/re-publish/i);
+    expect(body.detail).not.toContain("1.0.0");
   });
 });

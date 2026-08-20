@@ -17,7 +17,10 @@ import { getLatestVersionInfo } from "./package-versions.ts";
 import { resolveProxy } from "./org-proxies.ts";
 import { resolveModel } from "./org-models.ts";
 import { extractManifestSchemas } from "../lib/manifest-utils.ts";
-import { resolveIntegrationSpawns } from "./integration-spawn-resolver.ts";
+import { resolveIntegrationSpawns, type DroppedIntegration } from "./integration-spawn-resolver.ts";
+import { appendRunLog } from "./state/runs.ts";
+import type { OrgScope } from "../lib/scope.ts";
+import { logger } from "../lib/logger.ts";
 import {
   DEFAULT_RUN_TIMEOUT_SECONDS,
   getPlatformRunLimits,
@@ -133,6 +136,12 @@ export async function buildRunContext(params: {
   modelSource: string | null;
   modelCost: ModelCost | null;
   generationConfig: ModelGenerationSettings;
+  /**
+   * Integrations the agent declared that this run will start WITHOUT (not
+   * installed / not connected / unresolvable). Empty on the happy path. The
+   * caller MUST surface these — see {@link recordDroppedIntegrations}.
+   */
+  droppedIntegrations: DroppedIntegration[];
 }> {
   const { runId, agent, orgId, applicationId, actor, input, files } = params;
 
@@ -149,10 +158,14 @@ export async function buildRunContext(params: {
   // entry and it is the slowest independent chain (storage fetch +
   // credential decrypt + possible OAuth refresh), so it runs concurrently
   // with the config/checkpoint/bundle and model/proxy resolution below
-  // instead of serializing after them. Failures here are per-integration
-  // warnings; the run proceeds with the surviving subset. The resolver
-  // reads the version from `dependencies.integrations[id]` (§4.1) and the
-  // tool/scope selection from `integrations_configuration[id]` (§4.4).
+  // instead of serializing after them. A per-integration failure does NOT
+  // fail the run — "run with what you have" is a supported product mode (the
+  // agent-page picker models unconnected integrations explicitly) — but it is
+  // not silent either: the resolver returns every drop and this function
+  // hands it back as `droppedIntegrations`, which the pipeline persists as a
+  // `warn` run log once the run row exists. The resolver reads the version
+  // from `dependencies.integrations[id]` (§4.1) and the tool/scope selection
+  // from `integrations_configuration[id]` (§4.4).
   const integrationSpawnsPromise = resolveIntegrationSpawns({
     orgId,
     applicationId,
@@ -270,7 +283,7 @@ export async function buildRunContext(params: {
   };
 
   // Converge the integration spawn resolution kicked off at entry.
-  const integrationSpawns = await integrationSpawnsPromise;
+  const { specs: integrationSpawns, dropped: droppedIntegrations } = await integrationSpawnsPromise;
 
   // AFPS: snake_case. The editor writes `runtime_tools`; reading the wrong key
   // here would silently drop every author's runtime-tool selection.
@@ -313,5 +326,62 @@ export async function buildRunContext(params: {
     modelSource,
     modelCost,
     generationConfig,
+    droppedIntegrations,
   };
+}
+
+/**
+ * Run-log `event` name for a declared-but-not-spawned integration. Stable
+ * (an operator/API consumer can filter on it) and singular — one row per
+ * dropped integration, so `data.integrationId` is never a list.
+ */
+export const INTEGRATION_DROPPED_EVENT = "integration_dropped";
+
+/**
+ * Persist the degradation marker for each integration the run starts
+ * without: one `warn` `run_logs` row per drop, on the same
+ * pg_notify → SSE path the container's own breadcrumbs use, so the gap is
+ * visible on the run page instead of living only in server-side logs.
+ *
+ * Why it is NOT emitted inside {@link buildRunContext}, where the drops are
+ * discovered: `run_logs.run_id` is a hard FK on `runs.id`, and the context is
+ * built BEFORE `createRun` (the plan is an input to the run row). Writing
+ * there would blow the FK. The pipeline therefore carries the list across the
+ * create boundary and calls this right after.
+ *
+ * Best-effort by design, matching the sibling platform breadcrumbs: a failed
+ * marker write must never fail a run that is otherwise ready to start. The
+ * write failure is itself logged rather than swallowed.
+ */
+export async function recordDroppedIntegrations(
+  scope: OrgScope,
+  runId: string,
+  dropped: readonly DroppedIntegration[],
+): Promise<void> {
+  for (const entry of dropped) {
+    try {
+      await appendRunLog(
+        scope,
+        runId,
+        "system",
+        INTEGRATION_DROPPED_EVENT,
+        `integration '${entry.integrationId}' is declared by this agent but was not started (${entry.reason})` +
+          (entry.detail ? `: ${entry.detail}` : "") +
+          " — its tools are unavailable to this run",
+        {
+          platform: true,
+          integrationId: entry.integrationId,
+          reason: entry.reason,
+          ...(entry.detail !== undefined ? { detail: entry.detail } : {}),
+        },
+        "warn",
+      );
+    } catch (err) {
+      logger.warn("failed to append dropped-integration run log", {
+        runId,
+        integrationId: entry.integrationId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
 }

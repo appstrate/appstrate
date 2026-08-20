@@ -580,17 +580,28 @@ describe("resolveLiveIntegrationCredentials", () => {
     expect(await needsReconnection(connId)).toBe(false);
   });
 
-  it("does not resolve another actor's connection (actor-scope isolation)", async () => {
+  it("does not resolve another actor's connection — 404, never a silent empty payload", async () => {
     const other = await createTestUser();
     // The only connection belongs to a DIFFERENT user; it is not shared.
-    await seedConnection({ userId: other.id, accountId: "other-acct" });
+    const foreignId = await seedConnection({ userId: other.id, accountId: "other-acct" });
 
     // No force-refresh: we want to observe selection, not the refresh path.
-    const out = await resolveLiveIntegrationCredentials(INTEGRATION_ID, resolverContext());
-    // No accessible connection → empty credential surface. The foreign row is
-    // never decrypted, never returned (no cross-actor leak).
-    expect(out.auths).toEqual([]);
-    expect(out.deliveryPlans).toEqual({});
+    let err: unknown;
+    try {
+      await resolveLiveIntegrationCredentials(INTEGRATION_ID, resolverContext());
+      throw new Error("expected resolveLiveIntegrationCredentials to throw");
+    } catch (e) {
+      err = e;
+    }
+    // The foreign row is never decrypted and never returned (no cross-actor
+    // leak) — but "no accessible connection" is now a LOUD 404 rather than the
+    // empty payload, which the sidecar read as "this integration declares no
+    // auth, skip the MITM listener" and booted the run uncredentialed.
+    expect((err as { status?: number }).status).toBe(404);
+    expect((err as Error).message).not.toContain("other-acct");
+    // The other actor's connection is untouched — a failed lookup must never
+    // flag a row that belongs to someone else.
+    expect(await needsReconnection(foreignId)).toBe(false);
   });
 
   it("throws 404 when the integration is not installed in the application", async () => {

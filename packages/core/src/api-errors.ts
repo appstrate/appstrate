@@ -381,8 +381,14 @@ function mapZodCode(issue: z.core.$ZodIssue): FieldErrorCode {
  * Render a path segment array using bracket notation for numeric indices
  * (`items[0].name`) so consumers can disambiguate array indices from string
  * keys that happen to be all-digits. Mirrors Stripe's `param` convention.
+ *
+ * Exported because the same convention has to hold outside the RFC 9457
+ * `errors[]` pointers: the platform's boot-time env validators render Zod paths
+ * into their fail-fast messages too (`apps/api/src/lib/zod-format.ts`), and a
+ * second renderer there would print `clients.0.auth_key` for the shape this one
+ * prints as `clients[0].auth_key`.
  */
-function renderFieldPath(path: readonly PropertyKey[]): string {
+export function renderFieldPath(path: readonly PropertyKey[]): string {
   let out = "";
   for (const seg of path) {
     if (typeof seg === "number" || (typeof seg === "string" && /^\d+$/.test(seg))) {

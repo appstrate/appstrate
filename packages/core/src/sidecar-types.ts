@@ -622,6 +622,22 @@ export interface OAuthTokenResponse {
 export const OAUTH_REFRESH_LEAD_MS = 5 * 60_000;
 
 /**
+ * Prefix the sidecar's connect-login puts on the ONE error class written for
+ * the person logging in: an `isError: true` CallToolResult from the
+ * integration's own login tool ("wrong password", "MFA required", "captcha").
+ *
+ * Shared for the same reason as `OAUTH_REFRESH_LEAD_MS` above — the producer
+ * (`runtime-pi/sidecar/connect-login.ts`) and the consumer
+ * (`apps/api/src/services/connect/connect-run-launcher.ts`) sit on opposite
+ * sides of the container boundary and must agree exactly. Unlike the
+ * `APPSTRATE_CONNECT_RESULT:` / `APPSTRATE_CONNECT_ERROR:` sentinels, a
+ * mismatch here fails SILENTLY: the launcher stops recognising the marker, and
+ * every login rejection degrades back to the opaque `500` it exists to replace,
+ * with nothing in the logs saying a string drifted.
+ */
+export const CONNECT_LOGIN_TOOL_ERROR_PREFIX = "connect-login: login tool reported an error";
+
+/**
  * One ordered, human-readable line in the integration boot trail. The sidecar
  * (which owns the per-phase timings) formats the message; the agent relays it
  * verbatim into the run-event pipeline as an `appstrate.progress` breadcrumb so

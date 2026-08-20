@@ -85,6 +85,10 @@ import { createConnectRunExecutor } from "../services/connect/connect-run-launch
 import { getCurrentScopesGranted } from "../services/integration-scope-resolver.ts";
 import { isUserConnectionCreationBlocked } from "../services/integration-connection-resolver.ts";
 import {
+  CLIENT_SECRET_REQUIRED_MESSAGE,
+  PUBLIC_CLIENT_WITH_SECRET_MESSAGE,
+} from "../services/integration-manifest-helpers.ts";
+import {
   deleteIntegrationPin,
   listAgentsConsumingIntegration,
   listIntegrationPins,
@@ -188,7 +192,13 @@ export const updateConnectionSchema = z
 
 export const oauthClientSchema = z.object({
   client_id: z.string().min(1),
-  client_secret: z.string().default(""),
+  /**
+   * Shared shape only — the concrete bodies below layer their own semantics on
+   * top with refinements (create: required unless public; update: absent means
+   * PRESERVE). Deliberately optional here so no derived schema can inherit a
+   * default that manufactures a secret nobody typed.
+   */
+  client_secret: z.string().optional(),
   /**
    * The admin's explicit declaration for THIS client, overriding the
    * manifest's. `"none"` registers a PUBLIC client — the app has no secret at
@@ -206,14 +216,36 @@ export const oauthClientSchema = z.object({
 });
 
 /**
- * Registration body. `client_secret` defaults to `""` — registering an app
- * with no secret is how a PUBLIC client is declared.
+ * Shared by both bodies below: `"none"` declares a PUBLIC client, so a secret
+ * sent alongside it means the caller resolved a credential and then said it
+ * would not be used.
+ */
+const noSecretWithPublicClient = (b: {
+  token_endpoint_auth_method?: string;
+  client_secret?: string;
+}) => !(b.token_endpoint_auth_method === "none" && (b.client_secret ?? "").length > 0);
+
+/**
+ * Registration body. A public client is DECLARED
+ * (`token_endpoint_auth_method: "none"`), never inferred from an absent or
+ * blank `client_secret` — so both directions of the pair are guarded:
+ *
+ *   - `"none"` WITH a secret → the caller resolved a credential and then said
+ *     it would not be used;
+ *   - a secret-based method (or no method at all, which means "the manifest's
+ *     method applies") WITHOUT a secret → the request that cannot succeed.
+ *     This is the one that used to return 201: `client_secret` defaulted to
+ *     `""` and the storage encoder read that emptiness as "public", so an
+ *     admin who declared `client_secret_basic` and forgot the secret got a
+ *     PUBLIC client back and a token endpoint answering HTTP 400 later.
  */
 export const oauthClientCreateSchema = oauthClientSchema
-  .extend({ client_secret: z.string().default("") })
-  .refine((b) => !(b.token_endpoint_auth_method === "none" && b.client_secret.length > 0), {
-    message:
-      "token_endpoint_auth_method='none' declares a public client; do not send a client_secret with it",
+  .refine(noSecretWithPublicClient, {
+    message: PUBLIC_CLIENT_WITH_SECRET_MESSAGE,
+    path: ["client_secret"],
+  })
+  .refine((b) => b.token_endpoint_auth_method === "none" || (b.client_secret ?? "").length > 0, {
+    message: CLIENT_SECRET_REQUIRED_MESSAGE,
     path: ["client_secret"],
   });
 
@@ -224,10 +256,17 @@ export const oauthClientCreateSchema = oauthClientSchema
  * credential and flipped the client public.
  */
 export const oauthClientUpdateSchema = oauthClientSchema
-  .extend({ client_secret: z.string().optional() })
-  .refine((b) => !(b.token_endpoint_auth_method === "none" && (b.client_secret ?? "").length > 0), {
+  .refine(noSecretWithPublicClient, {
+    message: PUBLIC_CLIENT_WITH_SECRET_MESSAGE,
+    path: ["client_secret"],
+  })
+  // An EXPLICIT empty string is a destructive statement — it clears the stored
+  // ciphertext — so it is only accepted alongside the declaration that makes it
+  // coherent. Absence stays untouched by this rule: it is the preserve path
+  // above, and the rotate form relies on it.
+  .refine((b) => !(b.client_secret === "" && b.token_endpoint_auth_method !== "none"), {
     message:
-      "token_endpoint_auth_method='none' declares a public client; do not send a client_secret with it",
+      "an empty client_secret clears the stored credential and is only accepted together with token_endpoint_auth_method='none'; omit the field entirely to preserve the stored secret",
     path: ["client_secret"],
   });
 
@@ -568,7 +607,10 @@ export function createIntegrationsRouter() {
       }
       const client = await createIntegrationOAuthClient(scope, packageId, authKey, {
         clientId: body.client_id,
-        clientSecret: body.client_secret,
+        // `?? ""` is reachable only for a declared public client: the schema
+        // refuses an absent secret under any other method, so the blank never
+        // stands in for one the admin meant to supply.
+        clientSecret: body.client_secret ?? "",
         ...(body.token_endpoint_auth_method !== undefined
           ? { tokenEndpointAuthMethod: body.token_endpoint_auth_method }
           : {}),

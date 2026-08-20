@@ -72,6 +72,29 @@ import type {
 export const RUN_HISTORY_FIELDS = ["checkpoint", "result"] as const;
 export type RunHistoryField = (typeof RUN_HISTORY_FIELDS)[number];
 
+/**
+ * The `@scope/name` a run's agent is known by, recovered for the case where the
+ * agent no longer exists.
+ *
+ * `runs.package_id` is `ON DELETE SET NULL` (schema/runs.ts): deleting the
+ * source agent mid-run nulls the column while the run survives for
+ * observability/billing. Every consumer downstream (finalize, the internal
+ * run-context endpoint, `getRunEffectiveAgent`'s `agent_deleted` report) needs a
+ * printable, stable id — so fall back to the INSERT-time snapshot, stamped on
+ * the row precisely for this case, and only then to a neutral sentinel for
+ * pre-snapshot legacy rows.
+ */
+export function runAgentIdentity(row: {
+  packageId: string | null;
+  agentScope: string | null;
+  agentName: string | null;
+}): string {
+  return (
+    row.packageId ??
+    (row.agentScope && row.agentName ? `@${row.agentScope}/${row.agentName}` : "@deleted/unknown")
+  );
+}
+
 function parseRunConfig(value: Record<string, unknown> | null | undefined) {
   if (value == null) return null;
   const result = runConfigSchema.safeParse(value);

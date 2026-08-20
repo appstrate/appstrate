@@ -799,6 +799,7 @@
   "integration.connect.fields.client_key.label": "Clé privée (PEM)",
   "integration.oauthClient.clientId": "Client ID",
   "integration.oauthClient.clientSecret": "Client Secret",
+  "integration.oauthClient.clientSecretRequired": "Le client secret est obligatoire. Si le fournisseur a enregistré cette application comme client public (sans secret), cochez « Client public » ci-dessous.",
   "integration.oauthClient.publicClient": "Client public (PKCE seul, pas de secret)",
   "integration.oauthClient.redirectUri": "Redirect URI (optionnel)",
   "integration.oauthClient.platformRedirectUri": "Redirect URI à enregistrer chez le fournisseur",

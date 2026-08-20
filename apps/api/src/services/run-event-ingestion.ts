@@ -39,7 +39,13 @@ import {
   recordDocumentPartialPublication,
 } from "@appstrate/core/telemetry";
 import { persistRunEvent, writeRunnerLedgerRow } from "./run-launcher/appstrate-event-sink.ts";
-import { updateRun, appendRunLog, computeRunSpend, readLastEmittedOutput } from "./state/runs.ts";
+import {
+  updateRun,
+  appendRunLog,
+  computeRunSpend,
+  readLastEmittedOutput,
+  runAgentIdentity,
+} from "./state/runs.ts";
 import { createRunNotifications } from "./state/notifications.ts";
 import {
   addMemories as addUnifiedMemories,
@@ -48,7 +54,7 @@ import {
   CHECKPOINT_KEY,
 } from "./state/package-persistence.ts";
 import { actorFromIds } from "../lib/actor.ts";
-import { getRunEffectiveAgent } from "./run-effective-agent.ts";
+import { getRunEffectiveAgent, runPinnedVersionGoneDetail } from "./run-effective-agent.ts";
 import { validateOutput } from "./schema.ts";
 import { asJSONSchemaObject } from "@appstrate/core/form";
 import { emitEvent } from "../lib/modules/module-loader.ts";
@@ -135,20 +141,14 @@ export async function getRunSinkContext(runId: string): Promise<RunSinkContext |
   if (!row) return null;
   if (row.sinkSecretEncrypted === null) return null;
 
-  // `runs.package_id` is `ON DELETE SET NULL` (schema/runs.ts) — deleting the
-  // source agent mid-run nulls the column while the run survives for
-  // observability/billing. `RunSinkContext.packageId` is typed as a non-null
-  // string, so a raw `row as RunSinkContext` cast would smuggle a runtime null
-  // past every finalize consumer (getRunEffectiveAgent, memory/pinned persistence,
+  // `RunSinkContext.packageId` is typed as a non-null string, so a raw
+  // `row as RunSinkContext` cast would smuggle a runtime null past every
+  // finalize consumer (getRunEffectiveAgent, memory/pinned persistence,
   // onRunStatusChange event params) — silently skipping finalization
-  // side-effects for a deleted-agent run. Recover the agent's `@scope/name`
-  // from the INSERT-time snapshot (stamped precisely for this deleted-agent
-  // case) so finalize still runs with a stable identity; fall back to a neutral
-  // sentinel only when even the snapshot is absent (pre-snapshot legacy rows).
+  // side-effects for a deleted-agent run. `runAgentIdentity` owns the recovery
+  // (and the sentinel); see `state/runs.ts`.
   const { agentScope, agentName, ...rest } = row;
-  const packageId =
-    rest.packageId ??
-    (agentScope && agentName ? `@${agentScope}/${agentName}` : "@deleted/unknown");
+  const packageId = runAgentIdentity({ ...rest, agentScope, agentName });
   return { ...rest, packageId } as RunSinkContext;
 }
 
@@ -331,7 +331,7 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
   //    names one, the draft otherwise. Validating against the mutable draft
   //    let a post-kickoff schema edit flip a pinned run's outcome (false
   //    failure on a tightened draft schema, false success on a loosened one).
-  const agent = await getRunEffectiveAgent(run);
+  const effective = await getRunEffectiveAgent(run);
 
   // 3. Derive final status + error message. Pure computation — no DB writes
   //    before the CAS so concurrent synthesis + container-posted finalize
@@ -340,7 +340,25 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
   let errorMessage: string | null = result.error?.message ?? null;
   let outputValidationErrors: string[] | null = null;
 
-  if (status === "success" && agent?.manifest.output?.schema) {
+  if (effective.status === "version_deleted") {
+    // The pinned `package_versions` snapshot was deleted mid-run while the
+    // agent itself still exists, so the output contract this run agreed to
+    // cannot be read. Optional chaining here used to skip validation entirely
+    // and let the run land on `success` — a verdict rendered against a contract
+    // nobody read. Fail it instead, naming the same cause the run-token guards
+    // name. Only a `success` verdict is rewritten: a run that already terminated
+    // non-success carries its own, more specific cause (watchdog kill,
+    // cancellation, runner-declared failure) and must keep it.
+    if (status === "success") {
+      status = "failed";
+      errorMessage = runPinnedVersionGoneDetail(effective);
+    }
+  } else if (effective.status === "agent_deleted") {
+    // Deliberately NOT the branch above, and deliberately not a failure:
+    // `agent_deleted` is a designed state (see `runAgentIdentity` in
+    // `state/runs.ts`). Failing the run here would fabricate a verdict about
+    // work that may have completed fine, so the runner's own status stands.
+  } else if (status === "success" && effective.manifest.output?.schema) {
     // Distinguish two failure shapes that both surface as a schema mismatch:
     //   1. the agent never called `output` (`result.output` is null) — the
     //      empty `{}` only fails because required fields are absent, so a bare
@@ -354,7 +372,7 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
     const outputRecord = isPlainRecord(result.output) ? result.output : {};
     const validation = validateOutput(
       outputRecord,
-      asJSONSchemaObject(agent.manifest.output.schema),
+      asJSONSchemaObject(effective.manifest.output.schema),
     );
     if (!validation.valid) {
       status = "failed";
