@@ -28,6 +28,7 @@ interface FetchCall {
   method: string;
   headers: Record<string, string>;
   body?: string;
+  bodyBytes?: Uint8Array;
 }
 
 function buildOAuthTokenResponse(overrides: Partial<OAuthTokenResponse> = {}): OAuthTokenResponse {
@@ -54,8 +55,19 @@ function setupFetchMock(handler: (url: string, init: RequestInit) => Promise<Res
           : Object.entries(h as Record<string, string>);
       for (const [k, v] of entries) headers[k.toLowerCase()] = v;
     }
-    const body = typeof init?.body === "string" ? init.body : undefined;
-    calls.push({ url: u, method: init?.method ?? "GET", headers, body });
+    const body =
+      typeof init?.body === "string"
+        ? init.body
+        : init?.body instanceof Uint8Array
+          ? new TextDecoder().decode(init.body)
+          : undefined;
+    const bodyBytes =
+      init?.body instanceof Uint8Array
+        ? new Uint8Array(init.body)
+        : body !== undefined
+          ? new TextEncoder().encode(body)
+          : undefined;
+    calls.push({ url: u, method: init?.method ?? "GET", headers, body, bodyBytes });
     return handler(u, init ?? {});
   });
   return { fetchFn, calls };
@@ -184,6 +196,26 @@ describe("/llm/* oauth — no forging", () => {
       body,
     });
     expect(calls[1]!.body).toBe(body);
+  });
+
+  it("preserves a compressed Codex body byte-identical", async () => {
+    const { fetchFn, calls } = setupFetchMock(upstreamOk);
+    const deps = makeDeps(fetchFn);
+    deps.config.llm = { ...OAUTH_CFG, baseUrl: "https://chatgpt.com/backend-api" };
+    const app = createApp(deps);
+    const compressed = new Uint8Array([0x28, 0xb5, 0x2f, 0xfd, 0xff, 0x00, 0x81, 0x7f]);
+
+    await app.request("/llm/codex/responses", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "content-encoding": "zstd",
+      },
+      body: compressed,
+    });
+
+    expect(calls[1]!.headers["content-encoding"]).toBe("zstd");
+    expect(calls[1]!.bodyBytes).toEqual(compressed);
   });
 
   it("logs the forwarded method and status on a redacted upstream 405", async () => {
