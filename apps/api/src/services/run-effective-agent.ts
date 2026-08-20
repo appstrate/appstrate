@@ -50,7 +50,7 @@ export interface RunPinnedVersionGone {
  * STATE B — the PACKAGE row itself is gone: the agent was deleted while the
  * run was in flight. This is a deliberate, designed state, not corruption —
  * `runs.package_id` is `ON DELETE SET NULL` and the run survives for
- * observability/billing (see the note at `run-event-ingestion.ts:138-152`,
+ * observability/billing (see `runAgentIdentity` in `services/state/runs.ts`,
  * which reconstructs a stable `@scope/name` from the INSERT-time snapshot).
  * No definition will ever come back, so "re-publish the version" is not a
  * remedy here — which is exactly why this is NOT state A with a different
@@ -66,16 +66,7 @@ export interface RunAgentGone {
   readonly packageId: string;
 }
 
-/**
- * Outcome of {@link getRunEffectiveAgent}. Three-way on purpose, and NOT the
- * `{ ok: true } | { ok: false; reason }` shape used elsewhere (e.g.
- * `resolveOne` in `integration-spawn-resolver.ts`): a bare boolean lets a
- * caller write `if (!res.ok) fail()` and re-collapse the two absent states,
- * which is the exact regression this shape exists to prevent. The two
- * "gone" branches carry different fields and different discriminants, and the
- * detail builders below accept ONE branch each — so producing a message
- * without first narrowing to a single state does not type-check.
- */
+/** Outcome of {@link getRunEffectiveAgent}. */
 export type RunEffectiveAgentResult = RunEffectiveAgentFound | RunPinnedVersionGone | RunAgentGone;
 
 /**
@@ -114,15 +105,8 @@ export function runAgentGoneDetail(gone: RunAgentGone): string {
  * - concrete semver → the `package_versions` snapshot for that exact
  *   version.
  *
- * When the definition is not readable, the result says WHICH of the two
- * absent states applies — {@link RunPinnedVersionGone} (state A) or
- * {@link RunAgentGone} (state B) — because they call for opposite handling:
- * A is an anomaly with an unknowable contract, B is a designed, benign state
- * a run is allowed to finish in. There is deliberately NO draft fallback for
- * the pinned case: serving the mutable draft is exactly the substitution the
- * module header forbids, and it did so silently — a run token's authorization
- * set and a run's output contract would both have been quietly re-derived
- * from a definition the run never agreed to.
+ * When it is not readable the result names which absent state applies —
+ * {@link RunPinnedVersionGone} (A) or {@link RunAgentGone} (B); see the module header.
  */
 export async function getRunEffectiveAgent(run: {
   packageId: string;

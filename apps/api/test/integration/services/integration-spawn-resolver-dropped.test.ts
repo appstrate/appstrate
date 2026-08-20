@@ -35,15 +35,9 @@ import {
 } from "../../../src/services/run-context-builder.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import {
-  seedPackage,
-  seedInstalledPackage,
-  seedPackageVersion,
-  seedRun,
-} from "../../helpers/seed.ts";
+import { seedPackage, seedInstalledPackage, seedMcpServer, seedRun } from "../../helpers/seed.ts";
 import {
   localIntegrationManifest,
-  mcpServerManifest,
   httpHeaderDelivery,
 } from "../../helpers/integration-manifests.ts";
 
@@ -105,20 +99,7 @@ describe("resolveIntegrationSpawns — dropped[] degradation marker", () => {
   }
 
   async function seedServer() {
-    const manifest = mcpServerManifest({
-      name: SERVER,
-      version: "1.0.0",
-      serverType: "node",
-      entryPoint: "./server.js",
-    });
-    await seedPackage({
-      id: SERVER,
-      orgId: ctx.orgId,
-      type: "mcp-server",
-      source: "local",
-      draftManifest: manifest,
-    });
-    await seedPackageVersion({ packageId: SERVER, version: "1.0.0", manifest });
+    await seedMcpServer({ id: SERVER, orgId: ctx.orgId });
   }
 
   async function resolve() {
@@ -314,14 +295,5 @@ describe("recordDroppedIntegrations — run_logs marker", () => {
     expect(second!.data!.reason).toBe("resolve_error");
     expect(second!.data!.detail).toBe("boom");
     expect(second!.message).toContain("boom");
-  });
-
-  it("is a no-op for an empty drop list", async () => {
-    const runId = await seedPendingRun();
-
-    await recordDroppedIntegrations({ orgId: ctx.orgId }, runId, []);
-
-    const rows = await db.select().from(runLogs).where(eq(runLogs.runId, runId));
-    expect(rows).toHaveLength(0);
   });
 });

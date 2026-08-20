@@ -296,14 +296,9 @@ function describeEntryId(entry: unknown): string {
 
 /**
  * The ids of the nested clients an issue set points at, in path order, deduped.
- * `rawSystemIntegrationSchema` embeds the client array and validates it
- * atomically, so a single mistyped `auth_key` rejects the whole entry; without
- * this the operator would only learn that "the Gmail entry" is bad, not which
- * of its clients. It needs no schema restructuring — the issue path already
- * carries the index.
- *
- * The client id is not a secret (unlike client_id/client_secret, which
- * `redactEntry` drops) — it is the `client_ref` the API exposes.
+ * The entry schema validates the embedded client array atomically, so one bad
+ * client rejects the whole entry — this names WHICH client. The id is not a
+ * secret (unlike client_id/client_secret, which `redactEntry` drops).
  */
 function namedClientIds(entry: unknown, issues: readonly z.core.$ZodIssue[]): string[] {
   const rawClients = (entry as { clients?: unknown } | null | undefined)?.clients;
@@ -318,14 +313,7 @@ function namedClientIds(entry: unknown, issues: readonly z.core.$ZodIssue[]): st
   return out;
 }
 
-/**
- * Render a rejected entry as `path: message` segments through `formatZodIssues`
- * — the same renderer the sibling boot-time env validators (`run-limits`,
- * `proxy-limits`) use, so every fail-fast env crash reads the same way and
- * `clients[0].auth_key` never becomes `clients.0.auth_key` in one of them. The
- * only thing added on top is the client-id annotation, which exists nowhere
- * else because no other env var nests a named record inside an array.
- */
+/** Render a rejected entry via `formatZodIssues`, annotated with the offending client ids. */
 function describeIssues(entry: unknown, error: z.ZodError): string {
   const detail = formatZodIssues(error);
   const clients = namedClientIds(entry, error.issues);

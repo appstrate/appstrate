@@ -598,23 +598,8 @@ export function createInternalRouter() {
 }
 
 /**
- * The definition the run executes can no longer be read. Both run-token
- * guards above depend on that manifest to decide what this token may reach,
- * so BOTH absent states throw here: there is nothing to fall back to, and
- * reading the mutable draft instead would silently re-derive a live run's
- * authorization set from a definition it never agreed to.
- *
- * The two states are NOT the same error, though, and this is the single
- * place allowed to translate them — each branch is narrowed before its
- * detail builder runs, so neither cause can be described with the other's
- * sentence:
- *
- *   - `version_deleted` → 409 `run_definition_gone`. The agent row is still
- *     there; the pinned `package_versions` snapshot is not.
- *   - `agent_deleted` → 409 `run_agent_deleted`. The package row itself is
- *     gone (`runs.package_id` is `ON DELETE SET NULL`; the run survives for
- *     observability). Nothing will restore this definition, so the remedy
- *     differs and the code has to as well.
+ * Both absent states throw here: the run-token guards above need the manifest
+ * to decide what the token may reach. The only place allowed to translate them.
  *
  * 409 for both, NOT 410 and NOT 404. `410` is already load-bearing on
  * `/internal/integration-credentials/*` with "the credential was revoked

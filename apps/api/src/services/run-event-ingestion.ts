@@ -354,21 +354,10 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
       errorMessage = runPinnedVersionGoneDetail(effective);
     }
   } else if (effective.status === "agent_deleted") {
-    // Deliberately NOT the branch above, and deliberately not a failure.
-    // Deleting an agent mid-run is a DESIGNED state, not an anomaly: the note
-    // at L138-152 of this file spells it out — `runs.package_id` is
-    // `ON DELETE SET NULL`, the run row survives for observability/billing, and
-    // finalize reconstructs a stable `@scope/name` identity from the
-    // INSERT-time snapshot (falling back to `"@deleted/unknown"`) precisely so
-    // finalization still runs. There is no contract left to validate against
-    // and no verdict to render from one, so output validation is skipped and
-    // the run finalizes on whatever status the runner declared.
-    //
-    // Collapsing this into `version_deleted` marks every in-flight run of a
-    // deleted agent `failed`, which is a fabricated verdict about work that may
-    // have completed fine. The two states are separate values in
-    // `RunEffectiveAgentResult` so that collapse cannot happen by accident —
-    // do not merge them back.
+    // Deliberately NOT the branch above, and deliberately not a failure:
+    // `agent_deleted` is a designed state (see `runAgentIdentity` in
+    // `state/runs.ts`). Failing the run here would fabricate a verdict about
+    // work that may have completed fine, so the runner's own status stands.
   } else if (status === "success" && effective.manifest.output?.schema) {
     // Distinguish two failure shapes that both surface as a schema mismatch:
     //   1. the agent never called `output` (`result.output` is null) — the

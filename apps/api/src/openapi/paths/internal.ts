@@ -2,21 +2,10 @@
 
 /**
  * The `409` answered by BOTH `/internal/integration-credentials/{scope}/{name}`
- * operations (GET and the `/refresh` POST). One object spread at both sites so
- * the two descriptions cannot drift apart — they document the same three
- * problem `code`s and a reader comparing the endpoints must not have to diff
- * two hand-copies to learn they are the same contract.
- *
- * Module-local const, NOT a `#/components/responses/*` $ref: the same object is
- * serialized at both sites, so the emitted spec stays byte-identical to the
- * hand-written pair it replaces. Same technique as `paths/documents.ts`'s
+ * operations. Module-local const, NOT a `#/components/responses/*` $ref: the same
+ * object is serialized at both sites, so the emitted spec stays byte-identical to
+ * the hand-written pair it replaces. Same technique as `paths/documents.ts`'s
  * `pipelineResponses`.
- *
- * Deliberately NOT shared with the `409` of `/internal/mcp-server-bundle/…`:
- * that endpoint documents only the two definition-gone codes (it has no
- * `auth_key` to leave undeclared) and frames them against the dependency set it
- * enumerates, not against a run token's authorization set. Different contract,
- * different text.
  */
 const integrationCredentialsConflict409 = {
   description:

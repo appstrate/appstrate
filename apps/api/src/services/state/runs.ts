@@ -83,10 +83,6 @@ export type RunHistoryField = (typeof RUN_HISTORY_FIELDS)[number];
  * printable, stable id — so fall back to the INSERT-time snapshot, stamped on
  * the row precisely for this case, and only then to a neutral sentinel for
  * pre-snapshot legacy rows.
- *
- * One home for the fallback chain AND for the sentinel string: two call sites
- * each spelling it out is two chances for a run whose agent was deleted to be
- * reported under two different names.
  */
 export function runAgentIdentity(row: {
   packageId: string | null;

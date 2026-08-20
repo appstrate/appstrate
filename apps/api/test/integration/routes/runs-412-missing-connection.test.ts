@@ -33,7 +33,7 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
-import { seedAgent, seedPackage, seedPackageVersion } from "../../helpers/seed.ts";
+import { seedAgent, seedMcpServer, seedPackage, seedPackageVersion } from "../../helpers/seed.ts";
 import { installPackage } from "../../../src/services/application-packages.ts";
 import { integrationConnections, applicationPackages } from "@appstrate/db/schema";
 import { and, eq } from "drizzle-orm";
@@ -41,7 +41,6 @@ import { encryptCredentialEnvelope } from "@appstrate/connect";
 import {
   localIntegrationManifest,
   httpHeaderDelivery,
-  mcpServerManifest,
 } from "../../helpers/integration-manifests.ts";
 
 const app = getTestApp();
@@ -640,24 +639,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
    * the silent auto-pick.
    */
   async function seedDefaultToolsIntegration(id: string) {
-    const serverManifest = mcpServerManifest({
-      name: MCP_SERVER,
-      version: "1.0.0",
-      serverType: "node",
-      entryPoint: "./server.js",
-    });
-    await seedPackage({
-      id: MCP_SERVER,
-      orgId: ctx.orgId,
-      type: "mcp-server",
-      source: "local",
-      draftManifest: serverManifest,
-    });
-    await seedPackageVersion({
-      packageId: MCP_SERVER,
-      version: "1.0.0",
-      manifest: serverManifest,
-    });
+    await seedMcpServer({ id: MCP_SERVER, orgId: ctx.orgId });
     const manifest = buildDefaultToolsIntegrationManifest(id);
     await seedPackage({
       id,

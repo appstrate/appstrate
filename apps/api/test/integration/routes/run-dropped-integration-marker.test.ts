@@ -34,8 +34,7 @@ import {
   seedDefaultOrgModel,
   waitForRunPipelineSettled,
 } from "../../helpers/run-connection-fixtures.ts";
-import { seedPackage, seedPackageVersion } from "../../helpers/seed.ts";
-import { mcpServerManifest } from "../../helpers/integration-manifests.ts";
+import { seedMcpServer } from "../../helpers/seed.ts";
 import { INTEGRATION_DROPPED_EVENT } from "../../../src/services/run-context-builder.ts";
 import { _setOrchestratorForTesting } from "../../../src/services/orchestrator/index.ts";
 
@@ -62,29 +61,6 @@ describe("run launch — dropped-integration marker in run_logs", () => {
   // The trigger is fire-and-forget; drain here (not at the tail of a body) so a
   // failing assertion cannot leave background writes racing the next truncate.
   afterEach(waitForRunPipelineSettled);
-
-  /**
-   * Seed the `mcp-server` package the fixture integration references, plus the
-   * published version the spawn resolver pins against — the one piece the
-   * connection fixtures deliberately leave out (their default gap IS the
-   * missing server).
-   */
-  async function seedReferencedMcpServer(serverId: string) {
-    const manifest = mcpServerManifest({
-      name: serverId,
-      version: "1.0.0",
-      serverType: "node",
-      entryPoint: "./server.js",
-    });
-    await seedPackage({
-      id: serverId,
-      orgId: ctx.orgId,
-      type: "mcp-server",
-      source: "local",
-      draftManifest: manifest,
-    });
-    await seedPackageVersion({ packageId: serverId, version: "1.0.0", manifest });
-  }
 
   async function launch() {
     return app.request("/api/runs/inline", {
@@ -125,7 +101,10 @@ describe("run launch — dropped-integration marker in run_logs", () => {
     // fires at all" — the failure mode a marker written unconditionally has.
     await seedConnectionTestIntegration(ctx, INTEGRATION);
     await seedIntegrationConnection(ctx, INTEGRATION);
-    await seedReferencedMcpServer(`${INTEGRATION}-server`);
+    // The `mcp-server` the fixture integration references — the one piece the
+    // connection fixtures deliberately leave out (their default gap IS the
+    // missing server).
+    await seedMcpServer({ id: `${INTEGRATION}-server`, orgId: ctx.orgId });
     await seedDefaultOrgModel(ctx);
 
     const res = await launch();

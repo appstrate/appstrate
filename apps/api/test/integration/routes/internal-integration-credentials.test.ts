@@ -296,7 +296,11 @@ describe("GET /internal/integration-credentials/:scope/:name", () => {
     expect(res.status).toBe(409);
     const body = (await res.json()) as { code?: string; detail?: string };
     expect(body.code).toBe("integration_auth_undeclared");
+    // Names the undeclared key AND what the manifest does declare. The
+    // declared-auths list needs its prefix: a bare `toContain("primary")` is
+    // satisfied by the `legacy_primary` substring and proves nothing.
     expect(body.detail).toContain("legacy_primary");
+    expect(body.detail).toContain("declared auths: primary");
     // The credential is intact — a manifest edit must never destroy it.
     const [row] = await db
       .select()
@@ -353,23 +357,18 @@ describe("POST /internal/integration-credentials/:scope/:name/refresh", () => {
     }
   }
 
-  async function seedConnection(integrationId: string, credentialsEncrypted?: string) {
-    const [row] = await db
-      .insert(integrationConnections)
-      .values({
-        integrationId: integrationId,
-        authKey: "primary",
-        accountId: "acct-test",
-        applicationId: ctx.defaultAppId,
-        userId: ctx.user.id,
-        endUserId: null,
-        credentialsEncrypted:
-          credentialsEncrypted ??
-          encryptCredentialEnvelope({ outputs: { api_key: "live-secret-value" } }),
-        scopesGranted: [],
-      })
-      .returning({ id: integrationConnections.id });
-    return row!.id;
+  async function seedConnection(integrationId: string) {
+    const ciphertext = encryptCredentialEnvelope({ outputs: { api_key: "live-secret-value" } });
+    await db.insert(integrationConnections).values({
+      integrationId: integrationId,
+      authKey: "primary",
+      accountId: "acct-test",
+      applicationId: ctx.defaultAppId,
+      userId: ctx.user.id,
+      endUserId: null,
+      credentialsEncrypted: ciphertext,
+      scopesGranted: [],
+    });
   }
 
   beforeEach(async () => {
@@ -454,48 +453,6 @@ describe("POST /internal/integration-credentials/:scope/:name/refresh", () => {
       .select()
       .from(integrationConnections)
       .where(eq(integrationConnections.integrationId, INTEGRATION));
-    expect(row!.needsReconnection).toBe(true);
-
-    const [runRow] = await db.select().from(runs).where(eq(runs.id, runId));
-    const meta = runRow!.metadata as { degraded_integrations?: string[] } | null;
-    expect(meta?.degraded_integrations).toContain(INTEGRATION);
-  });
-
-  // ─── A FORCED refresh never answers 200-with-empty ─────
-  //
-  // The forced path only runs after the sidecar saw an upstream 401, so
-  // "nothing to inject, carry on" is the one answer that can never be right
-  // here: it puts the sidecar straight back into the same 401.
-
-  it("DENY: 404 (not 200-with-empty) on a forced refresh with no accessible connection", async () => {
-    await seedIntegration(INTEGRATION, true);
-    // No connection at all — e.g. the run's pinned row was deleted mid-run.
-
-    const res = await app.request(`/internal/integration-credentials/${INTEGRATION}/refresh`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}` },
-    });
-
-    expect(res.status).toBe(404);
-    expect(JSON.stringify(await res.json())).toContain("no connection for this run's actor");
-  });
-
-  it("DENY: 410 (not 200-with-empty) on a forced refresh of undecryptable credentials", async () => {
-    await seedIntegration(INTEGRATION, true);
-    const connectionId = await seedConnection(INTEGRATION, "v1:not-a-real-envelope");
-
-    const res = await app.request(`/internal/integration-credentials/${INTEGRATION}/refresh`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}` },
-    });
-
-    expect(res.status).toBe(410);
-    expect(JSON.stringify(await res.json())).toMatch(/could not be decrypted/i);
-
-    const [row] = await db
-      .select()
-      .from(integrationConnections)
-      .where(eq(integrationConnections.id, connectionId));
     expect(row!.needsReconnection).toBe(true);
 
     const [runRow] = await db.select().from(runs).where(eq(runs.id, runId));

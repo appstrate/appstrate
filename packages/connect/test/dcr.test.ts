@@ -191,6 +191,7 @@ describe("registerDynamicClient (RFC 7591)", () => {
     ).rejects.toMatchObject({
       name: "DynamicClientRegistrationError",
       status: 400,
+      errorCode: "invalid_request",
       errorDescription: "Your integration is not currently allowlisted.",
     });
   });
@@ -217,28 +218,6 @@ describe("registerDynamicClient (RFC 7591)", () => {
       status: 400,
       errorCode: "invalid_redirect_uri",
       errorDescription: undefined,
-    });
-  });
-
-  it("captures the error code alongside the description when both are present", async () => {
-    const fetchImpl = (async () =>
-      new Response(
-        JSON.stringify({
-          error: "invalid_client_metadata",
-          error_description: "redirect_uris must use https",
-        }),
-        { status: 400, headers: { "Content-Type": "application/json" } },
-      )) as unknown as typeof fetch;
-    await expect(
-      registerDynamicClient({
-        registrationEndpoint: "https://as/register",
-        redirectUri: "https://app/cb",
-        clientName: "X",
-        fetchImpl,
-      }),
-    ).rejects.toMatchObject({
-      errorCode: "invalid_client_metadata",
-      errorDescription: "redirect_uris must use https",
     });
   });
 
