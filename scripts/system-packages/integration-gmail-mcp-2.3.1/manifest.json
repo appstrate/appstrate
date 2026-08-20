@@ -1,6 +1,6 @@
 {
   "name": "@appstrate/gmail-mcp",
-  "version": "2.3.0",
+  "version": "2.3.1",
   "type": "integration",
   "schema_version": "0.1",
   "display_name": "Gmail",
@@ -151,6 +151,46 @@
       }
     },
     "unlabel_thread": {
+      "required_scopes": {
+        "primary": ["https://www.googleapis.com/auth/gmail.modify"]
+      }
+    },
+    "trash_message": {
+      "required_scopes": {
+        "primary": ["https://www.googleapis.com/auth/gmail.modify"]
+      }
+    },
+    "untrash_message": {
+      "required_scopes": {
+        "primary": ["https://www.googleapis.com/auth/gmail.modify"]
+      }
+    },
+    "mark_message_spam": {
+      "required_scopes": {
+        "primary": ["https://www.googleapis.com/auth/gmail.modify"]
+      }
+    },
+    "unmark_message_spam": {
+      "required_scopes": {
+        "primary": ["https://www.googleapis.com/auth/gmail.modify"]
+      }
+    },
+    "trash_thread": {
+      "required_scopes": {
+        "primary": ["https://www.googleapis.com/auth/gmail.modify"]
+      }
+    },
+    "untrash_thread": {
+      "required_scopes": {
+        "primary": ["https://www.googleapis.com/auth/gmail.modify"]
+      }
+    },
+    "mark_thread_spam": {
+      "required_scopes": {
+        "primary": ["https://www.googleapis.com/auth/gmail.modify"]
+      }
+    },
+    "unmark_thread_spam": {
       "required_scopes": {
         "primary": ["https://www.googleapis.com/auth/gmail.modify"]
       }
