@@ -3,7 +3,7 @@
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
-import { Check, LogOut, Settings, FileText, Palette } from "lucide-react";
+import { BookOpen, Check, FileText, LifeBuoy, LogOut, Palette, Settings } from "lucide-react";
 import { useAuth } from "../hooks/use-auth";
 import { useTheme } from "../stores/theme-store";
 import { themeOptions } from "../lib/theme";
@@ -118,6 +118,32 @@ export function NavUser({ minimal = false }: NavUserProps) {
             ))}
           </DropdownMenuSubContent>
         </DropdownMenuSub>
+        {/* Documentation and support live here as well as in the product
+            switcher. The duplication is deliberate: this menu is where people
+            look for help by habit, and a second door onto the docs costs less
+            than a first door nobody finds. */}
+        <DropdownMenuItem asChild>
+          <a
+            href="https://docs.appstrate.dev"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-2"
+          >
+            <BookOpen size={14} />
+            {t("userMenu.documentation")}
+          </a>
+        </DropdownMenuItem>
+        <DropdownMenuItem asChild>
+          <a
+            href="https://discord.gg/5Js2CKWNnh"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-2"
+          >
+            <LifeBuoy size={14} />
+            {t("userMenu.getHelp")}
+          </a>
+        </DropdownMenuItem>
         {!minimal && (
           <DropdownMenuItem asChild>
             <a

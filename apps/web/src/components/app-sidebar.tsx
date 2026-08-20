@@ -2,7 +2,6 @@
 
 import type { ComponentProps } from "react";
 import { NavOrg } from "@/components/nav-org";
-import { SidebarBilling } from "@/components/sidebar-billing";
 import { SidebarMeta } from "@/components/sidebar-meta";
 import { ProductSwitcher } from "@/components/product-switcher";
 import {
@@ -22,12 +21,12 @@ export function AppSidebar(props: ComponentProps<typeof Sidebar>) {
       <SidebarContent className="gap-0">
         <NavOrg />
       </SidebarContent>
-      {/* Foot of the sidebar, in decreasing weight: the usage gauge, the meta
-          rows, then the collapse control. The org/workspace switcher used to
-          live here and now opens the header trail — two switchers for one thing
-          reads as hesitation. */}
+      {/* Foot of the sidebar: the meta rows, then the collapse control. No
+          credits gauge — a permanent progress bar spends attention every second
+          on a number that is consulted every few weeks. It belongs behind the
+          Usage row, not in front of the navigation. The org/workspace switcher
+          used to live here too and now opens the header trail. */}
       <SidebarFooter className="gap-0 p-0">
-        <SidebarBilling />
         <SidebarMeta />
         <div className="border-sidebar-border flex items-center justify-end border-t px-2 py-1.5">
           <SidebarTrigger />

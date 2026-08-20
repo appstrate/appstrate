@@ -120,5 +120,7 @@
   "products.docs": "Docs & API",
   "products.docsDescription": "Developer reference",
   "nav.section.build": "Build",
-  "nav.usage": "Usage"
+  "nav.usage": "Usage",
+  "userMenu.documentation": "Documentation",
+  "userMenu.getHelp": "Get help"
 }
