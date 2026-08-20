@@ -47,7 +47,7 @@ export interface ChatPlatformDeps {
   rateLimit(maxPerMinute: number): MiddlewareHandler;
   /**
    * Resolve the chosen model row (`presetId`) for a chat turn: an API-key /
-   * unknown provider yields `{ subscription: false }` (ai-sdk path); an oauth2
+   * unknown provider yields `{ subscription: false }` (llm-proxy-bound); an oauth2
    * provider yields the real upstream binding + a fresh access token, or a
    * `needsReconnection` signal when its credential is dead.
    */

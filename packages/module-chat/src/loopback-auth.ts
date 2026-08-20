@@ -20,11 +20,11 @@
  *
  * Two minters share this machinery:
  *
- *   - `mintLoopbackToken` — the INFERENCE bearer (ai-sdk path). Scope
+ *   - `mintLoopbackToken` — the INFERENCE bearer (llm-proxy calls). Scope
  *     `llm-proxy:call` + `models:read`, `firstPartyLoopback: true` (the
  *     llm-proxy accepts a loopback caller without an API key).
  *   - `mintMcpLoopbackToken` — the platform-MCP bearer handed to the
- *     in-process Pi subscription engine. Scope is the caller's own already-
+ *     in-process Pi engine. Scope is the caller's own already-
  *     resolved permission set (RBAC fidelity, no amplification) and
  *     `firstPartyLoopback: false` — it authorizes the MCP meta-tools but
  *     can NEVER be replayed against the inference proxy.
@@ -110,7 +110,7 @@ function mint(
  * Mint the INFERENCE loopback bearer (`llm-proxy:call` + `models:read`,
  * first-party-loopback granted).
  *
- * The default 60 s TTL fits the `ai-sdk` path, which re-mints on every proxy
+ * The default 60 s TTL fits the proxy binding, which re-mints on every provider
  * call. A caller whose token must live across a whole multi-step turn (minutes
  * — blocking run long-polls) passes a longer `ttlMs`. The token stays
  * least-privilege and process-local either way.
@@ -130,7 +130,7 @@ export function mintLoopbackToken(
 
 /**
  * Mint the platform-MCP loopback bearer handed to the in-process Pi
- * subscription engine for its own `/api/mcp/o/:org` connection.
+ * Pi engine for its own `/api/mcp/o/:org` connection.
  *
  * `permissions` MUST be the caller's already-resolved permission set (from
  * `c.get("permissions")`): the MCP meta-tools re-enter the platform in-process

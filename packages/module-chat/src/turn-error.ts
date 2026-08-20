@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Provider-neutral chat-turn error contract shared by both inference engines.
+ * Provider-neutral chat-turn error contract for the chat's inference engine.
  * Raw provider messages stay server-side; only this stable classification may
  * cross the stream/persistence boundary.
  */

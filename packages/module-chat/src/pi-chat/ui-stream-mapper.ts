@@ -3,9 +3,8 @@
 /**
  * Map the Pi SDK's `AgentSessionEvent` stream onto the AI SDK **UI message
  * stream** chunks — the exact protocol the chat client (assistant-ui /
- * `useChat`) already consumes from the `ai-sdk` path. This is what lets the
- * single generic Pi subscription chat engine share one client contract with the
- * `ai-sdk` engine (the loop differs; the I/O contract is shared).
+ * `useChat`) consumes. The engine's loop is Pi's; the I/O contract stays the
+ * one the client already speaks.
  *
  * Pi emits (via `session.subscribe(cb)`):
  *   - `message_start` — a new assistant message → per-turn `start-step`.
@@ -22,7 +21,7 @@
  *
  * Tool-name parity: Pi tools are registered under their raw MCP names, so no
  * `mcp__<server>__` prefix is present — but {@link stripMcpToolPrefix} is applied
- * defensively so the client's tool UIs match the `ai-sdk` path regardless.
+ * defensively so the client's tool UIs render consistently regardless.
  */
 
 import type { UIMessageChunk } from "ai";
@@ -34,7 +33,7 @@ import type {
 } from "./pi-events.ts";
 
 /**
- * Strip an `mcp__<server>__` prefix so tool names match the `ai-sdk` path
+ * Strip an `mcp__<server>__` prefix so tool names match the bare MCP names
  * (`mcp__platform__search_operations` → `search_operations`). Tool names may
  * themselves contain `__`, so we split on the delimiter and drop exactly the
  * `mcp` + server segments. Non-MCP names pass through.

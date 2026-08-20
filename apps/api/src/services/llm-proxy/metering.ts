@@ -159,7 +159,7 @@ export interface RecordUsageInputs {
   /**
    * Chat session this call belongs to, propagated from the VALIDATED loopback
    * bearer's claims (never a spoofable header). Only set for chat's built-in
-   * (ai-sdk → proxy) path; null for headless/CLI proxy calls.
+   * proxy-routed turns; null for headless/CLI proxy calls.
    */
   chatSessionId: string | null;
   /** The Appstrate preset id (org model row id) — stored as `llm_usage.model`. */
@@ -316,8 +316,6 @@ export interface MeteredForwardOptions {
   cache?: { cacheKey: string; ttlSeconds: number } | null;
   /** Log-line prefix for the out-of-band SSE-metering-failure error. */
   logLabel: string;
-  /** Side-effect hook on an upstream error (e.g. a `logger.warn`). */
-  onUpstreamError?: (status: number) => void;
   /**
    * Ledger writer. Defaults to {@link recordProxyUsage} (the single ledger
    * writer); injected by tests that exercise the forwarding branches without a
@@ -435,7 +433,6 @@ export async function forwardMeteredResponse(
   // forwarded — a synthetic neutral envelope replaces it (whitelist by
   // construction); the upstream detail stays in server logs only.
   if (!upstream.ok) {
-    options.onUpstreamError?.(upstream.status);
     const errorBody = await upstream.text();
     if (swap) {
       return syntheticAliasErrorResponse(

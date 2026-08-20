@@ -6,7 +6,7 @@
  * The identical provider response is parsed twice in this product:
  *
  *   - by the platform proxy adapter (`llm-proxy/openai.ts`), for remote runs and
- *     chat's ai-sdk path — the result is priced by `computeTokenCost` and
+ *     chat's proxy-routed turns — the result is priced by `computeTokenCost` and
  *     written to `llm_usage`;
  *   - by `@earendil-works/pi-ai` (`dist/api/openai-completions.js`,
  *     `parseChunkUsage`), for every platform-side Pi run — the result is priced

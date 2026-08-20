@@ -4,7 +4,7 @@
  * Pure helper (no React) that pulls the connect offer out of an
  * `invoke_operation` tool result.
  *
- * Single channel: the typed `connectOffer` field both engines attach to the
+ * Single channel: the typed `connectOffer` field the engine attaches to the
  * tool output ({@link ../connect-offer.ts}) — the only place the live URL
  * exists in a persisted result. The payload itself is never scraped; in the
  * model channel every connect URL is replaced by the redaction placeholder, and

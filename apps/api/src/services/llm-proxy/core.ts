@@ -42,7 +42,7 @@ export interface ProxyCallInputs {
   runId: string | null;
   /**
    * Forwarded to `llm_usage.chat_session_id`. Read from the VALIDATED loopback
-   * bearer's claims (chat's built-in ai-sdk path), never a spoofable header;
+   * bearer's claims (chat's proxy-routed turns), never a spoofable header;
    * null for headless/CLI proxy calls.
    */
   chatSessionId: string | null;

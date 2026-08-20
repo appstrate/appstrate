@@ -1,26 +1,26 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * `runPiSubscriptionChat` — the SINGLE in-process chat engine for every
- * oauth-subscription provider (claude-code, codex).
+ * `runPiChat` is the single in-process server engine for Pi-selected chat turns.
  *
  * Runs a `@earendil-works/pi-coding-agent` session in the `apps/api` process,
  * driven by the Pi SDK (`@earendil-works/pi-ai`), which natively emits each
- * provider's subscription request shape from the real access token — the
+ * provider's request shape from either a real OAuth token or the llm-proxy
+ * transport. OAuth examples include the
  * Anthropic OAuth fingerprint (`sk-ant-oat…` → beta + claude-cli UA + system
- * prelude) or the codex-responses headers (`chatgpt-account-id` decoded from the
+ * prelude) and the codex-responses headers (`chatgpt-account-id` decoded from the
  * token JWT). The platform forges nothing; request-shape fidelity is delegated
- * to Pi. There is no per-provider chat engine or handler seam — every
- * subscription provider rides this one loop.
+ * to Pi. API-key providers keep their secret behind llm-proxy. Every selected
+ * provider rides this one loop.
  *
- * The chat runs server-side, so the real subscription token is registered
- * directly on an ephemeral {@link ModelRuntime} (never persisted, never handed
- * to the client) — no sidecar/gateway bearer-swap is needed (that only exists for
+ * The chat runs server-side, so a real OAuth token is registered
+ * directly in an in-memory {@link ModelRuntime} (never persisted, never handed to
+ * the client) — no sidecar/gateway bearer-swap is needed (that only exists for
  * containerised RUNS, where the token must stay out of the agent container).
  *
  * The Pi session's event stream is mapped onto the AI-SDK UI-message-stream
  * ({@link PiChatUiStreamMapper}), the exact protocol the chat client already
- * consumes from the ai-sdk path — one client contract, two loops.
+ * has always consumed.
  */
 
 import {
@@ -32,20 +32,17 @@ import {
 import {
   loadPiCodingAgentSdk,
   derivePiCompactionSettings,
-  deriveProviderFromApi,
   prepareRequestedThinkingLevel,
   setPiRuntimeCredential,
-  type Api,
-  type Model,
 } from "@appstrate/runner-pi";
 import { CHAT_TOOL_STEP_BUDGET, CHAT_TURN_DEADLINE_MS } from "@appstrate/core/chat-turn-metadata";
-import type { SubscriptionChatModel, ChatUsageRecord } from "@appstrate/core/chat-contract";
+import type { ChatUsageRecord } from "@appstrate/core/chat-contract";
 import { applyOperationIndexPolicy } from "../operation-index.ts";
 import { logger } from "../logger.ts";
 import { PiChatUiStreamMapper } from "./ui-stream-mapper.ts";
 import type { AgentSessionEvent } from "./pi-events.ts";
 import { buildPlatformMcpTools } from "./mcp-tools.ts";
-import { acquirePiChatSlot, chatCapacityResponse, releaseOnClose } from "./concurrency.ts";
+import { releaseOnClose, type PiChatSlot } from "./concurrency.ts";
 import { createStepCapController, type PiChatSession } from "./turn-control.ts";
 import {
   ChatTurnDeadlineError,
@@ -55,41 +52,19 @@ import {
 } from "../turn-closure.ts";
 import { classifyClientTurnError, clientTurnErrorMarker } from "../turn-error.ts";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
+import { buildPiTurnMetadata, piFailureChunks } from "./pi-turn-closure.ts";
 import {
-  buildSubscriptionTurnMetadata,
-  subscriptionFailureChunks,
-} from "./subscription-turn-closure.ts";
-import { createPiChatResourceLoader } from "./resource-loader.ts";
+  PI_CHAT_MODEL_RUNTIME_CREATE_OPTIONS,
+  type ResolvedPiChatModelBinding,
+} from "./model-binding.ts";
 import { buildStructuredPiTurn, reconstructPiSession } from "./structured-session.ts";
+import { createPiChatResourceLoader } from "./resource-loader.ts";
 
-/**
- * Wall-clock ceiling for a single chat turn. A turn fans out into up to
- * CHAT_MAX_STEPS steps (each possibly long-polling a run for ~55 s), so the
- * budget is generous; it exists to stop a wedged upstream stream from holding a
- * concurrency slot forever.
- *
- * It now lives in `@appstrate/core/chat-turn-metadata` next to the step budget:
- * both engines derive their child-call budgets from the SAME ceiling, and a
- * `run_and_wait` can no longer be granted more time than the turn hosting it.
- */
-
-/**
- * Chat resolves one concrete model before it ever enters Pi, and registers that
- * provider's credential immediately after. A catalog read from disk
- * (`modelsPath`) or a network refresh on construction would therefore be pure
- * latency on the turn's critical path, so both are refused outright rather than
- * merely unused: `allowModelNetwork: false` makes an accidental catalog fetch a
- * failure instead of a silent multi-second stall.
- */
-const MODEL_RUNTIME_CREATE_OPTIONS = {
-  modelsPath: null,
-  allowModelNetwork: false,
-  refreshOnCreate: false,
-} as const;
-
-export interface PiSubscriptionChatInput {
-  /** Resolved subscription model + fresh real access token. */
-  model: SubscriptionChatModel;
+export interface PiChatInput {
+  /** Capacity reserved by the route before it persists the user turn. */
+  slot: PiChatSlot;
+  /** Resolved Pi model, authentication transport and metering ownership. */
+  modelBinding: ResolvedPiChatModelBinding;
   /** Appstrate preset id (org model row id) — stored as `llm_usage.model`. */
   presetId: string;
   orgId: string;
@@ -112,14 +87,11 @@ export interface PiSubscriptionChatInput {
 }
 
 /**
- * Drive one subscription chat turn and return the UI-message-stream `Response`.
- * Returns a 429 immediately when the in-process session cap is saturated.
+ * Drive one admitted Pi chat turn and return the UI-message-stream `Response`.
  */
-export function runPiSubscriptionChat(input: PiSubscriptionChatInput): Response {
-  const slot = acquirePiChatSlot();
-  if (!slot) return chatCapacityResponse();
-
-  const { model, platformMcp, abortSignal, onError } = input;
+export function runPiChat(input: PiChatInput): Response {
+  const { modelBinding, platformMcp, abortSignal, onError } = input;
+  const model = modelBinding.model;
   const mapper = new PiChatUiStreamMapper();
   const startedAt = Date.now();
 
@@ -185,20 +157,7 @@ export function runPiSubscriptionChat(input: PiSubscriptionChatInput): Response 
           SettingsManager,
         } = await loadPiCodingAgentSdk();
 
-        const provider = deriveProviderFromApi(model.apiShape as Api);
-        const piModel: Model<Api> = {
-          id: model.modelId,
-          name: model.modelId,
-          api: model.apiShape as Api,
-          provider,
-          baseUrl: model.baseUrl,
-          reasoning: model.reasoning,
-          ...(model.reasoningLevelMap ? { thinkingLevelMap: model.reasoningLevelMap } : {}),
-          input: (model.input ?? ["text"]) as Model<Api>["input"],
-          cost: (model.cost ?? { input: 0, output: 0 }) as Model<Api>["cost"],
-          contextWindow: model.contextWindow ?? undefined,
-          maxTokens: model.maxTokens ?? undefined,
-        } as Model<Api>;
+        const piModel = model;
         const requestedThinkingLevel = input.generation.reasoningLevel ?? "medium";
         const {
           model: sessionModel,
@@ -235,18 +194,37 @@ export function runPiSubscriptionChat(input: PiSubscriptionChatInput): Response 
           sessionFile: sessionManager.getSessionFile() ?? null,
         });
 
-        // Real subscription token in-memory only — pi-ai emits the OAuth request
-        // shape from it natively (never persisted, never sent to the client).
-        const modelRuntime = await ModelRuntime.create(MODEL_RUNTIME_CREATE_OPTIONS);
-        await setPiRuntimeCredential(modelRuntime, provider, model.accessToken);
+        // OAuth uses the real access token in memory. A proxy-routed model
+        // registers only the inert `proxy` placeholder — enough to satisfy the
+        // provider's "some credential is configured" check; the bearer that
+        // actually authorizes the call is minted per request by the binding's
+        // `before_provider_headers` extension. Registration carries no `api` or
+        // `baseUrl`: pi-ai builds every request URL from `model.baseUrl` (which
+        // already points at the llm-proxy) and picks the serializer from
+        // `model.api`, so declaring either on the provider would be dead weight.
+        // `registerProvider` (not `setRuntimeApiKey`) keeps that placeholder
+        // synchronous and purely in-memory — no credential-state sync on the
+        // turn's critical path.
+        const modelRuntime = await ModelRuntime.create(PI_CHAT_MODEL_RUNTIME_CREATE_OPTIONS);
+        if (modelBinding.authMode === "proxy") {
+          modelRuntime.registerProvider(modelBinding.provider, {
+            apiKey: modelBinding.runtimeApiKey,
+          });
+        } else {
+          await setPiRuntimeCredential(
+            modelRuntime,
+            modelBinding.provider,
+            modelBinding.runtimeApiKey,
+          );
+        }
 
         // MCP server usage guidance is appended to the system prompt, then the
         // (uncacheable) operation index is dropped for providers without a
-        // prompt cache — the same shared policy the ai-sdk path applies.
+        // prompt cache.
         let system = mcpTools.instructions
           ? `${input.system}\n\n${mcpTools.instructions}`
           : input.system;
-        system = applyOperationIndexPolicy(system, model.apiShape);
+        system = applyOperationIndexPolicy(system, model.api);
 
         const generationExtensions =
           input.generation.temperature === undefined
@@ -259,12 +237,18 @@ export function runPiSubscriptionChat(input: PiSubscriptionChatInput): Response 
                   });
                 },
               ];
+        const authExtensions =
+          modelBinding.authMode === "proxy" ? [modelBinding.authExtension] : [];
         const resourceLoader = await createPiChatResourceLoader({
           DefaultResourceLoader,
           SettingsManager,
           cwd: "/tmp",
           agentDir: "/tmp/pi-chat",
-          extensionFactories: [...mcpTools.extensionFactories, ...generationExtensions],
+          extensionFactories: [
+            ...mcpTools.extensionFactories,
+            ...authExtensions,
+            ...generationExtensions,
+          ],
           systemPrompt: system,
         });
 
@@ -326,8 +310,7 @@ export function runPiSubscriptionChat(input: PiSubscriptionChatInput): Response 
           // Early-stopping generate: the tool loop was cut at
           // CHAT_TOOL_STEP_BUDGET, so spend the last step on ONE tool-less model
           // call — the user gets a synthesis of the work already done instead of
-          // a truncated tool call. Same contract as the ai-sdk engine's final
-          // step (`prepareAiSdkChatStep`).
+          // a truncated tool call.
           if (stepCap.fired()) {
             logger.info("chat turn step cap reached", {
               chatSessionId: input.chatSessionId,
@@ -378,7 +361,7 @@ export function runPiSubscriptionChat(input: PiSubscriptionChatInput): Response 
 
         write({
           type: "finish",
-          messageMetadata: buildSubscriptionTurnMetadata({
+          messageMetadata: buildPiTurnMetadata({
             finishReason: closure.finishReason,
             ...(clientError ? { clientError } : {}),
             stepCount,
@@ -394,32 +377,34 @@ export function runPiSubscriptionChat(input: PiSubscriptionChatInput): Response 
         // seam the token counts + the model's catalog rates and let it compute
         // the equivalent cost with the shared formula (consistent with the
         // proxy/runner paths) rather than forwarding pi-ai's own `meta.costUsd`.
-        input.recordUsage({
-          orgId: input.orgId,
-          userId: input.userId,
-          chatSessionId: input.chatSessionId,
-          presetId: input.presetId,
-          modelId: model.modelId,
-          apiShape: model.apiShape,
-          inputTokens: meta.usage.input,
-          outputTokens: meta.usage.output,
-          cacheReadTokens: meta.usage.cacheRead,
-          cacheWriteTokens: meta.usage.cacheWrite,
-          cost: model.cost,
-          durationMs: Date.now() - startedAt,
-        });
+        if (modelBinding.metering.kind === "inline") {
+          input.recordUsage({
+            orgId: input.orgId,
+            userId: input.userId,
+            chatSessionId: input.chatSessionId,
+            presetId: input.presetId,
+            modelId: model.id,
+            apiShape: model.api as ChatUsageRecord["apiShape"],
+            inputTokens: meta.usage.input,
+            outputTokens: meta.usage.output,
+            cacheReadTokens: meta.usage.cacheRead,
+            cacheWriteTokens: meta.usage.cacheWrite,
+            cost: modelBinding.metering.cost,
+            durationMs: Date.now() - startedAt,
+          });
+        }
       } catch (err) {
         // `createUIMessageStream` turns an escaped exception into a transient
         // error chunk. Without a start + finish boundary there is no assistant
         // message for the persistence drain to reconstruct after a reload.
         if (streamFinished) {
-          logger.error("subscription chat failed after its finish chunk", { err: String(err) });
+          logger.error("Pi chat failed after its finish chunk", { err: String(err) });
         } else {
-          logger.error("subscription chat turn failed", {
+          logger.error("Pi chat turn failed", {
             err: String(err),
             chatSessionId: input.chatSessionId,
           });
-          for (const chunk of subscriptionFailureChunks({
+          for (const chunk of piFailureChunks({
             error: err,
             streamStarted,
             aborted: turnAbort.signal.aborted,
@@ -443,6 +428,6 @@ export function runPiSubscriptionChat(input: PiSubscriptionChatInput): Response 
   // been cancelled/errored) — it streams from `stream`, so the slot must
   // outlive the producer function.
   return createUIMessageStreamResponse({
-    stream: releaseOnClose<UIMessageChunk>(stream, () => slot.release()),
+    stream: releaseOnClose<UIMessageChunk>(stream, () => input.slot.release()),
   });
 }

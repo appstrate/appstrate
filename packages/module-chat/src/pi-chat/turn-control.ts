@@ -1,20 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Step-cap control for the Pi subscription chat engine — the ONE guard that is
+ * Step-cap control for the Pi chat engine — the ONE guard that is
  * genuinely Pi-specific.
  *
  * **Step cap ("early-stopping generate").** `CHAT_MAX_STEPS` used to be reported
  * by this engine and never enforced. {@link createStepCapController} enforces it
- * the way the ai-sdk engine does (`prepareAiSdkChatStep`): stop the tool loop at
+ * stop the tool loop at
  * `CHAT_TOOL_STEP_BUDGET`, then issue exactly ONE more model call WITHOUT tools
  * carrying `CHAT_FINAL_STEP_SYSTEM_PROMPT`, so the user gets a synthesis of the
  * work already done instead of a truncated tool call. It is deliberately
  * pure/injectable so it is unit testable without a live model or a container.
  *
  * The other guard that used to live here — deadline vs explicit stop, and the
- * user-facing notice a deadline owes the user — is engine-neutral (both engines
- * enforce the same ceiling and close the turn the same way) and now lives in
+ * user-facing notice a deadline owes the user — is not Pi-specific and lives in
  * `../turn-closure.ts`.
  */
 

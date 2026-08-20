@@ -257,7 +257,7 @@ jobs:
         run: |
           # MUST run from a directory with no sibling package.json — otherwise
           # bugs in transitive deps that resolve `dirname(process.execPath)/package.json`
-          # at module top-level (e.g. `@mariozechner/pi-coding-agent`) are masked
+          # at module top-level (e.g. `@earendil-works/pi-coding-agent`) are masked
           # by `apps/cli/package.json` and only crash on the user's machine.
           # See `apps/cli/src/lib/pi-binary-shim.ts` for the post-mortem.
           TMP="$(mktemp -d)"

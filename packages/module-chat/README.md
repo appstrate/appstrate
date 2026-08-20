@@ -13,10 +13,11 @@ Module Appstrate — chat conversationnel first-party au-dessus de la plateforme
 
 ## Cerveau LLM (✅ transplanté du satellite appstrate-chat)
 
-`POST /api/chat` = boucle AI SDK v6 `streamText` (UIMessage stream) :
+`POST /api/chat` = une seule boucle Pi in-process, qui émet un UIMessage stream
+AI SDK comme protocole de fil (c'est le contrat que consomme assistant-ui) :
 
 - **Modèles** : résolus via `GET /api/models` de l'org, inference via le **llm-proxy** de la plateforme (clé injectée côté serveur, métrée) — le module ne détient aucune clé.
-- **Subscription** : les modèles oauth-subscription (ex. claude-code) sont servis par le moteur Pi in-process générique du module (`src/pi-chat/`), résolu via les services plateforme (`resolveSubscriptionChatModel`) — pas de seam par fournisseur, pas de binaire externe ; pi-ai émet nativement le request shape subscription du fournisseur depuis le token.
+- **Moteur** : TOUS les modèles sont servis par le moteur Pi in-process générique du module (`src/pi-chat/`) — pas de seam par fournisseur, pas de second moteur, pas de binaire externe. Le mode de credential est résolu via les services plateforme (`resolveSubscriptionChatModel`) : un modèle oauth-subscription (ex. claude-code) donne à Pi le vrai token et le baseUrl du fournisseur, et pi-ai en émet nativement le request shape ; un modèle par clé API donne à Pi une clé inerte et une base URL llm-proxy, le vrai secret ne quittant jamais la plateforme.
 - **Outils** : les méta-tools du module `mcp` (`search_operations` / `describe_operation` / `invoke_operation`) exposés via le MCP HTTP de la plateforme — le modèle pilote la plateforme avec les permissions de l'appelant.
 - **Identité** : forward des headers de l'appelant (cookie/Authorization + X-Org-Id/X-Application-Id) sur appels loopback — l'OAuth audience-bindé du satellite disparaît, le pipeline d'auth ré-authentifie chaque saut.
 - **Persistance** : chaque tour est écrit dans `chat_sessions`/`chat_messages` ; la session est identifiée par un id de chemin (`/api/chat/sessions/:id/messages`), créé côté serveur — pas de header dédié.
@@ -32,25 +33,25 @@ inachevé.
 - **Rate limiting** : `rateLimit()`/`idempotency()` sont internes à apps/api ; un module npm ne peut pas encore les appliquer tant qu'ils ne sont pas exportés.
 - **End-users** : `endUserGrantable` reste désactivé jusqu'à l'arrivée du chat embarqué B2B2C.
 
-### Parité entre moteurs (ai-sdk vs subscription)
+### Protections côté modèle
 
-Les deux protections côté modèle sont couvertes sur les DEUX moteurs :
-
-- **Redaction des liens de connexion** : côté ai-sdk via `wrapToolModelOutputs`
-  (`platform-mcp.ts`) ; côté subscription via le forwarder Pi
-  (`src/pi-chat/mcp-tools.ts`) — le canal `content` (seul sérialisé vers le
-  modèle par pi-ai) est redacté, tandis que `details` conserve le payload
-  complet pour que l'UI extraie l'offre de connexion (`extract-auth-offer`).
-- **Politique d'index d'opérations** : helper unique partagé
-  (`applyOperationIndexPolicy`, `src/operation-index.ts`) importé par les deux
-  moteurs.
+- **Redaction des liens de connexion** : dans le forwarder Pi
+  (`src/pi-chat/mcp-tools.ts`), le canal `content` — seul sérialisé vers le
+  modèle par pi-ai — est redacté, tandis que `details` conserve le payload
+  complet pour que l'UI extraie l'offre de connexion (`src/ui/auth-offer.ts`).
+  La redaction s'applique aussi au replay de l'historique persisté
+  (`src/pi-chat/structured-session.ts`).
+- **Politique d'index d'opérations** : `applyOperationIndexPolicy`
+  (`src/operation-index.ts`), appliquée par le moteur au prompt système après
+  y avoir ajouté les instructions MCP. Elle discrimine par **apiShape**, pas par
+  moteur : l'index est retiré pour les fournisseurs sans cache de prompt.
 
 ## Configuration (variables d'environnement)
 
 Ces variables sont lues directement par le module (pas via le schéma Zod
 `@appstrate/env`), toutes optionnelles :
 
-| Variable           | Défaut                   | Rôle                                                                                                                                                                                                        |
-| ------------------ | ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `CHAT_SELF_ORIGIN` | `http://127.0.0.1:$PORT` | Origine loopback pour les appels in-process (`/api/models`, `/api/llm-proxy`, `/api/mcp`). **Doit rester loopback** : ce hop transmet le cookie/Authorization de l'appelant (rejeté sinon — cf. `self.ts`). |
-| `CHAT_DEBUG`       | _(absent)_               | Si défini, active les logs de debug verbeux du module.                                                                                                                                                      |
+| Variable                  | Défaut                   | Rôle                                                                                                                                                                                                                             |
+| ------------------------- | ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `CHAT_SELF_ORIGIN`        | `http://127.0.0.1:$PORT` | Origine loopback pour les appels in-process (`/api/models`, `/api/llm-proxy`, `/api/mcp`). **Doit rester loopback** : ce hop transmet le cookie/Authorization de l'appelant (rejeté sinon — cf. `self.ts`).                      |
+| `CHAT_PI_MAX_CONCURRENCY` | `6`                      | Plafond de sessions de chat simultanées dans le process API. **Chaque** tour de chat réserve un slot ; à saturation la route répond 429. À fixer depuis une capacité mesurée avant de servir du trafic réel — cf. `docs/ENV.md`. |

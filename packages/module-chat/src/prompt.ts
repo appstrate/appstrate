@@ -8,9 +8,9 @@
  * The prompt deliberately does NOT restate the cross-cutting guidance the
  * platform MCP server already sends via its `instructions` (async runs, the
  * run_and_wait shortcut, integration selection/preference, connect-before-run,
- * heavy-list projection). Both chat engines already receive that server text
- * (ai-sdk appends `mcp.instructions`; the subscription SDK gets it through its
- * own MCP handshake), so duplicating it here only lets the two drift. Keep only
+ * heavy-list projection). The chat engine already receives that server text
+ * through its own MCP handshake, so duplicating it here only lets the two
+ * drift. Keep only
  * chat-specific value: persona, the operation-vs-agent decision tree, the inline
  * manifest authoring pattern, and how to consume a run's result.
  */
@@ -34,7 +34,7 @@ export type ChatEnv = {
     orgSlug?: string;
     /**
      * Caller's resolved RBAC permission set (from the platform auth pipeline).
-     * Forwarded into the scoped platform-MCP bearer the subscription engine
+     * Forwarded into the scoped platform-MCP bearer the Pi engine
      * hands its external binary, so the meta-tools authorize with exactly the
      * caller's own permissions — no amplification.
      */
@@ -231,8 +231,8 @@ export function formatCallerContext(raw: unknown, opts?: { locale?: string }): s
     // version) the model uses verbatim. The preference order (connected >
     // activated > inactive) and the default-vs-tool_catalog selection rule live
     // once in the platform MCP server instructions (apps/api/src/modules/mcp/
-    // router.ts), which both chat engines already receive; don't restate them
-    // here or the two drift.
+    // router.ts), which the engine already receives through its own MCP
+    // handshake; don't restate them here or the two drift.
     lines.push(
       `Integrations the user has connected and could attach to an agent: ${list}. Use the \`@scope/name\` id verbatim.`,
     );

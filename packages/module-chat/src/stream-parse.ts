@@ -2,7 +2,7 @@
 
 /**
  * Reconstruct the final assistant `UIMessage` from an AI SDK UI-message stream
- * (SSE bytes). Both chat engines emit the same wire format
+ * (SSE bytes). The chat engine emits the wire format
  * (`toUIMessageStreamResponse`), so parsing one teed copy of the response body
  * server-side lets the chat module persist the assistant turn uniformly —
  * without a per-engine persistence callback or a core-contract change.
@@ -53,7 +53,7 @@ function sseToChunks(byteStream: ReadableStream<Uint8Array>): ReadableStream<UIM
  * Drain the stream and return the FINAL state of EACH assembled message, in
  * order of first appearance. `readUIMessageStream` re-emits an evolving snapshot
  * per message as chunks arrive, so we key a Map by message id (last snapshot
- * wins). Both engines emit a single top-level `start` per turn today, so the
+ * wins). The engine emits a single top-level `start` per turn today, so the
  * multi-message handling is defensive — but it is what makes a future
  * multi-message engine safe to add without silently dropping or duplicating
  * content. Reading the whole stream is what drives generation to completion on

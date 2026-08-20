@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-export type ChatTurnEngine = "ai-sdk" | "subscription";
 export type ChatTurnErrorCategory =
   | "credential_unavailable"
   | "rate_limited"
@@ -25,7 +24,8 @@ export const CHAT_FINAL_STEP_SYSTEM_PROMPT =
 
 /**
  * Wall-clock ceiling for ONE chat turn — the TIME budget, as `CHAT_MAX_STEPS`
- * is the step budget. Shared by both engines so a child call can never be
+ * is the step budget. The one ceiling every child budget derives from, so a
+ * child call can never be
  * granted more time than the turn hosting it (the Pi engine used to own this
  * constant privately while `RUN_AND_WAIT_MAX_MS` let a run wait 3× longer than
  * the whole turn).
@@ -72,7 +72,7 @@ export interface TurnRunBudget {
 
 /**
  * THE budget arithmetic — the single place the deadline is turned into a child
- * budget, used by both chat engines (deadline propagation: an absolute
+ * budget, used by the chat engine (deadline propagation: an absolute
  * timestamp descends, every caller derives its own remaining slice from it, and
  * the whole subtree dies at the same instant).
  */
@@ -96,9 +96,8 @@ export function formatBudgetDuration(ms: number): string {
  * see its budget cannot manage it — the audited turn launched a ~2-minute
  * compilation with 22 seconds left on the clock.
  *
- * Deliberately one short, stable line: both engines place it where it cannot
- * invalidate a prompt-cache prefix (ai-sdk: a second system block AFTER the
- * cache breakpoint; Pi: appended to a tool result, i.e. frozen into the
+ * Deliberately one short, stable line, placed where it cannot invalidate a
+ * prompt-cache prefix (appended to a tool result, i.e. frozen into the
  * transcript once written).
  *
  * The launch threshold it quotes is derived from {@link computeTurnRunBudget},
@@ -119,7 +118,6 @@ export function formatTurnBudgetNote(input: { remainingMs: number; stepsUsed: nu
 }
 
 export interface AppstrateTurnMetadata {
-  engine: ChatTurnEngine;
   finishReason?: ChatTurnFinishReason;
   /**
    * Stable, provider-neutral class for retry UI + telemetry.
@@ -177,7 +175,11 @@ export function turnMetadataFromMessage(message: unknown): AppstrateTurnMetadata
   const appstrate = metadata && isRecord(metadata.appstrate) ? metadata.appstrate : null;
   const turn = appstrate && isRecord(appstrate.turn) ? appstrate.turn : null;
   if (!turn) return null;
-  if (turn.engine !== "ai-sdk" && turn.engine !== "subscription") return null;
+  // The shape gate is the three step counters. It used to also require an
+  // `engine` string, which was the only reader that field ever had — the check
+  // existed because the field existed. Rows written before the chat unified on
+  // one engine still carry it; an unread extra key decodes fine, so nothing had
+  // to be rewritten or deleted when it went away.
   if (typeof turn.stepCount !== "number") return null;
   if (typeof turn.maxSteps !== "number") return null;
   if (typeof turn.maxStepsReached !== "boolean") return null;

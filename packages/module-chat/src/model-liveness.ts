@@ -15,7 +15,7 @@
  * Structural parameter so both row shapes pass unchanged — `OrgModel`
  * (`llm.ts`, server) and `OrgModelOption` (`ui/models-data.ts`, browser).
  * Kept in its own dependency-free leaf, like `chat-families.ts`, because
- * `llm.ts` pulls the AI SDK and the logger and must not reach the browser
+ * `llm.ts` pulls the logger and must not reach the browser
  * bundle.
  */
 export function isModelLive(model: { needs_reconnection?: boolean }): boolean {

@@ -3,7 +3,7 @@
 /**
  * How a chat turn CLOSES, and what the user is told about it — engine-neutral.
  *
- * Both engines fold a user stop and the turn's wall-clock ceiling
+ * The engine folds a user stop and the turn's wall-clock ceiling
  * (`CHAT_TURN_DEADLINE_MS`) into a single `AbortController`. Tagging the
  * deadline with {@link ChatTurnDeadlineError} is what lets the finish path tell
  * them apart: a user stop is a normal ending (the user already knows), a
@@ -13,10 +13,9 @@
  * exactly how a 10-minute turn once ended as an empty message.
  *
  * These primitives were born on the Pi engine (`pi-chat/turn-control.ts`) but
- * describe the shared contract, not that engine: the ai-sdk path enforces the
- * same ceiling and closes the turn the same way. They live here so there is ONE
- * home for the rule — the step-cap controller, which really is Pi-specific,
- * stays in `pi-chat/turn-control.ts`.
+ * describe the turn contract, not the engine's internals. They live here so
+ * there is ONE home for the rule — the step-cap controller, which really is
+ * Pi-specific, stays in `pi-chat/turn-control.ts`.
  */
 
 import type { UIMessageChunk } from "ai";

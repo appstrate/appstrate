@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Bounded in-process concurrency for the Pi subscription chat engine.
+ * Bounded in-process concurrency for the Pi chat engine.
  *
- * Each subscription chat turn drives a `@earendil-works/pi-coding-agent` session
+ * Each Pi chat turn drives a `@earendil-works/pi-coding-agent` session
  * in-process inside the single `apps/api` process — which also serves runs,
  * auth, and everything else. Without a ceiling a burst of concurrent chats would
  * spin up an unbounded number of Pi sessions (each holding an upstream inference
@@ -13,10 +13,11 @@
  * (see {@link chatCapacityResponse}) and the client backs off instead of piling
  * on more sessions.
  *
- * The cap is read from `CHAT_PI_MAX_CONCURRENCY` (positive integer, default 6) —
- * an opt-in module knob read straight from `process.env`, not a core env-schema
- * field (the chat module runs without the platform env surface in tests/OSS
- * standalone wiring).
+ * The cap is read from `CHAT_PI_MAX_CONCURRENCY` (positive integer, default 6).
+ * Higher limits used by the performance harness must remain explicit until
+ * replica resources and cloud concurrency have been validated. The module knob
+ * is read straight from `process.env` because the chat module also runs without
+ * the platform env surface in tests and standalone OSS wiring.
  */
 
 import { logger } from "../logger.ts";

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Connect-offer redaction + extraction — the single walk both chat engines use
+ * Connect-offer redaction + extraction — the single walk the chat engine uses
  * on tool results that may carry a connect/authorize URL.
  *
  * A connect URL must exist in exactly one place per channel:
@@ -154,101 +154,6 @@ export function splitJsonText(text: string): { text: string; offer: ConnectOffer
   }
   const r = splitValue(parsed, 0);
   return { text: r.changed ? JSON.stringify(r.value) : text, offer: r.offer };
-}
-
-/**
- * Redact connect links from a `toModelOutput` result. The AI SDK v7
- * `ToolResultOutput` union is `text | json | content | error-text | error-json |
- * execution-denied`; the MCP client's `mcpToModelOutput` only ever emits `json`
- * or `content`, so those are the live shapes here. `text` (a top-level string
- * value) is covered too as belt-and-braces — a `toModelOutput` returning it must
- * not slip a connect link past the model-channel scrub. The `error-*` variants
- * are produced by the SDK itself (never routed through `toModelOutput`), and
- * `execution-denied` carries only a denial reason, so neither reaches this walk.
- * Pure, redact-only — the model channel never gets a `connectOffer` field. For
- * `text`/`content` text we only touch valid JSON (re-stringified only when
- * something changed); anything else is returned as-is.
- */
-export function redactConnectLinks(output: unknown): unknown {
-  if (output == null || typeof output !== "object") return output;
-  const o = output as Record<string, unknown>;
-
-  if (o.type === "json") {
-    const r = splitValue(o.value, 0);
-    return r.changed ? { ...o, value: r.value } : output;
-  }
-
-  if (o.type === "text" && typeof o.value === "string") {
-    const r = splitJsonText(o.value);
-    return r.text === o.value ? output : { ...o, value: r.text };
-  }
-
-  if (o.type === "content" && Array.isArray(o.value)) {
-    let changed = false;
-    const nextValue = o.value.map((part) => {
-      if (part == null || typeof part !== "object") return part;
-      const p = part as Record<string, unknown>;
-      if (p.type !== "text" || typeof p.text !== "string") return part;
-      const r = splitJsonText(p.text);
-      if (r.text === p.text) return part;
-      changed = true;
-      return { ...p, text: r.text };
-    });
-    return changed ? { ...o, value: nextValue } : output;
-  }
-
-  return output;
-}
-
-/**
- * Split a tool `execute` result for the UI/persistence channel: redact every
- * connect link in place and attach the captured offer as a typed top-level
- * `connectOffer` field. Handles the two shapes `@ai-sdk/mcp` `execute` returns —
- * the raw MCP `CallToolResult` `{content:[…], structuredContent?}` (also on
- * `isError`), or a bare `structuredContent` payload object when an
- * `outputSchema` is configured. Returns the original reference when nothing
- * changed.
- */
-export function splitToolResult(result: unknown): unknown {
-  if (result == null || typeof result !== "object") return result;
-  const o = result as Record<string, unknown>;
-
-  if (Array.isArray(o.content)) {
-    let changed = false;
-    let offer: ConnectOffer | null = null;
-    const content = o.content.map((part) => {
-      if (part == null || typeof part !== "object") return part;
-      const p = part as Record<string, unknown>;
-      if (p.type !== "text" || typeof p.text !== "string") return part;
-      const r = splitJsonText(p.text);
-      offer ??= r.offer;
-      if (r.text === p.text) return part;
-      changed = true;
-      return { ...p, text: r.text };
-    });
-    let structuredContent = o.structuredContent;
-    if (structuredContent !== undefined) {
-      const sc = splitConnectPayload(structuredContent);
-      if (sc.redacted !== structuredContent) changed = true;
-      // structuredContent is the canonical payload — its offer wins.
-      if (sc.offer) offer = sc.offer;
-      structuredContent = sc.redacted;
-    }
-    if (!changed) return result;
-    return {
-      ...o,
-      content,
-      ...(o.structuredContent !== undefined ? { structuredContent } : {}),
-      ...(offer ? { connectOffer: offer } : {}),
-    };
-  }
-
-  const r = splitConnectPayload(result);
-  if (r.redacted === result) return result;
-  return {
-    ...(r.redacted as Record<string, unknown>),
-    ...(r.offer ? { connectOffer: r.offer } : {}),
-  };
 }
 
 /**

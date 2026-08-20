@@ -21,7 +21,6 @@ describe("chat turn metadata", () => {
     const metadata = mergeTurnMetadata(
       { usage: { input_tokens: 10 }, costUsd: 0.01 },
       {
-        engine: "subscription",
         finishReason: "stop",
         stepCount: 16,
         maxSteps: 16,
@@ -35,7 +34,6 @@ describe("chat turn metadata", () => {
       costUsd: 0.01,
       appstrate: {
         turn: {
-          engine: "subscription",
           finishReason: "stop",
           stepCount: 16,
           maxSteps: 16,
@@ -46,6 +44,30 @@ describe("chat turn metadata", () => {
     });
   });
 
+  it("decodes a row still carrying the retired `engine` stamp", () => {
+    // Threads persisted before the chat unified on one engine carry an `engine`
+    // key the decoder no longer looks at. This is what let the field be dropped
+    // without rewriting or deleting a single row: an unread extra key rides
+    // along harmlessly. Forged as the STORED shape — `mergeTurnMetadata` cannot
+    // express it any more, which is the point.
+    const turn = {
+      finishReason: "stop" as const,
+      stepCount: 1,
+      maxSteps: 16,
+      maxStepsReached: false,
+    };
+    for (const engine of ["ai-sdk", "subscription", "pi"]) {
+      const decoded = turnMetadataFromMessage({
+        metadata: { appstrate: { turn: { engine, ...turn } } },
+      });
+      expect(decoded).toMatchObject({ finishReason: "stop", stepCount: 1 });
+    }
+    // And a row written today, with no stamp at all, decodes the same way.
+    expect(turnMetadataFromMessage({ metadata: mergeTurnMetadata(undefined, turn) })).toMatchObject(
+      { finishReason: "stop", stepCount: 1 },
+    );
+  });
+
   it("detects a reached tool-step budget as a turn limit", () => {
     const message = {
       role: "assistant",
@@ -53,7 +75,6 @@ describe("chat turn metadata", () => {
       metadata: mergeTurnMetadata(
         { source: "test" },
         {
-          engine: "ai-sdk",
           finishReason: "stop",
           stepCount: 16,
           maxSteps: 16,
@@ -74,7 +95,6 @@ describe("chat turn metadata", () => {
       role: "assistant",
       content: [],
       metadata: mergeTurnMetadata(undefined, {
-        engine: "ai-sdk",
         finishReason: "stop",
         stepCount: 16,
         maxSteps: 16,

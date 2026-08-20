@@ -4,7 +4,7 @@
  * Build the Pi extension factories that expose the platform's own MCP tools
  * (`search_operations` / `describe_operation` / `invoke_operation` +
  * `run_and_wait`) to the in-process Pi chat session — the same meta-tools the
- * `ai-sdk` chat path gets, so the assistant pilots the platform with the
+ * platform MCP server exposes, so the assistant pilots the platform with the
  * caller's own permissions.
  *
  * Unlike the runtime container (which forwards a FIXED descriptor set), the chat
@@ -13,7 +13,7 @@
  * extension that streams a LIVE preliminary run card into the UI stream (the
  * run id appears the moment the run is launched, then the card updates as the
  * run progresses) while the tool result stays blocked on completion — the same
- * behaviour the `ai-sdk` path gets from `wrapRunAndWaitTool`.
+ * behaviour the live run card needs.
  */
 
 import { formatTurnBudgetNote } from "@appstrate/core/chat-turn-metadata";
@@ -49,7 +49,7 @@ interface PiToolResult {
 
 /**
  * Wrap an arbitrary payload as a Pi tool result. Channel split mirrors the
- * ai-sdk path's `wrapToolConnectOffers`: `content` is what pi-ai serializes to
+ * The model-visible channel: `content` is what pi-ai serializes to
  * the MODEL, so connect links are redacted there; the connect URL surfaces
  * ONLY through the typed `connectOffer` field the connect card reads. `details`
  * (UI JSON view) carries the redacted payload — the live URL lives in exactly
@@ -286,7 +286,6 @@ function makeRunAndWaitExtension(
           signal: execSignal ?? ctx.signal,
           budget: {
             turnDeadlineAt: ctx.turnBudget.deadlineAt,
-            engine: "subscription",
             chatSessionId: ctx.turnBudget.chatSessionId,
             ...(ctx.turnBudget.orgId ? { orgId: ctx.turnBudget.orgId } : {}),
             ...(ctx.turnBudget.now ? { now: ctx.turnBudget.now } : {}),

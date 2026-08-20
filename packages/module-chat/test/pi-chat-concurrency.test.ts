@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Bounded concurrency for the in-process Pi subscription chat engine: the
+ * Bounded concurrency for the in-process Pi chat engine: the
  * counting gate (cap via CHAT_PI_MAX_CONCURRENCY, default 6), the 429 capacity
  * response, and the slot-release stream wrapper. The wrapper is the leak guard
  * — it must fire exactly once on every terminal path: normal completion,
@@ -35,7 +35,7 @@ describe("piChatMaxConcurrency", () => {
     delete process.env[ENV_VAR];
   });
 
-  it("defaults to 6 when the env var is absent", () => {
+  it("defaults to 6 while cloud capacity remains unvalidated", () => {
     delete process.env[ENV_VAR];
     expect(piChatMaxConcurrency()).toBe(6);
   });

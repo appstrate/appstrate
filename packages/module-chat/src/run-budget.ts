@@ -4,7 +4,7 @@
  * Turn-budget propagation for `run_and_wait` — ONE implementation shared by both
  * chat engines (`pi-chat/mcp-tools.ts` and `platform-mcp.ts`).
  *
- * The defect this closes: `RUN_AND_WAIT_MAX_MS` is 30 minutes and neither engine
+ * The defect this closes: `RUN_AND_WAIT_MAX_MS` is 30 minutes and the chat
  * ever passed `maxMs`, so a tool call was allowed to wait THREE TIMES longer
  * than the 10-minute turn hosting it. Measured consequence: a run launched at
  * T+9:38 of a 10-minute turn, the turn died 22 s later, the run succeeded 2
@@ -26,7 +26,6 @@ import {
   CHAT_TURN_SAFETY_MARGIN_MS,
   computeTurnRunBudget,
   formatBudgetDuration,
-  type ChatTurnEngine,
 } from "@appstrate/core/chat-turn-metadata";
 import {
   runAndWaitStepsWithDocuments,
@@ -40,8 +39,6 @@ import { stampChatSessionOnRun } from "./run-reconcile.ts";
 export interface TurnBudgetContext {
   /** Absolute wall-clock instant the turn ends (`turnStart + CHAT_TURN_DEADLINE_MS`). */
   turnDeadlineAt: number;
-  /** Which engine hosts the turn. This field alone is trace attribution only. */
-  engine: ChatTurnEngine;
   /**
    * Chat session the turn belongs to. Trace attribution AND the orphan-run link
    * (C3): every run launched here is stamped with it so a run that finishes after
@@ -78,7 +75,6 @@ export function decideRunAndWaitBudget(
 
   if (!budget.launchable) {
     log.warn("chat run_and_wait refused — insufficient turn budget", {
-      engine: ctx.engine,
       chatSessionId: ctx.chatSessionId ?? null,
       remainingMs: budget.remainingMs,
       runBudgetMs: budget.maxMs,
@@ -114,7 +110,7 @@ export function decideRunAndWaitBudget(
 
 /**
  * {@link runAndWaitStepsWithDocuments}, bounded by the hosting turn's deadline.
- * Both engines call THIS — the gate, the `maxMs` derivation and the
+ * The chat's `run_and_wait` calls THIS — the gate, the `maxMs` derivation and the
  * launching-session link exist once.
  *
  * The link (C3) is written off the FIRST step carrying a run id, which is the
