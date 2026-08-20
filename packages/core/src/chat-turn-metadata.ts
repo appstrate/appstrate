@@ -1,24 +1,29 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Which loop produced a persisted turn.
+ * The engine a NEW turn is written with. There is exactly one, and this is not
+ * a registry of engines that exist — it is the write side of a persisted field.
  *
- * `pi` is the only value a turn can be written with today — `ai-sdk` and
- * `subscription` exist so threads persisted before the chat unified on one
- * engine still decode. Never write either.
- *
- * Kept even though nothing BRANCHES on it: chat messages are an append-only
- * store read for years, and this is the only stamp of what produced a given
- * row. It is what makes the ai-sdk → pi transition legible in the data after
- * the fact, and it is the field a future engine change would be diagnosed
- * with. Twelve bytes a turn.
- *
- * Note before removing it anyway: {@link turnMetadataFromMessage} REQUIRES it.
- * Dropping the write without relaxing that gate makes every new turn's metadata
- * fail to decode — the error state and the turn-limit notice would silently
- * stop rendering.
+ * Kept as a stamp even though nothing BRANCHES on it: chat messages are an
+ * append-only store read for years, and this is the only record of what
+ * produced a given row. It is what makes the ai-sdk → pi transition legible in
+ * the data after the fact, and the field a future engine change would be
+ * diagnosed with. Twelve bytes a turn.
  */
-export type ChatTurnEngine = "ai-sdk" | "pi" | "subscription";
+export type ChatTurnEngine = "pi";
+
+/**
+ * What the DECODER accepts off a stored row: the live engine, plus the two
+ * markers written before the chat unified on one engine. Neither is an engine
+ * that still exists; they are historical values that must keep decoding, or the
+ * error state and the turn-limit notice stop rendering on old threads
+ * ({@link turnMetadataFromMessage} rejects a row whose `engine` it does not
+ * recognise).
+ *
+ * The split is the point: {@link mergeTurnMetadata} takes the narrow type, so
+ * a legacy value cannot be written by accident, while reads stay permissive.
+ */
+export type PersistedChatTurnEngine = ChatTurnEngine | "ai-sdk" | "subscription";
 export type ChatTurnErrorCategory =
   | "credential_unavailable"
   | "rate_limited"
@@ -137,7 +142,8 @@ export function formatTurnBudgetNote(input: { remainingMs: number; stepsUsed: nu
 }
 
 export interface AppstrateTurnMetadata {
-  engine: ChatTurnEngine;
+  /** Wide on purpose — this interface is what a DECODED row looks like. */
+  engine: PersistedChatTurnEngine;
   finishReason?: ChatTurnFinishReason;
   /**
    * Stable, provider-neutral class for retry UI + telemetry.
@@ -166,13 +172,30 @@ export interface ChatMessageMetadata {
   [key: string]: unknown;
 }
 
+/** The values {@link turnMetadataFromMessage} will decode. */
+const PERSISTED_CHAT_TURN_ENGINES: ReadonlySet<PersistedChatTurnEngine> = new Set([
+  "pi",
+  "ai-sdk",
+  "subscription",
+]);
+
+/**
+ * What a caller may WRITE: {@link AppstrateTurnMetadata} narrowed to the live
+ * engine. Forging a legacy row (a test rehearsing the back-compat path) builds
+ * the stored shape directly instead — going through today's writer to produce
+ * yesterday's bytes is exactly what stops catching drift.
+ */
+export type ChatTurnMetadataInput = Omit<AppstrateTurnMetadata, "engine"> & {
+  engine: ChatTurnEngine;
+};
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 export function mergeTurnMetadata(
   existing: unknown,
-  turn: AppstrateTurnMetadata,
+  turn: ChatTurnMetadataInput,
 ): ChatMessageMetadata {
   const root = isRecord(existing) ? existing : {};
   const appstrate = isRecord(root.appstrate) ? root.appstrate : {};
@@ -195,9 +218,7 @@ export function turnMetadataFromMessage(message: unknown): AppstrateTurnMetadata
   const appstrate = metadata && isRecord(metadata.appstrate) ? metadata.appstrate : null;
   const turn = appstrate && isRecord(appstrate.turn) ? appstrate.turn : null;
   if (!turn) return null;
-  if (turn.engine !== "ai-sdk" && turn.engine !== "pi" && turn.engine !== "subscription") {
-    return null;
-  }
+  if (!PERSISTED_CHAT_TURN_ENGINES.has(turn.engine as PersistedChatTurnEngine)) return null;
   if (typeof turn.stepCount !== "number") return null;
   if (typeof turn.maxSteps !== "number") return null;
   if (typeof turn.maxStepsReached !== "boolean") return null;

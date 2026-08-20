@@ -57,9 +57,13 @@ describe("chat turn metadata", () => {
       turnMetadataFromMessage({ metadata: mergeTurnMetadata(undefined, { engine: "pi", ...turn }) })
         ?.engine,
     ).toBe("pi");
+    // A row written before the chat unified on one engine. Forged as the STORED
+    // shape, not through `mergeTurnMetadata` — the writer only accepts the live
+    // engine now, and rehearsing back-compat through today's writer could never
+    // catch the drift this test exists to catch.
     expect(
       turnMetadataFromMessage({
-        metadata: mergeTurnMetadata(undefined, { engine: "subscription", ...turn }),
+        metadata: { appstrate: { turn: { engine: "subscription", ...turn } } },
       })?.engine,
     ).toBe("subscription");
   });
@@ -71,7 +75,7 @@ describe("chat turn metadata", () => {
       metadata: mergeTurnMetadata(
         { source: "test" },
         {
-          engine: "ai-sdk",
+          engine: "pi",
           finishReason: "stop",
           stepCount: 16,
           maxSteps: 16,
@@ -92,7 +96,7 @@ describe("chat turn metadata", () => {
       role: "assistant",
       content: [],
       metadata: mergeTurnMetadata(undefined, {
-        engine: "ai-sdk",
+        engine: "pi",
         finishReason: "stop",
         stepCount: 16,
         maxSteps: 16,
