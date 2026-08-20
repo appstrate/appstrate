@@ -2,7 +2,7 @@
 
 /**
  * `deriveProviderFromApi` is the single source of truth mapping a Pi
- * `MODEL_API` shape to the Pi SDK `AuthStorage` provider key. The entrypoint
+ * `MODEL_API` shape to the Pi SDK `ModelRuntime` provider key. The entrypoint
  * uses it to populate `model.provider`, which the runner then reads verbatim
  * to register + resolve the API key — so this table is the only place the
  * api→provider translation lives.
@@ -14,10 +14,11 @@ import { deriveProviderFromApi } from "../src/index.ts";
 describe("deriveProviderFromApi", () => {
   it("maps each known api shape to its SDK provider key (n→1)", () => {
     expect(deriveProviderFromApi("anthropic-messages")).toBe("anthropic");
-    // The three OpenAI-family shapes all collapse to one provider key.
+    // Codex has its own native provider in Pi 0.84. Mapping it to `openai`
+    // silently selects the standard Responses serializer in ModelRuntime.
     expect(deriveProviderFromApi("openai-completions")).toBe("openai");
     expect(deriveProviderFromApi("openai-responses")).toBe("openai");
-    expect(deriveProviderFromApi("openai-codex-responses")).toBe("openai");
+    expect(deriveProviderFromApi("openai-codex-responses")).toBe("openai-codex");
     expect(deriveProviderFromApi("mistral-conversations")).toBe("mistral");
     expect(deriveProviderFromApi("google-generative-ai")).toBe("google");
     expect(deriveProviderFromApi("google-vertex")).toBe("google-vertex");

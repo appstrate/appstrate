@@ -4,12 +4,12 @@
  * This file exports an extension factory that registers a "word_count" tool.
  * The agent can call this tool during agent runs.
  *
- * Extension import: @mariozechner/pi-coding-agent (NOT "pi-agent")
+ * Extension import: @earendil-works/pi-coding-agent (NOT "pi-agent")
  * Execute signature: (_toolCallId, params, signal) -- params is the SECOND argument
  * Return type: { content: [{ type: "text", text: "..." }] }
  */
 
-import type { ExtensionFactory } from "@mariozechner/pi-coding-agent";
+import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
 
 const wordCountExtension: ExtensionFactory = (context) => {
   return {

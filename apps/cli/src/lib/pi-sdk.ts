@@ -2,7 +2,7 @@
 
 /**
  * Single import surface ("barrel") for the Pi Coding Agent SDK
- * (`@mariozechner/pi-ai`) inside the `@appstrate/cli`.
+ * (`@earendil-works/pi-ai`) inside the `@appstrate/cli`.
  *
  * This is the ONLY file under `apps/cli/` allowed to import from the Pi
  * SDK directly — enforced by the `no-restricted-imports` ESLint guard
@@ -16,4 +16,4 @@
  */
 
 // --- types ---
-export type { Api, Model } from "@mariozechner/pi-ai";
+export type { Api, Model } from "@earendil-works/pi-ai";

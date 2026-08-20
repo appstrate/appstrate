@@ -79,14 +79,14 @@
     "zod": "^4.4.3"
   },
   "peerDependencies": {
-    "@mariozechner/pi-coding-agent": "0.73.1",
-    "@mariozechner/pi-ai": "0.73.1"
+    "@earendil-works/pi-coding-agent": "0.84.2",
+    "@earendil-works/pi-ai": "0.84.2"
   },
   "peerDependenciesMeta": {
-    "@mariozechner/pi-coding-agent": {
+    "@earendil-works/pi-coding-agent": {
       "optional": true
     },
-    "@mariozechner/pi-ai": {
+    "@earendil-works/pi-ai": {
       "optional": true
     }
   },
@@ -94,7 +94,7 @@
     "@appstrate/core": "workspace:*",
     "@types/mustache": "^4.2.6",
     "@types/semver": "^7.8.0",
-    "@mariozechner/pi-coding-agent": "0.73.1",
-    "@mariozechner/pi-ai": "0.73.1"
+    "@earendil-works/pi-coding-agent": "0.84.2",
+    "@earendil-works/pi-ai": "0.84.2"
   }
 }

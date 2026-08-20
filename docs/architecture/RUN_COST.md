@@ -18,16 +18,15 @@ Extracted from `CLAUDE.md` Backend section. Canonical read path + ingestion chai
 
 ## Token buckets — one normalisation, two implementations
 
-Cost is `input×input_rate + output×output_rate + cacheRead×cacheRead_rate + cacheWrite×cacheWrite_rate` over four **disjoint** buckets (`computeTokenCost`, `@appstrate/afps-runtime/runner`). The same upstream reply is normalised into those buckets twice — by the proxy adapter (`llm-proxy/openai.ts`) and by `@mariozechner/pi-ai` (`providers/openai-completions.js`, used by every platform-side run). **The two must agree, or identical consumption costs a different amount depending on where the run executed.** The openai-compatible formula (pi-ai's, mirrored exactly by the adapter):
+Cost is `input×input_rate + output×output_rate + cacheRead×cacheRead_rate + cacheWrite×cacheWrite_rate` over four **disjoint** buckets (`computeTokenCost`, `@appstrate/afps-runtime/runner`). The same upstream reply is normalised into those buckets twice — by the proxy adapter (`llm-proxy/openai.ts`) and by `@earendil-works/pi-ai` (`api/openai-completions.js`, used by every platform-side run). **The two must agree, or identical consumption costs a different amount depending on where the run executed.** The openai-compatible formula (pi-ai's, mirrored exactly by the adapter):
 
 ```
-reportedCached = prompt_tokens_details.cached_tokens ?? prompt_cache_hit_tokens ?? 0
+cacheRead      = prompt_tokens_details.cached_tokens ?? prompt_cache_hit_tokens ?? 0
 cacheWrite     = prompt_tokens_details.cache_write_tokens ?? 0
-cacheRead      = cacheWrite > 0 ? max(0, reportedCached − cacheWrite) : reportedCached
 input          = max(0, prompt_tokens − cacheRead − cacheWrite)
 ```
 
-`prompt_tokens` is the TOTAL prompt in every dialect (OpenAI `cached_tokens ⊂ prompt_tokens`; DeepSeek `prompt_tokens = hit + miss`; OpenRouter additionally folds `cache_write_tokens` into `cached_tokens`), so both cache buckets are carved back out of `input`. Anthropic's wire fields are already disjoint and map 1:1. Parity is enforced by `apps/api/test/unit/llm-proxy-usage-parity.test.ts`, which also fails if the installed pi-ai stops matching the transcribed formula.
+`prompt_tokens` is the TOTAL prompt in every dialect (OpenAI `cached_tokens ⊂ prompt_tokens`; DeepSeek `prompt_tokens = hit + miss`), so both cache buckets are carved back out of `input`. `cached_tokens` is the cache-READ count and nothing else: OpenAI neither documents nor emits `cache_write_tokens`, and the OpenRouter-compatible providers that do emit it report it as a **separate** count rather than folding it into `cached_tokens` ([OpenRouter's own provider](https://github.com/OpenRouterTeam/ai-sdk-provider/pull/409), [ds4](https://github.com/antirez/ds4/pull/29)). Subtracting writes from `cached_tokens` therefore under-reports a spec-compliant provider, which is why pi-ai stopped doing it in 0.84 and the adapter follows. Anthropic's wire fields are already disjoint and map 1:1. Parity is enforced by `apps/api/test/unit/llm-proxy-usage-parity.test.ts`, which also fails if the installed pi-ai stops matching the transcribed formula.
 
 Every count is floored at zero at the adapter boundary (`helpers.tokenCount`, and the same clamp in `recordChatUsage`): a negative count would produce a negative `cost_usd` that SUBTRACTS from the run's cost and from the corresponding debit. That application-side floor is backed by two DB constraints — `llm_usage_cost_usd_non_negative` and `runs_cost_non_negative` (migration `0029`) — so a write path that bypasses `recordLlmUsage` fails loudly instead of silently crediting an org.
 

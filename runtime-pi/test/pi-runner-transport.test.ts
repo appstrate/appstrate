@@ -108,7 +108,7 @@ describe("runtime-pi sidecar transport wiring", () => {
         id: "gpt-5-codex",
         name: "gpt-5-codex",
         api: "openai-codex-responses",
-        provider: "openai",
+        provider: "openai-codex",
         baseUrl: `${server.url.origin}/llm`,
         reasoning: false,
         input: ["text"],
@@ -133,7 +133,6 @@ describe("runtime-pi sidecar transport wiring", () => {
         context: makeContext(),
         eventSink: sink,
       });
-
       expect(sidecarRequests).toEqual([{ method: "POST", path: "/llm/codex/responses" }]);
       expect(upstreamRequests).toEqual([{ method: "POST", path: "/codex/responses" }]);
       expect(sink.finalizeCalls).toBe(1);

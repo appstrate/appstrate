@@ -42,6 +42,20 @@ describe("preserveRequestedThinkingLevel", () => {
 });
 
 describe("prepareRequestedThinkingLevel", () => {
+  it("adapts the stable Appstrate Codex base URL to Pi 0.84 exactly once", () => {
+    const prepared = prepareRequestedThinkingLevel(
+      model({ api: "openai-codex-responses", baseUrl: "https://proxy.test/llm/" }),
+      "off",
+    );
+    const alreadyPrepared = prepareRequestedThinkingLevel(
+      model({ api: "openai-codex-responses", baseUrl: "https://proxy.test/llm/codex" }),
+      "off",
+    );
+
+    expect(prepared.model.baseUrl).toBe("https://proxy.test/llm/codex");
+    expect(alreadyPrepared.model.baseUrl).toBe("https://proxy.test/llm/codex");
+  });
+
   it("routes portable max through Pi's xhigh slot without collapsing its native value", () => {
     const prepared = prepareRequestedThinkingLevel(model(), "max");
     expect(prepared.thinkingLevel).toBe("xhigh");
@@ -79,8 +93,8 @@ describe("prepareRequestedThinkingLevel", () => {
 
     expect(result.errorMessage).toBe("payload captured");
     expect(payload).toMatchObject({
-      max_tokens: 64_768,
-      thinking: { type: "enabled", budget_tokens: 32_768 },
+      max_tokens: 65_536,
+      thinking: { type: "enabled", budget_tokens: 32_768, display: "summarized" },
     });
   });
 });

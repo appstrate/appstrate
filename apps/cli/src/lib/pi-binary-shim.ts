@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 //
-// Workaround for transitive `@mariozechner/pi-coding-agent` crash on Bun
+// Workaround for transitive `@earendil-works/pi-coding-agent` crash on Bun
 // `--compile`'d binaries.
 //
 // Pi's `dist/config.js` runs `JSON.parse(readFileSync(getPackageJsonPath()))`
@@ -17,7 +17,7 @@
 //
 // MUST be the first import in `src/cli.ts`. ESM side effects run in
 // import-declaration order, and the shim has to land before any module
-// that transitively pulls in `@mariozechner/pi-coding-agent` (notably
+// that transitively pulls in `@earendil-works/pi-coding-agent` (notably
 // `@appstrate/runner-pi`) and triggers pi's top-level `readFileSync`.
 //
 // The npm channel (`bun build --target=bun --outdir=dist`) is unaffected:

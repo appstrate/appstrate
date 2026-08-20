@@ -7,7 +7,7 @@
  * An OAuth-subscription run hands the agent container a placeholder bearer; the
  * real subscription token never crosses the isolation boundary. The sidecar
  * resolves the real token platform-side and swaps it onto the outbound request.
- * The Pi SDK (`@mariozechner/pi-ai`) already emits the full subscription request
+ * The Pi SDK (`@earendil-works/pi-ai`) already emits the full subscription request
  * shape — the Anthropic OAuth fingerprint (`anthropic-beta: oauth-2025-04-20`,
  * the `claude-cli` user-agent, the "You are Claude Code" system prelude) or the
  * codex-responses shape (`chatgpt-account-id`, the codex user-agent). So the
@@ -33,7 +33,7 @@
  * Why the exact string matters: pi-ai's `anthropic-messages` provider selects
  * the OAuth request shape from the key alone —
  * `apiKey.includes("sk-ant-oat")`
- * (`@mariozechner/pi-ai` `dist/providers/anthropic.js`). Anthropic gates OAuth
+ * (`@earendil-works/pi-ai` `dist/api/anthropic-messages.js`). Anthropic gates OAuth
  * tokens to that body shape upstream, so the reshape has to happen client-side,
  * before the placeholder is swapped for the real bearer. A placeholder missing
  * the marker silently drops the request onto the api-key shape and the upstream

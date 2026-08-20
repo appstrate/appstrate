@@ -4,8 +4,8 @@
  * OAuth-subscription run policy for the run launcher.
  *
  * Every run — API-key AND OAuth subscription (Claude Pro/Max, ChatGPT Codex) —
- * executes on the SINGLE Pi engine (`@mariozechner/pi-coding-agent`). Pi's SDK
- * (`@mariozechner/pi-ai`) natively speaks the subscription request shapes: for
+ * executes on the SINGLE Pi engine (`@earendil-works/pi-coding-agent`). Pi's SDK
+ * (`@earendil-works/pi-ai`) natively speaks the subscription request shapes: for
  * an Anthropic OAuth token it emits the Claude Code fingerprint (bearer,
  * `anthropic-beta: oauth-2025-04-20`, the `claude-cli` user-agent, the
  * "You are Claude Code" system prelude); for a ChatGPT Codex token it emits the

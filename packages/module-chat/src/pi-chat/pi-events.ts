@@ -4,9 +4,9 @@
  * Framework-neutral structural views of the Pi SDK event shapes the chat engine
  * consumes. Declared here (not imported from the Pi SDK) so the UI-stream mapper
  * is unit-testable with synthetic events and carries no eager Pi-SDK import — the
- * heavy `@mariozechner/pi-coding-agent` graph loads only inside the engine, via
- * `loadPiCodingAgentSdk()`. These mirror `@mariozechner/pi-agent-core`'s
- * `AgentSessionEvent` and `@mariozechner/pi-ai`'s `Usage` (v0.73.1); a shape
+ * heavy `@earendil-works/pi-coding-agent` graph loads only inside the engine, via
+ * `loadPiCodingAgentSdk()`. These mirror `@earendil-works/pi-agent-core`'s
+ * `AgentSessionEvent` and `@earendil-works/pi-ai`'s `Usage` (v0.84.2); a shape
  * drift surfaces as a mapper test failure, not a silent miss.
  */
 
