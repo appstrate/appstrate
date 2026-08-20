@@ -33,7 +33,7 @@
   --color-ring: var(--ring);
   --color-success: var(--success);
   --color-warning: var(--warning);
-  --radius: 0.5rem;
+  --radius: 9px;
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
@@ -49,60 +49,82 @@
 }
 
 :root {
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
+  /* Palette from the UX/UI redesign (satellites/redesign-2026/styles.css),
+     converted hex → oklch. Two systematic shifts against the stock shadcn
+     neutrals it replaces: every grey now carries a slight violet cast (hue
+     ~286 instead of chroma 0), and the brand blue is the design's #2F6FED
+     rather than the shadcn default. The redesign's own names map onto the
+     shadcn semantics, they are not the same words: its `--accent` is the
+     BRAND blue and lands on `--primary`, while shadcn's `--accent` is the
+     subtle hover surface and takes the redesign's `--bg-alt`. */
+  --background: oklch(1 0 0); /* #FFFFFF */
+  --foreground: oklch(0.21 0.006 285.9); /* #18181B */
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
+  --card-foreground: oklch(0.21 0.006 285.9);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.623 0.214 259);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27);
-  --destructive-foreground: oklch(0.985 0 0);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.556 0 0);
-  --success: oklch(0.696 0.17 142);
-  --warning: oklch(0.769 0.188 70);
-  --sidebar: hsl(0 0% 98%);
-  --sidebar-foreground: hsl(240 5.3% 26.1%);
-  --sidebar-primary: hsl(240 5.9% 10%);
-  --sidebar-primary-foreground: hsl(0 0% 98%);
-  --sidebar-accent: hsl(240 4.8% 95.9%);
-  --sidebar-accent-foreground: hsl(240 5.9% 10%);
-  --sidebar-border: hsl(220 13% 91%);
-  --sidebar-ring: hsl(217.2 91.2% 59.8%);
+  --popover-foreground: oklch(0.21 0.006 285.9);
+  --primary: oklch(0.574 0.202 262); /* #2F6FED */
+  --primary-foreground: oklch(1 0 0);
+  --secondary: oklch(0.953 0.005 286.3); /* #EFEFF3 */
+  --secondary-foreground: oklch(0.21 0.006 285.9);
+  --muted: oklch(0.953 0.005 286.3);
+  --muted-foreground: oklch(0.551 0.023 264.4); /* #6B7280 */
+  --accent: oklch(0.953 0.005 286.3);
+  --accent-foreground: oklch(0.21 0.006 285.9);
+  --destructive: oklch(0.543 0.174 29.7); /* #C0392B */
+  --destructive-foreground: oklch(1 0 0);
+  --border: oklch(0.929 0.005 286.3); /* #E7E7EB */
+  --input: oklch(0.929 0.005 286.3);
+  --ring: oklch(0.574 0.202 262); /* focus halo picks up the brand blue */
+  --success: oklch(0.526 0.128 153); /* #157F45 */
+  --warning: oklch(0.563 0.112 76.7); /* #9A6B12 */
+  --sidebar: oklch(0.977 0.003 286.4); /* #F7F7F9 */
+  --sidebar-foreground: oklch(0.21 0.006 285.9);
+  /* Stays near-black, not the brand blue: the redesign gives org avatars a
+     per-org colour set inline, so it takes no position here — and a blue
+     avatar competes with the one blue that means "primary action". */
+  --sidebar-primary: oklch(0.21 0.006 285.9);
+  --sidebar-primary-foreground: oklch(1 0 0);
+  --sidebar-accent: oklch(0.929 0.005 286.3); /* hover/active nav surface */
+  --sidebar-accent-foreground: oklch(0.21 0.006 285.9);
+  --sidebar-border: oklch(0.929 0.005 286.3);
+  --sidebar-ring: oklch(0.574 0.202 262);
 }
 
 .dark {
-  --background: oklch(0.13 0 0);
+  /* DERIVED, not ported: the redesign defines no dark palette (its styles.css
+     has a `:root` block and nothing else). Structure and lightness steps are
+     the ones that were already here; what changed is the same two shifts as
+     the light theme — the violet cast on the neutrals, and the brand blue,
+     lifted to oklch L .68 so it holds contrast on a dark surface. Revisit
+     once the redesign takes a position on dark mode. */
+  --background: oklch(0.145 0.004 286);
   --foreground: oklch(0.985 0 0);
-  --card: oklch(0.17 0 0);
+  --card: oklch(0.18 0.004 286);
   --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.17 0 0);
+  --popover: oklch(0.18 0.004 286);
   --popover-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.269 0 0);
+  --primary: oklch(0.68 0.17 262);
+  --primary-foreground: oklch(0.145 0.004 286);
+  --secondary: oklch(0.28 0.005 286);
   --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
+  --muted: oklch(0.28 0.005 286);
+  --muted-foreground: oklch(0.712 0.019 261);
+  --accent: oklch(0.28 0.005 286);
   --accent-foreground: oklch(0.985 0 0);
-  --border: oklch(0.269 0 0);
-  --input: oklch(0.269 0 0);
-  --sidebar: hsl(240 5.9% 10%);
-  --sidebar-foreground: hsl(240 4.8% 95.9%);
-  --sidebar-primary: hsl(224.3 76.3% 48%);
-  --sidebar-primary-foreground: hsl(0 0% 100%);
-  --sidebar-accent: hsl(240 3.7% 15.9%);
-  --sidebar-accent-foreground: hsl(240 4.8% 95.9%);
-  --sidebar-border: hsl(240 3.7% 15.9%);
-  --sidebar-ring: hsl(217.2 91.2% 59.8%);
+  --border: oklch(0.28 0.005 286);
+  --input: oklch(0.28 0.005 286);
+  --ring: oklch(0.68 0.17 262);
+  --success: oklch(0.7 0.14 153);
+  --warning: oklch(0.78 0.13 77);
+  --sidebar: oklch(0.18 0.004 286);
+  --sidebar-foreground: oklch(0.96 0.002 286);
+  --sidebar-primary: oklch(0.68 0.17 262);
+  --sidebar-primary-foreground: oklch(0.145 0.004 286);
+  --sidebar-accent: oklch(0.28 0.005 286);
+  --sidebar-accent-foreground: oklch(0.96 0.002 286);
+  --sidebar-border: oklch(0.28 0.005 286);
+  --sidebar-ring: oklch(0.68 0.17 262);
 }
 
 @layer base {
