@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect, afterEach } from "bun:test";
-import { loadHistory } from "../src/ui/sessions.ts";
+import { loadHistory, stopSession } from "../src/ui/sessions.ts";
 
 const realFetch = globalThis.fetch;
 afterEach(() => {
@@ -37,5 +37,27 @@ describe("loadHistory decode", () => {
   it("throws on other errors", async () => {
     globalThis.fetch = (async () => new Response(null, { status: 500 })) as typeof fetch;
     await expect(loadHistory(() => ({}), "chs_x")).rejects.toThrow();
+  });
+});
+
+describe("stopSession", () => {
+  it("posts an authenticated explicit stop to the active conversation", async () => {
+    let request: { input: RequestInfo | URL; init?: RequestInit } | undefined;
+    globalThis.fetch = (async (input, init) => {
+      request = { input, init };
+      return new Response(null, { status: 204 });
+    }) as typeof fetch;
+
+    await stopSession(() => ({ "X-Org-Id": "org_1" }), "chs_1");
+
+    expect(String(request?.input)).toBe("/api/chat/sessions/chs_1/stop");
+    expect(request?.init?.method).toBe("POST");
+    expect(request?.init?.credentials).toBe("include");
+    expect(request?.init?.headers).toEqual({ "X-Org-Id": "org_1" });
+  });
+
+  it("throws when the server refuses the stop", async () => {
+    globalThis.fetch = (async () => new Response(null, { status: 500 })) as typeof fetch;
+    await expect(stopSession(() => ({}), "chs_1")).rejects.toThrow("HTTP 500");
   });
 });

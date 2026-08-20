@@ -80,6 +80,19 @@ export async function markSessionRead(
   if (!res.ok) throw new Error(`Failed to mark session read (HTTP ${res.status})`);
 }
 
+/** Explicitly stop the server-side producer for an active conversation. */
+export async function stopSession(
+  getHeaders: GetHeaders | null | undefined,
+  id: string,
+): Promise<void> {
+  const res = await fetch(`/api/chat/sessions/${id}/stop`, {
+    method: "POST",
+    credentials: "include",
+    headers: headers(getHeaders),
+  });
+  if (!res.ok) throw new Error(`Failed to stop session (HTTP ${res.status})`);
+}
+
 /** A stored message node as returned by `GET /sessions/:id`. */
 interface StoredMessage {
   id: string;
