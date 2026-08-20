@@ -36,7 +36,7 @@ import { handleChatStream, type ChatEngine, type ChatEnv } from "../src/chat-str
 import { mintSessionId } from "../src/session-id.ts";
 import { acquirePiChatSlot, releaseOnClose } from "../src/pi-chat/concurrency.ts";
 import type { PiChatInput } from "../src/pi-chat/engine.ts";
-import { buildChatPlatformDeps } from "../src/platform-services.ts";
+import { buildChatPlatformDeps, type ChatPlatformDeps } from "../src/platform-services.ts";
 import { buildModuleInitContext } from "../../../apps/api/src/lib/modules/registry.ts";
 import { errorHandler } from "../../../apps/api/src/middleware/error-handler.ts";
 import { SYSTEM_PROMPT } from "../src/prompt.ts";
@@ -80,7 +80,7 @@ const MODEL_PRESET_ID = "model_chat_handler_test";
  * One scripted openai-completions model row, in the list envelope
  * `/api/models` actually returns (`{ object: "list", data, hasMore }`).
  */
-function modelsResponse(): Response {
+function modelsResponse(apiShape = "openai-completions"): Response {
   return Response.json({
     object: "list",
     hasMore: false,
@@ -88,7 +88,7 @@ function modelsResponse(): Response {
       {
         id: MODEL_PRESET_ID,
         modelId: "gpt-4o-mini",
-        apiShape: "openai-completions",
+        apiShape,
         enabled: true,
         is_default: true,
         generation: {
@@ -113,10 +113,10 @@ function contextResponse(): Response {
 }
 
 /** Build the scripted in-memory dispatch. Nothing leaves this process. */
-function scriptedDispatch(): (req: Request) => Promise<Response> {
+function scriptedDispatch(apiShape?: string): (req: Request) => Promise<Response> {
   return async (req: Request): Promise<Response> => {
     const path = new URL(req.url).pathname;
-    if (path === "/api/models") return modelsResponse();
+    if (path === "/api/models") return modelsResponse(apiShape);
     if (path === "/api/me/context") return contextResponse();
     if (path === "/api/applications") {
       return Response.json({ data: [{ id: APP_ID, isDefault: true }] });
@@ -212,12 +212,21 @@ describe("handleChatStream engine routing", () => {
     sessionId: string,
     generation?: { temperature?: number; reasoningLevel?: string },
     engine?: ChatEngine,
+    overrides?: {
+      /** apiShape of the single scripted `/api/models` row. */
+      apiShape?: string;
+      /** Stand in for the platform's credential resolution. */
+      resolveSubscriptionChatModel?: ChatPlatformDeps["resolveSubscriptionChatModel"];
+    },
   ): Promise<Response> {
     // Real platform deps (the same context `init()` gets), with dispatch
     // overridden by the scripted one so no request leaves this process.
     const deps = {
       ...buildChatPlatformDeps(buildModuleInitContext()),
-      dispatch: scriptedDispatch(),
+      dispatch: scriptedDispatch(overrides?.apiShape),
+      ...(overrides?.resolveSubscriptionChatModel
+        ? { resolveSubscriptionChatModel: overrides.resolveSubscriptionChatModel }
+        : {}),
     };
     const app = buildApp(deps, engine);
     const res = await app.request("/api/chat", {
@@ -243,6 +252,44 @@ describe("handleChatStream engine routing", () => {
     expect(res.status).toBe(400);
     // Rejected in the preamble — no turn was ever started.
     expect(calls).toEqual([]);
+  });
+
+  it("answers 401 reconnect for a dead oauth credential, before any persistence", async () => {
+    const sessionId = mintSessionId();
+    const { engine, calls } = scriptedEngine();
+    const res = await postChat(sessionId, undefined, engine, {
+      apiShape: "anthropic-messages",
+      // The platform resolved the row to an oauth2 provider whose credential is
+      // revoked or no longer decrypts.
+      resolveSubscriptionChatModel: async () => ({ subscription: true, needsReconnection: true }),
+    });
+
+    expect(res.status).toBe(401);
+    expect(res.headers.get("content-type") ?? "").toContain("application/problem+json");
+    const body = (await res.json()) as { code?: string; needsReconnection?: boolean };
+    // The client keys the reconnect prompt off these two fields.
+    expect(body.code).toBe("needs_reconnection");
+    expect(body.needsReconnection).toBe(true);
+
+    // No session would 401 upstream, and nothing was written.
+    expect(calls).toEqual([]);
+    const rows = await db.select().from(chatMessages).where(eq(chatMessages.sessionId, sessionId));
+    expect(rows).toEqual([]);
+  });
+
+  it("rejects a model family the engine cannot bind, before any persistence", async () => {
+    const sessionId = mintSessionId();
+    const { engine, calls } = scriptedEngine();
+    // Chat-usable (it is an oauth-subscription shape) but with no llm-proxy
+    // route — so an API-key row carrying it resolves to no binding at all.
+    const res = await postChat(sessionId, undefined, engine, {
+      apiShape: "openai-codex-responses",
+    });
+
+    expect(res.status).toBe(400);
+    expect(calls).toEqual([]);
+    const rows = await db.select().from(chatMessages).where(eq(chatMessages.sessionId, sessionId));
+    expect(rows).toEqual([]);
   });
 
   it("ends the turn and clears the in-flight marker when the engine fails", async () => {
