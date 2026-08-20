@@ -17,6 +17,7 @@ import { HostedAuthGate } from "./components/hosted-auth-gate";
 import { AppSidebar } from "./components/app-sidebar";
 import { useBackgroundLocation } from "./lib/modal-route";
 import { NavigateKeepingState } from "./components/navigate-keeping-state";
+import { RedirectAppSettings } from "./components/redirect-app-settings";
 import { ShellBreadcrumb } from "./components/shell-breadcrumb";
 import { NotificationBell } from "./components/notification-bell";
 import { NavUser } from "./components/nav-user";
@@ -122,6 +123,11 @@ const OnboardingWaitingStep = lazy(() =>
 );
 const OrgSettingsLayout = lazy(() =>
   import("./pages/org-settings/layout").then((m) => ({ default: m.OrgSettingsLayout })),
+);
+const WorkspaceSettingsLayout = lazy(() =>
+  import("./pages/workspace-settings/layout").then((m) => ({
+    default: m.WorkspaceSettingsLayout,
+  })),
 );
 const OrgSettingsGeneralPage = lazy(() =>
   import("./pages/org-settings/general").then((m) => ({ default: m.OrgSettingsGeneralPage })),
@@ -360,19 +366,26 @@ export function App() {
       <Route path="oauth" element={<OrgSettingsOAuthPage />} />
       <Route path="cli-sessions" element={<OrgSettingsCliSessionsPage />} />
       <Route path="billing" element={<OrgSettingsBillingPage />} />
-      <Route path="app/general" element={<OrgSettingsAppGeneralPage />} />
-      <Route path="app/api-keys" element={<ApiKeysPage />} />
-      <Route path="app/end-users" element={<EndUsersPage />} />
+    </>
+  );
+
+  // Workspace settings are their own surface: everything below is scoped by
+  // `X-Application-Id`, which is a different scope from the org, not a
+  // subsection of it.
+  const workspaceSettingsRoutes = (
+    <>
+      <Route index element={<NavigateKeepingState to="general" />} />
+      <Route path="general" element={<OrgSettingsAppGeneralPage />} />
+      <Route path="auth" element={<OrgSettingsAppAuthPage />} />
+      <Route path="api-keys" element={<ApiKeysPage />} />
+      <Route path="oauth" element={<OrgSettingsAppOauthPage />} />
+      <Route path="end-users" element={<EndUsersPage />} />
       {features.webhooks && (
         <>
-          <Route path="app/webhooks" element={<WebhooksPage />} />
-          <Route path="app/webhooks/:id" element={<WebhookDetailPage />} />
+          <Route path="webhooks" element={<WebhooksPage />} />
+          <Route path="webhooks/:id" element={<WebhookDetailPage />} />
         </>
       )}
-      {/* Old top-level homes, kept as redirects: these URLs have been
-                  handed out in docs and bookmarks. */}
-      <Route path="app/auth" element={<OrgSettingsAppAuthPage />} />
-      <Route path="app/oauth" element={<OrgSettingsAppOauthPage />} />
     </>
   );
 
@@ -853,15 +866,15 @@ export function App() {
             )}
             <Route
               path="/app-settings"
-              element={<Navigate to="/org-settings/app/general" replace />}
+              element={<Navigate to="/workspace-settings/general" replace />}
             />
             <Route
               path="/end-users"
-              element={<Navigate to="/org-settings/app/end-users" replace />}
+              element={<Navigate to="/workspace-settings/end-users" replace />}
             />
             <Route
               path="/webhooks"
-              element={<Navigate to="/org-settings/app/webhooks" replace />}
+              element={<Navigate to="/workspace-settings/webhooks" replace />}
             />
             <Route
               path="/org-settings"
@@ -873,6 +886,19 @@ export function App() {
             >
               {orgSettingsRoutes}
             </Route>
+            <Route
+              path="/workspace-settings"
+              element={
+                <LazyRoute>
+                  <WorkspaceSettingsLayout />
+                </LazyRoute>
+              }
+            >
+              {workspaceSettingsRoutes}
+            </Route>
+            {/* `/org-settings/app/*` moved out when workspace settings became
+                their own surface; these URLs are in bookmarks and docs. */}
+            <Route path="/org-settings/app/:tab" element={<RedirectAppSettings />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         </Routes>
@@ -890,6 +916,16 @@ export function App() {
               }
             >
               {orgSettingsRoutes}
+            </Route>
+            <Route
+              path="/workspace-settings"
+              element={
+                <LazyRoute>
+                  <WorkspaceSettingsLayout />
+                </LazyRoute>
+              }
+            >
+              {workspaceSettingsRoutes}
             </Route>
           </Routes>
         )}

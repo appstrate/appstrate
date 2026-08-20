@@ -12,7 +12,7 @@
 import { Link, useLocation } from "react-router-dom";
 import { openAsModal } from "../lib/modal-route";
 import { useTranslation } from "react-i18next";
-import { BarChart3, Code2, Settings } from "lucide-react";
+import { BarChart3, Code2 } from "lucide-react";
 import { useAppConfig } from "../hooks/use-app-config";
 import { usePermissions } from "../hooks/use-permissions";
 import { cn } from "@appstrate/ui/cn";
@@ -31,10 +31,10 @@ export function SidebarMeta() {
   const { isAdmin } = usePermissions();
 
   const DEVELOPERS_PATHS = [
-    "/org-settings/app/api-keys",
-    "/org-settings/app/oauth",
-    "/org-settings/app/end-users",
-    "/org-settings/app/webhooks",
+    "/workspace-settings/api-keys",
+    "/workspace-settings/oauth",
+    "/workspace-settings/end-users",
+    "/workspace-settings/webhooks",
   ];
   const inDevelopers = DEVELOPERS_PATHS.some((p) => pathname.startsWith(p));
 
@@ -57,22 +57,10 @@ export function SidebarMeta() {
     ...(isAdmin
       ? [
           {
-            path: "/org-settings/app/api-keys",
+            path: "/workspace-settings/api-keys",
             label: t("nav.developers"),
             icon: Code2,
             active: inDevelopers,
-          },
-        ]
-      : []),
-    // Last, and matched by exclusion: every developer screen lives under
-    // /org-settings too, so a plain `startsWith` would light both rows at once.
-    ...(isAdmin
-      ? [
-          {
-            path: "/org-settings",
-            label: t("nav.settings"),
-            icon: Settings,
-            active: pathname.startsWith("/org-settings") && !inDevelopers,
           },
         ]
       : []),

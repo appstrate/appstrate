@@ -865,5 +865,8 @@
   "models.generation.levelsShort.high": "High",
   "models.generation.levelsShort.xhigh": "XHigh",
   "models.generation.levelsShort.max": "Max",
-  "orgSettings.sectionDevelopers": "Developers"
+  "orgSettings.sectionDevelopers": "Developers",
+  "workspaceSettings.pageTitle": "Workspace settings",
+  "workspaceSettings.pageTitleNamed": "Workspace · {{name}}",
+  "workspaceSettings.sectionGeneral": "Workspace"
 }

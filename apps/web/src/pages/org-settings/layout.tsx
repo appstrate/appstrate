@@ -10,26 +10,18 @@ import {
   KeyRound,
   Laptop,
   LayoutGrid,
-  Settings,
-  Shield,
   Users,
-  Webhook,
 } from "lucide-react";
 import { SettingsLayout, type SettingsSection } from "../../components/settings-layout";
-import { AppSettingsSwitcher } from "../../components/app-settings-switcher";
 import type { BreadcrumbEntry } from "../../components/page-header";
 import { usePermissions } from "../../hooks/use-permissions";
 import { useAppConfig } from "../../hooks/use-app-config";
-import { useCurrentApplicationId } from "../../hooks/use-current-application";
-import { useApplication } from "../../hooks/use-applications";
 import { useOrgSettings } from "../../hooks/use-org-settings";
 
 export function OrgSettingsLayout() {
   const { t } = useTranslation(["settings", "common"]);
   const { isAdmin } = usePermissions();
   const { features } = useAppConfig();
-  const applicationId = useCurrentApplicationId();
-  const { data: application } = useApplication(applicationId ?? "");
   const location = useLocation();
 
   const oidcEnabled = !!features.oidc;
@@ -86,69 +78,15 @@ export function OrgSettingsLayout() {
         },
       ],
     },
-    ...(isAdmin && application
-      ? [
-          {
-            label: t("orgSettings.sectionApplication"),
-            items: [
-              {
-                to: "/org-settings/app/general",
-                icon: Settings,
-                label: t("appSettings.tabGeneral"),
-              },
-              {
-                to: "/org-settings/app/auth",
-                icon: Shield,
-                label: t("appSettings.tabAuth"),
-                show: oidcEnabled,
-              },
-            ],
-          },
-          {
-            // Everything here is how you plug Appstrate into your own systems,
-            // and all of it is org+workspace scoped — which is why these four
-            // belong side by side. Two of them used to sit in the main
-            // navigation under "Administration" while the other two were
-            // already here, splitting one family across two places.
-            label: t("orgSettings.sectionDevelopers"),
-            items: [
-              {
-                to: "/org-settings/app/api-keys",
-                icon: KeyRound,
-                label: t("orgSettings.tabApiKeys"),
-              },
-              {
-                to: "/org-settings/app/oauth",
-                icon: KeyRound,
-                label: t("appSettings.tabOauth"),
-                show: oidcEnabled,
-              },
-              {
-                to: "/org-settings/app/end-users",
-                icon: Users,
-                label: t("endUsers.pageTitle"),
-              },
-              {
-                to: "/org-settings/app/webhooks",
-                icon: Webhook,
-                label: t("webhooks.pageTitle"),
-                show: !!features.webhooks,
-              },
-            ],
-          },
-        ]
-      : []),
   ];
 
   const allItems = sections.flatMap((s) => s.items);
   const activeItem =
     allItems.find((i) => location.pathname === i.to) ??
     allItems.find((i) => location.pathname.startsWith(i.to + "/"));
-  const isAppRoute = location.pathname.startsWith("/org-settings/app/");
 
   const breadcrumbs: BreadcrumbEntry[] = [
     { label: t("orgSettings.pageTitle"), href: "/org-settings" },
-    ...(isAppRoute ? [{ label: application?.name ?? "", node: <AppSettingsSwitcher /> }] : []),
     ...(activeItem ? [{ label: activeItem.label }] : []),
   ];
 

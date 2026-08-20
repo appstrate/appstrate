@@ -134,33 +134,48 @@ export function OrgSwitcher() {
             {shownOrgs.map((org) => {
               const isActive = org.id === currentOrg.id;
               return (
-                <button
+                <div
                   key={org.id}
-                  type="button"
-                  data-testid={`org-item-${org.id}`}
-                  onClick={() => {
-                    if (!isActive) {
-                      switchOrg(org.id);
-                      navigate("/", { replace: true });
-                    }
-                    setOpen(false);
-                  }}
                   className={cn(
-                    "hover:bg-accent flex w-full items-center justify-start gap-2.5 rounded-md p-2 text-left",
+                    "hover:bg-accent flex items-center rounded-md",
                     isActive && "bg-spark-soft hover:bg-spark-soft",
                   )}
                 >
-                  <OrgAvatar name={org.name} className="size-[30px] text-[0.82rem]" />
-                  <span className="flex min-w-0 flex-col">
-                    <span className="truncate text-sm font-medium">{org.name}</span>
-                    <span className="text-muted-foreground text-xs">
-                      {t(`switcher.role.${org.role}`)}
+                  <button
+                    type="button"
+                    data-testid={`org-item-${org.id}`}
+                    onClick={() => {
+                      if (!isActive) {
+                        switchOrg(org.id);
+                        navigate("/", { replace: true });
+                      }
+                      setOpen(false);
+                    }}
+                    className="flex min-w-0 flex-1 items-center justify-start gap-2.5 p-2 text-left"
+                  >
+                    <OrgAvatar name={org.name} className="size-[30px] text-[0.82rem]" />
+                    <span className="flex min-w-0 flex-col">
+                      <span className="truncate text-sm font-medium">{org.name}</span>
+                      <span className="text-muted-foreground text-xs">
+                        {t(`switcher.role.${org.role}`)}
+                      </span>
                     </span>
-                  </span>
+                  </button>
+                  {/* Only on the current org: the gear configures what you are
+                      IN, and switching org first is one honest click rather
+                      than a shortcut that silently changes context. */}
                   {isActive && (
-                    <Settings size={15} className="text-muted-foreground ml-auto shrink-0" />
+                    <Link
+                      to="/org-settings"
+                      state={openAsModal(location)}
+                      onClick={() => setOpen(false)}
+                      aria-label={t("switcher.orgSettings", { org: org.name })}
+                      className="text-muted-foreground hover:text-foreground shrink-0 p-2"
+                    >
+                      <Settings size={15} />
+                    </Link>
                   )}
-                </button>
+                </div>
               );
             })}
           </div>
@@ -174,24 +189,36 @@ export function OrgSwitcher() {
             {shownApps.map((app) => {
               const isActive = app.id === currentAppId;
               return (
-                <button
+                <div
                   key={app.id}
-                  type="button"
-                  data-testid={`app-item-${app.id}`}
-                  onClick={() => {
-                    if (!isActive) switchApp(app.id);
-                    setOpen(false);
-                  }}
                   className={cn(
-                    "hover:bg-accent flex w-full items-center justify-start gap-2.5 rounded-md p-2 text-left",
+                    "hover:bg-accent flex items-center rounded-md",
                     isActive && "bg-primary-soft hover:bg-primary-soft",
                   )}
                 >
-                  <span className="truncate text-sm font-medium">{app.name}</span>
+                  <button
+                    type="button"
+                    data-testid={`app-item-${app.id}`}
+                    onClick={() => {
+                      if (!isActive) switchApp(app.id);
+                      setOpen(false);
+                    }}
+                    className="flex min-w-0 flex-1 items-center justify-start gap-2.5 p-2 text-left"
+                  >
+                    <span className="truncate text-sm font-medium">{app.name}</span>
+                  </button>
                   {isActive && (
-                    <Settings size={15} className="text-muted-foreground ml-auto shrink-0" />
+                    <Link
+                      to="/workspace-settings"
+                      state={openAsModal(location)}
+                      onClick={() => setOpen(false)}
+                      aria-label={t("workspaceSettings.pageTitle", { ns: "settings" })}
+                      className="text-muted-foreground hover:text-foreground shrink-0 p-2"
+                    >
+                      <Settings size={15} />
+                    </Link>
                   )}
-                </button>
+                </div>
               );
             })}
           </div>
