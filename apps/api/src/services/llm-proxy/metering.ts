@@ -311,7 +311,8 @@ export interface MeteredForwardOptions {
   /**
    * Response-cache write for a non-streaming 2xx reply. When set, the forwarded
    * (already alias-swapped) body is persisted and the `x-llm-proxy-cache-status:
-   * MISS` header is stamped. Omitted → no caching.
+   * MISS` header is stamped. `null` → no caching (the sole caller always
+   * passes the field; it is `null` whenever no cache key was resolved).
    */
   cache?: { cacheKey: string; ttlSeconds: number } | null;
   /** Log-line prefix for the out-of-band SSE-metering-failure error. */

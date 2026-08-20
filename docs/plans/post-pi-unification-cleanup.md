@@ -22,13 +22,6 @@ re-discovered as oversights.
 | 4   | `isFinalChatStep` dead; `SubscriptionChat*` misnamed | **No**     | Both are published `@appstrate/core` surface. Removing/renaming needs a core major + consumer lockstep — a release process, not a cleanup.     |
 | 5   | Pre-existing small debt                              | **Yes**    | Cheap, and adjacent enough that leaving it costs another pass.                                                                                 |
 
-### On item 3
-
-I recommended shipping the Codecov change as its own PR so its effect on patch
-coverage is observable in isolation. Bundling it here means this PR's own patch
-number moves for two reasons at once. Keeping it anyway, as asked — noting that
-if the number looks surprising, item 3 is the confound.
-
 ### On item 4 — do not "fix" these here
 
 `isFinalChatStep` is provably dead (`packages/core/src/chat-turn-metadata.ts`;
@@ -95,13 +88,13 @@ contract, covered upstream), and not a second copy of the mapper's unit tests.
 **Verification.** The test must fail if the auth extension is removed — a
 coverage test that cannot fail is theatre.
 
-## 3. Stop the `public-origin` flag reporting phantom misses
+## 3. `public-origin` phantom misses — diagnosed, NOT fixed here
 
-**Problem.** The `Run public-origin regression` job boots the whole platform to
-exercise one OIDC route. Bun instruments every file that boot loads, so the
-upload carries 0-hit lines for code the job never exercises. Codecov unions
-sessions per line, and lines the `unit` session does not even emit stay missing
-forever.
+**The problem is real.** The `Run public-origin regression` job boots the whole
+platform to exercise one OIDC route. Bun instruments every file that boot loads,
+so the upload carries 0-hit lines for code the job never exercises. Codecov
+unions sessions per line, and lines the `unit` session does not even emit stay
+missing forever.
 
 Measured on #1173:
 
@@ -111,14 +104,32 @@ Measured on #1173:
 | `model-binding.ts` | 92 / 92 (100%)      | **112** / 10            | 114 lines, 22 missed  |
 
 `model-binding.ts` is fully covered and reported at 80.7%. This inflates patch
-coverage against every PR touching a file the boot path loads, not just chat.
+coverage against every PR touching a file the boot path loads.
 
-**Approach.** Scope the flag to the paths it is meant to measure, via
-`flags.public-origin.paths` in `.codecov.yml`. The flag keeps its own signal;
-it stops speaking for subsystems it merely imported.
+**The obvious remedy is wrong, and was reverted.** Scoping the flag with
+`flags.public-origin.paths` looks right and is not: `paths` discards the
+session's POSITIVE contributions for excluded files too, not just its 0-hit
+noise. Measured against that session's own lcov, a scope limited to the OIDC
+module drops 494 files that carry real hits — including every one of the four
+`component_management` components that run `target: auto`, i.e. a
+no-regression floor:
 
-**Verification.** Config only — no local test proves it. The check is the patch
-number on this PR, and the note above about item 3 being a confound.
+| component    | files with hits in that session | examples                                            |
+| ------------ | ------------------------------- | --------------------------------------------------- |
+| rbac         | 4                               | `auth-pipeline.ts` 72 hits, `auth-secrets.ts` 42/44 |
+| credentials  | 31                              | `packages/connect/src/encryption.ts` 43/124         |
+| orchestrator | 8                               | `orchestrator/registry.ts` 60/93                    |
+| run-state    | 3                               | `services/state/runs.ts` 105/1177                   |
+
+Those statuses are not informational. Trading an inflated patch number for four
+red no-regression floors is a worse deal than the problem.
+
+**What a real fix needs.** The noise must be cut where it is produced — the
+coverage run instrumenting files the test never exercises — not where it is
+consumed. That is a `bunfig.toml` / per-run instrumentation question, and it
+belongs in its own PR with the component statuses watched, not bundled with
+chat work. Filed here with the measurements so the next attempt starts from
+them instead of re-deriving them.
 
 ## 4. Parked — see the scope decision above.
 

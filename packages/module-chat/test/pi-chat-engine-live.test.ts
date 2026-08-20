@@ -130,30 +130,39 @@ async function runTurn(mintBearer: () => string) {
   expect(slot).not.toBeNull();
 
   const usage: ChatUsageRecord[] = [];
-  const res = runPiChat({
-    slot: slot!,
-    modelBinding: binding,
-    presetId: "preset_live",
-    orgId: "org_live",
-    userId: "user_live",
-    chatSessionId: null,
-    messages: userTurn("dis bonjour"),
-    system: "You are a helpful assistant.",
-    generation: {},
-    platformMcp: { url: `${ORIGIN}/api/mcp/o/org_live?context=injected`, headers: {} },
-    abortSignal: new AbortController().signal,
-    onError: (error) => String(error),
-    recordUsage: (record) => usage.push(record),
-  });
+  // The slot lives in module-global state SHARED with every other test file in
+  // this process. A throw between acquire and drain would leave `active`
+  // permanently incremented and silently skew the capacity suites, so the
+  // release is structural rather than trusted to the happy path.
+  try {
+    const res = runPiChat({
+      slot: slot!,
+      modelBinding: binding,
+      presetId: "preset_live",
+      orgId: "org_live",
+      userId: "user_live",
+      chatSessionId: null,
+      messages: userTurn("dis bonjour"),
+      system: "You are a helpful assistant.",
+      generation: {},
+      platformMcp: { url: `${ORIGIN}/api/mcp/o/org_live?context=injected`, headers: {} },
+      abortSignal: new AbortController().signal,
+      onError: (error) => String(error),
+      recordUsage: (record) => usage.push(record),
+    });
 
-  const text = await res.text();
-  const chunks: Array<{ type: string; [k: string]: unknown }> = [];
-  for (const line of text.split("\n")) {
-    if (!line.startsWith("data:")) continue;
-    const data = line.slice(5).trim();
-    if (data && data !== "[DONE]") chunks.push(JSON.parse(data));
+    const text = await res.text();
+    const chunks: Array<{ type: string; [k: string]: unknown }> = [];
+    for (const line of text.split("\n")) {
+      if (!line.startsWith("data:")) continue;
+      const data = line.slice(5).trim();
+      if (data && data !== "[DONE]") chunks.push(JSON.parse(data));
+    }
+    return { chunks, usage };
+  } finally {
+    // Idempotent: `releaseOnClose` already fired on the nominal path.
+    slot!.release();
   }
-  return { chunks, usage, slot: slot! };
 }
 
 describe("runPiChat against a stub provider", () => {
@@ -161,7 +170,7 @@ describe("runPiChat against a stub provider", () => {
     capture.authHeaders.length = 0;
     capture.bodies.length = 0;
     let minted = 0;
-    const { chunks, usage, slot } = await runTurn(() => `loopback-${++minted}`);
+    const { chunks, usage } = await runTurn(() => `loopback-${++minted}`);
 
     // (1) The client contract: a start, visible text, a finish, no error chunk.
     const types = chunks.map((c) => c.type);
@@ -195,7 +204,6 @@ describe("runPiChat against a stub provider", () => {
     const reacquired = acquirePiChatSlot();
     expect(reacquired).not.toBeNull();
     reacquired?.release();
-    slot.release();
   }, 30_000);
 
   it("mints a NEW bearer per provider request rather than reusing one", async () => {
@@ -205,11 +213,10 @@ describe("runPiChat against a stub provider", () => {
     capture.authHeaders.length = 0;
     capture.bodies.length = 0;
     let minted = 0;
-    const { slot } = await runTurn(() => `fresh-${++minted}`);
+    await runTurn(() => `fresh-${++minted}`);
 
     expect(capture.authHeaders.length).toBe(minted);
     expect(new Set(capture.authHeaders).size).toBe(capture.authHeaders.length);
     expect(capture.authHeaders.every((h) => h.startsWith("Bearer fresh-"))).toBe(true);
-    slot.release();
   }, 30_000);
 });

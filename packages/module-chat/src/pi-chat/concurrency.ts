@@ -91,7 +91,14 @@ export const acquirePiChatSlot = (): PiChatSlot | null => {
     return null;
   }
   active += 1;
-  if (active > highWaterMark) highWaterMark = active;
+  if (active > highWaterMark) {
+    highWaterMark = active;
+    // Reported when the peak is REACHED, not only when a turn is refused: an
+    // operator sizing the cap needs to see 5-of-6 long before anyone gets a
+    // 429, and by the time a refusal logs the saturation is already known.
+    // Bounded by construction — at most `max` lines per process lifetime.
+    logger.info("chat concurrency peak", { highWaterMark, max: piChatMaxConcurrency() });
+  }
   let released = false;
   return {
     release() {
