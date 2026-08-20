@@ -3,6 +3,7 @@
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
+import { DOCS_URL, SUPPORT_URL } from "@/lib/external-links";
 import { BookOpen, Check, FileText, LifeBuoy, LogOut, Palette, Settings } from "lucide-react";
 import { useAuth } from "../hooks/use-auth";
 import { useTheme } from "../stores/theme-store";
@@ -124,7 +125,7 @@ export function NavUser({ minimal = false }: NavUserProps) {
             than a first door nobody finds. */}
         <DropdownMenuItem asChild>
           <a
-            href="https://docs.appstrate.dev"
+            href={DOCS_URL}
             target="_blank"
             rel="noopener noreferrer"
             className="flex items-center gap-2"
@@ -135,7 +136,7 @@ export function NavUser({ minimal = false }: NavUserProps) {
         </DropdownMenuItem>
         <DropdownMenuItem asChild>
           <a
-            href="https://discord.gg/5Js2CKWNnh"
+            href={SUPPORT_URL}
             target="_blank"
             rel="noopener noreferrer"
             className="flex items-center gap-2"

@@ -109,7 +109,10 @@ export function ChatModulePage() {
   // bottom. Without a definite height here the flex chain grows with the message
   // list and the composer scrolls off-screen.
   return (
-    <div data-full-bleed className="relative flex h-[calc(100dvh-3.5rem)] min-h-0 min-w-0">
+    <div
+      data-full-bleed
+      className="relative flex h-[calc(100dvh-var(--spacing-header))] min-h-0 min-w-0"
+    >
       <div className="min-w-0 flex-1">
         <ChatPage
           getHeaders={getHeaders}

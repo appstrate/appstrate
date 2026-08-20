@@ -13,6 +13,7 @@
  * Reached from the gear on the workspace row of the org/workspace switcher; the
  * organisation's gear opens the other one.
  */
+import { Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { KeyRound, Settings, Shield, Users, Webhook } from "lucide-react";
 import { SettingsLayout, type SettingsSection } from "../../components/settings-layout";
@@ -77,7 +78,9 @@ export function WorkspaceSettingsLayout() {
 
   const breadcrumbs: BreadcrumbEntry[] = [{ label: title }];
 
-  if (!isAdmin) return null;
+  // A real URL has to resolve to something: rendering nothing left a
+  // non-admin staring at a blank page.
+  if (!isAdmin) return <Navigate to="/" replace />;
 
   return <SettingsLayout title={title} emoji="🗂️" breadcrumbs={breadcrumbs} sections={sections} />;
 }

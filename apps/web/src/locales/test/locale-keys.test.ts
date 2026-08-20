@@ -174,6 +174,7 @@ const DYNAMIC_KEY_PREFIXES = [
   "run.connSource.", // components/run-info-tab.tsx — t(`run.connSource.${c.source}`)
   "run.status.", // packages/module-chat/src/ui/run-events.ts — runStatusLineKey()
   "status.", // components/status-badge.tsx — t(`status.${status}`)
+  "switcher.role.", // components/org-switcher.tsx — t(`switcher.role.${org.role}`)
 ];
 
 /**

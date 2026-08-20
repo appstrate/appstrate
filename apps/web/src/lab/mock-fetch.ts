@@ -15,6 +15,13 @@
  * Everything above this seam behaves exactly as in production: React Query
  * caches, `Suspense` fallbacks run, `ApiError` is thrown from non-2xx bodies,
  * mutations invalidate. What changes is only what comes back off the wire.
+ *
+ * CONSOLE CARVE-OUT — the repo bans `console.*` (CLAUDE.md, CONTRIBUTING.md),
+ * a rule aimed at the API, where `lib/logger.ts` emits structured JSON to
+ * stdout. This file is a browser-side dev harness that a serve-only Vite plugin
+ * injects and that never enters a production bundle, and the console IS its
+ * output device: a missing fixture has to announce itself where the developer
+ * is already looking. Stated here rather than left silent.
  */
 import { getScenario } from "./scenario";
 import { resolveHandler } from "./handlers";

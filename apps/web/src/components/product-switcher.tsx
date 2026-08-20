@@ -30,8 +30,7 @@ import {
 } from "@appstrate/ui/components/dropdown-menu";
 import { useAppConfig } from "@/hooks/use-app-config";
 import { AppstrateMark } from "@/components/appstrate-mark";
-
-const DOCS_URL = "https://docs.appstrate.dev";
+import { DOCS_URL } from "@/lib/external-links";
 
 interface Product {
   id: string;

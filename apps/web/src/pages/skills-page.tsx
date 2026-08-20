@@ -3,9 +3,5 @@
 import { ItemTab } from "./item-tab";
 
 export function SkillsPage() {
-  return (
-    <div>
-      <ItemTab />
-    </div>
-  );
+  return <ItemTab />;
 }

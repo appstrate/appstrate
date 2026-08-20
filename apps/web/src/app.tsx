@@ -225,7 +225,7 @@ function MainLayout() {
           header above it kept the full width, and the profile would sit 15px
           further right than the content it is supposed to line up with. */}
       <SidebarInset className="bg-canvas h-svh overflow-y-auto">
-        <header className="bg-canvas sticky top-0 z-20 flex h-14 shrink-0 items-center border-b transition-[width,height] ease-linear group-has-data-[collapsible=icon]/sidebar-wrapper:h-12">
+        <header className="bg-canvas h-header sticky top-0 z-20 flex shrink-0 items-center border-b">
           <div className="max-w-page px-gutter mx-auto flex w-full items-center gap-2">
             {/* Mobile-only trigger — desktop collapse lives in the sidebar */}
             <SidebarTrigger className="md:hidden" />

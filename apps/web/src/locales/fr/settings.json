@@ -78,7 +78,6 @@
   "createOrg.slugHint": "Identifiant unique en minuscules (lettres, chiffres, tirets).",
   "orgSettings.pageTitle": "Paramètres de l'organisation",
   "orgSettings.sectionOrganization": "Organisation",
-  "orgSettings.sectionApplication": "Espace de travail",
   "orgSettings.tabGeneral": "Général",
   "orgSettings.tabMembers": "Membres",
   "orgSettings.tabOauth": "SSO collaborateurs",

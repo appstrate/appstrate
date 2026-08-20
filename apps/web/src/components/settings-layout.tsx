@@ -18,7 +18,7 @@ import type { LucideIcon } from "lucide-react";
 import { PageHeader, type BreadcrumbEntry } from "./page-header";
 import { AppVersion } from "./app-version";
 import { PanelDialog } from "./panel-dialog";
-import { useIsModalRoute, useBackgroundLocation } from "../lib/modal-route";
+import { openAsModal, useIsModalRoute, useBackgroundLocation } from "../lib/modal-route";
 import { cn } from "@appstrate/ui/cn";
 import {
   Select,
@@ -121,7 +121,7 @@ export function SettingsLayout({ sections, title, emoji, breadcrumbs }: Settings
                   // Keep the same screen underneath while moving between
                   // sections; without this every section click would close the
                   // overlay and navigate for real.
-                  state={background ? { backgroundLocation: background } : undefined}
+                  state={background ? openAsModal(background) : undefined}
                 />
               ))}
             </div>
@@ -139,7 +139,7 @@ export function SettingsLayout({ sections, title, emoji, breadcrumbs }: Settings
     <Select
       value={activeItem?.to ?? allItems[0]?.to ?? ""}
       onValueChange={(to) =>
-        navigate(to, { state: background ? { backgroundLocation: background } : undefined })
+        navigate(to, { state: background ? openAsModal(background) : undefined })
       }
     >
       <SelectTrigger>
@@ -178,7 +178,7 @@ export function SettingsLayout({ sections, title, emoji, breadcrumbs }: Settings
   }
 
   return (
-    <div data-full-bleed className="flex h-[calc(100dvh-3.5rem)] min-h-0">
+    <div data-full-bleed className="flex h-[calc(100dvh-var(--spacing-header))] min-h-0">
       <aside className="bg-sidebar border-sidebar-border w-56 shrink-0 overflow-y-auto border-r max-sm:hidden">
         {rail}
       </aside>

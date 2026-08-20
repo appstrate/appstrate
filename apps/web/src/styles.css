@@ -66,6 +66,10 @@
      org chip up with the content's left edge and the profile with its right. */
   --spacing-gutter: clamp(1.25rem, 3vw, 2.75rem);
   --container-page: 1300px;
+  /* The redesign's `--topnav-h`. A constant: surfaces that own their own
+     height subtract it, so a header that shrank on sidebar collapse left them
+     overflowing by 8px. */
+  --spacing-header: 3.5rem;
 }
 
 :root {

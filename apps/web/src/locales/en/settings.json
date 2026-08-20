@@ -78,7 +78,6 @@
   "createOrg.slugHint": "Unique identifier in lowercase (letters, numbers, hyphens).",
   "orgSettings.pageTitle": "Organization Settings",
   "orgSettings.sectionOrganization": "Organization",
-  "orgSettings.sectionApplication": "Workspace",
   "orgSettings.tabGeneral": "General",
   "orgSettings.tabMembers": "Members",
   "orgSettings.tabOauth": "Team SSO",
