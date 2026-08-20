@@ -232,6 +232,16 @@ function dependencyOverridesArgument(args: Record<string, unknown>): {
         "no dependency override is needed.",
     };
   }
+  if (overrides) {
+    const invalid = Object.entries(overrides).find(([, selector]) => selector !== "draft");
+    if (invalid) {
+      return {
+        error:
+          `\`dependency_overrides["${invalid[0]}"]\` must be "draft" in run_and_wait. ` +
+          "Put published version pins directly in the agent manifest.",
+      };
+    }
+  }
   return { overrides };
 }
 
@@ -426,6 +436,20 @@ export async function launchRunAndWait(
     };
   }
 
+  if (kind === "inline" && dependencyOverrides.overrides) {
+    return {
+      ok: false,
+      step: {
+        payload: {
+          error:
+            "`dependency_overrides` is available for kind:'agent' only. " +
+            "Put the dependency selection directly in the inline manifest.",
+        },
+        isError: true,
+      },
+    };
+  }
+
   let launchPath: string;
   let launchBody: Record<string, unknown> | undefined;
   const contextDocuments = asNonEmptyArray(args.context_documents);
@@ -543,7 +567,6 @@ export async function launchRunAndWait(
     };
   }
 
-  // Both run bodies carry the same field, so one forward covers both kinds.
   if (connectionOverrides.overrides) {
     launchBody = { ...launchBody, connection_overrides: connectionOverrides.overrides };
   }

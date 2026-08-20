@@ -273,7 +273,7 @@ describe("run_and_wait", () => {
   });
 
   describe("dependency_overrides", () => {
-    it("declares dependency_overrides as an optional object of string selectors", () => {
+    it("declares dependency_overrides as agent-only draft selections", () => {
       const { tool } = makeRunAndWait({});
       const property = (
         tool.descriptor.inputSchema.properties as Record<string, Record<string, unknown>>
@@ -281,17 +281,15 @@ describe("run_and_wait", () => {
 
       expect(property).toBeDefined();
       expect(property!.type).toBe("object");
-      expect(property!.additionalProperties).toEqual({ type: "string" });
+      expect(property!.additionalProperties).toEqual({ type: "string", enum: ["draft"] });
+      expect(property!.description).toContain("kind:agent ONLY");
       expect(tool.descriptor.inputSchema.required as string[]).toEqual(["kind"]);
     });
 
-    it("forwards dependency_overrides verbatim on an inline launch", async () => {
-      const { tool, calls } = makeRunAndWait({
-        launch: () => jsonResponse({ id: "run_inline", status: "pending" }),
-        getRun: [jsonResponse({ id: "run_inline", status: "success" })],
-      });
+    it("rejects dependency_overrides on an inline launch before dispatch", async () => {
+      const { tool, calls } = makeRunAndWait({});
 
-      await tool.handler(
+      const res = await tool.handler(
         {
           kind: "inline",
           manifest: {
@@ -304,16 +302,9 @@ describe("run_and_wait", () => {
         noExtra,
       );
 
-      const post = calls.find((c) => c.method === "POST");
-      expect(post?.path).toBe("/api/runs/inline");
-      expect(post?.body).toEqual({
-        manifest: defaultInlineManifest({
-          name: "tmp",
-          dependencies: { skills: { "@acme/helper": "^1.0.0" } },
-        }),
-        prompt: expect.stringContaining("do it"),
-        dependency_overrides: { "@acme/helper": "draft" },
-      });
+      expect(res.isError).toBe(true);
+      expect(parseResult(res).error).toContain("kind:'agent'");
+      expect(calls).toHaveLength(0);
     });
 
     it("forwards dependency_overrides verbatim on an agent launch", async () => {
@@ -335,6 +326,24 @@ describe("run_and_wait", () => {
       const post = calls.find((c) => c.method === "POST");
       expect(post?.path).toBe("/api/agents/@acme/writer/run");
       expect(post?.body).toEqual({ dependency_overrides: { "@acme/helper": "draft" } });
+    });
+
+    it("rejects published version selectors before dispatch", async () => {
+      const { tool, calls } = makeRunAndWait({});
+
+      const res = await tool.handler(
+        {
+          kind: "agent",
+          scope: "@acme",
+          name: "writer",
+          dependency_overrides: { "@acme/helper": "1.2.3" },
+        },
+        noExtra,
+      );
+
+      expect(res.isError).toBe(true);
+      expect(parseResult(res).error).toContain('must be "draft"');
+      expect(calls).toHaveLength(0);
     });
 
     it("rejects a JSON-encoded dependency_overrides map before dispatch", async () => {
