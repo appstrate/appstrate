@@ -144,7 +144,7 @@ function scriptedEngine(text = "Bonjour le monde"): {
       { type: "text-start", id },
       { type: "text-delta", id, delta: text },
       { type: "text-end", id },
-      { type: "finish", messageMetadata: { appstrate: { turn: { engine: "pi", ...TURN_META } } } },
+      { type: "finish", messageMetadata: { appstrate: { turn: TURN_META } } },
     ];
     const stream = new ReadableStream<UIMessageChunk>({
       start(controller) {
@@ -360,7 +360,7 @@ describe("handleChatStream engine routing", () => {
     expect(assistant).toBeDefined();
     const content = assistant!.content as {
       parts?: Array<{ type: string; text?: string }>;
-      metadata?: { appstrate?: { turn?: { engine?: string; finishReason?: string } } };
+      metadata?: { appstrate?: { turn?: { finishReason?: string; stepCount?: number } } };
     };
     const persistedText = (content.parts ?? [])
       .filter((p) => p.type === "text")
@@ -369,8 +369,8 @@ describe("handleChatStream engine routing", () => {
     expect(persistedText).toContain("Bonjour le monde");
 
     // (6) The finish chunk's metadata survived the persist drain.
-    expect(content.metadata?.appstrate?.turn?.engine).toBe("pi");
     expect(content.metadata?.appstrate?.turn?.finishReason).toBe("stop");
+    expect(content.metadata?.appstrate?.turn?.stepCount).toBe(1);
 
     // (7) The in-flight marker was cleared on finalize (onSettled →
     // clearActiveStream), so the session is no longer "generating".

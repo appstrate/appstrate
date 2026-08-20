@@ -25,7 +25,6 @@ export function buildPiTurnMetadata(input: {
   lastToolName?: string;
 }): ChatMessageMetadata {
   return mergeTurnMetadata(undefined, {
-    engine: "pi",
     finishReason: input.finishReason,
     ...(input.clientError
       ? {

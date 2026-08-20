@@ -35,7 +35,6 @@ describe("piFailureChunks", () => {
     const message = await assemble(chunks);
     expect(message?.id).toBe("assistant-before-start");
     expect(turnMetadataFromMessage(message)).toMatchObject({
-      engine: "pi",
       finishReason: "error",
       errorCategory: "upstream_unavailable",
       errorRetryable: true,
