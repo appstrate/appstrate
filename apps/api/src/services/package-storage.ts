@@ -14,7 +14,10 @@ import {
   type BundlePackage,
 } from "@appstrate/afps-runtime/bundle";
 import { getErrorMessage } from "@appstrate/core/errors";
-import { RunPackageCatalog } from "./run-launcher/run-package-catalog.ts";
+import {
+  RunPackageCatalog,
+  type ResolvedSkillVersionMap,
+} from "./run-launcher/run-package-catalog.ts";
 import { loadAndVerifyBundle } from "./run-launcher/bundle-signature-policy.ts";
 import { AGENT_PACKAGES_BUCKET, versionZipKey } from "./package-storage-keys.ts";
 
@@ -135,6 +138,7 @@ interface AgentPackageResult {
    * from the SAME source the runner-pi container will load.
    */
   bundle: Bundle;
+  resolvedSkillVersions: ResolvedSkillVersionMap;
 }
 
 /**
@@ -199,18 +203,15 @@ export async function buildAgentPackage(
     depsRecord && typeof depsRecord === "object" ? Object.keys(depsRecord).length : 0;
 
   const buildStart = performance.now();
-  const bundle = await buildBundleFromCatalog(
-    root,
-    new RunPackageCatalog({ orgId, dependencyOverrides }),
-    {
-      // Run bundle = agent + skills. Integrations/mcp-servers are spawned and
-      // fetched separately by the sidecar, not bundled into the agent.
-      depTypes: ["skills"],
-      onWarn: (message) => {
-        logger.warn("buildAgentPackage: bundle builder warning", { agentId: agent.id, message });
-      },
+  const catalog = new RunPackageCatalog({ orgId, dependencyOverrides });
+  const bundle = await buildBundleFromCatalog(root, catalog, {
+    // Run bundle = agent + skills. Integrations/mcp-servers are spawned and
+    // fetched separately by the sidecar, not bundled into the agent.
+    depTypes: ["skills"],
+    onWarn: (message) => {
+      logger.warn("buildAgentPackage: bundle builder warning", { agentId: agent.id, message });
     },
-  );
+  });
   logger.info("buildAgentPackage: bundle assembled", {
     agentId: agent.id,
     skillCount,
@@ -219,7 +220,11 @@ export async function buildAgentPackage(
 
   const zipBuffer = writeBundleToBuffer(bundle);
 
-  return { zip: Buffer.from(zipBuffer), bundle };
+  return {
+    zip: Buffer.from(zipBuffer),
+    bundle,
+    resolvedSkillVersions: catalog.getResolvedSkillVersions(),
+  };
 }
 
 /** Build a minimal ZIP with just manifest.json + a content file (default: prompt.md). */

@@ -89,6 +89,9 @@ describe("Enriched run projection", () => {
       runOrigin: "platform",
       connectionOverrides: { "@acme/gmail": "conn_1" },
       dependencyOverrides: { "@acme/skill": "draft" },
+      resolvedSkillVersions: {
+        "@acme/skill": { version: null, source: "draft" },
+      },
       // Excluded-by-design columns, all populated so an accidental spread shows.
       modelCost: { input: 1, output: 2 },
       resolvedIntegrationVersions: {
@@ -132,6 +135,9 @@ describe("Enriched run projection", () => {
     expect(body.runOrigin).toBe("platform");
     expect(body.connection_overrides).toEqual({ "@acme/gmail": "conn_1" });
     expect(body.dependency_overrides).toEqual({ "@acme/skill": "draft" });
+    expect(body.resolved_skill_versions).toEqual({
+      "@acme/skill": { version: null, source: "draft" },
+    });
     expect(body.started_at).toBeString();
     expect(body.orgId).toBe(ctx.orgId);
     expect(body.applicationId).toBe(ctx.defaultAppId);

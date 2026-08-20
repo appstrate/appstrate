@@ -3,6 +3,7 @@
 import type { AppstrateRunPlan, FileReference } from "./run-launcher/types.ts";
 import type { ExecutionContext } from "@appstrate/afps-runtime/types";
 import type { LoadedPackage } from "../types/index.ts";
+import type { ResolvedSkillVersionMap } from "./run-launcher/run-package-catalog.ts";
 import { signRunToken } from "../lib/run-token.ts";
 import {
   CHECKPOINT_KEY,
@@ -133,6 +134,7 @@ export async function buildRunContext(params: {
   modelSource: string | null;
   modelCost: ModelCost | null;
   generationConfig: ModelGenerationSettings;
+  resolvedSkillVersions: ResolvedSkillVersionMap;
 }> {
   const { runId, agent, orgId, applicationId, actor, input, files } = params;
 
@@ -188,7 +190,7 @@ export async function buildRunContext(params: {
 
   const config = params.config ?? configFull?.config ?? {};
   const agentPackage = agentPackageResult.zip;
-  const { bundle } = agentPackageResult;
+  const { bundle, resolvedSkillVersions } = agentPackageResult;
 
   // Step 2: resolve model and proxy with cascade
   const effectiveModelId = params.modelId ?? configFull?.modelId ?? null;
@@ -313,5 +315,6 @@ export async function buildRunContext(params: {
     modelSource,
     modelCost,
     generationConfig,
+    resolvedSkillVersions,
   };
 }

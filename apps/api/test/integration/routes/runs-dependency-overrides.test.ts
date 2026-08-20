@@ -103,4 +103,27 @@ describe("GET /api/runs/:id — dependency_overrides echo", () => {
     const wire = (await res.json()) as { dependency_overrides: Record<string, string> | null };
     expect(wire.dependency_overrides).toBeNull();
   });
+
+  it("exposes the resolved skill version snapshot", async () => {
+    const row = await seedRun({
+      packageId: AGENT,
+      orgId: ctx.orgId,
+      applicationId: ctx.defaultAppId,
+      userId: ctx.user.id,
+      resolvedSkillVersions: {
+        "@deporg/skill": { version: "1.2.3", source: "version" },
+      },
+    });
+    const res = await app.request(`/api/runs/${row.id}`, { headers: authHeaders(ctx) });
+    expect(res.status).toBe(200);
+    const wire = (await res.json()) as {
+      resolved_skill_versions: Record<
+        string,
+        { version: string | null; source: "version" | "draft" }
+      > | null;
+    };
+    expect(wire.resolved_skill_versions).toEqual({
+      "@deporg/skill": { version: "1.2.3", source: "version" },
+    });
+  });
 });

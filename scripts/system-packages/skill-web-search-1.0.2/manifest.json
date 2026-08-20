@@ -1,0 +1,13 @@
+{
+  "name": "@appstrate/web-search",
+  "version": "1.0.2",
+  "type": "skill",
+  "schema_version": "0.2",
+  "display_name": "Recherche web (run inline)",
+  "description": "Chercher le web ou lire des URL depuis le chat. Charge ce guide dès que la demande exige des informations web externes. Il choisit un connecteur disponible, lance un run inline borné et restitue seulement des résultats appuyés par les sources observées.",
+  "license": "Apache-2.0",
+  "_meta": {
+    "dev.appstrate/visibility": { "level": "unlisted" },
+    "dev.appstrate/assistant-skill": { "enabled": true }
+  }
+}

@@ -191,6 +191,86 @@ const PROTECTED_HEADERS = new Set<string>([
 // Cap the buffered response body so a large list endpoint can't dump
 // unbounded text into the model context. Truncation is flagged in the result.
 const MAX_RESPONSE_CHARS = 100_000;
+const MAX_TEXT_ATTACHMENT_BYTES = 100_000;
+const TEXT_ATTACHMENT_EXTENSIONS = new Set([
+  ".md",
+  ".markdown",
+  ".txt",
+  ".json",
+  ".jsonl",
+  ".yaml",
+  ".yml",
+  ".toml",
+  ".ini",
+  ".csv",
+  ".tsv",
+  ".xml",
+  ".html",
+  ".css",
+  ".js",
+  ".jsx",
+  ".mjs",
+  ".cjs",
+  ".ts",
+  ".tsx",
+  ".py",
+  ".sh",
+  ".sql",
+  ".log",
+]);
+
+function textAttachmentName(response: Response): string | undefined {
+  const disposition = response.headers.get("content-disposition");
+  if (!disposition?.toLowerCase().startsWith("attachment;")) return undefined;
+  const encoded = /filename\*=UTF-8''([^;]+)/i.exec(disposition)?.[1];
+  const fallback = /filename="([^"]+)"/i.exec(disposition)?.[1];
+  let filename = fallback;
+  if (encoded) {
+    try {
+      filename = decodeURIComponent(encoded);
+    } catch {
+      return undefined;
+    }
+  }
+  if (!filename) return undefined;
+  const basename = filename.slice(filename.lastIndexOf("/") + 1).toLowerCase();
+  const dot = basename.lastIndexOf(".");
+  return TEXT_ATTACHMENT_EXTENSIONS.has(dot >= 0 ? basename.slice(dot) : "") ? filename : undefined;
+}
+
+async function readBodyBounded(
+  response: Response,
+  maxBytes: number,
+): Promise<{ bytes: Uint8Array; exceeded: boolean }> {
+  const reader = response.body?.getReader();
+  if (!reader) return { bytes: new Uint8Array(), exceeded: false };
+  const chunks: Uint8Array[] = [];
+  let kept = 0;
+  try {
+    while (kept <= maxBytes) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value.byteLength === 0) continue;
+      const remaining = maxBytes + 1 - kept;
+      const chunk = value.byteLength > remaining ? value.subarray(0, remaining) : value;
+      chunks.push(chunk);
+      kept += chunk.byteLength;
+      if (kept > maxBytes) {
+        await reader.cancel("text attachment exceeds MCP response limit").catch(() => undefined);
+        break;
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const bytes = new Uint8Array(kept);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return { bytes, exceeded: kept > maxBytes };
+}
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   return typeof value === "object" && value !== null && !Array.isArray(value)
@@ -492,7 +572,7 @@ function interpolatePath(op: CatalogOperation, pathParams: Record<string, unknow
  *  - Streaming (`text/event-stream`) bodies are refused, NOT buffered —
  *    `.text()` on an open SSE stream never resolves and would hang the
  *    server promise (the platform exposes SSE GET operations).
- *  - Non-text bodies (downloads, tarballs) are summarised, not decoded.
+ *  - Small UTF-8 text attachments are decoded; other binary bodies are summarised.
  *  - Text bodies are capped to bound context size.
  */
 export async function readResponse(response: Response): Promise<CallToolResult> {
@@ -519,12 +599,46 @@ export async function readResponse(response: Response): Promise<CallToolResult> 
   const isTextual = contentType === "" || isTextShapedContentType(contentType);
   if (!isTextual) {
     const len = response.headers.get("content-length");
+    const byteLength = len ? Number(len) : null;
+    const attachmentName = textAttachmentName(response);
+    if (
+      attachmentName &&
+      byteLength !== null &&
+      Number.isSafeInteger(byteLength) &&
+      byteLength >= 0 &&
+      byteLength <= MAX_TEXT_ATTACHMENT_BYTES
+    ) {
+      const { bytes, exceeded } = await readBodyBounded(response, MAX_TEXT_ATTACHMENT_BYTES);
+      if (!exceeded) {
+        try {
+          return textResult(
+            {
+              status: response.status,
+              body: new TextDecoder("utf-8", { fatal: true }).decode(bytes),
+              attachment_name: attachmentName,
+            },
+            isError,
+          );
+        } catch {
+          // Keep invalid UTF-8 on the binary-safe path below.
+        }
+      }
+      return textResult(
+        {
+          status: response.status,
+          note: "Non-text response body omitted.",
+          content_type: contentType,
+          bytes: bytes.byteLength,
+        },
+        isError,
+      );
+    }
     return textResult(
       {
         status: response.status,
         note: "Non-text response body omitted.",
         content_type: contentType,
-        bytes: len ? Number(len) : null,
+        bytes: byteLength,
       },
       isError,
     );
@@ -808,6 +922,10 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
       "Chaining runs (kind:inline): feed earlier runs' deliverables to a later one by passing " +
       "their `document://` URIs in `context_documents` — never by copying their content into " +
       "`prompt`. " +
+      "For controlled testing of an existing agent, pass top-level `dependency_overrides` with " +
+      'the value `"draft"` to use a declared skill or integration working copy for this run ' +
+      "only. Published version pins belong in the manifest, and inline runs do not accept this " +
+      "field. " +
       "Prefer an existing agent over an inline manifest when one matches the intent.",
     annotations: {
       title: "Run and wait",
@@ -920,6 +1038,16 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
             "it under, which matches no integration and is ignored. TOP-LEVEL argument, " +
             "alongside `manifest`/`config` — pass the object itself; JSON-encoding it is " +
             "refused before the launch.",
+        },
+        dependency_overrides: {
+          type: "object",
+          additionalProperties: { type: "string", enum: ["draft"] },
+          description:
+            'Working-copy selections (kind:agent ONLY): `{ "@scope/dep": "draft" }`. Keys must ' +
+            "name dependencies declared by the selected agent. The map is recorded on the run " +
+            "and never changes the agent manifest. Put published version pins directly in a " +
+            "manifest; inline runs reject this field because their manifest is already supplied " +
+            "per run.",
         },
         context_documents: {
           type: "array",
