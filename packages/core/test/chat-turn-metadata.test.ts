@@ -21,7 +21,7 @@ describe("chat turn metadata", () => {
     const metadata = mergeTurnMetadata(
       { usage: { input_tokens: 10 }, costUsd: 0.01 },
       {
-        engine: "subscription",
+        engine: "pi",
         finishReason: "stop",
         stepCount: 16,
         maxSteps: 16,
@@ -35,7 +35,7 @@ describe("chat turn metadata", () => {
       costUsd: 0.01,
       appstrate: {
         turn: {
-          engine: "subscription",
+          engine: "pi",
           finishReason: "stop",
           stepCount: 16,
           maxSteps: 16,
@@ -44,6 +44,24 @@ describe("chat turn metadata", () => {
         },
       },
     });
+  });
+
+  it("reads new Pi metadata and keeps old subscription metadata readable", () => {
+    const turn = {
+      finishReason: "stop" as const,
+      stepCount: 1,
+      maxSteps: 16,
+      maxStepsReached: false,
+    };
+    expect(
+      turnMetadataFromMessage({ metadata: mergeTurnMetadata(undefined, { engine: "pi", ...turn }) })
+        ?.engine,
+    ).toBe("pi");
+    expect(
+      turnMetadataFromMessage({
+        metadata: mergeTurnMetadata(undefined, { engine: "subscription", ...turn }),
+      })?.engine,
+    ).toBe("subscription");
   });
 
   it("detects a reached tool-step budget as a turn limit", () => {

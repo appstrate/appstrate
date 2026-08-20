@@ -34,7 +34,7 @@ export type ChatEnv = {
     orgSlug?: string;
     /**
      * Caller's resolved RBAC permission set (from the platform auth pipeline).
-     * Forwarded into the scoped platform-MCP bearer the subscription engine
+     * Forwarded into the scoped platform-MCP bearer the Pi engine
      * hands its external binary, so the meta-tools authorize with exactly the
      * caller's own permissions — no amplification.
      */

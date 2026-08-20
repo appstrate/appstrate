@@ -6,7 +6,7 @@
  *
  * All agent RUNS execute on the single Pi engine. The interactive chat surface
  * is likewise unified: `@appstrate/module-chat` owns ONE generic in-process
- * Pi-SDK chat engine (`runPiSubscriptionChat`) that serves EVERY
+ * Pi-SDK chat engine (`runPiChat`) that serves EVERY
  * oauth-subscription provider (claude-code, codex). There is no per-provider
  * chat-handler seam — the chat module resolves the real OAuth token + provider
  * baseUrl for the chosen model row through {@link PlatformServices}
@@ -64,7 +64,7 @@ export interface SubscriptionChatModel {
  *     that no longer decrypts) → the chat surfaces a reconnect prompt. Nothing
  *     is resolvable either way, so this is purely which error the user sees.
  *   - `{ subscription: true, model }` — an oauth2 model with a fresh token → the
- *     Pi subscription chat engine drives it.
+ *     Pi chat engine drives it.
  */
 export type SubscriptionChatResolution =
   | { subscription: false }

@@ -39,7 +39,13 @@ import { openPlatformMcp, platformMcpUrl } from "./platform-mcp.ts";
 import { selfOrigin, forwardedHeaders } from "./self.ts";
 import { mintLoopbackToken, mintMcpLoopbackToken } from "./loopback-auth.ts";
 import { materializeUserAttachments, messagesWithAttachmentsAsText } from "./attachments.ts";
-import { runPiSubscriptionChat } from "./pi-chat/engine.ts";
+import { runPiChat, type PiChatInput } from "./pi-chat/engine.ts";
+import { PI_CHAT_ENGINE_ORG_IDS_ENV, selectChatEngine } from "./pi-chat/engine-selection.ts";
+import {
+  resolvePiChatModelBinding,
+  type ResolvedPiChatModelBinding,
+} from "./pi-chat/model-binding.ts";
+import { acquirePiChatSlot, chatCapacityResponse, type PiChatSlot } from "./pi-chat/concurrency.ts";
 import { SYSTEM_PROMPT, buildCallerContextBlock, type ChatEnv } from "./prompt.ts";
 export type { ChatEnv } from "./prompt.ts";
 import { finalizeChatStream } from "./finalize-stream.ts";
@@ -209,13 +215,24 @@ export function prepareAiSdkChatStep({
 }
 
 /**
- * TTL for the subscription-engine path's loopback bearer. The Pi chat engine
+ * TTL for the Pi-engine path's loopback bearer. The Pi chat engine
  * opens its platform MCP client once per turn with these headers, so the token
  * must outlive the whole turn (up to CHAT_MAX_STEPS steps, each able to
  * long-poll a run's status for ~55 s). 30 min is a generous ceiling for a
  * single interactive turn.
  */
 const ENGINE_LOOPBACK_TTL_MS = 30 * 60_000;
+
+/** Small runtime seam that makes engine selection and non-fallback testable. */
+export interface ChatEngineRuntime {
+  configuredPiOrgIds(): string | undefined;
+  runPiChat(input: PiChatInput): Response;
+}
+
+const defaultChatEngineRuntime: ChatEngineRuntime = {
+  configuredPiOrgIds: () => process.env[PI_CHAT_ENGINE_ORG_IDS_ENV],
+  runPiChat,
+};
 
 // The client (assistant-ui / useChat) posts the full thread plus optional
 // session/model/context extras. `messages` are UIMessages; we keep validation
@@ -419,6 +436,7 @@ export function createTurnClosureStream(options: {
 export async function handleChatStream(
   c: Context<ChatEnv>,
   deps: ChatPlatformDeps,
+  engineRuntime: ChatEngineRuntime = defaultChatEngineRuntime,
 ): Promise<Response> {
   const orgId = c.get("orgId");
   const user = c.get("user");
@@ -554,15 +572,27 @@ export async function handleChatStream(
     messages[messages.length - 1] = lastMessage;
   }
 
-  // Subscription chat routing. Every oauth-subscription provider (claude-code,
-  // codex) is served by ONE generic in-process Pi engine owned by this module —
-  // there is no per-provider vendor-SDK seam. The platform resolves the chosen
-  // model row: an API-key/unknown provider → `{ subscription: false }` (the
-  // generic ai-sdk path below); an oauth2 provider → the real upstream binding +
-  // a fresh access token (or a reconnect signal). Token resolution (decrypt +
-  // possible refresh) happens here in the preamble, alongside the other reads.
+  // Resolve one Pi binding before selecting the engine. OAuth providers yield a
+  // fresh access token or a reconnect signal. API-key providers yield a proxy
+  // binding with no provider secret. OAuth always uses Pi; API-key models use Pi
+  // only for an exactly allowlisted organization during this phase.
   const subscription = await deps.resolveSubscriptionChatModel(orgId, chosen.id);
-  const isSubscription = subscription.subscription;
+  const modelBindingResolution = resolvePiChatModelBinding({
+    model: chosen,
+    subscription,
+    origin,
+    mintBearer: mintInferenceAuth,
+  });
+  const isSubscription =
+    modelBindingResolution.status === "needs-reconnection" ||
+    (modelBindingResolution.status === "ready" &&
+      modelBindingResolution.binding.authMode === "oauth2");
+  const selectedEngine = selectChatEngine({
+    orgId,
+    subscription: isSubscription,
+    configuredOrgIds: engineRuntime.configuredPiOrgIds(),
+  });
+  const usePiEngine = selectedEngine === "pi";
 
   // Admission gate — EVERY turn, whichever engine serves it. The platform
   // resolves system-provided vs. org-owned server-side and dispatches
@@ -574,9 +604,9 @@ export async function handleChatStream(
   // costs nothing. That is the module's call to make, not the platform's: the
   // turn is driven by the IN-PROCESS Pi engine, so the platform funds its
   // compute even when it funds no inference, and a module gating on
-  // subscription status must be able to refuse it. We report
-  // `subscription: true` — the one fact this module owns, since it picked the
-  // engine — and the platform derives the credential source from it.
+  // subscription status must be able to refuse it. `subscription` reports the
+  // credential mode, independently of whether the selected engine is Pi or AI
+  // SDK, and the platform derives the credential source from it.
   //
   // Gated BEFORE the phase-B preamble so a rejected turn opens no MCP session
   // and persists no user message.
@@ -592,7 +622,7 @@ export async function handleChatStream(
   // The caller-context block (both paths) and the platform MCP probe (ai-sdk
   // path only) are independent — run them together.
   //
-  // The subscription path SKIPS the probe entirely: the Pi chat engine opens
+  // The Pi path SKIPS the probe entirely: the Pi chat engine opens
   // its OWN MCP connection from `platformMcp.url`, and the MCP server's
   // instructions reach the model through that handshake. A probe here would be
   // a second handshake we'd immediately close (2 round-trips wasted on the
@@ -622,7 +652,7 @@ export async function handleChatStream(
     locale: c.req.header("X-Chat-Locale"),
   });
   let contextBlock: string;
-  if (isSubscription) {
+  if (usePiEngine) {
     contextBlock = await contextPromise;
   } else {
     // The chat's tools come from the platform MCP module (`/api/mcp/o/:org`).
@@ -647,11 +677,11 @@ export async function handleChatStream(
   }
   const phaseBMs = Date.now() - phaseBStart;
 
-  // Assemble the system prompt. Subscription path: tool-grounding prompt, no
+  // Assemble the system prompt. Pi path: tool-grounding prompt, no
   // inline instructions (the SDK's own MCP handshake delivers them). ai-sdk
   // path: prompt + the platform MCP server instructions (mcp is required, so
   // it's always present here).
-  let system = isSubscription
+  let system = usePiEngine
     ? SYSTEM_PROMPT
     : mcp?.instructions
       ? `${SYSTEM_PROMPT}\n\n${mcp.instructions}`
@@ -660,13 +690,38 @@ export async function handleChatStream(
   system = applyOperationIndexPolicy(system, chosen.apiShape);
 
   logger.info("chat preamble", {
-    engine: isSubscription ? "subscription" : "ai-sdk",
+    engine: selectedEngine,
+    authMode:
+      modelBindingResolution.status === "ready"
+        ? modelBindingResolution.binding.authMode
+        : modelBindingResolution.status,
     providerId: chosen.providerId,
     phaseAMs,
     phaseBMs,
     preambleMs: Date.now() - turnStart,
-    hasTools: isSubscription || Boolean(mcp),
+    hasTools: usePiEngine || Boolean(mcp),
   });
+
+  // Reject invalid Pi bindings and saturated capacity before the user message
+  // or active-stream marker is written. Once acquired, the slot is transferred
+  // to `runPiChat`, which releases it when the response stream closes.
+  let piAdmission: { slot: PiChatSlot; binding: ResolvedPiChatModelBinding } | undefined;
+  if (usePiEngine) {
+    if (modelBindingResolution.status === "needs-reconnection") {
+      await closeMcp();
+      return subscriptionReconnectResponse();
+    }
+    if (modelBindingResolution.status !== "ready") {
+      await closeMcp();
+      throw invalidRequest(`Model family "${chosen.apiShape}" is not supported by Pi chat.`);
+    }
+    const slot = acquirePiChatSlot();
+    if (!slot) {
+      await closeMcp();
+      return chatCapacityResponse();
+    }
+    piAdmission = { slot, binding: modelBindingResolution.binding };
+  }
 
   // ── Server-authoritative persistence + resumable streaming ───────────────
   // Persist the user turn BEFORE inference; the assistant turn is persisted when
@@ -694,6 +749,7 @@ export async function handleChatStream(
       // would leak per failed turn. Close it on this error path before
       // rethrowing. Credential headers are untouched — this is purely the
       // leak-on-error cleanup.
+      piAdmission?.slot.release();
       await closeMcp();
       throw err;
     }
@@ -748,20 +804,18 @@ export async function handleChatStream(
   const failCleanup = async () => {
     clearDeadline();
     unregisterStopController(streamId);
+    // `release()` is idempotent, so folding it in here makes the slot
+    // leak-proof structurally instead of depending on every Pi failure path
+    // remembering to release before calling this.
+    piAdmission?.slot.release();
     if (sessionId) await clearActiveStream(sessionId, streamId).catch(() => {});
     await closeMcp();
   };
 
-  // Subscription path — the generic in-process Pi engine drives the turn with
-  // the real access token resolved above; the token stays in this process's
-  // memory (in-memory AuthStorage, never persisted, never sent to the client).
-  if (subscription.subscription) {
-    if ("needsReconnection" in subscription) {
-      // The oauth credential is dead → tell the client to reconnect rather than
-      // launching a session that would 401 upstream.
-      await failCleanup();
-      return subscriptionReconnectResponse();
-    }
+  // Pi path. OAuth tokens stay in memory; API-key bindings carry only the inert
+  // proxy key and mint a fresh loopback bearer for every llm-proxy call. A Pi
+  // failure exits this branch and is never retried through AI SDK.
+  if (piAdmission) {
     // The Pi session opens its OWN platform MCP connection (`/api/mcp/o/:org`),
     // and run_and_wait hits platform run routes with these headers. It must NEVER
     // receive the caller's raw cookie/Authorization (reusable far beyond chat).
@@ -786,8 +840,9 @@ export async function handleChatStream(
     if (applicationId) mcpHeaders["x-application-id"] = applicationId;
     try {
       return await finalize(
-        runPiSubscriptionChat({
-          model: subscription.model,
+        engineRuntime.runPiChat({
+          slot: piAdmission.slot,
+          modelBinding: piAdmission.binding,
           presetId: chosen.id,
           orgId,
           userId: user.id,
@@ -813,7 +868,10 @@ export async function handleChatStream(
     }
   }
 
-  // ai-sdk path — API-key providers only, bound to the llm-proxy.
+  // AI SDK path for API-key providers outside the temporary Pi org allowlist.
+  // No Pi-binding check here on purpose: `modelFromFamily` below rejects exactly
+  // the same families, and gating this path on a Pi-only resolution would let a
+  // family added to one table and not the other break chat for every org.
   const model = modelFromFamily(
     chosen,
     origin,

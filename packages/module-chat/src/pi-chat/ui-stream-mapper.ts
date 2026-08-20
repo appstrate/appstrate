@@ -4,7 +4,7 @@
  * Map the Pi SDK's `AgentSessionEvent` stream onto the AI SDK **UI message
  * stream** chunks — the exact protocol the chat client (assistant-ui /
  * `useChat`) already consumes from the `ai-sdk` path. This is what lets the
- * single generic Pi subscription chat engine share one client contract with the
+ * single generic Pi chat engine share one client contract with the
  * `ai-sdk` engine (the loop differs; the I/O contract is shared).
  *
  * Pi emits (via `session.subscribe(cb)`):

@@ -4,7 +4,7 @@ import { describe, expect, it } from "bun:test";
 import { readUIMessageStream, type UIMessage, type UIMessageChunk } from "ai";
 import { turnMetadataFromMessage } from "@appstrate/core/chat-turn-metadata";
 import { ChatTurnDeadlineError, turnDeadlineNoticeText } from "../src/turn-closure.ts";
-import { subscriptionFailureChunks } from "../src/pi-chat/subscription-turn-closure.ts";
+import { piFailureChunks } from "../src/pi-chat/pi-turn-closure.ts";
 
 async function assemble(chunks: UIMessageChunk[]): Promise<UIMessage | undefined> {
   const stream = new ReadableStream<UIMessageChunk>({
@@ -18,9 +18,9 @@ async function assemble(chunks: UIMessageChunk[]): Promise<UIMessage | undefined
   return last;
 }
 
-describe("subscriptionFailureChunks", () => {
+describe("piFailureChunks", () => {
   it("makes a setup failure reconstructable and persists safe error metadata", async () => {
-    const chunks = subscriptionFailureChunks({
+    const chunks = piFailureChunks({
       error: new Error("upstream 503 req_public123 leaked detail"),
       streamStarted: false,
       aborted: false,
@@ -35,7 +35,7 @@ describe("subscriptionFailureChunks", () => {
     const message = await assemble(chunks);
     expect(message?.id).toBe("assistant-before-start");
     expect(turnMetadataFromMessage(message)).toMatchObject({
-      engine: "subscription",
+      engine: "pi",
       finishReason: "error",
       errorCategory: "upstream_unavailable",
       errorRetryable: true,
@@ -53,7 +53,7 @@ describe("subscriptionFailureChunks", () => {
   it("finishes a started prompt failure exactly once for reload persistence", async () => {
     const chunks: UIMessageChunk[] = [
       { type: "start", messageId: "assistant-after-start" },
-      ...subscriptionFailureChunks({
+      ...piFailureChunks({
         error: new Error("rate limit 429"),
         streamStarted: true,
         aborted: false,
@@ -75,7 +75,7 @@ describe("subscriptionFailureChunks", () => {
   });
 
   it("preserves deadline semantics when setup aborts before start", async () => {
-    const chunks = subscriptionFailureChunks({
+    const chunks = piFailureChunks({
       error: new DOMException("aborted", "AbortError"),
       streamStarted: false,
       aborted: true,
@@ -98,7 +98,7 @@ describe("subscriptionFailureChunks", () => {
   });
 
   it("keeps an explicit stop distinct from a failure and a deadline", async () => {
-    const chunks = subscriptionFailureChunks({
+    const chunks = piFailureChunks({
       error: new DOMException("aborted", "AbortError"),
       streamStarted: false,
       aborted: true,
