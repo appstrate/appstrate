@@ -83,7 +83,6 @@ export function OrgSettingsLayout() {
     <SettingsLayout
       title={t("orgSettings.pageTitle")}
       scope={{
-        label: t("scope.organisation", { ns: "common" }),
         icon: Building,
         name: currentOrg?.name ?? "",
       }}

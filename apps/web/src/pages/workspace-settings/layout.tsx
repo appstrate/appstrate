@@ -83,7 +83,6 @@ export function WorkspaceSettingsLayout() {
     <SettingsLayout
       title={title}
       scope={{
-        label: t("scope.workspace", { ns: "common" }),
         icon: LayoutGrid,
         name: application?.name ?? "",
       }}

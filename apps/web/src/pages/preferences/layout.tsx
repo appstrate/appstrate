@@ -13,7 +13,6 @@ export function PreferencesLayout() {
     <SettingsLayout
       title={t("preferences.title")}
       scope={{
-        label: t("scope.account", { ns: "common" }),
         icon: User,
         name: profile?.displayName || user?.name || user?.email || "",
       }}

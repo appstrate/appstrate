@@ -114,8 +114,5 @@
   "nav.usage": "Usage",
   "userMenu.documentation": "Documentation",
   "userMenu.getHelp": "Obtenir de l'aide",
-  "nav.settings": "Paramètres",
-  "scope.organisation": "Organisation",
-  "scope.workspace": "Espace de travail",
-  "scope.account": "Compte"
+  "nav.settings": "Paramètres"
 }

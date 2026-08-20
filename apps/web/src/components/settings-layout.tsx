@@ -14,6 +14,7 @@
  * it left unanswered — WHICH organisation, WHICH workspace am I configuring —
  * is the one that matters once the two surfaces look alike.
  */
+import { useTranslation } from "react-i18next";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import type { LucideIcon } from "lucide-react";
 import { Link } from "react-router-dom";
@@ -48,11 +49,12 @@ interface SettingsLayoutProps {
   /** Announced to screen readers, and shown as the rail's scope name. */
   title: string;
   /**
-   * What these settings configure. Named in the rail head because the three
-   * surfaces are otherwise indistinguishable once open, and editing the wrong
-   * scope is a silent mistake.
+   * What these settings configure. The rail head reads "Paramètres" over this
+   * NAME; which kind of thing it is comes from the section label below, where
+   * it also does the work of separating one group from the next. Putting the
+   * kind in both places just said the same word twice.
    */
-  scope: { label: string; icon: LucideIcon; name: string };
+  scope: { icon: LucideIcon; name: string };
 }
 
 function RailLink({
@@ -86,6 +88,7 @@ function RailLink({
 }
 
 export function SettingsLayout({ sections, title, scope }: SettingsLayoutProps) {
+  const { t } = useTranslation("common");
   const location = useLocation();
   const navigate = useNavigate();
   const background = useBackgroundLocation();
@@ -109,7 +112,7 @@ export function SettingsLayout({ sections, title, scope }: SettingsLayoutProps) 
         <scope.icon className="text-muted-foreground size-4 shrink-0" />
         <span className="flex min-w-0 flex-col">
           <span className="text-muted-foreground text-[0.7rem] tracking-[0.04em] uppercase">
-            {scope.label}
+            {t("nav.settings", { ns: "common" })}
           </span>
           <span className="truncate text-sm font-semibold">{scope.name}</span>
         </span>
