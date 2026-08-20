@@ -15,6 +15,8 @@ import { MagicLinkPage } from "./pages/magic-link";
 import { ErrorBoundary } from "./components/error-boundary";
 import { HostedAuthGate } from "./components/hosted-auth-gate";
 import { AppSidebar } from "./components/app-sidebar";
+import { useBackgroundLocation } from "./lib/modal-route";
+import { NavigateKeepingState } from "./components/navigate-keeping-state";
 import { ShellBreadcrumb } from "./components/shell-breadcrumb";
 import { NotificationBell } from "./components/notification-bell";
 import { NavUser } from "./components/nav-user";
@@ -338,7 +340,41 @@ function useExternalRedirect(isAuthenticated: boolean) {
 export function App() {
   const { user, loading } = useAuth();
   const { features } = useAppConfig();
+  const location = useLocation();
+  // A routed modal carries the screen it opened over. While one is up the main
+  // route tree renders from THAT location, so the page underneath stays exactly
+  // as the user left it — scroll, filters and all — instead of unmounting.
+  const modalBackground = useBackgroundLocation();
   useExternalRedirect(!!user);
+
+  // Declared once, mounted twice: in the page route tree, and again in the
+  // overlay tree below when settings are opened over another screen.
+  const orgSettingsRoutes = (
+    <>
+      <Route index element={<NavigateKeepingState to="general" />} />
+      <Route path="general" element={<OrgSettingsGeneralPage />} />
+      <Route path="members" element={<OrgSettingsMembersPage />} />
+      <Route path="applications" element={<OrgSettingsApplicationsPage />} />
+      <Route path="models" element={<OrgSettingsModelsPage />} />
+      <Route path="proxies" element={<OrgSettingsProxiesPage />} />
+      <Route path="oauth" element={<OrgSettingsOAuthPage />} />
+      <Route path="cli-sessions" element={<OrgSettingsCliSessionsPage />} />
+      <Route path="billing" element={<OrgSettingsBillingPage />} />
+      <Route path="app/general" element={<OrgSettingsAppGeneralPage />} />
+      <Route path="app/api-keys" element={<ApiKeysPage />} />
+      <Route path="app/end-users" element={<EndUsersPage />} />
+      {features.webhooks && (
+        <>
+          <Route path="app/webhooks" element={<WebhooksPage />} />
+          <Route path="app/webhooks/:id" element={<WebhookDetailPage />} />
+        </>
+      )}
+      {/* Old top-level homes, kept as redirects: these URLs have been
+                  handed out in docs and bookmarks. */}
+      <Route path="app/auth" element={<OrgSettingsAppAuthPage />} />
+      <Route path="app/oauth" element={<OrgSettingsAppOauthPage />} />
+    </>
+  );
 
   if (loading) {
     return <BootScreen />;
@@ -497,7 +533,7 @@ export function App() {
        */}
       <PendingPairingsWatcher />
       <OrgGate>
-        <Routes>
+        <Routes location={modalBackground ?? location}>
           <Route path="/login" element={<Navigate to="/" replace />} />
           <Route path="/register" element={<Navigate to="/" replace />} />
           {/*
@@ -835,32 +871,28 @@ export function App() {
                 </LazyRoute>
               }
             >
-              <Route index element={<Navigate to="general" replace />} />
-              <Route path="general" element={<OrgSettingsGeneralPage />} />
-              <Route path="members" element={<OrgSettingsMembersPage />} />
-              <Route path="applications" element={<OrgSettingsApplicationsPage />} />
-              <Route path="models" element={<OrgSettingsModelsPage />} />
-              <Route path="proxies" element={<OrgSettingsProxiesPage />} />
-              <Route path="oauth" element={<OrgSettingsOAuthPage />} />
-              <Route path="cli-sessions" element={<OrgSettingsCliSessionsPage />} />
-              <Route path="billing" element={<OrgSettingsBillingPage />} />
-              <Route path="app/general" element={<OrgSettingsAppGeneralPage />} />
-              <Route path="app/api-keys" element={<ApiKeysPage />} />
-              <Route path="app/end-users" element={<EndUsersPage />} />
-              {features.webhooks && (
-                <>
-                  <Route path="app/webhooks" element={<WebhooksPage />} />
-                  <Route path="app/webhooks/:id" element={<WebhookDetailPage />} />
-                </>
-              )}
-              {/* Old top-level homes, kept as redirects: these URLs have been
-                  handed out in docs and bookmarks. */}
-              <Route path="app/auth" element={<OrgSettingsAppAuthPage />} />
-              <Route path="app/oauth" element={<OrgSettingsAppOauthPage />} />
+              {orgSettingsRoutes}
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         </Routes>
+        {/* Overlay tree — only mounted while a modal is floating over another
+            screen. Same components, same paths; what differs is that the route
+            below stays rendered underneath. */}
+        {modalBackground && (
+          <Routes>
+            <Route
+              path="/org-settings"
+              element={
+                <LazyRoute>
+                  <OrgSettingsLayout />
+                </LazyRoute>
+              }
+            >
+              {orgSettingsRoutes}
+            </Route>
+          </Routes>
+        )}
       </OrgGate>
     </ErrorBoundary>
   );

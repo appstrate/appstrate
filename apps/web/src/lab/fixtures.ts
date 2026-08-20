@@ -376,3 +376,44 @@ export const billing = {
   status: "active",
   upgrades: [],
 };
+
+/* -------------------------------------------------------------------------- */
+/* Organisation detail                                                         */
+/* -------------------------------------------------------------------------- */
+
+export const orgDetail: Json200<"/api/orgs/{orgId}", "get"> = {
+  id: ORG_ID,
+  name: "Tractr",
+  slug: "tractr",
+  createdAt: ago(200_000),
+  storage: { used_bytes: 2_411_724_800, limit_bytes: null, effective_limit_bytes: null },
+  members: [
+    {
+      userId: USER_ID,
+      displayName: "Olivier Tarbès",
+      email: "olivier@tractr.net",
+      role: "owner",
+      joinedAt: ago(200_000),
+    },
+    {
+      userId: "user_lab_2",
+      displayName: "Pierre",
+      email: "pierre@tractr.net",
+      role: "admin",
+      joinedAt: ago(90_000),
+    },
+    {
+      userId: "user_lab_3",
+      displayName: "Camille",
+      email: "camille@tractr.net",
+      role: "member",
+      joinedAt: ago(12_000),
+    },
+  ],
+  invitations: [],
+};
+
+export const orgSettings: Json200<"/api/orgs/{orgId}/settings", "get"> = {
+  api_version: "2026-08-01",
+  dashboard_sso_enabled: false,
+};

@@ -10,17 +10,20 @@ export function SidebarNavLink({
   label,
   isActive,
   children,
+  state,
 }: {
   to: string;
   icon: LucideIcon;
   label: string;
   isActive: boolean;
   children?: ReactNode; // badges, indicators
+  /** Navigation state — used to keep a routed modal open across its own rail. */
+  state?: unknown;
 }) {
   return (
     <SidebarMenuItem>
       <SidebarMenuButton asChild isActive={isActive} tooltip={label}>
-        <Link to={to}>
+        <Link to={to} state={state}>
           <Icon />
           <span>{label}</span>
         </Link>

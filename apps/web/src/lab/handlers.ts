@@ -47,6 +47,19 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
   },
   {
     method: "GET",
+    pattern: /^\/api\/orgs\/[^/]+\/settings$/,
+    handler: () => ({ status: 200, body: f.orgSettings }),
+  },
+  {
+    method: "GET",
+    pattern: /^\/api\/orgs\/[^/]+$/,
+    handler: (_u, s) => ({
+      status: 200,
+      body: s === "empty" ? { ...f.orgDetail, members: [], invitations: [] } : f.orgDetail,
+    }),
+  },
+  {
+    method: "GET",
     pattern: /^\/api\/applications\/[^/]+$/,
     handler: () => ({ status: 200, body: f.applications.data[0] }),
   },

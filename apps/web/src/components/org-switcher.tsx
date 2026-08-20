@@ -9,7 +9,8 @@
  * behind the other.
  */
 import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
+import { openAsModal } from "../lib/modal-route";
 import { useTranslation } from "react-i18next";
 import { ChevronsUpDown, Plus, Search, Settings, Library } from "lucide-react";
 import { useOrg } from "../hooks/use-org";
@@ -60,6 +61,7 @@ function ColumnHeader({
 export function OrgSwitcher() {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const location = useLocation();
   const { currentOrg, orgs, switchOrg, loading } = useOrg();
   const { data: applications } = useApplications();
   const currentAppId = useCurrentApplicationId();
@@ -198,6 +200,7 @@ export function OrgSwitcher() {
         <div className="grid grid-cols-2 border-t">
           <Link
             to="/org-settings"
+            state={openAsModal(location)}
             onClick={() => setOpen(false)}
             className="hover:bg-accent flex items-center gap-2 px-3 py-2.5 text-[0.84rem] font-medium"
           >

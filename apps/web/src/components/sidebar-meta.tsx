@@ -10,6 +10,7 @@
  * where it sat next to End-Users as if the two were the same kind of errand.
  */
 import { Link, useLocation } from "react-router-dom";
+import { openAsModal } from "../lib/modal-route";
 import { useTranslation } from "react-i18next";
 import { BarChart3, Code2, Settings } from "lucide-react";
 import { useAppConfig } from "../hooks/use-app-config";
@@ -24,7 +25,8 @@ import {
 
 export function SidebarMeta() {
   const { t } = useTranslation();
-  const { pathname } = useLocation();
+  const location = useLocation();
+  const { pathname } = location;
   const { features } = useAppConfig();
   const { isAdmin } = usePermissions();
 
@@ -90,7 +92,7 @@ export function SidebarMeta() {
               isActive={item.active}
               className="text-muted-foreground hover:text-sidebar-foreground"
             >
-              <Link to={item.path}>
+              <Link to={item.path} state={openAsModal(location)}>
                 <item.icon className={cn("size-4 shrink-0")} />
                 <span>{item.label}</span>
               </Link>
