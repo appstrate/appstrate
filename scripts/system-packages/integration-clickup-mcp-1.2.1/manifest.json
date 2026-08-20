@@ -1,6 +1,6 @@
 {
   "name": "@appstrate/clickup-mcp",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "type": "integration",
   "schema_version": "0.1",
   "display_name": "ClickUp",
@@ -54,6 +54,7 @@
     "clickup_create_list_in_folder": {},
     "clickup_create_reminder": {},
     "clickup_create_task": {},
+    "clickup_delete_comment": {},
     "clickup_delete_task": {},
     "clickup_download_task_attachment": {},
     "clickup_filter_tasks": {},
@@ -88,6 +89,7 @@
     "clickup_send_chat_message": {},
     "clickup_start_time_tracking": {},
     "clickup_stop_time_tracking": {},
+    "clickup_update_comment": {},
     "clickup_update_document_page": {},
     "clickup_update_folder": {},
     "clickup_update_list": {},
