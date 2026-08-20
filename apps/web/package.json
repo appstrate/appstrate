@@ -8,7 +8,9 @@
     "build": "vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "test": "bun test --recursive src/"
+    "test": "bun test --recursive src/",
+    "dev:hmr": "vite",
+    "dev:lab": "VITE_LAB=1 vite"
   },
   "dependencies": {
     "@appstrate/core": "workspace:*",

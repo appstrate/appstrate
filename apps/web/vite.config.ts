@@ -76,9 +76,63 @@ function i18nBootPreload(): Plugin {
   };
 }
 
+/**
+ * Lab mode (`bun run dev:lab`) — inject `src/lab/install.ts` as the module
+ * script *ahead of* `/src/main.tsx`, so the fixture layer patches `fetch`
+ * before `api/client.ts` and `lib/auth-client.ts` are evaluated and capture a
+ * reference to the real one. Ordered `type="module"` scripts run in document
+ * order, which is the whole mechanism.
+ *
+ * `apply: "serve"` — this never touches a production build, and `src/lab` is
+ * unreachable from the app's import graph, so it is not bundled either.
+ */
+function labMode(): Plugin {
+  return {
+    name: "appstrate:lab-mode",
+    apply: "serve",
+    transformIndexHtml: {
+      order: "pre",
+      handler(html) {
+        if (!process.env.VITE_LAB) return html;
+        return {
+          html,
+          tags: [
+            {
+              tag: "script",
+              attrs: { type: "module", src: "/src/lab/install.ts" },
+              injectTo: "body-prepend",
+            },
+          ],
+        };
+      },
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [react(), tailwindcss(), i18nBootPreload()],
+  plugins: [react(), tailwindcss(), i18nBootPreload(), labMode()],
   envDir: "../../",
+  // Hot-reload dev server (`bun run dev:hmr` / `dev:lab`). The production
+  // pipeline is unchanged: `dev`/`build` still emit into `dist/`, which the
+  // API serves. This block only exists for `vite dev`, which serves the SPA
+  // itself and swaps edited modules into the running page instead of
+  // rebuilding the whole bundle and reloading the tab.
+  //
+  // `proxy` forwards API + auth + SSE traffic to the local backend so the
+  // same-origin cookie and `/api` paths keep working from port 5173. In lab
+  // mode nothing reaches it — `src/lab` answers every request in the browser —
+  // but leaving it wired means `dev:hmr` works against a real instance with
+  // no further setup.
+  server: {
+    port: 5173,
+    proxy: {
+      "/api": {
+        target: process.env.VITE_API_ORIGIN ?? "http://localhost:3000",
+        changeOrigin: false,
+        ws: true,
+      },
+    },
+  },
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
