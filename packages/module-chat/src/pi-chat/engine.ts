@@ -23,7 +23,12 @@
  * consumes from the ai-sdk path — one client contract, two loops.
  */
 
-import { createUIMessageStream, createUIMessageStreamResponse, type UIMessageChunk } from "ai";
+import {
+  createUIMessageStream,
+  createUIMessageStreamResponse,
+  type UIMessage,
+  type UIMessageChunk,
+} from "ai";
 import {
   loadPiCodingAgentSdk,
   derivePiCompactionSettings,
@@ -55,6 +60,7 @@ import {
   subscriptionFailureChunks,
 } from "./subscription-turn-closure.ts";
 import { createPiChatResourceLoader } from "./resource-loader.ts";
+import { buildStructuredPiTurn, reconstructPiSession } from "./structured-session.ts";
 
 /**
  * Wall-clock ceiling for a single chat turn. A turn fans out into up to
@@ -90,8 +96,8 @@ export interface PiSubscriptionChatInput {
   userId: string;
   /** Chat session the turn belongs to (null for an ephemeral, unpersisted turn). */
   chatSessionId: string | null;
-  /** Pre-assembled transcript prompt for this turn. */
-  prompt: string;
+  /** Canonical active UIMessage branch, including the current user head. */
+  messages: UIMessage[];
   /** Base system persona (+ caller context) — MCP instructions are appended here. */
   system: string;
   generation: ModelGenerationSettings;
@@ -173,6 +179,7 @@ export function runPiSubscriptionChat(input: PiSubscriptionChatInput): Response 
         const {
           createAgentSession,
           DefaultResourceLoader,
+          estimateTokens,
           ModelRuntime,
           SessionManager,
           SettingsManager,
@@ -198,6 +205,35 @@ export function runPiSubscriptionChat(input: PiSubscriptionChatInput): Response 
           thinkingLevel,
           thinkingBudgets,
         } = prepareRequestedThinkingLevel(piModel, requestedThinkingLevel);
+        const projectedTurn = buildStructuredPiTurn(
+          input.messages,
+          {
+            api: sessionModel.api,
+            provider: sessionModel.provider,
+            model: sessionModel.id,
+          },
+          {
+            estimateTokens,
+            // The system prompt is part of every request Pi sends, so it counts
+            // toward the context the compaction threshold is measured against.
+            baseTokens: estimateTokens({
+              role: "user",
+              content: [{ type: "text", text: input.system }],
+              timestamp: 0,
+            }),
+          },
+        );
+        const sessionManager = reconstructPiSession(SessionManager, projectedTurn.history);
+        logger.info("Pi chat session reconstructed", {
+          chatSessionId: input.chatSessionId,
+          branchHeadId: projectedTurn.branchHeadId,
+          modelId: sessionModel.id,
+          sourceMessageCount: projectedTurn.sourceMessageCount,
+          toolCallCount: projectedTurn.toolCallCount,
+          toolResultCount: projectedTurn.toolResultCount,
+          contextTokens: projectedTurn.contextTokens,
+          sessionFile: sessionManager.getSessionFile() ?? null,
+        });
 
         // Real subscription token in-memory only — pi-ai emits the OAuth request
         // shape from it natively (never persisted, never sent to the client).
@@ -239,7 +275,7 @@ export function runPiSubscriptionChat(input: PiSubscriptionChatInput): Response 
           thinkingLevel,
           modelRuntime,
           resourceLoader,
-          sessionManager: SessionManager.inMemory(),
+          sessionManager,
           settingsManager: SettingsManager.inMemory({
             compaction: derivePiCompactionSettings(piModel).compaction,
             thinkingBudgets,
@@ -278,7 +314,15 @@ export function runPiSubscriptionChat(input: PiSubscriptionChatInput): Response 
         });
 
         try {
-          await Promise.race([typedSession.prompt(input.prompt), abortPromise]);
+          await Promise.race([
+            // `expandPromptTemplates` defaults to true, which routes a message
+            // starting with "/" into Pi's extension-command dispatch. Chat text
+            // is user prose, never a Pi command: the resource loader already
+            // disables skills and prompt templates, and the chat extensions
+            // register tools only — pin the invariant rather than depend on it.
+            typedSession.prompt(projectedTurn.prompt, { expandPromptTemplates: false }),
+            abortPromise,
+          ]);
           // Early-stopping generate: the tool loop was cut at
           // CHAT_TOOL_STEP_BUDGET, so spend the last step on ONE tool-less model
           // call — the user gets a synthesis of the work already done instead of

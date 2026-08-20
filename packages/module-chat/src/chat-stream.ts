@@ -38,7 +38,6 @@ import { listModels, pickModel, modelFromFamily, resolveDefaultApplicationId } f
 import { openPlatformMcp, platformMcpUrl } from "./platform-mcp.ts";
 import { selfOrigin, forwardedHeaders } from "./self.ts";
 import { mintLoopbackToken, mintMcpLoopbackToken } from "./loopback-auth.ts";
-import { buildTranscriptPrompt } from "./transcript.ts";
 import { materializeUserAttachments, messagesWithAttachmentsAsText } from "./attachments.ts";
 import { runPiSubscriptionChat } from "./pi-chat/engine.ts";
 import { SYSTEM_PROMPT, buildCallerContextBlock, type ChatEnv } from "./prompt.ts";
@@ -793,7 +792,7 @@ export async function handleChatStream(
           orgId,
           userId: user.id,
           chatSessionId: meteringSessionId,
-          prompt: buildTranscriptPrompt(messages),
+          messages,
           system,
           generation: generationSettings,
           platformMcp: { url: platformMcpUrl(origin, orgId), headers: mcpHeaders },

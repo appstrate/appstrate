@@ -31,7 +31,8 @@ import {
 import { createUpload } from "../../../apps/api/src/services/uploads.ts";
 import { resolveChatAttachment } from "../../../apps/api/src/services/documents.ts";
 import { materializeUserAttachments, messagesWithAttachmentsAsText } from "../src/attachments.ts";
-import { buildTranscriptPrompt } from "../src/transcript.ts";
+import { loadPiCodingAgentSdk } from "@appstrate/runner-pi";
+import { buildStructuredPiTurn } from "../src/pi-chat/structured-session.ts";
 import { persistUserMessage } from "../src/persistence.ts";
 
 // Boot the platform app once (registers routes, storage, DB) — this test drives
@@ -191,10 +192,15 @@ describe("chat attachments", () => {
     expect(block).toContain("2.3 MB");
     expect(asText!.parts.some((p) => p.type === "file")).toBe(false);
 
-    // Pi transcript path surfaces the same block to the model.
-    const transcript = buildTranscriptPrompt([rewritten]);
-    expect(transcript).toContain(docId);
-    expect(transcript).toContain("[Attached document: rapport.txt");
+    // Pi structured projection surfaces the same block in the current prompt.
+    const { estimateTokens } = await loadPiCodingAgentSdk();
+    const turn = buildStructuredPiTurn(
+      [rewritten],
+      { api: "openai-completions", provider: "openai", model: "attachment-test" },
+      { estimateTokens, baseTokens: 0 },
+    );
+    expect(turn.prompt).toContain(docId);
+    expect(turn.prompt).toContain("[Attached document: rapport.txt");
   });
 
   it("rejects an attachment URI that is neither upload:// nor document:// (e.g. https://)", async () => {
