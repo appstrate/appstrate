@@ -69,7 +69,7 @@ function batchKey(context: unknown): object | undefined {
 export interface PiChatToolLoopSession {
   /** Restrict the tools exposed on the NEXT run (`[]` = tool-less). */
   setActiveToolsByName(toolNames: string[]): void;
-  prompt(message: string): Promise<void>;
+  prompt(message: string, options?: { expandPromptTemplates?: boolean }): Promise<void>;
   agent: {
     afterToolCall?: (
       context: unknown,
