@@ -572,21 +572,15 @@ export async function handleChatStream(
     messages[messages.length - 1] = lastMessage;
   }
 
-  // Resolve one Pi binding before selecting the engine. OAuth providers yield a
-  // fresh access token or a reconnect signal. API-key providers yield a proxy
-  // binding with no provider secret. OAuth always uses Pi; API-key models use Pi
-  // only for an exactly allowlisted organization during this phase.
+  // Credential mode first, engine second. The platform resolves the chosen model
+  // row: an API-key/unknown provider yields `{ subscription: false }`; an oauth2
+  // provider yields the real upstream binding + a fresh access token (or a
+  // reconnect signal). OAuth always uses Pi; an API-key model uses Pi only for an
+  // exactly allowlisted organization during this phase. The Pi model binding
+  // itself is resolved further down, on the Pi path only — building one here
+  // would put a throwaway model + bearer minter on the ai-sdk path's TTFT.
   const subscription = await deps.resolveSubscriptionChatModel(orgId, chosen.id);
-  const modelBindingResolution = resolvePiChatModelBinding({
-    model: chosen,
-    subscription,
-    origin,
-    mintBearer: mintInferenceAuth,
-  });
-  const isSubscription =
-    modelBindingResolution.status === "needs-reconnection" ||
-    (modelBindingResolution.status === "ready" &&
-      modelBindingResolution.binding.authMode === "oauth2");
+  const isSubscription = subscription.subscription;
   const selectedEngine = selectChatEngine({
     orgId,
     subscription: isSubscription,
@@ -691,10 +685,9 @@ export async function handleChatStream(
 
   logger.info("chat preamble", {
     engine: selectedEngine,
-    authMode:
-      modelBindingResolution.status === "ready"
-        ? modelBindingResolution.binding.authMode
-        : modelBindingResolution.status,
+    // Which credential the turn spends, orthogonal to which engine drives it:
+    // an oauth2 subscription token, or an org API key behind the llm-proxy.
+    credentialMode: isSubscription ? "oauth2" : "api-key",
     providerId: chosen.providerId,
     phaseAMs,
     phaseBMs,
@@ -702,16 +695,26 @@ export async function handleChatStream(
     hasTools: usePiEngine || Boolean(mcp),
   });
 
-  // Reject invalid Pi bindings and saturated capacity before the user message
-  // or active-stream marker is written. Once acquired, the slot is transferred
-  // to `runPiChat`, which releases it when the response stream closes.
+  // Resolve the Pi binding and reserve capacity before the user message or the
+  // active-stream marker is written, so a dead credential, an unsupported family
+  // or a saturated process leaves no half-written turn behind. Once acquired,
+  // the slot is transferred to `runPiChat`, which releases it when the response
+  // stream closes.
   let piAdmission: { slot: PiChatSlot; binding: ResolvedPiChatModelBinding } | undefined;
   if (usePiEngine) {
-    if (modelBindingResolution.status === "needs-reconnection") {
+    const resolution = resolvePiChatModelBinding({
+      model: chosen,
+      subscription,
+      origin,
+      mintBearer: mintInferenceAuth,
+    });
+    if (resolution.status === "needs-reconnection") {
+      // The oauth credential is dead → tell the client to reconnect rather than
+      // launching a session that would 401 upstream.
       await closeMcp();
       return subscriptionReconnectResponse();
     }
-    if (modelBindingResolution.status !== "ready") {
+    if (resolution.status !== "ready") {
       await closeMcp();
       throw invalidRequest(`Model family "${chosen.apiShape}" is not supported by Pi chat.`);
     }
@@ -720,7 +723,7 @@ export async function handleChatStream(
       await closeMcp();
       return chatCapacityResponse();
     }
-    piAdmission = { slot, binding: modelBindingResolution.binding };
+    piAdmission = { slot, binding: resolution.binding };
   }
 
   // ── Server-authoritative persistence + resumable streaming ───────────────

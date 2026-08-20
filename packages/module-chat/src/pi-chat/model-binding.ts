@@ -32,7 +32,11 @@ interface PiChatModelBindingBase {
 
 export interface PiProxyModelBinding extends PiChatModelBindingBase {
   authMode: "proxy";
-  /** Inert value required by provider serializers. */
+  /**
+   * Inert placeholder registered on the runtime so the provider counts as
+   * authenticated. It authorizes nothing: {@link authExtension} overwrites the
+   * Authorization header on every request, and llm-proxy never forwards it.
+   */
   runtimeApiKey: "proxy";
   /** Per-request bearer injection through Pi's provider-header lifecycle hook. */
   authExtension: ExtensionFactory;
@@ -61,19 +65,20 @@ export const PI_CHAT_MODEL_RUNTIME_CREATE_OPTIONS = {
   refreshOnCreate: false,
 } as const;
 
-interface PiModelRuntimeApiRegistration {
-  getProvider(providerId: string): { getModels(): ReadonlyArray<{ api: string }> } | undefined;
-  registerProvider(
-    providerId: string,
-    config: { api?: Api; baseUrl?: string; apiKey?: string },
-  ): void;
-}
-
 export type PiChatModelBindingResolution =
   | { status: "ready"; binding: ResolvedPiChatModelBinding }
   | { status: "needs-reconnection" }
   | { status: "unsupported" };
 
+/**
+ * llm-proxy base URL per family, in the shape PI expects — NOT the one
+ * `proxyTarget` (`../llm.ts`) hands the AI SDK. Both tables end on the same
+ * absolute URL; they differ because each client appends a different path:
+ * pi-ai's Anthropic client appends `/v1/messages` and its Mistral transport
+ * appends `v1/chat/completions`, so the `/v1` the AI SDK path carries in its
+ * base would be duplicated here. Change one table and re-derive the other from
+ * the client's own path building, never by copying the string across.
+ */
 function proxyBaseUrl(origin: string, apiShape: string): string | null {
   switch (apiShape) {
     case "openai-completions":
@@ -160,21 +165,6 @@ export function createPiProxyModelBinding(args: {
     authExtension: createPiProxyAuthExtension(args.mintBearer),
     metering: { kind: "proxy" },
   };
-}
-
-/** Keep the proxy model's declared serializer when Pi's built-in provider uses another API. */
-export function ensurePiRuntimeModelApi(
-  runtime: PiModelRuntimeApiRegistration,
-  binding: PiProxyModelBinding,
-): void {
-  const supportsApi = runtime
-    .getProvider(binding.provider)
-    ?.getModels()
-    .some((model) => model.api === binding.model.api);
-  runtime.registerProvider(binding.provider, {
-    ...(supportsApi ? {} : { api: binding.model.api, baseUrl: binding.model.baseUrl }),
-    apiKey: binding.runtimeApiKey,
-  });
 }
 
 export function createPiOAuthModelBinding(model: SubscriptionChatModel): PiOAuthModelBinding {

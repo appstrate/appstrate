@@ -165,6 +165,12 @@ export function applyGenerationToProxyBody(
  *     SDK support, not by shared definition; the two clients can diverge.
  * {@link CHAT_USABLE_FAMILIES} is a superset on purpose — see below.
  */
+/**
+ * llm-proxy path suffix per family, in the shape the AI SDK providers expect.
+ * The Pi engine keeps its own table (`proxyBaseUrl`, `pi-chat/model-binding.ts`)
+ * because pi-ai's clients append different paths — same final URL, different
+ * base. Keep the two in step when a family is added.
+ */
 function proxyTarget(family: string): { kind: ProxyKind; suffix: string } | null {
   switch (family) {
     case "anthropic-messages":

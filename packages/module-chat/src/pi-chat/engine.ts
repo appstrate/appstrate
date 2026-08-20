@@ -54,7 +54,6 @@ import { classifyClientTurnError, clientTurnErrorMarker } from "../turn-error.ts
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 import { buildPiTurnMetadata, piFailureChunks } from "./pi-turn-closure.ts";
 import {
-  ensurePiRuntimeModelApi,
   PI_CHAT_MODEL_RUNTIME_CREATE_OPTIONS,
   type ResolvedPiChatModelBinding,
 } from "./model-binding.ts";
@@ -206,12 +205,22 @@ export function runPiChat(input: PiChatInput): Response {
           sessionFile: sessionManager.getSessionFile() ?? null,
         });
 
-        // OAuth uses the real access token in memory. Proxy-routed models hold
-        // only the inert `proxy` placeholder; their bearer is minted per request
-        // by the `before_provider_headers` extension in the binding.
+        // OAuth uses the real access token in memory. A proxy-routed model
+        // registers only the inert `proxy` placeholder — enough to satisfy the
+        // provider's "some credential is configured" check; the bearer that
+        // actually authorizes the call is minted per request by the binding's
+        // `before_provider_headers` extension. Registration carries no `api` or
+        // `baseUrl`: pi-ai builds every request URL from `model.baseUrl` (which
+        // already points at the llm-proxy) and picks the serializer from
+        // `model.api`, so declaring either on the provider would be dead weight.
+        // `registerProvider` (not `setRuntimeApiKey`) keeps that placeholder
+        // synchronous and purely in-memory — no credential-state sync on the
+        // turn's critical path.
         const modelRuntime = await ModelRuntime.create(PI_CHAT_MODEL_RUNTIME_CREATE_OPTIONS);
         if (modelBinding.authMode === "proxy") {
-          ensurePiRuntimeModelApi(modelRuntime, modelBinding);
+          modelRuntime.registerProvider(modelBinding.provider, {
+            apiKey: modelBinding.runtimeApiKey,
+          });
         } else {
           await setPiRuntimeCredential(
             modelRuntime,
