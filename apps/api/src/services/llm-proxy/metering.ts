@@ -304,14 +304,14 @@ export interface MeteredForwardOptions {
    * frames, JSON body), upstream error bodies are REPLACED with a synthetic
    * neutral envelope, and response headers are reduced to the shared allowlist
    * — so the caller never sees the backing model. The usage tap reads the
-   * untouched stream, so accounting still sees the real id. `null` (the
-   * subscription gateways) forwards verbatim.
+   * untouched stream, so accounting still sees the real id. `null` forwards
+   * verbatim — a non-aliased preset has nothing to swap.
    */
   swap?: ModelSwap | null;
   /**
    * Response-cache write for a non-streaming 2xx reply. When set, the forwarded
    * (already alias-swapped) body is persisted and the `x-llm-proxy-cache-status:
-   * MISS` header is stamped. Omitted (subscription gateways) → no caching.
+   * MISS` header is stamped. Omitted → no caching.
    */
   cache?: { cacheKey: string; ttlSeconds: number } | null;
   /** Log-line prefix for the out-of-band SSE-metering-failure error. */
@@ -399,8 +399,8 @@ export function guardSseTeardown(
 
 /**
  * Forward an upstream LLM response to the caller and record usage — the single
- * forwarding terminus shared by the protocol-adapter core ({@link proxyLlmCall})
- * and the Claude Code subscription SDK gateway. Handles the three branches
+ * forwarding terminus, reached through the protocol-adapter core
+ * ({@link proxyLlmCall}). Handles the three branches
  * identically (errors verbatim + un-metered; SSE teed + tapped out-of-band;
  * non-streaming JSON buffered + metered), with optional alias-swap and
  * response-cache woven in. Returns the client-facing `Response`.

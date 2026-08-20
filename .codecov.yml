@@ -42,6 +42,23 @@ flags:
     carryforward: true
   public-origin:
     carryforward: false
+    # SCOPED on purpose. This job boots the whole platform to exercise ONE OIDC
+    # route, and Bun instruments every file that boot loads — so an unscoped
+    # upload contributes 0-hit lines for every subsystem the job merely
+    # imported. Codecov unions sessions per line, and a line the `unit` session
+    # does not even emit can then never be marked covered: it is missing
+    # forever. Measured on #1173, `packages/module-chat/src/pi-chat/model-binding.ts`
+    # was 92/92 (100%) in `unit` and reported at 80.7% because this flag added
+    # 20 phantom lines; `chat-stream.ts` gained ~156. That inflates patch
+    # coverage on every PR touching a file the boot path loads.
+    #
+    # Keep this list to what the job actually exercises — the OIDC module, the
+    # Better Auth wiring it drives, and the email templates whose links carry
+    # the public origin. Widening it re-imports the problem.
+    paths:
+      - apps/api/src/modules/oidc/**
+      - packages/db/src/auth.ts
+      - packages/emails/**
   integration:
     carryforward: true
 

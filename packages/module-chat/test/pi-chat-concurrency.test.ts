@@ -13,8 +13,11 @@ import { afterEach, describe, expect, it } from "bun:test";
 import {
   acquirePiChatSlot,
   chatCapacityResponse,
+  piChatConcurrencyIsDefault,
+  piChatConcurrencyStats,
   piChatMaxConcurrency,
   releaseOnClose,
+  resetPiChatConcurrencyStats,
   type PiChatSlot,
 } from "../src/pi-chat/concurrency.ts";
 
@@ -155,5 +158,50 @@ describe("releaseOnClose", () => {
     }).getReader();
     const { done } = await reader.read();
     expect(done).toBe(true);
+  });
+});
+
+describe("capacity signal for sizing the cap", () => {
+  afterEach(() => {
+    delete process.env[ENV_VAR];
+    resetPiChatConcurrencyStats();
+  });
+
+  it("records the high-water mark, so a quiet process reads differently from a pinned one", () => {
+    process.env[ENV_VAR] = "3";
+    resetPiChatConcurrencyStats();
+    const a = acquirePiChatSlot()!;
+    const b = acquirePiChatSlot()!;
+    expect(piChatConcurrencyStats()).toMatchObject({ active: 2, highWaterMark: 2, max: 3 });
+
+    // Releasing lowers `active` but must NOT lower the mark — the peak is the
+    // whole point: an operator sizing the cap needs what the process ever held,
+    // not what it happens to hold when they look.
+    a.release();
+    b.release();
+    expect(piChatConcurrencyStats()).toMatchObject({ active: 0, highWaterMark: 2 });
+  });
+
+  it("counts every refusal", () => {
+    process.env[ENV_VAR] = "1";
+    resetPiChatConcurrencyStats();
+    const held = acquirePiChatSlot()!;
+    expect(acquirePiChatSlot()).toBeNull();
+    expect(acquirePiChatSlot()).toBeNull();
+    expect(piChatConcurrencyStats()).toMatchObject({ rejected: 2, active: 1, max: 1 });
+    held.release();
+  });
+
+  it("reports whether the cap is an operator decision or the built-in default", () => {
+    delete process.env[ENV_VAR];
+    expect(piChatConcurrencyIsDefault()).toBe(true);
+    // Invalid input falls back to the default, so it is NOT a decision either —
+    // a typo'd cap must not read as deliberate.
+    process.env[ENV_VAR] = "nope";
+    expect(piChatConcurrencyIsDefault()).toBe(true);
+    process.env[ENV_VAR] = "0";
+    expect(piChatConcurrencyIsDefault()).toBe(true);
+    process.env[ENV_VAR] = "32";
+    expect(piChatConcurrencyIsDefault()).toBe(false);
   });
 });

@@ -287,8 +287,7 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
   }
 
   // Forward + meter, weaving in the alias-swap (every branch) and the
-  // response-cache write (non-streaming 2xx). Shared with the Claude Code
-  // subscription gateway, which forwards verbatim (no swap, no cache).
+  // response-cache write (non-streaming 2xx).
   return forwardMeteredResponse(
     upstream,
     inputs.adapter,

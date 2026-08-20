@@ -27,6 +27,7 @@ import { buildChatPlatformDeps, type ChatPlatformDeps } from "./platform-service
 import { drainTurns } from "./inflight.ts";
 import { reconcileChatRun } from "./run-reconcile.ts";
 import { logger } from "./logger.ts";
+import { warnIfDefaultChatConcurrency } from "./pi-chat/concurrency.ts";
 import { z } from "zod";
 
 // Platform deps captured at init from `ctx.services` (immutable; no module-level
@@ -55,6 +56,9 @@ const chatModule: AppstrateModule = {
     // /api/models, /api/applications, /api/me/context, the llm-proxy — loopback
     // fetch fallback inside), and the subscription-model resolution + usage metering.
     deps = buildChatPlatformDeps(ctx);
+    // Chat now runs entirely in-process, so its concurrency cap is a capacity
+    // decision an operator must make deliberately. Say so at boot.
+    warnIfDefaultChatConcurrency();
   },
 
   createRouter() {
