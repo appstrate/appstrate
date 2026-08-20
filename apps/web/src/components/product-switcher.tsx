@@ -9,7 +9,7 @@
  */
 import { useNavigate, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Check, MessageSquare } from "lucide-react";
+import { Blocks, Check, MessageSquare } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import {
   DropdownMenu,
@@ -18,7 +18,6 @@ import {
   DropdownMenuTrigger,
 } from "@appstrate/ui/components/dropdown-menu";
 import { useAppConfig } from "@/hooks/use-app-config";
-import { AppstrateMark } from "@/components/appstrate-mark";
 
 /** The redesign's nine-dot grid. No lucide glyph matches it. */
 function GridIcon({ className }: { className?: string }) {
@@ -44,7 +43,7 @@ export function ProductSwitcher() {
       description: t("products.studioDescription"),
       to: "/",
       active: !pathname.startsWith("/chat"),
-      icon: <AppstrateMark className="h-5 w-auto text-white" />,
+      icon: <Blocks className="size-[18px]" />,
       tint: "bg-primary",
       enabled: true,
     },
