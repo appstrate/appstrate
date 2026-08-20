@@ -1,21 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import type { ReactNode } from "react";
-import { Link } from "react-router-dom";
-import {
-  Breadcrumb,
-  BreadcrumbItem,
-  BreadcrumbLink,
-  BreadcrumbList,
-  BreadcrumbPage,
-  BreadcrumbSeparator,
-} from "@appstrate/ui/components/breadcrumb";
+import { useEffect, type ReactNode } from "react";
+import { useBreadcrumbStore, type BreadcrumbEntry } from "@/stores/breadcrumb-store";
 
-export interface BreadcrumbEntry {
-  label: string;
-  href?: string;
-  node?: ReactNode;
-}
+export type { BreadcrumbEntry };
 
 interface PageHeaderProps {
   title: string;
@@ -35,28 +23,20 @@ export function PageHeader({
   actions,
   children,
 }: PageHeaderProps) {
+  // Pages keep declaring their trail here, next to the code that knows the
+  // dynamic labels; the shell header draws it. Keyed on the labels and hrefs
+  // rather than the array itself, which every page rebuilds on each render and
+  // which would otherwise publish in a loop.
+  const setEntries = useBreadcrumbStore((s) => s.setEntries);
+  const signature = JSON.stringify((breadcrumbs ?? []).map((c) => [c.label, c.href]));
+  useEffect(() => {
+    setEntries(breadcrumbs ?? []);
+    return () => setEntries([]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [signature, setEntries]);
+
   return (
     <div className="mb-4">
-      {breadcrumbs && breadcrumbs.length > 0 && (
-        <Breadcrumb className="mb-2">
-          <BreadcrumbList>
-            {breadcrumbs.map((crumb, i) => (
-              <BreadcrumbItem key={i}>
-                {i > 0 && <BreadcrumbSeparator />}
-                {crumb.node ? (
-                  crumb.node
-                ) : crumb.href ? (
-                  <BreadcrumbLink asChild>
-                    <Link to={crumb.href}>{crumb.label}</Link>
-                  </BreadcrumbLink>
-                ) : (
-                  <BreadcrumbPage>{crumb.label}</BreadcrumbPage>
-                )}
-              </BreadcrumbItem>
-            ))}
-          </BreadcrumbList>
-        </Breadcrumb>
-      )}
       <div className="flex min-h-9 items-center justify-between gap-4">
         <h2 className="flex items-center gap-2 text-lg font-semibold">
           {icon ?? (emoji && <span>{emoji}</span>)}

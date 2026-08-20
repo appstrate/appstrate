@@ -59,7 +59,6 @@ export function SharedHeader({
         emoji={emojiMap[detail.type]}
         icon={iconNode}
         breadcrumbs={[
-          { label: t("nav.orgSection", { ns: "common" }), href: "/" },
           { label: breadcrumbLabel, href: breadcrumbPath },
           { label: detail.displayName },
         ]}

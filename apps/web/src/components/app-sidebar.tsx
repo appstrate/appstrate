@@ -2,7 +2,6 @@
 
 import type { ComponentProps } from "react";
 import { Link } from "react-router-dom";
-import { OrgSwitcher } from "@/components/org-switcher";
 import { NavOrg } from "@/components/nav-org";
 import { SidebarBilling } from "@/components/sidebar-billing";
 import { useTheme } from "@/stores/theme-store";
@@ -41,7 +40,6 @@ function SidebarLogo() {
         className="hidden size-7 shrink-0 group-data-[collapsible=icon]:block group-data-[collapsible=icon]:group-hover/logo:hidden"
       />
       {/* Toggle: always shown when expanded; collapsed only on hover */}
-      <SidebarTrigger className="ml-auto shrink-0 group-data-[collapsible=icon]:ml-0 group-data-[collapsible=icon]:hidden group-data-[collapsible=icon]:group-hover/logo:flex" />
     </div>
   );
 }
@@ -56,8 +54,11 @@ export function AppSidebar(props: ComponentProps<typeof Sidebar>) {
         <NavOrg />
         <SidebarBilling />
       </SidebarContent>
-      <SidebarFooter>
-        <OrgSwitcher />
+      {/* The org/workspace switcher now opens the header trail. Two switchers
+          for one thing reads as hesitation, so the footer keeps only the
+          collapse control. */}
+      <SidebarFooter className="border-sidebar-border flex-row items-center justify-end border-t py-1.5">
+        <SidebarTrigger />
       </SidebarFooter>
     </Sidebar>
   );

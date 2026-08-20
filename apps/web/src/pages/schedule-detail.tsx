@@ -51,13 +51,12 @@ export function ScheduleDetailPage() {
   };
 
   return (
-    <div className="p-6">
+    <div>
       <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as typeof activeTab)}>
         <PageHeader
           title={schedule.name || schedule.id}
           emoji="📅"
           breadcrumbs={[
-            { label: t("nav.orgSection", { ns: "common" }), href: "/" },
             { label: t("schedule.breadcrumbList"), href: "/schedules" },
             { label: schedule.name || schedule.id },
           ]}

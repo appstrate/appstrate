@@ -125,7 +125,6 @@ export function OrgSettingsLayout() {
   const isAppRoute = location.pathname.startsWith("/org-settings/app/");
 
   const breadcrumbs: BreadcrumbEntry[] = [
-    { label: t("nav.orgSection", { ns: "common" }), href: "/" },
     { label: t("orgSettings.pageTitle"), href: "/org-settings" },
     ...(isAppRoute ? [{ label: application?.name ?? "", node: <AppSettingsSwitcher /> }] : []),
     ...(activeItem ? [{ label: activeItem.label }] : []),

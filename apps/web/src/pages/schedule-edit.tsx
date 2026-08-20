@@ -31,12 +31,11 @@ export function ScheduleEditPage() {
   const scheduleName = schedule.name || t("schedule.unnamed");
 
   return (
-    <div className="p-6">
+    <div>
       <PageHeader
         title={t("schedule.titleEdit")}
         emoji="📅"
         breadcrumbs={[
-          { label: t("nav.orgSection", { ns: "common" }), href: "/" },
           { label: t("schedule.breadcrumbList"), href: "/schedules" },
           { label: scheduleName, href: `/schedules/${id}` },
           { label: t("schedule.breadcrumbEdit") },

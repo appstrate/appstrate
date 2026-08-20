@@ -70,7 +70,6 @@ export function EditorShell({
   const listPath = packageListPath(type);
 
   const breadcrumbs: BreadcrumbEntry[] = [
-    { label: t("nav.orgSection", { ns: "common" }), href: "/" },
     { label: t(listLabel.key, { ns: listLabel.ns }), href: listPath },
   ];
 
@@ -89,7 +88,7 @@ export function EditorShell({
     : t(breadcrumbNewKeys[type]);
 
   return (
-    <div className="space-y-4 p-6">
+    <div className="space-y-4">
       <PageHeader title={title} emoji={emojiMap[type]} breadcrumbs={breadcrumbs} />
 
       {error && (

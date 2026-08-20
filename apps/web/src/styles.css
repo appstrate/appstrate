@@ -56,6 +56,11 @@
      is what the blue means. */
   --color-spark: var(--spark);
   --color-spark-foreground: var(--spark-foreground);
+  /* Page frame — the redesign's `--droit-gutter` and its 1300px column. The
+     header's inner row and the page body share both, which is what lines the
+     org chip up with the content's left edge and the profile with its right. */
+  --spacing-gutter: clamp(1.25rem, 3vw, 2.75rem);
+  --container-page: 1300px;
 }
 
 :root {

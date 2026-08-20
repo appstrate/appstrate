@@ -364,7 +364,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   const versionLabel = isHistoricalVersion ? versionDetail?.version : undefined;
 
   return (
-    <div className="p-6">
+    <div>
       <SharedHeader
         detail={unifiedForHeader}
         isHistoricalVersion={isHistoricalVersion}

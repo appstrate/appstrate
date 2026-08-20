@@ -79,10 +79,7 @@ export function ItemTab({
           </>
         }
         title={title}
-        breadcrumbs={[
-          { label: t("nav.orgSection", { ns: "common" }), href: "/" },
-          { label: title },
-        ]}
+        breadcrumbs={[{ label: title }]}
       />
       <ImportModal open={importOpen} onClose={() => setImportOpen(false)} />
     </>

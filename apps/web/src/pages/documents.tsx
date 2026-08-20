@@ -95,15 +95,8 @@ function DocumentsPageContent() {
   };
 
   return (
-    <div className="p-6">
-      <PageHeader
-        title={t("page.title")}
-        emoji="📄"
-        breadcrumbs={[
-          { label: t("nav.orgSection", { ns: "common" }), href: "/" },
-          { label: t("page.title") },
-        ]}
-      />
+    <div>
+      <PageHeader title={t("page.title")} emoji="📄" breadcrumbs={[{ label: t("page.title") }]} />
 
       <StorageUsageLine />
 

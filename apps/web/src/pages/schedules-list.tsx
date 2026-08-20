@@ -25,14 +25,11 @@ export function SchedulesListPage() {
     agents?.find((f) => f.id === packageId)?.display_name ?? packageId;
 
   return (
-    <div className="p-6">
+    <div>
       <PageHeader
         title={t("schedules.title")}
         emoji="📅"
-        breadcrumbs={[
-          { label: t("nav.orgSection", { ns: "common" }), href: "/" },
-          { label: t("schedules.title") },
-        ]}
+        breadcrumbs={[{ label: t("schedules.title") }]}
         actions={
           isAdmin ? (
             <Button onClick={() => navigate("/schedules/new")}>{t("schedules.create")}</Button>

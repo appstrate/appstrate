@@ -15,6 +15,7 @@ import { MagicLinkPage } from "./pages/magic-link";
 import { ErrorBoundary } from "./components/error-boundary";
 import { HostedAuthGate } from "./components/hosted-auth-gate";
 import { AppSidebar } from "./components/app-sidebar";
+import { ShellBreadcrumb } from "./components/shell-breadcrumb";
 import { NotificationBell } from "./components/notification-bell";
 import { NavUser } from "./components/nav-user";
 import { LoadingState } from "./components/page-states";
@@ -212,17 +213,23 @@ function MainLayout() {
       {/* `bg-canvas` overrides SidebarInset's own `bg-background`: the content
           column is page canvas (grey), not a component surface (white). */}
       <SidebarInset className="bg-canvas h-svh">
-        <header className="flex h-14 shrink-0 items-center gap-2 border-b transition-[width,height] ease-linear group-has-data-[collapsible=icon]/sidebar-wrapper:h-12">
-          {/* Mobile-only trigger — desktop collapse lives in the sidebar header */}
-          <SidebarTrigger className="ml-2 md:hidden" />
-          <div className="flex-1" />
-          <div className="flex items-center gap-1 px-4">
-            <NotificationBell />
-            <NavUser />
+        <header className="flex h-14 shrink-0 items-center border-b transition-[width,height] ease-linear group-has-data-[collapsible=icon]/sidebar-wrapper:h-12">
+          <div className="max-w-page px-gutter mx-auto flex w-full items-center gap-2">
+            {/* Mobile-only trigger — desktop collapse lives in the sidebar */}
+            <SidebarTrigger className="md:hidden" />
+            <ShellBreadcrumb />
+            <div className="flex shrink-0 items-center gap-1">
+              <NotificationBell />
+              <NavUser />
+            </div>
           </div>
         </header>
         <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-          <Outlet />
+          {/* Full-bleed surfaces (the chat, anything that owns its own height)
+              opt out with `data-full-bleed` on their root. */}
+          <div className="max-w-page px-gutter mx-auto w-full pt-8 pb-18 has-[[data-full-bleed]]:max-w-none has-[[data-full-bleed]]:p-0">
+            <Outlet />
+          </div>
         </div>
       </SidebarInset>
     </SidebarProvider>

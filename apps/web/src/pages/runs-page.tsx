@@ -19,14 +19,11 @@ export function RunsPage() {
   const [kindTab, setKindTab] = useState<RunKindFilter>("all");
 
   return (
-    <div className="p-6">
+    <div>
       <PageHeader
         title={t("runs.title")}
         emoji="▶️"
-        breadcrumbs={[
-          { label: t("nav.orgSection", { ns: "common" }), href: "/" },
-          { label: t("runs.title") },
-        ]}
+        breadcrumbs={[{ label: t("runs.title") }]}
         actions={
           <Button
             variant="outline"

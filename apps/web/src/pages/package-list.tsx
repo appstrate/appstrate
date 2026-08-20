@@ -110,14 +110,11 @@ export function PackageList() {
   }));
 
   return (
-    <div className="p-6">
+    <div>
       <PackageTab
         title={t("list.tabAgents")}
         emoji="⚡"
-        breadcrumbs={[
-          { label: t("nav.orgSection", { ns: "common" }), href: "/" },
-          { label: t("list.tabAgents") },
-        ]}
+        breadcrumbs={[{ label: t("list.tabAgents") }]}
         items={items}
         isLoading={isLoading}
         error={error}

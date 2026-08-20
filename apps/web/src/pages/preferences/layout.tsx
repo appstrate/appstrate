@@ -11,10 +11,7 @@ export function PreferencesLayout() {
     <SettingsLayout
       title={t("preferences.title")}
       emoji="👤"
-      breadcrumbs={[
-        { label: t("nav.orgSection", { ns: "common" }), href: "/" },
-        { label: t("preferences.title") },
-      ]}
+      breadcrumbs={[{ label: t("preferences.title") }]}
       sections={[
         {
           label: t("preferences.sectionAccount"),

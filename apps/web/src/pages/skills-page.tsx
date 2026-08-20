@@ -4,7 +4,7 @@ import { ItemTab } from "./item-tab";
 
 export function SkillsPage() {
   return (
-    <div className="p-6">
+    <div>
       <ItemTab />
     </div>
   );

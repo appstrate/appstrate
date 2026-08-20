@@ -238,14 +238,13 @@ export function RunDetailPage() {
   // Inline agents are 1:1 with their single run — the agent crumb already
   // identifies the run, so a trailing "Run #N" crumb is redundant.
   const breadcrumbs = [
-    { label: t("nav.orgSection", { ns: "common" }), href: "/" },
     { label: t("detail.breadcrumb"), href: "/agents" },
     agentCrumb,
     ...(isInline ? [] : [{ label: runCrumbLabel }]),
   ];
 
   return (
-    <div className="p-6">
+    <div>
       <PageHeader title={title} breadcrumbs={breadcrumbs} />
 
       <div className="border-border mb-4 rounded-md border">

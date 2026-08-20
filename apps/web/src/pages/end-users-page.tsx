@@ -126,14 +126,11 @@ function EndUsersPageContent() {
   if (error) return <ErrorState message={getErrorMessage(error)} />;
 
   return (
-    <div className="p-6">
+    <div>
       <PageHeader
         title={t("endUsers.pageTitle")}
         emoji="👥"
-        breadcrumbs={[
-          { label: t("nav.orgSection", { ns: "common" }), href: "/" },
-          { label: t("endUsers.pageTitle") },
-        ]}
+        breadcrumbs={[{ label: t("endUsers.pageTitle") }]}
         actions={
           <Button onClick={() => setCreateOpen(true)}>{t("applications.newEndUser")}</Button>
         }

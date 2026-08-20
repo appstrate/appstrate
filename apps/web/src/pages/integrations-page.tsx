@@ -93,14 +93,11 @@ export function IntegrationsPage() {
   }, [integrations, tab, query]);
 
   return (
-    <div className="p-6">
+    <div>
       <PageHeader
         emoji="🧩"
         title={t("integrations.title")}
-        breadcrumbs={[
-          { label: t("nav.orgSection", { ns: "common" }), href: "/" },
-          { label: t("integrations.title") },
-        ]}
+        breadcrumbs={[{ label: t("integrations.title") }]}
         actions={
           isAdmin ? (
             <Link to="/integrations/new">

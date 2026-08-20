@@ -26,12 +26,11 @@ export function ScheduleCreatePage() {
   if (agentsLoading) return <LoadingState />;
 
   return (
-    <div className="p-6">
+    <div>
       <PageHeader
         title={t("schedule.titleNew")}
         emoji="📅"
         breadcrumbs={[
-          { label: t("nav.orgSection", { ns: "common" }), href: "/" },
           { label: t("schedule.breadcrumbList"), href: "/schedules" },
           { label: t("schedule.breadcrumbNew") },
         ]}

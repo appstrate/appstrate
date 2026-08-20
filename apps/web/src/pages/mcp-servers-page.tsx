@@ -4,7 +4,7 @@ import { ItemTab } from "./item-tab";
 
 export function McpServersPage() {
   return (
-    <div className="p-6">
+    <div>
       <ItemTab type="mcp-server" readOnly />
     </div>
   );
