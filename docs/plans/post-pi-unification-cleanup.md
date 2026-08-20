@@ -136,10 +136,21 @@ Each verified during the audit; none caused by #1173.
   The defect is that nothing says so and nothing enforces the rest of the list.
   Add a compile-time subset guard plus the carve-out in prose. Do **not** add
   codex to the picker.
-- **`@earendil-works/pi-coding-agent` devDep in `apps/api`** with no importer
-  (the real importers, `packages/runner-pi` and `runtime-pi`, declare it
-  themselves). Remove only if a full typecheck stays green — it may be
-  satisfying type resolution.
+- ~~**`@earendil-works/pi-coding-agent` devDep in `apps/api`** with no
+  importer.~~ **Investigated and NOT removed.** It has no import statement, but
+  it is not dead: `packages/runner-pi` declares the package in
+  `peerDependencies`, and `apps/api` is the consumer that imports
+  `@appstrate/runner-pi` — so this line is what satisfies that peer. A
+  typecheck cannot see it, because the actual load is a runtime `import()`
+  inside `loadPiCodingAgentSdk`.
+
+  The `Dockerfile` documents this exact failure class above its install step:
+  packages that value-import at runtime a dependency declared as a
+  `devDependency`, where "the build stays GREEN and the failure only appears at
+  runtime" — the reason the image deliberately avoids `--production`. Removing
+  the one declaration that satisfies a declared peer moves the manifests
+  further from the state that comment says must be fixed first. Left as is.
+
 - **"subscription gateway" comment cluster** (6 sites across
   `services/llm-proxy/**`, `lib/egress-host-guard.ts`) describing a surface
   retired before #1173. `routes/llm-proxy.ts` already states the opposite, so
