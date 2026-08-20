@@ -864,5 +864,6 @@
   "models.generation.levelsShort.medium": "Moy.",
   "models.generation.levelsShort.high": "Haut",
   "models.generation.levelsShort.xhigh": "XHigh",
-  "models.generation.levelsShort.max": "Max"
+  "models.generation.levelsShort.max": "Max",
+  "orgSettings.sectionDevelopers": "Développeurs"
 }

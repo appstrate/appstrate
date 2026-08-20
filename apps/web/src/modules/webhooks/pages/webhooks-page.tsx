@@ -8,7 +8,6 @@ import { usePermissions } from "@/hooks/use-permissions";
 import { Button } from "@appstrate/ui/components/button";
 import { Badge } from "@appstrate/ui/components/badge";
 import { useWebhooks } from "../hooks/use-webhooks";
-import { PageHeader } from "@/components/page-header";
 import { LoadingState, ErrorState, EmptyState } from "@/components/page-states";
 import { WebhookCreateModal } from "../components/webhook-create-modal";
 import { getErrorMessage } from "@appstrate/core/errors";
@@ -25,15 +24,10 @@ export function WebhooksPage() {
   if (error) return <ErrorState message={getErrorMessage(error)} />;
 
   return (
-    <div className="p-6">
-      <PageHeader
-        title={t("settings:webhooks.pageTitle")}
-        emoji="🪝"
-        breadcrumbs={[{ label: t("settings:webhooks.pageTitle") }]}
-        actions={
-          <Button onClick={() => setCreateOpen(true)}>{t("settings:webhooks.createTitle")}</Button>
-        }
-      />
+    <div>
+      <div className="mb-4 flex items-center justify-end">
+        <Button onClick={() => setCreateOpen(true)}>{t("settings:webhooks.createTitle")}</Button>
+      </div>
 
       {!webhooks || webhooks.length === 0 ? (
         <EmptyState message={t("settings:webhooks.empty")} icon={Webhook}>

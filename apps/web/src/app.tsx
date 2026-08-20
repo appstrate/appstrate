@@ -795,26 +795,6 @@ export function App() {
               <Route path="devices" element={<PreferencesDevicesPage />} />
               <Route path="connections" element={<PreferencesConnectionsPage />} />
             </Route>
-            {features.webhooks && (
-              <>
-                <Route
-                  path="/webhooks"
-                  element={
-                    <Suspense fallback={<LoadingState />}>
-                      <WebhooksPage />
-                    </Suspense>
-                  }
-                />
-                <Route
-                  path="/webhooks/:id"
-                  element={
-                    <Suspense fallback={<LoadingState />}>
-                      <WebhookDetailPage />
-                    </Suspense>
-                  }
-                />
-              </>
-            )}
             {features.chat && (
               <>
                 <Route
@@ -835,18 +815,17 @@ export function App() {
                 />
               </>
             )}
-            {/* App-scoped routes (read applicationId from store, like orgId) */}
-            <Route
-              path="/end-users"
-              element={
-                <LazyRoute>
-                  <EndUsersPage />
-                </LazyRoute>
-              }
-            />
             <Route
               path="/app-settings"
               element={<Navigate to="/org-settings/app/general" replace />}
+            />
+            <Route
+              path="/end-users"
+              element={<Navigate to="/org-settings/app/end-users" replace />}
+            />
+            <Route
+              path="/webhooks"
+              element={<Navigate to="/org-settings/app/webhooks" replace />}
             />
             <Route
               path="/org-settings"
@@ -867,6 +846,15 @@ export function App() {
               <Route path="billing" element={<OrgSettingsBillingPage />} />
               <Route path="app/general" element={<OrgSettingsAppGeneralPage />} />
               <Route path="app/api-keys" element={<ApiKeysPage />} />
+              <Route path="app/end-users" element={<EndUsersPage />} />
+              {features.webhooks && (
+                <>
+                  <Route path="app/webhooks" element={<WebhooksPage />} />
+                  <Route path="app/webhooks/:id" element={<WebhookDetailPage />} />
+                </>
+              )}
+              {/* Old top-level homes, kept as redirects: these URLs have been
+                  handed out in docs and bookmarks. */}
               <Route path="app/auth" element={<OrgSettingsAppAuthPage />} />
               <Route path="app/oauth" element={<OrgSettingsAppOauthPage />} />
             </Route>

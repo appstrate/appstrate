@@ -69,9 +69,10 @@ export function SettingsLayout({ sections, title, emoji, breadcrumbs }: Settings
 
   return (
     <SidebarProvider
+      data-full-bleed
       disableKeyboardShortcut
       defaultOpen
-      className="min-h-0! w-auto flex-1 overflow-hidden"
+      className="h-[calc(100dvh-3.5rem)] min-h-0! w-auto flex-1 overflow-hidden"
       style={{ "--sidebar-width": "14rem" } as React.CSSProperties}
     >
       {/* Desktop: real sidebar flush against the global AppSidebar */}

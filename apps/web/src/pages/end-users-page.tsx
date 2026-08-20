@@ -16,7 +16,6 @@ import {
 } from "@appstrate/ui/components/tooltip";
 import { useEndUsers, type EndUserInfo } from "../hooks/use-end-users";
 import { useCurrentApplicationId } from "../hooks/use-current-application";
-import { PageHeader } from "../components/page-header";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 import { EndUserCreateModal } from "../components/end-user-create-modal";
 import { EndUserDetailModal } from "../components/end-user-detail-modal";
@@ -127,14 +126,9 @@ function EndUsersPageContent() {
 
   return (
     <div>
-      <PageHeader
-        title={t("endUsers.pageTitle")}
-        emoji="👥"
-        breadcrumbs={[{ label: t("endUsers.pageTitle") }]}
-        actions={
-          <Button onClick={() => setCreateOpen(true)}>{t("applications.newEndUser")}</Button>
-        }
-      />
+      <div className="mb-4 flex items-center justify-end">
+        <Button onClick={() => setCreateOpen(true)}>{t("applications.newEndUser")}</Button>
+      </div>
 
       <div className="relative mb-4">
         <Search

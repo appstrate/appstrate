@@ -29,6 +29,7 @@ window.__APP_CONFIG__ = {
     bootstrapTokenPending: false,
     chat: true,
     billing: true,
+    webhooks: true,
   },
   trustedOrigins: [],
 };

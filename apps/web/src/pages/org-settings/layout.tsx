@@ -13,6 +13,7 @@ import {
   Settings,
   Shield,
   Users,
+  Webhook,
 } from "lucide-react";
 import { SettingsLayout, type SettingsSection } from "../../components/settings-layout";
 import { AppSettingsSwitcher } from "../../components/app-settings-switcher";
@@ -96,21 +97,42 @@ export function OrgSettingsLayout() {
                 label: t("appSettings.tabGeneral"),
               },
               {
-                to: "/org-settings/app/api-keys",
-                icon: KeyRound,
-                label: t("orgSettings.tabApiKeys"),
-              },
-              {
                 to: "/org-settings/app/auth",
                 icon: Shield,
                 label: t("appSettings.tabAuth"),
                 show: oidcEnabled,
+              },
+            ],
+          },
+          {
+            // Everything here is how you plug Appstrate into your own systems,
+            // and all of it is org+workspace scoped — which is why these four
+            // belong side by side. Two of them used to sit in the main
+            // navigation under "Administration" while the other two were
+            // already here, splitting one family across two places.
+            label: t("orgSettings.sectionDevelopers"),
+            items: [
+              {
+                to: "/org-settings/app/api-keys",
+                icon: KeyRound,
+                label: t("orgSettings.tabApiKeys"),
               },
               {
                 to: "/org-settings/app/oauth",
                 icon: KeyRound,
                 label: t("appSettings.tabOauth"),
                 show: oidcEnabled,
+              },
+              {
+                to: "/org-settings/app/end-users",
+                icon: Users,
+                label: t("endUsers.pageTitle"),
+              },
+              {
+                to: "/org-settings/app/webhooks",
+                icon: Webhook,
+                label: t("webhooks.pageTitle"),
+                show: !!features.webhooks,
               },
             ],
           },

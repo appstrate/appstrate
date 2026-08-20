@@ -24,14 +24,10 @@ export function WebhookDetailPage() {
   if (!webhook) return <ErrorState />;
 
   return (
-    <div className="p-6">
+    <div>
       <PageHeader
         title={webhook.url}
         emoji="🪝"
-        breadcrumbs={[
-          { label: t("settings:webhooks.pageTitle"), href: "/webhooks" },
-          { label: webhook.url },
-        ]}
         actions={
           <div className="flex items-center gap-2">
             <Badge variant={webhook.enabled ? "success" : "secondary"}>

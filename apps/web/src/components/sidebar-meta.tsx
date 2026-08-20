@@ -11,7 +11,7 @@
  */
 import { Link, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { BarChart3, Settings } from "lucide-react";
+import { BarChart3, Code2, Settings } from "lucide-react";
 import { useAppConfig } from "../hooks/use-app-config";
 import { usePermissions } from "../hooks/use-permissions";
 import { cn } from "@appstrate/ui/cn";
@@ -28,13 +28,52 @@ export function SidebarMeta() {
   const { features } = useAppConfig();
   const { isAdmin } = usePermissions();
 
+  const DEVELOPERS_PATHS = [
+    "/org-settings/app/api-keys",
+    "/org-settings/app/oauth",
+    "/org-settings/app/end-users",
+    "/org-settings/app/webhooks",
+  ];
+  const inDevelopers = DEVELOPERS_PATHS.some((p) => pathname.startsWith(p));
+
   const items = [
     // No billing configured means no usage to read — the row would open an
     // empty page.
     ...(features.billing
-      ? [{ path: "/org-settings/billing", label: t("nav.usage"), icon: BarChart3 }]
+      ? [
+          {
+            path: "/org-settings/billing",
+            label: t("nav.usage"),
+            icon: BarChart3,
+            active: pathname.startsWith("/org-settings/billing"),
+          },
+        ]
       : []),
-    ...(isAdmin ? [{ path: "/org-settings", label: t("nav.settings"), icon: Settings }] : []),
+    // Straight into the Developers section: the four plug-in-your-own-systems
+    // screens (API keys, OAuth clients, end-users, webhooks) that used to be
+    // split between the settings surface and the main navigation.
+    ...(isAdmin
+      ? [
+          {
+            path: "/org-settings/app/api-keys",
+            label: t("nav.developers"),
+            icon: Code2,
+            active: inDevelopers,
+          },
+        ]
+      : []),
+    // Last, and matched by exclusion: every developer screen lives under
+    // /org-settings too, so a plain `startsWith` would light both rows at once.
+    ...(isAdmin
+      ? [
+          {
+            path: "/org-settings",
+            label: t("nav.settings"),
+            icon: Settings,
+            active: pathname.startsWith("/org-settings") && !inDevelopers,
+          },
+        ]
+      : []),
   ];
 
   if (items.length === 0) return null;
@@ -48,7 +87,7 @@ export function SidebarMeta() {
               asChild
               size="sm"
               tooltip={item.label}
-              isActive={pathname.startsWith(item.path)}
+              isActive={item.active}
               className="text-muted-foreground hover:text-sidebar-foreground"
             >
               <Link to={item.path}>

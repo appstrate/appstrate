@@ -122,5 +122,6 @@
   "nav.section.build": "Construire",
   "nav.usage": "Usage",
   "userMenu.documentation": "Documentation",
-  "userMenu.getHelp": "Obtenir de l'aide"
+  "userMenu.getHelp": "Obtenir de l'aide",
+  "nav.developers": "Développeurs"
 }

@@ -9,9 +9,7 @@ import {
   Calendar,
   Wrench,
   Plug,
-  Webhook,
   Loader2,
-  Users,
   Boxes,
   FileText,
   type LucideIcon,
@@ -19,8 +17,6 @@ import {
 import { useUnreadCount } from "../hooks/use-notifications";
 import { useAgents } from "../hooks/use-packages";
 import { usePaginatedRuns } from "../hooks/use-paginated-runs";
-import { usePermissions } from "../hooks/use-permissions";
-import { useAppConfig } from "../hooks/use-app-config";
 import { SidebarNavLink } from "./sidebar-nav-link";
 import {
   SidebarGroup,
@@ -38,8 +34,6 @@ export function NavOrg() {
   const location = useLocation();
   const { data: unreadCount } = useUnreadCount();
   const { data: agents } = useAgents();
-  const { isAdmin } = usePermissions();
-  const { features } = useAppConfig();
 
   // Inline runs live on ephemeral shadow packages that are not in `agents`,
   // so they don't contribute to `runningRuns`. Check them separately.
@@ -73,13 +67,6 @@ export function NavOrg() {
     { path: "/skills", label: t("nav.skills"), icon: Wrench },
     { path: "/mcp-servers", label: t("nav.mcpServers"), icon: Plug },
     { path: "/integrations", label: t("nav.integrations"), icon: Boxes },
-  ];
-
-  const adminItems: NavItem[] = [
-    ...(isAdmin && features.webhooks
-      ? [{ path: "/webhooks", label: t("nav.webhooks"), icon: Webhook }]
-      : []),
-    ...(isAdmin ? [{ path: "/end-users", label: t("nav.endUsers"), icon: Users }] : []),
   ];
 
   const renderItems = (items: NavItem[]) =>
@@ -146,13 +133,6 @@ export function NavOrg() {
         <SidebarGroupLabel>{t("nav.section.build")}</SidebarGroupLabel>
         <SidebarMenu>{renderItems(buildItems)}</SidebarMenu>
       </SidebarGroup>
-
-      {adminItems.length > 0 && (
-        <SidebarGroup>
-          <SidebarGroupLabel>{t("nav.section.admin")}</SidebarGroupLabel>
-          <SidebarMenu>{renderItems(adminItems)}</SidebarMenu>
-        </SidebarGroup>
-      )}
     </>
   );
 }

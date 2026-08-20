@@ -47,6 +47,18 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
   },
   {
     method: "GET",
+    pattern: /^\/api\/applications\/[^/]+$/,
+    handler: () => ({ status: 200, body: f.applications.data[0] }),
+  },
+  {
+    // Empty on purpose: the point in the lab is the settings shell and its
+    // Developers section, not a list of secrets.
+    method: "GET",
+    pattern: /^\/api\/api-keys$/,
+    handler: () => ({ status: 200, body: { object: "list", data: [], hasMore: false } }),
+  },
+  {
+    method: "GET",
     pattern: /^\/api\/applications$/,
     handler: (_u, s) => ({
       status: 200,
