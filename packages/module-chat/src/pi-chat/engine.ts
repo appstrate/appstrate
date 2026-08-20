@@ -231,7 +231,7 @@ export function runPiChat(input: PiChatInput): Response {
 
         // MCP server usage guidance is appended to the system prompt, then the
         // (uncacheable) operation index is dropped for providers without a
-        // prompt cache — the same shared policy the ai-sdk path applies.
+        // prompt cache.
         let system = mcpTools.instructions
           ? `${input.system}\n\n${mcpTools.instructions}`
           : input.system;
@@ -321,7 +321,7 @@ export function runPiChat(input: PiChatInput): Response {
           // Early-stopping generate: the tool loop was cut at
           // CHAT_TOOL_STEP_BUDGET, so spend the last step on ONE tool-less model
           // call — the user gets a synthesis of the work already done instead of
-          // a truncated tool call. Same contract as the ai-sdk engine's final
+          // a truncated tool call. Same contract as the final
           // step (`prepareAiSdkChatStep`).
           if (stepCap.fired()) {
             logger.info("chat turn step cap reached", {

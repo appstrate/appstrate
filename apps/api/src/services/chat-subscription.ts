@@ -49,8 +49,8 @@ export async function resolveSubscriptionChatModel(
     // A model that resolves to nothing because its stored credential is dead —
     // oauth flagged needs-reconnection, or (either auth mode) a secret that no
     // longer decrypts — surfaces as a reconnect prompt; anything else (unknown
-    // preset, disabled model) falls through to the ai-sdk path, which produces
-    // the appropriate "no such model" error. Reached only after `loadModel`
+    // preset, disabled model) falls through to the API-key branch, which
+    // produces the appropriate "no such model" error. Reached only after `loadModel`
     // already returned null, so nothing is resolvable and no spend can happen
     // on either branch: this only decides which error the user is shown, and
     // "reconnect that credential" is the actionable one.
@@ -70,8 +70,8 @@ export async function resolveSubscriptionChatModel(
   // oauth2 providers, and the run launcher fail-closes on it too
   // (`assertOauthRunNotAliased`) — but a legacy/hand-written row must not make
   // chat quietly execute the real hidden binding while runs refuse it.
-  // Falling through to the generic ai-sdk path routes the turn to the LLM
-  // gateway, whose oauth-subscription rejection names the alias only.
+  // Falling through to the API-key branch routes the turn to the LLM gateway,
+  // whose oauth-subscription rejection names the alias only.
   if (resolved.aliased) {
     logger.warn("chat: refusing aliased oauth-subscription model (invalid row)", {
       orgId,

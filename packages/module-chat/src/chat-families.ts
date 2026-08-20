@@ -25,7 +25,7 @@
  * "does the llm-proxy route it?". The extra member today is
  * `openai-codex-responses`. The superset relation is enforced by
  * `test/chat-families.test.ts` — a proxy family missing from this set would be
- * filtered out by `pickModel` before `modelFromFamily` ever saw it.
+ * filtered out by `pickModel` before a binding could be built for it.
  */
 export const CHAT_USABLE_FAMILIES = new Set([
   "openai-completions",

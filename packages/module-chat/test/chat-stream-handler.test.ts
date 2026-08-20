@@ -1,30 +1,27 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * End-to-end coverage for `handleChatStream` — the ai-sdk chat path exercised
- * with a fully scripted platform, no network and no real provider.
+ * End-to-end coverage for `handleChatStream` with a fully scripted platform: no
+ * network, no real provider, no real Pi session.
  *
  * The handler builds `platformFetch` from `deps.dispatch` and threads it into
- * every platform read (`/api/models`, `/api/me/context`), the platform MCP
- * handshake (`/api/mcp/o/:org`), AND the model inference call
- * (`/api/llm-proxy/…/chat/completions`). So a single in-memory `dispatch` can
- * drive the whole turn deterministically:
+ * every platform read, so a single in-memory `dispatch` drives the preamble
+ * deterministically:
  *
- *   - `/api/models`                → one openai-completions model (llm-proxy)
- *   - `/api/mcp/o/:org`            → minimal Streamable-HTTP MCP: initialize +
- *                                    empty tools list (the "no tools" path)
- *   - `/api/me/context`            → a small caller-context payload
- *   - `…/chat/completions` (POST)  → an OpenAI-style SSE text completion; the
- *                                    request body is captured for assertions
+ *   - `/api/models`       → one openai-completions model (llm-proxy-routed)
+ *   - `/api/me/context`   → a small caller-context payload
+ *   - `/api/applications` → the default application id
  *
- * This exercises the cache-controlled system prompt end-to-end: the system rides
- * via the canonical `instructions` field as a `SystemModelMessage` object (see
- * `aiSdkCachedSystemMessage`), which ai@7 prepends to the model prompt as the
- * first `role:"system"` message. Asserting the stream reaches `finish` with NO
- * error part AND that the wire body's first message is the system prompt
- * exercises the real `streamText` → `toUIMessageStreamResponse` assembly, and the
- * persisted assistant turn proves the `onEnd` / `messageMetadata` finalize path
- * ran.
+ * The engine itself is injected. Production always gets `runPiChat`, which would
+ * open a real Pi session against a real provider; here a scripted engine returns
+ * the same UI-message-stream contract, so the turn's OWN responsibilities —
+ * admission, the model binding it hands the engine, persistence, and the
+ * in-flight marker's lifecycle — are asserted without an upstream call. What the
+ * engine does with the binding is covered by `pi-chat-model-binding.test.ts` and
+ * the Pi mapper/closure suites.
+ *
+ * NOTE: there is no platform-MCP handshake here. The engine opens its own MCP
+ * connection from `platformMcp.url`; the handler only mints the bearer.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -34,9 +31,11 @@ import { db } from "@appstrate/db/client";
 import { chatMessages, chatSessions } from "@appstrate/db/schema";
 import { truncateAll } from "../../../apps/api/test/helpers/db.ts";
 import { createTestContext, type TestContext } from "../../../apps/api/test/helpers/auth.ts";
-import { handleChatStream, type ChatEngineRuntime, type ChatEnv } from "../src/chat-stream.ts";
+import { createUIMessageStreamResponse, type UIMessageChunk } from "ai";
+import { handleChatStream, type ChatEngine, type ChatEnv } from "../src/chat-stream.ts";
 import { mintSessionId } from "../src/session-id.ts";
-import { acquirePiChatSlot } from "../src/pi-chat/concurrency.ts";
+import { acquirePiChatSlot, releaseOnClose } from "../src/pi-chat/concurrency.ts";
+import type { PiChatInput } from "../src/pi-chat/engine.ts";
 import { buildChatPlatformDeps } from "../src/platform-services.ts";
 import { buildModuleInitContext } from "../../../apps/api/src/lib/modules/registry.ts";
 import { errorHandler } from "../../../apps/api/src/middleware/error-handler.ts";
@@ -70,9 +69,6 @@ async function waitForAssistantPersist(sessionId: string, timeoutMs = 8_000): Pr
   }
 }
 
-// A distinctive marker in the scripted MCP `instructions` so we can prove the
-// server instructions were fetched and appended to the system prompt.
-const MCP_INSTRUCTIONS_MARKER = "SCRIPTED_MCP_INSTRUCTIONS_MARKER";
 // A distinctive marker in the scripted caller context so we can prove
 // `/api/me/context` was fetched and rendered into the system prompt.
 const CONTEXT_ORG_MARKER = "ChatHandlerTestOrg";
@@ -116,93 +112,60 @@ function contextResponse(): Response {
   });
 }
 
-/**
- * Minimal Streamable-HTTP MCP server: answers `initialize` (advertising the
- * `tools` capability + instructions) and `tools/list` (empty). A GET returns
- * 405 so the client's best-effort inbound SSE probe is a clean no-op. This is
- * the supported "module present, zero tools" path — enough to satisfy the
- * ai-sdk path's hard MCP requirement without any real tools.
- */
-async function mcpDispatch(req: Request): Promise<Response> {
-  if (req.method === "GET") return new Response(null, { status: 405 });
-  if (req.method === "DELETE") return new Response(null, { status: 202 });
-  const msg = (await req.json()) as { id?: unknown; method?: string };
-  // Notifications (no id) — 202, nothing to answer.
-  if (!("id" in msg) || msg.id === undefined) return new Response(null, { status: 202 });
-  if (msg.method === "initialize") {
-    return new Response(
-      JSON.stringify({
-        jsonrpc: "2.0",
-        id: msg.id,
-        result: {
-          protocolVersion: "2025-06-18",
-          capabilities: { tools: {} },
-          serverInfo: { name: "scripted-platform-mcp", version: "1.0.0" },
-          instructions: MCP_INSTRUCTIONS_MARKER,
-        },
-      }),
-      {
-        status: 200,
-        headers: { "content-type": "application/json", "mcp-session-id": "sess_test" },
-      },
-    );
-  }
-  if (msg.method === "tools/list") {
-    return new Response(JSON.stringify({ jsonrpc: "2.0", id: msg.id, result: { tools: [] } }), {
-      status: 200,
-      headers: { "content-type": "application/json" },
-    });
-  }
-  return new Response(JSON.stringify({ jsonrpc: "2.0", id: msg.id, result: {} }), {
-    status: 200,
-    headers: { "content-type": "application/json" },
-  });
-}
-
-/** An OpenAI chat-completions SSE stream: role, two text deltas, stop + usage. */
-function openAiSse(): Response {
-  const frames = [
-    `data: {"id":"c1","object":"chat.completion.chunk","model":"${MODEL_PRESET_ID}","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}\n\n`,
-    `data: {"id":"c1","object":"chat.completion.chunk","model":"${MODEL_PRESET_ID}","choices":[{"index":0,"delta":{"content":"Bonjour"},"finish_reason":null}]}\n\n`,
-    `data: {"id":"c1","object":"chat.completion.chunk","model":"${MODEL_PRESET_ID}","choices":[{"index":0,"delta":{"content":" le monde"},"finish_reason":null}]}\n\n`,
-    `data: {"id":"c1","object":"chat.completion.chunk","model":"${MODEL_PRESET_ID}","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":12,"completion_tokens":4,"total_tokens":16}}\n\n`,
-    `data: [DONE]\n\n`,
-  ].join("");
-  return new Response(frames, { status: 200, headers: { "content-type": "text/event-stream" } });
-}
-
-interface DispatchCapture {
-  inferenceBody: {
-    messages?: Array<{ role: string; content: unknown }>;
-    stream_options?: { include_usage?: boolean };
-  } | null;
-  inferenceUrl: string | null;
-}
-
-/** Build the scripted in-memory dispatch + a capture handle for assertions. */
-function scriptedDispatch(): {
-  dispatch: (req: Request) => Promise<Response>;
-  capture: DispatchCapture;
-} {
-  const capture: DispatchCapture = { inferenceBody: null, inferenceUrl: null };
-  const dispatch = async (req: Request): Promise<Response> => {
-    const url = new URL(req.url);
-    const path = url.pathname;
-    if (path.endsWith("/chat/completions")) {
-      capture.inferenceUrl = req.url;
-      capture.inferenceBody = (await req.json()) as DispatchCapture["inferenceBody"];
-      return openAiSse();
-    }
+/** Build the scripted in-memory dispatch. Nothing leaves this process. */
+function scriptedDispatch(): (req: Request) => Promise<Response> {
+  return async (req: Request): Promise<Response> => {
+    const path = new URL(req.url).pathname;
     if (path === "/api/models") return modelsResponse();
     if (path === "/api/me/context") return contextResponse();
-    if (path.startsWith("/api/mcp/")) return mcpDispatch(req);
     if (path === "/api/applications") {
       return Response.json({ data: [{ id: APP_ID, isDefault: true }] });
     }
     return new Response("unexpected dispatch: " + path, { status: 404 });
   };
-  return { dispatch, capture };
 }
+
+/**
+ * A scripted engine: records what the handler handed it, then streams the same
+ * chunk sequence the Pi mapper emits for a plain text answer. The concurrency
+ * slot is released when the stream closes — exactly as the real engine does, so
+ * one test cannot starve the next.
+ */
+function scriptedEngine(text = "Bonjour le monde"): {
+  engine: ChatEngine;
+  calls: PiChatInput[];
+} {
+  const calls: PiChatInput[] = [];
+  const engine: ChatEngine = (input) => {
+    calls.push(input);
+    const id = "txt_1";
+    const chunks: UIMessageChunk[] = [
+      { type: "start", messageId: "asst_1" },
+      { type: "text-start", id },
+      { type: "text-delta", id, delta: text },
+      { type: "text-end", id },
+      { type: "finish", messageMetadata: { appstrate: { turn: { engine: "pi", ...TURN_META } } } },
+    ];
+    const stream = new ReadableStream<UIMessageChunk>({
+      start(controller) {
+        for (const chunk of chunks) controller.enqueue(chunk);
+        controller.close();
+      },
+    });
+    return createUIMessageStreamResponse({
+      stream: releaseOnClose(stream, () => input.slot.release()),
+    });
+  };
+  return { engine, calls };
+}
+
+/** The turn-metadata fields `turnMetadataFromMessage` requires to decode. */
+const TURN_META = {
+  finishReason: "stop",
+  stepCount: 1,
+  maxSteps: 16,
+  maxStepsReached: false,
+} as const;
 
 /** Parse a UI-message SSE response body into its decoded chunk objects. */
 async function collectUiChunks(
@@ -228,10 +191,7 @@ describe("handleChatStream engine routing", () => {
   });
 
   /** A `Hono<ChatEnv>` app mirroring what the platform auth pipeline sets. */
-  function buildApp(
-    deps: ReturnType<typeof buildChatPlatformDeps>,
-    engineRuntime?: ChatEngineRuntime,
-  ) {
+  function buildApp(deps: ReturnType<typeof buildChatPlatformDeps>, engine?: ChatEngine) {
     const app = new Hono<ChatEnv>();
     // Mirror production's RFC 9457 error boundary so invalid client input is
     // asserted at the HTTP contract, not as an uncaught handler exception.
@@ -243,7 +203,7 @@ describe("handleChatStream engine routing", () => {
       c.set("orgName", ctx.org.name);
       c.set("orgSlug", ctx.org.slug);
       c.set("permissions", new Set<string>());
-      return handleChatStream(c, deps, engineRuntime);
+      return handleChatStream(c, deps, engine);
     });
     return app;
   }
@@ -251,13 +211,15 @@ describe("handleChatStream engine routing", () => {
   async function postChat(
     sessionId: string,
     generation?: { temperature?: number; reasoningLevel?: string },
-    engineRuntime?: ChatEngineRuntime,
+    engine?: ChatEngine,
   ): Promise<Response> {
-    const { dispatch, capture } = scriptedDispatch();
     // Real platform deps (the same context `init()` gets), with dispatch
     // overridden by the scripted one so no request leaves this process.
-    const deps = { ...buildChatPlatformDeps(buildModuleInitContext()), dispatch };
-    const app = buildApp(deps, engineRuntime);
+    const deps = {
+      ...buildChatPlatformDeps(buildModuleInitContext()),
+      dispatch: scriptedDispatch(),
+    };
+    const app = buildApp(deps, engine);
     const res = await app.request("/api/chat", {
       method: "POST",
       headers: {
@@ -271,31 +233,29 @@ describe("handleChatStream engine routing", () => {
         ...(generation ? { generation } : {}),
       }),
     });
-    return Object.assign(res, { capture });
+    return res;
   }
 
   it("rejects generation settings unsupported by the selected model", async () => {
-    const res = (await postChat(mintSessionId(), { temperature: 0.4 })) as Response & {
-      capture: DispatchCapture;
-    };
+    const { engine, calls } = scriptedEngine();
+    const res = await postChat(mintSessionId(), { temperature: 0.4 }, engine);
 
     expect(res.status).toBe(400);
-    expect(res.capture.inferenceBody).toBeNull();
+    // Rejected in the preamble — no turn was ever started.
+    expect(calls).toEqual([]);
   });
 
-  it("never falls back to AI SDK when a Pi-selected API-key turn fails", async () => {
+  it("ends the turn and clears the in-flight marker when the engine fails", async () => {
     const sessionId = mintSessionId();
-    const res = (await postChat(sessionId, undefined, {
-      configuredPiOrgIds: () => ctx.orgId,
-      runPiChat: () => {
-        throw new Error("forced Pi engine failure");
-      },
-    })) as Response & { capture: DispatchCapture };
+    const res = await postChat(sessionId, undefined, () => {
+      throw new Error("forced engine failure");
+    });
 
+    // A failed turn surfaces as an error — it is never quietly retried on some
+    // other loop, which would bill twice and hide the failure.
     expect(res.status).toBe(500);
-    expect(res.capture.inferenceBody).toBeNull();
-    expect(res.capture.inferenceUrl).toBeNull();
 
+    // `failCleanup` ran: the session is not left stuck "generating".
     const [session] = await db
       .select({ activeStreamId: chatSessions.activeStreamId })
       .from(chatSessions)
@@ -304,7 +264,7 @@ describe("handleChatStream engine routing", () => {
     expect(session?.activeStreamId).toBeNull();
   });
 
-  it("rejects a saturated Pi turn before persisting its user message", async () => {
+  it("rejects a saturated turn before persisting its user message", async () => {
     const previousCap = process.env.CHAT_PI_MAX_CONCURRENCY;
     process.env.CHAT_PI_MAX_CONCURRENCY = "1";
     const heldSlot = acquirePiChatSlot();
@@ -313,12 +273,9 @@ describe("handleChatStream engine routing", () => {
     const sessionId = mintSessionId();
     let engineCalls = 0;
     try {
-      const res = await postChat(sessionId, undefined, {
-        configuredPiOrgIds: () => ctx.orgId,
-        runPiChat: () => {
-          engineCalls += 1;
-          throw new Error("Pi engine must not start while capacity is saturated");
-        },
+      const res = await postChat(sessionId, undefined, () => {
+        engineCalls += 1;
+        throw new Error("the engine must not start while capacity is saturated");
       });
 
       expect(res.status).toBe(429);
@@ -336,17 +293,17 @@ describe("handleChatStream engine routing", () => {
     }
   });
 
-  it("streams start → text → finish with no error and persists the assistant turn", async () => {
+  it("streams start → text → finish, hands the engine a proxy binding, and persists the turn", async () => {
     const sessionId = mintSessionId();
-    const res = (await postChat(sessionId)) as Response & { capture: DispatchCapture };
+    const { engine, calls } = scriptedEngine();
+    const res = await postChat(sessionId, undefined, engine);
 
     // (1) SSE response.
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type") ?? "").toContain("text/event-stream");
 
-    // (2) The chunk sequence: a start, text delta(s), a finish — and NO error
-    // chunk. An error chunk here would mean the system-prompt assembly (the
-    // `instructions` object) failed to reach the model cleanly.
+    // (2) The chunk sequence reaches the client intact: a start, text delta(s),
+    // a finish — and NO error chunk.
     const chunks = await collectUiChunks(res);
     const types = chunks.map((c) => c.type);
     expect(types).toContain("start");
@@ -354,32 +311,39 @@ describe("handleChatStream engine routing", () => {
     expect(types).toContain("finish");
     expect(types.filter((t) => t === "error")).toEqual([]);
 
-    // The visible text reached the client.
     const textParts = chunks
       .filter((c) => c.type === "text-delta")
       .map((c) => (c as { delta?: string }).delta ?? "")
       .join("");
     expect(textParts).toContain("Bonjour le monde");
 
-    // (3) The inference request carried the system content as the FIRST message
-    // — proving the cache-controlled system-message assembly end-to-end (this is
-    // the standardizePrompt path that would have thrown pre-fix).
-    const body = res.capture.inferenceBody;
-    expect(res.capture.inferenceUrl).toContain(
-      "/api/llm-proxy/openai-completions/v1/chat/completions",
-    );
-    // Streaming usage is opt-in on OpenAI-compatible APIs. This field is
-    // load-bearing for the built-in-model billing path: the proxy can only
-    // write the chat's llm_usage row when the terminal SSE frame has usage.
-    expect(body?.stream_options).toEqual({ include_usage: true });
-    expect(body?.messages?.[0]?.role).toBe("system");
-    const systemContent = String(body?.messages?.[0]?.content ?? "");
-    expect(systemContent).toContain(SYSTEM_PROMPT.slice(0, 64));
-    // The platform MCP server instructions + caller context were assembled in.
-    expect(systemContent).toContain(MCP_INSTRUCTIONS_MARKER);
-    expect(systemContent).toContain(CONTEXT_ORG_MARKER);
+    // (3) What the handler handed the engine. This is the security-relevant
+    // half of the turn: the model row resolved to a PROXY binding carrying the
+    // Appstrate preset id and an llm-proxy base URL, never the upstream model id
+    // and never a provider secret. (The per-family URL table itself is pinned by
+    // `pi-chat-model-binding.test.ts`.)
+    expect(calls).toHaveLength(1);
+    const input = calls[0]!;
+    expect(input.presetId).toBe(MODEL_PRESET_ID);
+    expect(input.orgId).toBe(ctx.orgId);
+    expect(input.chatSessionId).toBe(sessionId);
+    expect(input.modelBinding.authMode).toBe("proxy");
+    expect(input.modelBinding.model.id).toBe(MODEL_PRESET_ID);
+    expect(input.modelBinding.model.baseUrl).toContain("/api/llm-proxy/openai-completions/v1");
+    expect(JSON.stringify(input.modelBinding.model)).not.toContain("gpt-4o-mini");
+    // llm-proxy owns the metering for a proxy-bound turn — nothing is recorded
+    // inline, so the turn cannot be billed twice.
+    expect(input.modelBinding.metering).toEqual({ kind: "proxy" });
 
-    // (4) Wait for the connection-independent persist drain to settle.
+    // (4) The system prompt was assembled from the caller context. There are no
+    // inline MCP instructions on this path: the engine's own handshake delivers
+    // them, and it is handed the org-scoped URL to open it with.
+    expect(input.system).toContain(SYSTEM_PROMPT.slice(0, 64));
+    expect(input.system).toContain(CONTEXT_ORG_MARKER);
+    expect(input.platformMcp.url).toContain(`/api/mcp/o/${encodeURIComponent(ctx.orgId)}`);
+    expect(input.platformMcp.headers.Authorization).toMatch(/^Bearer /);
+
+    // (5) Wait for the connection-independent persist drain to settle.
     await waitForAssistantPersist(sessionId);
 
     const rows = await db
@@ -404,12 +368,11 @@ describe("handleChatStream engine routing", () => {
       .join("");
     expect(persistedText).toContain("Bonjour le monde");
 
-    // (5) The "chat turn done" finalize path ran: the ai-sdk turn metadata was
-    // attached via `messageMetadata` (engine + finishReason from onEnd).
-    expect(content.metadata?.appstrate?.turn?.engine).toBe("ai-sdk");
+    // (6) The finish chunk's metadata survived the persist drain.
+    expect(content.metadata?.appstrate?.turn?.engine).toBe("pi");
     expect(content.metadata?.appstrate?.turn?.finishReason).toBe("stop");
 
-    // (6) The in-flight marker was cleared on finalize (onSettled →
+    // (7) The in-flight marker was cleared on finalize (onSettled →
     // clearActiveStream), so the session is no longer "generating".
     const [session] = await db
       .select({ activeStreamId: chatSessions.activeStreamId })

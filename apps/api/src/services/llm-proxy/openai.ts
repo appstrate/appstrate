@@ -11,7 +11,7 @@
  * {@link createOpenAICompatibleAdapter}.
  *
  * Usage normalisation — PARITY WITH THE RUNNER. The same upstream reply is
- * normalised twice in this product: here (remote runs + chat's ai-sdk path,
+ * normalised twice in this product: here (remote runs + proxy-routed chat,
  * which go through this proxy) and inside `@earendil-works/pi-ai`
  * (`dist/api/openai-completions.js`, `parseChunkUsage`), which
  * every platform-side Pi run uses. The two MUST agree bucket for bucket or the

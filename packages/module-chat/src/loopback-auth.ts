@@ -20,7 +20,7 @@
  *
  * Two minters share this machinery:
  *
- *   - `mintLoopbackToken` — the INFERENCE bearer (ai-sdk path). Scope
+ *   - `mintLoopbackToken` — the INFERENCE bearer (llm-proxy calls). Scope
  *     `llm-proxy:call` + `models:read`, `firstPartyLoopback: true` (the
  *     llm-proxy accepts a loopback caller without an API key).
  *   - `mintMcpLoopbackToken` — the platform-MCP bearer handed to the

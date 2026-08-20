@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Connect-link handling on the Pi chat path — parity with the ai-sdk path's
+ * Connect-link handling on the model-visible channel of a Pi tool result —
  * `wrapToolConnectOffers`. The MODEL-visible channel of a Pi tool result is its
  * `content` text blocks (pi-ai serializes only `content` upstream) and must
  * have `connect_url`/`auth_url` scrubbed. The UI reads the typed `connectOffer`

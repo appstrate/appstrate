@@ -4,29 +4,20 @@
  * Model resolution — ported from the appstrate-chat satellite (lib/models.ts).
  *
  * The chat owns no LLM key. It lists the org's configured models
- * (`GET /api/models`) and builds an AI SDK model bound to the platform
- * **llm-proxy**, which injects the real provider key server-side and meters
- * the call. The only change from the satellite: instead of an OAuth
- * inference token against a remote instance, we forward the caller's own
- * headers on a loopback request (see self.ts).
+ * (`GET /api/models`) and picks the row the turn binds to; the binding itself
+ * is built by `pi-chat/model-binding.ts`, which points the engine at the
+ * platform **llm-proxy** (real provider key injected server-side, call metered
+ * there). The only change from the satellite: instead of an OAuth inference
+ * token against a remote instance, we forward the caller's own headers on a
+ * loopback request (see self.ts).
  */
 
-import { createAnthropic } from "@ai-sdk/anthropic";
-import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
-import type { LanguageModel } from "ai";
 import { badGateway, invalidRequest } from "@appstrate/core/api-errors";
 import { CHAT_USABLE_FAMILIES } from "./chat-families.ts";
 import { isModelLive } from "./model-liveness.ts";
 import { logger } from "./logger.ts";
-import {
-  anthropicReasoningBudgetTokens,
-  toNativeModelReasoningLevel,
-  type ModelGenerationCapabilities,
-  type ModelGenerationSettings,
-} from "@appstrate/core/model-generation";
+import type { ModelGenerationCapabilities } from "@appstrate/core/model-generation";
 import type { ModelCost } from "@appstrate/core/module";
-
-const LLM_PROXY_PATH = "/api/llm-proxy";
 
 export interface OrgModel {
   id: string;
@@ -109,137 +100,6 @@ export function pickModel(models: OrgModel[], modelId?: string): OrgModel {
   return chosen;
 }
 
-type ProxyKind = "anthropic" | "openai-compatible";
-
-/** Pure provider-body adapter for chat reasoning controls. */
-export function applyGenerationToProxyBody(
-  body: BodyInit | null | undefined,
-  model: Pick<OrgModel, "apiShape" | "generation">,
-  generation: ModelGenerationSettings,
-): BodyInit | null | undefined {
-  if (generation.reasoningLevel == null || typeof body !== "string") return body;
-  try {
-    const payload = JSON.parse(body) as Record<string, unknown>;
-    const nativeReasoningLevel = toNativeModelReasoningLevel(
-      generation.reasoningLevel,
-      model.generation,
-    );
-    if (model.apiShape === "anthropic-messages") {
-      if (generation.reasoningLevel === "off") {
-        delete payload.thinking;
-        delete payload.output_config;
-      } else if (model.generation?.reasoning.adaptive) {
-        payload.thinking = { type: "adaptive" };
-        payload.output_config = { effort: nativeReasoningLevel };
-      } else {
-        payload.thinking = {
-          type: "enabled",
-          budget_tokens: anthropicReasoningBudgetTokens(generation.reasoningLevel),
-        };
-      }
-    } else {
-      payload.reasoning_effort = nativeReasoningLevel;
-    }
-    return JSON.stringify(payload);
-  } catch {
-    // Preserve the provider SDK body; it will surface its own parse error.
-    return body;
-  }
-}
-
-/**
- * Map a proxy family to its AI SDK provider kind and the baseURL suffix under
- * `/api/llm-proxy`. Each suffix mirrors the upstream SDK's own path convention
- * so a provider configured here hits the right proxy route:
- *   - Anthropic SDK appends `/v1/messages`         → suffix carries `/v1`.
- *   - OpenAI-compatible appends `/chat/completions` → suffix carries `/v1`.
- * Returns `null` for an unknown family rather than guessing a route.
- *
- * The keys are `platform-routed ∩ AI-SDK-supported`. Two sibling lists are
- * NOT the same policy and must not be merged into this one:
- *   - `apps/api/src/routes/llm-proxy.ts` `routes[]` — the AUTHORITATIVE route
- *     table (deliberately concrete per spec). A family added HERE without a
- *     route THERE 404s; widen the route table first.
- *   - `apps/cli/src/lib/models.ts` `PROXY_SUPPORTED_APIS` —
- *     `platform-routed ∩ pi-ai-supported`. Same three today by coincidence of
- *     SDK support, not by shared definition; the two clients can diverge.
- * {@link CHAT_USABLE_FAMILIES} is a superset on purpose — see below.
- */
-/**
- * llm-proxy path suffix per family, in the shape the AI SDK providers expect.
- * The Pi engine keeps its own table (`proxyBaseUrl`, `pi-chat/model-binding.ts`)
- * because pi-ai's clients append different paths — same final URL, different
- * base. Keep the two in step when a family is added.
- */
-function proxyTarget(family: string): { kind: ProxyKind; suffix: string } | null {
-  switch (family) {
-    case "anthropic-messages":
-      return { kind: "anthropic", suffix: "/anthropic-messages/v1" };
-    case "openai-completions":
-      return { kind: "openai-compatible", suffix: "/openai-completions/v1" };
-    case "mistral-conversations":
-      return { kind: "openai-compatible", suffix: "/mistral-conversations/v1" };
-    // Codex (openai-codex-responses) is intentionally absent: it IS chat-usable
-    // now, but as an oauth-subscription it runs on the in-process Pi chat engine
-    // (resolved before this point in chat-stream.ts), NOT the llm-proxy — so it
-    // must never resolve a proxy target here.
-    default:
-      return null;
-  }
-}
-
-/**
- * Build an AI SDK `LanguageModel` for `model`, bound to the llm-proxy.
- * Returns `null` for an unknown family.
- */
-export function modelFromFamily(
-  model: OrgModel,
-  origin: string,
-  headers: Record<string, string>,
-  mintAuth: () => string,
-  platformFetch: typeof fetch,
-  generation: ModelGenerationSettings = {},
-): LanguageModel | null {
-  const target = proxyTarget(model.apiShape);
-  if (!target) return null;
-
-  const baseURL = `${origin}${LLM_PROXY_PATH}${target.suffix}`;
-
-  // Re-mint the bearer on every request the SDK makes. The static `headers`
-  // bearer expires 60 s after the turn starts; a multi-step turn outlives it,
-  // so we overwrite Authorization with a fresh token just before each call.
-  const fetchImpl = (async (input, init) => {
-    const h = new Headers(init?.headers);
-    h.set("authorization", `Bearer ${mintAuth()}`);
-    const body = applyGenerationToProxyBody(init?.body, model, generation);
-    return platformFetch(input, { ...init, body, headers: h });
-  }) as typeof fetch;
-
-  // The proxy resolves `body.model` as the Appstrate **preset id** (the org
-  // model row id), then rewrites it to the real upstream model — so we hand
-  // the SDK `model.id`, not `model.modelId`.
-  // `apiKey` is a placeholder — the real provider key is injected by the
-  // proxy. We authenticate with the forwarded caller headers, which override
-  // whatever the SDK derives from `apiKey`.
-  switch (target.kind) {
-    case "anthropic":
-      return createAnthropic({ baseURL, apiKey: "proxy", headers, fetch: fetchImpl })(model.id);
-    case "openai-compatible":
-      return createOpenAICompatible({
-        name: "appstrate-llm-proxy",
-        baseURL,
-        apiKey: "proxy",
-        headers,
-        fetch: fetchImpl,
-        // OpenAI-compatible providers only include token counters in the
-        // terminal SSE frame when explicitly requested. Without this flag a
-        // successful built-in chat turn can stream normally while the proxy
-        // has no usage object to persist or bill.
-        includeUsage: true,
-      })(model.id);
-  }
-}
-
 /**
  * App-scoped operations (agents, runs, …) need an application context. A
  * session carries none by default, so resolve the org's default application
@@ -258,7 +118,7 @@ export async function resolveDefaultApplicationId(
   orgId: string,
   // Required (no default): callers must pass the platform's in-process dispatch
   // so the default-application lookup rides the loopback-auth seam. A plain
-  // `fetch` default would silently bypass it — symmetry with listModels/modelFromFamily.
+  // `fetch` default would silently bypass it — symmetry with listModels.
   fetchImpl: typeof fetch,
 ): Promise<string | undefined> {
   const cached = appCache.get(orgId);

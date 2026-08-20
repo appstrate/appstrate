@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/** `subscription` is retained only to read messages persisted before Pi was generalized. */
+/**
+ * `pi` is the only engine a turn can be written with. `ai-sdk` and
+ * `subscription` are retained ONLY so threads persisted before the chat unified
+ * on Pi still decode — never write either.
+ */
 export type ChatTurnEngine = "ai-sdk" | "pi" | "subscription";
 export type ChatTurnErrorCategory =
   | "credential_unavailable"
@@ -97,9 +101,8 @@ export function formatBudgetDuration(ms: number): string {
  * see its budget cannot manage it — the audited turn launched a ~2-minute
  * compilation with 22 seconds left on the clock.
  *
- * Deliberately one short, stable line: both engines place it where it cannot
- * invalidate a prompt-cache prefix (ai-sdk: a second system block AFTER the
- * cache breakpoint; Pi: appended to a tool result, i.e. frozen into the
+ * Deliberately one short, stable line, placed where it cannot invalidate a
+ * prompt-cache prefix (appended to a tool result, i.e. frozen into the
  * transcript once written).
  *
  * The launch threshold it quotes is derived from {@link computeTurnRunBudget},

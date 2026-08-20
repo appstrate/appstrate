@@ -4,13 +4,15 @@
  * Chat PLATFORM CONTRACT — the first-party, framework-neutral types the chat
  * module and the platform (apps/api) agree on through core alone.
  *
- * All agent RUNS execute on the single Pi engine. The interactive chat surface
- * is likewise unified: `@appstrate/module-chat` owns ONE generic in-process
- * Pi-SDK chat engine (`runPiChat`) that serves EVERY
- * oauth-subscription provider (claude-code, codex). There is no per-provider
- * chat-handler seam — the chat module resolves the real OAuth token + provider
- * baseUrl for the chosen model row through {@link PlatformServices}
- * (`resolveSubscriptionChatModel`) and drives Pi inline.
+ * All agent RUNS execute on the single Pi engine, and so does EVERY chat turn:
+ * `@appstrate/module-chat` owns ONE generic in-process Pi-SDK chat engine
+ * (`runPiChat`) serving both credential modes. There is no per-provider
+ * chat-handler seam and no second inference loop — the chat module resolves the
+ * chosen model row through {@link PlatformServices}
+ * (`resolveSubscriptionChatModel`) and drives Pi inline. An oauth2 row yields
+ * the real token + provider baseUrl (the engine talks to the provider
+ * directly); an API-key row yields no secret at all and the engine is pointed
+ * at the platform llm-proxy instead.
  *
  * The types are framework-neutral (no `ai`/UI-stream/Pi-SDK types) so they cross
  * apps/api ↔ module-chat through `ctx.services` only.
@@ -64,7 +66,7 @@ export interface SubscriptionChatModel {
  *     that no longer decrypts) → the chat surfaces a reconnect prompt. Nothing
  *     is resolvable either way, so this is purely which error the user sees.
  *   - `{ subscription: true, model }` — an oauth2 model with a fresh token → the
- *     Pi chat engine drives it.
+ *     engine talks to the provider directly with it, instead of the llm-proxy.
  */
 export type SubscriptionChatResolution =
   | { subscription: false }

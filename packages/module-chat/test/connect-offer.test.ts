@@ -15,7 +15,6 @@ import {
   splitJsonText,
   splitToolResult,
 } from "../src/connect-offer.ts";
-import { wrapToolConnectOffers } from "../src/platform-mcp.ts";
 
 const URL_ = "https://app.example.com/api/integrations/connect/start?token=SECRET";
 
@@ -143,27 +142,5 @@ describe("readConnectOffer", () => {
     expect(readConnectOffer({ connectOffer: { connect_url: "javascript:alert(1)" } })).toBeNull();
     expect(readConnectOffer({ connectOffer: "https://x/y" })).toBeNull();
     expect(readConnectOffer(null)).toBeNull();
-  });
-});
-
-describe("wrapToolConnectOffers (ai-sdk execute wrapper)", () => {
-  it("splits every tool's execute result and leaves execute-less tools untouched", async () => {
-    const noExecute = { description: "schema only" };
-    const withExecute = {
-      description: "connect kickoff",
-      execute: async () => ({
-        content: [{ type: "text", text: JSON.stringify({ body: { connect_url: URL_ } }) }],
-      }),
-    };
-    const wrapped = wrapToolConnectOffers({ noExecute, withExecute } as never) as unknown as {
-      noExecute: unknown;
-      withExecute: { execute: (a: unknown, o: unknown) => Promise<Record<string, unknown>> };
-    };
-
-    expect(wrapped.noExecute).toBe(noExecute as never);
-
-    const out = await wrapped.withExecute.execute({}, {});
-    expect(JSON.stringify(out.content)).not.toContain("token=SECRET");
-    expect(out.connectOffer).toEqual({ connect_url: URL_ });
   });
 });

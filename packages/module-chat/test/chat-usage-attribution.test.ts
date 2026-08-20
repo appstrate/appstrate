@@ -48,7 +48,7 @@ async function waitForRow<T>(query: () => Promise<T[]>): Promise<T> {
   throw new Error("waitForRow: row never materialised");
 }
 
-describe("chat ai-sdk path — session attribution via the loopback bearer", () => {
+describe("chat proxy-routed path — session attribution via the loopback bearer", () => {
   let ctx: TestContext;
   let presetId: string;
 

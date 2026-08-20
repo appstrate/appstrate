@@ -2,7 +2,6 @@
 
 import { describe, it, expect } from "bun:test";
 import { redactConnectLinks } from "../src/connect-offer.ts";
-import { wrapToolModelOutputs } from "../src/platform-mcp.ts";
 
 const PLACEHOLDER = "[connect link hidden — the chat renders the connect card]";
 
@@ -78,36 +77,5 @@ describe("redactConnectLinks", () => {
   it("passes a {type:'text'} non-JSON value through byte-identical", () => {
     const input = { type: "text", value: "just prose, not JSON" };
     expect(redactConnectLinks(input)).toBe(input);
-  });
-});
-
-describe("wrapToolModelOutputs", () => {
-  it("leaves a tool without toModelOutput untouched and applies redaction to one that has it", () => {
-    const plain = { description: "no model output", execute: () => ({ x: 1 }) };
-    const withOutput = {
-      description: "has model output",
-      execute: () => ({ irrelevant: true }),
-      toModelOutput: () => ({
-        type: "content",
-        value: [{ type: "text", text: JSON.stringify({ connect_url: "https://x/c" }) }],
-      }),
-    };
-
-    const wrapped = wrapToolModelOutputs({ plain, withOutput } as never) as unknown as Record<
-      string,
-      {
-        toModelOutput?: (args: { output: unknown }) => {
-          value: Array<{ text: string }>;
-        };
-      }
-    >;
-
-    // The tool without toModelOutput is passed through unchanged (same reference).
-    expect(wrapped.plain).toBe(plain as never);
-
-    // The wrapped tool redacts over the original's output.
-    const result = wrapped.withOutput.toModelOutput!({ output: undefined });
-    const parsed = JSON.parse(result.value[0].text) as { connect_url: string };
-    expect(parsed.connect_url).toBe(PLACEHOLDER);
   });
 });
