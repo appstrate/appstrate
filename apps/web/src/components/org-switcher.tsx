@@ -1,23 +1,22 @@
 // SPDX-License-Identifier: Apache-2.0
 
+/**
+ * Organisation and workspace switcher, at the head of the header trail.
+ *
+ * Two columns rather than a menu with a submenu, following the redesign: an
+ * organisation and a workspace are two independent dimensions of the same
+ * context, so both are visible and pickable in one pass instead of one hiding
+ * behind the other.
+ */
+import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { ChevronsUpDown, Check, Plus, Star, Library } from "lucide-react";
+import { ChevronsUpDown, Plus, Search, Settings, Library } from "lucide-react";
 import { useOrg } from "../hooks/use-org";
 import { useApplications } from "../hooks/use-applications";
 import { useCurrentApplicationId, useAppSwitcher } from "../hooks/use-current-application";
 import { usePermissions } from "../hooks/use-permissions";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
-  DropdownMenuTrigger,
-} from "@appstrate/ui/components/dropdown-menu";
+import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/components/popover";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { cn } from "@appstrate/ui/cn";
 
@@ -25,11 +24,35 @@ function OrgAvatar({ name, className }: { name: string; className?: string }) {
   return (
     <div
       className={cn(
-        "bg-sidebar-primary text-sidebar-primary-foreground flex items-center justify-center rounded-lg font-medium",
+        "bg-sidebar-primary text-sidebar-primary-foreground flex items-center justify-center rounded-lg font-bold",
         className,
       )}
     >
       {name.charAt(0).toUpperCase()}
+    </div>
+  );
+}
+
+function ColumnHeader({
+  label,
+  onAdd,
+  addLabel,
+}: {
+  label: string;
+  onAdd?: string;
+  addLabel: string;
+}) {
+  return (
+    <div className="flex items-center justify-between px-2 pt-1 pb-2">
+      <span className="text-muted-foreground text-[0.72rem] font-semibold tracking-[0.05em] uppercase">
+        {label}
+      </span>
+      {onAdd && (
+        <Link to={onAdd} className="text-primary flex items-center gap-1 text-xs font-medium">
+          {addLabel}
+          <Plus size={13} />
+        </Link>
+      )}
     </div>
   );
 }
@@ -42,18 +65,22 @@ export function OrgSwitcher() {
   const currentAppId = useCurrentApplicationId();
   const { switchApp } = useAppSwitcher();
   const { isAdmin } = usePermissions();
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
 
   const currentApp = applications?.find((a) => a.id === currentAppId) ?? null;
 
-  if (loading) {
-    return <Skeleton className="h-6 w-40" />;
-  }
-
+  if (loading) return <Skeleton className="h-6 w-40" />;
   if (!currentOrg) return null;
 
+  const needle = query.trim().toLowerCase();
+  const matches = (name: string) => !needle || name.toLowerCase().includes(needle);
+  const shownOrgs = orgs.filter((o) => matches(o.name));
+  const shownApps = (applications ?? []).filter((a) => matches(a.name));
+
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
         {/* Deliberately NOT shaped like the trail segments next to it. A
             breadcrumb segment means "go up a level" — cheap and reversible.
             This one replaces the whole context. The coloured avatar and the
@@ -68,9 +95,8 @@ export function OrgSwitcher() {
           <span className="truncate font-semibold">{currentOrg.name}</span>
           {currentApp && (
             <>
-              {/* The workspace stays visible even when there is only one: the
-                  concept has to be discoverable, and a level nobody ever sees
-                  is a level nobody learns. */}
+              {/* The workspace stays visible even when there is only one: a
+                  level nobody ever sees is a level nobody learns. */}
               <span className="text-border" aria-hidden>
                 |
               </span>
@@ -79,106 +105,117 @@ export function OrgSwitcher() {
           )}
           <ChevronsUpDown className="text-muted-foreground size-3.5 shrink-0" />
         </button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent
-        className="min-w-56 rounded-lg"
+      </PopoverTrigger>
+      <PopoverContent
         align="start"
-        side="bottom"
         sideOffset={6}
+        className="w-[540px] max-w-[calc(100vw-2rem)] overflow-hidden rounded-xl p-0"
       >
-        <DropdownMenuLabel className="text-muted-foreground text-xs">
-          {t("switcher.orgAriaLabel")}
-        </DropdownMenuLabel>
-        {orgs.map((org) => {
-          const isActive = org.id === currentOrg.id;
-          return (
-            <DropdownMenuItem
-              key={org.id}
-              data-testid={`org-item-${org.id}`}
-              className="flex items-center gap-2"
-              onSelect={() => {
-                if (!isActive) {
-                  switchOrg(org.id);
-                  navigate("/", { replace: true });
-                }
-              }}
-            >
-              <OrgAvatar name={org.name} className="size-6 rounded-md text-xs" />
-              <span className="flex-1 truncate">{org.name}</span>
-              {isActive && <Check size={14} strokeWidth={2.5} className="shrink-0" />}
-            </DropdownMenuItem>
-          );
-        })}
-        <DropdownMenuSeparator />
-        {/* Labelled even when there is a single application, because the chip
-            now shows it permanently: an unexplained "Default" row teaches
-            nothing, which was the point of keeping it visible. */}
-        <DropdownMenuLabel className="text-muted-foreground text-xs">
-          {t("switcher.appSection")}
-        </DropdownMenuLabel>
-        <DropdownMenuSub>
-          <DropdownMenuSubTrigger
-            data-testid="app-submenu-trigger"
-            className="flex items-center gap-2"
-          >
-            <span className="flex-1 truncate">{currentApp?.name}</span>
-          </DropdownMenuSubTrigger>
-          <DropdownMenuSubContent className="min-w-48 rounded-lg">
-            <DropdownMenuLabel className="text-muted-foreground text-xs">
-              {t("switcher.appAriaLabel")}
-            </DropdownMenuLabel>
-            {(applications ?? []).map((app) => {
-              const isActive = app.id === currentAppId;
+        <div className="flex items-center gap-2 border-b px-4 py-3">
+          <Search className="text-muted-foreground size-4 shrink-0" />
+          <input
+            autoFocus
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder={t("switcher.searchPlaceholder")}
+            className="w-full border-none bg-transparent p-0 text-sm shadow-none focus:ring-0 focus:outline-none"
+          />
+        </div>
+
+        <div className="grid grid-cols-2">
+          <div className="p-2.5">
+            <ColumnHeader
+              label={t("switcher.orgsColumn")}
+              addLabel={t("switcher.add")}
+              onAdd="/onboarding/create"
+            />
+            {shownOrgs.map((org) => {
+              const isActive = org.id === currentOrg.id;
               return (
-                <DropdownMenuItem
-                  key={app.id}
-                  data-testid={`app-item-${app.id}`}
-                  className="flex items-center justify-between gap-2"
-                  onSelect={() => {
-                    if (!isActive) switchApp(app.id);
+                <button
+                  key={org.id}
+                  type="button"
+                  data-testid={`org-item-${org.id}`}
+                  onClick={() => {
+                    if (!isActive) {
+                      switchOrg(org.id);
+                      navigate("/", { replace: true });
+                    }
+                    setOpen(false);
                   }}
+                  className={cn(
+                    "hover:bg-accent flex w-full items-center justify-start gap-2.5 rounded-md p-2 text-left",
+                    isActive && "bg-spark-soft hover:bg-spark-soft",
+                  )}
                 >
-                  <span className="flex items-center gap-1.5 truncate">
-                    {app.name}
-                    {app.isDefault && (
-                      <Star size={12} className="shrink-0 fill-amber-500 text-amber-500" />
-                    )}
+                  <OrgAvatar name={org.name} className="size-[30px] text-[0.82rem]" />
+                  <span className="flex min-w-0 flex-col">
+                    <span className="truncate text-sm font-medium">{org.name}</span>
+                    <span className="text-muted-foreground text-xs">
+                      {t(`switcher.role.${org.role}`)}
+                    </span>
                   </span>
-                  {isActive && <Check size={14} strokeWidth={2.5} className="shrink-0" />}
-                </DropdownMenuItem>
+                  {isActive && (
+                    <Settings size={15} className="text-muted-foreground ml-auto shrink-0" />
+                  )}
+                </button>
               );
             })}
-            <DropdownMenuSeparator />
-            <DropdownMenuItem asChild>
-              <Link
-                to="/org-settings/applications"
-                className="text-primary flex items-center gap-2"
-              >
-                <Plus size={14} />
-                {t("switcher.createApp")}
-              </Link>
-            </DropdownMenuItem>
-          </DropdownMenuSubContent>
-        </DropdownMenuSub>
-        <DropdownMenuItem asChild>
+          </div>
+
+          <div className="border-l p-2.5">
+            <ColumnHeader
+              label={t("switcher.workspacesColumn")}
+              addLabel={t("switcher.add")}
+              onAdd="/org-settings/applications"
+            />
+            {shownApps.map((app) => {
+              const isActive = app.id === currentAppId;
+              return (
+                <button
+                  key={app.id}
+                  type="button"
+                  data-testid={`app-item-${app.id}`}
+                  onClick={() => {
+                    if (!isActive) switchApp(app.id);
+                    setOpen(false);
+                  }}
+                  className={cn(
+                    "hover:bg-accent flex w-full items-center justify-start gap-2.5 rounded-md p-2 text-left",
+                    isActive && "bg-primary-soft hover:bg-primary-soft",
+                  )}
+                >
+                  <span className="truncate text-sm font-medium">{app.name}</span>
+                  {isActive && (
+                    <Settings size={15} className="text-muted-foreground ml-auto shrink-0" />
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 border-t">
           <Link
-            to="/onboarding/create"
-            state={{ fromSwitcher: true }}
-            className="text-primary flex items-center gap-2"
+            to="/org-settings"
+            onClick={() => setOpen(false)}
+            className="hover:bg-accent flex items-center gap-2 px-3 py-2.5 text-[0.84rem] font-medium"
           >
-            <Plus size={14} />
-            {t("switcher.createOrg")}
+            <Settings size={15} className="text-muted-foreground shrink-0" />
+            <span className="truncate">{t("switcher.orgSettings", { org: currentOrg.name })}</span>
           </Link>
-        </DropdownMenuItem>
-        {isAdmin && (
-          <DropdownMenuItem asChild>
-            <Link to="/library" className="text-primary flex items-center gap-2">
-              <Library size={14} />
-              {t("nav.library")}
+          {isAdmin && (
+            <Link
+              to="/library"
+              onClick={() => setOpen(false)}
+              className="hover:bg-accent flex items-center gap-2 border-l px-3 py-2.5 text-[0.84rem] font-medium"
+            >
+              <Library size={15} className="text-muted-foreground shrink-0" />
+              <span className="truncate">{t("nav.library")}</span>
             </Link>
-          </DropdownMenuItem>
-        )}
-      </DropdownMenuContent>
-    </DropdownMenu>
+          )}
+        </div>
+      </PopoverContent>
+    </Popover>
   );
 }

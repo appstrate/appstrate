@@ -16,5 +16,21 @@
 import { installLabFetch } from "./mock-fetch";
 import { mountLabPanel } from "./panel";
 
+// The platform injects this into index.html at serve time; `vite dev` serves
+// the file raw, so the lab supplies it. Modules are ON here: the point of the
+// lab is to see the whole surface, not the subset a given deployment enables.
+window.__APP_CONFIG__ = {
+  features: {
+    googleAuth: false,
+    githubAuth: false,
+    smtp: false,
+    signupDisabled: false,
+    orgCreationDisabled: false,
+    bootstrapTokenPending: false,
+    chat: true,
+  },
+  trustedOrigins: [],
+};
+
 installLabFetch();
 document.addEventListener("DOMContentLoaded", mountLabPanel);

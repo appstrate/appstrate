@@ -4,7 +4,7 @@ import type { ComponentProps } from "react";
 import { Link } from "react-router-dom";
 import { NavOrg } from "@/components/nav-org";
 import { SidebarBilling } from "@/components/sidebar-billing";
-import { useTheme } from "@/stores/theme-store";
+import { AppstrateMark } from "@/components/appstrate-mark";
 import {
   Sidebar,
   SidebarContent,
@@ -14,33 +14,24 @@ import {
 } from "@appstrate/ui/components/sidebar";
 
 /**
- * Sidebar header branding + collapse control.
+ * Brand cell: the mark plus the product name, never the "appstrate" wordmark.
  *
- * - Expanded: wordmark logo + collapse toggle (toggle pinned right).
- * - Collapsed: square app icon only.
- * - Collapsed + hovered: the icon is swapped for the collapse toggle, which
- *   stays clickable to re-open the sidebar.
+ * The redesign drops the wordmark here on purpose — the header already says
+ * which PRODUCT you are in ("Studio"), and the product switcher next to the
+ * profile is what moves you between them. Repeating the company name in the
+ * one place that should name the product wastes the slot.
  */
 function SidebarLogo() {
-  const { resolvedTheme } = useTheme();
-
   return (
-    <div className="group/logo flex w-full items-center gap-2 pl-2 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:pl-0">
-      <Link to="/" className="flex items-center group-data-[collapsible=icon]:hidden">
-        <img
-          src={resolvedTheme === "dark" ? "/logo-dark.svg" : "/logo-light.svg"}
-          alt="Appstrate"
-          className="h-7 w-auto"
-        />
-      </Link>
-      {/* Collapsed-only app icon — hidden as soon as the header is hovered */}
-      <img
-        src={resolvedTheme === "dark" ? "/icon-dark.svg" : "/icon-light.svg"}
-        alt="Appstrate"
-        className="hidden size-7 shrink-0 group-data-[collapsible=icon]:block group-data-[collapsible=icon]:group-hover/logo:hidden"
-      />
-      {/* Toggle: always shown when expanded; collapsed only on hover */}
-    </div>
+    <Link
+      to="/"
+      className="flex w-full items-center gap-2 pl-2 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:pl-0"
+    >
+      <AppstrateMark className="h-7 w-auto shrink-0" />
+      <span className="text-[1.02rem] font-semibold tracking-tight group-data-[collapsible=icon]:hidden">
+        Studio
+      </span>
+    </Link>
   );
 }
 

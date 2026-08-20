@@ -13,7 +13,6 @@ import {
   Loader2,
   Users,
   Boxes,
-  MessageSquare,
   FileText,
   Settings,
   type LucideIcon,
@@ -23,8 +22,6 @@ import { useAgents } from "../hooks/use-packages";
 import { usePaginatedRuns } from "../hooks/use-paginated-runs";
 import { usePermissions } from "../hooks/use-permissions";
 import { useAppConfig } from "../hooks/use-app-config";
-import { useChatUnreadCount } from "@appstrate/module-chat/unread";
-import { buildScopingHeaders } from "../lib/scoping-headers";
 import { SidebarNavLink } from "./sidebar-nav-link";
 import {
   SidebarGroup,
@@ -56,8 +53,6 @@ export function NavOrg() {
   const hasRunning =
     (agents?.some((f) => f.running_runs > 0) ?? false) || (runningInline?.total ?? 0) > 0;
   const unread = unreadCount ?? 0;
-  // Unread chat replies — drives the Chat nav badge, aligned with the Runs badge.
-  const chatUnread = useChatUnreadCount(buildScopingHeaders, features.chat);
 
   // Grouped nav: work surfaces (Activité) → build loop (Automatisation) →
   // reusable building blocks (Extensions) → admin-only config (Administration).
@@ -65,9 +60,6 @@ export function NavOrg() {
   const activityItems: NavItem[] = [
     { path: "/", label: t("nav.dashboard"), icon: LayoutDashboard },
     // Module-contributed product surfaces (absent flag = entry hidden)
-    ...(features.chat
-      ? [{ path: "/chat", label: t("nav.chat"), icon: MessageSquare, badge: chatUnread }]
-      : []),
     { path: "/documents", label: t("nav.documents"), icon: FileText },
   ];
 
