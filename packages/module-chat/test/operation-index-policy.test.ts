@@ -8,7 +8,7 @@
  */
 
 import { describe, expect, it } from "bun:test";
-import { applyOperationIndexPolicy } from "../src/chat-stream.ts";
+import { applyOperationIndexPolicy } from "../src/operation-index.ts";
 
 const HEADING = "## Operation index";
 const BASE = "You are a helpful assistant.\n\nSome MCP instructions here.";

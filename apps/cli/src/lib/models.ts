@@ -77,7 +77,7 @@ export async function listModelPresets(profileName: string): Promise<ModelPreset
  *     table. Deliberately concrete per the spec ("resists premature
  *     abstraction"), and it carries per-family upstream paths a membership set
  *     can't. Anything here must exist there; widen that table first.
- *   - `packages/module-chat/src/llm.ts` `proxyTarget()` —
+ *   - `packages/module-chat/src/pi-chat/model-binding.ts` `proxyBaseUrl()` —
  *     `platform-routed ∩ AI-SDK-supported`, plus each family's AI SDK provider
  *     kind and baseURL suffix. Same three families today by coincidence of
  *     support, not by shared definition: pi-ai already knows shapes the AI SDK

@@ -30,7 +30,7 @@
  * `cache_write_tokens` is reported separately by OpenRouter-compatible
  * providers. Pi 0.84.2 treats `cached_tokens` as cache reads and does not
  * subtract writes from it. Appstrate must preserve that exact partition so a
- * call has identical persisted usage on the AI SDK and Pi paths.
+ * call has identical persisted usage on the proxy and in-container run paths.
  */
 
 import type { LlmProxyAdapter, UpstreamUsage } from "./types.ts";

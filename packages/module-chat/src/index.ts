@@ -14,7 +14,7 @@
  *     (`ChatPage`) — the app shell lazy-loads it behind `features.chat`.
  *
  * The conversational loop (`POST /api/chat`) is the transplant of the
- * appstrate-chat satellite: AI SDK `streamText` over the org's configured
+ * appstrate-chat satellite: one in-process Pi engine over the org's configured
  * models (via the llm-proxy — no key held here) + the `/api/mcp` meta-tools
  * so the assistant pilots the platform with the caller's own permissions.
  */

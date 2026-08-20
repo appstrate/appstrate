@@ -4,7 +4,7 @@
  * Build the Pi extension factories that expose the platform's own MCP tools
  * (`search_operations` / `describe_operation` / `invoke_operation` +
  * `run_and_wait`) to the in-process Pi chat session — the same meta-tools the
- * `ai-sdk` chat path gets, so the assistant pilots the platform with the
+ * platform MCP server exposes, so the assistant pilots the platform with the
  * caller's own permissions.
  *
  * Unlike the runtime container (which forwards a FIXED descriptor set), the chat
@@ -13,7 +13,7 @@
  * extension that streams a LIVE preliminary run card into the UI stream (the
  * run id appears the moment the run is launched, then the card updates as the
  * run progresses) while the tool result stays blocked on completion — the same
- * behaviour the `ai-sdk` path gets from `wrapRunAndWaitTool`.
+ * behaviour the live run card needs.
  */
 
 import { formatTurnBudgetNote } from "@appstrate/core/chat-turn-metadata";

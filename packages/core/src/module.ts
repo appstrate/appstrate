@@ -1442,7 +1442,7 @@ export interface PlatformServices {
    * model id + baseUrl + a FRESH access token so the chat module can drive the
    * single generic in-process Pi chat engine inline; for an API-key / unknown
    * provider it returns `{ subscription: false }` so the chat falls to its
-   * generic ai-sdk (llm-proxy) path; for a dead oauth credential it returns
+   * llm-proxy binding on the same engine; for a dead oauth credential it returns
    * `{ subscription: true, needsReconnection: true }`. The chat module has no DB
    * access — this is the seam that resolves the credential + token server-side,
    * so the real subscription token never enters the module's own resolution
@@ -1456,7 +1456,7 @@ export interface PlatformServices {
    * Record one chat turn's LLM usage as an `llm_usage` ledger row (source
    * `proxy`, `run_id` null). The chat module has no DB access, so metering for
    * the inline Pi engine crosses through here — same ledger the llm-proxy meters
-   * into for the ai-sdk chat path and every agent run.
+   * into for proxy-routed chat turns and every agent run.
    */
   recordChatUsage(record: ChatUsageRecord): Promise<void>;
   /**

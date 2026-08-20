@@ -684,7 +684,7 @@ export async function fetchRunDocuments(
  * run's published `documents` so the model sees `{ uri, name, … }` it can chain
  * into a follow-up run (D6). The extra fetch runs only once the run is terminal
  * and only when a run id exists; a run that published nothing keeps the payload
- * document-free. Used by the chat run_and_wait paths (pi + ai-sdk).
+ * document-free. Used by the chat's `run_and_wait` tool.
  *
  * Truncation ({@link truncateRunAndWaitPayload}) is applied on the same terminal
  * step but is INDEPENDENT of the document list — an oversized result is cut back

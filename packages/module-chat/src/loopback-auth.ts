@@ -110,7 +110,7 @@ function mint(
  * Mint the INFERENCE loopback bearer (`llm-proxy:call` + `models:read`,
  * first-party-loopback granted).
  *
- * The default 60 s TTL fits the `ai-sdk` path, which re-mints on every proxy
+ * The default 60 s TTL fits the proxy binding, which re-mints on every provider
  * call. A caller whose token must live across a whole multi-step turn (minutes
  * — blocking run long-polls) passes a longer `ttlMs`. The token stays
  * least-privilege and process-local either way.

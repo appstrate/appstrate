@@ -13,8 +13,7 @@
  * pure/injectable so it is unit testable without a live model or a container.
  *
  * The other guard that used to live here — deadline vs explicit stop, and the
- * user-facing notice a deadline owes the user — is engine-neutral (both engines
- * enforce the same ceiling and close the turn the same way) and now lives in
+ * user-facing notice a deadline owes the user — is not Pi-specific and lives in
  * `../turn-closure.ts`.
  */
 

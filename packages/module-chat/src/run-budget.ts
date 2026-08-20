@@ -4,7 +4,7 @@
  * Turn-budget propagation for `run_and_wait` — ONE implementation shared by both
  * chat engines (`pi-chat/mcp-tools.ts` and `platform-mcp.ts`).
  *
- * The defect this closes: `RUN_AND_WAIT_MAX_MS` is 30 minutes and neither engine
+ * The defect this closes: `RUN_AND_WAIT_MAX_MS` is 30 minutes and the chat
  * ever passed `maxMs`, so a tool call was allowed to wait THREE TIMES longer
  * than the 10-minute turn hosting it. Measured consequence: a run launched at
  * T+9:38 of a 10-minute turn, the turn died 22 s later, the run succeeded 2
@@ -110,7 +110,7 @@ export function decideRunAndWaitBudget(
 
 /**
  * {@link runAndWaitStepsWithDocuments}, bounded by the hosting turn's deadline.
- * Both engines call THIS — the gate, the `maxMs` derivation and the
+ * The chat's `run_and_wait` calls THIS — the gate, the `maxMs` derivation and the
  * launching-session link exist once.
  *
  * The link (C3) is written off the FIRST step carrying a run id, which is the

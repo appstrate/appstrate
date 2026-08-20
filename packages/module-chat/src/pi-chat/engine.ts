@@ -20,7 +20,7 @@
  *
  * The Pi session's event stream is mapped onto the AI-SDK UI-message-stream
  * ({@link PiChatUiStreamMapper}), the exact protocol the chat client already
- * consumes from the AI SDK path, with one client contract for both loops.
+ * has always consumed.
  */
 
 import {
@@ -59,17 +59,6 @@ import {
 } from "./model-binding.ts";
 import { buildStructuredPiTurn, reconstructPiSession } from "./structured-session.ts";
 import { createPiChatResourceLoader } from "./resource-loader.ts";
-
-/**
- * Wall-clock ceiling for a single chat turn. A turn fans out into up to
- * CHAT_MAX_STEPS steps (each possibly long-polling a run for ~55 s), so the
- * budget is generous; it exists to stop a wedged upstream stream from holding a
- * concurrency slot forever.
- *
- * It now lives in `@appstrate/core/chat-turn-metadata` next to the step budget:
- * both engines derive their child-call budgets from the SAME ceiling, and a
- * `run_and_wait` can no longer be granted more time than the turn hosting it.
- */
 
 export interface PiChatInput {
   /** Capacity reserved by the route before it persists the user turn. */
@@ -321,8 +310,7 @@ export function runPiChat(input: PiChatInput): Response {
           // Early-stopping generate: the tool loop was cut at
           // CHAT_TOOL_STEP_BUDGET, so spend the last step on ONE tool-less model
           // call — the user gets a synthesis of the work already done instead of
-          // a truncated tool call. Same contract as the final
-          // step (`prepareAiSdkChatStep`).
+          // a truncated tool call.
           if (stepCap.fired()) {
             logger.info("chat turn step cap reached", {
               chatSessionId: input.chatSessionId,

@@ -6,7 +6,8 @@
  *
  * A tool `result` reaches us in one of several envelopes depending on the
  * runtime/bridge path — raw MCP `CallToolResult` `{ content: [{ type:"text",
- * text }] }`, the AI-SDK bridge `{ type:"content", value:[…] }` / `{ type:"json",
+ * text }] }`, or — in threads persisted before the chat unified on one engine —
+ * the AI-SDK bridge `{ type:"content", value:[…] }` / `{ type:"json",
  * value }`, a bare content array, or a JSON string. `unwrapResult` peels these
  * layers down to the actual payload so the rest of the UI never has to know
  * which path produced it.

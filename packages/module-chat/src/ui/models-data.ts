@@ -86,8 +86,9 @@ export async function fetchModels(
     });
     // Same family gate as the server (pickModel in llm.ts) — shared set so they
     // never drift. Subscription models (claude-code via anthropic-messages,
-    // codex via openai-codex-responses) pass the gate and the server routes them
-    // to the in-process Pi chat engine by resolving the model row's provider.
+    // codex via openai-codex-responses) pass the gate too; every model runs on
+    // the same engine, and the model row's provider only decides which
+    // credential the turn spends.
     //
     // Model aliases reach this cookie-authed surface with their backing stripped
     // (`apiShape: null`), so the family gate can't see it — but they're meant to

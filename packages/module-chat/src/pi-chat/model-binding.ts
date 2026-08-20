@@ -71,13 +71,17 @@ export type PiChatModelBindingResolution =
   | { status: "unsupported" };
 
 /**
- * llm-proxy base URL per family, in the shape PI expects — NOT the one
- * `proxyTarget` (`../llm.ts`) hands the AI SDK. Both tables end on the same
- * absolute URL; they differ because each client appends a different path:
- * pi-ai's Anthropic client appends `/v1/messages` and its Mistral transport
- * appends `v1/chat/completions`, so the `/v1` the AI SDK path carries in its
- * base would be duplicated here. Change one table and re-derive the other from
- * the client's own path building, never by copying the string across.
+ * llm-proxy base URL per family, in the shape pi-ai expects — which is NOT
+ * simply the route path. Each of pi-ai's clients appends a different suffix to
+ * reach the same absolute URL, so the split between base and suffix moves:
+ * its OpenAI client appends `/chat/completions`, its Anthropic client appends
+ * `/v1/messages`, and its Mistral transport appends `v1/chat/completions`.
+ * Hence `/v1` sits in the base for `openai-completions` and in the suffix for
+ * the other two.
+ *
+ * Derive a new entry from that client's own path building and check the result
+ * against the route declared in `apps/api/src/routes/llm-proxy.ts` — never by
+ * pattern-matching the strings below, which look inconsistent on purpose.
  */
 function proxyBaseUrl(origin: string, apiShape: string): string | null {
   switch (apiShape) {

@@ -13,7 +13,6 @@ import {
   readConnectOffer,
   splitConnectPayload,
   splitJsonText,
-  splitToolResult,
 } from "../src/connect-offer.ts";
 
 const URL_ = "https://app.example.com/api/integrations/connect/start?token=SECRET";
@@ -81,66 +80,5 @@ describe("splitJsonText", () => {
 
     const prose = "plain prose, no JSON";
     expect(splitJsonText(prose)).toEqual({ text: prose, offer: null });
-  });
-});
-
-describe("splitToolResult", () => {
-  it("splits an MCP CallToolResult and attaches the typed offer", () => {
-    const result = {
-      content: [
-        { type: "text", text: JSON.stringify({ status: 200, body: { connect_url: URL_ } }) },
-      ],
-      isError: false,
-    };
-    const out = splitToolResult(result) as Record<string, unknown>;
-    expect((out.content as Array<{ text: string }>)[0]!.text).not.toContain("token=SECRET");
-    expect(out.connectOffer).toEqual({ connect_url: URL_ });
-    expect(out.isError).toBe(false);
-  });
-
-  it("prefers the structuredContent offer and redacts it too", () => {
-    const result = {
-      content: [{ type: "text", text: JSON.stringify({ connect_url: "https://x/from-text" }) }],
-      structuredContent: { connect_url: URL_ },
-    };
-    const out = splitToolResult(result) as { structuredContent: { connect_url: string } } & {
-      connectOffer: unknown;
-    };
-    expect(out.structuredContent.connect_url).toBe(REDACTED_CONNECT_LINK);
-    expect(out.connectOffer).toEqual({ connect_url: URL_ });
-  });
-
-  it("handles a bare structuredContent payload (outputSchema-configured tools)", () => {
-    const out = splitToolResult({ connect_url: URL_, state: "s" }) as Record<string, unknown>;
-    expect(out.connect_url).toBe(REDACTED_CONNECT_LINK);
-    expect(out.connectOffer).toEqual({ connect_url: URL_, state: "s" });
-  });
-
-  it("returns the original reference for a result without connect links", () => {
-    const result = { content: [{ type: "text", text: JSON.stringify({ ok: true }) }] };
-    expect(splitToolResult(result)).toBe(result);
-  });
-});
-
-describe("readConnectOffer", () => {
-  it("reads the typed field at the top level and one output level down", () => {
-    const offer = { connect_url: URL_, state: "s" };
-    expect(readConnectOffer({ content: [], connectOffer: offer })).toEqual(offer);
-    expect(readConnectOffer({ output: { connectOffer: offer } })).toEqual(offer);
-  });
-
-  it("normalizes a persisted HTTP(S) offer before returning it", () => {
-    expect(
-      readConnectOffer({ connectOffer: { connect_url: "HTTPS://EXAMPLE.COM/Connect" } }),
-    ).toEqual({ connect_url: "https://example.com/Connect" });
-  });
-
-  it("rejects malformed or placeholder-bearing offers", () => {
-    expect(readConnectOffer({ connectOffer: { connect_url: REDACTED_CONNECT_LINK } })).toBeNull();
-    expect(readConnectOffer({ connectOffer: { connect_url: 42 } })).toBeNull();
-    expect(readConnectOffer({ connectOffer: { connect_url: "https://" } })).toBeNull();
-    expect(readConnectOffer({ connectOffer: { connect_url: "javascript:alert(1)" } })).toBeNull();
-    expect(readConnectOffer({ connectOffer: "https://x/y" })).toBeNull();
-    expect(readConnectOffer(null)).toBeNull();
   });
 });

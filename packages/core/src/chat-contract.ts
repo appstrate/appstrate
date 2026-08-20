@@ -59,8 +59,8 @@ export interface SubscriptionChatModel {
 
 /**
  * Outcome of resolving the chosen model row for a chat turn.
- *   - `{ subscription: false }` — an API-key / unknown provider → the chat's
- *     generic ai-sdk (llm-proxy) path handles it.
+ *   - `{ subscription: false }` — an API-key / unknown provider → the same
+ *     engine runs the turn, bound to the platform llm-proxy with an inert key.
  *   - `{ subscription: true, needsReconnection: true }` — a model whose stored
  *     credential is dead (oauth flagged needs-reconnection, or a stored secret
  *     that no longer decrypts) → the chat surfaces a reconnect prompt. Nothing

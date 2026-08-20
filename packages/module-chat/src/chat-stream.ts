@@ -23,8 +23,6 @@ import { z } from "zod";
 import { parseBody, invalidRequest } from "@appstrate/core/api-errors";
 import { isAttachmentUri } from "@appstrate/core/document-uri";
 import { logger } from "./logger.ts";
-import { applyOperationIndexPolicy } from "./operation-index.ts";
-export { applyOperationIndexPolicy } from "./operation-index.ts";
 import { listModels, pickModel, resolveDefaultApplicationId } from "./llm.ts";
 import { platformMcpUrl } from "./platform-mcp.ts";
 import { selfOrigin, forwardedHeaders } from "./self.ts";
@@ -244,7 +242,7 @@ export async function handleChatStream(
   // Materialize the new turn's composer attachments into durable, session-scoped
   // documents and rewrite each `upload://` (or already-`document://`) file part
   // to its stable `document://` URI, BEFORE the turn is persisted (persistence
-  // stores only `document://`) and before it reaches either engine (the model is
+  // stores only `document://`) and before it reaches the engine (the model is
   // shown the attachment as a text line, never a raw file URL). Needs the session
   // (the document container) and the resolved application id, both known here;
   // nothing has been opened yet, so a quota/cap rejection surfaces as a clean
@@ -316,9 +314,15 @@ export async function handleChatStream(
 
   // Assemble the system prompt: the tool-grounding prompt, with no inline MCP
   // instructions — the engine's own MCP handshake delivers them.
+  //
+  // The operation-index policy is NOT applied here. The index only ever enters a
+  // prompt through the MCP server's `instructions`, which this route no longer
+  // fetches; the engine appends them and applies the policy itself
+  // (`pi-chat/engine.ts`). Re-applying it to this prompt matched nothing — and
+  // could only misfire, since the context block below carries org-authored agent
+  // names and would be truncated at any that happened to spell the heading.
   let system = SYSTEM_PROMPT;
   if (contextBlock) system += `\n\n${contextBlock}`;
-  system = applyOperationIndexPolicy(system, chosen.apiShape);
 
   logger.info("chat preamble", {
     // Which credential the turn spends. One engine drives them both.

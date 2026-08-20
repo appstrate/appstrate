@@ -52,8 +52,7 @@ export function attachmentTextBlock(part: FileUIPart): string {
  * Return a copy of the thread with every file part replaced by a compact text
  * part (the {@link attachmentTextBlock}) so the model sees the attachment as
  * text it can act on. Messages without file parts are returned unchanged (no
- * copy). Used by BOTH engine paths (the ai-sdk `convertToModelMessages` input
- * and the Pi transcript) so the model-facing serialization lives in one place.
+ * copy). Used when projecting the thread into the engine's transcript so the model-facing serialization lives in one place.
  */
 export function messagesWithAttachmentsAsText(messages: UIMessage[]): UIMessage[] {
   return messages.map((message) => {

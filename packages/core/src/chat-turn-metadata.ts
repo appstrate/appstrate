@@ -43,7 +43,8 @@ export const CHAT_FINAL_STEP_SYSTEM_PROMPT =
 
 /**
  * Wall-clock ceiling for ONE chat turn — the TIME budget, as `CHAT_MAX_STEPS`
- * is the step budget. Shared by both engines so a child call can never be
+ * is the step budget. The one ceiling every child budget derives from, so a
+ * child call can never be
  * granted more time than the turn hosting it (the Pi engine used to own this
  * constant privately while `RUN_AND_WAIT_MAX_MS` let a run wait 3× longer than
  * the whole turn).
@@ -90,7 +91,7 @@ export interface TurnRunBudget {
 
 /**
  * THE budget arithmetic — the single place the deadline is turned into a child
- * budget, used by both chat engines (deadline propagation: an absolute
+ * budget, used by the chat engine (deadline propagation: an absolute
  * timestamp descends, every caller derives its own remaining slice from it, and
  * the whole subtree dies at the same instant).
  */

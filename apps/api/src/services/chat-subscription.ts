@@ -38,7 +38,7 @@ import { logger } from "../lib/logger.ts";
  * Resolve the chosen chat model preset to its real upstream binding for one
  * chat turn. Only oauth-subscription (authMode `oauth2`) models take the Pi
  * chat-engine path; everything else returns `{ subscription: false }` so the
- * chat module falls through to its generic ai-sdk (llm-proxy) path.
+ * chat module binds the same engine to the llm-proxy instead.
  */
 export async function resolveSubscriptionChatModel(
   orgId: string,
@@ -272,7 +272,7 @@ export async function checkUsageAllowed(args: {
     // remote-origin run).
     credentialSource: args.subscription || !isSystemModel(args.presetId) ? "org" : "system",
     // A turn executes in the platform's own process — never on a
-    // caller-supplied host. True of the in-process subscription engine too.
+    // caller-supplied host. True of the in-process chat engine too.
     executionPlane: "platform",
   });
   return rejection ?? null;
