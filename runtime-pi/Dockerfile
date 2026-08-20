@@ -60,7 +60,7 @@ RUN --mount=type=cache,target=/root/.bun/install/cache,sharing=locked \
 # node_modules) into a single file that Bun loads in one read — shaving
 # ~100-300 ms off container cold start.
 #
-# The Pi SDK pair (@mariozechner/pi-ai, @mariozechner/pi-coding-agent)
+# The Pi SDK pair (@earendil-works/pi-ai, @earendil-works/pi-coding-agent)
 # is kept `--external` deliberately. The SDK is large (~10 MB
 # bundled), uses dynamic provider dispatch, and we have observed
 # bundling it inlines transient modules that hurt rather than help.
@@ -91,8 +91,8 @@ COPY runtime-pi/*.ts              runtime-pi/
 # breaks name-dependent runtime lookups (`fn.name`, class-name dispatch).
 RUN bun build runtime-pi/entrypoint.ts \
         --target=bun \
-        --external='@mariozechner/pi-ai' \
-        --external='@mariozechner/pi-coding-agent' \
+        --external='@earendil-works/pi-ai' \
+        --external='@earendil-works/pi-coding-agent' \
         --outfile=runtime-pi/dist/entrypoint.js
 
 # ── Stage 2 — runtime ─────────────────────────────────────────────
@@ -204,17 +204,17 @@ COPY --from=deps --chown=pi:pi /build/runtime-pi/node_modules             ./runt
 # COPY and the symlink, which puts the raw platform SOURCE TREE back
 # inside the sandbox (see the comment on the entrypoint COPY below).
 
-# Pi SDK pair (@mariozechner/pi-ai, @mariozechner/pi-coding-agent) lands
+# Pi SDK pair (@earendil-works/pi-ai, @earendil-works/pi-coding-agent) lands
 # in runtime-pi/node_modules per bun's hoisting decisions. The bundle at
 # /runtime/dist/ keeps the pair `--external`, and its resolution walks up
 # to /runtime/node_modules, so symlink the pair there.
-RUN mkdir -p node_modules/@mariozechner \
- && ln -s /runtime/runtime-pi/node_modules/@mariozechner/pi-ai           node_modules/@mariozechner/pi-ai \
- && ln -s /runtime/runtime-pi/node_modules/@mariozechner/pi-coding-agent node_modules/@mariozechner/pi-coding-agent \
+RUN mkdir -p node_modules/@earendil-works \
+ && ln -s /runtime/runtime-pi/node_modules/@earendil-works/pi-ai           node_modules/@earendil-works/pi-ai \
+ && ln -s /runtime/runtime-pi/node_modules/@earendil-works/pi-coding-agent node_modules/@earendil-works/pi-coding-agent \
  && chown -h pi:pi \
-        node_modules/@mariozechner \
-        node_modules/@mariozechner/pi-ai \
-        node_modules/@mariozechner/pi-coding-agent
+        node_modules/@earendil-works \
+        node_modules/@earendil-works/pi-ai \
+        node_modules/@earendil-works/pi-coding-agent
 
 # The pre-bundled entrypoint, and nothing else. The `.ts` sources it was
 # built from (`runtime-pi/*.ts`, `runtime-pi/mcp/`) are deliberately NOT
@@ -251,7 +251,7 @@ COPY --from=deps --chown=pi:pi /build/runtime-pi/dist/entrypoint.js ./dist/entry
 ENV BUN_RUNTIME_TRANSPILER_CACHE_PATH=/runtime/.transpiler-cache
 RUN mkdir -p /runtime/.transpiler-cache \
  && (bun /runtime/dist/entrypoint.js > /dev/null 2>&1 || true) \
- && bun -e 'await import("@mariozechner/pi-ai"); await import("@mariozechner/pi-coding-agent");' \
+ && bun -e 'await import("@earendil-works/pi-ai"); await import("@earendil-works/pi-coding-agent");' \
  # Fail the build if priming produced nothing — an empty cache would be a
  # silent cold-start regression (the entrypoint run above swallows its exit
  # code by design, so this is the only guard that the graph actually loaded).

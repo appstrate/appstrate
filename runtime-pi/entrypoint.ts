@@ -407,7 +407,7 @@ const phaseTimings: Record<string, number> = {};
 
 // Warm the heavy Pi SDK now (non-awaited) so its ~200ms module eval overlaps
 // the network-bound provisioning below instead of landing on the pre-session
-// boot path. `@mariozechner/pi-coding-agent` is dynamically imported by
+// boot path. `@earendil-works/pi-coding-agent` is dynamically imported by
 // `PiRunner` at session-build time; ESM caches the module, so this kick-off
 // turns that later `await` into a no-op.
 const sdkImportStart = performance.now();

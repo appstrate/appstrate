@@ -6,11 +6,11 @@ Status: active. Addresses [#616](https://github.com/appstrate/appstrate/issues/6
 The agent execution path depends on a single-maintainer SDK published by one
 author:
 
-- `@mariozechner/pi-ai`
-- `@mariozechner/pi-coding-agent`
+- `@earendil-works/pi-ai`
+- `@earendil-works/pi-coding-agent`
 
-(plus their transitive siblings `@mariozechner/pi-agent-core`,
-`@mariozechner/pi-tui`).
+(plus their transitive siblings `@earendil-works/pi-agent-core`,
+`@earendil-works/pi-tui`).
 
 This document records why that risk is bounded today, the controls in place,
 and the concrete plan for substituting a forked/vendored SDK in an emergency.
@@ -35,17 +35,17 @@ the API process.
 
 The entire import surface, after this hardening, is **three barrel files**:
 
-| Package                | Barrel                             | Symbols consumed                                                                                                                                                                                            |
-| ---------------------- | ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `@appstrate/runner-pi` | `packages/runner-pi/src/pi-sdk.ts` | `AuthStorage`, `createAgentSession`, `DefaultResourceLoader`, `ModelRegistry`, `SessionManager`, `SettingsManager`, `Type` (values); `ExtensionAPI`, `ExtensionFactory`, `Api`, `KnownApi`, `Model` (types) |
-| `runtime-pi` (image)   | `runtime-pi/pi-sdk.ts`             | `Type` (value); `ExtensionAPI`, `ExtensionFactory`, `Api`, `Model` (types)                                                                                                                                  |
-| `@appstrate/cli`       | `apps/cli/src/lib/pi-sdk.ts`       | `Api`, `Model` (types)                                                                                                                                                                                      |
+| Package                | Barrel                             | Symbols consumed                                                                                                                                                                            |
+| ---------------------- | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@appstrate/runner-pi` | `packages/runner-pi/src/pi-sdk.ts` | `createAgentSession`, `DefaultResourceLoader`, `ModelRuntime`, `SessionManager`, `SettingsManager`, `Type` (values); `ExtensionAPI`, `ExtensionFactory`, `Api`, `KnownApi`, `Model` (types) |
+| `runtime-pi` (image)   | `runtime-pi/pi-sdk.ts`             | `Type` (value); `ExtensionAPI`, `ExtensionFactory`, `Api`, `Model` (types)                                                                                                                  |
+| `@appstrate/cli`       | `apps/cli/src/lib/pi-sdk.ts`       | `Api`, `Model` (types)                                                                                                                                                                      |
 
 Every other module imports these symbols from its package-local barrel, never
 from the SDK directly.
 
 > `examples/custom-skill/skill.ts` intentionally imports
-> `@mariozechner/pi-coding-agent` directly — it is user-facing documentation that
+> `@earendil-works/pi-coding-agent` directly — it is user-facing documentation that
 > demonstrates the real SDK extension API a skill author writes against, not
 > platform code. It is outside the guard scope on purpose.
 
@@ -59,7 +59,7 @@ document** — read the live pin instead, or you will silently downgrade a
 single-vendor dependency:
 
 ```sh
-grep -rn '"@mariozechner/pi-' --include=package.json . | grep -v node_modules
+grep -rn '"@earendil-works/pi-' --include=package.json . | grep -v node_modules
 ```
 
 The manifests carrying the pin: `package.json` (root), `apps/api`,
@@ -79,7 +79,7 @@ Because the SDK is imported only through the three `pi-sdk.ts` barrels, swapping
 the implementation is a change to those files alone — no agent logic moves.
 
 A `no-restricted-imports` rule in `eslint.config.mjs` forbids any direct
-`@mariozechner/pi-*` import (the whole vendor family — including subpaths) outside
+`@earendil-works/pi-*` import (the whole vendor family — including subpaths) outside
 the barrels (the barrels are exempted via `ignores`). The guard covers every
 declared SDK consumer tree: `packages/runner-pi/src`, `runtime-pi`, `apps/cli/src`,
 `apps/api/src`, and `packages/afps-runtime/src`. `afps-runtime` is SDK-agnostic and
@@ -137,14 +137,14 @@ transitively, so this is a single edit:
     // --- emergency Pi SDK substitution (pick ONE form per package) ---
 
     // a) npm alias to a published fork under our own scope:
-    "@mariozechner/pi-ai": "npm:@appstrate/pi-ai-fork@<pinned-version>",
-    "@mariozechner/pi-coding-agent": "npm:@appstrate/pi-coding-agent-fork@<pinned-version>",
+    "@earendil-works/pi-ai": "npm:@appstrate/pi-ai-fork@<pinned-version>",
+    "@earendil-works/pi-coding-agent": "npm:@appstrate/pi-coding-agent-fork@<pinned-version>",
 
     // b) pinned git fork (tag or commit SHA):
-    // "@mariozechner/pi-ai": "github:appstrate/pi-ai-fork#v<pinned-version>",
+    // "@earendil-works/pi-ai": "github:appstrate/pi-ai-fork#v<pinned-version>",
 
     // c) vendored tarball committed to the repo (fully offline):
-    // "@mariozechner/pi-ai": "file:./vendor/mariozechner-pi-ai-<pinned-version>.tgz"
+    // "@earendil-works/pi-ai": "file:./vendor/earendil-works-pi-ai-<pinned-version>.tgz"
   },
 }
 ```

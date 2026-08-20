@@ -23,7 +23,7 @@
  * No fingerprint forging anywhere — and the platform issues ZERO Anthropic API
  * calls to validate a credential or discover models. Both `claude-code` runs
  * and the chat execute on the single generic Pi engine
- * (`@mariozechner/pi-coding-agent` / `pi-ai`) — pi-ai emits the Anthropic OAuth
+ * (`@earendil-works/pi-coding-agent` / `pi-ai`) — pi-ai emits the Anthropic OAuth
  * request shape natively from the token, including the `oauth-2025-04-20` beta
  * header; the sidecar (run) / in-process token resolution (chat) only swap the
  * bearer and add or modify no `anthropic-beta` header.
@@ -172,7 +172,7 @@ const claudeCodeProvider: ModelProviderDefinition = {
   modelDiscovery: { mode: "static" },
   // Anthropic OAuth tokens are not JWTs — no JWT identity decoding. There is no
   // fingerprint forging: both `claude-code` agent runs and the interactive chat
-  // execute on the single generic Pi engine (`@mariozechner/pi-coding-agent` /
+  // execute on the single generic Pi engine (`@earendil-works/pi-coding-agent` /
   // `pi-ai`), which emits the Anthropic OAuth request shape natively from a
   // token containing `sk-ant-oat` — the sidecar (run) / in-process token
   // resolution (chat) only supplies the real bearer server-side. The provider

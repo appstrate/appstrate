@@ -12,15 +12,14 @@
  *
  * Usage normalisation — PARITY WITH THE RUNNER. The same upstream reply is
  * normalised twice in this product: here (remote runs + chat's ai-sdk path,
- * which go through this proxy) and inside `@mariozechner/pi-ai`
- * (`dist/providers/openai-completions.js:795-818`, `parseChunkUsage`), which
+ * which go through this proxy) and inside `@earendil-works/pi-ai`
+ * (`dist/api/openai-completions.js`, `parseChunkUsage`), which
  * every platform-side Pi run uses. The two MUST agree bucket for bucket or the
  * same consumption is billed differently depending on where the run executed.
  * pi-ai's formula, reproduced exactly by {@link parseOpenAICompatibleUsage}:
  *
- *   reportedCached = prompt_tokens_details.cached_tokens ?? prompt_cache_hit_tokens ?? 0
+ *   cacheRead      = prompt_tokens_details.cached_tokens ?? prompt_cache_hit_tokens ?? 0
  *   cacheWrite     = prompt_tokens_details.cache_write_tokens ?? 0
- *   cacheRead      = cacheWrite > 0 ? max(0, reportedCached − cacheWrite) : reportedCached
  *   input          = max(0, prompt_tokens − cacheRead − cacheWrite)
  *
  * Two wire dialects feed the first line: OpenAI's nested
@@ -28,12 +27,10 @@
  * DeepSeek's top-level `prompt_cache_hit_tokens` (`prompt_tokens = hit + miss`).
  * The nested field wins when both are present — pi-ai's precedence.
  *
- * `cache_write_tokens` is the field the previous implementation ignored: a
- * provider that reports it (OpenRouter, the case pi-ai explicitly handles)
- * folds those tokens into `cached_tokens`, so leaving them in `cacheRead`
- * priced cache WRITES at the cache-READ rate (≈0.1× input instead of ≈1.25×
- * input — an order of magnitude off, in the customer's favour on a
- * platform-paid model).
+ * `cache_write_tokens` is reported separately by OpenRouter-compatible
+ * providers. Pi 0.84.2 treats `cached_tokens` as cache reads and does not
+ * subtract writes from it. Appstrate must preserve that exact partition so a
+ * call has identical persisted usage on the AI SDK and Pi paths.
  */
 
 import type { LlmProxyAdapter, UpstreamUsage } from "./types.ts";
@@ -66,23 +63,19 @@ function parseOpenAICompatibleUsage(u: Record<string, unknown>): UpstreamUsage |
 
   // `?? ` chain, not `||`: a genuine 0 from the more specific source must not
   // fall through to the other dialect's field.
-  const reportedCached =
+  const reportedCacheRead =
     tokenCount(details?.["cached_tokens"]) ?? tokenCount(u["prompt_cache_hit_tokens"]);
   const reportedCacheWrite = tokenCount(details?.["cache_write_tokens"]);
 
   const cacheWrite = reportedCacheWrite ?? 0;
-  const cached = reportedCached ?? 0;
-  // A provider that reports cache writes counts them inside `cached_tokens`
-  // (observed on OpenRouter) — subtract them back out so the two buckets stay
-  // disjoint and each is priced at its own rate.
-  const cacheRead = cacheWrite > 0 ? Math.max(0, cached - cacheWrite) : cached;
+  const cacheRead = reportedCacheRead ?? 0;
   const input = Math.max(0, (prompt ?? 0) - cacheRead - cacheWrite);
 
   const result: UpstreamUsage = { inputTokens: input, outputTokens: completion ?? 0 };
   // Only surface a bucket the provider actually reported: an unreported bucket
   // stays NULL on the ledger row ("provider said nothing"), distinct from a
   // reported zero.
-  if (reportedCached !== undefined) result.cacheReadTokens = cacheRead;
+  if (reportedCacheRead !== undefined) result.cacheReadTokens = cacheRead;
   if (reportedCacheWrite !== undefined) result.cacheWriteTokens = cacheWrite;
   return result;
 }

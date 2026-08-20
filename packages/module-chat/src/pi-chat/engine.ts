@@ -4,8 +4,8 @@
  * `runPiSubscriptionChat` — the SINGLE in-process chat engine for every
  * oauth-subscription provider (claude-code, codex).
  *
- * Runs a `@mariozechner/pi-coding-agent` session in the `apps/api` process,
- * driven by the Pi SDK (`@mariozechner/pi-ai`), which natively emits each
+ * Runs a `@earendil-works/pi-coding-agent` session in the `apps/api` process,
+ * driven by the Pi SDK (`@earendil-works/pi-ai`), which natively emits each
  * provider's subscription request shape from the real access token — the
  * Anthropic OAuth fingerprint (`sk-ant-oat…` → beta + claude-cli UA + system
  * prelude) or the codex-responses headers (`chatgpt-account-id` decoded from the
@@ -14,8 +14,8 @@
  * subscription provider rides this one loop.
  *
  * The chat runs server-side, so the real subscription token is registered
- * directly in an in-memory {@link AuthStorage} (never persisted, never handed to
- * the client) — no sidecar/gateway bearer-swap is needed (that only exists for
+ * directly on an ephemeral {@link ModelRuntime} (never persisted, never handed
+ * to the client) — no sidecar/gateway bearer-swap is needed (that only exists for
  * containerised RUNS, where the token must stay out of the agent container).
  *
  * The Pi session's event stream is mapped onto the AI-SDK UI-message-stream
@@ -29,6 +29,7 @@ import {
   derivePiCompactionSettings,
   deriveProviderFromApi,
   prepareRequestedThinkingLevel,
+  setPiRuntimeCredential,
   type Api,
   type Model,
 } from "@appstrate/runner-pi";
@@ -53,6 +54,7 @@ import {
   buildSubscriptionTurnMetadata,
   subscriptionFailureChunks,
 } from "./subscription-turn-closure.ts";
+import { createPiChatResourceLoader } from "./resource-loader.ts";
 
 /**
  * Wall-clock ceiling for a single chat turn. A turn fans out into up to
@@ -64,6 +66,20 @@ import {
  * both engines derive their child-call budgets from the SAME ceiling, and a
  * `run_and_wait` can no longer be granted more time than the turn hosting it.
  */
+
+/**
+ * Chat resolves one concrete model before it ever enters Pi, and registers that
+ * provider's credential immediately after. A catalog read from disk
+ * (`modelsPath`) or a network refresh on construction would therefore be pure
+ * latency on the turn's critical path, so both are refused outright rather than
+ * merely unused: `allowModelNetwork: false` makes an accidental catalog fetch a
+ * failure instead of a silent multi-second stall.
+ */
+const MODEL_RUNTIME_CREATE_OPTIONS = {
+  modelsPath: null,
+  allowModelNetwork: false,
+  refreshOnCreate: false,
+} as const;
 
 export interface PiSubscriptionChatInput {
   /** Resolved subscription model + fresh real access token. */
@@ -155,10 +171,9 @@ export function runPiSubscriptionChat(input: PiSubscriptionChatInput): Response 
         });
 
         const {
-          AuthStorage,
           createAgentSession,
           DefaultResourceLoader,
-          ModelRegistry,
+          ModelRuntime,
           SessionManager,
           SettingsManager,
         } = await loadPiCodingAgentSdk();
@@ -186,9 +201,8 @@ export function runPiSubscriptionChat(input: PiSubscriptionChatInput): Response 
 
         // Real subscription token in-memory only — pi-ai emits the OAuth request
         // shape from it natively (never persisted, never sent to the client).
-        const authStorage = AuthStorage.inMemory();
-        authStorage.setRuntimeApiKey(provider, model.accessToken);
-        const modelRegistry = ModelRegistry.create(authStorage);
+        const modelRuntime = await ModelRuntime.create(MODEL_RUNTIME_CREATE_OPTIONS);
+        await setPiRuntimeCredential(modelRuntime, provider, model.accessToken);
 
         // MCP server usage guidance is appended to the system prompt, then the
         // (uncacheable) operation index is dropped for providers without a
@@ -209,25 +223,21 @@ export function runPiSubscriptionChat(input: PiSubscriptionChatInput): Response 
                   });
                 },
               ];
-        const resourceLoader = new DefaultResourceLoader({
+        const resourceLoader = await createPiChatResourceLoader({
+          DefaultResourceLoader,
+          SettingsManager,
           cwd: "/tmp",
           agentDir: "/tmp/pi-chat",
-          settingsManager: SettingsManager.inMemory(),
           extensionFactories: [...mcpTools.extensionFactories, ...generationExtensions],
-          noExtensions: false,
-          noPromptTemplates: true,
-          noThemes: true,
           systemPrompt: system,
         });
-        await resourceLoader.reload();
 
         const { session } = await createAgentSession({
           cwd: "/tmp",
           agentDir: "/tmp/pi-chat",
           model: sessionModel,
           thinkingLevel,
-          authStorage,
-          modelRegistry,
+          modelRuntime,
           resourceLoader,
           sessionManager: SessionManager.inMemory(),
           settingsManager: SettingsManager.inMemory({

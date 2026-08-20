@@ -175,8 +175,9 @@ const codexProvider: ModelProviderDefinition = {
   // pi-ai's `openai-codex-responses` provider builds the request body the
   // chatgpt.com Codex backend actually accepts (`instructions`, `input`,
   // `include` — distinct from the standard openai-responses shape) and
-  // resolves the URL to `${baseUrl}/codex/responses` natively. No
-  // sidecar-side path rewrite needed.
+  // resolves the URL to `${baseUrl}/responses`. The shared Pi runner adapts
+  // Appstrate's stable `${baseUrl}/codex/responses` contract at its SDK seam,
+  // with no sidecar-side path rewrite.
   apiShape: "openai-codex-responses",
   defaultBaseUrl: "https://chatgpt.com/backend-api",
   baseUrlOverridable: false,
@@ -256,8 +257,8 @@ const codexProvider: ModelProviderDefinition = {
   // time is louder than silently persisting a dead credential.
   requiredIdentityClaims: ["accountId"],
   // Codex agent runs are EXECUTABLE: they run on the single Pi engine
-  // (`@mariozechner/pi-coding-agent`) like any other subscription provider.
-  // Pi's SDK (`@mariozechner/pi-ai`) natively emits the codex-responses OAuth
+  // (`@earendil-works/pi-coding-agent`) like any other subscription provider.
+  // Pi's SDK (`@earendil-works/pi-ai`) natively emits the codex-responses OAuth
   // request shape (`chatgpt-account-id`, the codex user-agent), so the platform
   // forges nothing — the sidecar `/llm` oauth branch only swaps the placeholder
   // bearer for the real subscription token server-side. The run path is

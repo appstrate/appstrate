@@ -77,7 +77,7 @@ async function runAgainstLocalCodex(transport?: Transport): Promise<{
       id: "gpt-5-codex",
       name: "gpt-5-codex",
       api: "openai-codex-responses",
-      provider: "openai",
+      provider: "openai-codex",
       baseUrl: server.url.origin,
       reasoning: false,
       input: ["text"],
@@ -118,7 +118,7 @@ async function runAgainstLocalCodex(transport?: Transport): Promise<{
 }
 
 describe("PiRunner provider transport", () => {
-  it("keeps the direct default explicit: WebSocket probe then SSE fallback", async () => {
+  it("keeps the direct auto default and falls back to SSE when WebSocket is unavailable", async () => {
     const result = await runAgainstLocalCodex();
 
     expect(result.methods).toEqual(["GET", "POST"]);

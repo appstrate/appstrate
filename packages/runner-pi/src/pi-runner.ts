@@ -2,7 +2,7 @@
 
 /**
  * PiRunner — AFPS {@link Runner} implementation backed by the
- * {@link https://www.npmjs.com/package/@mariozechner/pi-coding-agent | Pi Coding Agent SDK}.
+ * {@link https://www.npmjs.com/package/@earendil-works/pi-coding-agent | Pi Coding Agent SDK}.
  *
  * The same class runs inside an Appstrate agent container (via
  * `runtime-pi/entrypoint.ts`) and on any developer laptop / server
@@ -29,7 +29,7 @@
 
 import {
   loadPiCodingAgentSdk,
-  type AuthStorage,
+  type ModelRuntime,
   type ExtensionFactory,
   type Api,
   type KnownApi,
@@ -107,6 +107,18 @@ function prepareAnthropicThinkingBudgets(
 }
 
 /**
+ * Pi 0.84 treats the Codex model base URL as the parent of `/responses`.
+ * Appstrate's provider and sidecar contracts expose the parent of
+ * `/codex/responses`, so retain that stable contract at our SDK boundary.
+ */
+function prepareProviderBaseUrl(model: PiModelConfig): PiModelConfig {
+  if (model.api !== "openai-codex-responses") return model;
+  const baseUrl = model.baseUrl.replace(/\/$/, "");
+  if (baseUrl.endsWith("/codex")) return model;
+  return { ...model, baseUrl: `${baseUrl}/codex` };
+}
+
+/**
  * Adapt Appstrate's complete LiteLLM vocabulary to Pi's six-level selector.
  * Pi has no first-class `max` selector, but its `xhigh` slot can map to the
  * provider-native `max` value. Classic Anthropic requests also receive a
@@ -121,23 +133,24 @@ export function prepareRequestedThinkingLevel(
   thinkingLevel: PiThinkingLevel;
   thinkingBudgets?: PiThinkingBudgets;
 } {
-  const thinkingBudgets = prepareAnthropicThinkingBudgets(model, level);
+  const preparedModel = prepareProviderBaseUrl(model);
+  const thinkingBudgets = prepareAnthropicThinkingBudgets(preparedModel, level);
   if (level !== "max") {
     return {
-      model: preserveRequestedThinkingLevel(model, level),
+      model: preserveRequestedThinkingLevel(preparedModel, level),
       thinkingLevel: level,
       ...(thinkingBudgets ? { thinkingBudgets } : {}),
     };
   }
 
-  const levelMap = model.thinkingLevelMap as
+  const levelMap = preparedModel.thinkingLevelMap as
     Partial<Record<ModelReasoningLevel, ModelNativeReasoningLevel | null>> | undefined;
   const nativeLevel = levelMap?.max ?? "max";
   return {
     model: {
-      ...model,
+      ...preparedModel,
       thinkingLevelMap: {
-        ...model.thinkingLevelMap,
+        ...preparedModel.thinkingLevelMap,
         xhigh: nativeLevel,
       } as PiModelConfig["thinkingLevelMap"],
     },
@@ -146,12 +159,32 @@ export function prepareRequestedThinkingLevel(
   };
 }
 
+/**
+ * Install an ephemeral credential on Pi 0.84's ModelRuntime.
+ *
+ * OpenAI Codex is OAuth-only in Pi's built-in catalog, so `setRuntimeApiKey`
+ * deliberately refuses it. Appstrate already resolves and refreshes that
+ * OAuth bearer outside Pi; a process-local provider overlay exposes the token
+ * as request auth without persisting it or replacing Codex's native serializer.
+ */
+export async function setPiRuntimeCredential(
+  modelRuntime: ModelRuntime,
+  provider: string,
+  apiKey: string,
+): Promise<void> {
+  if (provider === "openai-codex") {
+    modelRuntime.registerProvider(provider, { apiKey });
+    return;
+  }
+  await modelRuntime.setRuntimeApiKey(provider, apiKey);
+}
+
 export interface PiRunnerOptions {
   /** LLM model configuration passed to the Pi SDK. Required. */
   model: PiModelConfig;
   /**
-   * LLM API key. Registered on a {@link AuthStorage} under `model.provider`.
-   * Callers can also pass a pre-built `authStorage` to wire multi-provider auth.
+   * LLM API key. Registered on a {@link ModelRuntime} under `model.provider`.
+   * Callers can also pass a pre-built `modelRuntime` to wire multi-provider auth.
    */
   apiKey?: string;
   /**
@@ -182,12 +215,12 @@ export interface PiRunnerOptions {
    */
   extensionFactories?: ExtensionFactory[];
   /**
-   * Custom {@link AuthStorage}. When provided, the runner will not
+   * Custom {@link ModelRuntime}. When provided, the runner will not
    * register `apiKey` under a derived provider — callers control all
    * auth state.
    */
-  authStorage?: AuthStorage;
-  /** Path where the default auth store persists. Ignored if `authStorage` is set. */
+  modelRuntime?: ModelRuntime;
+  /** Path where the default credential store persists. Ignored if `modelRuntime` is set. */
   authStoragePath?: string;
   /** Pi SDK thinking level. Defaults to `"medium"`. */
   thinkingLevel?: ModelReasoningLevel;
@@ -493,28 +526,31 @@ export class PiRunner implements Runner {
     } = prepareRequestedThinkingLevel(model, requestedThinkingLevel);
 
     // Load the heavy Pi SDK value surface here (not at module top) so the
-    // ~200ms `@mariozechner/pi-coding-agent` eval stays off the runtime's
+    // ~200ms `@earendil-works/pi-coding-agent` eval stays off the runtime's
     // pre-session boot path. ESM caches the module, so when the container
     // entrypoint has already warmed it during provisioning this await resolves
     // instantly.
     const {
-      AuthStorage,
       createAgentSession,
       DefaultResourceLoader,
-      ModelRegistry,
+      ModelRuntime,
       SessionManager,
       SettingsManager,
     } = await loadPiCodingAgentSdk();
 
-    const authStorage =
-      this.opts.authStorage ??
-      AuthStorage.create(this.opts.authStoragePath ?? "/tmp/pi-auth/auth.json");
-    if (!this.opts.authStorage && apiKey) {
-      // `model.provider` is the Pi SDK's AuthStorage key the SDK resolves
+    const modelRuntime =
+      this.opts.modelRuntime ??
+      (await ModelRuntime.create({
+        authPath: this.opts.authStoragePath ?? "/tmp/pi-auth/auth.json",
+        modelsPath: null,
+        allowModelNetwork: false,
+      }));
+    if (!this.opts.modelRuntime && apiKey) {
+      // `model.provider` is the Pi SDK's credential key the SDK resolves
       // credentials against; register the key under the same value.
-      authStorage.setRuntimeApiKey(model.provider, apiKey);
-    } else if (!this.opts.authStorage && !apiKey) {
-      // No injected AuthStorage AND no runtime key — the SDK will call the
+      await setPiRuntimeCredential(modelRuntime, model.provider, apiKey);
+    } else if (!this.opts.modelRuntime && !apiKey) {
+      // No injected ModelRuntime AND no runtime key — the SDK will call the
       // provider unauthenticated and 401/retry silently (the platform's
       // kickoff fail-fast should prevent this, so reaching here means a
       // run bypassed that guard). Surface a line on the surprising path.
@@ -528,8 +564,6 @@ export class PiRunner implements Runner {
         }),
       );
     }
-
-    const modelRegistry = ModelRegistry.create(authStorage);
 
     // ONE call, so the window stamped on every turn breadcrumb cannot drift
     // from the one that sized this session's compaction pass.
@@ -563,8 +597,7 @@ export class PiRunner implements Runner {
       agentDir,
       model: sessionModel,
       thinkingLevel,
-      authStorage,
-      modelRegistry,
+      modelRuntime,
       resourceLoader,
       sessionManager: SessionManager.inMemory(),
       settingsManager: SettingsManager.inMemory({
@@ -1077,7 +1110,7 @@ interface PiMessageStartEvent {
    * The message the SDK is about to stream. `role` discriminates the
    * assistant's own turn from the user / toolResult messages the agent loop
    * also frames with `message_start` (verified in
-   * `@mariozechner/pi-agent-core/dist/agent-loop.js`).
+   * `@earendil-works/pi-agent-core/dist/agent-loop.js`).
    */
   message?: { role?: string };
 }
@@ -1125,6 +1158,20 @@ function terminalErrorMessage(errorMessage: string | undefined): string {
   return typeof errorMessage === "string" && errorMessage.length > 0
     ? errorMessage
     : "The agent's final model turn ended in an error";
+}
+
+/**
+ * Some provider adapters normalize an AbortError into stopReason "error"
+ * instead of "aborted". Keep this deliberately narrow: it is only consulted
+ * after a terminal tool completed successfully.
+ */
+function isProviderNormalizedAbort(errorMessage: string | undefined): boolean {
+  if (typeof errorMessage !== "string") return false;
+  const trimmed = errorMessage.trim();
+  let end = trimmed.length;
+  while (end > 0 && trimmed.charCodeAt(end - 1) === 46) end -= 1;
+  const normalized = trimmed.slice(0, end).toLowerCase();
+  return normalized === "the operation was aborted" || normalized === "this operation was aborted";
 }
 
 export interface SessionBridgeOptions {
@@ -1312,7 +1359,10 @@ export function installSessionBridge(
         // status stay consistent).
         if (
           isTerminalErrorStop(last.stopReason) &&
-          !(terminalToolCompleted && last.stopReason === "aborted")
+          !(
+            terminalToolCompleted &&
+            (last.stopReason === "aborted" || isProviderNormalizedAbort(last.errorMessage))
+          )
         ) {
           fire(
             buildError({ runId, timestamp: Date.now() }, terminalErrorMessage(last.errorMessage)),
@@ -1418,7 +1468,11 @@ export function installSessionBridge(
       // never disagree on what counts as a terminal failure.
       // A trailing "aborted" turn AFTER a successful terminal tool is the
       // runner's own early-stop, not a failure.
-      if (terminalToolCompleted && lastAssistantStopReason === "aborted") {
+      if (
+        terminalToolCompleted &&
+        (lastAssistantStopReason === "aborted" ||
+          isProviderNormalizedAbort(lastAssistantErrorMessage))
+      ) {
         return undefined;
       }
       if (!isTerminalErrorStop(lastAssistantStopReason)) {

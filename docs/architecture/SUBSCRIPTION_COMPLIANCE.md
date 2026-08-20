@@ -14,7 +14,7 @@ credentials (Claude Pro/Max via `claude-code`, ChatGPT Plus/Pro/Business via
 **not** claim.
 
 > **Single execution engine.** There is **one** agent-run engine: Pi
-> (`@mariozechner/pi-coding-agent`). API-key providers **and** OAuth
+> (`@earendil-works/pi-coding-agent`). API-key providers **and** OAuth
 > subscription providers (Claude Pro/Max, ChatGPT Codex) all execute on it —
 > there is no "official binary" run path, no Claude Agent SDK engine, no
 > `RunEngine` / `subscriptionEngine` provider→engine binding (that vocabulary
@@ -31,7 +31,7 @@ not policy opinions.
 
 ### 1.1 Pi formats the request; the platform forges nothing
 
-Subscription requests are built by **Pi's SDK** (`@mariozechner/pi-ai`), which
+Subscription requests are built by **Pi's SDK** (`@earendil-works/pi-ai`), which
 natively emits each provider's subscription request shape / fingerprint — the
 Anthropic OAuth fingerprint (`anthropic-beta: oauth-2025-04-20`, the `claude-cli`
 user-agent, the "You are Claude Code" system prelude) for `claude-code`, and the

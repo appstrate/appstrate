@@ -19,7 +19,7 @@ export const CUSTOM_ID = "__custom__";
  * Supported Pi SDK adapter shapes (in-container LLM client). Mirrors
  * `ModelApiShape` in core but stays here for the UI's "custom provider"
  * picker — the operator chooses one of these when their endpoint isn't
- * in the registry. The list is curated against what `@mariozechner/pi-ai`
+ * in the registry. The list is curated against what `@earendil-works/pi-ai`
  * actually exposes.
  */
 export const PI_ADAPTER_TYPES = [

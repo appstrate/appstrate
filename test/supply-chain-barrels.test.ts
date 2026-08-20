@@ -12,8 +12,8 @@
  * VALUE symbols consumers use are actually reachable at runtime. The
  * `@appstrate/runner-pi` barrel splits that surface: `Type` stays a static
  * value export (used synchronously at tool-registration time), while the six
- * heavy `pi-coding-agent` values (`AuthStorage`, `createAgentSession`,
- * `DefaultResourceLoader`, `ModelRegistry`, `SessionManager`, `SettingsManager`)
+ * heavy `pi-coding-agent` values (`ModelRuntime`, `createAgentSession`,
+ * `DefaultResourceLoader`, `SessionManager`, `SettingsManager`)
  * are reachable only through the `loadPiCodingAgentSdk()` dynamic loader that
  * keeps them out of the eager bundle graph. So the test asserts the static
  * `Type` + `loadPiCodingAgentSdk` handle exist on the barrel, then drives the
@@ -50,10 +50,9 @@ describe("supply-chain: pi-sdk barrel completeness", () => {
 
   it("@appstrate/runner-pi loadPiCodingAgentSdk() resolves every heavy value its consumers import", async () => {
     const expectedValues = [
-      "AuthStorage",
+      "ModelRuntime",
       "createAgentSession",
       "DefaultResourceLoader",
-      "ModelRegistry",
       "SessionManager",
       "SettingsManager",
     ] as const;

@@ -112,10 +112,7 @@ describe("openaiCompletionsAdapter", () => {
     });
   });
 
-  it("splits cache writes out of the reported cached_tokens (OpenRouter dialect)", () => {
-    // The bucket the adapter used to ignore entirely: a provider reporting
-    // `cache_write_tokens` folds those tokens INTO `cached_tokens`, so the write
-    // count must be carved out of the cache-read bucket and out of input.
+  it("keeps cache reads and writes separate as reported by Pi 0.84", () => {
     const usage = openaiCompletionsAdapter.parseJsonUsage({
       usage: {
         prompt_tokens: 1000,
@@ -124,9 +121,9 @@ describe("openaiCompletionsAdapter", () => {
       },
     });
     expect(usage).toEqual({
-      inputTokens: 600, // 1000 − 100 (read) − 300 (write)
+      inputTokens: 300,
       outputTokens: 50,
-      cacheReadTokens: 100, // 400 reported − 300 written
+      cacheReadTokens: 400,
       cacheWriteTokens: 300,
     });
   });
