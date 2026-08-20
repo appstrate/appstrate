@@ -72,7 +72,7 @@
     "@afps-spec/schema": "^0.6.1",
     "@afps-spec/types": "^0.1.0",
     "@appstrate/afps-shared": "workspace:*",
-    "file-type": "^22.0.1",
+    "file-type": "^22.0.2",
     "fflate": "^0.8.3",
     "mustache": "^4.2.0",
     "semver": "^7.8.4",
