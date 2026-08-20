@@ -1,9 +1,22 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * `pi` is the only engine a turn can be written with. `ai-sdk` and
- * `subscription` are retained ONLY so threads persisted before the chat unified
- * on Pi still decode — never write either.
+ * Which loop produced a persisted turn.
+ *
+ * `pi` is the only value a turn can be written with today — `ai-sdk` and
+ * `subscription` exist so threads persisted before the chat unified on one
+ * engine still decode. Never write either.
+ *
+ * Kept even though nothing BRANCHES on it: chat messages are an append-only
+ * store read for years, and this is the only stamp of what produced a given
+ * row. It is what makes the ai-sdk → pi transition legible in the data after
+ * the fact, and it is the field a future engine change would be diagnosed
+ * with. Twelve bytes a turn.
+ *
+ * Note before removing it anyway: {@link turnMetadataFromMessage} REQUIRES it.
+ * Dropping the write without relaxing that gate makes every new turn's metadata
+ * fail to decode — the error state and the turn-limit notice would silently
+ * stop rendering.
  */
 export type ChatTurnEngine = "ai-sdk" | "pi" | "subscription";
 export type ChatTurnErrorCategory =

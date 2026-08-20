@@ -68,7 +68,7 @@ describe("decideRunAndWaitBudget", () => {
   it("grants the derived budget on an ample turn, silently", () => {
     const { log, warnings } = captureLogger();
     const decision = decideRunAndWaitBudget(
-      { turnDeadlineAt: NOW + CHAT_TURN_DEADLINE_MS, engine: "ai-sdk", now: () => NOW },
+      { turnDeadlineAt: NOW + CHAT_TURN_DEADLINE_MS, now: () => NOW },
       log,
     );
     expect(decision).toEqual({
@@ -85,7 +85,6 @@ describe("decideRunAndWaitBudget", () => {
     const decision = decideRunAndWaitBudget(
       {
         turnDeadlineAt: NOW + 2 * 60_000 + CHAT_TURN_SAFETY_MARGIN_MS,
-        engine: "pi",
         chatSessionId: "chs_1",
         now: () => NOW,
       },
@@ -98,10 +97,7 @@ describe("decideRunAndWaitBudget", () => {
   it("refuses below the floor with an actionable, non-error payload", () => {
     const { log, warnings } = captureLogger();
     // The audited incident: 22 s left on the turn.
-    const decision = decideRunAndWaitBudget(
-      { turnDeadlineAt: NOW + 22_000, engine: "pi", now: () => NOW },
-      log,
-    );
+    const decision = decideRunAndWaitBudget({ turnDeadlineAt: NOW + 22_000, now: () => NOW }, log);
     expect(decision.launch).toBe(false);
     if (decision.launch) throw new Error("unreachable");
     expect(decision.payload).toMatchObject({
@@ -151,7 +147,7 @@ describe("runAndWaitStepsWithinTurnBudget", () => {
       { kind: "agent", scope: "@acme", name: "writer" },
       {
         ...clientOpts,
-        budget: { turnDeadlineAt: NOW + CHAT_TURN_DEADLINE_MS, engine: "ai-sdk", now: () => NOW },
+        budget: { turnDeadlineAt: NOW + CHAT_TURN_DEADLINE_MS, now: () => NOW },
       },
       fakeSteps as never,
     )) {
@@ -174,7 +170,7 @@ describe("runAndWaitStepsWithinTurnBudget", () => {
       { kind: "agent", scope: "@acme", name: "writer" },
       {
         ...clientOpts,
-        budget: { turnDeadlineAt: NOW + 22_000, engine: "ai-sdk", now: () => NOW },
+        budget: { turnDeadlineAt: NOW + 22_000, now: () => NOW },
       },
       fakeSteps as never,
     )) {
@@ -205,7 +201,7 @@ describe("runAndWaitStepsWithinTurnBudget", () => {
         origin: "https://test.local",
         headers: {},
         fetch: fetchImpl,
-        budget: { turnDeadlineAt: NOW + 1_000, engine: "pi", now: () => NOW },
+        budget: { turnDeadlineAt: NOW + 1_000, now: () => NOW },
       },
     )) {
       steps.push(step);
