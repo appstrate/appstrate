@@ -40,7 +40,7 @@ export type { UserProfile, RunLog } from "@appstrate/db/schema";
 import type { PackageType } from "@appstrate/core/validation";
 export type { PackageType };
 
-export type { Run } from "@appstrate/db/schema";
+export type { Run, ResolvedSkillVersion, ResolvedSkillVersionMap } from "@appstrate/db/schema";
 export type { RunArtifactsSummary } from "@appstrate/db/schema";
 import type { RunArtifactsSummary } from "@appstrate/db/schema";
 
@@ -149,6 +149,16 @@ export interface RunWireDto {
    * means the run is NOT reproducible from its `version_ref` alone.
    */
   dependency_overrides: unknown;
+  /**
+   * Concrete skill selections frozen into the bundle. The HTTP schema requires
+   * `version: null` for drafts, but openapi-fetch erases null-only properties
+   * while projecting responses, so the shared wire type accepts that generated
+   * representation as well. Persisted rows keep the stricter DB type.
+   */
+  resolved_skill_versions: Record<
+    string,
+    { version: string; source: "version" } | { version?: null; source: "draft" }
+  > | null;
 }
 
 /**

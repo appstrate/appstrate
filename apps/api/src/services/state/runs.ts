@@ -189,6 +189,7 @@ const enrichedRunColumns = {
   modelCredentialId: runs.modelCredentialId,
   connectionOverrides: runs.connectionOverrides,
   dependencyOverrides: runs.dependencyOverrides,
+  resolvedSkillVersions: runs.resolvedSkillVersions,
   resolvedConnections: runs.resolvedConnections,
 } as const;
 
@@ -341,6 +342,7 @@ function runRowToWireDto(row: RunProjection): RunWireDto {
     modelCredentialId: row.modelCredentialId,
     connection_overrides: row.connectionOverrides,
     dependency_overrides: row.dependencyOverrides,
+    resolved_skill_versions: row.resolvedSkillVersions,
   };
 }
 
@@ -527,6 +529,7 @@ interface CreateRunParams {
    * reproducible one. Null when the run resolved the manifest pins verbatim.
    */
   dependencyOverrides?: Record<string, string> | null;
+  resolvedSkillVersions?: import("@appstrate/db/schema").ResolvedSkillVersionMap | null;
   /**
    * Which runner drives this run. Platform-origin runs execute in a
    * server-managed Docker container; remote-origin runs execute on the
@@ -653,6 +656,9 @@ export async function createRun(scope: AppScope, params: CreateRunParams): Promi
       configOverride: parseRunConfigOverride(params.configOverride),
       ...(params.dependencyOverrides !== undefined
         ? { dependencyOverrides: params.dependencyOverrides }
+        : {}),
+      ...(params.resolvedSkillVersions !== undefined
+        ? { resolvedSkillVersions: params.resolvedSkillVersions }
         : {}),
       runOrigin: params.runOrigin ?? "platform",
       ...(params.sinkSecretEncrypted !== undefined

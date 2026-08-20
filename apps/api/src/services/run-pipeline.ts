@@ -36,6 +36,7 @@ import { ApiError } from "../lib/errors.ts";
 import type { LoadedPackage } from "../types/index.ts";
 import type { Actor } from "../lib/actor.ts";
 import type { FileReference } from "./run-launcher/types.ts";
+import type { ResolvedSkillVersionMap } from "./run-launcher/run-package-catalog.ts";
 import { runPreflightGates } from "./run-preflight-gates.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { runWithSpan } from "@appstrate/core/telemetry";
@@ -463,6 +464,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
   let modelSource: string | null;
   let modelCost: ModelCost | null;
   let generationConfig: ModelGenerationSettings;
+  let resolvedSkillVersions: ResolvedSkillVersionMap;
   let contextMs: number;
   const contextStart = Date.now();
   try {
@@ -477,6 +479,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
       modelSource,
       modelCost,
       generationConfig,
+      resolvedSkillVersions,
     } = await runWithSpan("appstrate.run.context", { attributes: spanAttributes }, () =>
       buildRunContext({
         runId,
@@ -583,6 +586,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
         config,
         configOverride: params.configOverride ?? null,
         dependencyOverrides: params.dependencyOverrides ?? null,
+        resolvedSkillVersions,
         runOrigin: "platform",
         sinkSecretEncrypted: encrypt(sinkCredentials.secret),
         sinkExpiresAt: new Date(sinkCredentials.expiresAt),
