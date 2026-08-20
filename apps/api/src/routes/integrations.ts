@@ -85,6 +85,10 @@ import { createConnectRunExecutor } from "../services/connect/connect-run-launch
 import { getCurrentScopesGranted } from "../services/integration-scope-resolver.ts";
 import { isUserConnectionCreationBlocked } from "../services/integration-connection-resolver.ts";
 import {
+  CLIENT_SECRET_REQUIRED_MESSAGE,
+  PUBLIC_CLIENT_WITH_SECRET_MESSAGE,
+} from "../services/integration-manifest-helpers.ts";
+import {
   deleteIntegrationPin,
   listAgentsConsumingIntegration,
   listIntegrationPins,
@@ -220,8 +224,6 @@ const noSecretWithPublicClient = (b: {
   token_endpoint_auth_method?: string;
   client_secret?: string;
 }) => !(b.token_endpoint_auth_method === "none" && (b.client_secret ?? "").length > 0);
-const noSecretWithPublicClientMessage =
-  "token_endpoint_auth_method='none' declares a public client; do not send a client_secret with it";
 
 /**
  * Registration body. A public client is DECLARED
@@ -239,12 +241,11 @@ const noSecretWithPublicClientMessage =
  */
 export const oauthClientCreateSchema = oauthClientSchema
   .refine(noSecretWithPublicClient, {
-    message: noSecretWithPublicClientMessage,
+    message: PUBLIC_CLIENT_WITH_SECRET_MESSAGE,
     path: ["client_secret"],
   })
   .refine((b) => b.token_endpoint_auth_method === "none" || (b.client_secret ?? "").length > 0, {
-    message:
-      "client_secret is required and must not be empty; if the provider registered this app as a public client (no secret at all), declare it with token_endpoint_auth_method='none' instead of omitting the secret",
+    message: CLIENT_SECRET_REQUIRED_MESSAGE,
     path: ["client_secret"],
   });
 
@@ -256,7 +257,7 @@ export const oauthClientCreateSchema = oauthClientSchema
  */
 export const oauthClientUpdateSchema = oauthClientSchema
   .refine(noSecretWithPublicClient, {
-    message: noSecretWithPublicClientMessage,
+    message: PUBLIC_CLIENT_WITH_SECRET_MESSAGE,
     path: ["client_secret"],
   })
   // An EXPLICIT empty string is a destructive statement — it clears the stored

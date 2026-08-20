@@ -47,23 +47,37 @@
 import { z } from "zod";
 import { getEnv } from "@appstrate/env";
 import { CREDENTIAL_KEY_RE } from "@appstrate/core/naming";
+import type { TokenEndpointAuthMethod } from "@appstrate/connect";
 import { logger } from "../lib/logger.ts";
 import { formatZodIssues } from "../lib/zod-format.ts";
+import {
+  CLIENT_SECRET_REQUIRED_MESSAGE,
+  PUBLIC_CLIENT_WITH_SECRET_MESSAGE,
+} from "./integration-manifest-helpers.ts";
 
 // `integration_connections.client_ref` is a flat client id — the env id of a
 // system client or the `integration_oauth_clients.id` (UUID) of a custom client.
 // No prefix/sentinel scheme: resolution is system-first then DB-by-id, mirroring
 // the model-provider credential pattern (`loadInferenceCredentials`).
 
-const SYSTEM_CLIENT_AUTH_METHODS = ["client_secret_post", "client_secret_basic", "none"] as const;
-
 /**
  * The RFC 7591 §2 methods a system entry may declare — the same set the API's
  * per-application client body accepts (`oauthClientSchema`,
  * `routes/integrations.ts`), so the env-sourced and DB-sourced halves of the
  * same credential surface stay declarable in exactly the same terms.
+ *
+ * A tuple because `z.enum` needs one, `satisfies` because the union itself is
+ * NOT declared here: `TokenEndpointAuthMethod` (`@appstrate/connect`) is the
+ * single source of truth, and this literal is checked against it rather than
+ * re-spelling it. Adding a method there and forgetting it here is now a
+ * deliberate narrowing rather than a silent divergence; spelling one WRONG here
+ * fails to compile.
  */
-export type SystemIntegrationClientAuthMethod = (typeof SYSTEM_CLIENT_AUTH_METHODS)[number];
+const SYSTEM_CLIENT_AUTH_METHODS = [
+  "client_secret_post",
+  "client_secret_basic",
+  "none",
+] as const satisfies readonly TokenEndpointAuthMethod[];
 
 export interface SystemIntegrationClientDefinition {
   /** Stable id — the connection's `client_ref` when this client mints it. */
@@ -88,7 +102,7 @@ export interface SystemIntegrationClientDefinition {
    * secret's presence, which is the inference that put `client_secret=`
    * (present but empty) on the wire.
    */
-  tokenEndpointAuthMethod: SystemIntegrationClientAuthMethod | undefined;
+  tokenEndpointAuthMethod: TokenEndpointAuthMethod | undefined;
 }
 
 // Per-client entry, nested under an integration. Wire keys are snake_case
@@ -124,23 +138,23 @@ const rawSystemIntegrationClientSchema = z
   })
   // Both directions of the pair, mirroring `oauthClientCreateSchema`'s two
   // refines exactly — an operator must be able to declare the same client the
-  // same way whether it arrives by env or by API.
+  // same way whether it arrives by env or by API. The two rejection messages are
+  // IMPORTED rather than restated, so "exactly" is a fact the compiler keeps
+  // rather than a claim this comment makes.
   //
   // No secret AND no `"none"` (including "no method at all", which means "the
   // manifest's method applies"): the token request cannot succeed. Boot crash
   // beats the alternative, which is the provider answering `invalid_client`
   // months later on a flow nobody changed.
   .refine((c) => c.client_secret !== undefined || c.token_endpoint_auth_method === "none", {
-    message:
-      "client_secret is required and must not be empty; if the provider registered this app as a public client (no secret at all), declare it with token_endpoint_auth_method='none' instead of omitting the secret",
+    message: CLIENT_SECRET_REQUIRED_MESSAGE,
     path: ["client_secret"],
   })
   // `"none"` WITH a secret: the operator resolved a credential and then said it
   // would not be used. One of the two is a mistake and the registry cannot tell
   // which, so it refuses rather than silently discarding a real secret.
   .refine((c) => !(c.token_endpoint_auth_method === "none" && c.client_secret !== undefined), {
-    message:
-      "token_endpoint_auth_method='none' declares a public client; do not send a client_secret with it",
+    message: PUBLIC_CLIENT_WITH_SECRET_MESSAGE,
     path: ["client_secret"],
   });
 

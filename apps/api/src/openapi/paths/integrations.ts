@@ -354,6 +354,57 @@ const baseResponseHeaders = {
   "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
 } as const;
 
+/**
+ * The `503`/`504` pair every connect-run-backed connect operation answers with
+ * (the programmatic `connectIntegrationFields` and the hosted form's
+ * `submitConnectPage`). Spread at both sites so the two cannot drift: they
+ * describe the SAME two failures of the SAME machinery — an execution backend
+ * that cannot run a sidecar-only workload, and a login that never completed —
+ * down to the `example` bodies a client codegens against.
+ *
+ * Module-local const, NOT a `#/components/responses/*` $ref: the spread is
+ * inlined at serialization time, so the emitted spec stays byte-identical to
+ * the hand-written pair it replaces. Same technique as `paths/documents.ts`'s
+ * `pipelineResponses`.
+ */
+const connectRunResponses = {
+  "503": {
+    description:
+      "The configured execution backend cannot run a connect-run (sidecar-only workload). Operator configuration; the remedy is logged server-side and deliberately kept out of this response, which an end user can reach.",
+    content: {
+      "application/problem+json": {
+        schema: { $ref: "#/components/schemas/ProblemDetail" },
+        example: {
+          type: "https://docs.appstrate.dev/errors/connect-unavailable",
+          title: "Service Unavailable",
+          status: 503,
+          detail:
+            "This connection method is unavailable on this deployment. Contact your administrator.",
+          code: "connect_unavailable",
+          requestId: "req_abc123",
+        },
+      },
+    },
+  },
+  "504": {
+    description: "The connect-run login did not complete within the timeout",
+    content: {
+      "application/problem+json": {
+        schema: { $ref: "#/components/schemas/ProblemDetail" },
+        example: {
+          type: "https://docs.appstrate.dev/errors/timeout",
+          title: "Gateway Timeout",
+          status: 504,
+          detail:
+            "The connection attempt timed out after 60000ms — the login did not complete in time. Please try again.",
+          code: "timeout",
+          requestId: "req_def456",
+        },
+      },
+    },
+  },
+} as const;
+
 export const integrationsPaths = {
   "/api/integrations": {
     get: {
@@ -805,41 +856,7 @@ export const integrationsPaths = {
         "400": { $ref: "#/components/responses/ValidationError" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
-        "503": {
-          description:
-            "The configured execution backend cannot run a connect-run (sidecar-only workload). Operator configuration; the remedy is logged server-side and deliberately kept out of this response, which an end user can reach.",
-          content: {
-            "application/problem+json": {
-              schema: { $ref: "#/components/schemas/ProblemDetail" },
-              example: {
-                type: "https://docs.appstrate.dev/errors/connect-unavailable",
-                title: "Service Unavailable",
-                status: 503,
-                detail:
-                  "This connection method is unavailable on this deployment. Contact your administrator.",
-                code: "connect_unavailable",
-                requestId: "req_abc123",
-              },
-            },
-          },
-        },
-        "504": {
-          description: "The connect-run login did not complete within the timeout",
-          content: {
-            "application/problem+json": {
-              schema: { $ref: "#/components/schemas/ProblemDetail" },
-              example: {
-                type: "https://docs.appstrate.dev/errors/timeout",
-                title: "Gateway Timeout",
-                status: 504,
-                detail:
-                  "The connection attempt timed out after 60000ms — the login did not complete in time. Please try again.",
-                code: "timeout",
-                requestId: "req_def456",
-              },
-            },
-          },
-        },
+        ...connectRunResponses,
       },
     },
   },
@@ -1070,41 +1087,7 @@ export const integrationsPaths = {
         },
         "400": { $ref: "#/components/responses/ValidationError" },
         "404": { $ref: "#/components/responses/NotFound" },
-        "503": {
-          description:
-            "The configured execution backend cannot run a connect-run (sidecar-only workload). Operator configuration; the remedy is logged server-side and deliberately kept out of this response, which an end user can reach.",
-          content: {
-            "application/problem+json": {
-              schema: { $ref: "#/components/schemas/ProblemDetail" },
-              example: {
-                type: "https://docs.appstrate.dev/errors/connect-unavailable",
-                title: "Service Unavailable",
-                status: 503,
-                detail:
-                  "This connection method is unavailable on this deployment. Contact your administrator.",
-                code: "connect_unavailable",
-                requestId: "req_abc123",
-              },
-            },
-          },
-        },
-        "504": {
-          description: "The connect-run login did not complete within the timeout",
-          content: {
-            "application/problem+json": {
-              schema: { $ref: "#/components/schemas/ProblemDetail" },
-              example: {
-                type: "https://docs.appstrate.dev/errors/timeout",
-                title: "Gateway Timeout",
-                status: 504,
-                detail:
-                  "The connection attempt timed out after 60000ms — the login did not complete in time. Please try again.",
-                code: "timeout",
-                requestId: "req_def456",
-              },
-            },
-          },
-        },
+        ...connectRunResponses,
       },
     },
   },

@@ -43,7 +43,10 @@ import { ApiError, invalidRequest } from "../../lib/errors.ts";
 import { logger } from "../../lib/logger.ts";
 import { signRunToken } from "../../lib/run-token.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
-import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
+import {
+  CONNECT_LOGIN_TOOL_ERROR_PREFIX,
+  type IntegrationSpawnSpec,
+} from "@appstrate/core/sidecar-types";
 import { fetchMcpServerManifest } from "../integration-service.ts";
 import {
   getIntegrationSourceKind,
@@ -65,23 +68,6 @@ import type { CredentialBundle } from "./strategy.ts";
 const RESULT_SENTINEL = "APPSTRATE_CONNECT_RESULT:";
 const ERROR_SENTINEL = "APPSTRATE_CONNECT_ERROR:";
 
-/**
- * Prefix the sidecar's connect-login primitive puts on a failure the LOGIN TOOL
- * ITSELF reported (`runtime-pi/sidecar/connect-login.ts` — an `isError: true`
- * CallToolResult carrying the tool's own text). That is the ONE error class on
- * this channel written for the person logging in: "wrong password", "MFA
- * required", "captcha".
- *
- * `APPSTRATE_CONNECT_ERROR:` itself is a catch-all — `runtime-pi/sidecar/server.ts`
- * puts `err.message` of ANY throw in connect mode on it, including runner-spawn
- * failures, CA/MITM faults and bundle-framing errors whose text can carry host
- * paths, namespaces and env-var names. Those must NOT reach the caller of the
- * hosted end-user form, so only the marked subset is surfaced (see
- * {@link loginToolDiagnostic}); everything else stays an opaque 500 with the raw
- * text in the platform logs.
- */
-const LOGIN_TOOL_ERROR_MARKER = "connect-login: login tool reported an error";
-
 /** Cap on the integration-authored diagnostic we echo back to the caller. */
 const MAX_DIAGNOSTIC_CHARS = 300;
 
@@ -90,10 +76,22 @@ const MAX_DIAGNOSTIC_CHARS = 300;
  * message, or `null` when the message is a sidecar-internal fault (which the
  * caller must never see). Returns a sentence — the tool's own text when it
  * carried one, a neutral fallback when it did not.
+ *
+ * The discriminator is `CONNECT_LOGIN_TOOL_ERROR_PREFIX`, which the sidecar's
+ * connect-login primitive puts on a failure the LOGIN TOOL ITSELF reported — the
+ * ONE error class on this channel written for the person logging in ("wrong
+ * password", "MFA required", "captcha").
+ *
+ * `APPSTRATE_CONNECT_ERROR:` itself is a catch-all — `runtime-pi/sidecar/server.ts`
+ * puts `err.message` of ANY throw in connect mode on it, including runner-spawn
+ * failures, CA/MITM faults and bundle-framing errors whose text can carry host
+ * paths, namespaces and env-var names. Those must NOT reach the caller of the
+ * hosted end-user form, so only the marked subset is surfaced here; everything
+ * else stays an opaque 500 with the raw text in the platform logs.
  */
 function loginToolDiagnostic(msg: string): string | null {
-  if (!msg.startsWith(LOGIN_TOOL_ERROR_MARKER)) return null;
-  const detail = msg.slice(LOGIN_TOOL_ERROR_MARKER.length).replace(/^:\s*/, "").trim();
+  if (!msg.startsWith(CONNECT_LOGIN_TOOL_ERROR_PREFIX)) return null;
+  const detail = msg.slice(CONNECT_LOGIN_TOOL_ERROR_PREFIX.length).replace(/^:\s*/, "").trim();
   if (!detail) return "the integration rejected the submitted credentials.";
   // The text is authored by the integration package — clip it so a runaway
   // upstream body can't be pasted wholesale into an API response.
@@ -275,7 +273,7 @@ function decryptConnectResult(payloadB64: string, resultKey: Buffer): string {
  * or when neither sentinel was emitted (sidecar died before producing a result).
  *
  * The throw is typed by audience, not by convenience:
- *   - a login-tool rejection (see {@link LOGIN_TOOL_ERROR_MARKER}) throws an
+ *   - a login-tool rejection (see {@link loginToolDiagnostic}) throws an
  *     `ApiError` 400 carrying the tool's diagnostic — the routes' existing
  *     `if (err instanceof ApiError) throw err` passthrough hands it to the
  *     caller verbatim;

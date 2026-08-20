@@ -23,6 +23,7 @@
 
 import type { IntegrationManifest } from "@appstrate/core/integration";
 import type { ManifestDeliveryHttp } from "@appstrate/core/sidecar-types";
+import type { TokenEndpointAuthMethod } from "@appstrate/connect";
 import { renderCredentialTemplate as renderCredentialTemplateCore } from "@appstrate/afps-shared/credential-template";
 
 /**
@@ -89,10 +90,6 @@ export interface AfpsManifestAuth {
   _meta?: Record<string, unknown>;
 }
 
-/** The `token_endpoint_auth_method` values Appstrate's OAuth client implements. */
-export type SupportedTokenEndpointAuthMethod =
-  "client_secret_basic" | "client_secret_post" | "none";
-
 /**
  * Narrow an AFPS 0.1 `token_endpoint_auth_method` to the subset Appstrate
  * implements. The JWT-assertion / mTLS client-auth methods are valid in a 0.1
@@ -106,11 +103,41 @@ export function toSupportedTokenEndpointAuthMethod(
   // constrained by a CHECK the type system cannot see) as well as one read off
   // a manifest. One parse point, one set of accepted values.
   method: AfpsManifestAuth["token_endpoint_auth_method"] | string | undefined,
-): SupportedTokenEndpointAuthMethod | undefined {
+): TokenEndpointAuthMethod | undefined {
   return method === "client_secret_basic" || method === "client_secret_post" || method === "none"
     ? method
     : undefined;
 }
+
+/**
+ * The two rejection messages guarding the public/confidential client
+ * declaration, shared by BOTH surfaces an OAuth client can be declared on:
+ * the per-application API body (`oauthClientCreateSchema`,
+ * `routes/integrations.ts`) and the env-sourced system entry
+ * (`rawSystemIntegrationClientSchema`, `integration-client-registry.ts`).
+ *
+ * They live here rather than at either end because the requirement is that the
+ * two ends stay IDENTICAL — an operator must be able to declare the same client
+ * the same way whether it arrives by env or by API, and must be told off in the
+ * same words when they get it wrong. Hand-copying the strings stated that
+ * invariant in a comment and enforced nothing; importing one constant makes a
+ * drift impossible to write.
+ */
+
+/**
+ * A secret-based method (or none at all, meaning "the manifest's method
+ * applies") WITHOUT a secret — the declaration that cannot succeed, because a
+ * blank secret cannot tell "declared public" from "operator forgot the secret".
+ */
+export const CLIENT_SECRET_REQUIRED_MESSAGE =
+  "client_secret is required and must not be empty; if the provider registered this app as a public client (no secret at all), declare it with token_endpoint_auth_method='none' instead of omitting the secret";
+
+/**
+ * `"none"` WITH a secret — the declarer resolved a credential and then said it
+ * would not be used. One of the two is a mistake and nothing can tell which.
+ */
+export const PUBLIC_CLIENT_WITH_SECRET_MESSAGE =
+  "token_endpoint_auth_method='none' declares a public client; do not send a client_secret with it";
 
 export interface AfpsDeliveryEnvEntry {
   value: string;
