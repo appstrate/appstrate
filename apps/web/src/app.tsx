@@ -350,7 +350,16 @@ export function App() {
   // A routed modal carries the screen it opened over. While one is up the main
   // route tree renders from THAT location, so the page underneath stays exactly
   // as the user left it — scroll, filters and all — instead of unmounting.
-  const modalBackground = useBackgroundLocation();
+  const explicitBackground = useBackgroundLocation();
+  // Opened cold — a pasted link, a reload, a new tab — there is no screen to
+  // float over, so the dashboard stands in. The surface is then a modal in
+  // every case, which removes the second, page-shaped rendering of it that
+  // otherwise had to exist and had to be kept looking like the first.
+  const OVERLAY_PREFIXES = ["/org-settings", "/workspace-settings", "/preferences"];
+  const isOverlayPath = OVERLAY_PREFIXES.some((p) => location.pathname.startsWith(p));
+  const modalBackground =
+    explicitBackground ??
+    (isOverlayPath ? { ...location, pathname: "/", search: "", hash: "", state: null } : null);
   useExternalRedirect(!!user);
 
   // Declared once, mounted twice: in the page route tree, and again in the
@@ -829,21 +838,6 @@ export function App() {
               path="/applications"
               element={<Navigate to="/org-settings/applications" replace />}
             />
-            <Route
-              path="/preferences"
-              element={
-                <LazyRoute>
-                  <PreferencesLayout />
-                </LazyRoute>
-              }
-            >
-              <Route index element={<Navigate to="general" replace />} />
-              <Route path="general" element={<PreferencesGeneralPage />} />
-              <Route path="appearance" element={<PreferencesAppearancePage />} />
-              <Route path="security" element={<PreferencesSecurityPage />} />
-              <Route path="devices" element={<PreferencesDevicesPage />} />
-              <Route path="connections" element={<PreferencesConnectionsPage />} />
-            </Route>
             {features.chat && (
               <>
                 <Route
@@ -876,37 +870,32 @@ export function App() {
               path="/webhooks"
               element={<Navigate to="/workspace-settings/webhooks" replace />}
             />
-            <Route
-              path="/org-settings"
-              element={
-                <LazyRoute>
-                  <OrgSettingsLayout />
-                </LazyRoute>
-              }
-            >
-              {orgSettingsRoutes}
-            </Route>
-            <Route
-              path="/workspace-settings"
-              element={
-                <LazyRoute>
-                  <WorkspaceSettingsLayout />
-                </LazyRoute>
-              }
-            >
-              {workspaceSettingsRoutes}
-            </Route>
-            {/* `/org-settings/app/*` moved out when workspace settings became
-                their own surface; these URLs are in bookmarks and docs. */}
-            <Route path="/org-settings/app/:tab" element={<RedirectAppSettings />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         </Routes>
-        {/* Overlay tree — only mounted while a modal is floating over another
-            screen. Same components, same paths; what differs is that the route
-            below stays rendered underneath. */}
+        {/* Overlay tree — the ONLY home of the settings routes. The tree above
+            renders the background location, so a second copy there could never
+            match; that is why there is no page-shaped variant to keep in sync. */}
         {modalBackground && (
           <Routes>
+            {/* `/org-settings/app/*` moved out when workspace settings became
+                their own surface; these URLs are in bookmarks and docs. */}
+            <Route path="/org-settings/app/:tab" element={<RedirectAppSettings />} />
+            <Route
+              path="/preferences"
+              element={
+                <LazyRoute>
+                  <PreferencesLayout />
+                </LazyRoute>
+              }
+            >
+              <Route index element={<Navigate to="general" replace />} />
+              <Route path="general" element={<PreferencesGeneralPage />} />
+              <Route path="appearance" element={<PreferencesAppearancePage />} />
+              <Route path="security" element={<PreferencesSecurityPage />} />
+              <Route path="devices" element={<PreferencesDevicesPage />} />
+              <Route path="connections" element={<PreferencesConnectionsPage />} />
+            </Route>
             <Route
               path="/org-settings"
               element={

@@ -5,11 +5,12 @@ import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Building, HardDrive, AlertTriangle } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
-import { Input } from "@appstrate/ui/components/input";
 import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { formatBytes } from "@appstrate/core/format";
 import { $api } from "../../api/client";
+import { SettingsGroup, SettingRow } from "../../components/settings/setting-row";
+import { InlineTextSetting } from "../../components/settings/inline-text-setting";
 import { useOrg } from "../../hooks/use-org";
 import { usePermissions } from "../../hooks/use-permissions";
 import { useAppConfig } from "../../hooks/use-app-config";
@@ -42,15 +43,12 @@ export function OrgSettingsGeneralPage() {
   // bar turns yellow — so the user is warned well before uploads get rejected.
   const storageNearLimit = storagePercent !== null && storagePercent >= USAGE_WARN;
 
-  const [editingName, setEditingName] = useState(false);
-  const [newName, setNewName] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   const updateNameMutation = $api.useMutation("put", "/api/orgs/{orgId}", {
     onSuccess: () => {
       // The org list lives under the legacy ["orgs"] key (see use-org.ts).
       void queryClient.invalidateQueries({ queryKey: orgKeys.all });
-      setEditingName(false);
     },
     onError: (err) => {
       toast.error(t("error.prefix", { message: getErrorMessage(err) }));
@@ -72,57 +70,23 @@ export function OrgSettingsGeneralPage() {
     return <EmptyState message={t("orgSettings.noOrg")} icon={Building} />;
   }
 
-  const handleSaveName = (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    const trimmed = newName.trim();
-    if (!trimmed || !orgId) return;
-    updateNameMutation.mutate({ params: { path: { orgId } }, body: { name: trimmed } });
-  };
-
   return (
     <>
-      <div className="text-muted-foreground mb-4 text-sm font-medium">
-        {t("orgSettings.orgTitle")}
-      </div>
-      <div className="border-border bg-card mb-4 rounded-lg border p-5">
-        <div className="flex items-center gap-3">
-          <div className="flex-1">
-            {editingName ? (
-              <form onSubmit={handleSaveName} className="flex items-center gap-2">
-                <Input
-                  type="text"
-                  value={newName}
-                  onChange={(e) => setNewName(e.target.value)}
-                  placeholder={currentOrg.name}
-                  autoFocus
-                />
-                <Button type="submit" disabled={updateNameMutation.isPending}>
-                  {updateNameMutation.isPending ? <Spinner /> : t("btn.save")}
-                </Button>
-                <Button type="button" variant="ghost" onClick={() => setEditingName(false)}>
-                  {t("btn.cancel")}
-                </Button>
-              </form>
-            ) : (
-              <>
-                <h3 className="text-[0.95rem] font-semibold">{currentOrg.name}</h3>
-                <span className="text-muted-foreground text-sm">{currentOrg.slug}</span>
-              </>
-            )}
-          </div>
-          {isAdmin && !editingName && (
-            <Button
-              variant="outline"
-              onClick={() => {
-                setNewName(currentOrg.name);
-                setEditingName(true);
-              }}
-            >
-              {t("btn.edit")}
-            </Button>
-          )}
-        </div>
-      </div>
+      <SettingsGroup title={t("orgSettings.orgTitle")}>
+        <SettingRow label={t("orgSettings.nameLabel")} description={currentOrg.slug}>
+          <InlineTextSetting
+            value={currentOrg.name}
+            disabled={!isAdmin || updateNameMutation.isPending}
+            aria-label={t("orgSettings.nameLabel")}
+            className="w-64"
+            onCommit={(name) => {
+              if (!orgId) return;
+              updateNameMutation.mutate({ params: { path: { orgId } }, body: { name } });
+            }}
+          />
+          {updateNameMutation.isPending && <Spinner />}
+        </SettingRow>
+      </SettingsGroup>
 
       {storage && (
         <>

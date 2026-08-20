@@ -15,9 +15,8 @@
  */
 import { Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { KeyRound, Settings, Shield, Users, Webhook } from "lucide-react";
+import { KeyRound, LayoutGrid, Settings, Shield, Users, Webhook } from "lucide-react";
 import { SettingsLayout, type SettingsSection } from "../../components/settings-layout";
-import type { BreadcrumbEntry } from "../../components/page-header";
 import { usePermissions } from "../../hooks/use-permissions";
 import { useAppConfig } from "../../hooks/use-app-config";
 import { useCurrentApplicationId } from "../../hooks/use-current-application";
@@ -76,11 +75,19 @@ export function WorkspaceSettingsLayout() {
     ? t("workspaceSettings.pageTitleNamed", { name: application.name })
     : t("workspaceSettings.pageTitle");
 
-  const breadcrumbs: BreadcrumbEntry[] = [{ label: title }];
-
   // A real URL has to resolve to something: rendering nothing left a
   // non-admin staring at a blank page.
   if (!isAdmin) return <Navigate to="/" replace />;
 
-  return <SettingsLayout title={title} emoji="🗂️" breadcrumbs={breadcrumbs} sections={sections} />;
+  return (
+    <SettingsLayout
+      title={title}
+      scope={{
+        label: t("scope.workspace", { ns: "common" }),
+        icon: LayoutGrid,
+        name: application?.name ?? "",
+      }}
+      sections={sections}
+    />
+  );
 }

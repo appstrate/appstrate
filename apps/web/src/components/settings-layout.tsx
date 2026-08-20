@@ -1,24 +1,25 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Settings surface: a rail of sections plus the active page.
+ * Settings surface: a rail of sections plus the active page, always as an
+ * overlay.
  *
- * Presented as an overlay when opened from inside the app, as a full page when
- * reached by a cold link or a reload — `useIsModalRoute` decides, the route
- * tree is the same either way.
+ * There is no page-shaped variant. A settings URL opened cold falls back to the
+ * dashboard underneath (see `app.tsx`), so this renders one way in every case —
+ * which is the point: a second rendering of the same screens is a second thing
+ * to keep looking like the first.
  *
- * The nested `SidebarProvider` this used to build is gone, and with it the
- * side-effect that made it worth removing: entering settings collapsed the
- * app's own sidebar and restored it on the way out, so the shell moved under
- * the user because they had clicked a link. As an overlay nothing underneath
- * moves at all.
+ * The rail's head is the org/workspace chip rather than a page title. The title
+ * only ever repeated the entry already highlighted below it, while the question
+ * it left unanswered — WHICH organisation, WHICH workspace am I configuring —
+ * is the one that matters once the two surfaces look alike.
  */
-import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
+import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import type { LucideIcon } from "lucide-react";
-import { PageHeader, type BreadcrumbEntry } from "./page-header";
+import { Link } from "react-router-dom";
 import { AppVersion } from "./app-version";
 import { PanelDialog } from "./panel-dialog";
-import { openAsModal, useIsModalRoute, useBackgroundLocation } from "../lib/modal-route";
+import { openAsModal, useBackgroundLocation } from "../lib/modal-route";
 import { cn } from "@appstrate/ui/cn";
 import {
   Select,
@@ -44,9 +45,14 @@ export interface SettingsSection {
 
 interface SettingsLayoutProps {
   sections: SettingsSection[];
+  /** Announced to screen readers, and shown as the rail's scope name. */
   title: string;
-  emoji?: string;
-  breadcrumbs?: BreadcrumbEntry[];
+  /**
+   * What these settings configure. Named in the rail head because the three
+   * surfaces are otherwise indistinguishable once open, and editing the wrong
+   * scope is a silent mistake.
+   */
+  scope: { label: string; icon: LucideIcon; name: string };
 }
 
 function RailLink({
@@ -79,10 +85,9 @@ function RailLink({
   );
 }
 
-export function SettingsLayout({ sections, title, emoji, breadcrumbs }: SettingsLayoutProps) {
+export function SettingsLayout({ sections, title, scope }: SettingsLayoutProps) {
   const location = useLocation();
   const navigate = useNavigate();
-  const asModal = useIsModalRoute();
   const background = useBackgroundLocation();
 
   const visibleSections = sections
@@ -94,15 +99,22 @@ export function SettingsLayout({ sections, title, emoji, breadcrumbs }: Settings
     allItems.find((i) => location.pathname === i.to) ??
     allItems.find((i) => location.pathname.startsWith(i.to + "/"));
 
+  // Keep the same screen underneath while moving between sections; without it
+  // every rail click would close the overlay and navigate for real.
+  const keepOverlay = background ? openAsModal(background) : undefined;
+
   const rail = (
     <div className="flex h-full flex-col">
-      <div className="px-4 pt-4 pb-2">
-        <h2 className="flex items-center gap-2 text-sm font-semibold">
-          {emoji && <span aria-hidden>{emoji}</span>}
-          {title}
-        </h2>
+      <div className="border-sidebar-border flex items-center gap-2.5 border-b px-4 py-3">
+        <scope.icon className="text-muted-foreground size-4 shrink-0" />
+        <span className="flex min-w-0 flex-col">
+          <span className="text-muted-foreground text-[0.7rem] tracking-[0.04em] uppercase">
+            {scope.label}
+          </span>
+          <span className="truncate text-sm font-semibold">{scope.name}</span>
+        </span>
       </div>
-      <div className="flex-1 px-2">
+      <div className="flex-1 px-2 py-1">
         {visibleSections.map((section, idx) => (
           <div key={idx} className="py-1">
             {section.label && (
@@ -118,10 +130,7 @@ export function SettingsLayout({ sections, title, emoji, breadcrumbs }: Settings
                   icon={item.icon}
                   label={item.label}
                   isActive={activeItem?.to === item.to}
-                  // Keep the same screen underneath while moving between
-                  // sections; without this every section click would close the
-                  // overlay and navigate for real.
-                  state={background ? openAsModal(background) : undefined}
+                  state={keepOverlay}
                 />
               ))}
             </div>
@@ -138,9 +147,7 @@ export function SettingsLayout({ sections, title, emoji, breadcrumbs }: Settings
   const mobileNav = (
     <Select
       value={activeItem?.to ?? allItems[0]?.to ?? ""}
-      onValueChange={(to) =>
-        navigate(to, { state: background ? openAsModal(background) : undefined })
-      }
+      onValueChange={(to) => navigate(to, { state: keepOverlay })}
     >
       <SelectTrigger>
         <SelectValue />
@@ -163,30 +170,15 @@ export function SettingsLayout({ sections, title, emoji, breadcrumbs }: Settings
     </Select>
   );
 
-  if (asModal) {
-    return (
-      <PanelDialog
-        title={title}
-        rail={rail}
-        mobileNav={mobileNav}
-        onClose={() => navigate(background?.pathname ?? "/", { replace: true })}
-      >
-        {activeItem && <h3 className="mb-4 text-lg font-semibold">{activeItem.label}</h3>}
-        <Outlet />
-      </PanelDialog>
-    );
-  }
-
   return (
-    <div data-full-bleed className="flex h-[calc(100dvh-var(--spacing-header))] min-h-0">
-      <aside className="bg-sidebar border-sidebar-border w-56 shrink-0 overflow-y-auto border-r max-sm:hidden">
-        {rail}
-      </aside>
-      <div className="min-w-0 flex-1 overflow-y-auto p-6">
-        <PageHeader title={title} emoji={emoji} breadcrumbs={breadcrumbs} />
-        <div className="mb-4 sm:hidden">{mobileNav}</div>
-        <Outlet />
-      </div>
-    </div>
+    <PanelDialog
+      title={title}
+      rail={rail}
+      mobileNav={mobileNav}
+      onClose={() => navigate(background?.pathname ?? "/", { replace: true })}
+    >
+      {activeItem && <h3 className="mb-6 text-lg font-semibold">{activeItem.label}</h3>}
+      <Outlet />
+    </PanelDialog>
   );
 }

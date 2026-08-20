@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import { DOCS_URL, SUPPORT_URL } from "@/lib/external-links";
+import { openAsModal } from "@/lib/modal-route";
 import { BookOpen, Check, FileText, LifeBuoy, LogOut, Palette, Settings } from "lucide-react";
 import { useAuth } from "../hooks/use-auth";
 import { useTheme } from "../stores/theme-store";
@@ -48,6 +49,7 @@ export function NavUser({ minimal = false }: NavUserProps) {
   const { user, profile, logout } = useAuth();
   const { theme, setTheme } = useTheme();
   const queryClient = useQueryClient();
+  const location = useLocation();
 
   if (!user) return null;
 
@@ -92,7 +94,11 @@ export function NavUser({ minimal = false }: NavUserProps) {
         <DropdownMenuSeparator />
         {!minimal && (
           <DropdownMenuItem asChild>
-            <Link to="/preferences" className="flex items-center gap-2">
+            <Link
+              to="/preferences"
+              state={openAsModal(location)}
+              className="flex items-center gap-2"
+            >
               <Settings size={14} />
               {t("userMenu.preferences")}
             </Link>

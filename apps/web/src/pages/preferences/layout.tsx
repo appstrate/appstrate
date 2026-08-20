@@ -3,15 +3,20 @@
 import { useTranslation } from "react-i18next";
 import { User, Palette, Shield, Plug, Laptop } from "lucide-react";
 import { SettingsLayout } from "../../components/settings-layout";
+import { useAuth } from "../../hooks/use-auth";
 
 export function PreferencesLayout() {
   const { t } = useTranslation(["settings", "common"]);
+  const { user, profile } = useAuth();
 
   return (
     <SettingsLayout
       title={t("preferences.title")}
-      emoji="👤"
-      breadcrumbs={[{ label: t("preferences.title") }]}
+      scope={{
+        label: t("scope.account", { ns: "common" }),
+        icon: User,
+        name: profile?.displayName || user?.name || user?.email || "",
+      }}
       sections={[
         {
           label: t("preferences.sectionAccount"),

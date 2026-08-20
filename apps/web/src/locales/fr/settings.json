@@ -867,5 +867,6 @@
   "orgSettings.sectionDevelopers": "Développeurs",
   "workspaceSettings.pageTitle": "Paramètres de l'espace de travail",
   "workspaceSettings.pageTitleNamed": "Espace de travail · {{name}}",
-  "workspaceSettings.sectionGeneral": "Espace de travail"
+  "workspaceSettings.sectionGeneral": "Espace de travail",
+  "orgSettings.nameLabel": "Nom"
 }

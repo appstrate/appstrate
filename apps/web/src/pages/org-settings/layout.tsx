@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useTranslation } from "react-i18next";
-import { useLocation } from "react-router-dom";
 import {
   BrainCircuit,
   Building,
@@ -13,7 +12,7 @@ import {
   Users,
 } from "lucide-react";
 import { SettingsLayout, type SettingsSection } from "../../components/settings-layout";
-import type { BreadcrumbEntry } from "../../components/page-header";
+import { useOrg } from "../../hooks/use-org";
 import { usePermissions } from "../../hooks/use-permissions";
 import { useAppConfig } from "../../hooks/use-app-config";
 import { useOrgSettings } from "../../hooks/use-org-settings";
@@ -21,8 +20,8 @@ import { useOrgSettings } from "../../hooks/use-org-settings";
 export function OrgSettingsLayout() {
   const { t } = useTranslation(["settings", "common"]);
   const { isAdmin } = usePermissions();
+  const { currentOrg } = useOrg();
   const { features } = useAppConfig();
-  const location = useLocation();
 
   const oidcEnabled = !!features.oidc;
   const { data: orgSettings } = useOrgSettings();
@@ -80,21 +79,14 @@ export function OrgSettingsLayout() {
     },
   ];
 
-  const allItems = sections.flatMap((s) => s.items);
-  const activeItem =
-    allItems.find((i) => location.pathname === i.to) ??
-    allItems.find((i) => location.pathname.startsWith(i.to + "/"));
-
-  const breadcrumbs: BreadcrumbEntry[] = [
-    { label: t("orgSettings.pageTitle"), href: "/org-settings" },
-    ...(activeItem ? [{ label: activeItem.label }] : []),
-  ];
-
   return (
     <SettingsLayout
       title={t("orgSettings.pageTitle")}
-      emoji="⚙️"
-      breadcrumbs={breadcrumbs}
+      scope={{
+        label: t("scope.organisation", { ns: "common" }),
+        icon: Building,
+        name: currentOrg?.name ?? "",
+      }}
       sections={sections}
     />
   );
