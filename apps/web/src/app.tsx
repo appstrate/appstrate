@@ -16,7 +16,6 @@ import { ErrorBoundary } from "./components/error-boundary";
 import { HostedAuthGate } from "./components/hosted-auth-gate";
 import { AppSidebar } from "./components/app-sidebar";
 import { ShellBreadcrumb } from "./components/shell-breadcrumb";
-import { ProductSwitcher } from "./components/product-switcher";
 import { NotificationBell } from "./components/notification-bell";
 import { NavUser } from "./components/nav-user";
 import { LoadingState } from "./components/page-states";
@@ -225,7 +224,6 @@ function MainLayout() {
             <ShellBreadcrumb />
             <div className="flex shrink-0 items-center gap-1">
               <NotificationBell />
-              <ProductSwitcher />
               <NavUser />
             </div>
           </div>

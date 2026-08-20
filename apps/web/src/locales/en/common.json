@@ -118,5 +118,7 @@
   "claim.passwordHelp": "Minimum 8 characters.",
   "claim.submit": "Claim instance",
   "claim.submitting": "Creating account…",
-  "claim.docs": "Docs: examples/self-hosting/AUTH_MODES.md"
+  "claim.docs": "Docs: examples/self-hosting/AUTH_MODES.md",
+  "products.docs": "Docs & API",
+  "products.docsDescription": "Developer reference"
 }
