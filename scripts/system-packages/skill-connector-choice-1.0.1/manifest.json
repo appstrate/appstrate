@@ -1,0 +1,13 @@
+{
+  "name": "@appstrate/connector-choice",
+  "version": "1.0.1",
+  "type": "skill",
+  "schema_version": "0.2",
+  "display_name": "Choix du connecteur",
+  "description": "Choisir comment connecter un service à un agent. Charge ce guide quand plusieurs connecteurs ou modes d'accès sont possibles, ou quand aucun connecteur adéquat n'est installé. Il arbitre friction, couverture et sécurité à partir du catalogue vivant.",
+  "license": "Apache-2.0",
+  "_meta": {
+    "dev.appstrate/visibility": { "level": "unlisted" },
+    "dev.appstrate/assistant-skill": { "enabled": true }
+  }
+}

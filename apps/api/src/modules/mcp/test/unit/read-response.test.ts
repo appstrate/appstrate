@@ -89,6 +89,90 @@ describe("readResponse — non-text bodies", () => {
     expect(result.isError).toBe(true);
     expect(parse(result).status).toBe(502);
   });
+
+  it("decodes a small UTF-8 skill reference returned as an attachment", async () => {
+    const text = "# Triage\n\nMéthode sélective.";
+    const response = new Response(text, {
+      status: 200,
+      headers: {
+        "content-type": "application/octet-stream",
+        "content-length": String(new TextEncoder().encode(text).byteLength),
+        "content-disposition": 'attachment; filename="triage-sentiment.md"',
+      },
+    });
+
+    const body = parse(await readResponse(response));
+    expect(body.body).toBe(text);
+    expect(body.attachment_name).toBe("triage-sentiment.md");
+  });
+
+  it("keeps an invalid UTF-8 text attachment on the binary-safe path", async () => {
+    const response = new Response(new Uint8Array([0xff, 0xfe]), {
+      status: 200,
+      headers: {
+        "content-type": "application/octet-stream",
+        "content-length": "2",
+        "content-disposition": 'attachment; filename="reference.md"',
+      },
+    });
+    const body = parse(await readResponse(response));
+    expect(body.note).toBe("Non-text response body omitted.");
+    expect(body.body).toBeUndefined();
+  });
+
+  it("does not buffer a text attachment above the response ceiling", async () => {
+    const response = new Response("not read", {
+      status: 200,
+      headers: {
+        "content-type": "application/octet-stream",
+        "content-length": "100001",
+        "content-disposition": 'attachment; filename="large.md"',
+      },
+    });
+    const body = parse(await readResponse(response));
+    expect(body.note).toBe("Non-text response body omitted.");
+    expect(body.bytes).toBe(100_001);
+  });
+
+  it("does not expose an oversized attachment when its declared length is false", async () => {
+    const response = new Response("x".repeat(100_001), {
+      status: 200,
+      headers: {
+        "content-type": "application/octet-stream",
+        "content-length": "1",
+        "content-disposition": 'attachment; filename="reference.md"',
+      },
+    });
+    const body = parse(await readResponse(response));
+    expect(body.note).toBe("Non-text response body omitted.");
+    expect(body.bytes).toBe(100_001);
+    expect(body.body).toBeUndefined();
+  });
+
+  it("cancels a misdeclared attachment stream as soon as the byte cap is crossed", async () => {
+    let cancelled = false;
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        controller.enqueue(new Uint8Array(60_000));
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    const response = new Response(stream, {
+      status: 200,
+      headers: {
+        "content-type": "application/octet-stream",
+        "content-length": "1",
+        "content-disposition": 'attachment; filename="reference.md"',
+      },
+    });
+
+    const body = parse(await readResponse(response));
+    expect(body.note).toBe("Non-text response body omitted.");
+    expect(body.bytes).toBe(100_001);
+    expect(cancelled).toBe(true);
+  });
 });
 
 describe("readResponse — text bodies", () => {

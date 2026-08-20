@@ -46,6 +46,7 @@ import { getPublicAppOrigin } from "../../lib/public-url.ts";
 import { registerAuthChallenge } from "../../lib/auth-challenges.ts";
 import { registerProtectedResourceFamily } from "../../lib/protected-resources.ts";
 import { recordAuditFromContext } from "../../services/audit.ts";
+import { buildAssistantSkillsSection } from "../../services/assistant-skills.ts";
 import type { AppEnv } from "../../types/index.ts";
 import { dispatchInProcess } from "../../lib/platform-app.ts";
 import { getMcpOrgResourceUri, orgIdFromMcpAudience } from "./audiences.ts";
@@ -137,6 +138,7 @@ export function buildServerInstructions(
   contextInjected = false,
   packageImportAvailable = false,
 ): string {
+  const assistantSkills = buildAssistantSkillsSection();
   // A `contextInjected` caller (the chat module) already injects the get_me
   // payload into its own system prompt and we drop the get_me tool for it, so
   // pushing "call get_me first" would point the model at a tool that isn't
@@ -167,7 +169,7 @@ This MCP server is scoped to ONE organization — the one this endpoint serves �
 - Connecting or reconnecting an integration before a run — an integration may be unconnected, expired, needs-reconnection, under-scoped, or otherwise unusable. Do NOT pre-validate just to launch a "do it now" inline run: \`run_and_wait\` already runs the same readiness preflight and returns a 400 without consuming credits when the manifest cannot run. If \`run_and_wait\` fails with field errors whose \`field\` is \`integrations.<id>\` (or if you intentionally call \`validateInlineRun\` only to iterate/check readiness without launching), that integration is not ready — whatever the \`code\` (\`not_connected\`, \`needs_reconnection\`, \`insufficient_scopes\`, \`auth_key_mismatch\`, …), with ONE exception below. For each such error you MUST start its connect flow (do not just describe it): CALL \`invoke_operation\` with \`operation_id: "initiateIntegrationConnect"\`, \`path_params: { packageId: "<id>", authKey: "<key>" }\` (the auth key is in \`manifest.auths\` of the integration row from \`GET /api/integrations\`). This op is auth-type-agnostic — it works for every auth (oauth2, api_key, basic, mtls, custom), so you never inspect the auth type yourself. If the error carries a \`connection_id\`, also pass \`body: { connection_id: "<that id>" }\` so the existing connection is reconnected/upgraded in place instead of duplicated. This tool call is what renders the one-click connect button (from its result); without it there is NO button, so never claim a button will appear unless you just made this exact call this turn. After the call, the client renders the connect button on its own from your tool result — your text must NOT duplicate it: do NOT paste the returned \`connect_url\`, do NOT describe the button or tell the caller where to click, do NOT restate the connection request. End your turn with ONE short sentence saying you'll continue once the integration is connected — do NOT poll, loop, wait, or run in the same turn. On a later turn, call \`run_and_wait\` again (or \`validateInlineRun\` if you are only checking readiness); when readiness passes, proceed with the run. (Non-interactive clients with no button can open the returned \`connect_url\`.)
 - The exception — code \`must_choose_connection\` on \`integrations.<id>\` is NOT a connect problem: the integration is connected more than once and the platform needs you to say which connection to use. Do NOT start a connect flow for it (another connection makes the ambiguity worse). Retry the SAME \`run_and_wait\` call with the top-level \`connection_overrides\` argument, mapping that integration id to one id from the error's \`candidate_connection_ids\`: \`connection_overrides: { "<id>": "<candidate_connection_id>" }\`. The key is the integration id itself — not the error's \`field\` path. Pick the candidate yourself when nothing distinguishes them; ask the user only if the choice visibly matters.
 
-${OPERATION_INDEX_HEADING}
+${assistantSkills ? `${assistantSkills}\n\n` : ""}${OPERATION_INDEX_HEADING}
 ${buildOperationIndex(permissions)}`;
 }
 

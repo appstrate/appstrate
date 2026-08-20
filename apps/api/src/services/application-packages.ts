@@ -15,6 +15,7 @@ import {
 } from "@appstrate/db/schema";
 import { notFound, conflict } from "../lib/errors.ts";
 import { orgOrSystemFilter, notEphemeralFilter } from "../lib/package-helpers.ts";
+import { isUnlisted } from "../lib/package-visibility.ts";
 import { asRecord } from "@appstrate/core/safe-json";
 import type { PackageType } from "@appstrate/core/validation";
 import type { ResolvedRunConfig } from "@appstrate/shared-types";
@@ -309,7 +310,9 @@ async function listInstalledPackageHints<T extends PackageHint>(
 
   // `enabled` is null for system packages (no application_packages row) — treat
   // null as enabled; only an explicit `false` disables a local install.
-  const enabled = rows.filter((r) => r.appEnabled !== false);
+  const enabled = rows.filter(
+    (r) => r.appEnabled !== false && !isUnlisted(asRecord(r.draftManifest)),
+  );
   const total = enabled.length;
 
   const items = enabled.slice(0, limit).map((row) => {
