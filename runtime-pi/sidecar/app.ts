@@ -369,17 +369,20 @@ function llmBodyOversizeError(actual: number | null) {
 }
 
 /**
- * Buffer an inbound `/llm` request body as text under a hard byte cap.
+ * Buffer an inbound `/llm` request body as bytes under a hard byte cap.
  * Enforces a `Content-Length` precheck when declared AND the actual
  * buffered byte length (a missing/spoofed Content-Length is still
- * bounded by the streaming read). Returns the decoded text, or a 413
+ * bounded by the streaming read). Returns the original bytes, or a 413
  * `Response` the caller returns verbatim.
  *
  * Replaces a bare `await c.req.raw.text()` — that path was uncapped after
  * `oauth-identity.ts` (which carried the `MAX_REQUEST_BODY_SIZE` →
  * `TransformBodyTooLargeError` → 413 guard) was deleted.
  */
-async function bufferLlmBodyBounded(c: Context, maxBytes: number): Promise<string | Response> {
+async function bufferLlmBodyBytesBounded(
+  c: Context,
+  maxBytes: number,
+): Promise<Uint8Array | Response> {
   const declared = c.req.header("content-length");
   if (declared !== undefined) {
     const declaredLength = Number(declared);
@@ -391,6 +394,13 @@ async function bufferLlmBodyBounded(c: Context, maxBytes: number): Promise<strin
   if (bytes === "exceeded") {
     return c.json(llmBodyOversizeError(null), 413);
   }
+  return bytes;
+}
+
+/** Decode a bounded JSON body for the API-key model-alias rewrite path. */
+async function bufferLlmBodyBounded(c: Context, maxBytes: number): Promise<string | Response> {
+  const bytes = await bufferLlmBodyBytesBounded(c, maxBytes);
+  if (bytes instanceof Response) return bytes;
   return new TextDecoder().decode(bytes);
 }
 
@@ -702,11 +712,11 @@ export function createApp(deps: AppDeps): Hono {
     // refresh — a consumed stream can't be. The body is forwarded VERBATIM:
     // the oauth mode carries no modelSwap (aliases are rejected platform-side)
     // and never rewrites what Pi signed.
-    let body: string | undefined;
+    let body: Uint8Array | undefined;
     if (method !== "GET" && method !== "HEAD") {
-      const buffered = await bufferLlmBodyBounded(c, MAX_REQUEST_BODY_SIZE);
+      const buffered = await bufferLlmBodyBytesBounded(c, MAX_REQUEST_BODY_SIZE);
       if (buffered instanceof Response) return buffered;
-      body = buffered || undefined;
+      body = buffered.byteLength > 0 ? buffered : undefined;
     }
 
     const doFetch = (headers: Headers): Promise<Response> =>
