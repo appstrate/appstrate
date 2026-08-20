@@ -39,7 +39,13 @@ import {
   recordDocumentPartialPublication,
 } from "@appstrate/core/telemetry";
 import { persistRunEvent, writeRunnerLedgerRow } from "./run-launcher/appstrate-event-sink.ts";
-import { updateRun, appendRunLog, computeRunSpend, readLastEmittedOutput } from "./state/runs.ts";
+import {
+  updateRun,
+  appendRunLog,
+  computeRunSpend,
+  readLastEmittedOutput,
+  runAgentIdentity,
+} from "./state/runs.ts";
 import { createRunNotifications } from "./state/notifications.ts";
 import {
   addMemories as addUnifiedMemories,
@@ -135,20 +141,14 @@ export async function getRunSinkContext(runId: string): Promise<RunSinkContext |
   if (!row) return null;
   if (row.sinkSecretEncrypted === null) return null;
 
-  // `runs.package_id` is `ON DELETE SET NULL` (schema/runs.ts) — deleting the
-  // source agent mid-run nulls the column while the run survives for
-  // observability/billing. `RunSinkContext.packageId` is typed as a non-null
-  // string, so a raw `row as RunSinkContext` cast would smuggle a runtime null
-  // past every finalize consumer (getRunEffectiveAgent, memory/pinned persistence,
+  // `RunSinkContext.packageId` is typed as a non-null string, so a raw
+  // `row as RunSinkContext` cast would smuggle a runtime null past every
+  // finalize consumer (getRunEffectiveAgent, memory/pinned persistence,
   // onRunStatusChange event params) — silently skipping finalization
-  // side-effects for a deleted-agent run. Recover the agent's `@scope/name`
-  // from the INSERT-time snapshot (stamped precisely for this deleted-agent
-  // case) so finalize still runs with a stable identity; fall back to a neutral
-  // sentinel only when even the snapshot is absent (pre-snapshot legacy rows).
+  // side-effects for a deleted-agent run. `runAgentIdentity` owns the recovery
+  // (and the sentinel); see `state/runs.ts`.
   const { agentScope, agentName, ...rest } = row;
-  const packageId =
-    rest.packageId ??
-    (agentScope && agentName ? `@${agentScope}/${agentName}` : "@deleted/unknown");
+  const packageId = runAgentIdentity({ ...rest, agentScope, agentName });
   return { ...rest, packageId } as RunSinkContext;
 }
 

@@ -462,8 +462,14 @@ async function loadIntegrationManifest(
     case "not_integration":
       throw notFound(`Package '${integrationId}' is not an integration`);
     case "invalid_manifest":
+      // The response stays a bare 500 (the caller is the sidecar, not a human,
+      // and the manifest is the platform's own data — a broken one is a server
+      // fault). The Zod issues ride the log line instead of being dropped two
+      // statements from the data: the operator reading this warning is the one
+      // who has to go fix the field it names.
       logger.warn("integration manifest fails validation in credentials resolver", {
         integrationId,
+        issues: res.failure.issues,
       });
       throw internalError();
   }

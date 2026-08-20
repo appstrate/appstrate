@@ -19,6 +19,7 @@ import { rateLimitByBearer } from "../middleware/rate-limit.ts";
 import {
   getRecentRuns,
   recordRunDegradedIntegration,
+  runAgentIdentity,
   RUN_HISTORY_FIELDS,
   type RunHistoryField,
 } from "../services/state/runs.ts";
@@ -147,17 +148,11 @@ async function verifyRunToken(c: Context): Promise<{
   return {
     runId,
     run: {
-      // Recover the agent identity the same way `getRunSinkContext` does: the
-      // live `package_id` when the row is still there, else the INSERT-time
-      // snapshot, else the neutral sentinel (pre-snapshot legacy rows). The
+      // Shared with `getRunSinkContext` (one fallback chain, one sentinel). The
       // previous `run.packageId!` asserted away a null that this endpoint can
       // genuinely see, and it reached `getRunEffectiveAgent` — which now
       // reports `agent_deleted` and needs a printable id for its message.
-      packageId:
-        run.packageId ??
-        (run.agentScope && run.agentName
-          ? `@${run.agentScope}/${run.agentName}`
-          : "@deleted/unknown"),
+      packageId: runAgentIdentity(run),
       userId: run.userId,
       endUserId: run.endUserId,
       orgId: run.orgId,

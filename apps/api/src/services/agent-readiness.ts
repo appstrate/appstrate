@@ -100,7 +100,12 @@ function manifestFailureError(
         field,
         code: "integration_invalid_manifest",
         title: "Invalid Integration Manifest",
-        message: `Integration '${integrationId}' has an invalid manifest and cannot be loaded.`,
+        // The schema issues are APPENDED, not summarised away. This message is
+        // server-authored prose the SPA renders verbatim (the row header in
+        // `missing-connections-modal.tsx`), so it is the only place a user ever
+        // sees WHICH manifest field is wrong; bare, it names a verdict and no
+        // fact (see `IntegrationManifestLoadFailure.invalid_manifest`).
+        message: `Integration '${integrationId}' has an invalid manifest and cannot be loaded: ${failure.issues}`,
       };
   }
 }

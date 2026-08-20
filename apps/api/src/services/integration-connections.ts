@@ -503,19 +503,20 @@ type IntegrationOAuthClientRow = typeof integrationOauthClients.$inferSelect;
  * `has_client_secret: true` from the column — the persisted, machine-readable
  * marker that says "this row holds a secret nobody can read".
  *
- * The paths that would ACT on that client refuse it by name instead:
- * `assertConnectClientUsable` before the connect redirect, and
- * `resolveIntegrationClientById` before a refresh. Neither state is inferred
- * away here — this function reports what the row says and nothing more.
+ * The path that would ACT on that client refuses it BY NAME:
+ * `assertConnectClientUsable`, before the connect redirect, in a 403 that names
+ * `CONNECTION_ENCRYPTION_KEY` and the re-registration. The refresh path does
+ * not, and deliberately: `resolveIntegrationClientById` logs the decrypt
+ * failure and returns `null`, so the token silently stops being renewed and the
+ * connection surfaces as `needs_reconnection` at expiry — the cause is named
+ * only in that server log. Refresh is machine-driven with nobody watching, and
+ * the recovery it pushes the user toward (reconnect) is the very path that
+ * DOES name the key, so the diagnosis is one click away rather than lost.
+ * Neither state is inferred away here — this function reports what the row says
+ * and nothing more.
  */
 function projectClientWithSecret(row: IntegrationOAuthClientRow): IntegrationOAuthClientWithSecret {
   let secret = "";
-  // Whether the stored ciphertext could be READ. A row whose ciphertext no
-  // longer opens (key rotated without re-encrypt, corruption) has a secret we
-  // cannot see — which is not the same thing as having none. Conflating the
-  // two would report it as a public client and hand the connect flow an empty
-  // credential, the exact substitution this column exists to prevent.
-  let secretReadable = true;
   // A public client stores no ciphertext at all, so there is nothing to
   // decrypt — and nothing that could fail to decrypt.
   try {
@@ -525,7 +526,10 @@ function projectClientWithSecret(row: IntegrationOAuthClientRow): IntegrationOAu
         : (decryptCredentials<{ client_secret?: string }>(row.clientSecretEncrypted)
             .client_secret ?? "");
   } catch (err) {
-    secretReadable = false;
+    // Logged, not tracked in a flag: `has_client_secret` below reads the
+    // column, so an unreadable ciphertext needs no in-band marker to be
+    // reported as the secret it is. The warning is what tells the operator
+    // WHICH row stopped opening.
     logger.warn("integration_oauth_client: client_secret decrypt failed", {
       packageId: row.integrationId,
       authKey: row.authKey,
@@ -540,9 +544,17 @@ function projectClientWithSecret(row: IntegrationOAuthClientRow): IntegrationOAu
     auth_key: row.authKey,
     client_id: row.clientId,
     clientSecret: secret,
-    // An unreadable ciphertext still IS a secret — report its presence from the
-    // column, not from what we managed to decrypt.
-    has_client_secret: secretReadable ? secret.length > 0 : row.clientSecretEncrypted.length > 0,
+    // Presence comes from the COLUMN, never from what we managed to decrypt. A
+    // row whose ciphertext no longer opens (key rotated without re-encrypt,
+    // corruption) has a secret we cannot see — which is not the same thing as
+    // having none, and reporting it as none would hand the connect flow an
+    // empty credential for a confidential client: the exact substitution this
+    // column exists to prevent. The column is also the only reading that stays
+    // safe for a ciphertext that opens to an EMPTY secret —
+    // `encodeClientAuthForStorage` refuses to write one, but a row that
+    // predates that refusal reports `true` here and is stopped by
+    // `assertConnectClientUsable` instead of going out as public.
+    has_client_secret: row.clientSecretEncrypted.length > 0,
     // `null` = the row declares nothing, so the manifest's method applies. That
     // is the ONLY reading; the method is never re-derived from the secret.
     // Inferring `"none"` from an empty decrypt is exactly the inference that

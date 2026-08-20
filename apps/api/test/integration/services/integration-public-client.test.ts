@@ -350,15 +350,13 @@ describe("public OAuth client is declared, not inferred", () => {
    */
   describe("the connect path refuses an unusable client before any redirect", () => {
     it("refuses an unreadable ciphertext, naming the key and the re-registration", async () => {
-      const id = await seedUnreadableRow();
+      await seedUnreadableRow();
       await expect(resolveForConnect()).rejects.toThrow(/cannot be decrypted/);
       await expect(resolveForConnect()).rejects.toThrow(/CONNECTION_ENCRYPTION_KEY/);
       await expect(resolveForConnect()).rejects.toThrow(/re-register the client/);
-      // …while the admin list still renders it, marked.
-      const clients = await listIntegrationClients(scope, INTEGRATION, AUTH_KEY);
-      const custom = clients.find((c) => c.client_ref === id);
-      expect(custom?.has_client_secret).toBe(true);
-      expect(custom?.token_endpoint_auth_method).toBeNull();
+      // The other half of the contract — the admin list still rendering this
+      // row, marked — has its own test ("never reports an unreadable ciphertext
+      // as a public client") below.
     });
 
     // The silent downgrade: with the manifest declaring `"none"`,

@@ -235,9 +235,17 @@ async function loadManifest(integrationId: string): Promise<IntegrationManifest>
         `Package '${integrationId}' is not an integration`,
       );
     case "invalid_manifest":
-      logger.warn("credential-proxy: integration manifest fails validation", { integrationId });
+      // Both halves carry the issues: the log for the operator, the thrown
+      // message because it travels to the agent as a `ProxyCredentialError`
+      // (`credential-proxy/core.ts`) — the only channel a run has for finding
+      // out why its integration went away. Schema issues name manifest fields,
+      // never credentials, so nothing secret rides along.
+      logger.warn("credential-proxy: integration manifest fails validation", {
+        integrationId,
+        issues: res.failure.issues,
+      });
       throw new IntegrationCredentialNotFoundError(
-        `Integration '${integrationId}' has an invalid manifest`,
+        `Integration '${integrationId}' has an invalid manifest: ${res.failure.issues}`,
       );
   }
 }

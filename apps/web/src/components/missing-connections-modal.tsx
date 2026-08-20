@@ -245,7 +245,11 @@ function MissingRow({
             <div className="truncate text-sm font-medium">{displayName}</div>
             <div className={`flex items-center gap-1.5 truncate text-xs ${colorClass}`}>
               <Icon className="size-3" />
-              <span className="truncate">
+              {/* `title` because the row TRUNCATES: a structural message can
+                  carry the server's diagnosis (e.g. the manifest schema issues
+                  behind `integration_invalid_manifest`), and a cause clipped at
+                  the row width is a cause the user never reads. */}
+              <span className="truncate" title={resolved ? undefined : err.message}>
                 {resolved ? t("missingConnections.resolved") : err.message}
               </span>
             </div>
