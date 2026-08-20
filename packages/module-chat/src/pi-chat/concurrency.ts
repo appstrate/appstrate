@@ -34,21 +34,29 @@ let active = 0;
 let highWaterMark = 0;
 let rejected = 0;
 
-/** Resolve the configured cap, falling back to the default on absent/invalid input. */
-export const piChatMaxConcurrency = (): number => {
+/**
+ * The cap and where it came from, resolved in ONE place.
+ *
+ * Both facts fall out of the same parse on purpose: read separately they could
+ * disagree after any change to what counts as valid, and a boot warning that
+ * disagrees with the cap actually applied is worse than no warning.
+ *
+ * Absent, empty, non-numeric and non-positive all mean "no operator decision" —
+ * a typo'd cap must not read as deliberate just because the variable is set.
+ */
+function resolveChatConcurrency(): { max: number; fromEnv: boolean } {
   const raw = process.env[ENV_VAR];
-  if (!raw) return DEFAULT_MAX_CONCURRENCY;
-  const n = Number.parseInt(raw, 10);
-  return Number.isInteger(n) && n > 0 ? n : DEFAULT_MAX_CONCURRENCY;
-};
+  const parsed = raw === undefined ? Number.NaN : Number.parseInt(raw, 10);
+  return Number.isInteger(parsed) && parsed > 0
+    ? { max: parsed, fromEnv: true }
+    : { max: DEFAULT_MAX_CONCURRENCY, fromEnv: false };
+}
+
+/** Resolve the configured cap, falling back to the default on absent/invalid input. */
+export const piChatMaxConcurrency = (): number => resolveChatConcurrency().max;
 
 /** Whether the cap is the built-in default rather than an operator decision. */
-export const piChatConcurrencyIsDefault = (): boolean => {
-  const raw = process.env[ENV_VAR];
-  if (!raw) return true;
-  const n = Number.parseInt(raw, 10);
-  return !(Number.isInteger(n) && n > 0);
-};
+export const piChatConcurrencyIsDefault = (): boolean => !resolveChatConcurrency().fromEnv;
 
 /**
  * Saturation snapshot for capacity sizing.
@@ -152,9 +160,10 @@ export function releaseOnClose<T>(
  * who never saw this line would discover the ceiling from user reports.
  */
 export function warnIfDefaultChatConcurrency(): void {
-  if (!piChatConcurrencyIsDefault()) return;
+  const { max, fromEnv } = resolveChatConcurrency();
+  if (fromEnv) return;
   logger.warn(
-    `${ENV_VAR} is unset — chat is capped at ${DEFAULT_MAX_CONCURRENCY} concurrent turns per API process. ` +
+    `${ENV_VAR} is unset or invalid — chat is capped at ${max} concurrent turns per API process. ` +
       "Set it from measured capacity before serving production chat traffic.",
   );
 }
