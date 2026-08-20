@@ -49,7 +49,7 @@ function SidebarLogo() {
 export function AppSidebar(props: ComponentProps<typeof Sidebar>) {
   return (
     <Sidebar collapsible="icon" {...props}>
-      <SidebarHeader className="border-sidebar-border h-16 justify-center border-b group-has-data-[collapsible=icon]/sidebar-wrapper:h-12">
+      <SidebarHeader className="border-sidebar-border h-14 justify-center border-b group-has-data-[collapsible=icon]/sidebar-wrapper:h-12">
         <SidebarLogo />
       </SidebarHeader>
       <SidebarContent className="gap-0">

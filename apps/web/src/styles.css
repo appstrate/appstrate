@@ -46,6 +46,16 @@
   --color-sidebar-primary: var(--sidebar-primary);
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar: var(--sidebar);
+  /* Page canvas — the grey the whole chrome sits on. Distinct from
+     `--background`, which stays white: that one is the COMPONENT surface
+     (dialogs, popovers, outline buttons, the active tab pill), and the
+     redesign keeps those white on top of the grey. */
+  --color-canvas: var(--canvas);
+  /* The coral of the Appstrate lightning bolt. Chrome accent only — the
+     notification count and the profile avatar — never a primary action, which
+     is what the blue means. */
+  --color-spark: var(--spark);
+  --color-spark-foreground: var(--spark-foreground);
 }
 
 :root {
@@ -78,7 +88,10 @@
   --ring: oklch(0.574 0.202 262); /* focus halo picks up the brand blue */
   --success: oklch(0.526 0.128 153); /* #157F45 */
   --warning: oklch(0.563 0.112 76.7); /* #9A6B12 */
-  --sidebar: oklch(0.977 0.003 286.4); /* #F7F7F9 */
+  --canvas: oklch(0.985 0 0); /* #FAFAFA */
+  --spark: oklch(0.682 0.18 37.9); /* #F2683C */
+  --spark-foreground: oklch(1 0 0);
+  --sidebar: oklch(0.985 0 0); /* #FAFAFA — merges with the canvas, split only by its border */
   --sidebar-foreground: oklch(0.21 0.006 285.9);
   /* Stays near-black, not the brand blue: the redesign gives org avatars a
      per-org colour set inline, so it takes no position here — and a blue
@@ -117,10 +130,15 @@
   --ring: oklch(0.68 0.17 262);
   --success: oklch(0.7 0.14 153);
   --warning: oklch(0.78 0.13 77);
-  --sidebar: oklch(0.18 0.004 286);
+  --canvas: oklch(0.145 0.004 286);
+  --spark: oklch(0.72 0.16 38);
+  --spark-foreground: oklch(0.145 0.004 286);
+  --sidebar: oklch(0.145 0.004 286);
   --sidebar-foreground: oklch(0.96 0.002 286);
-  --sidebar-primary: oklch(0.68 0.17 262);
-  --sidebar-primary-foreground: oklch(0.145 0.004 286);
+  /* Mirrors the light theme's org-avatar contrast (dark chip / light text)
+     rather than turning it into the brand blue. */
+  --sidebar-primary: oklch(0.96 0.002 286);
+  --sidebar-primary-foreground: oklch(0.21 0.006 285.9);
   --sidebar-accent: oklch(0.28 0.005 286);
   --sidebar-accent-foreground: oklch(0.96 0.002 286);
   --sidebar-border: oklch(0.28 0.005 286);
@@ -132,7 +150,7 @@
     @apply border-border;
   }
   body {
-    @apply bg-background text-foreground;
+    @apply bg-canvas text-foreground;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
     line-height: 1.6;
     min-height: 100vh;

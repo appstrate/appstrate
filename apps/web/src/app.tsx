@@ -209,8 +209,10 @@ function MainLayout() {
   return (
     <SidebarProvider open={sidebarOpen} onOpenChange={setSidebarOpen}>
       <AppSidebar />
-      <SidebarInset className="h-svh">
-        <header className="flex h-16 shrink-0 items-center gap-2 border-b transition-[width,height] ease-linear group-has-data-[collapsible=icon]/sidebar-wrapper:h-12">
+      {/* `bg-canvas` overrides SidebarInset's own `bg-background`: the content
+          column is page canvas (grey), not a component surface (white). */}
+      <SidebarInset className="bg-canvas h-svh">
+        <header className="flex h-14 shrink-0 items-center gap-2 border-b transition-[width,height] ease-linear group-has-data-[collapsible=icon]/sidebar-wrapper:h-12">
           {/* Mobile-only trigger — desktop collapse lives in the sidebar header */}
           <SidebarTrigger className="ml-2 md:hidden" />
           <div className="flex-1" />

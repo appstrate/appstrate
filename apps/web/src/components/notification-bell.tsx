@@ -58,7 +58,7 @@ function NotificationContent({
         <div className="flex items-center gap-2">
           <h4 className="text-sm font-semibold">{t("notifications.title")}</h4>
           {unread > 0 && (
-            <span className="bg-destructive text-destructive-foreground flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-xs font-medium">
+            <span className="bg-spark text-spark-foreground flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-xs font-medium">
               {unread}
             </span>
           )}
@@ -172,7 +172,7 @@ export function NotificationBell() {
     >
       <Bell size={18} />
       {unread > 0 && (
-        <span className="bg-destructive text-destructive-foreground absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[0.6rem] leading-none font-medium">
+        <span className="bg-spark text-spark-foreground absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[0.6rem] leading-none font-medium">
           {unread > 99 ? "99+" : unread}
         </span>
       )}

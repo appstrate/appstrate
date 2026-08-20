@@ -68,7 +68,7 @@ export function NavUser({ minimal = false }: NavUserProps) {
           className="rounded-full"
         >
           <Avatar className="size-8 rounded-full">
-            <AvatarFallback className="bg-sidebar-primary text-sidebar-primary-foreground rounded-full text-sm font-medium">
+            <AvatarFallback className="bg-spark text-spark-foreground rounded-full text-sm font-medium">
               {initials}
             </AvatarFallback>
           </Avatar>
@@ -78,7 +78,7 @@ export function NavUser({ minimal = false }: NavUserProps) {
         <DropdownMenuLabel className="p-0 font-normal">
           <div className="flex items-center gap-2 px-1 py-1.5 text-left text-sm">
             <Avatar className="size-8 rounded-lg">
-              <AvatarFallback className="bg-sidebar-primary text-sidebar-primary-foreground rounded-lg text-sm font-medium">
+              <AvatarFallback className="bg-spark text-spark-foreground rounded-lg text-sm font-medium">
                 {initials}
               </AvatarFallback>
             </Avatar>
