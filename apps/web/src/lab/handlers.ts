@@ -128,16 +128,7 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
     handler: () => ({ status: 200, body: {} }),
   },
 
-  /* Billing is optional in OSS builds — 404 is the real "not enabled" answer,
-     not a hole in the fixtures. */
-  {
-    method: "GET",
-    pattern: /^\/api\/billing$/,
-    handler: () => ({
-      status: 404,
-      body: { type: "about:blank", title: "Not Found", status: 404, detail: "Billing disabled" },
-    }),
-  },
+  { method: "GET", pattern: /^\/api\/billing$/, handler: () => ({ status: 200, body: f.billing }) },
 
   /* Live run channel. Answered with an open, silent event-stream: closing it
      or 404-ing sends the client into a reconnect loop that floods the console

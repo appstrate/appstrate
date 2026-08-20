@@ -27,8 +27,6 @@
   "switcher.appSection": "Espace de travail",
   "switcher.createApp": "Nouvel espace de travail",
   "nav.section.activity": "Activité",
-  "nav.section.automation": "Automatisation",
-  "nav.section.extensions": "Extensions",
   "nav.section.admin": "Administration",
   "nav.chat": "Chat",
   "nav.dashboard": "Dashboard",
@@ -120,5 +118,7 @@
   "claim.submitting": "Création du compte…",
   "claim.docs": "Documentation : examples/self-hosting/AUTH_MODES.md",
   "products.docs": "Docs & API",
-  "products.docsDescription": "Référence développeur"
+  "products.docsDescription": "Référence développeur",
+  "nav.section.build": "Construire",
+  "nav.usage": "Usage"
 }

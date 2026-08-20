@@ -28,6 +28,7 @@ window.__APP_CONFIG__ = {
     orgCreationDisabled: false,
     bootstrapTokenPending: false,
     chat: true,
+    billing: true,
   },
   trustedOrigins: [],
 };

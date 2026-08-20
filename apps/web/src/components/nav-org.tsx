@@ -14,7 +14,6 @@ import {
   Users,
   Boxes,
   FileText,
-  Settings,
   type LucideIcon,
 } from "lucide-react";
 import { useUnreadCount } from "../hooks/use-notifications";
@@ -54,8 +53,10 @@ export function NavOrg() {
     (agents?.some((f) => f.running_runs > 0) ?? false) || (runningInline?.total ?? 0) > 0;
   const unread = unreadCount ?? 0;
 
-  // Grouped nav: work surfaces (Activité) → build loop (Automatisation) →
-  // reusable building blocks (Extensions) → admin-only config (Administration).
+  // Two groups, split by what you are DOING rather than by object type:
+  // Activité is what is happening (and what is scheduled to happen), Construire
+  // is what you assemble. Schedules moved out of the old "Automatisation" for
+  // that reason — a schedule is upcoming activity, not a thing you build.
   // Runs is rendered specially (running spinner + unread badge) inside Activité.
   const activityItems: NavItem[] = [
     { path: "/", label: t("nav.dashboard"), icon: LayoutDashboard },
@@ -63,12 +64,12 @@ export function NavOrg() {
     { path: "/documents", label: t("nav.documents"), icon: FileText },
   ];
 
-  const automationItems: NavItem[] = [
-    { path: "/agents", label: t("nav.agents"), icon: Layers },
+  const activityTailItems: NavItem[] = [
     { path: "/schedules", label: t("nav.schedules"), icon: Calendar },
   ];
 
-  const extensionItems: NavItem[] = [
+  const buildItems: NavItem[] = [
+    { path: "/agents", label: t("nav.agents"), icon: Layers },
     { path: "/skills", label: t("nav.skills"), icon: Wrench },
     { path: "/mcp-servers", label: t("nav.mcpServers"), icon: Plug },
     { path: "/integrations", label: t("nav.integrations"), icon: Boxes },
@@ -79,7 +80,6 @@ export function NavOrg() {
       ? [{ path: "/webhooks", label: t("nav.webhooks"), icon: Webhook }]
       : []),
     ...(isAdmin ? [{ path: "/end-users", label: t("nav.endUsers"), icon: Users }] : []),
-    ...(isAdmin ? [{ path: "/org-settings", label: t("nav.settings"), icon: Settings }] : []),
   ];
 
   const renderItems = (items: NavItem[]) =>
@@ -138,17 +138,13 @@ export function NavOrg() {
               </>
             )}
           </SidebarMenuItem>
+          {renderItems(activityTailItems)}
         </SidebarMenu>
       </SidebarGroup>
 
       <SidebarGroup>
-        <SidebarGroupLabel>{t("nav.section.automation")}</SidebarGroupLabel>
-        <SidebarMenu>{renderItems(automationItems)}</SidebarMenu>
-      </SidebarGroup>
-
-      <SidebarGroup>
-        <SidebarGroupLabel>{t("nav.section.extensions")}</SidebarGroupLabel>
-        <SidebarMenu>{renderItems(extensionItems)}</SidebarMenu>
+        <SidebarGroupLabel>{t("nav.section.build")}</SidebarGroupLabel>
+        <SidebarMenu>{renderItems(buildItems)}</SidebarMenu>
       </SidebarGroup>
 
       {adminItems.length > 0 && (

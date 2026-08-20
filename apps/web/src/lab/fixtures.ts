@@ -355,3 +355,24 @@ export const notifications: Json200<"/api/notifications", "get"> = {
     },
   ],
 };
+
+/* -------------------------------------------------------------------------- */
+/* Billing                                                                     */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * `/api/billing` is served by the cloud module, not the OpenAPI surface, so it
+ * has no generated type to bind to — this one mirrors `hooks/use-billing`'s
+ * `BillingInfo` by hand. Deliberately at 68%: a gauge is only worth looking at
+ * somewhere between empty and full.
+ */
+export const billing = {
+  plan: "pro",
+  plans: [{ id: "pro", name: "Pro", price: 49, credit_quota: 50_000 }],
+  usage_percent: 68,
+  credits_used: 34_120,
+  credit_quota: 50_000,
+  period_end: new Date(T0 + 11 * 24 * 3_600_000).toISOString(),
+  status: "active",
+  upgrades: [],
+};
