@@ -3,17 +3,27 @@
 /**
  * Organisation and workspace switcher, at the head of the header trail.
  *
- * Two columns rather than a menu with a submenu, following the redesign: an
- * organisation and a workspace are two independent dimensions of the same
- * context, so both are visible and pickable in one pass instead of one hiding
- * behind the other.
+ * Two columns rather than a menu with a submenu: the left one lists the
+ * organisations, the right one the workspaces OF THE ONE BEING EXPLORED —
+ * clicking an organisation opens its workspaces, it does not switch to it.
+ *
+ * That is not a nicety, it is what the context actually is: you are always in a
+ * workspace, never in an organisation alone. A click that switched org on its
+ * own had to invent a workspace to land you in (whichever `useAutoSelect`
+ * picked), so half the choice was made for you and silently. Here the pick ends
+ * on a workspace, always, and org + workspace are applied together.
+ *
+ * The current context and the explored one are two different things and read
+ * differently: the current organisation keeps the coral fill and the only gear,
+ * the explored one is the highlighted row with the chevron into column two.
  */
 import { useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { openAsModal } from "../lib/modal-route";
 import { useTranslation } from "react-i18next";
-import { ChevronsUpDown, Plus, Search, Settings, Library } from "lucide-react";
+import { Check, ChevronRight, ChevronsUpDown, Plus, Search, Settings, Library } from "lucide-react";
 import { useOrg } from "../hooks/use-org";
+import { $api } from "../api/client";
 import { useApplications } from "../hooks/use-applications";
 import { useCurrentApplicationId, useAppSwitcher } from "../hooks/use-current-application";
 import { usePermissions } from "../hooks/use-permissions";
@@ -69,8 +79,26 @@ export function OrgSwitcher() {
   const { isAdmin } = usePermissions();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
+  // The organisation whose workspaces column two is showing. Null means "the
+  // one you are in": the panel always opens on your own context, and reopening
+  // it after a look around never leaves you exploring somewhere else.
+  const [exploredOrgId, setExploredOrgId] = useState<string | null>(null);
 
   const currentApp = applications?.find((a) => a.id === currentAppId) ?? null;
+  const exploredId = exploredOrgId ?? currentOrg?.id ?? null;
+  const isExploringElsewhere = exploredId !== null && exploredId !== currentOrg?.id;
+
+  // Workspaces of the EXPLORED organisation. The header is passed explicitly,
+  // so it is part of the query key and the client middleware leaves it alone
+  // (it only fills headers a request does not already carry). Exploring your
+  // own org therefore hits the very same key as `useApplications()` — same
+  // cache entry, no second request.
+  const exploredApps = $api.useQuery(
+    "get",
+    "/api/applications",
+    { params: { header: { "X-Org-Id": exploredId ?? undefined } } },
+    { enabled: open && !!exploredId, select: (e) => e.data },
+  );
 
   if (loading) return <Skeleton className="h-6 w-40" />;
   if (!currentOrg) return null;
@@ -78,10 +106,38 @@ export function OrgSwitcher() {
   const needle = query.trim().toLowerCase();
   const matches = (name: string) => !needle || name.toLowerCase().includes(needle);
   const shownOrgs = orgs.filter((o) => matches(o.name));
-  const shownApps = (applications ?? []).filter((a) => matches(a.name));
+  const shownApps = (exploredApps.data ?? []).filter((a) => matches(a.name));
+
+  /**
+   * The one place the context is applied — and it is applied whole. Switching
+   * org first would blank the workspace and let the auto-selector land the user
+   * anywhere for a frame; both stores are set in the same tick instead.
+   *
+   * A new organisation also means the current URL may not exist there (an agent
+   * id, a run number), so the landing is the root of the product you are in —
+   * changing org from the chat keeps you in the chat.
+   */
+  const applyContext = (orgId: string, applicationId: string) => {
+    const orgChanged = orgId !== currentOrg.id;
+    if (orgChanged) switchOrg(orgId);
+    switchApp(applicationId);
+    setOpen(false);
+    if (orgChanged) {
+      navigate(location.pathname.startsWith("/chat") ? "/chat" : "/", { replace: true });
+    }
+  };
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next);
+        if (!next) {
+          setExploredOrgId(null);
+          setQuery("");
+        }
+      }}
+    >
       <PopoverTrigger asChild>
         {/* Deliberately NOT shaped like the trail segments next to it. A
             breadcrumb segment means "go up a level" — cheap and reversible.
@@ -132,25 +188,25 @@ export function OrgSwitcher() {
               onAdd="/onboarding/create"
             />
             {shownOrgs.map((org) => {
-              const isActive = org.id === currentOrg.id;
+              const isCurrent = org.id === currentOrg.id;
+              const isExplored = org.id === exploredId;
               return (
                 <div
                   key={org.id}
                   className={cn(
                     "hover:bg-accent flex items-center rounded-md",
-                    isActive && "bg-spark-soft hover:bg-spark-soft",
+                    isExplored && "bg-accent",
+                    isCurrent && "bg-spark-soft hover:bg-spark-soft",
                   )}
                 >
+                  {/* Opens this organisation's workspaces beside it. It does
+                      NOT switch: you are always in a workspace, so the pick is
+                      only complete one column to the right. */}
                   <button
                     type="button"
                     data-testid={`org-item-${org.id}`}
-                    onClick={() => {
-                      if (!isActive) {
-                        switchOrg(org.id);
-                        navigate("/", { replace: true });
-                      }
-                      setOpen(false);
-                    }}
+                    aria-expanded={isExplored}
+                    onClick={() => setExploredOrgId(org.id)}
                     className="flex min-w-0 flex-1 items-center justify-start gap-2.5 p-2 text-left"
                   >
                     <OrgAvatar name={org.name} className="size-[30px] text-[0.82rem]" />
@@ -160,11 +216,20 @@ export function OrgSwitcher() {
                         {t(`switcher.role.${org.role}`)}
                       </span>
                     </span>
+                    {isCurrent && <Check size={15} className="text-spark ml-auto shrink-0" />}
+                    <ChevronRight
+                      className={cn(
+                        "text-muted-foreground shrink-0",
+                        isCurrent ? "ml-1" : "ml-auto",
+                        !isExplored && "opacity-0",
+                      )}
+                      size={15}
+                    />
                   </button>
                   {/* Only on the current org: the gear configures what you are
                       IN, and switching org first is one honest click rather
                       than a shortcut that silently changes context. */}
-                  {isActive && (
+                  {isCurrent && (
                     <Link
                       to="/org-settings"
                       state={openAsModal(location)}
@@ -181,46 +246,59 @@ export function OrgSwitcher() {
           </div>
 
           <div className="border-l p-2.5">
+            {/* Adding a workspace lands in the CURRENT org's settings, so the
+                shortcut is offered only while you are looking at your own —
+                elsewhere it would create it in the wrong place. */}
             <ColumnHeader
               label={t("switcher.workspacesColumn")}
               addLabel={t("switcher.add")}
-              onAdd="/org-settings/applications"
+              onAdd={isExploringElsewhere ? undefined : "/org-settings/applications"}
             />
-            {shownApps.map((app) => {
-              const isActive = app.id === currentAppId;
-              return (
-                <div
-                  key={app.id}
-                  className={cn(
-                    "hover:bg-accent flex items-center rounded-md",
-                    isActive && "bg-primary-soft hover:bg-primary-soft",
-                  )}
-                >
-                  <button
-                    type="button"
-                    data-testid={`app-item-${app.id}`}
-                    onClick={() => {
-                      if (!isActive) switchApp(app.id);
-                      setOpen(false);
-                    }}
-                    className="flex min-w-0 flex-1 items-center justify-start gap-2.5 p-2 text-left"
+            {exploredApps.isPending ? (
+              <div className="space-y-1 p-2">
+                <Skeleton className="h-5 w-2/3" />
+                <Skeleton className="h-5 w-1/2" />
+              </div>
+            ) : shownApps.length === 0 ? (
+              <p className="text-muted-foreground px-2 py-4 text-xs">
+                {t("switcher.workspacesEmpty")}
+              </p>
+            ) : (
+              shownApps.map((app) => {
+                const isCurrent = app.id === currentAppId && !isExploringElsewhere;
+                return (
+                  <div
+                    key={app.id}
+                    className={cn(
+                      "hover:bg-accent flex items-center rounded-md",
+                      isCurrent && "bg-primary-soft hover:bg-primary-soft",
+                    )}
                   >
-                    <span className="truncate text-sm font-medium">{app.name}</span>
-                  </button>
-                  {isActive && (
-                    <Link
-                      to="/workspace-settings"
-                      state={openAsModal(location)}
-                      onClick={() => setOpen(false)}
-                      aria-label={t("workspaceSettings.pageTitle", { ns: "settings" })}
-                      className="text-muted-foreground hover:text-foreground shrink-0 p-2"
+                    {/* The end of the pick: org AND workspace applied together. */}
+                    <button
+                      type="button"
+                      data-testid={`app-item-${app.id}`}
+                      onClick={() => applyContext(exploredId ?? currentOrg.id, app.id)}
+                      className="flex min-w-0 flex-1 items-center justify-start gap-2.5 p-2 text-left"
                     >
-                      <Settings size={15} />
-                    </Link>
-                  )}
-                </div>
-              );
-            })}
+                      <span className="truncate text-sm font-medium">{app.name}</span>
+                      {isCurrent && <Check size={15} className="text-primary ml-auto shrink-0" />}
+                    </button>
+                    {isCurrent && (
+                      <Link
+                        to="/workspace-settings"
+                        state={openAsModal(location)}
+                        onClick={() => setOpen(false)}
+                        aria-label={t("workspaceSettings.pageTitle", { ns: "settings" })}
+                        className="text-muted-foreground hover:text-foreground shrink-0 p-2"
+                      >
+                        <Settings size={15} />
+                      </Link>
+                    )}
+                  </div>
+                );
+              })
+            )}
           </div>
         </div>
 

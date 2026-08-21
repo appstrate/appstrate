@@ -74,22 +74,41 @@ export const orgs: Json200<"/api/orgs", "get"> = {
   ],
 };
 
+type Application = Json200<"/api/applications", "get">["data"][number];
+
+function makeApplication(id: string, orgId: string, name: string, isDefault = false): Application {
+  return {
+    id,
+    object: "application",
+    orgId,
+    name,
+    isDefault,
+    settings: {},
+    created_by: USER_ID,
+    createdAt: ago(60),
+    updatedAt: ago(60),
+  };
+}
+
+/**
+ * Workspaces PER ORGANISATION — the switcher's second column shows the ones
+ * belonging to the org being explored, so a single flat list would make it look
+ * right while proving nothing. Tractr has three, Appstrate one: the asymmetry
+ * is the point.
+ */
+export const applicationsByOrg: Record<string, Application[]> = {
+  [ORG_ID]: [
+    makeApplication(APP_ID, ORG_ID, "Default", true),
+    makeApplication("app_lab_prod", ORG_ID, "Production"),
+    makeApplication("app_lab_sandbox", ORG_ID, "Bac à sable"),
+  ],
+  org_lab_2: [makeApplication("app_lab_2_default", "org_lab_2", "Default", true)],
+};
+
 export const applications: Json200<"/api/applications", "get"> = {
   object: "list",
   hasMore: false,
-  data: [
-    {
-      id: APP_ID,
-      object: "application",
-      orgId: ORG_ID,
-      name: "Default",
-      isDefault: true,
-      settings: {},
-      created_by: USER_ID,
-      createdAt: ago(60),
-      updatedAt: ago(60),
-    },
-  ],
+  data: applicationsByOrg[ORG_ID]!,
 };
 
 /* -------------------------------------------------------------------------- */

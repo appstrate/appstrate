@@ -20,7 +20,7 @@ export type LabResponse = {
   stream?: boolean;
 };
 
-type Handler = (url: URL, scenario: Scenario) => LabResponse;
+type Handler = (url: URL, scenario: Scenario, headers: Headers) => LabResponse;
 
 /** `heavy` swaps the list bodies; `empty` empties them; `nominal` is as authored. */
 function list<T>(rows: T[], scenario: Scenario, heavy?: T[]): T[] {
@@ -73,10 +73,13 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
   {
     method: "GET",
     pattern: /^\/api\/applications$/,
-    handler: (_u, s) => ({
-      status: 200,
-      body: { ...f.applications, data: list(f.applications.data, s) },
-    }),
+    // Answers for the org the request asks for, not the one the app is in: the
+    // org switcher reads another org's workspaces before switching to it.
+    handler: (_u, s, headers) => {
+      const orgId = headers.get("X-Org-Id") ?? "";
+      const rows = f.applicationsByOrg[orgId] ?? f.applications.data;
+      return { status: 200, body: { ...f.applications, data: list(rows, s) } };
+    },
   },
 
   /* Runs — paginated, so the offset/limit query has to be honoured or the
@@ -165,10 +168,15 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
   },
 ];
 
-export function resolveHandler(method: string, url: URL, scenario: Scenario): LabResponse | null {
+export function resolveHandler(
+  method: string,
+  url: URL,
+  scenario: Scenario,
+  headers: Headers = new Headers(),
+): LabResponse | null {
   const route = ROUTES.find((r) => r.method === method && r.pattern.test(url.pathname));
   if (!route) return null;
-  const response = route.handler(url, scenario);
+  const response = route.handler(url, scenario, headers);
   // The realtime stream stays up in every scenario — a dead channel is not the
   // failure mode `error` is meant to exercise.
   if (scenario === "error" && !response.stream) {

@@ -62,6 +62,11 @@ on — without it the chat, billing and webhooks surfaces are invisible in the l
 A missing fixture logs `[lab] no fixture for GET /api/… → 404`. That is the
 console telling you about a hole, not a bug.
 
+Handlers receive the request's headers, so an org-scoped list can answer for the
+org that was ASKED for rather than the one the app is in — `applicationsByOrg`
+gives Tractr three workspaces and Appstrate one, which is what makes the
+switcher's second column provable.
+
 ## The target, read from the SAVED design state
 
 `app.jsx` in the design project pins `layout: "droit"` and `fondsGris: true`,
@@ -87,6 +92,17 @@ on top; content flush, no gutter card, no 16px top radius.
   segments beside it: a breadcrumb segment means "go up a level", cheap and
   reversible; this one replaces the whole context. Coloured avatar plus an
   up/down chevron, never a right chevron.
+- **The switch always ends on a workspace.** Two columns: organisations left,
+  the workspaces OF THE ONE BEING EXPLORED right. Clicking an organisation
+  opens its workspaces, it does not switch to it — you are never in an
+  organisation alone, so a click that switched on its own had to invent the
+  workspace to land you in (whichever `useAutoSelect` picked). Org and
+  workspace are then applied in the same tick, and a changed org lands on the
+  root of the product you are in (from the chat, you stay in the chat).
+  The current context and the explored one read differently: the current org
+  keeps the coral fill, the check and the only gear; the explored one is the
+  highlighted row with the chevron into column two. "Add a workspace" hides
+  while you explore elsewhere — it would create it in the org you are in.
 - **Nav** groups by what you are DOING: Activité (schedules included — a
   schedule is upcoming activity) and Construire.
 - **Meta block** at the sidebar foot: Usage, Paramètres. No credits gauge — a

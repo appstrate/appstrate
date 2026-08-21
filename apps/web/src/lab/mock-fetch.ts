@@ -52,7 +52,14 @@ export function installLabFetch(): void {
     // must reach the dev server untouched — only backend calls are faked.
     if (!url.pathname.startsWith("/api/")) return originalFetch(input, init);
 
-    const handled = resolveHandler(method, url, getScenario());
+    // The scoping headers travel with the request: a handler that answers an
+    // org-scoped list has to answer for the org that was ASKED for, not for
+    // whichever one the app happens to be in — that is the whole difference
+    // between one org and several in the lab.
+    const headers = new Headers(
+      init?.headers ?? (input instanceof Request ? input.headers : undefined),
+    );
+    const handled = resolveHandler(method, url, getScenario(), headers);
 
     if (!handled) {
       // Loud on purpose. An unfaked endpoint is a hole in the fixtures, and a

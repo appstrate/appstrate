@@ -114,5 +114,6 @@
   "nav.usage": "Usage",
   "userMenu.documentation": "Documentation",
   "userMenu.getHelp": "Get help",
-  "nav.settings": "Settings"
+  "nav.settings": "Settings",
+  "switcher.workspacesEmpty": "No workspace in this organisation."
 }
