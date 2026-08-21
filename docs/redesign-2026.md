@@ -152,6 +152,44 @@ l'utilisent", "Applications clientes", the hosted-connect message an end-user
 reads, the provider-side OAuth app). Code identifiers and API fields are
 untouched — this is vocabulary, not a data model change.
 
+## Judgments the product owner has already made
+
+Not preferences to guess at — calls made explicitly during the work, with the
+reason each time. They recur, so they are worth knowing before proposing
+something that contradicts one.
+
+- **Consistency between screens beats saving a line inside one.** A group label
+  on a single-group surface repeats the head, but removing it made the three
+  settings surfaces stop looking like the same system. The label stays. A
+  group-count rule was tried and reverted for exactly this.
+- **A concept has to be visible to be learned.** The workspace level shows even
+  when an org has one, because a level nobody ever sees is a level nobody
+  learns. Its menu ends on a way to create one rather than a dead end.
+- **Duplication is fine when it follows habit.** Documentation sits in both the
+  product switcher and the profile menu: people look for help in the profile
+  menu by reflex, and a second door costs less than a first door nobody finds.
+- **Nothing permanent in the navigation for a number read every few weeks.**
+  The credits gauge was removed on those grounds; it belongs behind Usage.
+- **Direct manipulation in forms.** No Edit button revealing a field. Fields,
+  dropdowns and toggles, Notion-style rows, as a systematic pattern.
+- **A modal must have a URL.** Non-negotiable — support has to be able to say
+  "open this", and back has to work.
+- **On a phone the menu is a dropdown at the top**, never a side rail.
+- **URLs may move in a redesign.** Redirects, then move on.
+- **Words matter.** "espace de travail" over "application"; the terminology pass
+  was requested before any of the screens using it were touched.
+
+On how the work goes:
+
+- References get sent as screenshots (Notion, Fleet, Coolify, LangSmith) and the
+  expectation is to steal the specific detail that applies, not the whole thing
+  — and to say which detail and why.
+- "Qu'est-ce que t'en penses" means a recommendation with its reason, not a
+  survey of options. Disagreeing is expected; being talked out of it is fine.
+- The dev server is not run by hand. Launch it, keep it alive, verify the thing
+  itself rather than asking for a look.
+- The two-axis code review runs after each substantive block.
+
 ## Traps hit more than once
 
 - **`<button>` centres its flex content by default.** Rows with a subtitle sat
@@ -180,8 +218,7 @@ untouched — this is vocabulary, not a data model change.
 
 ## Open
 
-- **Chat has its own shell**, without the Studio sidebar. Confirmed, not done —
-  `/chat` still renders inside `MainLayout`.
+- **Chat has its own shell** — see the section above for everything known.
 - **Usage page**, scoped by user: observability, not billing — who spends what,
   on which agent, with which model, for the agents a user can reach.
   `/api/runs` already accepts `start_date` / `end_date` / `user=me`, and each
@@ -196,6 +233,34 @@ untouched — this is vocabulary, not a data model change.
 - **Per-org colour** — the design gives each org a colour, the data model has no
   such field. Deferred by decision.
 - **Library browsing** (skills, integrations, templates) reuses `PanelDialog`.
+
+## Chat — what is known, before starting
+
+`/chat` and `/chat/:conversationId` still render inside `MainLayout`, so the
+Studio sidebar is present. Confirmed target: its own shell without it.
+
+What is already there:
+
+- `apps/web/src/modules/chat/` is the app-side shell: `chat-page.tsx` plus its
+  OWN `conversation-sidebar.tsx` and `conversation-sidebar-state.ts`. So the
+  chat already has a second sidebar; the Studio one next to it is the problem.
+- `chat-page.tsx` calls `useSidebarStore.getState().setOpenTransient(false)` on
+  mount and restores on unmount — the same collapse-the-app-sidebar trick that
+  was just removed from `SettingsLayout`, and for the same reason: it is making
+  room for a sidebar that should not have been competing with it. Removing that
+  effect is part of the job, not a side quest.
+- Root is `data-full-bleed` with `h-[calc(100dvh-var(--spacing-header))]`, so it
+  already opts out of the 1300px page frame and subtracts the header token.
+- The UI itself is packaged in `packages/module-chat/src/ui/` (assistant-ui
+  based). The app-side files are the shell around it.
+- Gated on `features.chat` from `window.__APP_CONFIG__`; the lab enables it.
+  `/api/chat/sessions` has a fixture; the rest of the chat endpoints do not.
+- `useChatUnreadCount` still exists — it drove the nav badge that was removed
+  when the chat left the navigation. It has no consumer right now.
+
+The shape to aim for: the product switcher stays (it is how you get back to
+Studio), the Studio navigation goes, the conversation sidebar takes its place.
+Fleet's reference screenshot has Chat and Inbox at the top of its own sidebar.
 
 ## Rule of thumb that decided several of these
 
