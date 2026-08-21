@@ -17,6 +17,7 @@ import {
 } from "../services/state/package-persistence.ts";
 import { validateAgainstSchema } from "../services/schema.ts";
 import { assertLockedFieldsSatisfiable } from "../services/input-resolution.ts";
+import { dropLockedFieldsFromSchedules } from "../services/scheduler.ts";
 import {
   listAccessiblePackages,
   updateInstalledPackage,
@@ -220,11 +221,31 @@ export function createAgentsRouter() {
         agent.manifest.input?.schema ?? { type: "object" as const, properties: {} },
       );
 
+      // `values` is the WHOLE stored document, and the editor form that owns it
+      // only ever renders the properties `input.schema` declares. A key naming
+      // no declared property is therefore invisible in the UI and un-removable:
+      // the settings form re-submits what it was handed, and the launch form
+      // seeds it as caller input on every run. Prune it to the declared keys.
+      //
+      // This is NOT the "silent drop of a caller value" `assertFieldsUnlocked`
+      // refuses: that rule protects a value a CALLER sent for a field that
+      // exists. Here the editor is replacing the entire stored document, and a
+      // key that matches no declared property has nothing to resolve into —
+      // keeping it only poisons every launch.
+      //
+      // Pruning BEFORE validation is also what keeps an
+      // `additionalProperties: false` schema saveable: an orphan key left in
+      // place would 400 here forever, locking the editor out of its own row.
+      const declaredProperties = new Set(Object.keys(schema.properties ?? {}));
+      const values = Object.fromEntries(
+        Object.entries(body.values).filter(([key]) => declaredProperties.has(key)),
+      );
+
       // Stored values are a partial layer: a required field the editor leaves
       // empty is legitimately asked at launch. Validate types/formats against
       // the input schema with `required` dropped, so a wrong-typed default is
       // still rejected here rather than at every run.
-      const validation = validateAgainstSchema(body.values, { ...schema, required: [] });
+      const validation = validateAgainstSchema(values, { ...schema, required: [] });
       if (!validation.valid) {
         throw validationFailed(
           validation.errors.map((e) => ({
@@ -238,12 +259,19 @@ export function createAgentsRouter() {
 
       // A required field locked with no value behind it is invisible at launch
       // AND unsatisfiable — every run would fail and nobody could see why.
-      assertLockedFieldsSatisfiable(schema, body.locked_fields, body.values);
+      assertLockedFieldsSatisfiable(schema, body.locked_fields, values);
 
       const scope = getAppScope(c);
       await updateInstalledPackage(scope, agent.id, {
-        inputSettings: { values: body.values, locked: body.locked_fields },
+        inputSettings: { values, locked: body.locked_fields },
       });
+
+      // Reconcile the schedules the new lock set just invalidated. A schedule
+      // that froze a now-locked field would otherwise fail `locked_input_field`
+      // on every tick forever — the schedule is not disabled by a failed fire.
+      // Its frozen value is dropped so the field re-resolves from the editor
+      // value, which is what a fresh launch does.
+      await dropLockedFieldsFromSchedules(scope, agent.id, body.locked_fields);
 
       await recordAuditFromContext(c, {
         action: "agent.input_settings_updated",
@@ -254,7 +282,7 @@ export function createAgentsRouter() {
 
       // 200 + the bare persisted resource (#657): validation failures are
       // 400s, so a 200 needs no valid:true scrap.
-      return c.json({ values: body.values, locked_fields: body.locked_fields });
+      return c.json({ values, locked_fields: body.locked_fields });
     },
   );
 

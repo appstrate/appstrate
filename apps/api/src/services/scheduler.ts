@@ -24,7 +24,7 @@ import {
   extractRunAgentDenorm,
 } from "./run-pipeline.ts";
 import { getInstalledPackageSettings } from "./application-packages.ts";
-import { resolveEffectiveInput } from "./input-resolution.ts";
+import { resolveEffectiveInput, withoutLockedFields } from "./input-resolution.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { asRecordOrNull } from "@appstrate/core/safe-json";
 import { getPackage, packageExists } from "./package-catalog.ts";
@@ -1047,6 +1047,65 @@ export async function updateSchedule(
   // update response matches the GET detail shape (actor/run counters).
   const [enriched] = await enrichSchedules([schedule], scope.orgId, viewer);
   return enriched ?? { ...schedule, ...UNENRICHED_SCHEDULE_FIELDS };
+}
+
+/**
+ * Drop the locked input fields from every schedule of one agent in one
+ * application.
+ *
+ * Called when the agent's lock set is written. A schedule froze its `input`
+ * before the lock existed, and the fire path refuses a schedule that answers a
+ * locked field (`resolveEffectiveInput` -> `locked_input_field`). Since a
+ * failed fire only records a failed run and never disables the schedule, an
+ * un-reconciled schedule would fail on EVERY tick, forever, until a human
+ * happened to reopen and re-save it.
+ *
+ * Dropping the key is the same rule the `rerun_from` replay applies (see
+ * {@link withoutLockedFields}): a schedule did not "set" the value the way a
+ * caller does, it froze a resolved one — so removing it lets the field
+ * re-resolve from the current editor value, exactly what a fresh launch does.
+ * Refusing the lock write instead would block a legitimate admin action.
+ *
+ * The whole lock set is applied, not just the keys added by this write: it is
+ * idempotent on a consistent row (`PUT /api/schedules/:id` already refuses a
+ * locked field, so a compliant schedule names none) and it repairs any drift.
+ *
+ * Rewrites go through {@link updateSchedule} rather than a raw UPDATE so the
+ * row and its repeatable BullMQ job — whose payload freezes `input` — stay in
+ * step; a raw UPDATE would leave the queue firing the stale frozen values.
+ *
+ * @returns the ids of the schedules that were rewritten.
+ */
+export async function dropLockedFieldsFromSchedules(
+  scope: AppScope,
+  packageId: string,
+  lockedFields: readonly string[],
+): Promise<string[]> {
+  if (lockedFields.length === 0) return [];
+
+  const rows = await db
+    .select({ id: schedules.id, input: schedules.input })
+    .from(schedules)
+    .where(
+      scopedWhere(schedules, {
+        orgId: scope.orgId,
+        applicationId: scope.applicationId,
+        extra: [eq(schedules.packageId, packageId)],
+      }),
+    );
+
+  const rewritten: string[] = [];
+  for (const row of rows) {
+    const input = asRecordOrNull(row.input);
+    if (!input) continue;
+    const stripped = withoutLockedFields(input, lockedFields);
+    // Only touch a schedule that actually answers a locked field — every other
+    // schedule keeps its row, its `updatedAt` and its queue job untouched.
+    if (Object.keys(stripped).length === Object.keys(input).length) continue;
+    await updateSchedule(scope, row.id, { input: stripped });
+    rewritten.push(row.id);
+  }
+  return rewritten;
 }
 
 export async function deleteSchedule(scope: AppScope, id: string): Promise<boolean> {
