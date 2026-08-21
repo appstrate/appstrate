@@ -242,24 +242,45 @@ changed width as you filtered). The second replaced that with chips carrying
 shipped. Filtering a list is the most-solved problem in this design system;
 none of it was ours to invent.
 
-The pattern:
+The pattern, and where it deviates:
 
-- **A dashed outline button per dimension**, with a `+` and the dimension's
-  name. Dashed and `+` mean "a filter you can add"; that is why it reads as
-  neutral until something is chosen. It has to be **`bg-transparent`**: shadcn's
-  `outline` variant paints `bg-background`, which is WHITE here (our page canvas
-  is its own `--canvas`), so the buttons came out as white pills on grey and the
-  dashes had nothing to be dashed against. Any port of a shadcn control onto the
-  canvas has this to check.
-- **The chosen values live INSIDE that button**, as small badges after a
-  vertical rule: up to two named, then "N sélectionnés". One place, one row, no
-  duplication.
+- **The filters live BEHIND a button, in a row of their own.** shadcn keeps
+  them inline in the bar; that works for a full-width page with two of them.
+  Ours sit beside a 256px sidebar, a screen can have three, and their width
+  depends on how many values are picked and how long the translations run — so
+  the bar spent several rounds either wrapping (flexbox sends the LAST child
+  down, which is the end that must not move) or growing machinery to avoid it:
+  a ladder of breakpoints, then a ghost row and a `ResizeObserver` to decide
+  when to fold. All of that is deleted. One layout at every width, nothing to
+  measure.
+- **The row opens ITSELF when something is filtering.** A list you did not
+  filter yourself — a link someone sent you — has to say why it is short, and a
+  badge saying "3" does not say which three. Only the first render decides;
+  closing it afterwards is the reader's call and nothing reopens it.
+- **The row may take two lines.** That is what a dedicated line is for, and it
+  is the difference between a line you opened and a line that appeared because
+  the window moved.
+- **The search never moves.** It is the one thing you type into, so it stays at
+  the left of the bar at every width, and it is the one control there with a
+  WHITE background — a field is a surface. (It used to travel into the
+  disclosure row with the filters, which was simply a bug.)
+- **A dashed outline means "an empty slot you can fill"**, on the filters
+  button and on each dimension's trigger; once something is in it the border
+  closes, because the control is a statement now, not an invitation. Those
+  buttons are `bg-transparent`: shadcn's `outline` paints `bg-background`,
+  which is WHITE here (our page canvas is its own `--canvas`), so they came out
+  as white pills on grey and the dashes had nothing to be dashed against. Their
+  shadow went for the same reason — a see-through control casts none. Any port
+  of a shadcn control onto the canvas has this to check.
+- **The chosen values live INSIDE each dimension's trigger**, up to two named,
+  then "N sélectionnés" — shadcn's own rule, and it no longer needs the
+  breakpoint that shortened it, since in a row of their own the buttons wrap.
 - **The menu is a `Command`**: searchable, square checkboxes, several values at
-  once, and a centred "Effacer les filtres" at the bottom.
-- **One "Réinitialiser ✕"** at the end of the row when anything is filtered:
-  the only ONE-click way back to the whole list. The menu's own item drops one
-  dimension ("Effacer ce filtre"), unticking drops one value. It is the PAGE's
-  reset, not a loop over the filters — see the trap below.
+  once, and a centred "Effacer ce filtre" at the bottom — THIS dimension, which
+  is why it is not called what the row's button is called.
+- **One "Réinitialiser ✕"** in the filter row once anything is on: the only
+  ONE-click way back to the whole list. It is the PAGE's reset, not a loop over
+  the filters — see the trap below.
 - **A tick adds, an untick removes, and nothing else happens.** This was got
   wrong once and the way it was wrong is worth keeping: "all values ticked
   narrows nothing, so store it as nothing ticked" is true of the RESULTS and
@@ -270,33 +291,46 @@ The pattern:
 - **The operators are never written.** Values of one dimension are
   alternatives, dimensions narrow each other — `(statut = échoué OU timeout) ET
 (type = agent)`, which is what the query does (`IN (…)` per dimension, `AND`
-  between them). No faceted filter anywhere spells that out: badges inside one
-  button and buttons side by side already say it.
+  between them). No faceted filter anywhere spells that out.
 - **The state is in the URL**, pushed, not replaced: a filtered list is what
   people paste to each other, and the rule that gave modals real URLs brings
-  the same obligation — Back has to undo a filter.
-- **The page's action is NOT in the toolbar.** It goes in `PageHeader`'s
-  `actions` slot at title height, like every other screen's. What the end of the
-  toolbar row carries instead is the redesign reference's `result-count` and,
-  where the list is drawn two ways, the view toggle — shadcn's own slot there
-  holds column visibility, which is the same kind of thing.
+  the same obligation — Back has to undo a filter. The search is the exception,
+  replaced rather than pushed: eight keystrokes would otherwise be eight
+  history entries.
+- **On a list screen the page's action IS in the bar**, at the right end beside
+  the view controls, where shadcn puts "Add task". Screens with no list keep
+  theirs at title height.
+- **The right end sheds words before icons** as the bar narrows: the count
+  first, then the labels on the filters and columns buttons, then the label on
+  the page's own action — which the CALLER writes with `@…/bar`, the container
+  the bar names, so the whole row degrades together. **No overflow menu**:
+  shadcn hides its View button and keeps "Add task" whole, and the control a
+  screen exists to offer is the last thing that should need a second click to
+  find.
 - The count reaches the toolbar through a render prop on `RunList`
-  (`toolbar={(total) => …}`), because the query lives in the list. A page
-  asking for the same rows again to count them is the duplicate
-  `GET /api/runs` the dashboard already had to be cured of.
+  (`toolbar={({ total, columns }) => …}`), because the query and the columns
+  live in the list. A page asking for the same rows again to count them is the
+  duplicate `GET /api/runs` the dashboard already had to be cured of.
 
-Two pieces of the original we cannot have yet, both for want of an endpoint:
+**The search** is answered wherever the data actually is: client-side over
+name, description and keywords on the package lists, which hold their catalogue
+whole; server-side on the run list through `q`, which matches the agent (scope
+and name, as stamped on the run), the error, and the run NUMBER when the query
+is digits. One placeholder shape everywhere — "Rechercher des runs…", the verb
+and what the table holds, not the fields it matches.
 
-- **The text search that opens shadcn's toolbar, ON THE RUN LIST.** `GET
-/api/runs` takes no text query, so the box would filter the fifteen rows on
-  screen and call it a search. It is present on the package lists (agents,
-  skills, MCP servers), where the catalogue arrives whole and a client-side
-  filter is the truth; integrations can have it next, for the same reason. For
-  runs it waits on a `q` parameter — agent name and error message are what it
-  would search.
-- **The per-value counts in the menu.** shadcn reads them off the rows it has
-  (`column.getFacetedUniqueValues()`); ours are paginated server-side, so a
-  count would describe the page rather than the list.
+**The columns are the reader's** (`DataTableViewOptions` in the reference).
+Hiding is per TABLE and remembered, so the runs table keeps its columns on the
+runs page, in an agent's tab and in the dashboard card alike; the last visible
+column cannot be hidden. That is why a column set is a HOOK the caller holds
+(`useRunColumns`, `useScheduleColumns`, `usePackageColumns`) rather than a list
+built inside the table: the menu names the columns and the table draws whatever
+is left, so both have to be looking at the same array.
+
+Still missing from the original, for want of an endpoint: **the per-value
+counts in the filter menu.** shadcn reads them off the rows it holds
+(`column.getFacetedUniqueValues()`); ours are paginated server-side, so a count
+would describe the page rather than the list.
 
 The empty state is the redesign reference's (`empty-state`): the icon in a
 raised badge at the centre of three rings. A 40px glyph at 40% opacity on an
