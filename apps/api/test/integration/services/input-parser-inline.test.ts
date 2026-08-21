@@ -52,20 +52,15 @@ const arrayFileSchema: JSONSchemaObject = {
   },
 };
 
-/** Minimal Hono context stub — parseRequestInput only reads the JSON body and orgId/applicationId. */
 /**
  * Minimal Hono context stub. A principal is always present: `parseRequestInput`
  * resolves the acting actor with the strict `getActor`, mirroring the fact that
  * every route reaching it sits behind authentication (the actor gates both the
  * document ACL and the staged-upload ownership check).
  */
-function fakeCtx(
-  body: unknown,
-  ctx: { orgId: string; applicationId: string; user?: { id: string } },
-): Context {
+function fakeCtx(ctx: { orgId: string; applicationId: string; user?: { id: string } }): Context {
   const user = ctx.user ?? { id: "usr_input_parser_test" };
   return {
-    req: { json: async () => body },
     get: (key: string) =>
       key === "orgId"
         ? ctx.orgId
@@ -95,7 +90,8 @@ describe("parseRequestInput — inline data: URIs", () => {
 
     const uri = `data:text/plain;base64,${TEXT_BYTES.toString("base64")}`;
     const result = await parseRequestInput(
-      fakeCtx({ input: { doc: uri } }, scope),
+      fakeCtx(scope),
+      { input: { doc: uri } },
       runId,
       singleTextSchema,
     );
@@ -129,7 +125,8 @@ describe("parseRequestInput — inline data: URIs", () => {
 
     const uri = `data:application/pdf;name=invoice.pdf;base64,${PDF_BYTES.toString("base64")}`;
     const result = await parseRequestInput(
-      fakeCtx({ input: { doc: uri } }, scope),
+      fakeCtx(scope),
+      { input: { doc: uri } },
       runId,
       singlePdfSchema,
     );
@@ -157,7 +154,7 @@ describe("parseRequestInput — inline data: URIs", () => {
     const uri = `data:application/pdf;base64,${TEXT_BYTES.toString("base64")}`;
     let thrown: unknown;
     try {
-      await parseRequestInput(fakeCtx({ input: { doc: uri } }, scope), runId, singlePdfSchema);
+      await parseRequestInput(fakeCtx(scope), { input: { doc: uri } }, runId, singlePdfSchema);
     } catch (e) {
       thrown = e;
     }
@@ -192,7 +189,8 @@ describe("parseRequestInput — inline data: URIs", () => {
 
     const inlineUri = `data:application/pdf;base64,${PDF_BYTES.toString("base64")}`;
     const result = await parseRequestInput(
-      fakeCtx({ input: { docs: [`upload://${uploadId}`, inlineUri] } }, scope),
+      fakeCtx(scope),
+      { input: { docs: [`upload://${uploadId}`, inlineUri] } },
       runId,
       arrayFileSchema,
     );

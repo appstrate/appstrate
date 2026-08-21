@@ -78,6 +78,9 @@ import {
   updatePackageSchema,
 } from "../routes/applications.ts";
 
+// --- Run launch schemas (routes/runs.ts) ---
+import { runAgentBodySchema } from "../routes/runs.ts";
+
 // --- Integration schemas (routes/integrations.ts) ---
 import {
   importConnectionSchema,
@@ -149,6 +152,23 @@ const coreSchemas: OpenApiSchemaEntry[] = [
     path: "/api/models/seed",
     jsonSchema: toJsonSchema(seedModelsSchema),
     description: "Bulk-seed models from registry",
+  },
+
+  // ─── Runs ───────────────────────────────────────────────────────────────
+  //
+  // The launch surfaces are `.strict()` (#1187), so every field they honour
+  // must be documented: an entry here is what turns "accepted by Zod but absent
+  // from the spec" into a failing check instead of a field callers cannot
+  // discover. The two inline surfaces are NOT registered: their schema is a
+  // wire-shape guard that deliberately defers `manifest` / `prompt` to the
+  // preflight (`z.unknown()`, optional), so a field-by-field comparison against
+  // a spec that declares both required and typed reports that deferral as
+  // drift. The check compares shapes; that one is a division of labour.
+  {
+    method: "POST",
+    path: "/api/agents/{scope}/{name}/run",
+    jsonSchema: toJsonSchema(runAgentBodySchema),
+    description: "Execute an agent",
   },
 
   // ─── API Keys ───────────────────────────────────────────────────────────

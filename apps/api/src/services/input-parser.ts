@@ -75,10 +75,7 @@ import {
 } from "./run-workspace-storage.ts";
 import { assignWorkspaceNames } from "./run-document-naming.ts";
 import { getEnv } from "@appstrate/env";
-import {
-  modelGenerationSettingsSchema,
-  type ModelGenerationSettings,
-} from "@appstrate/core/model-generation";
+import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 
 export interface ParsedInput {
   input?: Record<string, unknown>;
@@ -124,8 +121,22 @@ export interface ParsedInput {
   consumedDocumentIds?: string[];
 }
 
+/**
+ * The launch-body shape `parseRequestInput` reads.
+ *
+ * Structural on purpose, not the inferred type of one surface's schema: each
+ * launch route owns the `.strict()` Zod schema for its OWN surface and hands
+ * the parsed result here. `POST /runs/inline` passes a WIDER body (`manifest`,
+ * `prompt`, `context_documents` on top of these keys, and nullable `modelId` /
+ * `proxyId`), so this type is the intersection the parser actually reads.
+ *
+ * Every field is therefore already shape-validated by the time the parser sees
+ * it — no cast, no `c.req.json<T>()` lie. What remains below are the semantic
+ * guards a shape check cannot express (is this dependency spec resolvable, does
+ * this run belong to this agent).
+ */
 interface RunRequestBody {
-  input?: Record<string, unknown>;
+  input?: Record<string, unknown> | undefined;
   /**
    * Run id whose persisted `input` to replay verbatim on this run (wire field
    * `rerun_from`, mutually exclusive with `input`). Consumed staged uploads
@@ -134,12 +145,14 @@ interface RunRequestBody {
    * (`modelId`, `?version`) in one call, no re-upload and no
    * dependency on upload retention.
    */
-  rerun_from?: string;
-  modelId?: string;
-  generation?: ModelGenerationSettings;
-  proxyId?: string;
-  connection_overrides?: Record<string, string>;
-  dependency_overrides?: Record<string, string>;
+  rerun_from?: string | undefined;
+  /** Nullable on the inline surface only (`null` == "no override"). */
+  modelId?: string | null | undefined;
+  generation?: ModelGenerationSettings | undefined;
+  /** Nullable on the inline surface only (`null` == "no override"). */
+  proxyId?: string | null | undefined;
+  connection_overrides?: Record<string, string> | undefined;
+  dependency_overrides?: Record<string, string> | undefined;
 }
 
 /**
@@ -530,9 +543,18 @@ async function resolveRerunInput(
  * Parse and validate the run request body. Returns parsed input + resolved
  * uploaded files. Throws `ApiError` (invalidRequest / notFound / conflict /
  * gone) on any validation or resolution failure.
+ *
+ * `body` is the ALREADY-VALIDATED body of the calling surface (see
+ * {@link RunRequestBody}). The parser does not read the request body itself:
+ * the shape guard — which fields exist, of what type, and the refusal of any
+ * field the surface does not honour — belongs to the route, because it is the
+ * route that knows its own surface. `POST /runs/inline` legitimately carries
+ * `manifest` / `prompt` / `context_documents`, which the agent route must
+ * refuse; a single schema owned here could only be right for one of them.
  */
 export async function parseRequestInput(
   c: Context,
+  body: RunRequestBody,
   runId: string,
   inputSchema?: JSONSchemaObject,
   opts?: {
@@ -571,14 +593,6 @@ export async function parseRequestInput(
     lockedFields?: readonly string[];
   },
 ): Promise<ParsedInput> {
-  let body: RunRequestBody = {};
-  try {
-    const raw = await c.req.json<RunRequestBody>();
-    if (raw && typeof raw === "object") body = raw;
-  } catch {
-    body = {};
-  }
-
   let input = body.input ?? {};
   const isRerun = body.rerun_from !== undefined;
   if (body.rerun_from !== undefined) {
@@ -975,41 +989,15 @@ export async function parseRequestInput(
     }
   }
 
-  // `connection_overrides` shape guard. Flat map: integrationId → connectionId.
-  // Invalid bodies produce a 400 with a precise param so the picker UI can
-  // highlight the offender.
-  if (body.connection_overrides !== undefined) {
-    if (
-      body.connection_overrides === null ||
-      typeof body.connection_overrides !== "object" ||
-      Array.isArray(body.connection_overrides)
-    ) {
-      throw invalidRequest("`connection_overrides` must be a JSON object", "connection_overrides");
-    }
-    for (const [intId, connId] of Object.entries(body.connection_overrides)) {
-      if (typeof connId !== "string" || connId.length === 0) {
-        throw invalidRequest(
-          `\`connection_overrides["${intId}"]\` must be a non-empty connection id`,
-          `connection_overrides.${intId}`,
-        );
-      }
-    }
-  }
-
-  // `dependency_overrides` shape + value guard (#666). Flat map:
-  // packageId → "draft" | "<semver|dist-tag>". Each value must be a valid
-  // run-scoped override so a typo'd pin 400s here instead of silently doing
-  // nothing — the per-dependency analogue of the `connection_overrides` gate.
+  // `dependency_overrides` VALUE guard (#666). Flat map:
+  // packageId → "draft" | "<semver|dist-tag>". The map shape (object of
+  // strings) is already guaranteed by the calling surface's schema; what a
+  // shape check cannot express is whether each value is a resolvable
+  // run-scoped override, so a typo'd pin 400s here instead of silently doing
+  // nothing.
   if (body.dependency_overrides !== undefined) {
-    if (
-      body.dependency_overrides === null ||
-      typeof body.dependency_overrides !== "object" ||
-      Array.isArray(body.dependency_overrides)
-    ) {
-      throw invalidRequest("`dependency_overrides` must be a JSON object", "dependency_overrides");
-    }
     for (const [depId, spec] of Object.entries(body.dependency_overrides)) {
-      if (typeof spec !== "string" || !isValidDependencyOverride(spec)) {
+      if (!isValidDependencyOverride(spec)) {
         throw invalidRequest(
           `\`dependency_overrides["${depId}"]\` must be "draft" or a valid version spec (semver range or dist-tag)`,
           `dependency_overrides.${depId}`,
@@ -1027,16 +1015,12 @@ export async function parseRequestInput(
       ? body.dependency_overrides
       : undefined;
 
-  const generationResult = modelGenerationSettingsSchema.safeParse(body.generation ?? {});
-  if (!generationResult.success) {
-    throw invalidRequest(
-      `Invalid generation settings: ${generationResult.error.issues[0]?.message ?? "validation failed"}`,
-      "generation",
-    );
-  }
+  // `generation` is validated by the calling surface's schema (both launch
+  // surfaces parse it with `modelGenerationSettingsSchema`); an all-empty
+  // object carries no override and collapses to `undefined`.
   const generationConfigOverride =
-    body.generation !== undefined && Object.keys(generationResult.data).length > 0
-      ? generationResult.data
+    body.generation !== undefined && Object.keys(body.generation).length > 0
+      ? body.generation
       : undefined;
 
   // An effectively-empty input (no fields, no files) carries no information —
@@ -1055,9 +1039,11 @@ export async function parseRequestInput(
     uploadedFiles: uploadedFiles.length > 0 ? uploadedFiles : undefined,
     pendingDocuments: pendingDocuments.length > 0 ? pendingDocuments : undefined,
     consumedDocumentIds: consumedDocumentIds.length > 0 ? consumedDocumentIds : undefined,
-    modelIdOverride: body.modelId,
+    // `?? undefined` normalises the inline surface's nullable form (`null` ==
+    // "no override") onto the one representation every consumer reads.
+    modelIdOverride: body.modelId ?? undefined,
     generationConfigOverride,
-    proxyIdOverride: body.proxyId,
+    proxyIdOverride: body.proxyId ?? undefined,
     connectionOverrides: body.connection_overrides,
     dependencyOverrides,
   };

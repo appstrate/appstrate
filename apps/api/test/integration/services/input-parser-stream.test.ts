@@ -70,13 +70,14 @@ async function seedUpload(
  * authentication, and it gates both the document ACL and the staged-upload
  * ownership check. Tests that need a specific owner pass one explicitly.
  */
-function fakeCtx(
-  body: unknown,
-  ctx: { orgId: string; applicationId: string; endUser?: { id: string }; user?: { id: string } },
-): Context {
+function fakeCtx(ctx: {
+  orgId: string;
+  applicationId: string;
+  endUser?: { id: string };
+  user?: { id: string };
+}): Context {
   const user = ctx.endUser ? undefined : (ctx.user ?? { id: "usr_input_parser_test" });
   return {
-    req: { json: async () => body },
     get: (key: string) =>
       key === "orgId"
         ? ctx.orgId
@@ -119,7 +120,8 @@ describe("parseRequestInput — streamed document consume", () => {
 
     const runId = `run_${crypto.randomUUID()}`;
     const result = await parseRequestInput(
-      fakeCtx({ input: { doc: `upload://${id}` } }, scope),
+      fakeCtx(scope),
+      { input: { doc: `upload://${id}` } },
       runId,
       fileSchema,
     );
@@ -162,7 +164,7 @@ describe("parseRequestInput — streamed document consume", () => {
 
     const runId = `run_${crypto.randomUUID()}`;
     await expect(
-      parseRequestInput(fakeCtx({ input: { doc: `upload://${id}` } }, scope), runId, fileSchema),
+      parseRequestInput(fakeCtx(scope), { input: { doc: `upload://${id}` } }, runId, fileSchema),
     ).rejects.toMatchObject({ status: 400 });
 
     // Workspace rolled back via the deletion outbox — draining the worker
@@ -187,7 +189,7 @@ describe("parseRequestInput — streamed document consume", () => {
 
     const runId = `run_${crypto.randomUUID()}`;
     await expect(
-      parseRequestInput(fakeCtx({ input: { doc: `upload://${id}` } }, scope), runId, fileSchema),
+      parseRequestInput(fakeCtx(scope), { input: { doc: `upload://${id}` } }, runId, fileSchema),
     ).rejects.toMatchObject({ status: 400 });
 
     // Workspace rolled back, claim released — same guarantees as any rejection
@@ -214,7 +216,8 @@ describe("parseRequestInput — streamed document consume", () => {
     let thrown: unknown;
     try {
       await parseRequestInput(
-        fakeCtx({ input: { doc: `upload://${id}` } }, scope),
+        fakeCtx(scope),
+        { input: { doc: `upload://${id}` } },
         runId,
         fileSchema,
       );
@@ -270,10 +273,8 @@ describe("parseRequestInput — document:// cross-actor ACL (S2)", () => {
     const newRunId = `run_${crypto.randomUUID()}`;
     await expect(
       parseRequestInput(
-        fakeCtx(
-          { input: { doc: `document://${docA.id}` } },
-          { ...scope, user: { id: memberB.id } },
-        ),
+        fakeCtx({ ...scope, user: { id: memberB.id } }),
+        { input: { doc: `document://${docA.id}` } },
         newRunId,
         fileSchema,
       ),
@@ -295,7 +296,8 @@ describe("parseRequestInput — document:// cross-actor ACL (S2)", () => {
 
     const newRunId = `run_${crypto.randomUUID()}`;
     const result = await parseRequestInput(
-      fakeCtx({ input: { doc: `document://${docA.id}` } }, { ...scope, user: { id: ctx.user.id } }),
+      fakeCtx({ ...scope, user: { id: ctx.user.id } }),
+      { input: { doc: `document://${docA.id}` } },
       newRunId,
       fileSchema,
     );
@@ -320,10 +322,8 @@ describe("parseRequestInput — document:// cross-actor ACL (S2)", () => {
 
     const newRunId = `run_${crypto.randomUUID()}`;
     const result = await parseRequestInput(
-      fakeCtx(
-        { input: { doc: `document://${agentDoc.id}` } },
-        { ...scope, user: { id: memberB.id } },
-      ),
+      fakeCtx({ ...scope, user: { id: memberB.id } }),
+      { input: { doc: `document://${agentDoc.id}` } },
       newRunId,
       fileSchema,
     );
@@ -349,7 +349,8 @@ describe("parseRequestInput — rerun_from (#634)", () => {
 
     const newRunId = `run_${crypto.randomUUID()}`;
     const result = await parseRequestInput(
-      fakeCtx({ rerun_from: priorRunId }, scope),
+      fakeCtx(scope),
+      { rerun_from: priorRunId },
       newRunId,
       fileSchema,
     );
@@ -393,7 +394,8 @@ describe("parseRequestInput — rerun_from (#634)", () => {
     // A new run references it by document:// — resolved into the new workspace.
     const newRunId = `run_${crypto.randomUUID()}`;
     const result = await parseRequestInput(
-      fakeCtx({ input: { doc: `document://${doc.id}` } }, { ...scope, user: { id: ctx.user.id } }),
+      fakeCtx({ ...scope, user: { id: ctx.user.id } }),
+      { input: { doc: `document://${doc.id}` } },
       newRunId,
       fileSchema,
     );
@@ -409,10 +411,12 @@ describe("parseRequestInput — rerun_from (#634)", () => {
     const other = await createTestContext({ orgSlug: "org-docref-other" });
     await expect(
       parseRequestInput(
-        fakeCtx(
-          { input: { doc: `document://${doc.id}` } },
-          { orgId: other.orgId, applicationId: other.defaultAppId, user: { id: other.user.id } },
-        ),
+        fakeCtx({
+          orgId: other.orgId,
+          applicationId: other.defaultAppId,
+          user: { id: other.user.id },
+        }),
+        { input: { doc: `document://${doc.id}` } },
         `run_${crypto.randomUUID()}`,
         fileSchema,
       ),
@@ -421,10 +425,8 @@ describe("parseRequestInput — rerun_from (#634)", () => {
     // Cross-app: same org, foreign application id → 404.
     await expect(
       parseRequestInput(
-        fakeCtx(
-          { input: { doc: `document://${doc.id}` } },
-          { orgId: ctx.orgId, applicationId: "app_not_this_one", user: { id: ctx.user.id } },
-        ),
+        fakeCtx({ orgId: ctx.orgId, applicationId: "app_not_this_one", user: { id: ctx.user.id } }),
+        { input: { doc: `document://${doc.id}` } },
         `run_${crypto.randomUUID()}`,
         fileSchema,
       ),
@@ -445,7 +447,8 @@ describe("parseRequestInput — rerun_from (#634)", () => {
     try {
       await expect(
         parseRequestInput(
-          fakeCtx({ input: { doc: `upload://${id}` } }, { ...scope, user: { id: ctx.user.id } }),
+          fakeCtx({ ...scope, user: { id: ctx.user.id } }),
+          { input: { doc: `upload://${id}` } },
           `run_${crypto.randomUUID()}`,
           fileSchema,
         ),
@@ -465,19 +468,8 @@ describe("parseRequestInput — rerun_from (#634)", () => {
     const scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
     await expect(
       parseRequestInput(
-        fakeCtx({ input: {}, rerun_from: "run_x" }, scope),
-        `run_${crypto.randomUUID()}`,
-        fileSchema,
-      ),
-    ).rejects.toMatchObject({ status: 400 });
-  });
-
-  it("rejects a non-string rerun_from", async () => {
-    const ctx = await createTestContext({ orgSlug: "org-rerun-shape" });
-    const scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
-    await expect(
-      parseRequestInput(
-        fakeCtx({ rerun_from: 42 }, scope),
+        fakeCtx(scope),
+        { input: {}, rerun_from: "run_x" },
         `run_${crypto.randomUUID()}`,
         fileSchema,
       ),
@@ -495,10 +487,8 @@ describe("parseRequestInput — rerun_from (#634)", () => {
 
     await expect(
       parseRequestInput(
-        fakeCtx(
-          { rerun_from: priorRunId },
-          { orgId: other.orgId, applicationId: other.defaultAppId },
-        ),
+        fakeCtx({ orgId: other.orgId, applicationId: other.defaultAppId }),
+        { rerun_from: priorRunId },
         `run_${crypto.randomUUID()}`,
         fileSchema,
       ),
@@ -514,7 +504,8 @@ describe("parseRequestInput — rerun_from (#634)", () => {
 
     await expect(
       parseRequestInput(
-        fakeCtx({ rerun_from: priorRunId }, scope),
+        fakeCtx(scope),
+        { rerun_from: priorRunId },
         `run_${crypto.randomUUID()}`,
         fileSchema,
         {
@@ -533,7 +524,8 @@ describe("parseRequestInput — rerun_from (#634)", () => {
 
     await expect(
       parseRequestInput(
-        fakeCtx({ rerun_from: priorRunId }, { ...scope, endUser: { id: "eu_someone" } }),
+        fakeCtx({ ...scope, endUser: { id: "eu_someone" } }),
+        { rerun_from: priorRunId },
         `run_${crypto.randomUUID()}`,
         fileSchema,
       ),
@@ -555,7 +547,8 @@ describe("parseRequestInput — rerun_from (#634)", () => {
 
     await expect(
       parseRequestInput(
-        fakeCtx({ rerun_from: priorRunId }, scope),
+        fakeCtx(scope),
+        { rerun_from: priorRunId },
         `run_${crypto.randomUUID()}`,
         fileSchema,
       ),
@@ -578,7 +571,8 @@ describe("parseRequestInput — rerun_from (#634)", () => {
 
     await expect(
       parseRequestInput(
-        fakeCtx({ rerun_from: priorRunId }, scope),
+        fakeCtx(scope),
+        { rerun_from: priorRunId },
         `run_${crypto.randomUUID()}`,
         fileSchema,
       ),
@@ -593,7 +587,8 @@ describe("parseRequestInput — rerun_from (#634)", () => {
 
     await expect(
       parseRequestInput(
-        fakeCtx({ input: { doc: "data:application/pdf;name=report.pdf;base64," } }, scope),
+        fakeCtx(scope),
+        { input: { doc: "data:application/pdf;name=report.pdf;base64," } },
         `run_${crypto.randomUUID()}`,
         fileSchema,
       ),
@@ -607,7 +602,8 @@ describe("parseRequestInput — rerun_from (#634)", () => {
     await seedRun(scope, { id: priorRunId, input: null });
 
     const result = await parseRequestInput(
-      fakeCtx({ rerun_from: priorRunId }, scope),
+      fakeCtx(scope),
+      { rerun_from: priorRunId },
       `run_${crypto.randomUUID()}`,
       // No file fields required — empty input passes an empty schema.
       { type: "object", properties: {} },
@@ -665,10 +661,8 @@ describe("parseRequestInput — colliding document names (workspace-name hardeni
 
     const runId = `run_${crypto.randomUUID()}`;
     const result = await parseRequestInput(
-      fakeCtx(
-        { input: { docs: [`upload://${uploadId}`, `document://${doc.id}`, inlineUri] } },
-        { ...scope, user: { id: actor.id } },
-      ),
+      fakeCtx({ ...scope, user: { id: actor.id } }),
+      { input: { docs: [`upload://${uploadId}`, `document://${doc.id}`, inlineUri] } },
       runId,
       arrayFileSchema,
     );
