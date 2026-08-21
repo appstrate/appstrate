@@ -20,8 +20,11 @@
  *   vertical rule: up to two of them, then "N sélectionnés". One place, no
  *   second row, no duplication.
  * - **The menu is a `Command`**: searchable, square checkboxes, several values
- *   at once, and a centred "Effacer les filtres" at the bottom.
- * - **One "Réinitialiser ✕"** at the end of the row when anything is filtered.
+ *   at once, and a centred "Effacer ce filtre" at the bottom — THIS dimension,
+ *   which is why it is not called what the row's button is called.
+ * - **One "Réinitialiser ✕"** at the end of the row, once anything is filtered:
+ *   the only ONE-click way back to the whole list, whatever is on. Everything
+ *   else drops one dimension (the menu's own item) or one value (untick it).
  *
  * And what the pattern deliberately does NOT do: write the operators. Values of
  * one dimension are alternatives, dimensions narrow each other — `(statut =

@@ -71,7 +71,7 @@
   "toolbar.clearAll": "Tout effacer",
   "toolbar.selected": "{{count}} sélectionnés",
   "toolbar.reset": "Réinitialiser",
-  "toolbar.clearFilters": "Effacer les filtres",
+  "toolbar.clearFilters": "Effacer ce filtre",
   "toolbar.noResults": "Aucun résultat",
   "validation.required": "Ce champ est requis",
   "validation.minLength": "Minimum {{min}} caractères",

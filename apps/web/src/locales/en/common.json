@@ -71,7 +71,7 @@
   "toolbar.clearAll": "Clear all",
   "toolbar.selected": "{{count}} selected",
   "toolbar.reset": "Reset",
-  "toolbar.clearFilters": "Clear filters",
+  "toolbar.clearFilters": "Clear this filter",
   "toolbar.noResults": "No results found.",
   "validation.required": "This field is required",
   "validation.minLength": "Minimum {{min}} characters",
