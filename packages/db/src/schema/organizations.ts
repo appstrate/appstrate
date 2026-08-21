@@ -314,7 +314,7 @@ export const modelProviderPairings = pgTable(
     /**
      * IP address that consumed the pairing.
      *
-     * WRITTEN, NEVER READ — `services/model-providers/pairings.ts (`consumePairing`)` is the
+     * WRITTEN, NEVER READ — `consumePairing` in `services/model-providers/pairings.ts` is the
      * only writer; no route, DTO, OpenAPI field or `cloud` consumer reads it.
      * Its "for audit" justification does not survive contact with two facts:
      * `cleanupExpiredPairings` DELETEs the row an hour after expiry, and the

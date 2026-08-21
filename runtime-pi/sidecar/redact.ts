@@ -128,37 +128,66 @@ export function filterSensitiveHeaders(
  * get their own literal shapes. `sk-ant-` is matched case-insensitively ahead
  * of the generic family rule because Anthropic keys appear upper-cased in some
  * upstream error text, and the generic rule is deliberately case-sensitive.
- *
- * NOTE two deliberate deviations from the obvious regexes.
- *
- * First, `\b` is absent on the `Bearer|Basic` and `sk-ant-` rules. Those two
- * literals are specific enough to need no word anchor, and an anchor there is
- * actively harmful: in percent-encoded text the `0` of `%20` sits immediately
- * before `B`, so `\b` never matches. `\b` is kept ONLY on the generic
- * `sk|pk|ghp|…` family rule, which is where it earns its place (it is what
- * keeps "skeletons" and "pkgroots" readable).
- *
- * Second, the separator groups accept percent-encoded forms (`%20` for space,
- * `%3A`/`%3D`/`%22`/`%27` for `:`/`=`/`"`/`'`). Dropping `\b` alone was NOT
- * enough and the earlier comment here wrongly claimed otherwise: `%20` is not
- * `\s`, so `(Bearer|Basic)\s+` could not match `Bearer%20<token>` with or
- * without the anchor. That shape — an upstream error body or a redirect target
- * echoing `?h=Authorization%3A%20Bearer%20…` — is exactly what these rules
- * exist for, and only `sk-ant-` keys were being caught in it; an opaque
- * Vertex/Azure/generic OAuth bearer shipped verbatim to the operator log.
- * Each separator alternative starts with a distinct character (`%` is in none
- * of the literal classes), so the groups stay unambiguous and linear-time.
  */
+
+/**
+ * Start-of-credential anchor, replacing a bare `\b`.
+ *
+ * This exists because `\b` was wrong here THREE times, each caught only after
+ * the previous "fix" shipped, so the rule is now stated once instead of spelled
+ * out per pattern. Percent-encoded text is the whole problem: every triplet
+ * ends in an alphanumeric (`%20`→`0`, `%3D`→`D`, `%26`→`6`), and every shape
+ * below starts with one, so `\b` — which needs a non-word character on the
+ * left — can never match a credential that follows an encoded separator. That
+ * is not an exotic input: it is what a redirect target or an echoed
+ * `redirect_uri` looks like in an upstream error body, i.e. the exact material
+ * this function exists to scrub.
+ *
+ * `(?<=^|[^A-Za-z0-9_])` is EXACTLY equivalent to `\b` for these patterns
+ * (they all begin with a word character, so `\b` reduces to "start, or a
+ * non-word char on the left"). The `%[0-9A-Fa-f]{2}` alternative is the only
+ * widening: it additionally admits a preceding percent-triplet. So the prose
+ * protection `\b` bought is preserved intact — "risk-averse" still does not
+ * match the `sk-…` family, "skeletons" and "pkgroots" stay readable — while
+ * the encoded case is no longer a hole.
+ */
+const CRED_START = String.raw`(?<=^|%[0-9A-Fa-f]{2}|[^A-Za-z0-9_])`;
+
+/**
+ * Ordered scrub rules. Compiled once: these run on every proxied error body.
+ *
+ * `Bearer|Basic` and `sk-ant-` deliberately carry NO anchor — those literals
+ * are specific enough not to need one. Their separator group accepts `%20`
+ * alongside real whitespace for the same reason `CRED_START` exists, and the
+ * token class admits `%` so a percent-encoded base64 credential is masked
+ * whole rather than up to its first `%2B`.
+ *
+ * Every alternative in every separator group starts with a distinct character
+ * (`%` appears in none of the literal classes), so the groups stay unambiguous
+ * and the whole set runs in linear time.
+ */
+const SCRUB_RULES: ReadonlyArray<readonly [RegExp, string]> = [
+  [/(Bearer|Basic)(?:\s|%20)+[A-Za-z0-9._~+/=%-]+/gi, "$1 [redacted]"],
+  [new RegExp(`${CRED_START}eyJ[A-Za-z0-9._-]{10,}`, "g"), "[redacted-jwt]"],
+  [/sk-ant-[A-Za-z0-9._-]+/gi, "[redacted-key]"],
+  [
+    new RegExp(`${CRED_START}(?:sk|pk|ghp|gho|ghs|xox[baprs])[-_][A-Za-z0-9._-]{6,}`, "g"),
+    "[redacted-key]",
+  ],
+  [new RegExp(`${CRED_START}AKIA[A-Z0-9]{12,}`, "g"), "[redacted-key]"],
+  [new RegExp(`${CRED_START}ya29\\.[A-Za-z0-9._-]{6,}`, "g"), "[redacted-key]"],
+  [
+    new RegExp(
+      `${CRED_START}(token|secret|password|api[_-]?key|authorization|access[_-]?token|refresh[_-]?token)` +
+        `((?:["'\\s:=]|%20|%3A|%3D|%22|%27)+)[^\\s"',&]+`,
+      "gi",
+    ),
+    "$1$2[redacted]",
+  ],
+];
+
 export function scrubSecretMaterial(text: string): string {
-  return text
-    .replace(/(Bearer|Basic)(?:\s|%20)+[A-Za-z0-9._~+/=-]+/gi, "$1 [redacted]")
-    .replace(/\beyJ[A-Za-z0-9._-]{10,}/g, "[redacted-jwt]")
-    .replace(/sk-ant-[A-Za-z0-9._-]+/gi, "[redacted-key]")
-    .replace(/\b(sk|pk|ghp|gho|ghs|xox[baprs])[-_][A-Za-z0-9._-]{6,}/g, "[redacted-key]")
-    .replace(/\bAKIA[A-Z0-9]{12,}/g, "[redacted-key]")
-    .replace(/\bya29\.[A-Za-z0-9._-]{6,}/g, "[redacted-key]")
-    .replace(
-      /\b(token|secret|password|api[_-]?key|authorization|access[_-]?token|refresh[_-]?token)((?:["'\s:=]|%20|%3A|%3D|%22|%27)+)[^\s"',&]+/gi,
-      "$1$2[redacted]",
-    );
+  let out = text;
+  for (const [pattern, replacement] of SCRUB_RULES) out = out.replace(pattern, replacement);
+  return out;
 }

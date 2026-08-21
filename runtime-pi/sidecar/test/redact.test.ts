@@ -189,9 +189,44 @@ describe("scrubSecretMaterial", () => {
     expect(scrubSecretMaterial(`/cb?access_token%3D${opaque}&next=1`)).toContain("next=1");
   });
 
+  // Third regression on the SAME defect. Round 1 put `\b` on the Bearer rule;
+  // round 2 removed it there and widened that rule's separators — and left the
+  // identical `\b` on the key-name, JWT, family, AKIA and ya29 rules, where it
+  // fails for the identical reason. Every percent-triplet ends in an
+  // alphanumeric, so `\b` cannot match a credential preceded by an encoded
+  // separator. These fixtures are DOUBLY encoded (`%3F`/`%26`/`%22` before the
+  // key name), which the `?`-prefixed fixtures above structurally cannot reach.
+  it("masks credentials preceded by a percent-encoded separator", () => {
+    const opaque = "A1b2C3d4E5f6G7h8I9j0";
+    const encoded = [
+      `redirect_uri=https%3A%2F%2Fx.io%2Fcb%3Faccess_token%3D${opaque}`,
+      `https://x/cb?a=1%26access_token%3D${opaque}`,
+      `body=%7B%22access_token%22%3A%22${opaque}%22%7D`,
+    ];
+    for (const input of encoded) expect(scrubSecretMaterial(input)).not.toContain(opaque);
+
+    // Same anchor, the other four shapes that carried it.
+    expect(scrubSecretMaterial("r=%3FeyJhbGciOiJIUzI1NiIs.abcdefghij")).not.toContain("eyJhbGci");
+    expect(scrubSecretMaterial("u=x%26ghp_A1b2C3d4E5f6G7h8")).not.toContain("ghp_A1b2");
+    expect(scrubSecretMaterial("p=1%26AKIA1234567890ABCD")).not.toContain("AKIA1234567890ABCD");
+    expect(scrubSecretMaterial("r=%2Fcb%3Fya29.aBcDeFgHiJkL")).not.toContain("ya29.aBcDeFgHiJkL");
+  });
+
+  // The token class admits `%` so an encoded base64 credential is masked whole:
+  // without it, masking stopped at the first `%2B` and shipped the rest.
+  it("masks a percent-encoded base64 bearer to its end", () => {
+    expect(scrubSecretMaterial("Bearer%20abc%2Bdef%3Dghi")).toBe("Bearer [redacted]");
+  });
+
   it("leaves prose that merely starts with a key prefix alone", () => {
     expect(scrubSecretMaterial("found skeletons in pkgroots directory")).toBe(
       "found skeletons in pkgroots directory",
     );
+    // CRED_START must stay exactly as strict as the `\b` it replaced on the
+    // left-hand side: a key shape glued to a preceding word is still prose.
+    expect(scrubSecretMaterial("risk-averse and disk-usage notes")).toBe(
+      "risk-averse and disk-usage notes",
+    );
+    expect(scrubSecretMaterial("the mytoken=abc case")).toBe("the mytoken=abc case");
   });
 });

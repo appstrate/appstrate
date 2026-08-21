@@ -104,8 +104,8 @@ export const integrationConnections = pgTable(
     // above: `refresh_failure_count` IS read, and drives the reconnect
     // decision; this timestamp is not part of that predicate. It is genuine
     // debugging telemetry ("when did refresh last fail") with no surface, so
-    // exposing it in the connection DTO costs less than dropping data already
-    // collected. Left deliberately, not overlooked.
+    // keeping the column costs less than dropping data already collected.
+    // Left deliberately, not overlooked — nothing exposes it in any DTO.
     lastRefreshFailureAt: timestamp("last_refresh_failure_at", { withTimezone: true }),
     // User-facing display name, set at creation: the extracted identity
     // (email/login) when available, else "Connexion N" (N = existing connection

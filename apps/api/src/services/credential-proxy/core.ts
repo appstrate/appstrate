@@ -476,8 +476,8 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
         } as RequestInit);
       }
     } catch {
-      // Refresh itself failed (invalid_grant, revoked token, network
-      // hiccup, …) — surface the original 401 as-is; the caller will
+      // Refresh itself failed transiently (network hiccup, upstream 5xx, …)
+      // — surface the original 401 as-is; the caller will
       // handle re-authentication. `forceRefresh` flips `needsReconnection`
       // on BOTH terminal shapes before it gets here: a revoked refresh token
       // and an unrefreshable OAuth client. Both now return `null` rather

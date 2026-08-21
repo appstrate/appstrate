@@ -1430,12 +1430,12 @@ if (staleSpecOnly.length === 0 && staleCodeToSpec.length === 0) {
   console.log(`  OK — both endpoint allowlists are free of stale entries.`);
 } else {
   exitCode = 1;
-  for (const [label, stale, set] of [
+  for (const [label, stale, source] of [
     ["SPEC_ONLY_ALLOWLIST", staleSpecOnly, "the spec"],
     ["CODE_TO_SPEC_ALLOWLIST", staleCodeToSpec, "code"],
   ] as const) {
     if (stale.length === 0) continue;
-    console.log(`\n  Stale ${label} entries — no longer present in ${set} (${stale.length}):`);
+    console.log(`\n  Stale ${label} entries — no longer present in ${source} (${stale.length}):`);
     for (const ep of stale) console.log(`    - ${ep}`);
   }
   console.log(

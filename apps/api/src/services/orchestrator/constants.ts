@@ -1,4 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
+//
+// KEEP THIS FILE IMPORT-FREE. `services/docker.ts` reads from it, which is an
+// upward import (the orchestrator layer consumes docker.ts, not the reverse).
+// That is safe only while this module imports nothing: adding an import here
+// that leads back to docker.ts creates a cycle. Stop policy genuinely belongs
+// to the orchestrator layer, and the alternatives — a new file for one
+// constant, or parameters whose only argument is ever that same constant —
+// are worse. If this file ever needs an import, move the constants instead.
 
 // Sidecar cgroup memory limit. The sidecar's in-memory blob store caps
 // itself at 128 MiB (`runtime-pi/sidecar/app.ts`, RUN_BLOB_STORE_MAX_BYTES)
