@@ -18,7 +18,6 @@ import { OrgSwitcher } from "@/components/org-switcher";
 import { NotificationBell } from "@/components/notification-bell";
 import { ProductSwitcher } from "@/components/product-switcher";
 import { ShellBreadcrumb } from "@/components/shell-breadcrumb";
-import { SidebarMeta } from "@/components/sidebar-meta";
 import { cn } from "@appstrate/ui/cn";
 import {
   Sidebar,
@@ -42,12 +41,12 @@ export function ShellSidebar({
 
   return (
     <Sidebar collapsible="icon">
-      {/* Head: the brand cell with the product name, and beside it the two
-          controls that act on the whole shell (search, collapse) — the Mistral
-          arrangement. Under it, at the width of the navigation, the context the
-          navigation applies to. */}
-      <SidebarHeader className="border-sidebar-border gap-1 border-b px-2 py-2">
-        <div className="flex h-8 items-center gap-1">
+      {/* Head: the brand cell alone, at the header's height and closed by the
+          header's own rule — the two lines meet across the shell instead of
+          nearly meeting. Beside the product name, the two controls that act on
+          the whole shell: search and collapse. */}
+      <SidebarHeader className="border-sidebar-border h-header justify-center border-b px-2 py-0">
+        <div className="flex items-center gap-1">
           <ProductSwitcher />
           {!collapsed && (
             <>
@@ -69,14 +68,28 @@ export function ShellSidebar({
             </>
           )}
         </div>
-        <OrgSwitcher variant="row" />
       </SidebarHeader>
+      {/* Below the rule, the context the navigation applies to — and the bell
+          beside it, because notifications are scoped BY it: the server filters
+          them on `org_id` AND `application_id`, so they are this workspace's
+          news, not the user's. Parked next to the profile it would have read as
+          "my notifications" and been wrong. */}
+      <div className="flex items-center gap-1 px-2 pt-2 group-data-[collapsible=icon]:flex-col group-data-[collapsible=icon]:px-0">
+        <div className="min-w-0 flex-1 group-data-[collapsible=icon]:flex-none">
+          <OrgSwitcher variant="row" />
+        </div>
+        {/* Stays in the rail, stacked under the org avatar: the unread count is
+            the one thing here that changes on its own, and hiding it on collapse
+            would make the rail quieter than the state it reports. */}
+        <NotificationBell />
+      </div>
       <SidebarContent className={cn("gap-0", contentClassName)}>{children}</SidebarContent>
-      {/* Foot: what is ABOUT the workspace, then who you are. No credits gauge —
-          a permanent progress bar spends attention every second on a number
-          consulted every few weeks; it belongs behind the Usage row. */}
+      {/* Foot: who you are, and nothing else. Usage and Settings left it — both
+          configure the org, and the org's own switcher already carries them
+          (the gear on the row you are in, the settings link under the panel).
+          A row that repeats what the control above it offers is a row that
+          teaches the control is not enough. */}
       <SidebarFooter className="gap-0 p-0">
-        <SidebarMeta />
         <div className="border-sidebar-border border-t p-2">
           {collapsed ? <SidebarTrigger className="mb-1" /> : null}
           <NavUser variant="row" />
@@ -110,10 +123,7 @@ export function ShellHeader({
         {/* Mobile-only trigger — desktop collapse lives in the sidebar */}
         <SidebarTrigger className="md:hidden" />
         <ShellBreadcrumb />
-        <div className="flex shrink-0 items-center gap-1">
-          {actions}
-          <NotificationBell />
-        </div>
+        {actions ? <div className="flex shrink-0 items-center gap-1">{actions}</div> : null}
       </div>
     </header>
   );

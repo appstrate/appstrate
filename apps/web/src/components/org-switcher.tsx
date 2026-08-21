@@ -146,25 +146,26 @@ export function OrgSwitcher({ variant = "chip" }: { variant?: "chip" | "row" }) 
             This one replaces the whole context. The coloured avatar and the
             up/down chevron (never a right chevron) are what say so. */}
         {variant === "row" ? (
+          /* A white card on the sidebar's grey, not a nav row: it is the
+             context the navigation applies to, not a place the navigation can
+             take you. Org on top, workspace under it — the two levels read at
+             a glance instead of sharing a line behind a pipe. */
           <button
             type="button"
             data-testid="org-switcher-button"
             aria-label={t("switcher.orgAriaLabel")}
-            className="hover:bg-sidebar-accent data-[state=open]:bg-sidebar-accent flex h-9 w-full items-center gap-2 rounded-md px-2 text-sm transition-colors group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0!"
+            className="bg-card hover:bg-accent data-[state=open]:bg-accent flex w-full items-center gap-2.5 rounded-lg border p-2 text-sm shadow-sm transition-colors group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:border-0 group-data-[collapsible=icon]:p-0! group-data-[collapsible=icon]:shadow-none"
           >
             <OrgAvatar
               name={currentOrg.name}
-              className="size-5 shrink-0 rounded-[5px] text-[0.65rem]"
+              className="size-8 shrink-0 rounded-lg text-sm group-data-[collapsible=icon]:size-6 group-data-[collapsible=icon]:rounded-[5px] group-data-[collapsible=icon]:text-[0.65rem]"
             />
-            <span className="min-w-0 flex-1 truncate text-left font-medium group-data-[collapsible=icon]:hidden">
-              {currentOrg.name}
+            <span className="grid min-w-0 flex-1 text-left leading-tight group-data-[collapsible=icon]:hidden">
+              <span className="truncate font-semibold">{currentOrg.name}</span>
+              {/* The workspace stays visible even when there is only one: a
+                  level nobody ever sees is a level nobody learns. */}
               {currentApp && (
-                <>
-                  <span className="text-border mx-1" aria-hidden>
-                    |
-                  </span>
-                  {currentApp.name}
-                </>
+                <span className="text-muted-foreground truncate text-xs">{currentApp.name}</span>
               )}
             </span>
             <ChevronsUpDown className="text-muted-foreground size-3.5 shrink-0 group-data-[collapsible=icon]:hidden" />
