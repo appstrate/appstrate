@@ -16,7 +16,7 @@ import { totalTokens, type TokenUsage } from "@appstrate/core/token-usage";
  *
  * Its own file despite the single caller: it is `RunCostReadout`'s twin — same
  * directory, same props-in/tooltip-out shape, same dotted-underline trigger —
- * and inlining ~35 lines of four-bucket tooltip into `run-row.tsx` would bury
+ * and inlining ~35 lines of four-bucket tooltip into `run-detail-row.tsx` would bury
  * the row's own structure.
  *
  * The count goes through `totalTokens` so it covers the same four buckets the

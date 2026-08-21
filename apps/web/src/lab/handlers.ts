@@ -186,6 +186,23 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
   },
 ];
 
+/**
+ * What keeps answering under the `error` scenario: who you are, and which org
+ * and workspace you are in.
+ *
+ * Failing these too was failing the wrong thing. A 500 on the session logs you
+ * straight out, so the scenario meant to show what a broken screen looks like
+ * never got past the login form — no list ever rendered its error state. The
+ * failure a user actually meets is one request breaking under a shell that
+ * still stands, which is what this list leaves standing.
+ */
+const ERROR_SCENARIO_SURVIVORS = [
+  /^\/api\/auth\//,
+  /^\/api\/profile$/,
+  /^\/api\/orgs$/,
+  /^\/api\/applications$/,
+];
+
 export function resolveHandler(
   method: string,
   url: URL,
@@ -197,7 +214,8 @@ export function resolveHandler(
   const response = route.handler(url, scenario, headers);
   // The realtime stream stays up in every scenario — a dead channel is not the
   // failure mode `error` is meant to exercise.
-  if (scenario === "error" && !response.stream) {
+  const survives = ERROR_SCENARIO_SURVIVORS.some((p) => p.test(url.pathname));
+  if (scenario === "error" && !response.stream && !survives) {
     return {
       status: 500,
       body: {

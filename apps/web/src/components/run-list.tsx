@@ -6,8 +6,8 @@ import { PlayCircle } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { usePaginatedRuns, type RunKindFilter } from "../hooks/use-paginated-runs";
 import { useAgents } from "../hooks/use-packages";
-import { RunRow } from "./run-row";
-import { EmptyState } from "./page-states";
+import { RunsTable } from "./runs-table";
+import { EmptyState, ErrorState } from "./page-states";
 import type { EnrichedRun } from "@appstrate/shared-types";
 import { inlineRunDisplayName } from "../lib/run-title";
 
@@ -37,6 +37,8 @@ interface RunRowsProps {
   runs: EnrichedRun[];
   /** Still loading — renders the loading placeholder instead of the rows. */
   isLoading?: boolean;
+  /** The request failed — see {@link RunRows} on why this is not the empty state. */
+  isError?: boolean;
   fixedAgentName?: string;
   hideAgentName?: boolean;
   emptyState?: React.ReactNode;
@@ -60,6 +62,7 @@ interface RunRowsProps {
 export function RunRows({
   runs,
   isLoading = false,
+  isError = false,
   fixedAgentName,
   hideAgentName = false,
   emptyState,
@@ -92,26 +95,25 @@ export function RunRows({
     return agentNameMap.get(run.packageId) ?? run.agent_name ?? run.packageId;
   };
 
-  if (isLoading) {
-    return (
-      <div className="border-border text-muted-foreground rounded-md border p-8 text-center text-sm">
-        {t("loading", { ns: "common" })}
-      </div>
-    );
-  }
-
-  if (runs.length === 0) {
-    if (emptyState) return <>{emptyState}</>;
-    return <EmptyState message={t("detail.emptyRuns")} icon={PlayCircle} compact />;
-  }
+  // A failed request is NOT an empty list. The lab's `error` scenario is what
+  // showed it: with `GET /api/runs` answering 500, the page said "Aucun run" —
+  // telling a user their history is empty when the truth is that it could not
+  // be read.
+  const fallback = isError ? (
+    <ErrorState />
+  ) : (
+    (emptyState ?? <EmptyState message={t("detail.emptyRuns")} icon={PlayCircle} compact />)
+  );
 
   return (
-    <div className="border-border rounded-md border">
-      {banner}
-      {runs.map((run) => (
-        <RunRow key={run.id} run={run} agentName={resolveAgentName(run)} />
-      ))}
-    </div>
+    <RunsTable
+      runs={runs}
+      hideAgentName={hideAgentName}
+      agentName={resolveAgentName}
+      isLoading={isLoading}
+      banner={banner}
+      empty={fallback}
+    />
   );
 }
 
@@ -130,7 +132,7 @@ export function RunList({
   const { t } = useTranslation(["agents"]);
   const [page, setPage] = useState(0);
 
-  const { data, isLoading } = usePaginatedRuns({
+  const { data, isLoading, isError } = usePaginatedRuns({
     packageId,
     scheduleId,
     user,
@@ -151,6 +153,7 @@ export function RunList({
       <RunRows
         runs={runs}
         isLoading={showLoading}
+        isError={isError}
         fixedAgentName={fixedAgentName}
         hideAgentName={hideAgentName}
         emptyState={emptyState}

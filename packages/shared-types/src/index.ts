@@ -135,7 +135,7 @@ export interface RunWireDto {
   // contract already emits camelCase across all three surfaces in lockstep —
   // the runtime mapper (services/state/runs.ts `toRunWireDto`), the OpenAPI
   // spec (openapi/schemas.ts + baseline.json), and the SPA consumers
-  // (run-detail.tsx, run-row.tsx, api/schema.d.ts). Renaming here without
+  // (run-detail.tsx, runs-table.tsx, api/schema.d.ts). Renaming here without
   // re-cutting the spec + regenerating the client would break the contract, so
   // this field name is intentionally left as-is.
   runOrigin: string | null;

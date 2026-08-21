@@ -457,7 +457,7 @@ export function extractRunPackageId(result: unknown): string | undefined {
 
 /**
  * Build the in-app run-detail URL (`/agents/{packageId}/runs/{runId}`, the same
- * route `run-row.tsx` links to). `undefined` when the run has no package id
+ * route the run table links to). `undefined` when the run has no package id
  * (orphaned) so the caller can omit the link. `packageId` keeps its `@scope/name`
  * slashes literal to match the route; only the run id is encoded.
  */

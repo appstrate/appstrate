@@ -3,7 +3,7 @@
 /**
  * `ContextGaugeReadout` rendering tests (#1046).
  *
- * Same harness as `run-row.test.tsx`: no DOM, so the component is rendered with
+ * Same harness as `run-detail-row.test.tsx`: no DOM, so the component is rendered with
  * `renderToStaticMarkup` and asserted on its HTML, through the SPA's own i18n
  * singleton so the locale under test is the locale the assertions use.
  *
@@ -211,7 +211,7 @@ describe("ContextGaugeReadout — terminal run", () => {
 
     // Radix keeps the content unmounted until opened and this runner has no DOM,
     // so the wording is asserted on the exported content subcomponent — the same
-    // affordance `run-row.test.tsx` uses for `RunRowDetails`.
+    // affordance `run-detail-row.test.tsx` uses for `RunDetailPanel`.
     expect(visibleText(render(<ContextGaugePeakHint />))).toBe(
       agentsFr["run.contextGaugePeakHint"],
     );

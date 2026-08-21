@@ -23,7 +23,7 @@ import { RunDocumentsTab } from "../components/run-documents-tab";
 import { RunDeliverableTab } from "../components/run-deliverable-tab";
 import { RunDetailTabsController } from "../components/run-detail-tabs-controller";
 import { invalidateOrgStorage } from "../hooks/use-documents";
-import { RunRow } from "../components/run-row";
+import { RunDetailRow } from "../components/run-detail-row";
 import { RunCostReadout } from "../components/run-cost-readout";
 import { ContextGaugeReadout } from "../components/run-context-gauge";
 import { RunDegradedBanner } from "../components/run-degraded-banner";
@@ -132,7 +132,7 @@ export function RunDetailPage() {
   const hasRunMemory = runMemoryCount > 0;
 
   // Document count for the tab badge — read off the run DTO the page already
-  // has (same field `run-row.tsx` renders). Listing the run's documents just to
+  // has (same field the run table renders). Listing the run's documents just to
   // count them cost a request on every run page and silently saturated at the
   // page size; the list query now runs only when the tab is actually opened.
   const documentCount = (run?.document_counts.input ?? 0) + (run?.document_counts.output ?? 0);
@@ -248,7 +248,7 @@ export function RunDetailPage() {
       <PageHeader title={title} breadcrumbs={breadcrumbs} />
 
       <div className="border-border mb-4 rounded-md border">
-        <RunRow run={enrichedRun} variant="detail" />
+        <RunDetailRow run={enrichedRun} />
       </div>
 
       {agent && (

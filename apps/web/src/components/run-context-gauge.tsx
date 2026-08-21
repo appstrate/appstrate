@@ -138,7 +138,7 @@ export function ContextGaugeReadout({ turns, status }: ContextGaugeReadoutProps)
 
 /**
  * What the terminal gauge's tooltip says. Exported as a testing affordance, as
- * `RunRowDetails` is: Radix keeps tooltip content unmounted until it is opened
+ * `RunDetailPanel` is: Radix keeps tooltip content unmounted until it is opened
  * and the web test runner has no DOM, so this is the only way to assert the
  * sighted-user carrier of the current/peak distinction without a browser.
  */

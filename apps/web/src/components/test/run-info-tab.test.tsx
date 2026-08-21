@@ -5,7 +5,7 @@
  * surface `RunInfoTab` — the table is a private child, and exporting it just to
  * test it would widen the module boundary for the test's convenience.
  *
- * Same no-DOM harness as `run-row.test.tsx`.
+ * Same no-DOM harness as `run-detail-row.test.tsx`.
  */
 
 import type { ReactElement } from "react";
