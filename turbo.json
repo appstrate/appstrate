@@ -75,6 +75,9 @@
     "//#verify:module-contract": {
       "cache": false
     },
+    "//#verify:dead-code": {
+      "cache": false
+    },
     "//#typecheck:scripts": {
       "inputs": ["scripts/**/*.ts", "scripts/tsconfig.json", "tsconfig.base.json"]
     }
