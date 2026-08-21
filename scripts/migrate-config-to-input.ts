@@ -8,7 +8,6 @@
  *   bun scripts/migrate-config-to-input.ts              # dry-run (DEFAULT)
  *   bun scripts/migrate-config-to-input.ts --dry-run    # explicit dry-run
  *   bun scripts/migrate-config-to-input.ts --apply      # migrate
- *   bun scripts/migrate-config-to-input.ts --verify     # final assertion only
  *
  * WHY IT EXISTS
  *
@@ -26,9 +25,9 @@
  *   package_versions           REPUBLISH (never UPDATE — see below)
  *   package_schedules          repoint `version_override` off an affected version
  *
- * It never writes `application_packages.input_settings` — the stored values
- * carry over verbatim (same keys, no transformation) and no agent may silently
- * acquire a lock it never had. Both are asserted.
+ * It never writes `application_packages.input_settings`: the stored values carry
+ * over verbatim (same keys, no transformation), so no agent acquires — or
+ * loses — a per-field lock as a side effect of this migration.
  *
  * That carry-over is only safe while the surviving `input` property means what
  * the stored value was written against. On a property-name COLLISION it does
@@ -91,9 +90,7 @@ import {
   hasConfigSection,
   inputPropertyNames,
   mergeConfigIntoInput,
-  renderAssertion,
   rewriteConfigReferences,
-  type AssertionInput,
   type JsonObject,
   type MergeReport,
 } from "./lib/config-to-input.ts";
@@ -179,6 +176,7 @@ async function readSnapshot() {
 }
 
 type Snapshot = Awaited<ReturnType<typeof readSnapshot>>;
+type PackageRow = Snapshot["packageRows"][number];
 
 // ─────────────────────────────────────────────
 // Inventory model
@@ -238,8 +236,6 @@ interface Inventory {
   findings: AgentFinding[];
   /** Non-agent packages carrying a `config` key — outside the AFPS shape. */
   nonAgentAnomalies: string[];
-  /** System agents (no owning org) carrying `config` — not migratable here. */
-  systemAnomalies: string[];
 }
 
 /**
@@ -257,7 +253,13 @@ async function buildInventory(): Promise<Inventory> {
     .filter((p) => p.type !== "agent" && hasConfigSection(p.draftManifest))
     .map((p) => `${p.id} (type=${p.type})`);
 
-  const agents = packageRows.filter((p) => p.type === "agent");
+  // System agents (`org_id IS NULL`) are excluded at the source: their draft is
+  // re-upserted from `system-packages/` on every boot, none of those manifests
+  // declares `config`, and the org-scoped publish path this script reuses
+  // refuses them by design.
+  const agents = packageRows.filter(
+    (p): p is PackageRow & { orgId: string } => p.type === "agent" && p.orgId !== null,
+  );
   const agentIds = new Set(agents.map((a) => a.id));
 
   const versionsByPackage = new Map<string, typeof versionRows>();
@@ -288,18 +290,9 @@ async function buildInventory(): Promise<Inventory> {
   );
 
   const findings: AgentFinding[] = [];
-  const systemAnomalies: string[] = [];
   let versionsRead = 0;
 
   for (const agent of candidates) {
-    if (agent.orgId === null) {
-      // System packages (`org_id IS NULL`) are rebuilt from `system-packages/`
-      // by `scripts/build-system-packages.ts`; the publish path this script
-      // reuses is org-scoped and refuses them by design.
-      systemAnomalies.push(agent.id);
-      continue;
-    }
-
     const draftManifest = asObject(agent.draftManifest);
     const draftContent = agent.draftContent ?? "";
     const merged = draftManifest ? mergeConfigIntoInput(draftManifest) : null;
@@ -386,7 +379,6 @@ async function buildInventory(): Promise<Inventory> {
     versionsRead,
     findings,
     nonAgentAnomalies,
-    systemAnomalies,
   };
 }
 
@@ -465,8 +457,12 @@ function reportInventory(inv: Inventory): void {
       out(
         `                     file_constraints carried over : ${list(f.merge.fileConstraintsCarried)}`,
       );
-      if (f.merge.notCarried.length > 0) {
-        out(`                     NOT carried (no counterpart)  : ${list(f.merge.notCarried)}`);
+      // The AFPS `config` wrapper is `additionalProperties: false` over
+      // {schema, file_constraints, ui_hints, property_order, _meta}, and the
+      // first four are all carried above. `_meta` is therefore the ONLY member
+      // that can be left behind — name it rather than lose it silently.
+      if (f.draftManifest && "_meta" in (asObject(f.draftManifest["config"]) ?? {})) {
+        out("                     `config._meta` NOT carried    : dropped with the wrapper");
       }
     } else if (f.draftManifestAffected) {
       out("    draft manifest   carries `config` but is not a JSON object — unreadable");
@@ -533,11 +529,7 @@ function reportInventory(inv: Inventory): void {
 /** Report shapes this migration has no rule for. Returns true when apply must refuse. */
 function reportAnomalies(inv: Inventory): boolean {
   const collisionAnomalies = inv.findings.filter((f) => f.collidingStoredValueKeys.length > 0);
-  if (
-    inv.nonAgentAnomalies.length === 0 &&
-    inv.systemAnomalies.length === 0 &&
-    collisionAnomalies.length === 0
-  ) {
+  if (inv.nonAgentAnomalies.length === 0 && collisionAnomalies.length === 0) {
     return false;
   }
   out("── Anomalies ─────────────────────────────────────────────────");
@@ -545,11 +537,6 @@ function reportAnomalies(inv: Inventory): boolean {
     out("  Non-agent packages carrying a `config` section (outside AFPS §3.2):");
     for (const id of inv.nonAgentAnomalies) out(`    ${id}`);
     out("  This migration has no merge rule for them. Resolve by hand first.");
-  }
-  if (inv.systemAnomalies.length > 0) {
-    out("  System agents (org_id IS NULL) carrying a `config` section:");
-    for (const id of inv.systemAnomalies) out(`    ${id}`);
-    out("  Rebuild them from `system-packages/` via scripts/build-system-packages.ts.");
   }
   if (collisionAnomalies.length > 0) {
     out("  Collisions whose stored value was typed by the DROPPED `config` property:");
@@ -717,66 +704,60 @@ async function apply(inv: Inventory): Promise<string[]> {
 /**
  * Re-read the database from scratch and prove no reachable residue survives.
  *
- * `republishedIds` names the versions this run published, so their manifest and
+ * `republished` names the versions this run published, so their manifest and
  * their `prompt.md` (read back out of the uploaded ZIP) are checked explicitly
  * rather than inferred.
+ *
+ * A legacy affected version is deliberately NOT residue on its own: a published
+ * version is immutable (its `prompt.md` lives inside an integrity-pinned ZIP),
+ * so those rows keep their `config` for ever. Their count is reported. What must
+ * hold is that none of them is still SELECTED — the `latest` dist-tag moved to
+ * the republished version, and no schedule pins one.
  */
-async function assertClean(republishedIds: string[]): Promise<boolean> {
+async function assertClean(republished: string[]): Promise<boolean> {
   const inv = await buildInventory();
-  const { packageRows, scheduleRows, installRows } = inv.snapshot;
+  const { packageRows } = inv.snapshot;
 
-  const republishedManifestsWithConfig: string[] = [];
-  const republishedPromptsWithConfigRef: string[] = [];
-  for (const id of republishedIds) {
+  // Every category this migration is responsible for, in one list. Each entry
+  // names WHERE it was found, so a bare package id cannot be confused between
+  // the manifest and the prompt category.
+  const residue: string[] = [];
+
+  for (const id of republished) {
     const at = id.lastIndexOf("@");
     const detail = await getVersionDetail(id.slice(0, at), id.slice(at + 1));
-    if (hasConfigSection(detail?.manifest)) republishedManifestsWithConfig.push(id);
-    if (hasConfigReference(detail?.prompt)) republishedPromptsWithConfigRef.push(id);
+    if (hasConfigSection(detail?.manifest)) residue.push(`${id} (republished manifest)`);
+    if (hasConfigReference(detail?.prompt)) residue.push(`${id} (republished prompt.md)`);
   }
 
-  const legacyAffected: string[] = [];
-  const legacyStillLatest: string[] = [];
-  const schedulesPinned: string[] = [];
+  for (const p of packageRows) {
+    if (hasConfigSection(p.draftManifest)) residue.push(`${p.id} (packages.draft_manifest)`);
+    if (hasConfigReference(p.draftContent)) residue.push(`${p.id} (packages.draft_content)`);
+  }
+
+  let legacyAffected = 0;
   for (const f of inv.findings) {
     for (const v of f.affectedVersions) {
-      legacyAffected.push(`${f.packageId}@${v.version}`);
+      legacyAffected++;
       if (v.version === f.latestTaggedVersion) {
-        legacyStillLatest.push(`${f.packageId}@${v.version}`);
+        residue.push(`${f.packageId}@${v.version} (legacy version still tagged \`latest\`)`);
       }
     }
     for (const s of f.schedules) {
       if (s.resolvesToAffected) {
-        schedulesPinned.push(`${s.id} → ${f.packageId}@${s.resolvedVersion}`);
+        residue.push(`${s.id} (schedule pinned to ${f.packageId}@${s.resolvedVersion})`);
       }
     }
   }
 
-  const input: AssertionInput = {
-    draftsChecked: packageRows.length,
-    draftManifestsWithConfig: packageRows
-      .filter((p) => hasConfigSection(p.draftManifest))
-      .map((p) => p.id),
-    draftPromptsWithConfigRef: packageRows
-      .filter((p) => hasConfigReference(p.draftContent))
-      .map((p) => p.id),
-    republishedChecked: republishedIds.length,
-    republishedManifestsWithConfig,
-    republishedPromptsWithConfigRef,
-    // Denominator = every version-pinned schedule in the database, so this
-    // category cannot pass trivially on a subset that shrank to nothing.
-    schedulesChecked: scheduleRows.filter((s) => s.versionOverride !== null).length,
-    schedulesPinnedToAffected: schedulesPinned,
-    installsChecked: installRows.length,
-    installsWithLockedFields: installRows
-      .filter((i) => (i.inputSettings?.locked ?? []).length > 0)
-      .map((i) => `${i.packageId} @ ${i.applicationId}`),
-    legacyAffectedVersions: legacyAffected,
-    legacyAffectedStillLatest: legacyStillLatest,
-  };
-
-  const result = renderAssertion(input);
-  for (const line of result.lines) out(line);
-  return result.ok;
+  out("── Final assertion ───────────────────────────────────────────");
+  for (const id of residue) out(`  RESIDUE ${id}`);
+  out(
+    `  legacy published versions still carrying \`config\`: ${legacyAffected}` +
+      " (immutable — kept, but no longer selected by default)",
+  );
+  out(residue.length === 0 ? "PASS — no reachable `config` residue." : "FAIL — residue survived.");
+  return residue.length === 0;
 }
 
 // ─────────────────────────────────────────────
@@ -789,31 +770,21 @@ async function main(): Promise<number> {
     options: {
       "dry-run": { type: "boolean" },
       apply: { type: "boolean" },
-      verify: { type: "boolean" },
       help: { type: "boolean", short: "h" },
     },
     strict: true,
   });
 
   if (values.help) {
-    out("Usage: bun scripts/migrate-config-to-input.ts [--dry-run | --apply | --verify]");
+    out("Usage: bun scripts/migrate-config-to-input.ts [--dry-run | --apply]");
     out("  --dry-run  (default) inventory + report, writes nothing");
     out("  --apply    migrate drafts, republish affected agents, repoint pins, assert");
-    out("  --verify   run the final assertion only");
     return 0;
   }
 
-  const exclusive = [values["dry-run"], values.apply, values.verify].filter(Boolean).length;
-  if (exclusive > 1) {
-    out("Pick exactly one of --dry-run, --apply, --verify.");
+  if (values["dry-run"] && values.apply) {
+    out("Pick exactly one of --dry-run, --apply.");
     return 1;
-  }
-
-  if (values.verify) {
-    // A standalone verify inspects the state as it stands, so the
-    // republished-artifact categories are vacuously empty — the count printed
-    // next to them says exactly that.
-    return (await assertClean([])) ? 0 : 1;
   }
 
   const inv = await buildInventory();

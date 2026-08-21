@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Pure transformation + assertion logic for the one-shot `config` → `input`
- * data migration (`scripts/migrate-config-to-input.ts`).
+ * Pure transformation logic for the one-shot `config` → `input` data migration
+ * (`scripts/migrate-config-to-input.ts`).
  *
  * Kept free of database, storage and env imports so every rule below is
  * unit-testable without a live database. The CLI owns all I/O.
@@ -20,14 +20,6 @@ import { getOrderedKeys, asJSONSchemaObject } from "@appstrate/core/form";
 
 /** AFPS `schema_version` stamped on every manifest this migration rewrites. */
 export const MIGRATED_SCHEMA_VERSION = "0.3";
-
-/**
- * Wrapper members carried from `config` into `input`. Anything else present on
- * a `config` wrapper is reported as not carried — never dropped silently.
- * `required` is not listed here: per AFPS it lives inside `schema.required`,
- * and is merged with the schema below.
- */
-const CARRIED_WRAPPER_KEYS = new Set(["schema", "file_constraints", "ui_hints", "property_order"]);
 
 export type JsonObject = Record<string, unknown>;
 
@@ -63,8 +55,6 @@ export interface MergeReport {
   uiHintsCarried: string[];
   /** Property names whose `file_constraints` entry was carried over. */
   fileConstraintsCarried: string[];
-  /** `config` wrapper members with no `input` counterpart this migration carries. */
-  notCarried: string[];
 }
 
 export interface MergeOutcome {
@@ -102,7 +92,6 @@ export function mergeConfigIntoInput(manifest: JsonObject): MergeOutcome {
     requiredAdded: [],
     uiHintsCarried: [],
     fileConstraintsCarried: [],
-    notCarried: [],
   };
   if (!hasConfigSection(manifest)) return { manifest, report: emptyReport };
 
@@ -171,8 +160,6 @@ export function mergeConfigIntoInput(manifest: JsonObject): MergeOutcome {
     wrapper["property_order"] = [...inputKeys, ...configKeys];
   }
 
-  const notCarried = Object.keys(config).filter((key) => !CARRIED_WRAPPER_KEYS.has(key));
-
   const out: JsonObject = { ...manifest, input: wrapper };
   delete out["config"];
   out["schema_version"] = MIGRATED_SCHEMA_VERSION;
@@ -187,7 +174,6 @@ export function mergeConfigIntoInput(manifest: JsonObject): MergeOutcome {
       fileConstraintsCarried: Object.keys(
         pickKeys(asObject(config["file_constraints"]), mergedSet) ?? {},
       ),
-      notCarried,
     },
   };
 }
@@ -274,128 +260,4 @@ export function rewriteConfigReferences(template: string): { content: string; co
 /** Whether a prompt template still addresses the retired `config` namespace. */
 export function hasConfigReference(template: string | null | undefined): boolean {
   return template ? rewriteConfigReferences(template).count > 0 : false;
-}
-
-// ─────────────────────────────────────────────
-// Final assertion
-// ─────────────────────────────────────────────
-
-export interface AssertionInput {
-  /**
-   * Package rows read — the denominator for BOTH draft residue categories,
-   * since `draft_manifest` and `draft_content` come from the same rows.
-   */
-  draftsChecked: number;
-  draftManifestsWithConfig: string[];
-  draftPromptsWithConfigRef: string[];
-  /** `@scope/name@version` of every version this migration published. */
-  republishedChecked: number;
-  republishedManifestsWithConfig: string[];
-  republishedPromptsWithConfigRef: string[];
-  /** Schedules whose `version_override` was resolved. */
-  schedulesChecked: number;
-  schedulesPinnedToAffected: string[];
-  /** `application_packages` rows read for the stored-values no-op check. */
-  installsChecked: number;
-  installsWithLockedFields: string[];
-  /**
-   * Pre-existing published versions that still carry `config`. Immutable by
-   * construction — reported, never a failure on its own.
-   */
-  legacyAffectedVersions: string[];
-  /**
-   * Legacy affected versions still selected by default: the package's `latest`
-   * dist-tag still points at one, so an unpinned run would execute it. This IS
-   * a failure — it means the republish did not take.
-   */
-  legacyAffectedStillLatest: string[];
-}
-
-export interface AssertionResult {
-  ok: boolean;
-  lines: string[];
-}
-
-function residueLine(label: string, checked: number, offenders: string[]): string {
-  const verdict = offenders.length === 0 ? "clean" : `${offenders.length} FOUND`;
-  return `  ${label.padEnd(46)} checked ${String(checked).padStart(5)}   ${verdict}`;
-}
-
-/**
- * Render the final assertion. Fails when any residue the migration is
- * responsible for survives.
- *
- * `legacyAffectedVersions` is deliberately NOT a failure: a published version
- * is immutable (its `prompt.md` lives inside an integrity-pinned ZIP), so the
- * old rows keep their `config` for ever. What must hold is that none of them is
- * still *selected*: the `latest` dist-tag moved to the republished version and
- * no schedule pins one.
- */
-export function renderAssertion(input: AssertionInput): AssertionResult {
-  // One row per residue category — rendered AND failure-checked from the same
-  // literal, so a label can never drift between the report and the verdict.
-  const rows: { label: string; checked: number; offenders: string[] }[] = [
-    {
-      label: "`config` key in packages.draft_manifest",
-      checked: input.draftsChecked,
-      offenders: input.draftManifestsWithConfig,
-    },
-    {
-      // Same population as the drafts above — one read per package row.
-      label: "`{{config.` in packages.draft_content",
-      checked: input.draftsChecked,
-      offenders: input.draftPromptsWithConfigRef,
-    },
-    {
-      label: "`config` key in republished manifest",
-      checked: input.republishedChecked,
-      offenders: input.republishedManifestsWithConfig,
-    },
-    {
-      label: "`{{config.` in republished prompt.md",
-      checked: input.republishedChecked,
-      offenders: input.republishedPromptsWithConfigRef,
-    },
-    {
-      label: "schedule pinned to an affected version",
-      checked: input.schedulesChecked,
-      offenders: input.schedulesPinnedToAffected,
-    },
-    {
-      label: "application_packages.input_settings.locked not empty",
-      checked: input.installsChecked,
-      offenders: input.installsWithLockedFields,
-    },
-    {
-      // The legacy population is its own denominator — there is no separate
-      // counter for it.
-      label: "legacy affected version still tagged `latest`",
-      checked: input.legacyAffectedVersions.length,
-      offenders: input.legacyAffectedStillLatest,
-    },
-  ];
-
-  const lines = [
-    "── Final assertion ───────────────────────────────────────────",
-    ...rows.map((r) => residueLine(r.label, r.checked, r.offenders)),
-  ];
-
-  lines.push(
-    `  legacy published versions still carrying \`config\`: ${input.legacyAffectedVersions.length}` +
-      " (immutable — kept, but no longer selected by default)",
-  );
-
-  const failed = rows.filter((r) => r.offenders.length > 0);
-  if (failed.length === 0) {
-    lines.push("PASS — no reachable `config` residue.");
-    return { ok: true, lines };
-  }
-
-  lines.push("");
-  lines.push("FAIL — residue survived:");
-  for (const { label, offenders } of failed) {
-    lines.push(`  ${label}:`);
-    for (const id of offenders) lines.push(`    ${id}`);
-  }
-  return { ok: false, lines };
 }

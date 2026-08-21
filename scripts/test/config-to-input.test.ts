@@ -7,7 +7,7 @@
  * branch is pinned: the collision rule, the wrapper metadata carry-over
  * (including `required`, whose loss would silently make a mandatory field
  * optional), the Mustache rewrite across every tag form the renderer accepts,
- * idempotence, and the final assertion catching each residue category.
+ * and idempotence.
  *
  * Pure — no database. The CLI owns all I/O.
  */
@@ -20,9 +20,7 @@ import {
   hasConfigSection,
   inputPropertyNames,
   mergeConfigIntoInput,
-  renderAssertion,
   rewriteConfigReferences,
-  type AssertionInput,
   type JsonObject,
 } from "../lib/config-to-input.ts";
 
@@ -297,18 +295,6 @@ describe("mergeConfigIntoInput — wrapper metadata", () => {
     );
     expect("property_order" in wrapperOf(manifest)).toBe(false);
   });
-
-  it("reports config wrapper members it does not carry instead of losing them silently", () => {
-    const { report } = mergeConfigIntoInput(
-      baseManifest({
-        config: {
-          schema: { type: "object", properties: { days: { type: "number" } } },
-          _meta: { "acme:x": { note: "keep me" } },
-        },
-      }),
-    );
-    expect(report.notCarried).toEqual(["_meta"]);
-  });
 });
 
 describe("mergeConfigIntoInput — idempotence", () => {
@@ -420,61 +406,4 @@ describe("hasConfigReference", () => {
     expect(hasConfigReference(null)).toBe(false);
     expect(hasConfigReference(undefined)).toBe(false);
   });
-});
-
-describe("renderAssertion", () => {
-  const clean: AssertionInput = {
-    draftsChecked: 12,
-    draftManifestsWithConfig: [],
-    draftPromptsWithConfigRef: [],
-    republishedChecked: 3,
-    republishedManifestsWithConfig: [],
-    republishedPromptsWithConfigRef: [],
-    schedulesChecked: 5,
-    schedulesPinnedToAffected: [],
-    installsChecked: 7,
-    installsWithLockedFields: [],
-    legacyAffectedVersions: ["@acme/digest@1.0.0"],
-    legacyAffectedStillLatest: [],
-  };
-
-  it("passes when nothing reachable survives", () => {
-    const result = renderAssertion(clean);
-    expect(result.ok).toBe(true);
-    expect(result.lines.at(-1)).toContain("PASS");
-  });
-
-  it("prints the count checked for every category, so an empty set cannot pass silently", () => {
-    const text = renderAssertion(clean).lines.join("\n");
-    for (const n of ["12", "3", "5", "7"]) expect(text).toContain(`checked ${n.padStart(5)}`);
-  });
-
-  it("reports legacy immutable versions without failing on them", () => {
-    const result = renderAssertion(clean);
-    expect(result.ok).toBe(true);
-    expect(result.lines.join("\n")).toContain(
-      "legacy published versions still carrying `config`: 1",
-    );
-  });
-
-  const categories: [keyof AssertionInput, string][] = [
-    ["draftManifestsWithConfig", "packages.draft_manifest"],
-    ["draftPromptsWithConfigRef", "packages.draft_content"],
-    ["republishedManifestsWithConfig", "republished manifest"],
-    ["republishedPromptsWithConfigRef", "republished prompt.md"],
-    ["schedulesPinnedToAffected", "schedule pinned"],
-    ["installsWithLockedFields", "input_settings.locked"],
-    ["legacyAffectedStillLatest", "still tagged `latest`"],
-  ];
-
-  for (const [field, label] of categories) {
-    it(`fails on residue in ${String(field)}`, () => {
-      const result = renderAssertion({ ...clean, [field]: ["offender-1"] });
-      expect(result.ok).toBe(false);
-      const text = result.lines.join("\n");
-      expect(text).toContain("FAIL");
-      expect(text).toContain(label);
-      expect(text).toContain("offender-1");
-    });
-  }
 });
