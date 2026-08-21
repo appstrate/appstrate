@@ -11,7 +11,7 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { ListToolbar, type FilterSpec } from "../list-toolbar.tsx";
+import { ListToolbar, toggleValue, type FilterSpec } from "../list-toolbar.tsx";
 import { render } from "./run-fixture.tsx";
 
 function filters(over: Partial<Record<"status" | "kind", string[]>> = {}): FilterSpec[] {
@@ -39,6 +39,23 @@ function filters(over: Partial<Record<"status" | "kind", string[]>> = {}): Filte
     },
   ];
 }
+
+describe("ticking a value", () => {
+  it("adds it, and unticking removes it", () => {
+    expect(toggleValue([], "failed")).toEqual(["failed"]);
+    expect(toggleValue(["failed"], "timeout")).toEqual(["failed", "timeout"]);
+    expect(toggleValue(["failed", "timeout"], "failed")).toEqual(["timeout"]);
+  });
+
+  it("does nothing else — ticking the last box keeps every tick", () => {
+    // The version that also collapsed "all ticked" to "nothing ticked" was true
+    // of the RESULTS and nonsense as an interaction: Kind has two values, so
+    // ticking the second silently unticked the first, and Scope has one, so its
+    // only box could never stay ticked at all.
+    expect(toggleValue(["package"], "inline")).toEqual(["package", "inline"]);
+    expect(toggleValue([], "me")).toEqual(["me"]);
+  });
+});
 
 describe("with nothing filtered", () => {
   const html = render(<ListToolbar filters={filters()} />);

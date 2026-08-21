@@ -20,9 +20,9 @@ import type { RunKindFilter } from "../hooks/use-paginated-runs";
  *
  * Each dimension takes SEVERAL values. It matters for one of them: "everything
  * that broke" is `failed` or `timeout`, one question the endpoint now answers
- * in one request. The other two have two values and one, so selecting them all
- * means selecting none — which the toolbar normalises away, so all three menus
- * behave alike without any of them pretending to more than it does.
+ * in one request. The other two are narrower on the wire, and squaring that
+ * with the checkboxes is THIS file's job, not the toolbar's — a tick has to
+ * mean a tick on every menu.
  */
 const KINDS = ["package", "inline"] as const;
 const SCOPES = ["me"] as const;
@@ -84,9 +84,12 @@ export function RunsPage() {
     },
   ];
 
-  // `kind` is single on the wire — two values means both, which is no filter,
-  // and the toolbar has already normalised that to an empty list.
+  // The endpoint takes ONE kind, so "both ticked" is spelled "no kind
+  // parameter" — the same rows, asked for in the only way the wire has. Same
+  // for scope, whose single box is on or off. Neither collapses the ticks
+  // themselves: what you ticked stays ticked and stays chipped.
   const kind: RunKindFilter | undefined = kinds.length === 1 ? kinds[0] : undefined;
+  const user = scopes.includes("me") ? "me" : undefined;
 
   return (
     <div>
@@ -109,7 +112,7 @@ export function RunsPage() {
 
       <RunList
         pageSize={15}
-        user={scopes.length > 0 ? "me" : undefined}
+        user={user}
         kind={kind}
         status={statuses}
         toolbar={(total) => (

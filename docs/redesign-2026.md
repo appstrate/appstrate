@@ -237,6 +237,14 @@ navigation, cost a row each, and had nowhere to put a third dimension — which
 is why `status`, a filter `GET /api/runs` has always accepted, was not offered
 at all.
 
+- **A tick adds, an untick removes, and nothing else happens.** This was got
+  wrong once, and the way it was wrong is worth keeping: "all values ticked
+  narrows nothing, so store it as nothing ticked" is true of the RESULTS and
+  nonsense as an interaction. Kind has two values, so ticking the second
+  silently unticked the first; Scope has one, so its only box could never stay
+  ticked at all. A control never reads the results, and never rewrites what you
+  asked for: a combination that matches nothing is answered BY the table, which
+  says so and hands the filters back.
 - **The chips are the ONLY place a filter shows.** The trigger says what the
   dimension is, never what is chosen in it. The first version marked the
   trigger with the value ("Statut · échoué") and repeated it as a chip one line
@@ -266,11 +274,11 @@ Deviations from the reference, on purpose:
   the box would either do nothing or filter one page of fifteen client-side and
   call it a search. It waits for the endpoint, like the sortable heads and the
   header's own search icon.
-- **A dimension whose values are mutually exclusive is still a multi-select.**
-  Kind has two values and scope has one, so ticking them all means ticking
-  none — which normalises to no filter. The alternative was radio menus beside
-  checkbox menus, differing for a reason the user cannot see (which parameters
-  the endpoint happens to take as a list).
+- **Every dimension is a multi-select, including the narrow ones.** The
+  alternative was radio menus beside checkbox menus, differing for a reason
+  nobody can see: which parameters the endpoint happens to take as a list.
+  Squaring a tick with a wire that takes one value is the PAGE's job (two kinds
+  ticked is spelled "no kind parameter"), never the control's.
 - **No count badge on the trigger** (`lt-btn .lt-badge`). A count would say
   "Statut 2" where the chips one line below already say WHICH two. The
   reference's badge earns its place when the chip row can be scrolled away or

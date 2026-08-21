@@ -17,10 +17,21 @@
  *
  * **Every dimension takes several values**, and that is what stops the chips
  * from being a duplicate: one chip per VALUE, each removable on its own, which
- * a trigger cannot express. Where a dimension has two values (kind) or one
- * (scope), selecting them all means selecting none, and it normalises to no
- * filter — so the control never claims more than it does, and the three menus
- * still work the same way.
+ * a trigger cannot express.
+ *
+ * **A tick adds, an untick removes, and nothing else happens.** Ticking every
+ * value of a dimension is a legitimate state — it shows everything of that
+ * kind — and the menu keeps showing exactly what was ticked. A previous version
+ * was clever here: "all ticked narrows nothing, so store it as no filter". It
+ * is true of the RESULTS and nonsense as an interaction — Kind has two values,
+ * so ticking the second silently unticked the first, and Scope has one, so its
+ * only box could never stay ticked at all. The mapping to what the endpoint
+ * takes (one `kind`, so two ticks means no `kind` parameter) is the caller's
+ * business and stays out of sight.
+ *
+ * The controls never read the results, either: a filter is clickable whatever
+ * the table holds, and a combination that matches nothing is answered BY the
+ * table, which says so and hands the filters back.
  *
  * **The state belongs in the URL**, pushed, not replaced: a filtered list is
  * what people paste to each other, and the rule that gave modals real URLs
@@ -60,21 +71,21 @@ export interface FilterSpec {
   onChange: (values: string[]) => void;
 }
 
-/** Selecting every value narrows nothing, so it is stored as no filter at all. */
-function normalise(filter: FilterSpec, values: string[]): string[] {
-  return values.length === filter.options.length ? [] : values;
+/**
+ * Ticking a value adds it, unticking removes it. That is the whole rule, and it
+ * is exported so a test can hold it: the version that also collapsed "all
+ * ticked" to "nothing ticked" made the second tick of a two-value dimension
+ * untick the first, and a one-value dimension impossible to tick at all.
+ */
+export function toggleValue(values: string[], value: string): string[] {
+  return values.includes(value) ? values.filter((v) => v !== value) : [...values, value];
 }
 
 function FilterMenu({ filter }: { filter: FilterSpec }) {
   const { t } = useTranslation("common");
   const chosen = new Set(filter.values);
 
-  const toggle = (value: string) => {
-    const next = chosen.has(value)
-      ? filter.values.filter((v) => v !== value)
-      : [...filter.values, value];
-    filter.onChange(normalise(filter, next));
-  };
+  const toggle = (value: string) => filter.onChange(toggleValue(filter.values, value));
 
   return (
     <DropdownMenu>
