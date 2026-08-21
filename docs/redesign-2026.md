@@ -105,6 +105,17 @@ on top; content flush, no gutter card, no 16px top radius.
   while you explore elsewhere — it would create it in the org you are in.
 - **Nav** groups by what you are DOING: Activité (schedules included — a
   schedule is upcoming activity) and Construire.
+- **Where each switcher lives was re-decided, and confirmed.** The alternatives
+  were weighed against Mistral's shell (product at the top of the sidebar,
+  org/workspace at its foot with the account) and against stacking both in the
+  sidebar head. It stays as it is: the sidebar answers "which tool", the header
+  answers "on which data, which page" — two axes, two places, never confused,
+  and the header is the one bar that is identical on every screen, so the data
+  context sits against the page it scopes. Moving it to the foot would drift it
+  away from what it scopes and merge it with "who I am" (Mistral can: their org
+  IS the billing account; here it is the data boundary). Stacking it in the
+  head costs three rows of chrome before the navigation, and collapses to a
+  stack of unreadable avatars in the icon rail.
 - **Meta block** at the sidebar foot: Usage, Paramètres. No credits gauge — a
   permanent bar spends attention every second on a number read every few weeks.
 - Header height is `--spacing-header` (56px), a constant. It used to shrink on
@@ -199,6 +210,11 @@ something that contradicts one.
   menu by reflex, and a second door costs less than a first door nobody finds.
 - **Nothing permanent in the navigation for a number read every few weeks.**
   The credits gauge was removed on those grounds; it belongs behind Usage.
+- **The header's right end stays personal.** Page actions have a home — the
+  `actions` slot of `PageHeader`, at title height. The bell and the profile do
+  not move to make room for CTAs: that corner has to read the same on every
+  screen, and the free space is between the trail and the bell, which is where
+  the chat put its context tabs.
 - **Direct manipulation in forms.** No Edit button revealing a field. Fields,
   dropdowns and toggles, Notion-style rows, as a systematic pattern.
 - **A modal must have a URL.** Non-negotiable — support has to be able to say
