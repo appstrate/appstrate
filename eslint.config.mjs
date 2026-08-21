@@ -42,15 +42,30 @@ const ZOD4_STRING_FORMAT_BANS = [
   },
 ];
 
-// Assignments to the global process streams / exit, banned in CLI tests.
-// The selectors deliberately match through casts — the pattern this replaces
-// wrote `(process as unknown as { exit: … }).exit = original`, so anchoring on
-// `left.object.name === 'process'` alone would miss the exact code that caused
-// the bug. Matching a `process` node *inside* the assignment target catches the
-// plain form and every `as`-wrapped variant of it.
+// Global-stream capture, banned in CLI tests. Two shapes are matched:
+// assigning over `process.stdout.write` / `process.stderr.write` /
+// `process.exit`, and `spyOn`-ing the two stream writes (which reaches the
+// same global through a different door — the rule would be theatre without
+// it). All three assignment selectors match through casts: the pattern this
+// replaces wrote `(process as unknown as { exit: … }).exit = original`, so
+// anchoring on `left.object.name === 'process'` would miss the exact code that
+// caused the bug. They anchor on a `process` Identifier *descendant* of the
+// assignment target instead, which the cast cannot hide.
+//
+// NOT covered, and deliberately so — each would need a selector broad enough
+// to fire on innocent code, or type information ESLint's AST pass does not
+// have. They are documented so nobody reads a green lint as proof of absence:
+//   - aliasing:            `const p = process; p.stdout.write = fn`
+//   - computed access:     `process["stdout"].write = fn`
+//   - destructuring:       `const { stdout } = process; stdout.write = fn`
+//   - defineProperty:      `Object.defineProperty(process, "exit", …)`
+//   - a cast on the spy target: `spyOn(process.stdout as any, "write")`
+// `spyOn(process, "exit")` is also intentionally allowed: install.test.ts uses
+// it with a `finally` restore for the installer's terminal paths, which is a
+// different problem from capturing output.
 const globalIoBan = (target, selector) => ({
   selector,
-  message: `CLI tests must not assign to ${target}. \`bun test\` runs every package in one process, so a global capture buffer also collects what other suites, libraries and the runner write — the assertion then fails non-deterministically and names an innocent test (issue #1180). Pass the command an injected CommandIO instead: createMemoryIO() from test/helpers/memory-io.ts.`,
+  message: `CLI tests must not take over the global ${target} (by assignment or \`spyOn\`). \`bun test\` runs every package in one process, so a global capture buffer also collects what other suites, libraries and the runner write — the assertion then fails non-deterministically and names an innocent test (issue #1180). Pass the command an injected CommandIO instead: createMemoryIO() from test/helpers/memory-io.ts.`,
 });
 
 const AUTH_CLIENT_BAN = {
@@ -115,15 +130,23 @@ export default tseslint.config(
         ...ZOD4_STRING_FORMAT_BANS,
         globalIoBan(
           "process.stdout.write",
-          "AssignmentExpression > MemberExpression.left[property.name='write'] MemberExpression[object.name='process'][property.name='stdout']",
+          "AssignmentExpression > MemberExpression.left[property.name='write'] MemberExpression[property.name='stdout'] Identifier[name='process']",
         ),
         globalIoBan(
           "process.stderr.write",
-          "AssignmentExpression > MemberExpression.left[property.name='write'] MemberExpression[object.name='process'][property.name='stderr']",
+          "AssignmentExpression > MemberExpression.left[property.name='write'] MemberExpression[property.name='stderr'] Identifier[name='process']",
         ),
         globalIoBan(
           "process.exit",
           "AssignmentExpression > MemberExpression.left[property.name='exit'] Identifier[name='process']",
+        ),
+        globalIoBan(
+          "process.stdout.write",
+          "CallExpression[callee.name='spyOn'][arguments.0.object.name='process'][arguments.0.property.name='stdout'][arguments.1.value='write']",
+        ),
+        globalIoBan(
+          "process.stderr.write",
+          "CallExpression[callee.name='spyOn'][arguments.0.object.name='process'][arguments.0.property.name='stderr'][arguments.1.value='write']",
         ),
       ],
     },

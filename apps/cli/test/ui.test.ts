@@ -49,12 +49,17 @@ describe("confirm non-TTY guard", () => {
 });
 
 describe("intro / outro / spinner io seam", () => {
-  it("renders the intro frame into the injected sink, not the real stdout", () => {
+  // Only the *injected* half is exercised in-process. The complementary
+  // property — an un-injected call still reaching the real stdout — cannot be
+  // observed from here without owning the process streams, which is exactly
+  // the pattern issue #1180 retires; asserting an un-injected call left this
+  // sink empty would be vacuous (the sink was created two lines earlier and is
+  // unreachable from a call that was never handed it), and the call itself
+  // would spray clack ANSI into the runner's own output. The un-injected path
+  // is covered instead by the byte-for-byte child-process comparisons at the
+  // bottom of this file, which own a stdout no other suite can write to.
+  it("renders the intro frame into the injected sink", () => {
     const { io, stdout, stderr } = createMemoryIO();
-    intro("Appstrate login");
-    // No `io` on that first call: it went to the real stream, so the sink
-    // this test owns is still empty — the property the whole seam exists for.
-    expect(stdout()).toBe("");
     intro("Appstrate login", io);
     expect(stdout()).toContain("Appstrate login");
     expect(stderr()).toBe("");
@@ -62,8 +67,6 @@ describe("intro / outro / spinner io seam", () => {
 
   it("renders the outro frame into the injected sink", () => {
     const { io, stdout, stderr } = createMemoryIO();
-    outro("Logged in as alice@example.com");
-    expect(stdout()).toBe("");
     outro("Logged in as alice@example.com", io);
     expect(stdout()).toContain("Logged in as alice@example.com");
     expect(stderr()).toBe("");

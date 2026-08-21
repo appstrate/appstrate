@@ -307,10 +307,16 @@ export async function runRemote(
   // `appstrate.remote.triggered` line emitted just above is the lone
   // exception — it carries the runId + instance for debugging, has no
   // local-mode counterpart, and lands before any RunEvents do.
+  // Both writers are forwarded. `writeStderr` matters for the human sink's
+  // one stderr line (the `⚠` advisory on `appstrate.error`): leaving it unset
+  // would silently fall back to the sink's own `process.stderr.write` default,
+  // so a caller that injected `writeStderr` would still get that line on the
+  // global stream — the very leak this seam exists to close (issue #1180).
   const consoleSink: EventSink = createConsoleSink({
     json: opts.json,
     verbosity: opts.verbosity ?? "normal",
     writeStdout,
+    writeStderr,
   });
 
   // ─── 2. Signal wiring ──────────────────────────────────────────────

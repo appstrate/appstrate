@@ -490,7 +490,7 @@ describe("createConsoleSink — human mode", () => {
 // machine-readable stream.
 
 describe("createConsoleSink — writeStdout injection", () => {
-  it("routes JSONL emissions through the injected writer (not process.stdout)", async () => {
+  it("routes JSONL emissions through the injected writer, leaving stderr untouched", async () => {
     const captured: string[] = [];
     const stderrChunks: string[] = [];
     const sink = createConsoleSink({
@@ -512,7 +512,7 @@ describe("createConsoleSink — writeStdout injection", () => {
     expect(stderrChunks.join("")).toBe("");
   });
 
-  it("routes human-mode emissions through the injected writer", async () => {
+  it("routes human-mode emissions through the injected writer, leaving stderr untouched", async () => {
     const captured: string[] = [];
     const stderrChunks: string[] = [];
     const sink = createConsoleSink({

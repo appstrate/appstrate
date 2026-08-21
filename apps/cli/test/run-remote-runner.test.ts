@@ -18,6 +18,7 @@ import {
   type RemoteRunRecord,
   type RemoteRunLog,
 } from "../src/commands/run/remote-runner.ts";
+import { runIsolated } from "./helpers/isolated-process.ts";
 
 // ---------------------------------------------------------------------------
 // Test harness — scripted fetch
@@ -1406,5 +1407,109 @@ describe("runRemote — record-poll resilience", () => {
         new AbortController().signal,
       ),
     ).rejects.toMatchObject({ name: "RemoteRunError", status: 500 });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// writeStderr injection (issue #1180)
+// ---------------------------------------------------------------------------
+//
+// `runRemote` resolves `opts.writeStderr` for its own status lines, but the
+// console sink it builds also owns one stderr line: the `⚠` advisory rendered
+// for `appstrate.error`. Until this pair of tests existed no fixture emitted
+// that event, so the sink could be — and was — constructed with `writeStdout`
+// only, leaving the advisory on the sink's `process.stderr.write` default
+// while the caller believed it had captured every stream.
+
+/** A `system/adapter_error` log row is what `runLogToRunEvent` maps to `appstrate.error`. */
+const ADAPTER_ERROR_LOG = {
+  id: 1,
+  runId: "run_adv",
+  type: "system",
+  event: "adapter_error",
+  message: "adapter blew up",
+  level: "error",
+} satisfies RemoteRunLog;
+
+describe("runRemote — appstrate.error advisory routing", () => {
+  it("routes the ⚠ advisory through the injected writeStderr, not stdout", async () => {
+    const calls: FetchCall[] = [];
+    const fetchImpl = makeFetchImpl(
+      {
+        "POST /api/agents/@system/hello-world/run": { status: 201, body: { id: "run_adv" } },
+        "GET /api/runs/run_adv/logs": {
+          status: 200,
+          body: { object: "list", data: [ADAPTER_ERROR_LOG], hasMore: false },
+        },
+        "GET /api/runs/run_adv": {
+          status: 200,
+          body: recordSummary({ id: "run_adv", status: "success" }),
+        },
+      },
+      calls,
+    );
+
+    await runToTerminal(
+      withCapturedWriters(buildBaseOpts({ fetchImpl })),
+      new AbortController().signal,
+    );
+
+    expect(writers.stderr.join("")).toContain("adapter blew up");
+    // Pins the neighbouring channel: the advisory must not leak into the
+    // stdout stream, which carries the `--json` JSONL contract.
+    expect(writers.stdout.join("")).not.toContain("adapter blew up");
+  });
+
+  it("writes nothing to the real stderr when writeStderr is injected", async () => {
+    // In-process assertions can only show the advisory reached the injected
+    // writer; they cannot show it did NOT also reach the global stream —
+    // observing that would mean reassigning `process.stderr.write`, the exact
+    // pattern issue #1180 retires. A child process owns a stderr no other
+    // suite writes to, so an empty one is real evidence. The `⚠ ` marker
+    // echoed back on stdout is the positive control: without it an empty
+    // child stderr would also be what a fixture that never emitted the event
+    // produced.
+    const runner = JSON.stringify(`${import.meta.dir}/../src/commands/run/remote-runner.ts`);
+    const log = JSON.stringify(ADAPTER_ERROR_LOG);
+    const record = JSON.stringify(recordSummary({ id: "run_adv", status: "success" }));
+    const child = await runIsolated(`
+      const { runRemote } = await import(${runner});
+      const json = (body, status) =>
+        new Response(JSON.stringify(body), {
+          status,
+          headers: { "Content-Type": "application/json" },
+        });
+      const err = [];
+      await runRemote(
+        {
+          instance: "https://app.example.com",
+          bearerToken: "ask_test_key",
+          applicationId: "app_1",
+          orgId: "org_1",
+          scope: "@system",
+          name: "hello-world",
+          input: {},
+          json: false,
+          bundleLabel: "@system/hello-world",
+          pollIntervalMs: 1,
+          fetchImpl: (input, init) => {
+            const url = String(input);
+            if ((init?.method ?? "GET").toUpperCase() === "POST") return json({ id: "run_adv" }, 201);
+            if (url.includes("/logs"))
+              return json({ object: "list", data: [${log}], hasMore: false }, 200);
+            return json(${record}, 200);
+          },
+          writeStdout: () => {},
+          writeStderr: (chunk) => err.push(chunk),
+        },
+        new AbortController().signal,
+      );
+      process.stdout.write("CAPTURED:" + err.join(""));
+    `);
+
+    expect(child.exitCode).toBe(0);
+    expect(child.stdout).toContain("CAPTURED:");
+    expect(child.stdout).toContain("adapter blew up");
+    expect(child.stderr).toBe("");
   });
 });

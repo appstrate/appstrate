@@ -94,8 +94,10 @@ describe("exitWithError", () => {
   it("routes the formatted message to the injected io and exits with the code", () => {
     const { io, stdout, stderr } = createMemoryIO();
     expect(() => exitWithError(new Error("nope"), io, 4)).toThrow(ExitError);
-    expect(stderr()).toBe("nope\n");
-    expect(stdout()).toBe("");
+    // `createMemoryIO` renders through `cancel`, and production `cancel` is
+    // `clack.cancel` — a stdout writer. The sink keeps that channel.
+    expect(stdout()).toBe("nope\n");
+    expect(stderr()).toBe("");
   });
 
   it("defaults to exit code 1", () => {
@@ -148,9 +150,9 @@ describe("exitWithError", () => {
   });
 
   it("applies `formatError` before handing the message to the io", () => {
-    const { io, stderr } = createMemoryIO();
+    const { io, stdout } = createMemoryIO();
     const err = Object.assign(new Error("bad input"), { hint: "pass --force" });
     expect(() => exitWithError(err, io)).toThrow(ExitError);
-    expect(stderr()).toBe("bad input — pass --force\n");
+    expect(stdout()).toBe("bad input — pass --force\n");
   });
 });
