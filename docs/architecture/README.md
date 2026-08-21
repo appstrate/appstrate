@@ -19,6 +19,7 @@ duplicating the detail.
 
 - [**MODEL_ALIASES.md**](./MODEL_ALIASES.md) — LLM-gateway model-alias pattern (masking real model ids across the two inference paths).
 - [**SUBSCRIPTION_COMPLIANCE.md**](./SUBSCRIPTION_COMPLIANCE.md) — Subscription credential compliance posture for the opt-in codex / claude-code provider modules.
+- [**unified-pi-chat/**](./unified-pi-chat/README.md) — _Archive._ The August 2026 measurements behind moving every chat turn onto the in-process Pi engine, and the versioned evidence for them.
 
 ## Platform posture
 
