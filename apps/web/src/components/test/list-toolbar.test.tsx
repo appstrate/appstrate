@@ -190,4 +190,30 @@ describe("the view toggle", () => {
     expect(html).toContain('aria-label="Vue tableau" aria-pressed="true"');
     expect(html).toContain('aria-label="Vue cartes" aria-pressed="false"');
   });
+
+  it("opens the row, before what narrows it and before what acts on it", () => {
+    // "What am I looking at" comes before "which rows" and before "what do I
+    // do". It also gets it out of the action cluster, where it read as one more
+    // button rather than as a choice of representation.
+    const html = render(
+      <ListToolbar
+        filters={filters()}
+        view="table"
+        onViewChange={() => {}}
+        search={{ value: "", onChange: () => {}, placeholder: "Rechercher…" }}
+        actions={<button>Nouvel agent</button>}
+      />,
+    );
+    expect(html.indexOf("aria-pressed")).toBeLessThan(html.indexOf("Rechercher…"));
+    expect(html.indexOf("Rechercher…")).toBeLessThan(html.indexOf("Nouvel agent"));
+  });
+});
+
+describe("the filters button", () => {
+  it("shows the row is open, on the button that opened it", () => {
+    const html = render(<ListToolbar filters={filters({ status: ["failed"] })} />);
+    expect(html).toContain('aria-expanded="true"');
+    // The state IS the style hook: no second flag to keep in step.
+    expect(html).toContain("aria-expanded:bg-accent");
+  });
 });

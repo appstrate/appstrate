@@ -70,6 +70,7 @@ import { Check, Filter, LayoutGrid, PlusCircle, Rows3, SlidersHorizontal, X } fr
 import { cn } from "@appstrate/ui/cn";
 import type { ListView } from "@/stores/list-view-store";
 import { toggleValue } from "../lib/toggle-value";
+import { TOOLBAR_UTILITY } from "../lib/toolbar-button";
 import { Badge } from "@appstrate/ui/components/badge";
 import { Button } from "@appstrate/ui/components/button";
 import { Input } from "@appstrate/ui/components/input";
@@ -123,22 +124,6 @@ export interface FilterSpec {
 
 /** Beyond this many, the button counts instead of naming. */
 const NAMED_VALUES = 2;
-
-/**
- * What the bar's own controls look like: an outline and nothing else.
- *
- * Three tiers on one row, and the surface is what separates them. Filters and
- * Columns adjust the VIEW, so they are a border on the canvas — no fill, no
- * shadow. The page's own action does something to the data, so it keeps a
- * surface: white and slightly raised (or filled, when it is a create). Reading
- * left to right you can tell what is a setting from what is a deed without
- * reading a word.
- *
- * `px-2.5 gap-1.5` is what shadcn's `size="sm"` resolves to for a button
- * carrying an icon (`has-[>svg]:px-2.5`); ours is a flat `px-3 gap-2`, which is
- * where the extra width inside every one of them came from.
- */
-const UTILITY_BUTTON = "h-8 gap-1.5 bg-transparent px-2.5 shadow-none";
 
 function FacetedFilter({ filter }: { filter: FilterSpec }) {
   const { t } = useTranslation("common");
@@ -261,7 +246,7 @@ function ColumnsMenu({ columns }: { columns: ColumnMenuSpec }) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="outline" size="sm" className={UTILITY_BUTTON} title={label}>
+        <Button variant="outline" size="sm" className={TOOLBAR_UTILITY} title={label}>
           <SlidersHorizontal />
           <span className="hidden @xl/bar:inline">{label}</span>
         </Button>
@@ -313,7 +298,10 @@ function ViewToggle({ view, onChange }: { view: ListView; onChange: (view: ListV
   ];
 
   return (
-    <div className="bg-card inline-flex shrink-0 overflow-hidden rounded-md border shadow-sm">
+    // A grey track with a white chip on the chosen one — the same segmented
+    // control the shell uses for its products, and no colour: the bar has none
+    // anywhere else, and a blue fill here read as a state rather than a choice.
+    <div className="bg-accent inline-flex shrink-0 gap-0.5 rounded-md p-0.5">
       {options.map(({ id, icon: Icon, label }) => (
         <button
           key={id}
@@ -322,10 +310,10 @@ function ViewToggle({ view, onChange }: { view: ListView; onChange: (view: ListV
           aria-label={label}
           aria-pressed={view === id}
           className={cn(
-            "grid size-8 place-items-center border-l p-0 transition-colors first:border-l-0",
+            "grid size-7 place-items-center rounded-sm p-0 transition-colors",
             view === id
-              ? "bg-primary-soft text-primary"
-              : "text-muted-foreground hover:bg-accent hover:text-foreground",
+              ? "bg-card text-foreground shadow-sm"
+              : "text-muted-foreground hover:text-foreground",
           )}
         >
           <Icon className="size-4" />
@@ -386,6 +374,7 @@ export function ListToolbar({
     <div className="@container/bar mb-4 space-y-2">
       <div className="flex items-center gap-2">
         <div className="flex min-w-0 flex-1 items-center gap-2">
+          {view && onViewChange && <ViewToggle view={view} onChange={onViewChange} />}
           {search && (
             <Input
               value={search.value}
@@ -408,7 +397,9 @@ export function ListToolbar({
               size="sm"
               aria-expanded={open}
               title={t("toolbar.filters")}
-              className={UTILITY_BUTTON}
+              // `aria-expanded` is the state AND the style hook: an open row
+              // has to be readable from the button that opened it.
+              className={cn(TOOLBAR_UTILITY, "aria-expanded:bg-accent")}
               onClick={() => setOpen((wasOpen) => !wasOpen)}
             >
               <Filter />
@@ -422,7 +413,6 @@ export function ListToolbar({
           )}
 
           {columns && <ColumnsMenu columns={columns} />}
-          {view && onViewChange && <ViewToggle view={view} onChange={onViewChange} />}
           {actions}
         </div>
       </div>

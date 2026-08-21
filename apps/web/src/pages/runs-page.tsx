@@ -10,6 +10,7 @@ import { PageHeader } from "../components/page-header";
 import { EmptyState } from "../components/page-states";
 import { ListToolbar, type FilterSpec } from "../components/list-toolbar";
 import { useSearchPlaceholder } from "../lib/search-placeholder";
+import { TOOLBAR_ACTION } from "../lib/toolbar-button";
 import { RunList } from "../components/run-list";
 import type { RunKindFilter } from "../hooks/use-paginated-runs";
 
@@ -151,7 +152,7 @@ export function RunsPage() {
               <Button
                 variant="outline"
                 size="sm"
-                className="h-8 gap-1.5 px-2.5"
+                className={TOOLBAR_ACTION}
                 title={t("runs.markAllRead")}
                 onClick={() => markAllRead.mutate({})}
                 disabled={markAllRead.isPending || !unreadCount}

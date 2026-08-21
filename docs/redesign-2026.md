@@ -264,16 +264,27 @@ The pattern, and where it deviates:
   the left of the bar at every width, and it is the one control there with a
   WHITE background — a field is a surface. (It used to travel into the
   disclosure row with the filters, which was simply a bug.)
-- **Three tiers on one row, and the SURFACE is what separates them.** Filters
-  and Columns adjust the view, so they are an outline on the canvas: solid grey
-  border, no fill, no shadow. The page's own action does something to the data,
-  so it keeps a surface — white and slightly raised, or filled when it is a
-  create. Reading left to right you can tell a setting from a deed without
-  reading a word.
+- **TWO treatments, and the SURFACE is what separates them**
+  (`lib/toolbar-button.ts`, so every screen uses the same two). A control that
+  adjusts the view — Filters, Columns, Import — is an outline on the canvas:
+  solid grey border, no fill, no shadow. A control that acts on the data keeps
+  a surface: white, slightly raised. Reading a bar left to right you can tell a
+  setting from a deed without reading a word.
+  No filled blue in the bar. "Nouvel agent" was the one, and it made the agents
+  screen the only one whose action did not look like every other screen's.
   Note the trap in getting there: shadcn's `outline` variant paints
   `bg-background`, which is WHITE here (our page canvas is its own `--canvas`),
   so every one of them came out as a white pill on grey. Any port of a shadcn
   control onto the canvas has this to check.
+- **The open filter row shows on the button that opened it**, through
+  `aria-expanded:bg-accent` — the state is the style hook, so there is no
+  second flag to keep in step.
+- **The view toggle opens the row**, before the search and well before the
+  actions. "What am I looking at" comes before "which rows" and before "what do
+  I do", and it was sitting in the middle of the action cluster where it read
+  as one more button rather than as a choice of representation. Its style is
+  the shell's product tabs: a grey track, a white chip on the chosen one, no
+  colour — the bar has none anywhere else, and a blue fill read as a state.
 - **Dashed stays for the DIMENSION triggers only**, inside the filter row,
   where the metaphor holds: each one is an empty slot you can fill, and its
   border closes once it is filled. The Filters button itself is solid — it

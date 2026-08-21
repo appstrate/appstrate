@@ -3,11 +3,12 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Wrench, Plug } from "lucide-react";
+import { Plug, Plus, Upload, Wrench } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { ImportModal } from "../components/import-modal";
 import { usePackageList, type PackageType } from "../hooks/use-packages";
 import { type CardItem, PackageTab } from "./package-list";
+import { TOOLBAR_ACTION, TOOLBAR_UTILITY } from "../lib/toolbar-button";
 import { packageNewPath } from "../lib/package-paths";
 
 type BrowseType = Extract<PackageType, "skill" | "mcp-server">;
@@ -69,13 +70,31 @@ export function ItemTab({
         emptyIcon={presentation.emptyIcon}
         extraActions={
           <>
-            <Button variant="outline" size="sm" className="h-8" onClick={() => setImportOpen(true)}>
-              {t("nav.import", { ns: "common" })}
+            {/* Importing is a second way in, not the way in: utility treatment,
+                like Filters and Columns. The icon is what survives when the bar
+                runs out of room. */}
+            <Button
+              variant="outline"
+              size="sm"
+              className={TOOLBAR_UTILITY}
+              title={t("nav.import", { ns: "common" })}
+              onClick={() => setImportOpen(true)}
+            >
+              <Upload />
+              <span className="hidden @lg/bar:inline">{t("nav.import", { ns: "common" })}</span>
             </Button>
             {!readOnly && (
               <Link to={packageNewPath(type)}>
-                <Button size="sm" className="h-8">
-                  {t("list.createItem", { ns: "agents", type: typeLabel })}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className={TOOLBAR_ACTION}
+                  title={t("list.createItem", { ns: "agents", type: typeLabel })}
+                >
+                  <Plus />
+                  <span className="hidden @lg/bar:inline">
+                    {t("list.createItem", { ns: "agents", type: typeLabel })}
+                  </span>
                 </Button>
               </Link>
             )}

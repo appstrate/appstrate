@@ -13,6 +13,7 @@ import { SchedulesTable, useScheduleColumns } from "../components/schedules-tabl
 import { columnMenu, visibleColumns } from "../components/data-table";
 import { ListToolbar } from "../components/list-toolbar";
 import { useColumnVisibility } from "../stores/column-visibility-store";
+import { TOOLBAR_ACTION } from "../lib/toolbar-button";
 
 export function SchedulesListPage() {
   const { t } = useTranslation(["settings", "common"]);
@@ -23,8 +24,9 @@ export function SchedulesListPage() {
 
   const create = (
     <Button
+      variant="outline"
       size="sm"
-      className="h-8 gap-1.5 px-2.5"
+      className={TOOLBAR_ACTION}
       title={t("schedules.create")}
       onClick={() => navigate("/schedules/new")}
     >
