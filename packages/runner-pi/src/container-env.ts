@@ -10,6 +10,7 @@
  * serialisation, boolean casing) on their own.
  */
 
+import { createLogger } from "@appstrate/core/logger";
 import type {
   ModelNativeReasoningLevel,
   ModelReasoningLevel,
@@ -344,11 +345,67 @@ export const SIDECAR_OPERATOR_ENV_KEYS = [
 export type SidecarOperatorEnvKey = (typeof SIDECAR_OPERATOR_ENV_KEYS)[number];
 
 /**
+ * The operator keys the sidecar parses as a positive integer, and would throw
+ * on. Everything else in {@link SIDECAR_OPERATOR_ENV_KEYS} is a string the
+ * sidecar either uses verbatim (`RUNNER_IMAGE_*`) or already degrades safely on
+ * (`LOG_LEVEL` falls back to `info`; `APPSTRATE_MCP_TOOL_TIMEOUT_MS` returns
+ * `undefined` on garbage rather than throwing).
+ */
+// Core pino logger read straight from LOG_LEVEL, matching `subprocess-util.ts`:
+// this module is pulled into the firecracker daemon's dependency closure and
+// must not drag in the platform logger's env schema.
+const logger = createLogger(process.env.LOG_LEVEL ?? "info");
+
+const NUMERIC_SIDECAR_ENV_KEYS = new Set<SidecarOperatorEnvKey>([
+  "SIDECAR_MAX_REQUEST_BODY_BYTES",
+  "SIDECAR_MAX_MCP_ENVELOPE_BYTES",
+  "SIDECAR_API_CALL_CONCURRENCY",
+  "SIDECAR_INLINE_TOOL_OUTPUT_TOKENS",
+  "SIDECAR_RUN_TOOL_OUTPUT_BUDGET_TOKENS",
+]);
+
+/**
+ * The condition `readPositiveIntEnv` (`runtime-pi/sidecar/helpers.ts`) requires
+ * before it will return instead of throwing, minus the per-key ceiling.
+ *
+ * Deliberately no stricter than that: this gate only decides whether forwarding
+ * is SAFE, so being stricter would silently drop values the sidecar would have
+ * honoured, while being looser would let a boot crash through. `Number` is what
+ * the sidecar uses, so leading/trailing whitespace is tolerated identically.
+ */
+function isPositiveIntegerEnvValue(value: string): boolean {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && Number.isInteger(parsed) && parsed > 0;
+}
+
+/**
  * Read the operator-tunable env vars from the host's `process.env` and
  * return a record suitable for spreading into a container env. Empty
  * and undefined values are omitted so the container falls back to the
  * compiled defaults rather than seeing an empty string (which would
  * fail `readPositiveByteEnv` validation and crash the sidecar at boot).
+ *
+ * MALFORMED numeric values are omitted for the same reason, and this is
+ * load-bearing rather than defensive. The sidecar parses the keys in
+ * {@link NUMERIC_SIDECAR_ENV_KEYS} with `readPositiveIntEnv`, which THROWS on
+ * anything that is not a positive integer — at module scope, on the boot path,
+ * inside no `try`. So a single stale `=0` or `=100_000` would not degrade one
+ * feature: it would kill the sidecar process and fail every run.
+ *
+ * That danger is new for three of these keys. Until they were added to
+ * {@link SIDECAR_OPERATOR_ENV_KEYS} they were never forwarded in container
+ * mode, and `.env.example` told operators in as many words that setting them
+ * "has NO effect — the sidecar falls back to its compiled defaults". Making a
+ * documented no-op suddenly load-bearing must not turn a value someone set and
+ * forgot into a dead run plane. Falling back to the compiled default is exactly
+ * what that operator has been getting all along; the warning is what they were
+ * missing.
+ *
+ * Not covered here: a value that parses but exceeds the sidecar's per-key
+ * ceiling still throws at boot. That ceiling is sidecar policy
+ * (`ABSOLUTE_BODY_CEILING`) and mirroring it here would be the duplicate this
+ * codebase keeps paying for. It is also not a regression — it applies only to
+ * the two byte caps, which were already forwarded before.
  *
  * Restrict the returned set with `keys` when only a subset is relevant
  * (e.g. the agent container only needs the request-body cap).
@@ -359,7 +416,16 @@ export function pickOperatorSidecarEnv(
   const out: Record<string, string> = {};
   for (const key of keys) {
     const value = process.env[key];
-    if (value !== undefined && value !== "") out[key] = value;
+    if (value === undefined || value === "") continue;
+    if (NUMERIC_SIDECAR_ENV_KEYS.has(key) && !isPositiveIntegerEnvValue(value)) {
+      logger.warn(
+        "operator env var is not a positive integer — not forwarding it to the sidecar, " +
+          "which will use its compiled default",
+        { key, value },
+      );
+      continue;
+    }
+    out[key] = value;
   }
   return out;
 }
