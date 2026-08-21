@@ -86,46 +86,85 @@ on top; content flush, no gutter card, no 16px top radius.
 ## Shell
 
 ```
-[⚡] Studio ⌄  │  [T] Tractr | Default ⌄  /  Tous les runs        🔔  OT
-   product           org | workspace            where you are
+┌──────────────────────┬─────────────────────────────────────────────┐
+│ [T] Tractr | Default⌄│  Tous les runs                     🔍  🔔   │  56px
+├──────────────────────┼─────────────────────────────────────────────┤
+│  [▢ Studio][ Chat ]  │                                             │
+│  Activité            │                content                      │
+│   Dashboard …        │                                             │
+│  Construire          │                                             │
+│   Agents …           │                                             │
+├──────────────────────┤                                             │
+│ OT Olivier      ⇤    │                                             │
+└──────────────────────┴─────────────────────────────────────────────┘
 ```
 
-- **Product switcher** in the brand cell (Studio / Chat / Docs & API), not a
-  nine-dot grid top-right: you clicked right and the word on the far left
-  changed, and that corner holds personal things. The grid becomes right again
-  past roughly five products.
-- **Org/workspace chip** first in the trail. Deliberately NOT shaped like the
-  segments beside it: a breadcrumb segment means "go up a level", cheap and
-  reversible; this one replaces the whole context. Coloured avatar plus an
-  up/down chevron, never a right chevron.
+The column reads top to bottom as: whose data → which tool → what you do in it
+→ who you are. It took several passes to land there; the ones that were tried
+and dropped are at the end of this section, so they are not tried again.
+
+- **The head belongs to the ORGANISATION** — its avatar, its name, the
+  workspace beside it, one line, flat. Inside the app, whose data you are in is
+  the useful identity; the Appstrate mark is not in the column at all. The rule
+  under this band is the header's own, so the sidebar's line and the content
+  header's line are one line across the shell (both at 56px — check
+  `getBoundingClientRect().bottom` on both, they must match).
 - **The switch always ends on a workspace.** Two columns: organisations left,
   the workspaces OF THE ONE BEING EXPLORED right. Clicking an organisation
   opens its workspaces, it does not switch to it — you are never in an
   organisation alone, so a click that switched on its own had to invent the
   workspace to land you in (whichever `useAutoSelect` picked). Org and
-  workspace are then applied in the same tick, and a changed org lands on the
-  root of the product you are in (from the chat, you stay in the chat).
-  The current context and the explored one read differently: the current org
-  keeps the coral fill, the check and the only gear; the explored one is the
-  highlighted row with the chevron into column two. "Add a workspace" hides
-  while you explore elsewhere — it would create it in the org you are in.
-- **Nav** groups by what you are DOING: Activité (schedules included — a
-  schedule is upcoming activity) and Construire.
-- **Where each switcher lives was re-decided, and confirmed.** The alternatives
-  were weighed against Mistral's shell (product at the top of the sidebar,
-  org/workspace at its foot with the account) and against stacking both in the
-  sidebar head. It stays as it is: the sidebar answers "which tool", the header
-  answers "on which data, which page" — two axes, two places, never confused,
-  and the header is the one bar that is identical on every screen, so the data
-  context sits against the page it scopes. Moving it to the foot would drift it
-  away from what it scopes and merge it with "who I am" (Mistral can: their org
-  IS the billing account; here it is the data boundary). Stacking it in the
-  head costs three rows of chrome before the navigation, and collapses to a
-  stack of unreadable avatars in the icon rail.
-- **Meta block** at the sidebar foot: Usage, Paramètres. No credits gauge — a
-  permanent bar spends attention every second on a number read every few weeks.
+  workspace are applied in the same tick, and a changed org lands on the root
+  of the product you are in (from the chat, you stay in the chat). The current
+  context and the explored one read differently: the current org keeps the
+  coral fill, the check and the only gear; the explored one is the highlighted
+  row with the chevron into column two. "Add a workspace" hides while you
+  explore elsewhere — it would create it in the org you are in.
+- **The products are TABS**, not a menu: two of them (three once the Inbox
+  lands) and their names are what you choose between. A segmented control names
+  them all at once where a menu names one. Plain icons, no coloured tiles — the
+  only coloured mark in the column is the organisation's, one line up, and two
+  brands inside eight lines of chrome is one too many. Selection is the white
+  fill. No rule under the strip: it is its own enclosure. More air above than
+  below, so it reads as the head of the navigation rather than the tail of the
+  rule above it. In the rail the labels go and the icons stack.
+- **Docs & API is not a product** — it is a link out, and the profile menu
+  carries it, where people look for documentation by reflex.
+- **Search and the bell live in the header**, right end. Global but not
+  personal: they answer "find me something" and "what is new" where the sidebar
+  answers "where am I". Search is present but DISABLED — the app has no global
+  search yet (the reference design has one, see Strategy). Notifications are
+  scoped by org AND workspace server-side
+  (`services/state/notifications.ts` filters on both), which is why the bell is
+  not parked next to the profile: there it would read as "mine" and be wrong.
+- **The foot is the identity** — avatar, name, email, opening the profile menu
+  — and the collapse control beside it. Collapse changes the column's WIDTH, so
+  it belongs at the end of the column, not in the head competing with the
+  product name. Usage and Settings are NOT there: both configure the
+  organisation and its switcher already carries them (the gear on the row you
+  are in, the settings link under the panel). Usage costs one click more, and
+  when the Usage page of its own exists it will want a home — that is the
+  argument to re-open then.
+- **`ShellSidebar` + `ShellHeader`** (`components/shell-frame.tsx`) are written
+  once and used by both products; each passes only its own navigation. They
+  were extracted after the chat's copy had already drifted from Studio's by a
+  font weight.
 - Header height is `--spacing-header` (56px), a constant. It used to shrink on
   sidebar collapse while two surfaces subtracted a hard-coded 3.5rem.
+
+Tried and dropped, so they are not tried again:
+
+- **Everything in the header** (product in the brand cell, org chip first in
+  the trail). It was the state for weeks and it works; what it costs is a
+  header holding a trail and nothing else on screens that publish no trail —
+  the dashboard was 56px of bar for one bell.
+- **The context as a framed white card.** Good on its own, wrong once the tool
+  below was framed too: two stacked cards say the two lines are the same kind
+  of thing, and they are not. Rules separate the bands now, not frames.
+- **Search and the bell in the brand cell.** They fit, but the line then had
+  four things plus two buttons in 256px and the workspace truncated to "Defa…".
+- **Org over workspace on two lines.** It gave the workspace a weight the org
+  already carries.
 
 ## Tokens
 
@@ -276,6 +315,54 @@ On how the work goes:
   later in the session as missing requirements, and called the lab harness scope
   creep. It also found a failing test nobody had run.
 
+## Strategy — what the reference actually covers, and the order to take it
+
+Read the reference by its class families, not by scrolling it
+(`grep -oE "^\.[a-z]+-" satellites/redesign-2026/styles.css | sort | uniq -c | sort -rn`).
+What that shows:
+
+- `rd-*` (82 classes) — the RUN DETAIL. By far the most worked-out screen in the
+  reference, and the one the redesign has not touched at all.
+- `dt-*` — a DATA TABLE with named columns (`dt-c-num`, `-name`, `-status`,
+  `-actor`, `-cron`, `-trigger`, `-ver`, `-time`, `-result`) plus `dt-runs`,
+  `dt-agents`, `dt-sched`, `dt-intg`. The reference does not draw four list
+  screens; it draws ONE table and four column sets.
+- `lt-*` — the list toolbar above it (search, chips, clear, actions).
+- `cmdk-*` — a COMMAND PALETTE exists in the reference. That is what the
+  disabled search icon in the header is waiting for.
+- `empty-*`, `rcard-*`, `sched-*`, `lib-*`, `mem-*`, `log-*`, `term-*` — empty
+  states, run cards, schedules, library, memory, logs, terminal.
+
+So the strategy the reference itself suggests:
+
+1. **The shell is done. Freeze it.** It was iterated hard and the returns are
+   now small. Reopen only when a screen shows a real defect, not on taste.
+2. **Take PATTERNS, not pages.** `dt-*` says it plainly: build the table once
+   with a column contract, then Runs, Agents, Schedules and Integrations are
+   column sets. Six page-by-page passes cost more and drift more. Same for the
+   list toolbar, the empty state, the detail layout.
+3. **Promote to `@appstrate/ui` on the second use**, as `shell-frame` was. A
+   component that stays local until the third screen is a component whose
+   variants have already diverged.
+4. **Prove each pattern in the lab on all four scenarios** before applying it
+   anywhere else. Nominal is the one that lies: `heavy` found the unvirtualised
+   list, `empty` found the onboarding bounce, `error` finds the banner
+   placements. A pattern applied to six screens from its nominal state alone is
+   six screens to fix.
+5. **Order**: the table pattern (Runs first, most looked at), then run detail
+   (`rd-*`, the biggest single screen), then the command palette (it gives the
+   header's search icon its reason to exist), then Usage — the only screen with
+   no reference at all, which is exactly why it is not first.
+6. **Where the reference is silent, derive rather than invent**: grey canvas +
+   white cards, the control IS the setting, excursion → modal / destination →
+   page. Those four decide most cases on their own.
+7. **When the reference contradicts what the screen shows, the screen wins** —
+   it already happened once, with `:root` against the saved state.
+8. **Merge in slices.** The branch is 31 commits and the shell is independent
+   of the screens. A shell-only PR can land before the first table exists;
+   keeping everything for one big-bang merge makes the review worse and the
+   revert coarser.
+
 ## Open
 
 - **Usage page**, scoped by user: observability, not billing — who spends what,
@@ -289,8 +376,18 @@ On how the work goes:
   Save button.
 - **Grey depth.** #FAFAFA is 2% off white, faithful to the design but very
   quiet. One token if it should be deeper.
-- **Per-org colour** — the design gives each org a colour, the data model has no
-  such field. Deferred by decision.
+- **Per-org colour and LOGO** — the design gives each org a colour; the data
+  model has neither. Deferred by decision, twice. The shape is decided for when
+  it comes back: a dedicated column (identity read on every render, and
+  `GET /api/orgs` is the boot request that must carry it), stored LOCALLY
+  through the existing upload chain (`POST /api/uploads` → S3/MinIO/FS). A URL
+  is an IMPORT convenience — "take the favicon of my site", fetched server-side
+  through the SSRF floor (`@appstrate/core/ssrf`) and then stored locally —
+  never a storage mode: a third-party URL makes every employee's browser call
+  that third party on every page, breaks in a closed self-hosted install, and
+  takes the org's identity down with it the day the site is redone. The cost is
+  not the column, it is validation, a resized variant, deletion with the org,
+  and the settings screen.
 - **Library browsing** (skills, integrations, templates) reuses `PanelDialog`.
 
 ## Chat
