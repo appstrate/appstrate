@@ -9,6 +9,12 @@
  * which is the point: a second rendering of the same screens is a second thing
  * to keep looking like the first.
  *
+ * Every group carries its label, including a surface that has only one. The
+ * label states the KIND where the head only gives the NAME — "Tractr" alone
+ * does not say it is an organisation — and it keeps the three surfaces built
+ * the same way, which matters more than sparing one line inside any one of
+ * them.
+ *
  * The rail's head is the org/workspace chip rather than a page title. The title
  * only ever repeated the entry already highlighted below it, while the question
  * it left unanswered — WHICH organisation, WHICH workspace am I configuring —
@@ -120,7 +126,7 @@ export function SettingsLayout({ sections, title, scope }: SettingsLayoutProps) 
       <div className="flex-1 px-2 py-1">
         {visibleSections.map((section, idx) => (
           <div key={idx} className="py-1">
-            {section.label && visibleSections.length > 1 && (
+            {section.label && (
               <div className="text-muted-foreground px-2 py-1.5 text-xs font-medium">
                 {section.label}
               </div>
@@ -158,9 +164,7 @@ export function SettingsLayout({ sections, title, scope }: SettingsLayoutProps) 
       <SelectContent>
         {visibleSections.map((section, idx) => (
           <SelectGroup key={idx}>
-            {section.label && visibleSections.length > 1 && (
-              <SelectLabel>{section.label}</SelectLabel>
-            )}
+            {section.label && <SelectLabel>{section.label}</SelectLabel>}
             {section.items.map((item) => (
               <SelectItem key={item.to} value={item.to}>
                 <span className="inline-flex items-center gap-2">
