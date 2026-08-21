@@ -187,11 +187,17 @@ describe("discoverAvailableModels", () => {
     expect(result.outcome).toBe("auth_failed");
     // Aborted on the first candidate — no further probes burned.
     expect(calls).toEqual(["m-featured"]);
-    const info = await getOrgModelProviderCredential(ctx.org.id, cred.id);
-    // `[]`, not null: the DTO resolves through `resolveCredentialModelIds`,
-    // which coalesces a never-written column to an empty list. What matters
-    // is that the failed round wrote nothing.
-    expect(info?.available_model_ids).toEqual([]);
+    // Read the RAW column, not the DTO. The DTO resolves through
+    // `resolveCredentialModelIds`, which coalesces a never-written column to
+    // `[]` — so asserting `[]` there cannot tell "never wrote" from "wrote an
+    // empty list", and a regression that WIPES a good list on `auth_failed`
+    // would pass. The whole point of this test is that the failed round wrote
+    // nothing, so it has to assert on the thing that would have been written.
+    const [row] = await db
+      .select({ ids: modelProviderCredentials.availableModelIds })
+      .from(modelProviderCredentials)
+      .where(eq(modelProviderCredentials.id, cred.id));
+    expect(row?.ids).toBeNull();
   });
 
   it("keeps the previous list when nothing verifies (network incident ≠ empty plan)", async () => {

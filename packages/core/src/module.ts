@@ -1195,9 +1195,6 @@ export interface RunStatusChangeParams {
   extra?: Record<string, unknown>;
 }
 
-/**
- * Single field-level error entry carried on
-
 /** Parameters passed to the `onRunConnectionMissing` event. */
 export interface RunConnectionMissingParams {
   orgId: string;

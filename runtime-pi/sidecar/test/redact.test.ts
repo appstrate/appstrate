@@ -154,6 +154,22 @@ describe("scrubSecretMaterial", () => {
     );
   });
 
+  // Regression: the first version of this function put `\b` on the
+  // `Bearer|Basic` and `sk-ant-` rules. In a percent-encoded URL the `0` of
+  // `%20` sits immediately before the literal, so the anchor never matched and
+  // the key shipped verbatim to the operator log — a LEAK the predecessor
+  // (unanchored) did not have. These are the exact shapes upstream error
+  // bodies and redirect targets carry.
+  it("masks credentials that are not preceded by a word boundary", () => {
+    const key = "sk-ant-api03-9fK2mQzXbT4LpR7wV";
+    expect(
+      scrubSecretMaterial(`https://api.x/v1?h=Authorization%3A%20Bearer%20${key}`),
+    ).not.toContain(key);
+    expect(scrubSecretMaterial(`/cb#Bearer%20${key}`)).not.toContain(key);
+    expect(scrubSecretMaterial(`a${key}`)).not.toContain(key);
+    expect(scrubSecretMaterial("_Bearer tokABC123xyz")).not.toContain("tokABC123xyz");
+  });
+
   it("leaves prose that merely starts with a key prefix alone", () => {
     expect(scrubSecretMaterial("found skeletons in pkgroots directory")).toBe(
       "found skeletons in pkgroots directory",

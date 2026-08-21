@@ -480,7 +480,9 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
       // hiccup, …) — surface the original 401 as-is; the caller will
       // handle re-authentication. `forceRefresh` flips `needsReconnection`
       // on BOTH terminal shapes before it gets here: a revoked refresh token
-      // (which throws into this catch) and an unrefreshable OAuth client
+      // and an unrefreshable OAuth client — both now return `null` rather
+      // than throwing (the dedicated error class had one throw site whose
+      // only catch was unreachable), so the flag is what distinguishes them
       // (which returns null above, after marking the row). Transient
       // failures deliberately leave the row untouched — nothing is marked,
       // and the next call retries.

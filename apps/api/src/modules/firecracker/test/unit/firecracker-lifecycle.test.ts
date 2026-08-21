@@ -99,7 +99,14 @@ async function liveVm(
 describe("stopByRunId on a live VM", () => {
   it("SIGKILLs the VMM when the graceful shutdown cannot reach it, and waitForExit reports 137", async () => {
     const { exec } = fakeExec();
-    const orch = readyOrchestrator(exec);
+    // Non-zero grace ON PURPOSE — this is the ONE test that must enter
+    // `killVm`'s `graceSeconds > 0` block, so the SendCtrlAltDel PUT is
+    // actually issued against a socket with no listener and the SIGKILL
+    // fallback the test name describes is what we observe. The fixture
+    // defaults to 0 so the D-state tests below stay fast; overriding here
+    // costs ~1s and is the only way to cover the production path, whose
+    // real value is SIGTERM_GRACE_SECONDS = 5.
+    const orch = readyOrchestrator(exec, { sigtermGraceSeconds: 1 });
     const vm = await liveVm(orch, "run_live");
     const proc = vm.proc!;
 

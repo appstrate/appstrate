@@ -128,12 +128,22 @@ export function filterSensitiveHeaders(
  * get their own literal shapes. `sk-ant-` is matched case-insensitively ahead
  * of the generic family rule because Anthropic keys appear upper-cased in some
  * upstream error text, and the generic rule is deliberately case-sensitive.
+ *
+ * NOTE the deliberate absence of `\b` on the `Bearer|Basic` and `sk-ant-`
+ * rules. Those two literals are specific enough to need no word anchor, and an
+ * anchor there is actively harmful: in a percent-encoded URL —
+ * `?h=Authorization%3A%20Bearer%20sk-ant-…`, the shape upstream error bodies
+ * and redirect targets actually carry — the `0` of `%20` sits immediately
+ * before `B`, so `\b` never matches and the key ships verbatim to the operator
+ * log. `\b` is kept ONLY on the generic `sk|pk|ghp|…` family rule, which is
+ * where it earns its place (it is what keeps "skeletons" and "pkgroots"
+ * readable).
  */
 export function scrubSecretMaterial(text: string): string {
   return text
-    .replace(/\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]+/gi, "$1 [redacted]")
+    .replace(/(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]+/gi, "$1 [redacted]")
     .replace(/\beyJ[A-Za-z0-9._-]{10,}/g, "[redacted-jwt]")
-    .replace(/\bsk-ant-[A-Za-z0-9._-]+/gi, "[redacted-key]")
+    .replace(/sk-ant-[A-Za-z0-9._-]+/gi, "[redacted-key]")
     .replace(/\b(sk|pk|ghp|gho|ghs|xox[baprs])[-_][A-Za-z0-9._-]{6,}/g, "[redacted-key]")
     .replace(/\bAKIA[A-Z0-9]{12,}/g, "[redacted-key]")
     .replace(/\bya29\.[A-Za-z0-9._-]{6,}/g, "[redacted-key]")

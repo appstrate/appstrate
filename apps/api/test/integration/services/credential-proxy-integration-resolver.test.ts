@@ -264,10 +264,21 @@ describe("credential-proxy integration-resolver", () => {
       .update(packages)
       .set({ draftManifest: issuerOnly })
       .where(eq(packages.id, INTEGRATION_ID));
-    await seedConnection({ userId: ctx.user.id });
+    const connId = await seedConnection({ userId: ctx.user.id });
     token.setResponse({ not: "a discovery doc" }); // well-known probes → no issuer match
 
     expect(await forceRefreshIntegrationProxyCredentials(input())).toBeNull();
+    // `null` alone no longer discriminates transient from terminal: both
+    // shapes return it since `IntegrationCredentialRevokedError` was removed,
+    // so the PERSISTED flag is the only thing left that tells them apart. The
+    // comment above claims "the connection row is untouched" — assert it, or a
+    // regression that flags a healthy connection on a transient discovery
+    // outage (forcing a needless user reconnect) passes silently.
+    const [row] = await db
+      .select({ needsReconnection: integrationConnections.needsReconnection })
+      .from(integrationConnections)
+      .where(eq(integrationConnections.id, connId));
+    expect(row!.needsReconnection).toBe(false);
   });
 
   it("flags needsReconnection when the minting OAuth client is gone (terminal, not transient)", async () => {

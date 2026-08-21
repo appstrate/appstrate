@@ -162,14 +162,21 @@ export function releaseOnClose<T>(
  * chat is refused. The default of 6 is a conservative product value, not a
  * sizing decision, and the only measurements that exist are local. An operator
  * who never saw this line would discover the ceiling from user reports.
+ * Returns whether it warned. The boot caller ignores it; the return exists so
+ * the `fromEnv` decision is assertable without a logger spy (this repo forbids
+ * `mock.module()`). That decision needs pinning on its own: an invalid value
+ * like `"nope"` or `"0"` must read as NOT an operator decision, so a typo'd cap
+ * still gets the warning rather than silently passing as deliberate — and
+ * `piChatMaxConcurrency` cannot show that, since it only surfaces `max`.
  */
-export function warnIfDefaultChatConcurrency(): void {
+export function warnIfDefaultChatConcurrency(): boolean {
   const { max, fromEnv } = resolveChatConcurrency();
-  if (fromEnv) return;
+  if (fromEnv) return false;
   logger.warn(
     `${ENV_VAR} is unset or invalid — chat is capped at ${max} concurrent turns per API process. ` +
       "Set it from measured capacity before serving production chat traffic.",
   );
+  return true;
 }
 
 /**

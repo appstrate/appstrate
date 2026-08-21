@@ -82,7 +82,19 @@ COPY packages/runner-pi/src      packages/runner-pi/src
 COPY runtime-pi/sidecar/*.ts runtime-pi/sidecar/
 
 WORKDIR /build/runtime-pi/sidecar
-RUN bun build --compile --minify server.ts --outfile sidecar
+# `--define` is REQUIRED, not decoration. `bun build --compile` substitutes
+# `process.env.NODE_ENV` as a literal at BUNDLE time, so an `ENV NODE_ENV=` in
+# the runtime stage below is read by nothing — the value is already welded into
+# the binary. `token-budget.record()` guards its input validation with
+# `NODE_ENV !== "production"` precisely so a runtime misuse fails loudly in dev
+# and degrades to a silent no-op in production, where crashing a live run costs
+# more than a swallowed bad number. Without this flag the builder's ambient
+# (absent) NODE_ENV bakes in `undefined`, the guard is permanently true, and the
+# shipped sidecar THROWS on exactly the path documented as defensive.
+# Verified: `bun build --compile` ignores runtime env; `--define` fixes it.
+RUN bun build --compile --minify server.ts \
+      --define 'process.env.NODE_ENV="production"' \
+      --outfile sidecar
 
 # ── Stage 2 — minimal runtime ─────────────────────────────────────
 FROM ${RUNTIME_IMAGE} AS runtime
@@ -119,14 +131,11 @@ RUN apk add --no-cache libstdc++ libgcc ca-certificates docker-cli openssl
 
 COPY --from=builder --chmod=0555 /build/runtime-pi/sidecar/sidecar /usr/local/bin/sidecar
 
-# Load-bearing, not cosmetic: `token-budget.ts` guards its input validation with
-# `if (process.env.NODE_ENV !== "production") throw` so a runtime misuse fails
-# loudly in dev but degrades to a silent no-op in production, where crashing an
-# active run costs more than a swallowed bad number. This image never set the
-# variable (only the AGENT image did), so that condition was permanently true
-# and the shipped sidecar threw on exactly the path documented as defensive.
-# The platform builds the sidecar env from `pickOperatorSidecarEnv()`, which
-# does not forward NODE_ENV — so it has to be baked here.
+# For SUBPROCESSES only (the sidecar shells out to `docker` to spawn runner
+# containers); the sidecar binary itself does NOT read this. Its own
+# `process.env.NODE_ENV` was substituted as a literal at bundle time by the
+# `--define` on the build above — an `ENV` here cannot reach it. Both are
+# needed, and neither replaces the other.
 ENV NODE_ENV=production
 
 USER nobody:nobody

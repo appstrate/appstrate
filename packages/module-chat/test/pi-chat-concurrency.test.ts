@@ -15,6 +15,7 @@ import {
   chatCapacityResponse,
   piChatConcurrencyStats,
   piChatMaxConcurrency,
+  warnIfDefaultChatConcurrency,
   releaseOnClose,
   resetPiChatConcurrencyStats,
   type PiChatSlot,
@@ -192,18 +193,32 @@ describe("capacity signal for sizing the cap", () => {
   });
 
   it("falls back to the default on absent or invalid input, and honours a valid cap", () => {
-    // Asserted through `piChatMaxConcurrency` — the surface production reads.
-    // A predicate that only answered "is this the default?" existed here too,
-    // with no caller outside this file; `warnIfDefaultChatConcurrency` resolves
-    // the parse itself, so the predicate was pure test scaffolding.
     delete process.env[ENV_VAR];
     expect(piChatMaxConcurrency()).toBe(6);
-    // A typo'd cap must fall back rather than read as a deliberate value.
     process.env[ENV_VAR] = "nope";
     expect(piChatMaxConcurrency()).toBe(6);
     process.env[ENV_VAR] = "0";
     expect(piChatMaxConcurrency()).toBe(6);
     process.env[ENV_VAR] = "32";
     expect(piChatMaxConcurrency()).toBe(32);
+  });
+
+  it("treats an invalid cap as NOT an operator decision, so a typo still warns", () => {
+    // Separate from the cap assertions above on purpose: `piChatMaxConcurrency`
+    // surfaces only `max`, so it cannot distinguish "fell back to 6" from
+    // "operator chose 6". `warnIfDefaultChatConcurrency` is the only thing that
+    // reads `fromEnv`, and its return is that decision. Without this, a
+    // regression treating `"nope"` as deliberate would silence the boot warning
+    // with every other test still green.
+    delete process.env[ENV_VAR];
+    expect(warnIfDefaultChatConcurrency()).toBe(true);
+    process.env[ENV_VAR] = "nope";
+    expect(warnIfDefaultChatConcurrency()).toBe(true);
+    process.env[ENV_VAR] = "0";
+    expect(warnIfDefaultChatConcurrency()).toBe(true);
+    process.env[ENV_VAR] = "6"; // the default value, but chosen — not a fallback
+    expect(warnIfDefaultChatConcurrency()).toBe(false);
+    process.env[ENV_VAR] = "32";
+    expect(warnIfDefaultChatConcurrency()).toBe(false);
   });
 });
