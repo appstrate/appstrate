@@ -2,7 +2,7 @@
 
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Calendar } from "lucide-react";
+import { Calendar, Plus } from "lucide-react";
 import { usePermissions } from "../hooks/use-permissions";
 import { Button } from "@appstrate/ui/components/button";
 import { useAgents } from "../hooks/use-packages";
@@ -22,7 +22,15 @@ export function SchedulesListPage() {
   const { data: agents } = useAgents();
 
   const create = (
-    <Button onClick={() => navigate("/schedules/new")}>{t("schedules.create")}</Button>
+    <Button
+      size="sm"
+      className="h-8 gap-1.5 px-2.5"
+      title={t("schedules.create")}
+      onClick={() => navigate("/schedules/new")}
+    >
+      <Plus />
+      <span className="hidden @lg/bar:inline">{t("schedules.create")}</span>
+    </Button>
   );
 
   // The same cached agents query every other surface holds, keyed by package id.

@@ -67,6 +67,24 @@ describe("with nothing filtered", () => {
     expect(html).toContain("Type");
     expect(html).not.toContain("Réinitialiser");
   });
+
+  it("invites: dashed, with a plus", () => {
+    expect([...html.matchAll(/border-dashed/g)]).toHaveLength(2);
+    expect([...html.matchAll(/lucide-circle-plus/g)]).toHaveLength(2);
+  });
+});
+
+describe("a dimension that is filtering", () => {
+  const html = render(<ListToolbar filters={filters({ status: ["failed"] })} />);
+
+  it("stops inviting: the border closes and the plus goes with it", () => {
+    // Dashed AND `+` mean "an empty slot you can fill". Once it is filled the
+    // button is a statement, not an invitation — and dropping both saves the
+    // width exactly where width is scarce, since a filter with values is the
+    // wide one. Kind is still empty here, so exactly one of each remains.
+    expect([...html.matchAll(/border-dashed/g)]).toHaveLength(1);
+    expect([...html.matchAll(/lucide-circle-plus/g)]).toHaveLength(1);
+  });
 });
 
 describe("the chosen values", () => {

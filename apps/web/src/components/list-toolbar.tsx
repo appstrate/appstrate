@@ -131,17 +131,32 @@ function FacetedFilter({ filter }: { filter: FilterSpec }) {
         <Button
           variant="outline"
           size="sm"
-          className="h-8 border-dashed bg-transparent shadow-none"
+          className={cn(
+            // `px-2.5 gap-1.5` is what shadcn's own `size="sm"` resolves to for
+            // a button carrying an icon (`has-[>svg]:px-2.5`); ours is a flat
+            // `px-3 gap-2`, which is where the extra width inside every filter
+            // was coming from.
+            "h-8 gap-1.5 bg-transparent px-2.5 shadow-none",
+            // Dashed AND `+` mean "an empty slot you can fill". Once it is
+            // filled the button is not an invitation any more, it is a
+            // statement, so both go: the border closes and the plus leaves with
+            // it. It also happens to save the width exactly where width is
+            // scarce, since a filter with values is the wide one.
+            selected.length === 0 && "border-dashed",
+          )}
         >
-          <PlusCircle />
+          {selected.length === 0 && <PlusCircle />}
           {filter.label}
           {selected.length > 0 && (
             <>
-              <Separator orientation="vertical" className="mx-2 h-4" />
-              <Badge variant="secondary" className="rounded-sm px-1 font-normal @3xl:hidden">
+              <Separator orientation="vertical" className="mx-1.5 h-4" />
+              <Badge
+                variant="secondary"
+                className="rounded-sm px-1 font-normal @3xl/filters:hidden"
+              >
                 {selected.length}
               </Badge>
-              <div className="hidden gap-1 @3xl:flex">
+              <div className="hidden gap-1 @3xl/filters:flex">
                 {selected.length > NAMED_VALUES ? (
                   <Badge variant="secondary" className="rounded-sm px-1 font-normal">
                     {t("toolbar.selected", { count: selected.length })}
@@ -224,15 +239,16 @@ function FacetedFilter({ filter }: { filter: FilterSpec }) {
  */
 function ColumnsMenu({ columns }: { columns: ColumnMenuSpec }) {
   const { t } = useTranslation("common");
+  const label = t("toolbar.columns");
   const hidden = new Set(columns.hidden);
   const visibleCount = columns.options.filter((option) => !hidden.has(option.id)).length;
 
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="outline" size="sm" className="h-8">
+        <Button variant="outline" size="sm" className="h-8 gap-1.5 px-2.5" title={label}>
           <SlidersHorizontal />
-          {t("toolbar.columns")}
+          <span className="hidden @xl/bar:inline">{label}</span>
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-48">
@@ -360,10 +376,12 @@ export function ListToolbar({
     // dropping below, which is the one thing that must not move. The left group
     // takes what is left (`flex-1 min-w-0`) and wraps inside its own share;
     // `items-start` keeps the right group on the first line when it does.
-    <div className="mb-4 flex items-start gap-2">
-      {/* `@container`: the filters shorten themselves against the width THIS
-          group has, not the window's — see the note on the trigger. */}
-      <div className="@container flex min-w-0 flex-1 flex-wrap items-center gap-2">
+    <div className="@container/bar mb-4 flex items-start gap-2">
+      {/* Two containers, because the two ends answer different questions: the
+          filters shorten against the room THEY have, the right end against the
+          room the whole bar has. Named, or the nested one would silently win
+          for both. */}
+      <div className="@container/filters flex min-w-0 flex-1 flex-wrap items-center gap-2">
         {search && (
           <Input
             value={search.value}
@@ -391,13 +409,18 @@ export function ListToolbar({
         )}
       </div>
 
-      {/* Never wraps. What it CAN do on a narrow screen is drop what is
-          informative rather than operative — the count first, then the column
-          menu, which is shadcn's own answer (`hidden lg:flex` on their View).
-          The view toggle and the action are two small things and they stay. */}
-      <div className="flex shrink-0 items-center gap-3">
+      {/* Never wraps. What it CAN do as the bar narrows is shed what is
+          informative before what is operative, in that order: the count goes
+          first, then the words on the column menu, then the words on the page's
+          own action — which the CALLER writes, using `@…/bar` on its label, so
+          the whole row degrades together.
+          What does NOT happen here is an overflow menu. shadcn hides its View
+          button and keeps "Add task" whole, and that is the right instinct: the
+          control a screen exists to offer is the last thing that should need a
+          second click to find. */}
+      <div className="flex shrink-0 items-center gap-2">
         {count !== undefined && (
-          <span className="text-muted-foreground hidden text-sm sm:inline">{count}</span>
+          <span className="text-muted-foreground hidden text-sm @2xl/bar:inline">{count}</span>
         )}
         {columns && <ColumnsMenu columns={columns} />}
         {view && onViewChange && <ViewToggle view={view} onChange={onViewChange} />}

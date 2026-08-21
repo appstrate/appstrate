@@ -2,7 +2,7 @@
 
 import { useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { SearchX } from "lucide-react";
+import { CheckCheck, SearchX } from "lucide-react";
 import { runStatusValues } from "@appstrate/shared-types";
 import { Button } from "@appstrate/ui/components/button";
 import { useUnreadCount, useMarkAllRead } from "../hooks/use-notifications";
@@ -145,15 +145,19 @@ export function RunsPage() {
             // On a list screen the action belongs beside the view controls,
             // not at title height: every table screen then keeps its controls
             // and its actions in the same corner.
+            // The icon is what survives when the bar runs out of room; the
+            // words step aside on `@lg/bar`, the container the toolbar names.
             actions={
               <Button
                 variant="outline"
                 size="sm"
-                className="h-8"
+                className="h-8 gap-1.5 px-2.5"
+                title={t("runs.markAllRead")}
                 onClick={() => markAllRead.mutate({})}
                 disabled={markAllRead.isPending || !unreadCount}
               >
-                {t("runs.markAllRead")}
+                <CheckCheck />
+                <span className="hidden @lg/bar:inline">{t("runs.markAllRead")}</span>
               </Button>
             }
           />

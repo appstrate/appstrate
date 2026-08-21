@@ -3,7 +3,7 @@
 import { type ReactNode, useState } from "react";
 import { Link } from "react-router-dom";
 import { Trans, useTranslation } from "react-i18next";
-import { type LucideIcon, Layers, SearchX } from "lucide-react";
+import { type LucideIcon, Layers, Plus, SearchX, Upload } from "lucide-react";
 import type { PackageType } from "@appstrate/core/validation";
 import { Button } from "@appstrate/ui/components/button";
 import { useAgents } from "../hooks/use-packages";
@@ -186,14 +186,17 @@ export function PackageList() {
               <Button
                 variant="outline"
                 size="sm"
-                className="h-8"
+                className="h-8 gap-1.5 px-2.5"
+                title={t("nav.import", { ns: "common" })}
                 onClick={() => setImportOpen(true)}
               >
-                {t("nav.import", { ns: "common" })}
+                <Upload />
+                <span className="hidden @lg/bar:inline">{t("nav.import", { ns: "common" })}</span>
               </Button>
               <Link to="/agents/new">
-                <Button size="sm" className="h-8">
-                  {t("list.create")}
+                <Button size="sm" className="h-8 gap-1.5 px-2.5" title={t("list.create")}>
+                  <Plus />
+                  <span className="hidden @lg/bar:inline">{t("list.create")}</span>
                 </Button>
               </Link>
             </>
