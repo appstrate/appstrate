@@ -7,6 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Breaking, batched per the release policy in `.github/workflows/publish-core.yml`:
+these removals accumulate here until a deliberate major. `7.0.0` is already
+published without them, so the version in `package.json` does not move. Neither
+out-of-tree consumer is affected — `cloud` and `connect-helper` import only
+`module`, `logger`, `api-errors`, `telemetry`, `permissions` and
+`pairing-token`, and none of the names below.
+
+An AFPS agent manifest used to declare TWO parameter schemas — `input` (asked
+per run) and `config` (set once at setup). AFPS 0.3 removed `config`; whether a
+value is asked every time or stored once is a deployment policy, not a property
+of the package. Core no longer reads `manifest.config` at all.
+
+### Added
+
+- **`authorDefaults(schema)`** (`./form`) — the top-level properties of a JSON
+  Schema that declare a `default`, as a plain value map. This is the author
+  layer of input resolution, published so the platform and the CLI compute it
+  identically: the same bundle must yield the same parameters whether the run
+  is launched locally or on a platform. A property with no `default` stays
+  ABSENT rather than becoming `null`, so a lower layer — or the schema's own
+  `required` check — sees the truth.
+- **`validateAgainstSchema` / `SchemaValidationResult`** (`./schema-validation`)
+  — `validateConfig` / `ConfigValidationResult` under a name that describes
+  what they do. Same signature, same verdict.
+
+### Removed
+
+- **`mergeWithDefaults`** (`./form`) — replaced by `authorDefaults`. It
+  materialised `null` for every declared property without a `default` and
+  dropped undeclared caller keys, so a local `appstrate run` diverged from the
+  same bundle on a platform.
+- **`deepMergeConfig`** (`./schema-validation`) — nothing deep-merges any more.
+  Input resolution is a shallow per-property overlay of four layers, which is
+  what makes "which layer did this value come from" answerable at every call
+  site. Its prototype-pollution guard goes with it because the recursion it
+  guarded is gone, not because the concern was dismissed: a shallow spread of a
+  `JSON.parse`d object cannot write through `__proto__`.
+- **`validateConfig` / `ConfigValidationResult`** (`./schema-validation`) —
+  renamed, see Added.
+- **`InlineRunBody.config`** (`./platform-types`) — the inline-run routes no
+  longer accept the field.
+
 ## [7.0.0] — 2026-08-21
 
 Breaking release. Adds two names, and removes six with zero consumers anywhere — verified
