@@ -24,7 +24,7 @@ import { getInlineRunLimits } from "./run-limits.ts";
 // Core compaction — shared by worker, tests, and admin tools
 // ---------------------------------------------------------------------------
 
-export interface CompactionResult {
+interface CompactionResult {
   compactedPackages: number;
   deletedRunLogs: number;
 }

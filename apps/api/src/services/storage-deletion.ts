@@ -137,7 +137,7 @@ export async function enqueueStorageDeletion(
 }
 
 /** Injectable dependencies for {@link processStorageDeletionJobs} (DI, no module mocks). */
-export interface ProcessStorageDeletionDeps {
+interface ProcessStorageDeletionDeps {
   /** Physical delete (defaults to the real storage adapter). Idempotent on missing objects. */
   deleteFile?: (bucket: string, path: string) => Promise<void>;
   /** Small-object download used to expand run-workspace manifests. */
@@ -149,7 +149,7 @@ export interface ProcessStorageDeletionDeps {
 }
 
 /** Outcome of one worker pass. */
-export interface ProcessStorageDeletionResult {
+interface ProcessStorageDeletionResult {
   claimed: number;
   completed: number;
   failed: number;
@@ -335,7 +335,7 @@ async function emitBacklogMetrics(): Promise<void> {
 // Operator surface (admin dead-letter visibility)
 // ---------------------------------------------------------------------------
 
-export type StorageDeletionJobStatus = "pending" | "dead" | "completed";
+type StorageDeletionJobStatus = "pending" | "dead" | "completed";
 
 /**
  * A storage-deletion job row as surfaced to the admin list.
@@ -344,7 +344,7 @@ export type StorageDeletionJobStatus = "pending" | "dead" | "completed";
  * only `id` and `createdAt` sit on the universal DB-convention carve-out list
  * (`completed_at`, like every other domain timestamp, does NOT).
  */
-export interface StorageDeletionJobView {
+interface StorageDeletionJobView {
   id: string;
   bucket: string;
   storage_key: string;

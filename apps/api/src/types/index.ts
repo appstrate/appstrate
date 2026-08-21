@@ -11,9 +11,6 @@ export type { OrgRole } from "@appstrate/shared-types";
 import type { AgentManifest } from "@appstrate/core/validation";
 export type { AgentManifest };
 
-import type { ResourceEntry as ToolMeta } from "@appstrate/shared-types";
-export type { ToolMeta };
-
 // --- Loaded Package (manifest + prompt from DB) ---
 
 /**

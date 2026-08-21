@@ -109,10 +109,10 @@ export class RedirectBlockedError extends Error {
  * to its own error shape (sidecar `{status,error}` failure, CLI
  * `AuthorizedUrisError` / SSRF error).
  */
-export type PreflightResult =
+type PreflightResult =
   { ok: true } | { ok: false; reason: "ssrf" | "not_authorized"; message: string };
 
-export interface PreflightOptions {
+interface PreflightOptions {
   /**
    * Provider's declared trust boundary. When non-empty and `allowAllUris`
    * is false, the target must match.
@@ -272,13 +272,13 @@ function parseCookieHeader(value: string | null): Map<string, string> {
 }
 
 /** Optional observability hook — callers pass a logger; defaults to no-op. */
-export interface RedirectLogger {
+interface RedirectLogger {
   warn(message: string, fields?: Record<string, unknown>): void;
 }
 
 const NOOP_LOGGER: RedirectLogger = { warn() {} };
 
-export interface RedirectFollowOptions {
+interface RedirectFollowOptions {
   url: string;
   init: RequestInit;
   fetchFn: typeof fetch;
@@ -494,7 +494,7 @@ export async function fetchFollowingRedirectsCapturingCookies(
  * issues a single `redirect: "manual"` fetch and returns the (possibly
  * 30x) response unfollowed, exactly like the sidecar's streaming path.
  */
-export interface GuardedFetchOptions {
+interface GuardedFetchOptions {
   url: string;
   init: RequestInit;
   fetchFn?: typeof fetch;

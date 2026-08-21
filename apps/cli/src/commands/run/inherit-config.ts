@@ -29,7 +29,7 @@ import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
  * lives in `@appstrate/shared-types`; this alias keeps the legacy
  * CLI-local name available to existing callers and tests.
  */
-export type ResolvedRunConfigPayload = ResolvedRunConfig;
+type ResolvedRunConfigPayload = ResolvedRunConfig;
 
 export interface InheritedRunConfig {
   /** Model id to pass to the run pipeline, or null when nothing is set. */
@@ -54,7 +54,7 @@ export interface InheritedRunConfig {
   inherited: boolean;
 }
 
-export interface FetchRunConfigInput {
+interface FetchRunConfigInput {
   instance: string;
   bearerToken: string;
   applicationId: string;
@@ -104,7 +104,7 @@ export async function fetchRunConfigPayload(
   return (await res.json()) as ResolvedRunConfigPayload;
 }
 
-export interface MergeRunConfigInputs {
+interface MergeRunConfigInputs {
   /** Inherited payload (null = no inheritance — flags + defaults only). */
   inherited: ResolvedRunConfigPayload | null;
   /** `--model <id>` flag value. */

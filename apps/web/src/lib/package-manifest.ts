@@ -87,7 +87,7 @@ interface ManifestDependencyGroup {
   entries: Array<{ id: string; range: string }>;
 }
 
-export interface ManifestOverview {
+interface ManifestOverview {
   longDescription?: string;
   keywords: string[];
   /** license → author → schema_version → compatibility, in that order. */

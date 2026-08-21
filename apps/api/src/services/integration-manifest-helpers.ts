@@ -192,7 +192,7 @@ export interface AfpsManifestConnect {
  * leaves to the consumer (`tool` name, `run_at`, `reauth_on`, `produces`,
  * `persist_login_secret`).
  */
-export interface AppstrateConnectMeta {
+interface AppstrateConnectMeta {
   tool?: string;
   run_at?: "link" | "run-start";
   reauth_on?: number[];

@@ -65,7 +65,7 @@ export const PI_CHAT_MODEL_RUNTIME_CREATE_OPTIONS = {
   refreshOnCreate: false,
 } as const;
 
-export type PiChatModelBindingResolution =
+type PiChatModelBindingResolution =
   | { status: "ready"; binding: ResolvedPiChatModelBinding }
   | { status: "needs-reconnection" }
   | { status: "unsupported" };

@@ -9,7 +9,6 @@ import { loadSystemPackages, type SystemPackageEntry } from "@appstrate/core/sys
 import { compareVersionsDesc } from "@appstrate/core/semver";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { computeIntegrity } from "@appstrate/core/integrity";
-import type { PackageType } from "@appstrate/core/validation";
 import { createVersionAndUpload } from "./package-versions.ts";
 import { uploadPackageFiles, SYSTEM_STORAGE_NAMESPACE } from "./package-items/storage.ts";
 import { storageFolderForType } from "./package-items/config.ts";
@@ -17,7 +16,7 @@ import { storageFolderForType } from "./package-items/config.ts";
 export type { SystemPackageEntry };
 
 /** What one `syncSystemPackagesToDb` pass actually wrote. */
-export interface SystemPackageSyncReport {
+interface SystemPackageSyncReport {
   /** `packages` rows inserted or updated. */
   syncedPackages: number;
   /** `package_versions` rows created. */
@@ -113,10 +112,6 @@ function getAllSystemPackageVersions(): readonly SystemPackageEntry[] {
 
 export function isSystemPackage(id: string): boolean {
   return systemPackages.has(id);
-}
-
-export function getSystemPackagesByType(type: PackageType): SystemPackageEntry[] {
-  return [...systemPackages.values()].filter((e) => e.type === type);
 }
 
 /**

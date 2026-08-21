@@ -11,19 +11,19 @@
  * to whatever the request headers carried.
  */
 
-export interface RunnerResolverContext {
+interface RunnerResolverContext {
   /** Stamped by the OIDC strategy on `c.var.authExtra.cliFamilyId`. */
   cliFamilyId: string | null;
 }
 
-export interface RunnerResolverResult {
+interface RunnerResolverResult {
   /** Human-friendly device label (`cli_refresh_tokens.device_name`, …). */
   name: string | null;
   /** Forced kind override (`"cli"` for CLI tokens). Optional. */
   kind?: string | null;
 }
 
-export type RunnerResolver = (ctx: RunnerResolverContext) => Promise<RunnerResolverResult | null>;
+type RunnerResolver = (ctx: RunnerResolverContext) => Promise<RunnerResolverResult | null>;
 
 let _resolver: RunnerResolver | null = null;
 

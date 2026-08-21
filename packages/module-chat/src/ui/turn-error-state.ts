@@ -54,7 +54,7 @@ const REFUSAL_ERROR_KEY: Record<string, string> = {
   needs_reconnection: "turn.error.needsReconnection",
 };
 
-export interface TurnErrorState {
+interface TurnErrorState {
   text: string;
   retryable: boolean;
   requestId: string | undefined;

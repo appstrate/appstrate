@@ -43,7 +43,7 @@ export interface DnsResponderEvent {
   qtype?: number;
 }
 
-export interface CreateDnsResponderOptions {
+interface CreateDnsResponderOptions {
   /** IPv4 (dotted quad) every external A query resolves to. */
   answerIpv4: string;
   /** Bind host — 0.0.0.0 on a bridged network. */

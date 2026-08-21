@@ -90,13 +90,13 @@ const MAGIC_LINK_BINDING_PREFIX = "oidc-pending-client:";
  */
 const MAGIC_LINK_BINDING_TTL_MS = 16 * 60 * 1000;
 
-export interface TransactionContext {
+interface TransactionContext {
   headers: Headers | null;
   path?: string | null;
   query?: Record<string, unknown> | null;
 }
 
-export type PendingClientBinding =
+type PendingClientBinding =
   | { kind: "bound"; clientId: string; source: "oauth-state" | "magic-link" | "cookie" }
   | { kind: "invalid" }
   | { kind: "none" };
@@ -164,7 +164,7 @@ async function readOAuthCallbackState(): Promise<{ callbackURL: string } | null>
   }
 }
 
-export type CallbackURLAnalysis =
+type CallbackURLAnalysis =
   { kind: "oidc"; clientId: string } | { kind: "invalid" } | { kind: "not-oidc" };
 
 /**

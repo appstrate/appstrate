@@ -64,10 +64,7 @@ import { isBlockedUrlWithDns } from "../../../lib/ssrf-dns.ts";
 import { markClientSelfService } from "../services/oauth-admin.ts";
 import { mcpValidAudiences, initMcpValidAudiences } from "../../mcp/audiences.ts";
 
-export type ActorType = "dashboard_user" | "end_user" | "user";
-export type { OrgRole as OrgRoleClaim } from "@appstrate/core/permissions";
-
-export interface ClientMetadata {
+interface ClientMetadata {
   level?: "org" | "application" | "instance";
   referencedOrgId?: string;
   referencedApplicationId?: string;
@@ -129,7 +126,7 @@ export async function sha256HexVerify(clientSecret: string, storedHash: string):
   return timingSafeEqual(a, b);
 }
 
-export interface OidcBetterAuthPluginsOptions {
+interface OidcBetterAuthPluginsOptions {
   /**
    * ClientIds of first-party (`skip_consent = true`) OAuth clients known at
    * boot. Forwarded to `oauthProvider({ cachedTrustedClients })` so the
@@ -690,5 +687,3 @@ async function buildApplicationLevelClaims(
     throw err;
   }
 }
-
-export { getOidcAuthApi } from "./api.ts";

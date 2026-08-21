@@ -20,9 +20,9 @@ import type { AppEnv } from "../types/index.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { getClientIpFromRequest } from "../lib/client-ip.ts";
 
-export type AuditActorType = "user" | "end_user" | "api_key" | "system" | (string & {});
+type AuditActorType = "user" | "end_user" | "api_key" | "system" | (string & {});
 
-export interface RecordAuditInput {
+interface RecordAuditInput {
   orgId: string;
   applicationId?: string | null;
   actorType: AuditActorType;

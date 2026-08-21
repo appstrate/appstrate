@@ -29,7 +29,7 @@ const REFRESH_LOCK_TTL_SECONDS = 45;
 /** How long to wait for the distributed lock before proceeding unlocked. */
 const REFRESH_LOCK_ACQUIRE_TIMEOUT_MS = 30_000;
 
-export interface DedupedRefreshOptions<T> {
+interface DedupedRefreshOptions<T> {
   /** Redis lock key (e.g. `oauth-refresh:${id}` / `intg-refresh:${id}`). */
   lockKey: string;
   /** Label for the lock's timeout-warning log line. */

@@ -20,7 +20,7 @@ import { db } from "@appstrate/db/client";
 import { endUsers, user } from "@appstrate/db/schema";
 
 /** The owner columns any caller must project for a name lookup. */
-export interface ConnectionOwnerRef {
+interface ConnectionOwnerRef {
   userId: string | null;
   endUserId: string | null;
 }
@@ -30,7 +30,7 @@ export interface ConnectionOwnerRef {
  * owner row is gone (deleted member/end-user) — never throws on a dangling
  * owner, the connection itself is still a legitimate row.
  */
-export type OwnerNameLookup = (row: ConnectionOwnerRef) => string | null;
+type OwnerNameLookup = (row: ConnectionOwnerRef) => string | null;
 
 /**
  * Two batched lookups (users + end-users) over the distinct owner ids in

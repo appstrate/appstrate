@@ -51,7 +51,7 @@ export const PREVIEW_MAX_BYTES = 10 * 1024 * 1024;
 const PREVIEW_TOKEN_DOMAIN = "doc-preview.v1.";
 
 /** Payload encoded inside a preview token. */
-export interface PreviewTokenPayload {
+interface PreviewTokenPayload {
   /** Document id the token authorizes a preview of. */
   d: string;
   /** Org the document belongs to (binds the token to a tenant). */
@@ -179,7 +179,7 @@ export function buildInertPreviewCsp(appOrigin: string): string {
  * {@link buildPreviewCsp}. Named members (rather than a tuple or a bare string)
  * so a caller cannot silently put the meta copy on the header.
  */
-export interface PreviewCsp {
+interface PreviewCsp {
   /** For the `Content-Security-Policy` response header. Carries `sandbox`. */
   header: string;
   /** For {@link injectMetaCsp}. Same policy MINUS the `sandbox` directive. */

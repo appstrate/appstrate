@@ -90,7 +90,7 @@ function sleepWithAbort(ms: number, signal: AbortSignal): Promise<void> {
   });
 }
 
-export interface RetryContext {
+interface RetryContext {
   opts: ApiCommandOptions;
   effectiveOpts: ApiCommandOptions;
   url: string;

@@ -21,7 +21,7 @@ import { apiFetch } from "../lib/api.ts";
 import { listOrgs } from "../lib/orgs.ts";
 import { formatError } from "../lib/ui.ts";
 
-export interface WhoamiOptions {
+interface WhoamiOptions {
   profile?: string;
 }
 

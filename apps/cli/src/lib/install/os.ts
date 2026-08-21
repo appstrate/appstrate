@@ -22,7 +22,7 @@ export interface CommandResult {
   stderr: string;
 }
 
-export interface RunCommandOptions {
+interface RunCommandOptions {
   cwd?: string;
   env?: NodeJS.ProcessEnv;
   /**
@@ -264,7 +264,7 @@ export function isIpv4(value: string): boolean {
   });
 }
 
-export interface ParsedIpv4HttpUrl {
+interface ParsedIpv4HttpUrl {
   /** Input with trailing slashes stripped. */
   url: string;
   /** IPv4 literal (each octet 0..255) the daemon + guests must reach. */

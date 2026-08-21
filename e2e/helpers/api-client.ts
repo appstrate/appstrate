@@ -7,7 +7,7 @@
 
 import type { APIRequestContext, APIResponse } from "@playwright/test";
 
-export interface ApiClientOptions {
+interface ApiClientOptions {
   cookie: string;
   orgId: string;
   applicationId: string;

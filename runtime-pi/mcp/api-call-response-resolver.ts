@@ -57,7 +57,7 @@ type ReadResource = (uri: string) => Promise<{
   contents: Array<{ uri: string; mimeType?: string; text?: string; blob?: string }>;
 }>;
 
-export interface ShapeApiCallResponseOptions {
+interface ShapeApiCallResponseOptions {
   workspace: string;
   /** `responseMode.toFile` — workspace-relative path to write the body to. */
   toFile?: string;

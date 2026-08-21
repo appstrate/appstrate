@@ -35,12 +35,12 @@ import { upgradeHint } from "./install-source.ts";
 const ACK_FILENAME = "dual-install-ack.json";
 
 /** Subcommands whose output is parsed by humans / tooling — never warn here. */
-export const SILENT_SUBCOMMANDS = new Set(["doctor", "completion", "__install-source"]);
+const SILENT_SUBCOMMANDS = new Set(["doctor", "completion", "__install-source"]);
 
 /** Help/version flags that bypass the warning. */
-export const SILENT_FLAGS = new Set(["--version", "-V", "--help", "-h"]);
+const SILENT_FLAGS = new Set(["--version", "-V", "--help", "-h"]);
 
-export interface ShouldSkipArgs {
+interface ShouldSkipArgs {
   /** Commander's `program.args` after parsing — first non-flag is the subcommand. */
   args: string[];
   /** Raw `process.argv.slice(2)` — used to catch top-level `--help`/`--version` before commander resolves a subcommand. */
@@ -69,7 +69,7 @@ export interface AckStore {
   write(ack: DualInstallAck): Promise<void>;
 }
 
-export const defaultAckStore: AckStore = {
+const defaultAckStore: AckStore = {
   async read() {
     const path = join(getConfigDir(), ACK_FILENAME);
     try {
@@ -96,7 +96,7 @@ export const defaultAckStore: AckStore = {
   },
 };
 
-export interface RunDualInstallCheckOptions {
+interface RunDualInstallCheckOptions {
   pathEnv?: string;
   pathSeparator?: string;
   binaryName?: string;
@@ -106,7 +106,7 @@ export interface RunDualInstallCheckOptions {
   now?: () => Date;
 }
 
-export interface DualInstallWarning {
+interface DualInstallWarning {
   message: string;
   paths: string[];
 }

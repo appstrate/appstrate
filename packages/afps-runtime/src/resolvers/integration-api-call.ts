@@ -45,7 +45,6 @@ import {
   serializeFetchResponse,
   applyTransportHeaders,
   isReproducibleBody,
-  matchesAuthorizedUriSpec,
   type ApiCallFn,
   type ApiCallMeta,
 } from "./http-call-core.ts";
@@ -93,7 +92,7 @@ export interface IntegrationRef {
  * the auth's URL allowlist, the auth type, and the auth's `delivery.http`
  * config (if any).
  */
-export interface ApiCallIntegrationMeta {
+interface ApiCallIntegrationMeta {
   /** Scoped package id (e.g. `@appstrate/gmail`). */
   name: string;
   /**
@@ -308,7 +307,7 @@ export interface IntegrationApiCallResolver {
  * resolver derives the header from the integration manifest's
  * `delivery.http` plan (auth-type defaults included).
  */
-export interface LocalIntegrationCredentialsFile {
+interface LocalIntegrationCredentialsFile {
   version: number;
   integrations: Record<
     string,
@@ -328,7 +327,7 @@ export interface LocalIntegrationCredentialsFile {
   >;
 }
 
-export interface LocalIntegrationResolverOptions {
+interface LocalIntegrationResolverOptions {
   /** Path to a creds JSON file or an already-parsed object. */
   creds: string | LocalIntegrationCredentialsFile;
   /** Override the low-level HTTP client. Defaults to the global `fetch`. */
@@ -609,7 +608,7 @@ function applyDeliveryPlan(headers: Record<string, string>, plan: HttpDeliveryPl
 // Remote resolver
 // ─────────────────────────────────────────────
 
-export interface RemoteAppstrateIntegrationResolverOptions {
+interface RemoteAppstrateIntegrationResolverOptions {
   /** Base URL of the Appstrate instance. */
   instance: string;
   /** API key (ask_...) or device-flow JWT with `credential-proxy:call`. */
@@ -797,4 +796,3 @@ export class RemoteAppstrateIntegrationResolver implements IntegrationApiCallRes
 }
 
 // Re-export the URL matcher so callers can reason about authorized_uris.
-export { matchesAuthorizedUriSpec };

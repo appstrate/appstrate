@@ -35,7 +35,7 @@ import type { ModelSwap } from "@appstrate/core/sidecar-types";
 /** Maximum request body the proxy will accept before refusing up-front. */
 const DEFAULT_MAX_REQUEST_BYTES = 10 * 1024 * 1024;
 
-export interface ProxyCallInputs {
+interface ProxyCallInputs {
   adapter: LlmProxyAdapter;
   principal: LlmProxyPrincipal;
   /** Forwarded to `llm_usage.run_id`. Populated by Phase 4's `X-Run-Id` header. */

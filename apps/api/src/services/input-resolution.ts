@@ -30,7 +30,7 @@ import { authorDefaults, type JSONSchemaObject } from "@appstrate/core/form";
  * optional: an origin that has no such layer (an inline run has no stored
  * editor defaults, a manual run has no schedule) simply omits it.
  */
-export interface InputLayers {
+interface InputLayers {
   /** `manifest.input.schema` — its `default` keywords are the author layer. */
   schema?: JSONSchemaObject | undefined;
   /**

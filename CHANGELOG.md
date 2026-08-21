@@ -6,7 +6,42 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **The `check` chain now fails on dead exports** (`bun run verify:dead-code`,
+  backed by [knip](https://knip.dev) and `knip.config.ts`). `no-unused-vars`
+  only sees locals — an exported symbol is "used" by construction — so nothing
+  in the gate could answer "does this exported symbol still have a reader".
+  That blind spot is what let the dead weight removed in the previous audit
+  accumulate for months. The same pass also reports dead files and unused
+  dependencies. Entries and ignores in `knip.config.ts` each carry a
+  justification: an entry says _what reaches the file_, an ignore says _why
+  knip is structurally blind_.
+
+  Published packages are deliberately out of scope for public-export death:
+  `@appstrate/core`, `@appstrate/afps-runtime` and the `@appstrate/module-*`
+  packages are consumed out of tree, so "no in-repo reader" is not evidence.
+  knip treats every name in their `exports` map as an entry.
+
 ### Removed
+
+- **Dead declarations the new gate surfaced.** ~500 superfluous `export`
+  keywords (types and values used only inside their own file), plus a handful
+  of declarations that had no reader at all once the re-export was dropped —
+  `createTestSession`, `parseSSEStream`, `patchProcessExit`, `seedOrgProxy`,
+  `connectLoginBlock`, `getSystemPackagesByType`, `hasExternalDb`, `hasS3`,
+  `itRequiresRedis`/`Docker`/`S3`/`Postgres`. No runtime behaviour changes.
+
+- **Dependencies no source file imports.** `apps/web` declared 14
+  `@radix-ui/*` packages plus `ajv`, `ajv-formats`, `class-variance-authority`,
+  `clsx`, `cmdk` and `tailwind-merge` that belong to (and are declared by)
+  `@appstrate/ui`; `apps/api` declared `ajv-formats`, `semver` and the
+  deprecated `@types/ioredis` stub; the root manifest duplicated `ajv`,
+  `@types/json-schema` and `@types/semver` already declared by
+  `@appstrate/core`; `packages/db` declared `@better-auth/drizzle-adapter`
+  and `@appstrate/runner-pi` declared `ajv`. Only `@appstrate/runner-pi` is
+  published, and it never imported `ajv`, so installs get one fewer transitive
+  package.
 
 - **Every `config` wire field, with no alias and no deprecation window.**
   `config` on the run / inline-run / remote-run bodies; `config` and

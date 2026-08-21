@@ -44,8 +44,6 @@ import { validateAgentReadiness, collectAgentReadinessErrors } from "./agent-rea
 import type { InlineRunBody } from "@appstrate/core/platform-types";
 import type { ConnectionOverrides } from "@appstrate/core/integration";
 
-export type { InlineRunBody };
-
 export interface InlineRunPreflightResult {
   manifest: AgentManifest;
   prompt: string;

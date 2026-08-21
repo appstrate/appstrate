@@ -144,7 +144,6 @@ export async function updateOrganization(
 
 export { orgSettingsSchema } from "@appstrate/core/permissions";
 import type { OrgSettings } from "@appstrate/shared-types";
-export type { OrgSettings };
 
 export async function getOrgSettings(orgId: string): Promise<OrgSettings> {
   const [row] = await db

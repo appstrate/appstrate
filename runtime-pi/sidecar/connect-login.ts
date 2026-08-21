@@ -40,7 +40,7 @@ import { logger } from "./logger.ts";
  */
 type DeliveryHttp = ManifestDeliveryHttp;
 
-export interface RunConnectLoginOptions {
+interface RunConnectLoginOptions {
   /** Multiplexing host holding the integration's connected MCP client. */
   host: McpHost;
   /** Normalised namespace the integration registered under. */

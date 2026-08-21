@@ -19,7 +19,7 @@ function hasRedis(): boolean {
   return !!getEnv().REDIS_URL;
 }
 
-export function getRedis(): Redis {
+function getRedis(): Redis {
   if (!redis) {
     const url = getEnv().REDIS_URL;
     if (!url) throw new Error("REDIS_URL is required for Redis tests");

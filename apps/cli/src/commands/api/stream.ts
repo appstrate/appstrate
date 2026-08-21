@@ -2,7 +2,7 @@
 
 import type { WriteOutMetrics } from "./write-out.ts";
 
-export interface ChunkSink {
+interface ChunkSink {
   write(chunk: Uint8Array): void;
   close(): Promise<void>;
 }
@@ -64,7 +64,7 @@ export async function consumeResponseStream(
  * Never resolves otherwise — meant to lose `Promise.race` every time
  * the real work completes first.
  */
-export function abortAsRejection(signal: AbortSignal): Promise<never> {
+function abortAsRejection(signal: AbortSignal): Promise<never> {
   return new Promise<never>((_, reject) => {
     if (signal.aborted) {
       reject(abortError(signal.reason));

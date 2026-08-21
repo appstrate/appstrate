@@ -53,7 +53,7 @@ export interface CatalogOperation {
   operation: OperationNode;
 }
 
-export interface OperationCatalog {
+interface OperationCatalog {
   operations: Map<string, CatalogOperation>;
   /** Component schemas, for resolving `$ref`s in `describe_operation`. */
   componentSchemas: Record<string, unknown>;

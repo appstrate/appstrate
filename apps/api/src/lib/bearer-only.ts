@@ -40,7 +40,7 @@ const ACCEPTED_AUTH_METHODS: ReadonlySet<string> = new Set([
  * unchanged. (The bearer allowlist above is the opposite by design: an
  * explicit, core-owned set of strategy ids.)
  */
-export interface BearerCallerCapabilities {
+interface BearerCallerCapabilities {
   /** Strategy declared itself a first-party, server-minted loopback caller. */
   firstPartyLoopback?: boolean;
 }

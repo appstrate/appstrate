@@ -65,7 +65,6 @@ import { useOrgScope } from "./use-org-scope";
 // rename/removal of any non-`manifest` field breaks compilation.
 export type {
   AgentIntegrationEntry,
-  IntegrationAgentResolution,
   IntegrationAuthStatus,
   IntegrationAuthType,
   IntegrationCandidate,

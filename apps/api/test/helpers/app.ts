@@ -78,7 +78,7 @@ import welcomeRouter from "../../src/routes/welcome.ts";
 import type { AppstrateModule } from "@appstrate/core/module";
 import type { AppEnv } from "../../src/types/index.ts";
 
-export interface GetTestAppOptions {
+interface GetTestAppOptions {
   /**
    * Explicit module list to mount. When provided, bypasses the preload-
    * populated discovery registry and returns a fresh (non-cached) app.

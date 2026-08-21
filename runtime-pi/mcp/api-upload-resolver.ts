@@ -79,7 +79,7 @@ const ABORT_CLEANUP_TIMEOUT_MS = 5_000;
  * The resolver validates these inside `executeUpload` so the surface
  * is a single function, easy to unit-test.
  */
-export interface IntegrationUploadRequest {
+interface IntegrationUploadRequest {
   /**
    * The `{ns}__api_call` MCP tool name to dispatch each chunk through.
    * The integration is implied by the tool name.
@@ -101,7 +101,7 @@ export interface IntegrationUploadRequest {
  * was used, only "did it succeed, what did the upstream say, what's
  * the hash for verification".
  */
-export type IntegrationUploadResult =
+type IntegrationUploadResult =
   | {
       ok: true;
       protocol: UploadProtocol;

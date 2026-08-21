@@ -49,7 +49,7 @@ const PKCE_S256 = "S256";
 /** PKCE-plain marker. RFC 7636 §4.2 — only used when the IdP does not advertise S256. */
 const PKCE_PLAIN = "plain";
 
-export interface InitiateIntegrationOAuthInput {
+interface InitiateIntegrationOAuthInput {
   /** Integration package id (e.g. `@official/gmail`). */
   packageId: string;
   /** Auth key as declared in `manifest.auths.{key}`. */
@@ -149,7 +149,7 @@ export interface InitiateIntegrationOAuthInput {
   discover?: typeof resolveOAuthEndpoints;
 }
 
-export interface InitiateIntegrationOAuthResult {
+interface InitiateIntegrationOAuthResult {
   authUrl: string;
   state: string;
 }

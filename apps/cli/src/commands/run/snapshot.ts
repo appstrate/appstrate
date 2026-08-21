@@ -18,8 +18,6 @@ import { readFile } from "node:fs/promises";
 import type { ExecutionContext, SnapshotFile } from "@appstrate/afps-runtime/types";
 import { getErrorMessage } from "@appstrate/core/errors";
 
-export type { SnapshotFile };
-
 export class SnapshotError extends Error {
   constructor(
     message: string,

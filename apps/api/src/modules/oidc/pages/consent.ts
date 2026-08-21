@@ -59,7 +59,7 @@ function describeScope(scope: string): string {
   return SCOPE_DESCRIPTIONS_FR[scope] ?? scope;
 }
 
-export interface ConsentPageProps {
+interface ConsentPageProps {
   clientName: string;
   scopes: string[];
   /** Form action — typically `/api/oauth/consent${queryString}`. */

@@ -18,8 +18,6 @@ import { LocalEventBuffer } from "./event-buffer/local-event-buffer.ts";
 import { LocalCookieJarStore } from "./cookie-jar/local-cookie-jar.ts";
 import { logger } from "../lib/logger.ts";
 
-export { hasRedis, hasExternalDb, hasS3, getExecutionMode } from "./mode.ts";
-
 // ---------------------------------------------------------------------------
 // Singletons — Redis implementations are loaded lazily via dynamic import()
 // to avoid connecting to Redis when REDIS_URL is absent.

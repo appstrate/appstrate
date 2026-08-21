@@ -57,7 +57,7 @@ export interface MergeReport {
   fileConstraintsCarried: string[];
 }
 
-export interface MergeOutcome {
+interface MergeOutcome {
   manifest: JsonObject;
   report: MergeReport;
 }

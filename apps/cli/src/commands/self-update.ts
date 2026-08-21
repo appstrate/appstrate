@@ -24,7 +24,7 @@ import {
   type ResolveTargetVersionDeps,
 } from "../lib/self-update.ts";
 
-export interface SelfUpdateOptions {
+interface SelfUpdateOptions {
   /** Specific version to install. Default: latest published release. */
   version?: string;
   /** Reinstall even if the current version equals the target. */
@@ -57,7 +57,7 @@ export const SELF_UPDATE_EXIT = {
   UNKNOWN_SOURCE: 2,
 } as const;
 
-export interface SelfUpdateRunResult {
+interface SelfUpdateRunResult {
   exitCode: number;
   message: string;
   detail?: PerformCurlUpdateResult;

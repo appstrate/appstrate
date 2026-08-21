@@ -20,13 +20,11 @@
   "devDependencies": {
     "@commitlint/cli": "^21.2.1",
     "@commitlint/config-conventional": "^21.2.0",
-    "@eslint/js": "^10.0.1",
     "@earendil-works/pi-ai": "0.84.2",
+    "@eslint/js": "^10.0.1",
     "@readme/openapi-parser": "^7.0.1",
     "@redocly/openapi-core": "^2.43.2",
     "@types/bun": "latest",
-    "@types/json-schema": "7.0.15",
-    "@types/semver": "^7.8.0",
     "eslint": "^10.8.0",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-react": "^7.37.5",
@@ -34,6 +32,7 @@
     "eslint-plugin-react-refresh": "^0.5.3",
     "globals": "^17.8.0",
     "husky": "^9.1.7",
+    "knip": "^5.88.1",
     "lint-staged": "^17.3.0",
     "openapi-typescript": "^7.13.0",
     "prettier": "^3.9.6",
@@ -71,8 +70,9 @@
     "build:system-packages:check": "bun scripts/build-system-packages.ts --check",
     "lint:manifest-casing": "bun scripts/lint-manifest-casing.ts",
     "conformance:check": "bun scripts/conformance/run.ts --tier gate",
+    "verify:dead-code": "knip-bun --no-config-hints",
     "test:system-packages": "bun scripts/conformance/run.ts",
-    "check": "turbo typecheck lint format:check verify:openapi verify:api-types verify:type-coverage verify:compose-defaults detect:breaking build:system-packages:check lint:manifest-casing conformance:check verify:module-isolation typecheck:scripts verify:module-contract",
+    "check": "turbo typecheck lint format:check verify:openapi verify:api-types verify:type-coverage verify:compose-defaults detect:breaking build:system-packages:check lint:manifest-casing conformance:check verify:module-isolation typecheck:scripts verify:module-contract verify:dead-code",
     "verify:module-isolation": "bun scripts/verify-module-isolation.ts",
     "verify:module-contract": "bun scripts/verify-module-contract.ts",
     "typecheck:scripts": "tsc --noEmit -p scripts/tsconfig.json",
@@ -131,8 +131,7 @@
     "@appstrate/core": "workspace:*",
     "@appstrate/db": "workspace:*",
     "@appstrate/mcp-transport": "workspace:*",
-    "@electric-sql/pglite": "^0.5.4",
-    "ajv": "^8.20.0"
+    "@electric-sql/pglite": "^0.5.4"
   },
   "overrides": {
     "zod": "4.4.3",

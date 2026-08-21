@@ -82,7 +82,7 @@ export interface PlatformContainerResult {
   cancelled: boolean;
 }
 
-export interface RunPlatformContainerInput {
+interface RunPlatformContainerInput {
   runId: string;
   context: ExecutionContext;
   plan: AppstrateRunPlan;

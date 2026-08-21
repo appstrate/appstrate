@@ -24,8 +24,6 @@ import type { ExecutionMode } from "../../infra/mode.ts";
 import { DockerOrchestrator } from "./docker-orchestrator.ts";
 import { ProcessOrchestrator } from "./process-orchestrator.ts";
 
-export type { OrchestratorRegistration } from "@appstrate/core/platform-types";
-
 interface OwnedRegistration extends OrchestratorRegistration {
   /** Module id that contributed this backend ("core" for built-in ones). */
   readonly owner: string;

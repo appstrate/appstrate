@@ -19,7 +19,7 @@ import type { Manifest } from "@appstrate/core/validation";
 import { extractSkillIdsFromManifest } from "./../lib/manifest-utils.ts";
 import type { InlineRunLimits } from "./run-limits.ts";
 
-export interface InlineManifestValidationResult {
+interface InlineManifestValidationResult {
   valid: boolean;
   errors: string[];
   manifest?: Manifest;
@@ -27,7 +27,7 @@ export interface InlineManifestValidationResult {
   canonicalManifestJson?: string;
 }
 
-export interface InlineManifestValidationInput {
+interface InlineManifestValidationInput {
   manifest: unknown;
   prompt: unknown;
   limits: InlineRunLimits;

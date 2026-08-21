@@ -63,7 +63,7 @@ interface OpenBlock {
  * `usage.cost` still carries pi-ai's own per-bucket figures verbatim — they are
  * informational and are never billed.
  */
-export interface PiChatResultMeta {
+interface PiChatResultMeta {
   usage: PiUsage;
   finishReason: PiFinishReason;
   errorText?: string;

@@ -34,7 +34,7 @@ import { logger } from "../lib/logger.ts";
 import { validateManifest } from "@appstrate/core/validation";
 import type { AgentManifest, LoadedPackage } from "../types/index.ts";
 
-export interface RegistrySourceInput {
+interface RegistrySourceInput {
   orgId: string;
   applicationId: string;
   packageId: string;
@@ -50,7 +50,7 @@ export interface RegistrySourceInput {
   integrityHint?: string;
 }
 
-export interface ResolvedRegistryAgent {
+interface ResolvedRegistryAgent {
   agent: LoadedPackage;
   /** Version label to display on the run row (`"draft"` or a concrete semver). */
   versionLabel: string;

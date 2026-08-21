@@ -194,7 +194,7 @@ function isDataUri(value: unknown): value is string {
  * entries of array file fields so the inline path can rewrite the exact
  * persisted value after extraction.
  */
-export interface InputFileRef {
+interface InputFileRef {
   fieldName: string;
   uri: string;
   kind: "upload" | "data" | "document";
@@ -309,7 +309,7 @@ const MAX_INLINE_BASE64_LENGTH = Math.ceil(MAX_INLINE_FILE_BYTES / 3) * 4;
 const BASE64_RE = /^[A-Za-z0-9+/]*$/;
 
 /** A decoded inline file: declared MIME, optional declared filename, content. */
-export interface InlineFile {
+interface InlineFile {
   mime: string;
   name?: string;
   bytes: Uint8Array;

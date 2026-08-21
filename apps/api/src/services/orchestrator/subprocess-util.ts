@@ -79,7 +79,7 @@ export async function* tailFileLines(
   }
 }
 
-export interface CollectedProcess {
+interface CollectedProcess {
   exitCode: number;
   stdout: string;
   stderr: string;

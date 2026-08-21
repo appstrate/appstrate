@@ -75,7 +75,7 @@ function buildCacheKey(input: {
   return `llm-proxy:cache:v${ENTRY_VERSION}:${h.digest("hex")}`;
 }
 
-export interface CacheLookupInput {
+interface CacheLookupInput {
   orgId: string;
   presetId: string;
   apiShape: string;
@@ -83,7 +83,7 @@ export interface CacheLookupInput {
   requestBody: Uint8Array;
 }
 
-export interface CacheHit {
+interface CacheHit {
   response: Response;
   cacheKey: string;
 }
@@ -131,7 +131,7 @@ export async function lookupResponse(
   };
 }
 
-export interface CacheStoreInput {
+interface CacheStoreInput {
   cacheKey: string;
   ttlSeconds: number;
   status: number;

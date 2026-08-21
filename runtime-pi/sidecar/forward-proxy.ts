@@ -24,7 +24,7 @@ import {
 } from "./connect-tunnel.ts";
 import { logger } from "./logger.ts";
 
-export interface ForwardProxyDeps {
+interface ForwardProxyDeps {
   config: SidecarConfig;
   listenPort?: number; // default 8081 — tests use 0 (ephemeral)
   listenHost?: string; // default "0.0.0.0" — tests use "127.0.0.1"

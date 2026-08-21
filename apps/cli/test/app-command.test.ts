@@ -122,7 +122,11 @@ afterEach(async () => {
   await rm(tmpDir, { recursive: true, force: true });
 });
 
-async function seedLoggedIn(applicationId?: string, profile = "default", orgId = "org_1"): Promise<void> {
+async function seedLoggedIn(
+  applicationId?: string,
+  profile = "default",
+  orgId = "org_1",
+): Promise<void> {
   await setProfile(profile, {
     instance: "https://app.example.com",
     userId: "u_1",

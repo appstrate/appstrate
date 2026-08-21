@@ -29,7 +29,7 @@ export async function listOrgs(profileName: string): Promise<Org[]> {
   return apiList<Org>(profileName, "/api/orgs");
 }
 
-export interface CreateOrgInput {
+interface CreateOrgInput {
   name: string;
   slug?: string;
 }

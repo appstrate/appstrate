@@ -23,7 +23,7 @@
  *     `paths[path][method].responses[status].content["application/json"].schema`.
  */
 
-export type ResponseTypeEntry = {
+type ResponseTypeEntry = {
   /** Named component schema under `components.schemas`. Mutually exclusive with path/method/status. */
   specSchemaName?: string;
   /** Inline response: spec path (e.g. "/api/agents/{scope}/{name}/proxy"). */

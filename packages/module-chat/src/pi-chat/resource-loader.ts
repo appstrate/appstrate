@@ -4,7 +4,7 @@ import type { ExtensionFactory, PiCodingAgentSdk } from "@appstrate/runner-pi";
 
 type PiChatResourceLoaderSdk = Pick<PiCodingAgentSdk, "DefaultResourceLoader" | "SettingsManager">;
 
-export interface CreatePiChatResourceLoaderOptions extends PiChatResourceLoaderSdk {
+interface CreatePiChatResourceLoaderOptions extends PiChatResourceLoaderSdk {
   cwd: string;
   agentDir: string;
   systemPrompt: string;

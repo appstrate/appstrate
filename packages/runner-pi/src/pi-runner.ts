@@ -56,7 +56,6 @@ import {
   finalizeThrownFailure,
   reduceEvents,
   truncateToolResult,
-  toolResultByteLimit,
   zeroTokenUsage,
   type RunError,
   type RunOptions,
@@ -309,7 +308,6 @@ export function derivePiCompactionSettings(
 // import) so boot-critical callers can pull it without dragging this module's
 // SDK graph. Re-exported here so the historical `pi-runner.ts` import path
 // keeps resolving.
-export { PROVIDER_BY_API, deriveProviderFromApi } from "./provider-map.ts";
 
 // Compile error if appstrate ever declares an apiShape Pi does not know.
 type _ApiShapeSubsetOfPi = ModelApiShape extends KnownApi ? true : never;
@@ -1122,7 +1120,7 @@ type PiSubscribedEvent = { type: string } & Record<string, unknown>;
 // lives in `@appstrate/afps-runtime/runner` (imported above for the bridge's
 // own use). Re-exported here for this package's existing test imports + public
 // surface.
-export { truncateToolResult, toolResultByteLimit };
+export { truncateToolResult };
 
 /**
  * True when a settled assistant turn's `stopReason` represents a terminal
@@ -1163,7 +1161,7 @@ function isProviderNormalizedAbort(errorMessage: string | undefined): boolean {
   return normalized === "the operation was aborted" || normalized === "this operation was aborted";
 }
 
-export interface SessionBridgeOptions {
+interface SessionBridgeOptions {
   /**
    * Tool names whose first successful `tool_execution_end` marks the run
    * as complete. See {@link PiRunnerOptions.terminalTools}.

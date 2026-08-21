@@ -53,13 +53,11 @@ import {
   type OpensslExecError,
 } from "./openssl-exec.ts";
 
-export type { OpensslSpawnFn } from "./openssl-exec.ts";
-
 // ─────────────────────────────────────────────
 // Public types
 // ─────────────────────────────────────────────
 
-export interface OpensslGeneratorOptions {
+interface OpensslGeneratorOptions {
   /** Where the generator writes its temp files. Defaults to `os.tmpdir()`. */
   workDir?: string;
   /** Override the `openssl` binary path. Defaults to `"openssl"`. */
@@ -79,7 +77,7 @@ export class OpensslCaGeneratorError extends Error {
   }
 }
 
-export type OpensslCaErrorCode =
+type OpensslCaErrorCode =
   | "OPENSSL_NOT_FOUND"
   | "OPENSSL_NONZERO_EXIT"
   | "AKI_NOT_REQUESTED"

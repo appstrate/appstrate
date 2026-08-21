@@ -57,7 +57,7 @@ export class OauthProviderMissingCredentialError extends Error {
  * with a re-check plus a non-null assertion at the point of use, duplicating
  * the invariant this resolver already enforces.
  */
-export type CredentialDelivery =
+type CredentialDelivery =
   /** Oauth-class credential — bearer swapped server-side by the sidecar `/llm` gateway. */
   | { readonly kind: "oauth"; readonly credentialId: string }
   /** Static API-key provider — the placeholder is substituted for the real key inline. */

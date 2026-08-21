@@ -84,7 +84,7 @@ export interface PiChatSession extends PiChatToolLoopSession {
   abort?(): Promise<void>;
 }
 
-export interface StepCapController {
+interface StepCapController {
   /** Wrap the session's `afterToolCall` hook so the tool loop stops at the budget. */
   attach(session: PiChatToolLoopSession): void;
   /** Whether the cap actually fired (never true by arithmetic alone). */

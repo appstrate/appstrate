@@ -30,7 +30,7 @@
  * cause should also register with `process.on("exit", …)`.
  */
 
-export type ShutdownHook = () => Promise<void> | void;
+type ShutdownHook = () => Promise<void> | void;
 
 type ShutdownOptions = {
   /** Injected for tests so they can assert exit codes without killing the test runner. */
@@ -150,7 +150,7 @@ export class ShutdownCoordinator {
  * listeners; subcommands import `shutdownSignal` and `onShutdown`
  * directly without caring about the underlying instance.
  */
-export const coordinator = new ShutdownCoordinator();
+const coordinator = new ShutdownCoordinator();
 
 export const shutdownSignal: AbortSignal = coordinator.signal;
 export const onShutdown = (hook: ShutdownHook): (() => void) => coordinator.onShutdown(hook);

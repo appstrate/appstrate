@@ -28,7 +28,7 @@ import type { Context, MiddlewareHandler } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import { getPublicAppOrigin } from "./public-url.ts";
 
-export interface AuthChallengeArgs {
+interface AuthChallengeArgs {
   /** Canonical public app origin, e.g. `https://instance.example`. */
   origin: string;
   /**
@@ -42,7 +42,7 @@ export interface AuthChallengeArgs {
 }
 
 /** Builds the `WWW-Authenticate` header value for a matched resource. */
-export type AuthChallengeBuilder = (args: AuthChallengeArgs) => string;
+type AuthChallengeBuilder = (args: AuthChallengeArgs) => string;
 
 interface Entry {
   prefix: string;

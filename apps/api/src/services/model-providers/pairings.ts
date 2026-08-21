@@ -41,7 +41,7 @@ const SECRET_BYTES = 32;
 /** Grace window after `expires_at` before the cleanup worker DELETEs the row. */
 const CLEANUP_GRACE_HOURS = 1;
 
-export interface CreatePairingArgs {
+interface CreatePairingArgs {
   userId: string;
   orgId: string;
   providerId: string;
@@ -53,7 +53,7 @@ export interface CreatePairingArgs {
   ttlSeconds: number;
 }
 
-export interface CreatePairingResult {
+interface CreatePairingResult {
   id: string;
   /**
    * The plaintext pairing token — `appp_<base64url(header)>.<base64url(secret)>`.
@@ -63,7 +63,7 @@ export interface CreatePairingResult {
   expiresAt: Date;
 }
 
-export interface ConsumedPairing {
+interface ConsumedPairing {
   id: string;
   userId: string;
   orgId: string;

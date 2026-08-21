@@ -27,7 +27,7 @@ import type { ProxyCredentialsPayload } from "@appstrate/connect/proxy-primitive
 import { buildProxyCredentialsPayload } from "@appstrate/connect/integration-credentials";
 import type { IntegrationCredentialsSource } from "./integration-credentials-source.ts";
 
-export interface ApiCallCredentialAdapter {
+interface ApiCallCredentialAdapter {
   fetchCredentials: (integrationId: string) => Promise<ProxyCredentialsPayload>;
   /**
    * Force a refresh on a mid-run 401. Returns the re-snapshotted payload when

@@ -73,7 +73,7 @@ export function extractRunAgentDenorm(pkg: LoadedPackage): {
 // Types
 // ---------------------------------------------------------------------------
 
-export interface RunPipelineParams {
+interface RunPipelineParams {
   runId: string;
   agent: LoadedPackage;
   orgId: string;
@@ -149,7 +149,7 @@ export interface RunPipelineParams {
   manifestCache?: IntegrationManifestCache;
 }
 
-export interface RunPipelineSuccess {
+interface RunPipelineSuccess {
   runId: string;
   /**
    * Resolved model label snapshot — same value persisted on
@@ -164,7 +164,7 @@ export interface RunPipelineSuccess {
 // Preflight — shared by run route and scheduler
 // ---------------------------------------------------------------------------
 
-export interface PreflightResult {
+interface PreflightResult {
   modelId: string | null;
   generationConfig: ModelGenerationSettings | null;
   proxyId: string | null;

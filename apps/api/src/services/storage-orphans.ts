@@ -85,7 +85,7 @@ export interface OrphanScanBucket {
 }
 
 /** Per-bucket outcome of a diff pass. */
-export interface BucketDiff {
+interface BucketDiff {
   bucket: string;
   /** Objects enumerated in the bucket. */
   scanned: number;

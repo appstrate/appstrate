@@ -33,7 +33,7 @@ import { invalidRequest, parseBody } from "@appstrate/core/api-errors";
  * Options for {@link readJsonBody}. Passing a bare string is shorthand for
  * `{ param }` (kept for the existing positional callers).
  */
-export interface ReadJsonBodyOptions {
+interface ReadJsonBodyOptions {
   /** Field-path prefix forwarded to `parseBody` for nested error reporting. */
   param?: string;
   /** Treat a missing / whitespace-only body as `{}` instead of a 400. */

@@ -36,8 +36,6 @@ import type { AppContextRow } from "../../../middleware/app-context.ts";
 import type { AuthIdentity } from "../auth/types.ts";
 import { oidcEndUserProfiles } from "@appstrate/db/schema";
 
-export type { AuthIdentity };
-
 /**
  * Load an application row by id — shared helper for callers that need the
  * full `AppContextRow` shape outside the Hono middleware chain (e.g. the
@@ -67,7 +65,7 @@ async function requireAppById(applicationId: string): Promise<AppContextRow> {
   return app;
 }
 
-export interface ResolvedEndUser {
+interface ResolvedEndUser {
   endUserId: string;
   applicationId: string;
   orgId: string;

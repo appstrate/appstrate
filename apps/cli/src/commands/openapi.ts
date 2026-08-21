@@ -47,13 +47,13 @@ import {
 import { writeFile } from "node:fs/promises";
 import SwaggerParser from "@apidevtools/swagger-parser";
 
-export interface OpenapiCommandBaseOptions {
+interface OpenapiCommandBaseOptions {
   profile?: string;
   noCache?: boolean;
   refresh?: boolean;
 }
 
-export interface OpenapiListOptions extends OpenapiCommandBaseOptions {
+interface OpenapiListOptions extends OpenapiCommandBaseOptions {
   tag?: string;
   method?: string;
   path?: string;
@@ -61,11 +61,11 @@ export interface OpenapiListOptions extends OpenapiCommandBaseOptions {
   json?: boolean;
 }
 
-export interface OpenapiShowOptions extends OpenapiCommandBaseOptions {
+interface OpenapiShowOptions extends OpenapiCommandBaseOptions {
   json?: boolean;
 }
 
-export interface OpenapiExportOptions extends OpenapiCommandBaseOptions {
+interface OpenapiExportOptions extends OpenapiCommandBaseOptions {
   output?: string;
 }
 

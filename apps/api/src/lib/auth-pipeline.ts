@@ -37,7 +37,7 @@ import { logger } from "./logger.ts";
 import { withPublicAppOrigin } from "./public-url.ts";
 import type { AppEnv } from "../types/index.ts";
 
-export interface AuthPipelineOptions {
+interface AuthPipelineOptions {
   /**
    * Accessor for paths that bypass the auth middleware entirely.
    * Module-contributed public paths (e.g. a module's inbound webhook
@@ -456,7 +456,7 @@ export async function maybeTransformDeviceFlowFormBody(req: Request): Promise<Re
 }
 
 /** Paths that need auth but not org-context (user-scoped or self-resolving). */
-export function skipOrgContext(path: string): boolean {
+function skipOrgContext(path: string): boolean {
   if (path === "/api/orgs" || path === "/api/orgs/") return true; // list/create orgs
   if (path.startsWith("/api/orgs/")) return true; // /api/orgs/:id/* handle their own auth
   if (path === "/api/profile" || path === "/api/profile/") return true;

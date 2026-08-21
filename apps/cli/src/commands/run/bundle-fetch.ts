@@ -38,7 +38,7 @@ export class BundleFetchError extends Error {
   }
 }
 
-export interface BundleFetchInput {
+interface BundleFetchInput {
   instance: string;
   bearerToken: string;
   applicationId: string;
@@ -51,7 +51,7 @@ export interface BundleFetchInput {
   fetchImpl?: typeof fetch;
 }
 
-export interface BundleFetchResult {
+interface BundleFetchResult {
   /** Downloaded bundle bytes — verified against the server integrity header. */
   bytes: Uint8Array;
   /** Bundle SRI digest (`sha256-<base64>`) reported by the server. */

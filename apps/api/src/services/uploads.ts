@@ -105,7 +105,7 @@ function isWithinReuseWindow(consumedAt: Date): boolean {
 const CONSUME_GRACE_MS = 60 * 60 * 1000;
 
 /** Returned to the client from POST /api/uploads. */
-export interface CreateUploadResponse {
+interface CreateUploadResponse {
   object: "upload";
   id: string;
   uri: string;
@@ -165,7 +165,7 @@ export function parseUploadUri(uri: string): string | null {
 // Create
 // ---------------------------------------------------------------------------
 
-export interface CreateUploadParams {
+interface CreateUploadParams {
   orgId: string;
   applicationId: string;
   /** Dashboard/API-key user who created the upload (null for end-user flows). */
@@ -340,7 +340,7 @@ export async function createUpload(params: CreateUploadParams): Promise<CreateUp
  * silently disabled the ownership gate entirely and left tenant-only scoping,
  * i.e. any member of the org could consume any other member's staged bytes.
  */
-export interface UploadAccessContext {
+interface UploadAccessContext {
   orgId: string;
   applicationId: string;
   actor: Actor;
@@ -644,7 +644,7 @@ export async function consumeUploadStream(
 // Proxy-upload content sink (PUT /api/uploads/_content?token=...)
 // ---------------------------------------------------------------------------
 
-export interface FsContentWriteResult {
+interface FsContentWriteResult {
   storageKey: string;
   size: number;
 }

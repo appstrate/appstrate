@@ -24,7 +24,7 @@ import { ApiError, type ValidationFieldError } from "../lib/errors.ts";
 import type { Actor } from "../lib/actor.ts";
 import { emitEvent } from "../lib/modules/module-loader.ts";
 
-export interface AgentReadinessParams {
+interface AgentReadinessParams {
   agent: LoadedPackage;
   orgId: string;
   applicationId: string;

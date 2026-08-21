@@ -36,7 +36,7 @@ interface ActivateBaseProps {
   error?: string;
 }
 
-export interface ActivateEntryPageProps extends ActivateBaseProps {
+interface ActivateEntryPageProps extends ActivateBaseProps {
   /** CSRF token for the `POST /activate` user-code submission form. */
   csrfToken: string;
   /** Optional pre-fill for the user_code input (when the link from the CLI includes it). */
@@ -77,7 +77,7 @@ export function renderActivateEntryPage(props: ActivateEntryPageProps): RawHtml 
   });
 }
 
-export interface ActivateConsentPageProps extends ActivateBaseProps {
+interface ActivateConsentPageProps extends ActivateBaseProps {
   /** Display name for the OAuth client requesting access (e.g. "Appstrate CLI"). */
   clientName: string;
   /** Normalized `XXXX-XXXX` code for display, plus the raw 8-char value echoed in the hidden input. */
@@ -141,7 +141,7 @@ export function renderActivateConsentPage(props: ActivateConsentPageProps): RawH
   });
 }
 
-export interface ActivateResultPageProps extends ActivateBaseProps {
+interface ActivateResultPageProps extends ActivateBaseProps {
   outcome: "approved" | "denied";
 }
 

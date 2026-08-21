@@ -79,7 +79,7 @@ export async function isDockerAvailable(): Promise<boolean> {
  * threshold, but their ceiling is far higher — the warning is cheap, and
  * the remediation doc covers their case.
  */
-export interface DockerNetworkBudget {
+interface DockerNetworkBudget {
   used: number;
   threshold: number;
 }

@@ -6,7 +6,7 @@ import { bumpPatch } from "@appstrate/core/semver";
 import { getPackageById } from "./package-items/crud.ts";
 import { getLatestVersionInfo } from "./package-versions.ts";
 
-export type SkillOnlyResult =
+type SkillOnlyResult =
   | { ok: true; parsed: ParsedPackageZip }
   | { ok: false; reason: "not_a_skill" }
   | { ok: false; reason: "unchanged" };

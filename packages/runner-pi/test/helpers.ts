@@ -10,6 +10,7 @@ import type {
   BridgeableSession,
   InternalSink,
   PromptableSession,
+  SessionBridgeHandle,
   ToolWideningSession,
 } from "../src/pi-runner.ts";
 import { PiRunner } from "../src/pi-runner.ts";
@@ -121,7 +122,7 @@ export function createFakeSession(
  * Capture-all {@link EventSink}. Records every handled event and the
  * finalize argument for assertion.
  */
-export interface CaptureSink extends EventSink {
+interface CaptureSink extends EventSink {
   events: RunEvent[];
   finalized: RunResult | null;
   finalizeCalls: number;
@@ -225,7 +226,7 @@ export function makeTestBundle(root: BundlePackage, deps: BundlePackage[] = []):
  * A script that never emits a successful `output` therefore exercises the
  * missing-`output` re-prompt end to end through `run()`.
  */
-export type SessionScript = (
+type SessionScript = (
   session: FakeSession,
   ctx: ExecutionContext,
   signal: AbortSignal | undefined,
@@ -258,7 +259,7 @@ export class ScriptedPiRunner extends PiRunner {
     context: ExecutionContext,
     internalSink: InternalSink,
     signal: AbortSignal | undefined,
-    onBridgeReady?: (handle: import("../src/pi-runner.ts").SessionBridgeHandle) => void,
+    onBridgeReady?: (handle: SessionBridgeHandle) => void,
   ): Promise<void> {
     const session = createFakeSession();
     const { installSessionBridge, maybeRepromptForOutput } = await import("../src/pi-runner.ts");

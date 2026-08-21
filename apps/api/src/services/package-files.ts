@@ -43,10 +43,10 @@ import {
 import { isManifestTextFallback } from "../lib/manifest-utils.ts";
 import type { PackageType } from "@appstrate/core/validation";
 
-export type PackageFileMediaKind = "text" | "binary";
+type PackageFileMediaKind = "text" | "binary";
 
 /** One row of the flat file index. Wire shape — snake_case. */
-export interface PackageFileEntry {
+interface PackageFileEntry {
   path: string;
   size: number;
   media_kind: PackageFileMediaKind;
@@ -375,7 +375,7 @@ export function resolveDraftContent(
  * the bytes themselves (see {@link draftSnapshotId}), so `snapshotId` is
  * `null` and the caller has to read before it can compare.
  */
-export type PackageFileValidator =
+type PackageFileValidator =
   | { kind: "draft"; snapshotId: null; yanked: false }
   | {
       kind: "version";

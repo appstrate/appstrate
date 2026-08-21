@@ -35,10 +35,10 @@ import type { parseRunTarget } from "./package-spec.ts";
 
 export type ExecutionMode = "local" | "remote";
 
-export type RunTarget = ReturnType<typeof parseRunTarget>;
+type RunTarget = ReturnType<typeof parseRunTarget>;
 
 /** Subset of RunCommandOptions consumed by mode resolution + validation. */
-export interface ModeResolutionOpts {
+interface ModeResolutionOpts {
   local?: boolean;
   remote?: boolean;
   // Local-only flags — flagged at validation time when in remote mode.

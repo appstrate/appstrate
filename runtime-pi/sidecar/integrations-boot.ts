@@ -156,7 +156,7 @@ function decodeWorkspaceHandle(): WorkspaceHandle | null {
  * surface is `GET /internal/mcp-server-bundle/:scope/:name` with
  * Bearer-token auth (same run-token as the credentials endpoint).
  */
-export interface BundleFetchOptions {
+interface BundleFetchOptions {
   platformApiUrl: string;
   runToken: string;
   /** Override for tests. Defaults to `globalThis.fetch`. */
@@ -169,7 +169,7 @@ export interface BundleFetchOptions {
   resolveHostFn?: HostResolver;
 }
 
-export interface BootIntegrationsResult {
+interface BootIntegrationsResult {
   host: McpHost;
   /**
    * Tools registered on `host`, ready to merge into the sidecar's MCP

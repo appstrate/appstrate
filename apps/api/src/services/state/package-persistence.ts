@@ -65,14 +65,14 @@ const MAX_PINNED_KEY_LENGTH = 64;
 export type PersistenceScope =
   { type: "user"; id: string } | { type: "end_user"; id: string } | { type: "shared" };
 
-export type Memory = Pick<
+type Memory = Pick<
   PackagePersistenceRow,
   "id" | "content" | "runId" | "createdAt" | "pinned" | "actorType" | "actorId"
 >;
 
 // `key` is narrowed to non-null: the pinned-slot query filters `key IS NOT NULL`
 // (archive rows carry `key: null`), so the row type's nullable `key` is replaced.
-export type PinnedSlotRow = Pick<
+type PinnedSlotRow = Pick<
   PackagePersistenceRow,
   "id" | "content" | "runId" | "actorType" | "actorId" | "createdAt" | "updatedAt"
 > & { key: string };

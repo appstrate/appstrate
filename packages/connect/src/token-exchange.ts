@@ -26,7 +26,7 @@ import {
 import type { OAuthStateStore, TokenEndpointAuthMethod } from "./types.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 
-export interface ExchangeAuthorizationCodeInput {
+interface ExchangeAuthorizationCodeInput {
   /** Token endpoint URL (`auths.{key}.token_endpoint`). */
   tokenEndpoint: string;
   /** OAuth client id. Required (even for `none` — sent in the body). */
@@ -71,7 +71,7 @@ export interface ExchangeAuthorizationCodeInput {
   fetchImpl?: typeof fetch;
 }
 
-export interface ExchangeAuthorizationCodeResult {
+interface ExchangeAuthorizationCodeResult {
   parsed: ParsedTokenResponse;
   /** Raw JSON body of the token response — integration callers persist it for identity extraction. */
   raw: Record<string, unknown>;

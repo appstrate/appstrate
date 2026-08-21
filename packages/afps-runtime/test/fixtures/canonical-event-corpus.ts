@@ -39,7 +39,7 @@ import type { RunEvent } from "@afps-spec/types";
 
 const base = { timestamp: 1, runId: "r1" };
 
-export interface CanonicalEventFixture {
+interface CanonicalEventFixture {
   /** Human-readable label, surfaced in assertion diffs. */
   readonly label: string;
   readonly event: RunEvent;

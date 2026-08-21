@@ -312,8 +312,6 @@ export function useAgentBundleExport(scope: string | undefined, name: string | u
 
 // --- Version queries ---
 
-export type { VersionDetailResponse, VersionListItem };
-
 export function useVersionDetail(
   type: PackageType,
   packageId: string | undefined,

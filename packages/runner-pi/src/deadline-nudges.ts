@@ -79,7 +79,7 @@ function nudgeText(remainingSeconds: number, timeoutSeconds: number, final: bool
   );
 }
 
-export interface DeadlineNudgeDeps {
+interface DeadlineNudgeDeps {
   /** The run's wall-clock budget. `<= 0` (or non-finite) disables nudging entirely. */
   timeoutSeconds: number;
   /** Queues a steering message on the live session (`AgentSession.steer`). */

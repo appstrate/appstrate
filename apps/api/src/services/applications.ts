@@ -16,7 +16,7 @@ export const appSettingsSchema = z.object({
   allowedRedirectDomains: z.array(z.string()).max(20).optional(),
 });
 
-export type AppSettings = z.infer<typeof appSettingsSchema>;
+type AppSettings = z.infer<typeof appSettingsSchema>;
 
 /** Create a new application for an organization. */
 export async function createApplication(

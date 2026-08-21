@@ -196,7 +196,7 @@ export async function decrementOrgDocumentBytes(
 }
 
 /** Which container a materialized upload is anchored to. */
-export type DocumentContainer = { runId: string } | { chatSessionId: string };
+type DocumentContainer = { runId: string } | { chatSessionId: string };
 
 /**
  * A staged upload that the input-parser has already rewritten to
@@ -262,7 +262,7 @@ export interface DocumentCapabilities {
 }
 
 /** A document resolved for a caller, with its derived access capabilities. */
-export interface ResolvedDocument {
+interface ResolvedDocument {
   row: DocumentRow;
   capabilities: DocumentCapabilities;
 }
@@ -429,7 +429,7 @@ export function retentionExpiry(retentionDays: number | undefined, now = new Dat
 }
 
 /** Mid-stream byte ceiling for {@link createHashingCounter}. */
-export interface HashingCounterCaps {
+interface HashingCounterCaps {
   perFileCap: number;
 }
 
@@ -491,7 +491,7 @@ export function createHashingCounter(caps?: HashingCounterCaps): {
  * as domain fields — matching the `notification` DTO's `run_id` and the `Run`
  * DTO's treatment of non-listed `*_id` fields.
  */
-export interface DocumentDto {
+interface DocumentDto {
   object: "document";
   id: string;
   uri: string;
@@ -961,7 +961,7 @@ async function runOutputCountUsed(
 }
 
 /** The outcome of an agent-output ingestion: the row plus whether it deduped. */
-export interface CreatedDocumentFromStream {
+interface CreatedDocumentFromStream {
   row: DocumentRow;
   /** True when an identical (run, sha256, name) document already existed. */
   deduped: boolean;

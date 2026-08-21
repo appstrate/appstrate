@@ -67,7 +67,7 @@ const YEAR_SEGMENT = /^(19|20)\d{2}$/;
 const ZERO_PADDED_SEGMENT = /^0\d+$/;
 
 /** Parsed `<stem>-<version…>[-<qualifier…>]` model id. */
-export interface ParsedModelId {
+interface ParsedModelId {
   /** Leading run of non-version segments: `gpt`, `claude-opus`. */
   stem: string;
   /** Version tuple, most significant first: `[5, 6]`, `[4, 8]`. */

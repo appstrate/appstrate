@@ -41,7 +41,7 @@ import {
   type Verbosity,
 } from "./format.ts";
 
-export interface SinkOptions {
+interface SinkOptions {
   /** Emit JSONL on stdout. When false, human-readable output is used. */
   json?: boolean;
   /** Write the final RunResult JSON to this path. Optional. */

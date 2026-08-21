@@ -58,7 +58,7 @@ interface MutableCredentialsWire {
   expiresAtEpochMs: Record<string, number | null>;
 }
 
-export interface ResolveLiveCredentialsOptions {
+interface ResolveLiveCredentialsOptions {
   /** When true, refresh OAuth tokens regardless of remaining lifetime. */
   forceRefresh?: boolean;
 }

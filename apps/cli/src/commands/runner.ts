@@ -68,7 +68,7 @@ type GetJsonResult =
  * Bun's `fetch(…, { unix })` dials the socket and only uses the http://
  * authority for the Host header.
  */
-export type RunnerUnixGetJson = (
+type RunnerUnixGetJson = (
   socketPath: string,
   path: string,
   token: string,
@@ -95,7 +95,7 @@ const defaultUnixGetJson: RunnerUnixGetJson = async (socketPath, path, token) =>
 };
 
 /** Shared DI surface for every runner subcommand. */
-export interface RunnerDeps {
+interface RunnerDeps {
   exec?: RunnerExec;
   fs?: RunnerFs;
   http?: RunnerHttp;
@@ -145,7 +145,7 @@ function requireRoot(getuid: () => number, verb: string): void {
 
 // ─── install ─────────────────────────────────────────────────────────────
 
-export interface RunnerInstallOptions {
+interface RunnerInstallOptions {
   platformUrl?: string;
   token?: string;
   port?: string;
@@ -600,12 +600,12 @@ function detectFirewallCommands(port: number): ReturnType<typeof firewallCommand
 
 // ─── doctor ──────────────────────────────────────────────────────────────
 
-export interface RunnerDoctorOptions {
+interface RunnerDoctorOptions {
   json?: boolean;
   deps?: RunnerDeps;
 }
 
-export interface RunnerDoctorReport {
+interface RunnerDoctorReport {
   preflight: PreflightResult;
   service: { installed: boolean; active: boolean; enabled: boolean; state: string };
   health: {
@@ -746,7 +746,7 @@ export async function runnerDoctorCommand(opts: RunnerDoctorOptions = {}): Promi
 
 // ─── update ──────────────────────────────────────────────────────────────
 
-export interface RunnerUpdateOptions {
+interface RunnerUpdateOptions {
   deps?: RunnerDeps;
 }
 
@@ -801,7 +801,7 @@ export async function runnerUpdateCommand(opts: RunnerUpdateOptions = {}): Promi
 
 // ─── status / logs ─────────────────────────────────────────────────────────
 
-export interface RunnerStatusOptions {
+interface RunnerStatusOptions {
   deps?: RunnerDeps;
 }
 
@@ -815,7 +815,7 @@ export async function runnerStatusCommand(opts: RunnerStatusOptions = {}): Promi
   if (!res.ok && res.exitCode !== 3) process.exitCode = res.exitCode === -1 ? 1 : res.exitCode;
 }
 
-export interface RunnerLogsOptions {
+interface RunnerLogsOptions {
   follow?: boolean;
   deps?: RunnerDeps;
 }
@@ -831,7 +831,7 @@ export async function runnerLogsCommand(opts: RunnerLogsOptions = {}): Promise<v
 
 // ─── uninstall ──────────────────────────────────────────────────────────────
 
-export interface RunnerUninstallOptions {
+interface RunnerUninstallOptions {
   /** Preserve the state dir (kernel/rootfs/runs/firecracker). */
   keepData?: boolean;
   /** Skip the destructive confirmation (or set APPSTRATE_YES=1). */

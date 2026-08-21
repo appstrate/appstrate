@@ -66,10 +66,10 @@ const runnerEnvSchema = z.object({
   }),
 });
 
-export type RunnerEnv = z.infer<typeof runnerEnvSchema>;
+type RunnerEnv = z.infer<typeof runnerEnvSchema>;
 
 /** Where the daemon listens — a UDS (socket wins when set) or a TCP host:port. */
-export type RunnerListenConfig =
+type RunnerListenConfig =
   { kind: "unix"; socketPath: string; mode: number } | { kind: "tcp"; host: string; port: number };
 
 /**

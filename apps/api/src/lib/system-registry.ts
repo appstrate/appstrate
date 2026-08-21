@@ -19,7 +19,7 @@ import { logger } from "./logger.ts";
  * their own typed accessors over the returned Map.
  */
 
-export interface LoadSystemRegistryOptions<Raw, Def extends { id: string }> {
+interface LoadSystemRegistryOptions<Raw, Def extends { id: string }> {
   /** Log prefix / source label, e.g. `"proxy-registry"`. */
   name: string;
   /** Env var the entries came from, e.g. `"SYSTEM_PROXIES"` — for error context. */

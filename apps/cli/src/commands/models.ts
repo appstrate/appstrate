@@ -13,7 +13,7 @@ import { resolveActiveProfile, requireLoggedIn } from "../lib/config.ts";
 import { listModelPresets, PROXY_SUPPORTED_APIS } from "../lib/models.ts";
 import { exitWithError } from "../lib/ui.ts";
 
-export interface ModelsListOptions {
+interface ModelsListOptions {
   profile?: string;
   /** Emit machine-readable JSON instead of the human table. */
   json?: boolean;

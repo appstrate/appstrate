@@ -19,7 +19,7 @@ function boolEnv(raw: string | undefined, defaultValue: boolean): boolean {
   return raw.toLowerCase() === "true" || raw === "1";
 }
 
-export interface OtelEnv {
+interface OtelEnv {
   /** OTEL_ENABLED=true OR a non-empty OTEL_EXPORTER_OTLP_ENDPOINT. */
   enabled: boolean;
   /** Base OTLP collector endpoint; empty string reads as unset (compose `${VAR:-}` pattern). */

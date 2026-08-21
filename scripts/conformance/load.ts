@@ -10,7 +10,7 @@
 import { loadSystemPackages, type SystemPackageEntry } from "@appstrate/core/system-packages";
 import type { PackageClass } from "./types.ts";
 
-export interface ClassifiedPackage {
+interface ClassifiedPackage {
   entry: SystemPackageEntry;
   klass: PackageClass;
 }

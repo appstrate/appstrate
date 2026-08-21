@@ -168,7 +168,7 @@ export function resetOidcGuardsLimiters(): void {
   loginEmailLimiter = null;
 }
 
-export interface LoginEmailLimitResult {
+interface LoginEmailLimitResult {
   allowed: boolean;
   retryAfterSeconds: number;
 }

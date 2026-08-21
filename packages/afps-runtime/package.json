@@ -89,8 +89,6 @@
   "devDependencies": {
     "@appstrate/core": "workspace:*",
     "@types/mustache": "^4.2.6",
-    "@types/semver": "^7.8.0",
-    "@earendil-works/pi-coding-agent": "0.84.2",
-    "@earendil-works/pi-ai": "0.84.2"
+    "@types/semver": "^7.8.0"
   }
 }

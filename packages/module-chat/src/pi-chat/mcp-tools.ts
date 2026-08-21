@@ -101,7 +101,7 @@ export function mcpResultToPi(result: {
   return { content, details, ...(offer ? { connectOffer: offer } : {}) };
 }
 
-export interface PlatformMcpTools {
+interface PlatformMcpTools {
   extensionFactories: ExtensionFactory[];
   /** Server usage guidance (MCP `instructions`), to append to the system prompt. */
   instructions?: string;
@@ -130,7 +130,7 @@ export interface PiTurnBudget {
   now?: () => number;
 }
 
-export interface BuildPlatformMcpToolsOptions {
+interface BuildPlatformMcpToolsOptions {
   /** Platform MCP endpoint (`/api/mcp/o/:org?context=injected`). */
   url: string;
   /** Auth + scoping headers (short-lived MCP loopback bearer + org/app ids). */

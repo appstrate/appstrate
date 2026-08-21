@@ -78,12 +78,7 @@ import { assertApplicationInScope } from "./applications.ts";
 // Types
 // ─────────────────────────────────────────────
 
-export type {
-  IntegrationAuthStatus,
-  IntegrationAuthType,
-  IntegrationConnection as IntegrationConnectionSummary,
-  IntegrationOAuthClient,
-} from "@appstrate/shared-types";
+export type { IntegrationConnection as IntegrationConnectionSummary } from "@appstrate/shared-types";
 
 import type {
   IntegrationConnection as IntegrationConnectionSummary,
@@ -385,7 +380,7 @@ export async function selectAccessibleConnection(
  * `block_user_connections` gate. `blockUserConnections` defaults to `false` when
  * no per-app row exists.
  */
-export interface IntegrationActivation {
+interface IntegrationActivation {
   active: boolean;
   blockUserConnections: boolean;
 }
@@ -921,7 +916,7 @@ export async function updateIntegrationOAuthClient(
  * `clientRef` is what gets pinned on the connection so refresh resolves the
  * same credentials.
  */
-export interface ResolvedConnectClient {
+interface ResolvedConnectClient {
   clientId: string;
   clientSecret: string;
   /** Pre-registered redirect URI override, or null to use the platform default. */
@@ -1191,7 +1186,7 @@ export async function resolveIntegrationClientById(
  * user can see the shared system client and/or the org's own (BYO) client and
  * which one is the default. Secrets are never included.
  */
-export interface IntegrationClientDescriptor {
+interface IntegrationClientDescriptor {
   /** `client_ref` to pass back at connect time. */
   client_ref: string;
   /** `"built-in"` (env system client) or `"custom"` (org per-app client). */
@@ -1980,7 +1975,7 @@ function readPath(source: Record<string, unknown>, accessor: string): unknown {
 // Connection storage
 // ─────────────────────────────────────────────
 
-export interface StoreConnectionInput {
+interface StoreConnectionInput {
   packageId: string;
   authKey: string;
   accountId: string;
@@ -2058,7 +2053,7 @@ export type PersistTarget =
  *     on this: it must not clobber the identity, nor — when the IdP omits
  *     `scope` — the scope high-water-mark.
  */
-export interface PersistCredentialInput {
+interface PersistCredentialInput {
   credentials: Record<string, unknown>;
   /**
    * Bootstrap secrets (login password) — persisted NON-injectable (v2). JSON-typed
@@ -2455,7 +2450,7 @@ export async function listIntegrationConnections(
 }
 
 /** One integration the actor could attach to an agent (own and/or org-shared). */
-export interface UsableIntegration {
+interface UsableIntegration {
   integration_id: string;
   name: string;
   source: "own" | "shared" | "both";

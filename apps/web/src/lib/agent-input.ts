@@ -39,7 +39,7 @@ export interface AgentInputSettings {
  *   value), so it is folded into the "advanced" section, pre-filled.
  * - `prompted` — nothing decides it yet; asked at the top level.
  */
-export interface InputFieldPartition {
+interface InputFieldPartition {
   locked: string[];
   prefilled: string[];
   prompted: string[];

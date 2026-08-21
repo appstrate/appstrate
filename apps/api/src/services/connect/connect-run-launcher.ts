@@ -120,7 +120,7 @@ function stringifyInputs(inputs: Record<string, unknown>): Record<string, string
 /** How long to wait for the connect-run sidecar to mint the session before killing it. */
 const DEFAULT_CONNECT_TIMEOUT_MS = 60_000;
 
-export interface ConnectRunExecutorOptions {
+interface ConnectRunExecutorOptions {
   /** Injectable orchestrator — production defaults to the global singleton. */
   orchestrator?: RunOrchestrator;
   /** Override the connect-run timeout (ms). Defaults to 60s. */

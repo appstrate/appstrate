@@ -33,7 +33,7 @@ else
 end
 `;
 
-export interface RedisLockOptions {
+interface RedisLockOptions {
   /** Lock auto-expiry (safety net if the holder crashes without releasing). */
   ttlSeconds: number;
   /** How long to keep polling for the lock before giving up and proceeding unlocked. */

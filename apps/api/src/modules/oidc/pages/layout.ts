@@ -15,7 +15,7 @@
 import { html, type RawHtml } from "./html.ts";
 import type { ResolvedAppBranding } from "../services/branding.ts";
 
-export interface LayoutProps {
+interface LayoutProps {
   branding: ResolvedAppBranding;
   /** Document title — typically "Connexion à {brand}" or "Autorisation — {brand}". */
   title: string;

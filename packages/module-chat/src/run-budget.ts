@@ -36,7 +36,7 @@ import { logger } from "./logger.ts";
 import { stampChatSessionOnRun } from "./run-reconcile.ts";
 
 /** The turn's time budget, as seen by a tool call inside it. */
-export interface TurnBudgetContext {
+interface TurnBudgetContext {
   /** Absolute wall-clock instant the turn ends (`turnStart + CHAT_TURN_DEADLINE_MS`). */
   turnDeadlineAt: number;
   /**
@@ -57,7 +57,7 @@ export interface BudgetLogger {
   warn(message: string, fields?: Record<string, unknown>): void;
 }
 
-export type RunBudgetDecision =
+type RunBudgetDecision =
   { launch: true; maxMs: number } | { launch: false; payload: Record<string, unknown> };
 
 /**

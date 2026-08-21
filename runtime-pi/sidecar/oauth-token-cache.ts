@@ -36,7 +36,7 @@ export class NeedsReconnectionError extends Error {
 
 export const CACHE_TTL_MS = 30_000;
 
-export interface OAuthTokenCacheDeps {
+interface OAuthTokenCacheDeps {
   /**
    * Returns the current platform API base URL. Wrapped in a getter for
    * consistency with the live `config` object (which is mutable in tests).

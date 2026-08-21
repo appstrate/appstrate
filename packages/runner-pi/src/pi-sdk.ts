@@ -34,16 +34,7 @@ export { streamSimple } from "@earendil-works/pi-ai/compat";
 
 // --- types (erased at runtime) ---
 export type { ModelRuntime, ExtensionAPI, ExtensionFactory } from "@earendil-works/pi-coding-agent";
-export type {
-  Api,
-  KnownApi,
-  Model,
-  Transport,
-  Context,
-  Message,
-  SimpleStreamOptions,
-  AssistantMessageEventStream,
-} from "@earendil-works/pi-ai";
+export type { Api, KnownApi, Model, Transport, Message } from "@earendil-works/pi-ai";
 
 // --- heavy value surface (pi-coding-agent, ~200ms) behind a dynamic import ---
 // `@earendil-works/pi-coding-agent` is the single most expensive module to

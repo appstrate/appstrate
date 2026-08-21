@@ -505,13 +505,13 @@ export async function deleteOrgModel(orgId: string, modelDbId: string): Promise<
  * `apiShape` and `baseUrl` are resolved from the registry by the credential's
  * `providerId` at read time — no need to pass them through here.
  */
-export interface SeedModelsResult {
+interface SeedModelsResult {
   created: number;
   ids: string[];
   promotedDefault: boolean;
 }
 
-export interface SeedModelsInput {
+interface SeedModelsInput {
   models: ReadonlyArray<CatalogModelEntry & { id: string }>;
 }
 

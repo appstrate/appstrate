@@ -20,7 +20,6 @@ import {
   endUsers,
   schedules,
   apiKeys,
-  orgProxies,
   modelProviderCredentials,
   orgModels,
   orgInvitations,
@@ -269,26 +268,6 @@ export async function seedApiKey(
     })
     .returning();
   return { ...key!, rawKey };
-}
-
-// ─── Org Proxies ──────────────────────────────────────────
-
-type OrgProxyInsert = Partial<InferInsertModel<typeof orgProxies>> & {
-  orgId: string;
-};
-
-export async function seedOrgProxy(
-  overrides: OrgProxyInsert,
-): Promise<InferSelectModel<typeof orgProxies>> {
-  const [proxy] = await db
-    .insert(orgProxies)
-    .values({
-      label: "Test Proxy",
-      urlEncrypted: "encrypted-url-placeholder",
-      ...overrides,
-    })
-    .returning();
-  return proxy!;
 }
 
 // ─── Model Provider Credentials ─────────────────────────────

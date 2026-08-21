@@ -140,7 +140,7 @@ async function resolveProfileOrThrow(profileName: string): Promise<Profile> {
   return profile;
 }
 
-export interface AuthContext {
+interface AuthContext {
   instance: string;
   accessToken: string;
   orgId?: string;
@@ -241,7 +241,7 @@ async function doRefresh(profileName: string, profile: Profile, tokens: Tokens):
   }
 }
 
-export interface ApiFetchInit extends Omit<RequestInit, "headers"> {
+interface ApiFetchInit extends Omit<RequestInit, "headers"> {
   headers?: Record<string, string>;
 }
 

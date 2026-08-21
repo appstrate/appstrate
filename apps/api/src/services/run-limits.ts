@@ -124,7 +124,7 @@ export function getInlineRunLimits(): InlineRunLimits {
  */
 export const DEFAULT_RUN_TIMEOUT_SECONDS = 300;
 
-export interface ResolvedRunTimeout {
+interface ResolvedRunTimeout {
   /** What the manifest asked for (or {@link DEFAULT_RUN_TIMEOUT_SECONDS}). */
   declaredSeconds: number;
   /** What the run actually gets — `declaredSeconds` clamped to the ceiling. */

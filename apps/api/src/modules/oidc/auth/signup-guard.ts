@@ -62,7 +62,7 @@ import { resolvePendingClientBinding } from "../services/oauth-transaction-bindi
  * wiring in `packages/db/src/auth.ts` extracts and forwards) so the function
  * has no coupling to BA's internal `GenericEndpointContext` type.
  */
-export interface BeforeSignupGuardInput {
+interface BeforeSignupGuardInput {
   /** The user BA is about to create. Only `email` is required. */
   user: { email: string };
   /** Request headers — `null` if the signup is happening outside an HTTP context. */

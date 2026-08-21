@@ -24,18 +24,8 @@ import { documentUri, parseDocumentUri } from "@appstrate/core/document-uri";
 import { asRecord, unwrapResult } from "./tool-result.ts";
 
 /** Operation ids whose result launches a run we can follow. */
-export const RUN_LAUNCH_OPS = ["runAgent", "runInline", "run_and_wait"] as const;
-export type RunLaunchOp = (typeof RUN_LAUNCH_OPS)[number];
-
-/**
- * All run statuses — re-exported from the canonical, import-free tuple in
- * `@appstrate/db/run-status` (which the `run_status` `pgEnum` itself derives
- * from). That module pulls neither drizzle-orm nor the table schema, so this
- * browser-bundled UI module stays free of DB code while the list can no
- * longer drift from the database.
- */
-export { TERMINAL_RUN_STATUSES };
-export const RUN_STATUSES = runStatusValues;
+const RUN_LAUNCH_OPS = ["runAgent", "runInline", "run_and_wait"] as const;
+type RunLaunchOp = (typeof RUN_LAUNCH_OPS)[number];
 export type RunStatus = (typeof runStatusValues)[number];
 
 export function isTerminalStatus(status: string | null | undefined): status is RunStatus {
@@ -100,7 +90,7 @@ export const runLogLineSchema = z.object({
 export type RunLogLine = z.infer<typeof runLogLineSchema>;
 
 /** Minimal `run_update` SSE frame — only the lifecycle fields the panel reads. */
-export const runUpdateLiteSchema = z.object({
+const runUpdateLiteSchema = z.object({
   id: z.string().optional(),
   status: z.string(),
   packageId: z.string().nullable().optional(),
@@ -109,17 +99,17 @@ export const runUpdateLiteSchema = z.object({
   completedAt: z.string().nullable().optional(),
   duration: z.number().nullable().optional(),
 });
-export type RunUpdateLite = z.infer<typeof runUpdateLiteSchema>;
+type RunUpdateLite = z.infer<typeof runUpdateLiteSchema>;
 
 /**
  * The one extra field the full run resource carries beyond realtime updates.
  * It is the authoritative CURRENT primary selection, unlike append-only
  * `document.published` logs which also retain superseded selections.
  */
-export const runResourceLiteSchema = runUpdateLiteSchema.extend({
+const runResourceLiteSchema = runUpdateLiteSchema.extend({
   primary_document_id: z.string().nullable().optional(),
 });
-export type RunResourceLite = z.infer<typeof runResourceLiteSchema>;
+type RunResourceLite = z.infer<typeof runResourceLiteSchema>;
 
 /**
  * Pull the launched run id out of a tool-call result. The invoke-operation
@@ -423,7 +413,7 @@ export function mergeRunDocuments(
  * carried along so the renderer can still resolve a local preview for it (the
  * staged-image cache is keyed by `upload://` URI).
  */
-export type ResolvedAttachment = { kind: "document"; id: string } | { kind: "inert"; uri?: string };
+type ResolvedAttachment = { kind: "document"; id: string } | { kind: "inert"; uri?: string };
 
 /** Minimal structural view of an assistant-ui attachment content part. */
 interface AttachmentContentPart {

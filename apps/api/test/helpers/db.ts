@@ -8,13 +8,11 @@
  */
 import { db, closeDb } from "@appstrate/db/client";
 import { sql } from "drizzle-orm";
-import type { Db } from "@appstrate/db/client";
 import { readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { withDeadlockRetry } from "./deadlock-retry.ts";
 
 export { db, closeDb };
-export type { Db };
 
 /**
  * Reset the filesystem storage namespace between tests (tier0 / FS mode).

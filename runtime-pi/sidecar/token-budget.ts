@@ -142,7 +142,7 @@ export const estimateTokens: TokenEstimator = (text) => {
  * a wider union in the agent-facing `_meta` payload — they are not
  * decisions the budget can make.
  */
-export interface BudgetDecision {
+interface BudgetDecision {
   /**
    * - `inline`  — agent receives the full content as a `text` block.
    * - `spill`   — agent receives a `resource_link`; bytes are stashed
@@ -166,10 +166,7 @@ export interface BudgetDecision {
    *   before Pi SDK's turn-boundary compaction fires.
    */
   reason:
-    | "under_inline_cap"
-    | "exceeds_inline_cap"
-    | "exceeds_run_budget"
-    | "exceeds_context_window";
+    "under_inline_cap" | "exceeds_inline_cap" | "exceeds_run_budget" | "exceeds_context_window";
   /** Estimated tokens for *this* response. */
   estimatedTokens: number;
   /** Cumulative tokens consumed by tool outputs so far in this run. */
@@ -180,7 +177,7 @@ export interface BudgetDecision {
   inlineCapTokens: number;
 }
 
-export interface TokenBudgetOptions {
+interface TokenBudgetOptions {
   /**
    * Per-call cap. Anything strictly above this spills, regardless of
    * how much budget is left.

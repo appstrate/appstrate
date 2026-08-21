@@ -13,7 +13,7 @@ import { test as base, expect } from "@playwright/test";
 import { createApiClient, createOrgOnlyClient, type ApiClient } from "../helpers/api-client.ts";
 import { registerUser, createOrg, type AuthResult, type OrgResult } from "../helpers/seed.ts";
 
-export interface OrgContext {
+interface OrgContext {
   auth: AuthResult;
   org: OrgResult;
 }

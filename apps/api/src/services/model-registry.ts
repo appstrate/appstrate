@@ -12,7 +12,7 @@ import { getModelProvider } from "./model-providers/registry.ts";
 
 // --- Types ---
 
-export interface SystemModelProviderCredentialDefinition {
+interface SystemModelProviderCredentialDefinition {
   id: string;
   /**
    * Optional. Resolved at boot from `getModelProvider(providerId).displayName`

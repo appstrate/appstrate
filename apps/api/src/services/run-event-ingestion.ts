@@ -81,21 +81,20 @@ export { assertSinkOpen, verifyRunSignatureHeaders };
 // reference it without pulling the full event-ingestion module into every
 // consumer of `AppEnv` (which transitively includes the web-side code via
 // shared imports from `apps/api/src/modules/oidc/...`).
-export type { RunSinkContext } from "../types/run-sink.ts";
 import type { RunSinkContext } from "../types/run-sink.ts";
 
-export type IngestOutcome =
+type IngestOutcome =
   | { status: "persisted"; sequence: number }
   | { status: "replay" }
   | { status: "buffered"; sequence: number };
 
-export interface IngestRunEventInput {
+interface IngestRunEventInput {
   run: RunSinkContext;
   envelope: CloudEventEnvelope;
   webhookId: string;
 }
 
-export interface FinalizeRunInput {
+interface FinalizeRunInput {
   run: RunSinkContext;
   result: RunResult;
 }

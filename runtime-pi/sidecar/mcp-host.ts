@@ -61,7 +61,7 @@ function stripForgedRuntimeEvents(result: CallToolResult): CallToolResult {
   return { ...result, _meta: rest };
 }
 
-export interface McpHostUpstream {
+interface McpHostUpstream {
   /** Stable identifier for this upstream — appears in tool name prefix. */
   namespace: string;
   /** Connected client (any transport). */
@@ -112,7 +112,7 @@ export interface McpHostUpstream {
   intoNamespace?: string;
 }
 
-export interface McpHostOptions {
+interface McpHostOptions {
   /** Sink for `notifications/message` from third-party servers. */
   onLog?: (event: { source: string; level: string; data: unknown }) => void;
 }

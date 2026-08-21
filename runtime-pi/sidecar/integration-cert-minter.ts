@@ -45,7 +45,7 @@ import {
 // Public types
 // ─────────────────────────────────────────────
 
-export interface CertMinterOptions {
+interface CertMinterOptions {
   /** CA root cert PEM (from the run CA bundle). */
   caCertPem: string;
   /** CA private key PEM (from the run CA bundle). */
@@ -98,7 +98,7 @@ export class CertMintError extends Error {
   }
 }
 
-export type CertMintErrorCode =
+type CertMintErrorCode =
   | "INVALID_HOST"
   | "OPENSSL_NOT_FOUND"
   | "OPENSSL_NONZERO_EXIT"

@@ -17,7 +17,7 @@ import { html, type RawHtml } from "./html.ts";
 import { renderLayout } from "./layout.ts";
 import type { ResolvedAppBranding } from "../services/branding.ts";
 
-export interface ForgotPasswordPageProps {
+interface ForgotPasswordPageProps {
   queryString: string;
   error?: string;
   email?: string;

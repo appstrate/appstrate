@@ -56,7 +56,7 @@ import type { AppEnv } from "../types/index.ts";
  *   belongs to this family (for outbound confinement / mint-time checks), without
  *   needing a request path. It must accept exactly the URIs `deriveUri` can emit.
  */
-export interface ProtectedResourceFamily {
+interface ProtectedResourceFamily {
   prefix: string;
   deriveUri(path: string): string | undefined;
   ownsUri(uri: string): boolean;

@@ -193,7 +193,7 @@ const EXIT_REAP_AFTER_MS = 5 * 60_000;
  *                       partition where the platform's own timeout can no
  *                       longer reach the workload
  */
-export type TeardownReason =
+type TeardownReason =
   "finalize" | "watchdog-kill" | "orphan-sweep" | "shutdown" | "crash" | "reaper" | "max-lifetime";
 /**
  * Minimum firecracker binary version. 1.16 is what the docs require, and

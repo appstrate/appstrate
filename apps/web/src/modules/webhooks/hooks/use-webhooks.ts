@@ -2,14 +2,14 @@
 
 import type { Dispatch, SetStateAction } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import type { WebhookCreateResponse, WebhookDelivery } from "@appstrate/shared-types";
+import type { WebhookDelivery } from "@appstrate/shared-types";
 import { $api, client, type components, type paths } from "@/api/client";
 import { useCurrentOrgId } from "@/hooks/use-org";
 import { useCurrentApplicationId } from "@/hooks/use-current-application";
 
 /** Wire shape from the OpenAPI spec (components.schemas.WebhookObject). */
 export type WebhookInfo = components["schemas"]["WebhookObject"];
-export type { WebhookCreateResponse, WebhookDelivery };
+export type { WebhookDelivery };
 
 type CreateWebhookBody =
   paths["/api/webhooks"]["post"]["requestBody"]["content"]["application/json"];

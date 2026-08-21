@@ -36,7 +36,7 @@ import { clearResolvedModelCache } from "../resolved-model-cache.ts";
 
 // ─── Blob shapes (encrypted at rest) ───────────────────────────────────────
 
-export interface ApiKeyBlob {
+interface ApiKeyBlob {
   kind: "api_key";
   apiKey: string;
 }
@@ -57,7 +57,7 @@ export type OAuthBlob = OAuthTokenResponse & {
   email?: string;
 };
 
-export type CredentialsBlob = ApiKeyBlob | OAuthBlob;
+type CredentialsBlob = ApiKeyBlob | OAuthBlob;
 
 // ─── Decrypted-for-inference shape ─────────────────────────────────────────
 
@@ -67,7 +67,7 @@ export type CredentialsBlob = ApiKeyBlob | OAuthBlob;
  * `baseUrl` inline so downstream consumers don't have to re-look-up
  * `getModelProvider`.
  */
-export interface DecryptedModelProviderCredentials {
+interface DecryptedModelProviderCredentials {
   /** Canonical registry id ("anthropic", "openai", …). */
   providerId: string;
   apiShape: ModelApiShape;
@@ -170,7 +170,7 @@ function decryptBlob(ciphertext: string): CredentialsBlob | null {
  * `expectedOrgId` is enforced when provided — used as defense-in-depth by
  * the sidecar token-resolver path (run pinned to a specific org).
  */
-export interface RawCredentialLoad {
+interface RawCredentialLoad {
   id: string;
   orgId: string;
   providerId: string;
@@ -225,7 +225,7 @@ export async function loadCredentialRow(
  * no interest in the secret itself. Resolvable for a credential whose blob no
  * longer decrypts, which is what lets the callers render a dead row.
  */
-export type CredentialMetadata = Pick<RawCredentialLoad, "providerId" | "apiShape" | "baseUrl">;
+type CredentialMetadata = Pick<RawCredentialLoad, "providerId" | "apiShape" | "baseUrl">;
 
 /**
  * Thin projection of {@link loadCredentialRow}, which now carries these three
@@ -241,7 +241,7 @@ export async function loadCredentialMetadata(
 
 // ─── Create ────────────────────────────────────────────────────────────────
 
-export interface CreateApiKeyCredentialInput {
+interface CreateApiKeyCredentialInput {
   orgId: string;
   userId: string;
   label: string;
@@ -325,7 +325,7 @@ export async function createOAuthCredential(input: CreateOAuthCredentialInput): 
   return row!.id;
 }
 
-export interface ReconnectOAuthCredentialInput {
+interface ReconnectOAuthCredentialInput {
   orgId: string;
   id: string;
   providerId: string;
@@ -403,7 +403,7 @@ export async function reconnectOAuthCredential(
 
 // ─── Update ────────────────────────────────────────────────────────────────
 
-export interface UpdateModelProviderCredentialPatch {
+interface UpdateModelProviderCredentialPatch {
   label?: string;
   baseUrlOverride?: string | null;
   /** Rotate an api_key credential. Rejected on OAuth rows — refresh path uses {@link updateOAuthCredentialTokens}. */
@@ -488,7 +488,7 @@ export async function dedupeCredentialLabel(orgId: string, base: string): Promis
  * resolver after a successful upstream refresh. Preserves blob fields the
  * upstream didn't return (e.g. `email`, `accountId` when not rotated).
  */
-export interface UpdateOAuthCredentialTokensInput {
+interface UpdateOAuthCredentialTokensInput {
   accessToken: string;
   refreshToken: string;
   expiresAt: number | null;

@@ -38,7 +38,7 @@
 const ULID_BYTES = 16;
 const ENCODING_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"; // Crockford base32 — ULID standard.
 
-export interface BlobRecord {
+interface BlobRecord {
   /** Stable URI handed back to the agent in `resource_link` blocks. */
   uri: string;
   /** The bytes themselves. */
@@ -51,7 +51,7 @@ export interface BlobRecord {
   source?: string;
 }
 
-export interface PutOptions {
+interface PutOptions {
   mimeType?: string;
   source?: string;
 }

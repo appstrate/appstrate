@@ -66,8 +66,7 @@ import type { IntegrationManifestCache } from "./integration-service.ts";
 // Canonical wire shapes live in @appstrate/shared-types so the frontend
 // hook and OpenAPI spec can't drift from the service. Local aliases keep
 // the existing call sites readable.
-export type PinSummary = IntegrationPin;
-export type { ConsumingAgentSummary };
+type PinSummary = IntegrationPin;
 
 // ─────────────────────────── block_user_connections toggle ────────────────────
 
@@ -192,7 +191,7 @@ export async function listAgentsConsumingIntegration(
   }));
 }
 
-export interface SetPinInput {
+interface SetPinInput {
   agentPackageId: string;
   connectionId: string;
   createdBy: string | null;
@@ -372,7 +371,7 @@ export async function validatePinTarget(
 
 // ─────────────────────────── Member-pin CRUD ─────────────────────────────────
 
-export interface UpsertMemberPinInput {
+interface UpsertMemberPinInput {
   agentPackageId: string;
   integrationId: string;
   connectionId: string;
@@ -427,7 +426,7 @@ export async function deleteMemberPin(
  * picker — UI checks "is this integration already pinned by me?" and
  * renders the collapsed "Using: X" row pointing at the pinned connection.
  */
-export interface MemberPinSummary {
+interface MemberPinSummary {
   integration_package_id: string;
   connection_id: string;
 }
@@ -455,7 +454,7 @@ export async function listMemberPinsForAgent(
 
 // ─────────────────────────── Connection metadata edits ────────────────────────
 
-export interface UpdateConnectionMetadataInput {
+interface UpdateConnectionMetadataInput {
   label?: string | null;
   sharedWithOrg?: boolean;
 }
@@ -751,7 +750,7 @@ async function resolveAgentIntegrationPick(args: {
 }
 
 /** Bulk per-agent connection readiness — one call covering badge, picker, and pre-run check. */
-export interface AgentConnectionReadiness {
+interface AgentConnectionReadiness {
   /** True iff the run-kickoff would reject with 412 (run semantics — identical authority). */
   blocks_run: boolean;
   /** The integration portion of the 412 envelope (same `field: integrations.<id>` shape). */

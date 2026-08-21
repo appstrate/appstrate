@@ -264,7 +264,7 @@ function hasHeader(headers: Record<string, string>, name: string): boolean {
  * must be either a single bare token or a reverse-DNS prefix (RFC §10.1
  * / Appendix B). The canonical form is `"dev.appstrate/token-budget"`.
  */
-export const TOKEN_BUDGET_META_KEY = "dev.appstrate/token-budget";
+const TOKEN_BUDGET_META_KEY = "dev.appstrate/token-budget";
 
 /**
  * Discriminated reason surfaced in the agent-facing `_meta` payload.
@@ -1805,8 +1805,8 @@ export function createApiCallToolDefs(
 }
 
 /** Unprefixed tool names for the generic credential-injecting tools. */
-export const API_CALL_TOOL_NAME = "api_call";
-export const API_UPLOAD_TOOL_NAME = "api_upload";
+const API_CALL_TOOL_NAME = "api_call";
+const API_UPLOAD_TOOL_NAME = "api_upload";
 
 /**
  * The auth-scoped, unprefixed tool key for an integration's api_call surface:
@@ -1851,7 +1851,7 @@ export function isSyntheticApiToolName(name: string): boolean {
   return false;
 }
 
-export interface MountMcpOptions {
+interface MountMcpOptions {
   /** Run-scoped blob store for `api_call` resource spillover. */
   blobStore?: BlobStore;
   /**

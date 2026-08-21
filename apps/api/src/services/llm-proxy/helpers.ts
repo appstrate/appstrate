@@ -32,7 +32,7 @@ import { invalidRequest } from "../../lib/errors.ts";
  * streaming detection, and the upstream model rewrite all share a
  * single `JSON.parse` over the raw bytes.
  */
-export interface ParsedProxyRequest {
+interface ParsedProxyRequest {
   /** Caller-supplied preset id (the value of `body.model`). */
   presetId: string;
   /** True iff `body.stream === true`. */

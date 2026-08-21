@@ -24,12 +24,8 @@ export type {
   UploadProtocol,
   AdapterContext,
   ChunkInfo,
-  SessionState,
   UploadResult,
-  UploadSuccess,
-  UploadFailure,
-  AdapterApiCall,
   AdapterApiCallRequest,
   AdapterApiCallResponse,
 } from "./types.ts";
-export { UPLOAD_PROTOCOLS, UploadError } from "./types.ts";
+export { UPLOAD_PROTOCOLS } from "./types.ts";

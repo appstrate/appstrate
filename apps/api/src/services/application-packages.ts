@@ -26,8 +26,6 @@ import { parsePackageZip } from "@appstrate/core/zip";
 import { getVersionForDownload } from "./package-versions.ts";
 import { downloadVersionZip } from "./package-storage.ts";
 
-export type { ResolvedRunConfig };
-
 // ---------------------------------------------------------------------------
 // Install / Uninstall
 // ---------------------------------------------------------------------------
@@ -279,7 +277,7 @@ export async function listAccessiblePackages(scope: AppScope, type: PackageType)
  * extras (an agent's `takes_input`, a skill's `version`) are layered on top by
  * the projection passed to `listInstalledPackageHints`.
  */
-export interface PackageHint {
+interface PackageHint {
   /** Package identifier, e.g. "@appstrate/triage" / "@appstrate/web-research". */
   package_id: string;
   display_name: string;
@@ -338,12 +336,12 @@ async function listInstalledPackageHints<T extends PackageHint>(
 }
 
 /** One entry in the runnable-agent hint exposed via get_me / the chat prompt. */
-export interface RunnableAgent extends PackageHint {
+interface RunnableAgent extends PackageHint {
   /** Whether the agent declares an input schema with at least one property. */
   takes_input: boolean;
 }
 
-export interface RunnableAgentsResult {
+interface RunnableAgentsResult {
   agents: RunnableAgent[];
   /** True when the catalog was capped by `limit` (more reachable via search). */
   truncated: boolean;
@@ -373,13 +371,13 @@ export async function listRunnableAgents(
 }
 
 /** One entry in the installed-skill hint exposed via get_me / the chat prompt. */
-export interface InstalledSkill extends PackageHint {
+interface InstalledSkill extends PackageHint {
   /** The skill package's own manifest version, when known — pin a satisfiable
    * `dependencies.skills` range from it. */
   version: string | null;
 }
 
-export interface InstalledSkillsResult {
+interface InstalledSkillsResult {
   skills: InstalledSkill[];
   /** True when the catalog was capped by `limit` (more reachable via search). */
   truncated: boolean;

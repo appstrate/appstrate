@@ -168,7 +168,7 @@ export const ALLOWLIST: Record<string, { yamlDefault: string; reason: string }> 
 
 // ─── Compose default extraction ──────────────────────────────────────
 
-export interface ComposeDefaultMatch {
+interface ComposeDefaultMatch {
   /** 1-based line number within the analyzed content. */
   line: number;
   varName: string;
@@ -302,7 +302,7 @@ export interface ComposeFixRefused {
   raw: string;
 }
 
-export interface ComposeFixResult {
+interface ComposeFixResult {
   /** True when at least one line was rewritten. */
   changed: boolean;
   /** The repaired file content (identical to input when `changed` is false). */

@@ -25,7 +25,7 @@
 const PACKAGE_ID_RE = /^@[a-z0-9][a-z0-9-]*\/[a-z0-9][a-z0-9-]*(?:@(.+))?$/;
 
 /** Result of classifying `<arg>` for `appstrate run`. */
-export type ParsedRunTarget =
+type ParsedRunTarget =
   | {
       kind: "path";
       path: string;

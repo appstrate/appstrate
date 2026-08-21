@@ -30,7 +30,7 @@ import { html, type RawHtml } from "./html.ts";
 import { renderLayout } from "./layout.ts";
 import type { ResolvedAppBranding } from "../services/branding.ts";
 
-export interface MagicLinkConfirmPageProps {
+interface MagicLinkConfirmPageProps {
   /** Action URL for the POST form — `/api/oauth/magic-link/confirm?token=…&callbackURL=…&errorCallbackURL=…`. */
   action: string;
   csrfToken: string;

@@ -12,7 +12,7 @@ import { html, type RawHtml } from "./html.ts";
 import { renderLayout } from "./layout.ts";
 import { PLATFORM_DEFAULT_BRANDING, type ResolvedAppBranding } from "../services/branding.ts";
 
-export interface ErrorPageProps {
+interface ErrorPageProps {
   /** Error title — e.g. "Application introuvable". */
   title: string;
   /** Descriptive message explaining what happened. */

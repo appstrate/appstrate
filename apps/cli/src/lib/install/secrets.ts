@@ -85,7 +85,7 @@ export function generateBootstrapToken(): string {
  * Defaults are elided (not written) so a vanilla install produces the
  * same `.env` as before — no churn, no diff noise.
  */
-export interface PortOverrides {
+interface PortOverrides {
   port?: number;
 }
 

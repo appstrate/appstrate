@@ -45,9 +45,9 @@ export function isBlockedEgressUrl(url: string): boolean {
 }
 
 /** Why {@link checkEgressUrl} refused a URL. `detail` (host block only) is for logs, never a secret. */
-export type EgressUrlBlockReason = "invalid-url" | "blocked-scheme" | "blocked-host";
+type EgressUrlBlockReason = "invalid-url" | "blocked-scheme" | "blocked-host";
 
-export type EgressUrlCheck =
+type EgressUrlCheck =
   | {
       ok: true;
       hostname: string;
@@ -64,7 +64,7 @@ export type EgressUrlCheck =
     }
   | { ok: false; reason: EgressUrlBlockReason; hostname: string | null; detail?: string };
 
-export interface CheckEgressUrlOptions {
+interface CheckEgressUrlOptions {
   /**
    * When true, plain `http://` is refused for any host NOT on the operator's
    * internal-host allowlist — only `https://` (or an operator-trusted host on

@@ -43,12 +43,12 @@ import { actorFilter } from "../lib/actor.ts";
 import type { AppScope } from "../lib/scope.ts";
 import { getIntegration } from "./integration-service.ts";
 
-export interface ComputeRequiredScopesResult {
+interface ComputeRequiredScopesResult {
   /** Union over all agents — the set to add to the IdP authorize request. */
   required: string[];
 }
 
-export interface ScopeResolverInput {
+interface ScopeResolverInput {
   scope: AppScope;
   integrationId: string;
   /** Auth key on the integration manifest — selects the `required_scopes[authKey]` slice. */

@@ -16,7 +16,7 @@ import {
   type RunDoctorOptions,
 } from "../lib/doctor.ts";
 
-export interface DoctorCommandOptions {
+interface DoctorCommandOptions {
   /** When true, skip clack framing and emit JSON. Useful for scripts. */
   json?: boolean;
   /** Override deps for tests. */
