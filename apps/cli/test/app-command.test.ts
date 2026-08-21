@@ -6,6 +6,10 @@
  * We call each subcommand directly — commander is not in the loop — so
  * injected `deps` (picker / create prompt) aren't bypassed by non-TTY
  * guards.
+ *
+ * Output is captured through a per-test `createMemoryIO()` sink passed as the
+ * command's trailing `io` argument, not by reassigning the global streams —
+ * issue #1180.
  */
 
 import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll } from "bun:test";
@@ -44,31 +48,11 @@ type FetchCall = { url: string; method: string | undefined; body?: string };
 let tmpDir: string;
 let originalXdg: string | undefined;
 const originalFetch = globalThis.fetch;
-const originalExit = process.exit;
-const originalStdoutWrite = process.stdout.write.bind(process.stdout);
-const originalStderrWrite = process.stderr.write.bind(process.stderr);
 
 let fetchCalls: FetchCall[];
-let stdoutChunks: string[];
-let stderrChunks: string[];
 
 import { ExitError } from "./helpers/process-exit.ts";
-
-function captureIo(): void {
-  stdoutChunks = [];
-  stderrChunks = [];
-  process.stdout.write = ((chunk: string | Uint8Array): boolean => {
-    stdoutChunks.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf-8"));
-    return true;
-  }) as typeof process.stdout.write;
-  process.stderr.write = ((chunk: string | Uint8Array): boolean => {
-    stderrChunks.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf-8"));
-    return true;
-  }) as typeof process.stderr.write;
-  (process as unknown as { exit: (code?: number) => never }).exit = ((code?: number): never => {
-    throw new ExitError(code ?? 0);
-  }) as (code?: number) => never;
-}
+import { createMemoryIO } from "./helpers/memory-io.ts";
 
 interface Responders {
   listApps?: () => Response;
@@ -110,15 +94,11 @@ beforeEach(async () => {
   FakeKeyring.store.clear();
   _setKeyringFactoryForTesting((p) => new FakeKeyring(p));
   fetchCalls = [];
-  captureIo();
 });
 
 afterEach(async () => {
   _setKeyringFactoryForTesting(null);
   globalThis.fetch = originalFetch;
-  process.stdout.write = originalStdoutWrite;
-  process.stderr.write = originalStderrWrite;
-  (process as unknown as { exit: typeof originalExit }).exit = originalExit;
   await rm(tmpDir, { recursive: true, force: true });
 });
 
@@ -170,6 +150,7 @@ const twoApps = {
 
 describe("app list", () => {
   it("prints each app with a `*` marker on the pinned one and [default] tag", async () => {
+    const { io, stdout } = createMemoryIO();
     await seedLoggedIn("app_2");
     installFetch({
       listApps: () =>
@@ -179,9 +160,9 @@ describe("app list", () => {
         }),
     });
 
-    await appListCommand({ profile: "default" });
+    await appListCommand({ profile: "default" }, io);
 
-    const out = stdoutChunks.join("");
+    const out = stdout();
     const lines = out.split("\n").filter((l) => l.length > 0);
     const defaultLine = lines.find((l) => l.includes("Default"));
     const stagingLine = lines.find((l) => l.includes("Staging"));
@@ -195,6 +176,7 @@ describe("app list", () => {
   });
 
   it("prints a friendly message when the org has no applications", async () => {
+    const { io, stdout } = createMemoryIO();
     await seedLoggedIn();
     installFetch({
       listApps: () =>
@@ -204,13 +186,14 @@ describe("app list", () => {
         }),
     });
 
-    await appListCommand({ profile: "default" });
-    expect(stdoutChunks.join("")).toContain("(no applications)");
+    await appListCommand({ profile: "default" }, io);
+    expect(stdout()).toContain("(no applications)");
   });
 
   it("errors out when the profile is not logged in", async () => {
-    await expect(appListCommand({ profile: "default" })).rejects.toBeInstanceOf(ExitError);
-    expect(stderrChunks.join("")).toContain("not configured");
+    const { io, stderr } = createMemoryIO();
+    await expect(appListCommand({ profile: "default" }, io)).rejects.toBeInstanceOf(ExitError);
+    expect(stderr()).toContain("not configured");
   });
 });
 
@@ -218,20 +201,23 @@ describe("app list", () => {
 
 describe("app current", () => {
   it("prints the pinned app id to stdout", async () => {
+    const { io, stdout } = createMemoryIO();
     await seedLoggedIn("app_42");
-    await appCurrentCommand({ profile: "default" });
-    expect(stdoutChunks.join("").trim()).toBe("app_42");
+    await appCurrentCommand({ profile: "default" }, io);
+    expect(stdout().trim()).toBe("app_42");
   });
 
   it("exits 1 with a hint when no app is pinned", async () => {
+    const { io, stderr } = createMemoryIO();
     await seedLoggedIn();
-    await expect(appCurrentCommand({ profile: "default" })).rejects.toBeInstanceOf(ExitError);
-    expect(stderrChunks.join("")).toContain("No application pinned");
+    await expect(appCurrentCommand({ profile: "default" }, io)).rejects.toBeInstanceOf(ExitError);
+    expect(stderr()).toContain("No application pinned");
   });
 
   it("exits 1 when the profile is unconfigured", async () => {
-    await expect(appCurrentCommand({ profile: "default" })).rejects.toBeInstanceOf(ExitError);
-    expect(stderrChunks.join("")).toContain("Not logged in");
+    const { io, stderr } = createMemoryIO();
+    await expect(appCurrentCommand({ profile: "default" }, io)).rejects.toBeInstanceOf(ExitError);
+    expect(stderr()).toContain("Not logged in");
   });
 });
 
@@ -239,6 +225,7 @@ describe("app current", () => {
 
 describe("app switch", () => {
   it("pins the app matching the positional arg (by id)", async () => {
+    const { io, stdout } = createMemoryIO();
     await seedLoggedIn("app_1");
     installFetch({
       listApps: () =>
@@ -248,13 +235,14 @@ describe("app switch", () => {
         }),
     });
 
-    await appSwitchCommand({ profile: "default", ref: "app_2" });
+    await appSwitchCommand({ profile: "default", ref: "app_2" }, {}, io);
 
     expect(await pinnedAppId()).toBe("app_2");
-    expect(stdoutChunks.join("")).toContain('Pinned "Staging"');
+    expect(stdout()).toContain('Pinned "Staging"');
   });
 
   it("uses the injected picker when no ref is passed", async () => {
+    const { io } = createMemoryIO();
     await seedLoggedIn("app_1");
     installFetch({
       listApps: () =>
@@ -273,6 +261,7 @@ describe("app switch", () => {
           return apps[1]!;
         },
       },
+      io,
     );
 
     expect(seenCurrent).toBe("app_1");
@@ -280,6 +269,7 @@ describe("app switch", () => {
   });
 
   it("exits 1 when no apps exist", async () => {
+    const { io, stderr } = createMemoryIO();
     await seedLoggedIn("app_1");
     installFetch({
       listApps: () =>
@@ -289,27 +279,14 @@ describe("app switch", () => {
         }),
     });
 
-    await expect(appSwitchCommand({ profile: "default" })).rejects.toBeInstanceOf(ExitError);
-    expect(stderrChunks.join("")).toContain("No applications");
+    await expect(appSwitchCommand({ profile: "default" }, {}, io)).rejects.toBeInstanceOf(
+      ExitError,
+    );
+    expect(stderr()).toContain("No applications");
   });
 
   it("exits with an error when the ref does not match any app", async () => {
-    await seedLoggedIn("app_1");
-    installFetch({
-      listApps: () =>
-        new Response(JSON.stringify(twoApps), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        }),
-    });
-
-    await expect(appSwitchCommand({ profile: "default", ref: "nope" })).rejects.toBeInstanceOf(
-      ExitError,
-    );
-    expect(await pinnedAppId()).toBe("app_1"); // unchanged
-  });
-
-  it("exits with a hint when the picker returns null (non-TTY, no ref)", async () => {
+    const { io } = createMemoryIO();
     await seedLoggedIn("app_1");
     installFetch({
       listApps: () =>
@@ -320,9 +297,26 @@ describe("app switch", () => {
     });
 
     await expect(
-      appSwitchCommand({ profile: "default" }, { pickApp: async () => null }),
+      appSwitchCommand({ profile: "default", ref: "nope" }, {}, io),
     ).rejects.toBeInstanceOf(ExitError);
-    expect(stderrChunks.join("")).toContain("non-TTY");
+    expect(await pinnedAppId()).toBe("app_1"); // unchanged
+  });
+
+  it("exits with a hint when the picker returns null (non-TTY, no ref)", async () => {
+    const { io, stderr } = createMemoryIO();
+    await seedLoggedIn("app_1");
+    installFetch({
+      listApps: () =>
+        new Response(JSON.stringify(twoApps), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+    });
+
+    await expect(
+      appSwitchCommand({ profile: "default" }, { pickApp: async () => null }, io),
+    ).rejects.toBeInstanceOf(ExitError);
+    expect(stderr()).toContain("non-TTY");
     expect(await pinnedAppId()).toBe("app_1"); // unchanged
   });
 });
@@ -331,6 +325,7 @@ describe("app switch", () => {
 
 describe("app create", () => {
   it("POSTs with the positional name + auto-pins", async () => {
+    const { io, stdout } = createMemoryIO();
     await seedLoggedIn();
     let createdBody: unknown;
     installFetch({
@@ -349,14 +344,15 @@ describe("app create", () => {
       },
     });
 
-    await appCreateCommand({ profile: "default", name: "Fresh" });
+    await appCreateCommand({ profile: "default", name: "Fresh" }, {}, io);
 
     expect(createdBody).toEqual({ name: "Fresh" });
     expect(await pinnedAppId()).toBe("app_new");
-    expect(stdoutChunks.join("")).toContain('Created "Fresh"');
+    expect(stdout()).toContain('Created "Fresh"');
   });
 
   it("prompts via the injected creator when no name is passed", async () => {
+    const { io } = createMemoryIO();
     await seedLoggedIn();
     let createdBody: unknown;
     installFetch({
@@ -380,6 +376,7 @@ describe("app create", () => {
       {
         promptCreateApp: async () => ({ name: "Prompted" }),
       },
+      io,
     );
 
     expect(createdBody).toEqual({ name: "Prompted" });
@@ -387,19 +384,21 @@ describe("app create", () => {
   });
 
   it("exits with a hint when prompt is unavailable (non-TTY + no name)", async () => {
+    const { io, stderr } = createMemoryIO();
     await seedLoggedIn();
     installFetch({});
 
     await expect(
-      appCreateCommand({ profile: "default" }, { promptCreateApp: async () => null }),
+      appCreateCommand({ profile: "default" }, { promptCreateApp: async () => null }, io),
     ).rejects.toBeInstanceOf(ExitError);
-    expect(stderrChunks.join("")).toContain("non-TTY");
+    expect(stderr()).toContain("non-TTY");
   });
 
   it("requires login", async () => {
-    await expect(appCreateCommand({ profile: "default", name: "X" })).rejects.toBeInstanceOf(
-      ExitError,
-    );
-    expect(stderrChunks.join("")).toContain("not configured");
+    const { io, stderr } = createMemoryIO();
+    await expect(
+      appCreateCommand({ profile: "default", name: "X" }, {}, io),
+    ).rejects.toBeInstanceOf(ExitError);
+    expect(stderr()).toContain("not configured");
   });
 });
