@@ -633,6 +633,37 @@ export function App() {
               </LazyRoute>
             }
           />
+          {/* The chat brings its OWN shell (`modules/chat/chat-shell.tsx`) —
+              Studio's navigation is not its navigation — so its routes sit
+              beside MainLayout's rather than inside them. They keep the
+              realtime sync: a chat turn runs agents, and their progress is
+              pushed on the same stream. */}
+          {features.chat && (
+            <Route
+              element={
+                <GlobalRealtimeSync>
+                  <Outlet />
+                </GlobalRealtimeSync>
+              }
+            >
+              <Route
+                path="/chat"
+                element={
+                  <Suspense fallback={<LoadingState />}>
+                    <ChatModulePage />
+                  </Suspense>
+                }
+              />
+              <Route
+                path="/chat/:conversationId"
+                element={
+                  <Suspense fallback={<LoadingState />}>
+                    <ChatModulePage />
+                  </Suspense>
+                }
+              />
+            </Route>
+          )}
           <Route
             element={
               <GlobalRealtimeSync>
@@ -838,26 +869,6 @@ export function App() {
               path="/applications"
               element={<Navigate to="/org-settings/applications" replace />}
             />
-            {features.chat && (
-              <>
-                <Route
-                  path="/chat"
-                  element={
-                    <Suspense fallback={<LoadingState />}>
-                      <ChatModulePage />
-                    </Suspense>
-                  }
-                />
-                <Route
-                  path="/chat/:conversationId"
-                  element={
-                    <Suspense fallback={<LoadingState />}>
-                      <ChatModulePage />
-                    </Suspense>
-                  }
-                />
-              </>
-            )}
             <Route
               path="/app-settings"
               element={<Navigate to="/workspace-settings/general" replace />}

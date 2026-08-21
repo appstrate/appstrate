@@ -120,7 +120,7 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
     pattern: /^\/api\/chat\/sessions$/,
     handler: (_u, s) => ({
       status: 200,
-      body: { ...f.chatSessions, data: list(f.chatSessions.data, s) },
+      body: { ...f.chatSessions, data: list(f.chatSessions.data, s, f.heavyChatSessions) },
     }),
   },
 

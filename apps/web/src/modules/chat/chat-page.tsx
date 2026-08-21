@@ -1,18 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Shell wrapper for the chat module page — the UI itself lives in the
-// module package (`@appstrate/module-chat/ui`); this wrapper is the ONLY place
-// the shell imports the module, and it injects everything the module needs:
+// The chat module page — the UI itself lives in the module package
+// (`@appstrate/module-chat/ui`); this file injects everything the module needs:
 // scoping headers, navigation, the document services (preview, authenticated
 // download, authenticated image preview, staged upload) and the translator.
-// Lazy-loaded behind `features.chat`.
+// Lazy-loaded behind `features.chat`, together with the shell it mounts
+// (`chat-shell.tsx`, the only other importer of the module's UI — it mounts the
+// two pieces that belong to the shell rather than to the thread).
 
 import { useCallback, useEffect, useReducer } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ChatPage, type OpenDocument } from "@appstrate/module-chat/ui";
 import { buildScopingHeaders } from "../../lib/scoping-headers";
-import { useSidebarStore } from "../../stores/sidebar-store";
 import { useDocumentDownload, useDocumentImageSrc } from "../../hooks/use-documents";
 import { useUploadClient } from "../../hooks/use-upload";
 import {
@@ -20,19 +20,9 @@ import {
   conversationSidebarReducer,
 } from "./conversation-sidebar-state";
 import { ConversationContextActions, ConversationSidebar } from "./conversation-sidebar";
+import { ChatShell } from "./chat-shell";
 
 export function ChatModulePage() {
-  // Auto-collapse the global sidebar while in chat, restore on leave (same
-  // pattern as settings/profile). Transient setter leaves the user's persisted
-  // preference untouched.
-  useEffect(() => {
-    const { open, setOpenTransient } = useSidebarStore.getState();
-    const prev = open;
-    setOpenTransient(false);
-    return () => {
-      useSidebarStore.getState().setOpenTransient(prev);
-    };
-  }, []);
   // Conversation id lives in the URL (`/chat/:conversationId`) so a refresh or
   // deep-link restores the open conversation. `replace` keeps message/title
   // updates out of the back-history.
@@ -104,36 +94,38 @@ export function ChatModulePage() {
   // The chat's tools (run agents, inspect runs, search…) are served by the
   // `mcp` module, which is a hard peer requirement of `chat` (enforced at
   // boot) — so tools are always available when the chat is reachable.
-  // Bound the chat to the viewport height below the app shell's h-16 header so
-  // the thread scrolls internally and the composer stays pinned (sticky) at the
-  // bottom. Without a definite height here the flex chain grows with the message
-  // list and the composer scrolls off-screen.
+  //
+  // The shell hands the chat a definite height (its inset never scrolls), so
+  // the thread scrolls internally and the composer stays pinned at the bottom.
+  // The context panel is a sibling of the thread, INSIDE the shell's content
+  // area: it belongs to the conversation, and it overlays it on narrow screens.
   return (
-    <div
-      data-full-bleed
-      className="relative flex h-[calc(100dvh-var(--spacing-header))] min-h-0 min-w-0"
+    <ChatShell
+      getHeaders={getHeaders}
+      conversationId={conversationId ?? null}
+      onConversationChange={onConversationChange}
+      headerActions={<ConversationContextActions state={sidebarState} dispatch={dispatchSidebar} />}
     >
-      <div className="min-w-0 flex-1">
-        <ChatPage
-          getHeaders={getHeaders}
+      <div className="relative flex min-h-0 min-w-0 flex-1">
+        <div className="min-w-0 flex-1">
+          <ChatPage
+            getHeaders={getHeaders}
+            conversationId={conversationId ?? null}
+            newChatKey={location.key}
+            onConversationChange={onConversationChange}
+            onOpenDocument={presentDocument}
+            downloadDocument={onDownloadDocument}
+            useDocumentImageSrc={useDocumentImageSrc}
+            uploadFile={uploadFile}
+            t={translate}
+          />
+        </div>
+        <ConversationSidebar
           conversationId={conversationId ?? null}
-          newChatKey={location.key}
-          onConversationChange={onConversationChange}
-          onOpenDocument={presentDocument}
-          headerActions={
-            <ConversationContextActions state={sidebarState} dispatch={dispatchSidebar} />
-          }
-          downloadDocument={onDownloadDocument}
-          useDocumentImageSrc={useDocumentImageSrc}
-          uploadFile={uploadFile}
-          t={translate}
+          state={sidebarState}
+          dispatch={dispatchSidebar}
         />
       </div>
-      <ConversationSidebar
-        conversationId={conversationId ?? null}
-        state={sidebarState}
-        dispatch={dispatchSidebar}
-      />
-    </div>
+    </ChatShell>
   );
 }

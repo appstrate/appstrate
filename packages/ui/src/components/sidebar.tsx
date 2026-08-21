@@ -180,7 +180,23 @@ const Sidebar = React.forwardRef<
               <SheetTitle>Sidebar</SheetTitle>
               <SheetDescription>Displays the mobile sidebar.</SheetDescription>
             </SheetHeader>
-            <div className="flex h-full w-full flex-col">{children}</div>
+            {/* Picking a destination closes the drawer — on a phone it covers
+                the very screen it just navigated to. Only menu rows and links
+                count: the in-row actions (rename, delete) are buttons too, and
+                they must leave the drawer open to do their work.
+
+                Bubble phase, NOT capture: a capture handler would flush the
+                close synchronously (discrete event) and unmount this subtree
+                BEFORE the bubble dispatch, swallowing the row's own onClick. */}
+            <div
+              className="flex h-full w-full flex-col"
+              onClick={(event) => {
+                const el = event.target as HTMLElement;
+                if (el.closest('[data-sidebar="menu-button"], a[href]')) setOpenMobile(false);
+              }}
+            >
+              {children}
+            </div>
           </SheetContent>
         </Sheet>
       );

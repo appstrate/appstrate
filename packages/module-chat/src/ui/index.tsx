@@ -17,21 +17,12 @@
  *    `GET /api/chat/sessions/:id/stream`.
  */
 
-import {
-  type ReactNode,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  useSyncExternalStore,
-} from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { AssistantRuntimeProvider, type AttachmentAdapter } from "@assistant-ui/react";
 import { useAISDKRuntime } from "@assistant-ui/react-ai-sdk";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport, type UIMessage } from "ai";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { PanelLeftIcon } from "lucide-react";
 import { Thread } from "./thread.tsx";
 import {
   ChatHeadersProvider,
@@ -49,7 +40,7 @@ import type {
   UseDocumentImageSrc,
 } from "./runtime-context.ts";
 export type { OpenDocument } from "./runtime-context.ts";
-import { ThreadList, ActiveConversationTitle } from "./thread-list.tsx";
+export { ChatConversationList, ChatConversationTitle } from "./thread-list.tsx";
 import { ModelSelect } from "./model-select.tsx";
 import { fetchModels, type OrgModelOption } from "./models-data.ts";
 import { isModelLive } from "../model-liveness.ts";
@@ -114,8 +105,6 @@ export interface ChatPageProps {
    * tool UIs via context, not props.
    */
   onOpenDocument?: OpenDocument;
-  /** Optional host-owned actions displayed beside the conversation title. */
-  headerActions?: ReactNode;
   /**
    * REQUIRED host services — the chat implements none of them itself (see
    * `runtime-context.ts`): the authenticated download, the authenticated image
@@ -133,7 +122,6 @@ export function ChatPage({
   newChatKey,
   onConversationChange,
   onOpenDocument,
-  headerActions,
   downloadDocument,
   useDocumentImageSrc,
   uploadFile,
@@ -153,8 +141,6 @@ export function ChatPage({
   // Whether the active conversation already exists server-side (its id is in the
   // URL). A not-yet-persisted conversation is known-empty → skip its history GET.
   const isPersisted = conversationId != null;
-
-  const [mobileOpen, setMobileOpen] = useState(false);
 
   const [models, setModels] = useState<OrgModelOption[]>([]);
   // Model selection lives in an external store (localStorage-backed), not React
@@ -210,11 +196,6 @@ export function ChatPage({
     void markSessionRead(getHeaders, activeId).catch(() => {});
   }, [sessions.data, activeId, getHeaders, queryClient, visible]);
 
-  const unreadIds = useMemo(() => {
-    const list = sessions.data ?? [];
-    return new Set(list.filter((s) => s.id !== activeId && s.unread).map((s) => s.id));
-  }, [sessions.data, activeId]);
-
   // The host services, published as ONE value (see `runtime-context.ts`). Every
   // member is a stable host function, so this object is referentially stable
   // between renders and consumers re-render no more than with a context each.
@@ -242,73 +223,32 @@ export function ChatPage({
     <ChatHeadersProvider value={getHeaders ?? null}>
       <SelectConversationProvider value={onConversationChange ?? null}>
         <ChatHostProvider value={host}>
-          <div className="bg-background flex h-full w-full">
-            <aside className="hidden w-64 shrink-0 flex-col border-r md:flex">
-              <ThreadList activeId={conversationId ?? null} unreadIds={unreadIds} />
-            </aside>
-
-            {mobileOpen && (
-              <div className="fixed inset-0 z-40 md:hidden">
-                <div
-                  className="absolute inset-0 bg-black/40"
-                  onClick={() => setMobileOpen(false)}
-                  aria-hidden
-                />
-                <aside
-                  className="bg-background absolute inset-y-0 left-0 flex w-72 max-w-[85%] flex-col border-r shadow-xl"
-                  // Bubble phase, NOT capture: a capture handler would flush
-                  // `setMobileOpen(false)` synchronously (discrete event) and
-                  // unmount this subtree BEFORE the bubble dispatch, swallowing
-                  // the row button's own onClick (select/navigate). In bubble
-                  // order the child's handler runs first, then this closes.
-                  onClick={(e) => {
-                    if ((e.target as HTMLElement).closest("button")) setMobileOpen(false);
-                  }}
-                >
-                  <ThreadList activeId={conversationId ?? null} unreadIds={unreadIds} />
-                </aside>
-              </div>
-            )}
-
-            <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-              <div className="flex h-12 shrink-0 items-center gap-2 border-b px-3">
-                <button
-                  type="button"
-                  onClick={() => setMobileOpen(true)}
-                  aria-label="Conversations"
-                  className="hover:bg-accent -ml-1 rounded-md p-1.5 md:hidden"
-                >
-                  <PanelLeftIcon className="size-5" />
-                </button>
-                <div className="flex min-w-0 flex-1 items-center overflow-hidden">
-                  <ActiveConversationTitle activeId={conversationId ?? null} />
+          {/* The conversation list and the conversation title are NOT here:
+              they are the shell's navigation and the shell's "where you are",
+              mounted by the host from `ChatConversationList` /
+              `ChatConversationTitle`. What is left is the thread itself. */}
+          {/* A plain div, not a `main`: the host shell's inset already IS the
+              page's `main` landmark, and two nested ones name two pages. */}
+          <div className="bg-background flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden">
+            <Conversation
+              key={activeId}
+              id={activeId}
+              getHeaders={getHeaders}
+              isPersisted={isPersisted}
+              onConversationChange={onConversationChange}
+              attachments={attachments}
+              composerSlot={
+                <div className="flex items-center gap-2">
+                  <ModelSelect
+                    models={models}
+                    selectedId={selectedModel}
+                    onSelect={setSelectedModel}
+                    generation={generation}
+                    onGenerationChange={setGenerationSettings}
+                  />
                 </div>
-                {headerActions ? (
-                  <div className="flex shrink-0 items-center">{headerActions}</div>
-                ) : null}
-              </div>
-              <main className="min-h-0 min-w-0 flex-1 overflow-hidden">
-                <Conversation
-                  key={activeId}
-                  id={activeId}
-                  getHeaders={getHeaders}
-                  isPersisted={isPersisted}
-                  onConversationChange={onConversationChange}
-                  attachments={attachments}
-                  composerSlot={
-                    <div className="flex items-center gap-2">
-                      <ModelSelect
-                        models={models}
-                        selectedId={selectedModel}
-                        onSelect={setSelectedModel}
-                        generation={generation}
-                        onGenerationChange={setGenerationSettings}
-                      />
-                    </div>
-                  }
-                />
-              </main>
-            </div>
+              }
+            />
           </div>
         </ChatHostProvider>
       </SelectConversationProvider>

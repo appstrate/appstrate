@@ -6,12 +6,34 @@
  * source of truth, selection just navigates. Mutations (rename/delete) invalidate
  * the list; the active conversation's first message invalidates it too (see
  * index.tsx) so a new conversation appears here with its server-derived title.
+ *
+ * Both pieces are mounted by the HOST SHELL, not by `ChatPage`: the list is the
+ * chat's navigation (it sits in the shell sidebar, where Studio's nav sits) and
+ * the title is where-you-are (it sits in the shell breadcrumb). They therefore
+ * ship as self-contained wrappers — `ChatConversationList` and
+ * `ChatConversationTitle` — that carry the same context `ChatPage` publishes,
+ * so the host mounts them anywhere in its tree with only `getHeaders` in hand.
+ * Both read the SAME React Query key as the thread, so one request feeds all.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { PlusIcon, PencilIcon, Trash2Icon, Loader2Icon } from "lucide-react";
-import { useChatHeaders, useSelectConversation } from "./runtime-context.ts";
+import {
+  SidebarGroup,
+  SidebarGroupLabel,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+} from "@appstrate/ui/components/sidebar";
+import {
+  ChatHeadersProvider,
+  SelectConversationProvider,
+  useChatHeaders,
+  useSelectConversation,
+  type GetHeaders,
+  type SelectConversation,
+} from "./runtime-context.ts";
 import {
   renameSession,
   deleteSession,
@@ -56,47 +78,110 @@ function useNowTick(): number {
   return now;
 }
 
-export function ThreadList({
-  activeId,
-  unreadIds,
-}: {
-  activeId: string | null;
-  unreadIds?: ReadonlySet<string>;
-}) {
+/**
+ * The chat's navigation, in the host shell's sidebar vocabulary (same groups,
+ * rows and active fill as Studio's nav — the two products must read as one
+ * app). "Nouvelle conversation" sits ABOVE the group rather than as a discreet
+ * "+" beside its label: it is the primary action of the surface, and it is the
+ * only row that survives the icon rail, where the conversations themselves
+ * cannot be shown.
+ *
+ * A conversation whose reply arrived while the user was elsewhere reads as
+ * unread until it is opened; `activeId` is never counted, since looking at it
+ * IS reading it.
+ */
+function ThreadList({ activeId }: { activeId: string | null }) {
   const select = useSelectConversation();
   const { data: sessions, isLoading } = useSessions();
   const now = useNowTick();
+  const list = sessions ?? [];
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex h-12 shrink-0 items-center gap-1 border-b px-3">
-        <span className="flex-1 text-sm font-medium">Conversations</span>
-        <button
-          type="button"
-          aria-label="Nouvelle conversation"
-          title="Nouvelle conversation"
-          onClick={() => select?.(null)}
-          className="text-muted-foreground hover:text-foreground hover:bg-accent rounded-md p-1.5"
-        >
-          <PlusIcon className="size-4" />
-        </button>
-      </div>
-      <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto p-2">
-        {(sessions ?? []).map((s) => (
-          <ConversationRow
-            key={s.id}
-            session={s}
-            active={s.id === activeId}
-            unread={unreadIds?.has(s.id) ?? false}
-            now={now}
-          />
-        ))}
-        {!isLoading && (sessions ?? []).length === 0 && (
-          <p className="text-muted-foreground px-2 py-6 text-center text-xs">
+    <>
+      <SidebarGroup className="pb-0">
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton onClick={() => select?.(null)} tooltip="Nouvelle conversation">
+              <PlusIcon />
+              <span>Nouvelle conversation</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
+      </SidebarGroup>
+      <SidebarGroup className="min-h-0 flex-1 group-data-[collapsible=icon]:hidden">
+        <SidebarGroupLabel>Conversations</SidebarGroupLabel>
+        <SidebarMenu className="min-h-0 flex-1 overflow-y-auto">
+          {list.map((s) => (
+            <ConversationRow
+              key={s.id}
+              session={s}
+              active={s.id === activeId}
+              unread={s.unread && s.id !== activeId}
+              now={now}
+            />
+          ))}
+        </SidebarMenu>
+        {!isLoading && list.length === 0 && (
+          <p className="text-sidebar-foreground/70 px-2 py-6 text-center text-xs">
             Envoie un message ! Ton historique de conversations apparaîtra ici.
           </p>
         )}
-      </div>
-    </div>
+      </SidebarGroup>
+    </>
+  );
+}
+
+/**
+ * The list, mounted by the host in its sidebar. Self-contained: it carries the
+ * same two contexts `ChatPage` publishes, so the host needs only `getHeaders`
+ * and its own navigation callback — the sessions query key is shared, so this
+ * and the thread issue ONE request between them.
+ */
+export function ChatConversationList({
+  getHeaders,
+  activeId,
+  onConversationChange,
+}: {
+  getHeaders?: GetHeaders;
+  activeId: string | null;
+  onConversationChange?: SelectConversation;
+}) {
+  return (
+    <ChatProviders getHeaders={getHeaders} onConversationChange={onConversationChange}>
+      <ThreadList activeId={activeId} />
+    </ChatProviders>
+  );
+}
+
+/** The active conversation's title, mounted by the host in its breadcrumb. */
+export function ChatConversationTitle({
+  getHeaders,
+  activeId,
+}: {
+  getHeaders?: GetHeaders;
+  activeId: string | null;
+}) {
+  return (
+    <ChatProviders getHeaders={getHeaders}>
+      <ActiveConversationTitle activeId={activeId} />
+    </ChatProviders>
+  );
+}
+
+function ChatProviders({
+  getHeaders,
+  onConversationChange,
+  children,
+}: {
+  getHeaders?: GetHeaders;
+  onConversationChange?: SelectConversation;
+  children: ReactNode;
+}) {
+  return (
+    <ChatHeadersProvider value={getHeaders ?? null}>
+      <SelectConversationProvider value={onConversationChange ?? null}>
+        {children}
+      </SelectConversationProvider>
+    </ChatHeadersProvider>
   );
 }
 
@@ -147,56 +232,55 @@ function ConversationRow({
 
   if (editing) {
     return (
-      <div className="px-2 py-0">
+      <SidebarMenuItem className="px-2">
         <RenameInput current={session.title ?? ""} onDone={() => setEditing(false)} onSave={save} />
-      </div>
+      </SidebarMenuItem>
     );
   }
 
   return (
-    <div
-      data-active={active || undefined}
-      className="group hover:bg-accent/50 data-[active]:bg-accent data-[active]:text-accent-foreground flex items-center gap-1 rounded-md px-2 py-0 text-sm"
-    >
-      <button
-        type="button"
+    <SidebarMenuItem>
+      <SidebarMenuButton
+        isActive={active}
         onClick={() => select?.(session.id)}
-        className="flex min-w-0 flex-1 items-center gap-1.5 rounded-none bg-transparent px-0 py-1 text-left text-inherit hover:bg-transparent"
+        // Room for the fixed-width right slot below, which is absolutely
+        // positioned and would otherwise sit on top of a long title.
+        className="pr-16"
       >
         <span className={`block w-full truncate text-left ${unread ? "font-semibold" : ""}`}>
           {session.title ?? "Nouvelle conversation"}
         </span>
-      </button>
+      </SidebarMenuButton>
       {/* Fixed-width right slot: spinner / unread dot / timestamp have different
           natural widths — without w-14 the title's truncation point reflows on
           every generating↔idle transition. */}
-      <div className="relative flex w-14 shrink-0 items-center justify-end">
+      <div className="group-hover/menu-item:bg-sidebar-accent absolute top-1 right-1 flex h-6 w-14 items-center justify-end rounded-md">
         {session.generating ? (
           <Loader2Icon
-            className="text-muted-foreground size-3.5 animate-spin"
+            className="text-sidebar-foreground/70 size-3.5 animate-spin"
             aria-label="Opération en cours"
           />
         ) : unread ? (
           <span
-            className="bg-primary size-2 rounded-full transition-opacity group-hover:opacity-0"
+            className="bg-primary size-2 rounded-full transition-opacity group-hover/menu-item:opacity-0"
             aria-label="Réponse non lue"
             title="Réponse non lue"
           />
         ) : (
-          <span className="text-muted-foreground text-xs transition-opacity group-hover:opacity-0">
+          <span className="text-sidebar-foreground/70 text-xs transition-opacity group-hover/menu-item:opacity-0">
             {relativeTime(session.updatedAt, now)}
           </span>
         )}
         {/* pointer-events must track visibility: opacity-0 alone keeps the
             invisible buttons tappable — on touch devices (no hover) a tap on
             the timestamp area would hit the hidden Delete. */}
-        <div className="bg-background pointer-events-none absolute right-0 flex items-center gap-0.5 rounded-md p-0.5 opacity-0 shadow-sm transition-opacity group-hover:pointer-events-auto group-hover:opacity-100">
+        <div className="pointer-events-none absolute right-0 flex items-center gap-0.5 rounded-md p-0.5 opacity-0 transition-opacity group-hover/menu-item:pointer-events-auto group-hover/menu-item:opacity-100">
           <button
             type="button"
             aria-label="Renommer"
             title="Renommer"
             onClick={() => setEditing(true)}
-            className="text-muted-foreground hover:text-foreground hover:bg-accent rounded-md p-0.5"
+            className="text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-border rounded-md p-0.5"
           >
             <PencilIcon className="size-3.5" />
           </button>
@@ -205,23 +289,27 @@ function ConversationRow({
             aria-label="Supprimer"
             title="Supprimer"
             onClick={() => void onDelete()}
-            className="text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-md p-0.5"
+            className="text-sidebar-foreground/70 hover:text-destructive hover:bg-destructive/10 rounded-md p-0.5"
           >
             <Trash2Icon className="size-3.5" />
           </button>
         </div>
       </div>
-    </div>
+    </SidebarMenuItem>
   );
 }
 
-/** Active-conversation title + rename for the chat header. */
-export function ActiveConversationTitle({ activeId }: { activeId: string | null }) {
+/** Active-conversation title + rename for the shell breadcrumb. */
+function ActiveConversationTitle({ activeId }: { activeId: string | null }) {
   const { editing, setEditing, save } = useInlineRename(activeId ?? "");
   const { data: sessions } = useSessions();
   if (!activeId) return null;
   const session = sessions?.find((s) => s.id === activeId);
-  if (!session) return null;
+  // The list has not arrived yet, or the URL names a conversation that is gone.
+  // Still render the segment: the host has already drawn the separator before
+  // it, and a trail that ends on a lone "/" reads as a broken page. Not
+  // renameable — there is nothing known to rename.
+  if (!session) return <span className="truncate text-sm font-medium">Nouvelle conversation</span>;
 
   if (editing) {
     return (

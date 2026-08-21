@@ -342,6 +342,27 @@ export const chatSessions: Json200<"/api/chat/sessions", "get"> = {
   ],
 };
 
+type ChatSession = (typeof chatSessions)["data"][number];
+
+/**
+ * A long history — what the conversation list in the shell sidebar has to hold
+ * without pushing the new-conversation row or the meta block off screen. Titles
+ * of very different lengths on purpose: truncation and the fixed-width right
+ * slot (timestamp / unread dot / spinner) are what break first.
+ */
+export const heavyChatSessions: ChatSession[] = Array.from({ length: 60 }, (_, i) => ({
+  object: "chat_session",
+  id: `chat_h_${i}`,
+  title:
+    i % 5 === 0
+      ? `Conversation ${i + 1} — un titre assez long pour être coupé dans la barre latérale`
+      : `Conversation ${i + 1}`,
+  generating: i === 1,
+  unread: i % 7 === 3,
+  createdAt: ago(i * 90 + 120),
+  updatedAt: ago(i * 90),
+}));
+
 export const notifications: Json200<"/api/notifications", "get"> = {
   has_more: false,
   data: [
