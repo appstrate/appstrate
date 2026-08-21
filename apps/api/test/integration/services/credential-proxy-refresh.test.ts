@@ -76,7 +76,6 @@ async function setup(
   await db.insert(applicationPackages).values({
     applicationId: ctx.defaultAppId,
     packageId,
-    config: {},
   });
   // Register the org's custom per-application client first so its id can pin the
   // connection (client_ref is a flat client id).
@@ -128,7 +127,6 @@ async function setupSystemPinned(
   await db.insert(applicationPackages).values({
     applicationId: ctx.defaultAppId,
     packageId,
-    config: {},
   });
   await db.insert(integrationConnections).values({
     integrationId: packageId,

@@ -2,7 +2,7 @@
 
 /**
  * Integration tests for the unified input resolution across the three run
- * origins that reach it (`PUT .../config` write guard, `POST .../run`, the
+ * origins that reach it (`PUT .../input-settings` write guard, `POST .../run`, the
  * scheduler fire path).
  *
  * What each test pins is the value that reaches `runs.input` — the row the
@@ -95,11 +95,11 @@ describe("run input resolution — author / editor / schedule / caller layers", 
   }
 
   /** Write the per-application input settings through the real route. */
-  async function putConfig(body: {
+  async function putInputSettings(body: {
     values?: Record<string, unknown>;
     locked_fields?: string[];
   }): Promise<Response> {
-    return app.request(`/api/agents/${AGENT_ID}/config`, {
+    return app.request(`/api/agents/${AGENT_ID}/input-settings`, {
       method: "PUT",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -150,9 +150,9 @@ describe("run input resolution — author / editor / schedule / caller layers", 
 
   it("an editor default beats the author default and reaches the run", async () => {
     await seedRunnableAgent();
-    expect((await putConfig({ values: { folder: "archive" }, locked_fields: [] })).status).toBe(
-      200,
-    );
+    expect(
+      (await putInputSettings({ values: { folder: "archive" }, locked_fields: [] })).status,
+    ).toBe(200);
 
     const res = await triggerRun({ input: { subject: "hello" } });
     expect(res.status).toBe(201);
@@ -165,7 +165,7 @@ describe("run input resolution — author / editor / schedule / caller layers", 
 
   it("a caller can still override an UNLOCKED editor default", async () => {
     await seedRunnableAgent();
-    await putConfig({ values: { folder: "archive" }, locked_fields: [] });
+    await putInputSettings({ values: { folder: "archive" }, locked_fields: [] });
 
     const res = await triggerRun({ input: { subject: "hello", folder: "sent" } });
     expect(res.status).toBe(201);
@@ -177,7 +177,7 @@ describe("run input resolution — author / editor / schedule / caller layers", 
 
   it("a schedule value beats the editor default on the fire path", async () => {
     await seedRunnableAgent();
-    await putConfig({ values: { folder: "archive" }, locked_fields: [] });
+    await putInputSettings({ values: { folder: "archive" }, locked_fields: [] });
 
     const schedule = await seedSchedule({
       packageId: AGENT_ID,
@@ -209,7 +209,7 @@ describe("run input resolution — author / editor / schedule / caller layers", 
 
   it("a schedule value on a locked field produces a visible failed run", async () => {
     await seedRunnableAgent();
-    await putConfig({ values: { folder: "archive" }, locked_fields: ["folder"] });
+    await putInputSettings({ values: { folder: "archive" }, locked_fields: ["folder"] });
 
     const schedule = await seedSchedule({
       packageId: AGENT_ID,
@@ -239,7 +239,7 @@ describe("run input resolution — author / editor / schedule / caller layers", 
 
   it("POST /run with a caller value on a locked field returns 400 locked_input_field", async () => {
     await seedRunnableAgent();
-    await putConfig({ values: { folder: "archive" }, locked_fields: ["folder"] });
+    await putInputSettings({ values: { folder: "archive" }, locked_fields: ["folder"] });
 
     const res = await triggerRun({ input: { subject: "hello", folder: "sent" } });
 
@@ -255,7 +255,7 @@ describe("run input resolution — author / editor / schedule / caller layers", 
 
   it("a locked field still resolves from its editor value on a run that omits it", async () => {
     await seedRunnableAgent();
-    await putConfig({ values: { folder: "archive" }, locked_fields: ["folder"] });
+    await putInputSettings({ values: { folder: "archive" }, locked_fields: ["folder"] });
 
     const res = await triggerRun({ input: { subject: "hello" } });
     expect(res.status).toBe(201);
@@ -268,7 +268,7 @@ describe("run input resolution — author / editor / schedule / caller layers", 
   it("refuses to lock a required field that has no effective value", async () => {
     await seedRunnableAgent();
 
-    const res = await putConfig({ values: {}, locked_fields: ["subject"] });
+    const res = await putInputSettings({ values: {}, locked_fields: ["subject"] });
 
     expect(res.status).toBe(400);
     const body = (await res.json()) as { code?: string; detail?: string };
@@ -279,7 +279,10 @@ describe("run input resolution — author / editor / schedule / caller layers", 
   it("allows locking a required field once it has a stored value", async () => {
     await seedRunnableAgent();
 
-    const res = await putConfig({ values: { subject: "fixed" }, locked_fields: ["subject"] });
+    const res = await putInputSettings({
+      values: { subject: "fixed" },
+      locked_fields: ["subject"],
+    });
     expect(res.status).toBe(200);
 
     // And that value is what the run receives, with no `subject` asked at launch.
@@ -291,7 +294,7 @@ describe("run input resolution — author / editor / schedule / caller layers", 
 
   it("allows locking an OPTIONAL field with no value at all", async () => {
     await seedRunnableAgent();
-    const res = await putConfig({ values: {}, locked_fields: ["folder"] });
+    const res = await putInputSettings({ values: {}, locked_fields: ["folder"] });
     expect(res.status).toBe(200);
   });
 });

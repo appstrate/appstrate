@@ -71,11 +71,11 @@ export function onMutationError(err: Error) {
  * Both members are FULL replacements — an omitted key is cleared, never left
  * unchanged — so the caller always sends the complete pair.
  */
-export function useSaveConfig(packageId: string) {
+export function useSaveInputSettings(packageId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (settings: { values: Record<string, unknown>; locked_fields: string[] }) => {
-      const { data } = await client.PUT("/api/agents/{scope}/{name}/config", {
+      const { data } = await client.PUT("/api/agents/{scope}/{name}/input-settings", {
         params: { path: splitPackageRef(packageId) },
         body: settings,
       });

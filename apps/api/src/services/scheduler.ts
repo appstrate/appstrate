@@ -23,7 +23,7 @@ import {
   resolveRunPreflight,
   extractRunAgentDenorm,
 } from "./run-pipeline.ts";
-import { getPackageConfig } from "./application-packages.ts";
+import { getInstalledPackageSettings } from "./application-packages.ts";
 import { resolveEffectiveInput } from "./input-resolution.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { asRecordOrNull } from "@appstrate/core/safe-json";
@@ -545,7 +545,7 @@ export async function triggerScheduledRun(
 
     // Per-application settings: editor defaults + locked fields for the input
     // resolution below, and the model/proxy the preflight projects back.
-    const packageConfig = await getPackageConfig(applicationId, packageId);
+    const packageSettings = await getInstalledPackageSettings(applicationId, packageId);
 
     // Shared preflight: validate readiness
     let preflightModelId: string | null;
@@ -557,7 +557,7 @@ export async function triggerScheduledRun(
         applicationId,
         orgId,
         actor,
-        packageConfig,
+        packageSettings,
         // Schedule freezes per-integration picks at create time; forward
         // them so readiness honours the same disambiguation the run
         // pipeline will use a few lines down (matches the "single source
@@ -599,8 +599,8 @@ export async function triggerScheduledRun(
     try {
       resolvedInput = resolveEffectiveInput({
         ...(inputSchema ? { schema: asJSONSchemaObject(inputSchema) } : {}),
-        editorDefaults: packageConfig.config,
-        lockedFields: packageConfig.lockedFields,
+        editorDefaults: packageSettings.values,
+        lockedFields: packageSettings.locked,
         scheduleValues: input,
       });
     } catch (err) {

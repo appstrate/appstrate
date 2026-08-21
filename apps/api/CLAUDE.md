@@ -18,7 +18,7 @@ Conventions for `apps/api`. Root guide: `../../CLAUDE.md`. Module authoring: `sr
 - **System agents**: all agents (system + local) live in DB. System agents loaded from `system-packages/` ZIPs at boot and synced with `orgId: null` (`lib/boot.ts` `syncSystemPackagesToDb()`).
 - **Graceful shutdown**: `run-tracker.ts` — stop scheduler → reject new POST → wait in-flight (max 30s) → exit.
 - **Validation (Zod)**: all route bodies validated with `parseBody(schema, body)` from `lib/errors.ts` (`.safeParse()` → throws `invalidRequest()`). Naming `{concept}Schema` / `{Concept}` (`z.infer`). JSONB reads use safe narrowing (null/typeof/Array.isArray), not raw `as`. Query params: `z.coerce.number().int().min().max().catch(default).parse()`. **Zod 4** — `z.url()` NOT `z.string().url()`, `z.uuid()`. Reference: `routes/models.ts`, `routes/webhooks.ts`, `routes/organizations.ts`.
-- **Validation (AJV)**: `validateConfig()`/`validateInput()`/`validateOutput()` for **dynamic** manifest schemas only. One AJV instance, `coerceTypes: true`, extra fields allowed.
+- **Validation (AJV)**: `validateAgainstSchema()`/`validateInput()`/`validateOutput()` for **dynamic** manifest schemas only. One AJV instance, `coerceTypes: true`, extra fields allowed.
 
 ## Headless Developer Platform
 
@@ -28,7 +28,7 @@ Headless API for embedding agents. Patterns mirror Stripe.
 - **End-users** (`end_users`, prefix `eu_`): external users via API, belong to an application. Not Better Auth users. Routes `/api/end-users` (CRUD, admin). Fields: `externalId` (unique/app), `metadata` (JSONB ≤50 keys), `email`, `name`. Default connection profile on creation.
 - **`Appstrate-User` header**: impersonation (`eu_` ID). API key auth only — `400` on cookie. Validates end-user belongs to key's application. Full audit log per impersonation.
 - **Webhooks** (`webhooks` prefix `wh_`, `webhook_deliveries`): application-scoped (`applicationId` NOT NULL). Standard Webhooks spec (HMAC-SHA256). BullMQ delivery, 8-attempt backoff. Events: `run.started`/`success`/`failed`/`timeout`/`cancelled`. SSRF protection on URLs. Routes `/api/webhooks` (CRUD + test/ping + rotate + deliveries, admin).
-- **Application packages** (`application_packages`): installed packages per app with the agent's stored input values (`config`) + locked fields, model/proxy overrides, and version pinning. All of it is per-application (not per-org).
+- **Application packages** (`application_packages`): installed packages per app with the agent's stored input settings (`input_settings` jsonb — `{ values, locked }`, read via `getInputSettings()`, written only by `PUT /api/agents/{scope}/{name}/input-settings`), model/proxy overrides, and version pinning. All of it is per-application (not per-org).
 - **API versioning**: date-based. Header `Appstrate-Version` (request override + response). Org pinning via `settings.apiVersion`. `Sunset` header on deprecated. `middleware/api-version.ts`.
 - **Idempotency**: `Idempotency-Key` on POST routes. Redis-backed, 24h TTL, SHA-256 body hash. `409` concurrent, `422` body mismatch, `Idempotent-Replayed: true` on cached replay. `middleware/idempotency.ts`.
 - **Error handling**: RFC 9457 `application/problem+json` on all endpoints. `ApiError` factories (`invalidRequest`, `unauthorized`, `forbidden`, `notFound`, `conflict`, `gone`, `internalError`, `systemEntityForbidden`). `Request-Id` (`req_`) on all responses.

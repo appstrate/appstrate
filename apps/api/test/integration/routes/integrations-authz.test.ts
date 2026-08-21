@@ -86,7 +86,7 @@ async function seedIntegration(orgId: string, manifest: IntegrationManifest) {
 
 /** Activate (install) the integration in the application. */
 async function activate(applicationId: string, packageId: string): Promise<void> {
-  await db.insert(applicationPackages).values({ applicationId, packageId, config: {} });
+  await db.insert(applicationPackages).values({ applicationId, packageId });
 }
 
 function memberHeaders(

@@ -49,7 +49,7 @@ test.describe("Cross-org agent isolation", () => {
     const name = `agent-cfg-${Date.now()}`;
     await createAgent(clientA, scope, name);
 
-    const res = await clientB.put(`/agents/${scope}/${name}/config`, {
+    const res = await clientB.put(`/agents/${scope}/${name}/input-settings`, {
       values: { key: "val" },
       locked_fields: [],
     });

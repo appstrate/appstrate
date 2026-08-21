@@ -69,7 +69,7 @@ describe("integration activation precedence", () => {
   async function installRow(packageId: string, enabled: boolean) {
     await db
       .insert(applicationPackages)
-      .values({ applicationId: ctx.defaultAppId, packageId, config: {}, enabled });
+      .values({ applicationId: ctx.defaultAppId, packageId, enabled });
   }
 
   it("auto-activates a system integration with no install row", async () => {

@@ -18,7 +18,7 @@ import {
 import { listUserRuns } from "../services/state/notifications.ts";
 import { resolveAgentRunVersion } from "../services/agent-version-resolver.ts";
 import { parseRequestInput } from "../services/input-parser.ts";
-import { getPackageConfig } from "../services/application-packages.ts";
+import { getInstalledPackageSettings } from "../services/application-packages.ts";
 import { deleteRunWorkspace } from "../services/run-workspace-storage.ts";
 import { asJSONSchemaObject } from "@appstrate/core/form";
 import { abortRun } from "../services/run-tracker.ts";
@@ -183,7 +183,7 @@ export function createRunsRouter() {
         // Per-application settings first: they carry the editor defaults and
         // the locked-field list the input resolution needs, and the readiness
         // preflight below reuses this same row (one read per trigger).
-        const packageConfig = await getPackageConfig(c.get("applicationId"), agent.id);
+        const packageSettings = await getInstalledPackageSettings(c.get("applicationId"), agent.id);
 
         const inputResult = await parseRequestInput(
           c,
@@ -195,8 +195,8 @@ export function createRunsRouter() {
             // Same-agent gate for `rerun_from` — replaying another agent's run
             // input is rejected with 409 `rerun_agent_mismatch`.
             agentPackageId: agent.id,
-            editorDefaults: packageConfig.config,
-            lockedFields: packageConfig.lockedFields,
+            editorDefaults: packageSettings.values,
+            lockedFields: packageSettings.locked,
           },
         );
 
@@ -240,7 +240,7 @@ export function createRunsRouter() {
           applicationId: c.get("applicationId"),
           orgId,
           actor,
-          packageConfig,
+          packageSettings,
           connectionOverrides: connectionOverrides ?? null,
           manifestCache,
         });

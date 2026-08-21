@@ -173,7 +173,6 @@ describe("GET /api/integrations", () => {
     await db.insert(applicationPackages).values({
       applicationId: ctx.defaultAppId,
       packageId: pkg.id,
-      config: {},
     });
     const res = await app.request("/api/integrations", { headers: authHeaders(ctx) });
     const body = (await res.json()) as { data: Array<{ id: string; active: boolean }> };
@@ -224,7 +223,6 @@ describe("GET /api/integrations", () => {
     await db.insert(applicationPackages).values({
       applicationId: ctx.defaultAppId,
       packageId: pkg.id,
-      config: {},
       enabled: false,
     });
     const res = await app.request("/api/integrations", { headers: authHeaders(ctx) });

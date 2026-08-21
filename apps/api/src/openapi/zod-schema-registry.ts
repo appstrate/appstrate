@@ -248,7 +248,7 @@ const coreSchemas: OpenApiSchemaEntry[] = [
   },
   {
     method: "PUT",
-    path: "/api/agents/{scope}/{name}/config",
+    path: "/api/agents/{scope}/{name}/input-settings",
     jsonSchema: toJsonSchema(agentInputSettingsSchema),
     description: "Set agent input settings",
   },

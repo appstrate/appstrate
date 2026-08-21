@@ -29,7 +29,7 @@ describe("requireAgent (via agent config route)", () => {
       "@testorg/my-agent",
     );
 
-    const res = await app.request("/api/agents/@testorg/my-agent/config", {
+    const res = await app.request("/api/agents/@testorg/my-agent/input-settings", {
       method: "PUT",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
       body: JSON.stringify({ values: {}, locked_fields: [] }),
@@ -38,7 +38,7 @@ describe("requireAgent (via agent config route)", () => {
   });
 
   it("returns 404 when agent does not exist", async () => {
-    const res = await app.request("/api/agents/@testorg/nonexistent/config", {
+    const res = await app.request("/api/agents/@testorg/nonexistent/input-settings", {
       method: "PUT",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
       body: JSON.stringify({}),

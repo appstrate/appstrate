@@ -557,14 +557,16 @@ export async function parseRequestInput(
      */
     injectedInput?: Record<string, unknown>;
     /**
-     * Values the editor stored once on `application_packages.config` — layer 2
-     * of the input resolution (see `input-resolution.ts`). Omitted by origins
-     * that have no per-application row (inline runs on a shadow package).
+     * Values the editor stored once on `application_packages.input_settings`
+     * (`values`) — layer 2 of the input resolution (see
+     * `input-resolution.ts`). Omitted by origins that have no per-application
+     * row (inline runs on a shadow package).
      */
     editorDefaults?: Record<string, unknown>;
     /**
-     * `application_packages.locked_fields` — input fields the caller may not
-     * set. A request naming one is refused with 400 `locked_input_field`.
+     * `application_packages.input_settings` (`locked`) — input fields the
+     * caller may not set. A request naming one is refused with 400
+     * `locked_input_field`.
      */
     lockedFields?: readonly string[];
   },

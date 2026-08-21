@@ -15,12 +15,12 @@ import {
   scopeFromActor,
   type PersistenceScope,
 } from "../services/state/package-persistence.ts";
-import { validateConfig } from "../services/schema.ts";
+import { validateAgainstSchema } from "../services/schema.ts";
 import { assertLockedFieldsSatisfiable } from "../services/input-resolution.ts";
 import {
   listAccessiblePackages,
   updateInstalledPackage,
-  getPackageConfig,
+  getInstalledPackageSettings,
   hasPackageAccess,
 } from "../services/application-packages.ts";
 import { getPackage } from "../services/package-catalog.ts";
@@ -61,8 +61,8 @@ export const modelIdSchema = z.object({
 });
 
 /**
- * Body of `PUT /api/agents/{scope}/{name}/config` — the agent's stored input
- * settings for this application.
+ * Body of `PUT /api/agents/{scope}/{name}/input-settings` — the agent's stored
+ * input settings for this application.
  *
  * `values` are layer 2 of the input resolution (editor defaults, partial by
  * design); `locked_fields` names the input fields no caller may set at
@@ -206,10 +206,10 @@ export function createAgentsRouter() {
     return c.json(listResponse(agentList));
   });
 
-  // PUT /api/agents/:scope/:name/config — save the agent's stored input
-  // defaults + field locks (admin-only).
+  // PUT /api/agents/:scope/:name/input-settings — save the agent's stored
+  // input defaults + field locks (admin-only).
   router.put(
-    `/${SCOPED_PACKAGE_ROUTE}/config`,
+    `/${SCOPED_PACKAGE_ROUTE}/input-settings`,
     requireAgent(),
     requirePermission("agents", "configure"),
     async (c) => {
@@ -224,7 +224,7 @@ export function createAgentsRouter() {
       // empty is legitimately asked at launch. Validate types/formats against
       // the input schema with `required` dropped, so a wrong-typed default is
       // still rejected here rather than at every run.
-      const validation = validateConfig(body.values, { ...schema, required: [] });
+      const validation = validateAgainstSchema(body.values, { ...schema, required: [] });
       if (!validation.valid) {
         throw validationFailed(
           validation.errors.map((e) => ({
@@ -242,15 +242,14 @@ export function createAgentsRouter() {
 
       const scope = getAppScope(c);
       await updateInstalledPackage(scope, agent.id, {
-        config: body.values,
-        lockedFields: body.locked_fields,
+        inputSettings: { values: body.values, locked: body.locked_fields },
       });
 
       await recordAuditFromContext(c, {
-        action: "agent.config_updated",
+        action: "agent.input_settings_updated",
         resourceType: "agent",
         resourceId: agent.id,
-        after: { lockedFields: body.locked_fields },
+        after: { locked: body.locked_fields },
       });
 
       // 200 + the bare persisted resource (#657): validation failures are
@@ -263,7 +262,7 @@ export function createAgentsRouter() {
   router.get(`/${SCOPED_PACKAGE_ROUTE}/proxy`, requireAgent(), async (c) => {
     const agent = c.get("package");
     const applicationId = c.get("applicationId");
-    const { proxyId } = await getPackageConfig(applicationId, agent.id);
+    const { proxyId } = await getInstalledPackageSettings(applicationId, agent.id);
 
     return c.json({ proxyId, resolved: proxyId !== "none" });
   });
@@ -310,8 +309,8 @@ export function createAgentsRouter() {
       });
 
       // Return the bare proxy-setting resource — same shape and read path
-      // (`getPackageConfig`) as GET /agents/:scope/:name/proxy (#657).
-      const { proxyId } = await getPackageConfig(scope.applicationId, agent.id);
+      // (`getInstalledPackageSettings`) as GET /agents/:scope/:name/proxy (#657).
+      const { proxyId } = await getInstalledPackageSettings(scope.applicationId, agent.id);
       return c.json({ proxyId, resolved: proxyId !== "none" });
     },
   );
@@ -320,7 +319,10 @@ export function createAgentsRouter() {
   router.get(`/${SCOPED_PACKAGE_ROUTE}/model`, requireAgent(), async (c) => {
     const agent = c.get("package");
     const applicationId = c.get("applicationId");
-    const { modelId, generationConfig } = await getPackageConfig(applicationId, agent.id);
+    const { modelId, generationConfig } = await getInstalledPackageSettings(
+      applicationId,
+      agent.id,
+    );
 
     return c.json({ modelId, generation: generationConfig });
   });
@@ -336,7 +338,7 @@ export function createAgentsRouter() {
       const data = await readJsonBody(c, modelIdSchema);
 
       // Reject unknown/cross-org ids like run and schedule overrides do (#960); null clears.
-      const current = await getPackageConfig(scope.applicationId, agent.id);
+      const current = await getInstalledPackageSettings(scope.applicationId, agent.id);
       const explicitModel = await assertExplicitModelExists(scope.orgId, data.modelId);
       const selectedModel =
         explicitModel ?? (await resolveModel(scope.orgId, agent.id, data.modelId));
@@ -378,8 +380,11 @@ export function createAgentsRouter() {
       });
 
       // Return the bare model-setting resource — same shape and read path
-      // (`getPackageConfig`) as GET /agents/:scope/:name/model (#657).
-      const { modelId, generationConfig } = await getPackageConfig(scope.applicationId, agent.id);
+      // (`getInstalledPackageSettings`) as GET /agents/:scope/:name/model (#657).
+      const { modelId, generationConfig } = await getInstalledPackageSettings(
+        scope.applicationId,
+        agent.id,
+      );
       return c.json({ modelId, generation: generationConfig });
     },
   );

@@ -26,9 +26,9 @@
  *   package_versions           REPUBLISH (never UPDATE — see below)
  *   package_schedules          repoint `version_override` off an affected version
  *
- * It never writes `application_packages.config` (the stored values carry over
- * verbatim — same keys, no transformation) nor `application_packages.locked_fields`
- * (no agent may silently acquire a lock it never had). Both are asserted.
+ * It never writes `application_packages.input_settings` — the stored values
+ * carry over verbatim (same keys, no transformation) and no agent may silently
+ * acquire a lock it never had. Both are asserted.
  *
  * That carry-over is only safe while the surviving `input` property means what
  * the stored value was written against. On a property-name COLLISION it does
@@ -163,8 +163,7 @@ async function readSnapshot() {
         .select({
           packageId: applicationPackages.packageId,
           applicationId: applicationPackages.applicationId,
-          config: applicationPackages.config,
-          lockedFields: applicationPackages.lockedFields,
+          inputSettings: applicationPackages.inputSettings,
         })
         .from(applicationPackages),
       db
@@ -350,7 +349,7 @@ async function buildInventory(): Promise<Inventory> {
       ...new Set(
         installRows
           .filter((i) => i.packageId === agent.id)
-          .flatMap((i) => Object.keys(asObject(i.config) ?? {})),
+          .flatMap((i) => Object.keys(asObject(i.inputSettings?.values) ?? {})),
       ),
     ];
     const orphanStoredValueKeys = storedValueKeys.filter((key) => !migratedProps.has(key));
@@ -557,9 +556,13 @@ function reportAnomalies(inv: Inventory): boolean {
     for (const f of collisionAnomalies) {
       out(`    ${f.packageId}  ${list(f.collidingStoredValueKeys)}`);
     }
-    out("  `application_packages.config` is never rewritten, so those values would be read");
+    out(
+      "  `application_packages.input_settings` is never rewritten, so those values would be read",
+    );
     out("  as `input` and validated against the property `input` kept — a type mismatch");
-    out("  fails EVERY launch, and `PUT /api/agents/{scope}/{name}/config` refuses the same");
+    out(
+      "  fails EVERY launch, and `PUT /api/agents/{scope}/{name}/input-settings` refuses the same",
+    );
     out("  value, so it cannot be cleared from the UI either. Which type was meant is not");
     out("  in the data: reconcile the stored value or the schema by hand first.");
   }
@@ -765,7 +768,7 @@ async function assertClean(republishedIds: string[]): Promise<boolean> {
     schedulesPinnedToAffected: schedulesPinned,
     installsChecked: installRows.length,
     installsWithLockedFields: installRows
-      .filter((i) => (i.lockedFields ?? []).length > 0)
+      .filter((i) => (i.inputSettings?.locked ?? []).length > 0)
       .map((i) => `${i.packageId} @ ${i.applicationId}`),
     legacyAffectedVersions: legacyAffected,
     legacyAffectedStillLatest: legacyStillLatest,

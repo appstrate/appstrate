@@ -33,17 +33,22 @@ export const applicationPackages = pgTable(
     versionId: integer("version_id").references(() => packageVersions.id, {
       onDelete: "set null",
     }),
-    // Editor-set default values for the agent's INPUT fields (AFPS
-    // `input.schema`). Layer 2 of the four-layer input resolution — author
-    // default (JSON Schema `default`) < editor default (this column) <
-    // schedule values < run-time caller input. The column name predates the
-    // input/config collapse and is kept: the row identity is unchanged.
-    config: jsonb("config").notNull().default({}),
-    // Input field names the editor froze. A locked field is not overridable
-    // at launch: run-time input and schedule values naming one are refused
-    // (400 `locked_input_field`), so its effective value is always the
-    // author default merged with `config` above.
-    lockedFields: text("locked_fields").array().notNull().default([]),
+    // The agent's stored input settings for this application, in one
+    // document:
+    //   `values` — editor-set defaults for the agent's INPUT fields (AFPS
+    //     `input.schema`). Layer 2 of the four-layer input resolution —
+    //     author default (JSON Schema `default`) < editor default < schedule
+    //     values < run-time caller input.
+    //   `locked` — input field names the editor froze. A locked field is not
+    //     overridable at launch: run-time input and schedule values naming one
+    //     are refused (400 `locked_input_field`), so its effective value is
+    //     always the author default merged with `values` above.
+    // The wire pairs these as `values` / `locked_fields`; inside the column
+    // the name `input_settings` already supplies the noun.
+    inputSettings: jsonb("input_settings")
+      .$type<{ values: Record<string, unknown>; locked: string[] }>()
+      .notNull()
+      .default({ values: {}, locked: [] }),
     modelId: text("model_id"),
     generationConfig: jsonb("generation_config").$type<ModelGenerationSettings>(),
     proxyId: text("proxy_id"),

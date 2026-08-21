@@ -86,9 +86,9 @@ export const agentsPaths = {
       },
     },
   },
-  "/api/agents/{scope}/{name}/config": {
+  "/api/agents/{scope}/{name}/input-settings": {
     put: {
-      operationId: "saveAgentConfig",
+      operationId: "saveAgentInputSettings",
       tags: ["Agents"],
       summary: "Save agent input settings",
       description:

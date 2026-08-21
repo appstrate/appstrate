@@ -12,7 +12,7 @@
  * Four layers, last one wins:
  *
  *   author default   (manifest `input.schema` JSON Schema `default` keyword)
- *     -> editor default   (`application_packages.config`)
+ *     -> editor default   (`application_packages.input_settings.values`)
  *       -> schedule values   (`package_schedules.input`)
  *         -> run-time caller input   <- REFUSED on a locked field
  *
@@ -33,9 +33,12 @@ import { authorDefaults, type JSONSchemaObject } from "@appstrate/core/form";
 export interface InputLayers {
   /** `manifest.input.schema` — its `default` keywords are the author layer. */
   schema?: JSONSchemaObject | undefined;
-  /** `application_packages.config` — values the editor stored once. */
+  /**
+   * `application_packages.input_settings.values` — values the editor stored
+   * once.
+   */
   editorDefaults?: Record<string, unknown> | undefined;
-  /** `application_packages.locked_fields` — fields no caller may override. */
+  /** `application_packages.input_settings.locked` — fields no caller may override. */
   lockedFields?: readonly string[] | undefined;
   /** `package_schedules.input` — values frozen on a scheduled trigger. */
   scheduleValues?: Record<string, unknown> | undefined;

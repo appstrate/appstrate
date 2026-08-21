@@ -286,21 +286,23 @@ describe("Applications API", () => {
     });
 
     // The agent's stored input values have ONE write path
-    // (`PUT /api/agents/{scope}/{name}/config`, which validates them against
-    // the manifest input schema and refuses an unsatisfiable locked required
-    // field). This generic route must not be a second, unvalidated one.
-    it("ignores a `config` key in the body — it is not a write path for stored input values", async () => {
-      await seedPackage({ id: "@testorg/no-config-write", orgId: ctx.orgId });
-      await seedInstalledPackage(ctx.defaultAppId, "@testorg/no-config-write");
+    // (`PUT /api/agents/{scope}/{name}/input-settings`, which validates them
+    // against the manifest input schema and refuses an unsatisfiable locked
+    // required field). This generic route must not be a second, unvalidated one.
+    it("ignores an `input_settings` key in the body — it is not a write path for stored input values", async () => {
+      await seedPackage({ id: "@testorg/no-input-settings-write", orgId: ctx.orgId });
+      await seedInstalledPackage(ctx.defaultAppId, "@testorg/no-input-settings-write");
 
-      const res = await putPackage("@testorg/no-config-write", { config: { hello: "world" } });
+      const res = await putPackage("@testorg/no-input-settings-write", {
+        input_settings: { values: { hello: "world" }, locked: [] },
+      });
 
       expect(res.status).toBe(200);
       const [row] = await db
-        .select({ config: applicationPackages.config })
+        .select({ inputSettings: applicationPackages.inputSettings })
         .from(applicationPackages)
-        .where(installedRowWhere("@testorg/no-config-write"));
-      expect(row?.config).toEqual({});
+        .where(installedRowWhere("@testorg/no-input-settings-write"));
+      expect(row?.inputSettings).toEqual({ values: {}, locked: [] });
     });
 
     it("rejects unsupported generation settings instead of persisting them", async () => {

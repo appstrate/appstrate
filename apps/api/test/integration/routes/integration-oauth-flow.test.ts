@@ -102,7 +102,7 @@ async function setup(
   });
   await db
     .insert(applicationPackages)
-    .values({ applicationId: ctx.defaultAppId, packageId: INTEGRATION, config: {} });
+    .values({ applicationId: ctx.defaultAppId, packageId: INTEGRATION });
 
   // A secret-less registration must DECLARE itself public: the route refuses a
   // missing/blank `client_secret` under any other method rather than inferring

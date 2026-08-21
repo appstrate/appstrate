@@ -1,5 +1,5 @@
 {
-  "id": "ba7de685-3dfe-4445-9d67-77c8a8635e28",
+  "id": "8fbd9ec6-e1f1-422b-9a0f-321e7044cb94",
   "prevId": "1bc8685b-7601-4fca-814c-d5547d98fc7c",
   "version": "7",
   "dialect": "postgresql",
@@ -1862,19 +1862,12 @@
           "primaryKey": false,
           "notNull": false
         },
-        "config": {
-          "name": "config",
+        "input_settings": {
+          "name": "input_settings",
           "type": "jsonb",
           "primaryKey": false,
           "notNull": true,
-          "default": "'{}'::jsonb"
-        },
-        "locked_fields": {
-          "name": "locked_fields",
-          "type": "text[]",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'{}'"
+          "default": "'{\"values\":{},\"locked\":[]}'::jsonb"
         },
         "model_id": {
           "name": "model_id",

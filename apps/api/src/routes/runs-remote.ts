@@ -39,7 +39,7 @@ import { createRun } from "../services/run-creation.ts";
 import { resolveRunnerContext } from "../lib/runner-context.ts";
 import { resolveRegistryAgent } from "../services/registry-run-resolver.ts";
 import { validateInput } from "../services/schema.ts";
-import { getPackageConfig } from "../services/application-packages.ts";
+import { getInstalledPackageSettings } from "../services/application-packages.ts";
 import { resolveEffectiveInput } from "../services/input-resolution.ts";
 import { validateAgentReadiness } from "../services/agent-readiness.ts";
 import { assertApplicationInScope } from "../services/applications.ts";
@@ -235,12 +235,15 @@ export function createRunsRemoteRouter() {
         // resolves through the same four layers as a platform run: author
         // defaults < editor defaults < caller input, with locked fields
         // refused (400 `locked_input_field`). There is no schedule layer here.
-        const packageConfig = await getPackageConfig(applicationId, agentForRun.id);
+        const { values: storedValues, locked: lockedFields } = await getInstalledPackageSettings(
+          applicationId,
+          agentForRun.id,
+        );
         const inputSchema = agentForRun.manifest.input?.schema;
         effectiveInput = resolveEffectiveInput({
           ...(inputSchema ? { schema: asJSONSchemaObject(inputSchema) } : {}),
-          editorDefaults: packageConfig.config,
-          lockedFields: packageConfig.lockedFields,
+          editorDefaults: storedValues,
+          lockedFields,
           callerInput:
             body.input && typeof body.input === "object" && !Array.isArray(body.input)
               ? (body.input as Record<string, unknown>)

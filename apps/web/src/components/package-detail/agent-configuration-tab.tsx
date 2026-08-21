@@ -27,7 +27,7 @@ import { isModelSelectable } from "../../lib/model-selectability";
 import { ModelUnselectableNote } from "../model-availability-badge";
 import { useProxies, useAgentProxy, useSetAgentProxy } from "../../hooks/use-proxies";
 import { usePackageDetail } from "../../hooks/use-packages";
-import { useSaveConfig } from "../../hooks/use-mutations";
+import { useSaveInputSettings } from "../../hooks/use-mutations";
 import { authorDefaults, getOrderedKeys, type SchemaWrapper } from "@appstrate/core/form";
 import { formatInputValue, hasInputFields, subsetWrapper } from "../../lib/agent-input";
 import {
@@ -43,7 +43,7 @@ import { ModelGenerationFields } from "../model-generation-fields";
  * parameter takes when the caller does not supply one, and whether the caller
  * may supply one at all.
  *
- * Both halves are FULL replacements on the wire (`PUT .../config` with
+ * Both halves are FULL replacements on the wire (`PUT .../input-settings` with
  * `{ values, locked_fields }`), which is why the whole section saves at once
  * rather than per field — a partial write would silently clear the rest.
  *
@@ -67,7 +67,7 @@ function InputSettingsSection({
   isHistorical?: boolean;
 }) {
   const { t } = useTranslation(["agents", "common"]);
-  const mutation = useSaveConfig(packageId);
+  const mutation = useSaveInputSettings(packageId);
   const labels = useSchemaFormLabels();
   const upload = useUploadClient();
   const [values, setValues] = useState<Record<string, unknown>>(initialValues);

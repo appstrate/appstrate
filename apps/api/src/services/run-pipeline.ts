@@ -16,7 +16,7 @@ import type { DroppedIntegration } from "./integration-spawn-resolver.ts";
 import { toBundleApiError } from "./run-launcher/bundle-error-mapping.ts";
 import { createRun, appendRunLog } from "./state/runs.ts";
 import { materializeRunUploads, type PendingUploadMaterialization } from "./documents.ts";
-import type { PackageConfig } from "./application-packages.ts";
+import type { InstalledPackageSettings } from "./application-packages.ts";
 import { resolveModel } from "./org-models.ts";
 import { executeAgentInBackground } from "./run-launcher/execute-background.ts";
 import { validateAgentReadiness } from "./agent-readiness.ts";
@@ -174,7 +174,7 @@ export interface PreflightResult {
  * Validate agent readiness and project the per-application run settings.
  * Shared by the POST /run route and the scheduler's triggerScheduledRun.
  *
- * `packageConfig` is supplied by the caller rather than loaded here: both
+ * `packageSettings` is supplied by the caller rather than loaded here: both
  * origins already need it BEFORE this point, to resolve the input layers
  * (editor defaults + locked fields) the launch is validated against. One
  * read per trigger, and readiness cannot disagree with input resolution
@@ -192,7 +192,7 @@ export async function resolveRunPreflight(params: {
   orgId: string;
   actor: Actor | null;
   /** Per-application settings row, already loaded by the caller. */
-  packageConfig: PackageConfig;
+  packageSettings: InstalledPackageSettings;
   connectionOverrides?: ConnectionOverrides | null;
   scheduleConnectionOverrides?: ConnectionOverrides | null;
   /**
@@ -202,7 +202,7 @@ export async function resolveRunPreflight(params: {
    */
   manifestCache?: IntegrationManifestCache;
 }): Promise<PreflightResult> {
-  const { agent, applicationId, orgId, actor, packageConfig } = params;
+  const { agent, applicationId, orgId, actor, packageSettings } = params;
 
   await validateAgentReadiness({
     agent,
@@ -217,9 +217,9 @@ export async function resolveRunPreflight(params: {
   });
 
   return {
-    modelId: packageConfig.modelId,
-    generationConfig: packageConfig.generationConfig,
-    proxyId: packageConfig.proxyId,
+    modelId: packageSettings.modelId,
+    generationConfig: packageSettings.generationConfig,
+    proxyId: packageSettings.proxyId,
   };
 }
 

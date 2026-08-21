@@ -150,7 +150,7 @@ describe("mergeConfigIntoInput — collisions", () => {
 });
 
 describe("blockingCollisions", () => {
-  // `application_packages.config` is never rewritten, so a collided name's
+  // `application_packages.input_settings` is never rewritten, so a collided name's
   // stored value survives typed by the property the merge just dropped.
   const collisions = mergeConfigIntoInput(
     baseManifest({
@@ -161,7 +161,7 @@ describe("blockingCollisions", () => {
 
   it("blocks a collision whose name carries a stored value", () => {
     // Stored `{ mode: "fast" }` now validates against `{type:"integer"}`: every
-    // launch 400s and `PUT …/config` refuses the same value.
+    // launch 400s and `PUT …/input-settings` refuses the same value.
     expect(blockingCollisions(collisions, ["mode"])).toEqual(["mode"]);
   });
 
@@ -463,7 +463,7 @@ describe("renderAssertion", () => {
     ["republishedManifestsWithConfig", "republished manifest"],
     ["republishedPromptsWithConfigRef", "republished prompt.md"],
     ["schedulesPinnedToAffected", "schedule pinned"],
-    ["installsWithLockedFields", "locked_fields"],
+    ["installsWithLockedFields", "input_settings.locked"],
     ["legacyAffectedStillLatest", "still tagged `latest`"],
   ];
 

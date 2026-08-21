@@ -65,9 +65,9 @@ export const updateApplicationSchema = z.object({
 });
 
 // Neither body carries the agent's stored input values: `PUT
-// /api/agents/{scope}/{name}/config` is their single write path, because it
-// is the only one that validates them against `manifest.input.schema` and
-// enforces `assertLockedFieldsSatisfiable`.
+// /api/agents/{scope}/{name}/input-settings` is their single write path,
+// because it is the only one that validates them against
+// `manifest.input.schema` and enforces `assertLockedFieldsSatisfiable`.
 export const installPackageSchema = z.object({
   packageId: z.string().min(1),
 });

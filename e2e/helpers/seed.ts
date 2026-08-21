@@ -160,8 +160,8 @@ export async function createAgent(
 /**
  * Create an agent declaring an `input` schema — needed to test per-app
  * isolation of the editor's stored input values. The values a `PUT
- * /agents/{scope}/{name}/config` stores are validated against this schema,
- * so an agent with no input schema cannot store arbitrary values.
+ * /agents/{scope}/{name}/input-settings` stores are validated against this
+ * schema, so an agent with no input schema cannot store arbitrary values.
  */
 export async function createAgentWithInputSchema(
   client: ApiClient,

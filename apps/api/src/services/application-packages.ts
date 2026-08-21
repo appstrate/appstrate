@@ -78,11 +78,12 @@ async function assertMcpServerInstallable(scope: AppScope, packageId: string): P
 /**
  * Install a package into an application.
  *
- * Deliberately takes no initial values: `application_packages.config` holds
- * the agent's editor-set input defaults, and it has exactly ONE write path —
- * `PUT /api/agents/{scope}/{name}/config`, which validates them against
- * `manifest.input.schema` and refuses a locked required field with no value
- * behind it. An install writes the column's `{}` default and nothing else.
+ * Deliberately takes no initial values: `application_packages.input_settings`
+ * holds the agent's editor-set input defaults, and it has exactly ONE write
+ * path — `PUT /api/agents/{scope}/{name}/input-settings`, which validates them
+ * against `manifest.input.schema` and refuses a locked required field with no
+ * value behind it. An install writes the column's empty default and nothing
+ * else.
  */
 export async function installPackage(scope: AppScope, packageId: string) {
   await assertApplicationInScope(scope);
@@ -156,11 +157,11 @@ export async function uninstallPackage(scope: AppScope, packageId: string): Prom
 // Query
 // ---------------------------------------------------------------------------
 
-// Stored input values (`application_packages.config`) and their locks are
-// deliberately NOT projected here: this listing is the install / enable /
-// pin surface, and the agent's stored values are read through
-// `GET /api/agents/{scope}/{name}` where they travel with the schema and the
-// locks that give them meaning (`AgentDetail.input`).
+// Stored input values (`application_packages.input_settings`) are deliberately
+// NOT projected here: this listing is the install / enable / pin surface, and
+// the agent's stored values are read through `GET /api/agents/{scope}/{name}`
+// where they travel with the schema and the locks that give them meaning
+// (`AgentDetail.input`).
 const installedPackageSelect = {
   packageId: applicationPackages.packageId,
   generationConfig: applicationPackages.generationConfig,
@@ -234,8 +235,8 @@ export async function listAccessiblePackages(scope: AppScope, type: PackageType)
       draftContent: packages.draftContent,
       source: packages.source,
       // application_packages columns (null for system packages). The agent's
-      // stored input values are NOT projected here — `getPackageConfig` is the
-      // reader for those, and it travels with `lockedFields`.
+      // stored input values are NOT projected here — `getInstalledPackageSettings`
+      // is the reader for those, and it travels with the locks.
       appModelId: applicationPackages.modelId,
       appProxyId: applicationPackages.proxyId,
       appVersionId: applicationPackages.versionId,
@@ -436,31 +437,32 @@ export async function hasPackageAccess(scope: AppScope, packageId: string): Prom
 }
 
 // ---------------------------------------------------------------------------
-// Package Config (per-app) — single source of truth for config/model/proxy/profile
+// Installed-package settings (per-app) — single source of truth for everything
+// the `application_packages` row carries about one package: the agent's stored
+// input values, their locks, and the model/proxy overrides.
 // ---------------------------------------------------------------------------
 
-/** Per-application settings for one package. */
-export interface PackageConfig {
+/** Per-application settings for one package — the whole row, projected. */
+export interface InstalledPackageSettings {
   /**
    * Editor-set default values for the agent's input fields — layer 2 of the
    * input resolution (`services/input-resolution.ts`).
    */
-  config: Record<string, unknown>;
+  values: Record<string, unknown>;
   /** Input fields no caller may set at launch. */
-  lockedFields: string[];
+  locked: string[];
   modelId: string | null;
   generationConfig: import("@appstrate/core/model-generation").ModelGenerationSettings | null;
   proxyId: string | null;
 }
 
-export async function getPackageConfig(
+export async function getInstalledPackageSettings(
   applicationId: string,
   packageId: string,
-): Promise<PackageConfig> {
+): Promise<InstalledPackageSettings> {
   const [row] = await db
     .select({
-      config: applicationPackages.config,
-      lockedFields: applicationPackages.lockedFields,
+      inputSettings: applicationPackages.inputSettings,
       generationConfig: applicationPackages.generationConfig,
       modelId: applicationPackages.modelId,
       proxyId: applicationPackages.proxyId,
@@ -473,9 +475,12 @@ export async function getPackageConfig(
       ),
     )
     .limit(1);
+  // JSONB read: narrow both members rather than trusting the column's
+  // declared `$type`.
+  const stored = row?.inputSettings;
   return {
-    config: asRecord(row?.config),
-    lockedFields: row?.lockedFields ?? [],
+    values: asRecord(stored?.values),
+    locked: Array.isArray(stored?.locked) ? stored.locked : [],
     modelId: row?.modelId ?? null,
     generationConfig: row?.generationConfig ?? null,
     proxyId: row?.proxyId ?? null,
@@ -483,15 +488,15 @@ export async function getPackageConfig(
 }
 
 // ---------------------------------------------------------------------------
-// Config Updates
+// Updates
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
 // Resolved run-config — single source of truth for both the UI's per-app
 // agent run and the CLI's `appstrate run @scope/agent` invocation. The
 // CLI reads this endpoint after profile resolution to reproduce the UI
-// run byte-for-byte (same model, proxy, config, version pin) unless the
-// user passed an explicit override flag.
+// run byte-for-byte (same model, proxy, generation settings, version pin)
+// unless the user passed an explicit override flag.
 //
 // Wire shape lives in `@appstrate/shared-types` so the CLI consumes the
 // same interface without redeclaring it.
@@ -566,7 +571,7 @@ export async function getResolvedRunConfig(
  *     `PUT /applications/:id/packages/:packageId` route): the association row
  *     MUST already exist — an update that would create a new row is a client
  *     error (404), never an implicit install.
- *   - default (agent config/proxy/model routes, integration activate /
+ *   - default (agent input-settings/proxy/model routes, integration activate /
  *     deactivate): upsert. A SYSTEM package legitimately has no
  *     `application_packages` row until its first per-app setting is written,
  *     so create-on-first-write is intended there. Those routes preflight the
@@ -577,8 +582,7 @@ export async function updateInstalledPackage(
   scope: AppScope,
   packageId: string,
   updates: {
-    config?: Record<string, unknown>;
-    lockedFields?: string[];
+    inputSettings?: { values: Record<string, unknown>; locked: string[] };
     modelId?: string | null;
     generationConfig?: import("@appstrate/core/model-generation").ModelGenerationSettings | null;
     proxyId?: string | null;
@@ -589,16 +593,14 @@ export async function updateInstalledPackage(
 ): Promise<void> {
   const set: Partial<{
     updatedAt: Date;
-    config: Record<string, unknown>;
-    lockedFields: string[];
+    inputSettings: { values: Record<string, unknown>; locked: string[] };
     modelId: string | null;
     generationConfig: import("@appstrate/core/model-generation").ModelGenerationSettings | null;
     proxyId: string | null;
     versionId: number | null;
     enabled: boolean;
   }> = { updatedAt: new Date() };
-  if (updates.config !== undefined) set.config = updates.config;
-  if (updates.lockedFields !== undefined) set.lockedFields = updates.lockedFields;
+  if (updates.inputSettings !== undefined) set.inputSettings = updates.inputSettings;
   if (updates.modelId !== undefined) set.modelId = updates.modelId;
   if (updates.generationConfig !== undefined) set.generationConfig = updates.generationConfig;
   if (updates.proxyId !== undefined) set.proxyId = updates.proxyId;
@@ -639,8 +641,7 @@ export async function updateInstalledPackage(
       .values({
         applicationId: scope.applicationId,
         packageId,
-        config: updates.config ?? {},
-        ...(updates.lockedFields !== undefined ? { lockedFields: updates.lockedFields } : {}),
+        ...(updates.inputSettings !== undefined ? { inputSettings: updates.inputSettings } : {}),
         ...(updates.modelId !== undefined ? { modelId: updates.modelId } : {}),
         ...(updates.generationConfig !== undefined
           ? { generationConfig: updates.generationConfig }

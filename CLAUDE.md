@@ -70,7 +70,7 @@ User Browser (BrowserRouter SPA)  Platform (Bun + Hono :3000)
      |                                |
      |-- Login/Signup --------------->|-- Better Auth (cookie session)
      |-- / (Agent List) ------------->|-- GET /api/agents
-     |-- PUT /api/agents/:id/config ->|-- schema.ts (AJV) → state.ts (Drizzle)
+     |-- PUT .../input-settings ----->|-- schema.ts (AJV) → state.ts (Drizzle)
      |-- POST .../connect/:prov ----->|-- connect route → OAuth2 flow / API key storage
      |-- POST /api/agents/:id/run --->|-- validate → create run → executeAgentInBackground()
      |<-- SSE (replay + live) --------|-- subscribe to logs via pub/sub
@@ -201,7 +201,7 @@ Most-touched optional vars: `MODULES` (default `oidc,webhooks,mcp,core-providers
 - **Extension return type**: `{ content: [{ type: "text", text: "..." }] }` — NOT a plain string.
 - **Skills**: YAML frontmatter (`name`, `description`) in `SKILL.md`. Container path `.pi/skills/{id}/SKILL.md`.
 - **Proxy system**: org-level CRUD `/api/proxies` (admin). System proxies from `SYSTEM_PROXIES` env at boot. Agent override `GET/PUT /api/agents/:id/proxy`. Cascade: agent → org default → `PROXY_URL`.
-- **Application-scoped input defaults**: an agent's stored input values (`application_packages.config`) and its per-field locks (`application_packages.locked_fields`) are per-application. `package_persistence` (memory archive + pinned slots) also app-scoped, row-partitioned by `(actor_type, actor_id)` (members + end-users never read each other's state).
+- **Application-scoped input defaults**: an agent's stored input values and its per-field locks live together in one jsonb column, `application_packages.input_settings` (`{ values, locked }`), per-application. Its single write path is `PUT /api/agents/{scope}/{name}/input-settings`; on the wire the pair is `{ values, locked_fields }`. `package_persistence` (memory archive + pinned slots) also app-scoped, row-partitioned by `(actor_type, actor_id)` (members + end-users never read each other's state).
 - **Run lifecycle**: `pending` → `running` → `success` | `failed` | `timeout` | `cancelled`. Transitions via `updateRun()` in `services/state/runs.ts`. `pg_notify` on every change → SSE. Concurrent runs per agent supported (`run-tracker.ts`).
 - **Enriched run responses**: `listRunsWithFilter`/`getRunFull` LEFT JOIN to add `user_name`, `end_user_name`, `api_key_name`, `schedule_name`. `EnrichedRun` (`@appstrate/shared-types`) extends `Run` with these. Frontend reads names directly — no separate lookups.
 - **Run trigger tracking**: `runs.apiKeyId` (FK → `api_keys.id`, ON DELETE SET NULL) records triggering key. With `userId`/`endUserId`/`scheduleId` → full trigger attribution.

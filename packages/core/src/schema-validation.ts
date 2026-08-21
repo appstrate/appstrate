@@ -7,8 +7,8 @@
  * A published export of `@appstrate/core`, so out-of-tree consumers (modules,
  * external tooling) reach the same verdict as the platform on the same
  * `(values, schema)` pair. In this workspace its sole importer is
- * `apps/api/src/services/schema.ts`, which re-exports it as the server's
- * `validateConfig`.
+ * `apps/api/src/services/schema.ts`, which re-exports it alongside the
+ * server-only `validateInput` / `validateOutput`.
  *
  * Reuses the shared Ajv2020 factory in `./ajv.ts` so the dialect
  * (formats, strict-mode, coercion) matches between callers.
@@ -19,8 +19,8 @@ import type { JSONSchemaObject } from "./form.ts";
 
 const ajv = createAjv({ coerceTypes: true });
 
-// Compiled-validator cache. `validateConfig` runs on hot paths (per run,
-// per config save) and receives schemas freshly parsed from JSONB, so
+// Compiled-validator cache. `validateAgainstSchema` runs on hot paths (per
+// run, per input-settings save) and receives schemas freshly parsed from JSONB, so
 // AJV's own by-reference cache never hits — compilation (the expensive
 // step) ran on every call AND each compile was retained forever in the
 // Ajv instance's internal registry (unbounded growth in a long-lived
@@ -63,7 +63,7 @@ function compileCached(schema: JSONSchemaObject): ReturnType<typeof ajv.compile>
   return validate;
 }
 
-export interface ConfigValidationResult {
+export interface SchemaValidationResult {
   valid: boolean;
   errors: { field: string; message: string }[];
   data?: Record<string, unknown>;
@@ -86,10 +86,10 @@ export function stripEmptyRequired(
   return cleaned;
 }
 
-export function validateConfig(
+export function validateAgainstSchema(
   data: Record<string, unknown>,
   schema: JSONSchemaObject,
-): ConfigValidationResult {
+): SchemaValidationResult {
   // Empty-schema short-circuit — an agent that declares no properties
   // accepts anything.
   if (!schema.properties || Object.keys(schema.properties).length === 0) {

@@ -198,11 +198,11 @@ export function mergeConfigIntoInput(manifest: JsonObject): MergeOutcome {
  *
  * On a collision `mergeConfigIntoInput` drops the `config` property whole and
  * keeps `input`'s. The migration deliberately never rewrites
- * `application_packages.config`, whose keys are read as `input` values from
+ * `application_packages.input_settings`, whose keys are read as `input` values from
  * then on — so for a colliding name the stored value was typed by the property
  * that was just dropped, and is now validated against a schema it was never
  * written for. `{type:"integer"}` against a stored `"fast"` fails AJV on every
- * launch (`coerceTypes` cannot rescue it) and `PUT /api/agents/{scope}/{name}/config`
+ * launch (`coerceTypes` cannot rescue it) and `PUT /api/agents/{scope}/{name}/input-settings`
  * refuses the same value, so the agent becomes unlaunchable with no way to
  * clear it. Which of the two types was meant is not knowable from the data.
  *
@@ -362,7 +362,7 @@ export function renderAssertion(input: AssertionInput): AssertionResult {
       offenders: input.schedulesPinnedToAffected,
     },
     {
-      label: "application_packages.locked_fields not empty",
+      label: "application_packages.input_settings.locked not empty",
       checked: input.installsChecked,
       offenders: input.installsWithLockedFields,
     },

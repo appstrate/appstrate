@@ -239,26 +239,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/agents/{scope}/{name}/config": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        /**
-         * Save agent input settings
-         * @description Save the agent's stored input values and field locks for this application. `values` are validated against the manifest `input.schema` with `required` dropped (a required field left empty is asked at launch). Locking a required field that has no value — no author `default` and no entry in `values` — is refused with 400 `locked_required_field_empty`.
-         */
-        put: operations["saveAgentConfig"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/agents/{scope}/{name}/connection-readiness": {
         parameters: {
             query?: never;
@@ -272,6 +252,26 @@ export interface paths {
          */
         get: operations["getAgentConnectionReadiness"];
         put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/agents/{scope}/{name}/input-settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Save agent input settings
+         * @description Save the agent's stored input values and field locks for this application. `values` are validated against the manifest `input.schema` with `required` dropped (a required field left empty is asked at launch). Locking a required field that has no value — no author `default` and no entry in `values` — is refused with 400 `locked_required_field_empty`.
+         */
+        put: operations["saveAgentInputSettings"];
         post?: never;
         delete?: never;
         options?: never;
@@ -605,7 +605,7 @@ export interface paths {
         get: operations["getInstalledPackage"];
         /**
          * Update installed package overrides
-         * @description Update the model/proxy overrides, generation settings, enabled flag, or version pinning for an installed package. The agent's stored input values are NOT settable here — use `PUT /api/agents/{scope}/{name}/config`, which validates them against the manifest input schema.
+         * @description Update the model/proxy overrides, generation settings, enabled flag, or version pinning for an installed package. The agent's stored input values are NOT settable here — use `PUT /api/agents/{scope}/{name}/input-settings`, which validates them against the manifest input schema.
          */
         put: operations["updateInstalledPackage"];
         post?: never;
@@ -6538,7 +6538,45 @@ export interface operations {
             };
         };
     };
-    saveAgentConfig: {
+    getAgentConnectionReadiness: {
+        parameters: {
+            query?: {
+                /** @description Which agent definition to assess: `draft` (the live editor working copy), `published` (the latest published version), or a version spec (exact version, dist-tag, or semver range). **Omitting the parameter resolves the `draft`** — preserving the launch-badge default. Pass a concrete version to get the same run-blocking verdict the run would produce for that pinned version (issue #770), so the modal and badge never disagree with the actual run. Ignored for system agents. */
+                version?: string;
+            };
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
+                "X-Application-Id"?: components["parameters"]["XAppId"];
+            };
+            path: {
+                /** @description Package scope (e.g. @myorg) */
+                scope: components["parameters"]["PackageScope"];
+                /** @description Package name */
+                name: components["parameters"]["PackageName"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Connection readiness */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentConnectionReadiness"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    saveAgentInputSettings: {
         parameters: {
             query?: never;
             header?: {
@@ -6573,44 +6611,6 @@ export interface operations {
                 };
             };
             400: components["responses"]["ValidationError"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-        };
-    };
-    getAgentConnectionReadiness: {
-        parameters: {
-            query?: {
-                /** @description Which agent definition to assess: `draft` (the live editor working copy), `published` (the latest published version), or a version spec (exact version, dist-tag, or semver range). **Omitting the parameter resolves the `draft`** — preserving the launch-badge default. Pass a concrete version to get the same run-blocking verdict the run would produce for that pinned version (issue #770), so the modal and badge never disagree with the actual run. Ignored for system agents. */
-                version?: string;
-            };
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
-            };
-            path: {
-                /** @description Package scope (e.g. @myorg) */
-                scope: components["parameters"]["PackageScope"];
-                /** @description Package name */
-                name: components["parameters"]["PackageName"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Connection readiness */
-            200: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AgentConnectionReadiness"];
-                };
-            };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];

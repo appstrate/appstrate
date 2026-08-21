@@ -18,7 +18,7 @@ import {
   initSystemModelProviderKeys,
 } from "../../../src/services/model-registry.ts";
 import {
-  getPackageConfig,
+  getInstalledPackageSettings,
   installPackage,
   updateInstalledPackage,
 } from "../../../src/services/application-packages.ts";
@@ -308,14 +308,14 @@ describe("Agents API", () => {
     });
   });
 
-  describe("PUT /api/agents/:scope/:name/config", () => {
+  describe("PUT /api/agents/:scope/:name/input-settings", () => {
     it("stores input values and field locks", async () => {
       await seedAgent({
-        id: "@myorg/config-agent",
+        id: "@myorg/input-settings-agent",
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
         draftManifest: {
-          name: "@myorg/config-agent",
+          name: "@myorg/input-settings-agent",
           version: "0.1.0",
           type: "agent",
           description: "Test",
@@ -326,10 +326,10 @@ describe("Agents API", () => {
       });
       await installPackage(
         { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
-        "@myorg/config-agent",
+        "@myorg/input-settings-agent",
       );
 
-      const res = await app.request("/api/agents/@myorg/config-agent/config", {
+      const res = await app.request("/api/agents/@myorg/input-settings-agent/input-settings", {
         method: "PUT",
         headers: {
           ...authHeaders(ctx),
@@ -370,21 +370,20 @@ describe("Agents API", () => {
         { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
         "@myorg/partial-agent",
         {
-          config: { folder: "archive" },
-          lockedFields: ["folder"],
+          inputSettings: { values: { folder: "archive" }, locked: ["folder"] },
         },
       );
 
-      const res = await app.request("/api/agents/@myorg/partial-agent/config", {
+      const res = await app.request("/api/agents/@myorg/partial-agent/input-settings", {
         method: "PUT",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({ values: { folder: "sent" } }),
       });
 
       expect(res.status).toBe(400);
-      const stored = await getPackageConfig(ctx.defaultAppId, "@myorg/partial-agent");
-      expect(stored.config).toEqual({ folder: "archive" });
-      expect(stored.lockedFields).toEqual(["folder"]);
+      const stored = await getInstalledPackageSettings(ctx.defaultAppId, "@myorg/partial-agent");
+      expect(stored.values).toEqual({ folder: "archive" });
+      expect(stored.locked).toEqual(["folder"]);
     });
 
     it("rejects a body carrying an unknown key with 400 and leaves the stored row intact", async () => {
@@ -409,20 +408,23 @@ describe("Agents API", () => {
       await updateInstalledPackage(
         { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
         "@myorg/unknown-key-agent",
-        { config: { folder: "archive" }, lockedFields: ["folder"] },
+        { inputSettings: { values: { folder: "archive" }, locked: ["folder"] } },
       );
 
       // The pre-refactor body shape: bare field names at the top level.
-      const res = await app.request("/api/agents/@myorg/unknown-key-agent/config", {
+      const res = await app.request("/api/agents/@myorg/unknown-key-agent/input-settings", {
         method: "PUT",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({ values: {}, locked_fields: [], folder: "sent" }),
       });
 
       expect(res.status).toBe(400);
-      const stored = await getPackageConfig(ctx.defaultAppId, "@myorg/unknown-key-agent");
-      expect(stored.config).toEqual({ folder: "archive" });
-      expect(stored.lockedFields).toEqual(["folder"]);
+      const stored = await getInstalledPackageSettings(
+        ctx.defaultAppId,
+        "@myorg/unknown-key-agent",
+      );
+      expect(stored.values).toEqual({ folder: "archive" });
+      expect(stored.locked).toEqual(["folder"]);
     });
 
     it("rejects a wrong-typed stored value with 400", async () => {
@@ -445,7 +447,7 @@ describe("Agents API", () => {
         "@myorg/typed-agent",
       );
 
-      const res = await app.request("/api/agents/@myorg/typed-agent/config", {
+      const res = await app.request("/api/agents/@myorg/typed-agent/input-settings", {
         method: "PUT",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({ values: { count: "not-a-number" }, locked_fields: [] }),

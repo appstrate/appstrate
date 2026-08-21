@@ -194,14 +194,14 @@ test.describe("Default app vs custom app access", () => {
     });
 
     // Store input values in the default app
-    const resSetA = await apiClient.put(`/agents/${scope}/${agentName}/config`, {
+    const resSetA = await apiClient.put(`/agents/${scope}/${agentName}/input-settings`, {
       values: { mode: "default-app-value" },
       locked_fields: [],
     });
     expect(resSetA.status()).toBe(200);
 
     // Store different values in the custom app
-    const resSetB = await customClient.put(`/agents/${scope}/${agentName}/config`, {
+    const resSetB = await customClient.put(`/agents/${scope}/${agentName}/input-settings`, {
       values: { mode: "custom-app-value" },
       locked_fields: [],
     });

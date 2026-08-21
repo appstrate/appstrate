@@ -5,10 +5,14 @@ import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { usePermissions } from "../hooks/use-permissions";
 import { useAgents } from "../hooks/use-packages";
-import { useCreateSchedule, useScheduleFormDeps } from "../hooks/use-schedules";
+import {
+  useCreateSchedule,
+  useScheduleFormDeps,
+  useScheduleFormDepsError,
+} from "../hooks/use-schedules";
 import { ScheduleForm } from "../components/schedule-form";
 import { PageHeader } from "../components/page-header";
-import { LoadingState } from "../components/page-states";
+import { LoadingState, ErrorState } from "../components/page-states";
 
 export function ScheduleCreatePage() {
   const { t } = useTranslation(["agents", "common"]);
@@ -20,6 +24,7 @@ export function ScheduleCreatePage() {
 
   const effectiveAgentId = selectedAgentId || agents?.[0]?.id || "";
   const deps = useScheduleFormDeps(effectiveAgentId || undefined);
+  const depsError = useScheduleFormDepsError(effectiveAgentId || undefined);
   const createSchedule = useCreateSchedule(effectiveAgentId);
 
   if (!isAdmin) return null;
@@ -29,6 +34,9 @@ export function ScheduleCreatePage() {
   // the agent detail lands later — a form mounted on empty settings classifies
   // nothing as pre-filled and renders the "Avancé" fold blank. With no agent at
   // all there is nothing to wait for, so the (empty) selector stays reachable.
+  // A detail query that FAILED never lands either, so it gets the error
+  // affordance rather than an endless spinner.
+  if (depsError) return <ErrorState message={depsError.message} />;
   if (effectiveAgentId && !deps) return <LoadingState />;
 
   return (

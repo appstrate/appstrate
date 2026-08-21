@@ -31,7 +31,7 @@ import { getAppScope, type AppScope } from "../lib/scope.ts";
 import { getOrgMember } from "../services/organizations.ts";
 import { getEndUser } from "../services/end-users.ts";
 import { assertExplicitModelExists, resolveModel } from "../services/org-models.ts";
-import { getPackageConfig } from "../services/application-packages.ts";
+import { getInstalledPackageSettings } from "../services/application-packages.ts";
 import { assertFieldsUnlocked, resolveEffectiveInput } from "../services/input-resolution.ts";
 import { asJSONSchemaObject, schemaHasFileFields } from "@appstrate/core/form";
 import { listScheduleRuns } from "../services/state/runs.ts";
@@ -200,11 +200,11 @@ export function createSchedulesRouter() {
       // be demanded again here. A schedule value naming a locked field is
       // refused (400 `locked_input_field`) at this write rather than silently
       // each tick.
-      const packageConfig = await getPackageConfig(scope.applicationId, agent.id);
+      const packageSettings = await getInstalledPackageSettings(scope.applicationId, agent.id);
       const resolvedInput = resolveEffectiveInput({
         ...(inputSchema ? { schema: asJSONSchemaObject(inputSchema) } : {}),
-        editorDefaults: packageConfig.config,
-        lockedFields: packageConfig.lockedFields,
+        editorDefaults: packageSettings.values,
+        lockedFields: packageSettings.locked,
         scheduleValues: data.input,
       });
       if (inputSchema) {
@@ -235,7 +235,7 @@ export function createSchedulesRouter() {
           (await resolveModel(
             scope.orgId,
             agent.id,
-            data.model_id_override ?? packageConfig.modelId,
+            data.model_id_override ?? packageSettings.modelId,
           ));
         if (!selectedModel) {
           throw invalidRequest(
@@ -305,12 +305,15 @@ export function createSchedulesRouter() {
     // The agent's per-application settings — read once and shared by the
     // locked-field refusal and the generation-config reconciliation below,
     // which can both run on the same request.
-    const packageConfig = await getPackageConfig(scope.applicationId, existing.packageId);
+    const packageSettings = await getInstalledPackageSettings(
+      scope.applicationId,
+      existing.packageId,
+    );
 
     // A schedule may not answer a locked field — same refusal the create route
     // and the fire path apply, so the three cannot disagree.
     if (data.input !== undefined) {
-      assertFieldsUnlocked(data.input, packageConfig.lockedFields, "schedule input");
+      assertFieldsUnlocked(data.input, packageSettings.locked, "schedule input");
     }
 
     // Reject a `model_id_override` that references no real model (no-op when
@@ -330,7 +333,7 @@ export function createSchedulesRouter() {
         (await resolveModel(
           scope.orgId,
           existing.packageId,
-          effectiveModelOverride ?? packageConfig.modelId,
+          effectiveModelOverride ?? packageSettings.modelId,
         ));
 
       if (generationConfigOverride && Object.keys(generationConfigOverride).length > 0) {

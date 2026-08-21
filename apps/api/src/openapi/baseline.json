@@ -657,9 +657,9 @@
         }
       }
     },
-    "/api/agents/{scope}/{name}/config": {
+    "/api/agents/{scope}/{name}/input-settings": {
       "put": {
-        "operationId": "saveAgentConfig",
+        "operationId": "saveAgentInputSettings",
         "tags": ["Agents"],
         "summary": "Save agent input settings",
         "description": "Save the agent's stored input values and field locks for this application. `values` are validated against the manifest `input.schema` with `required` dropped (a required field left empty is asked at launch). Locking a required field that has no value — no author `default` and no entry in `values` — is refused with 400 `locked_required_field_empty`.",
@@ -18578,7 +18578,7 @@
         "operationId": "updateInstalledPackage",
         "tags": ["Application Packages"],
         "summary": "Update installed package overrides",
-        "description": "Update the model/proxy overrides, generation settings, enabled flag, or version pinning for an installed package. The agent's stored input values are NOT settable here — use `PUT /api/agents/{scope}/{name}/config`, which validates them against the manifest input schema.",
+        "description": "Update the model/proxy overrides, generation settings, enabled flag, or version pinning for an installed package. The agent's stored input values are NOT settable here — use `PUT /api/agents/{scope}/{name}/input-settings`, which validates them against the manifest input schema.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"

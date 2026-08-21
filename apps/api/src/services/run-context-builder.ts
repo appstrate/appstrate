@@ -10,7 +10,7 @@ import {
   listPinnedSlots,
   scopeFromActor,
 } from "./state/package-persistence.ts";
-import { getPackageConfig } from "./application-packages.ts";
+import { getInstalledPackageSettings } from "./application-packages.ts";
 import type { Actor } from "../lib/actor.ts";
 import { buildAgentPackage } from "./package-storage.ts";
 import { getLatestVersionInfo } from "./package-versions.ts";
@@ -144,8 +144,8 @@ export async function buildRunContext(params: {
 }> {
   const { runId, agent, orgId, applicationId, actor, input, files } = params;
 
-  // Skip getPackageConfig when all values are already provided by the caller (from preflight)
-  const skipConfigFetch =
+  // Skip getInstalledPackageSettings when all values are already provided by the caller (from preflight)
+  const skipSettingsFetch =
     params.modelId !== undefined &&
     params.proxyId !== undefined &&
     params.generationConfig !== undefined;
@@ -155,7 +155,7 @@ export async function buildRunContext(params: {
   // live credentials). Kicked off FIRST: its inputs are all available at
   // entry and it is the slowest independent chain (storage fetch +
   // credential decrypt + possible OAuth refresh), so it runs concurrently
-  // with the config/checkpoint/bundle and model/proxy resolution below
+  // with the settings/checkpoint/bundle and model/proxy resolution below
   // instead of serializing after them. A per-integration failure does NOT
   // fail the run — "run with what you have" is a supported product mode (the
   // agent-page picker models unconnected integrations explicitly) — but it is
@@ -179,9 +179,9 @@ export async function buildRunContext(params: {
 
   // Step 1: load all independent data in parallel
   const persistenceScope = scopeFromActor(actor);
-  const [configFull, previousCheckpoint, agentPackageResult, latestVersion, pinnedSlotRows] =
+  const [appSettings, previousCheckpoint, agentPackageResult, latestVersion, pinnedSlotRows] =
     await Promise.all([
-      skipConfigFetch ? null : getPackageConfig(applicationId, agent.id),
+      skipSettingsFetch ? null : getInstalledPackageSettings(applicationId, agent.id),
       getCheckpoint(agent.id, applicationId, persistenceScope),
       buildAgentPackage(agent, orgId, params.dependencyOverrides ?? null),
       params.overrideVersionLabel
@@ -201,8 +201,8 @@ export async function buildRunContext(params: {
   const { bundle } = agentPackageResult;
 
   // Step 2: resolve model and proxy with cascade
-  const effectiveModelId = params.modelId ?? configFull?.modelId ?? null;
-  const effectiveProxyId = params.proxyId ?? configFull?.proxyId ?? null;
+  const effectiveModelId = params.modelId ?? appSettings?.modelId ?? null;
+  const effectiveProxyId = params.proxyId ?? appSettings?.proxyId ?? null;
 
   const [proxyResult, modelResult] = await Promise.all([
     resolveProxy(orgId, agent.id, effectiveProxyId),
@@ -235,7 +235,7 @@ export async function buildRunContext(params: {
   // otherwise read as "free".
   const modelCost = modelResult.cost ?? null;
   const generationDefaults = reconcileModelGenerationSettings(
-    params.generationConfig ?? configFull?.generationConfig ?? {},
+    params.generationConfig ?? appSettings?.generationConfig ?? {},
     modelResult.generation,
   );
   const generationConfig = resolveModelGenerationSettings({

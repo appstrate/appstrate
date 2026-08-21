@@ -183,6 +183,20 @@ export interface ScheduleFormDeps {
 }
 
 /**
+ * The agent-detail query's failure, for a page that renders a loading state
+ * until {@link useScheduleFormDeps} resolves. A deleted agent or a revoked
+ * permission never lets the detail land, so without this the page spins
+ * forever. Same query key as that hook — React Query serves it from the cache,
+ * no second request.
+ */
+export function useScheduleFormDepsError(
+  packageId: string | undefined,
+  version?: string,
+): Error | null {
+  return usePackageDetail("agent", packageId, { version }).error;
+}
+
+/**
  * Aggregates the agent-detail / model / proxy lookups that both
  * `ScheduleCreatePage` and `ScheduleEditPage` feed into `<ScheduleForm>`.
  * Returns `null` until the agent detail has landed — or when no agent is

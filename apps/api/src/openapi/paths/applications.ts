@@ -381,7 +381,7 @@ export const applicationsPaths = {
       tags: ["Application Packages"],
       summary: "Update installed package overrides",
       description:
-        "Update the model/proxy overrides, generation settings, enabled flag, or version pinning for an installed package. The agent's stored input values are NOT settable here — use `PUT /api/agents/{scope}/{name}/config`, which validates them against the manifest input schema.",
+        "Update the model/proxy overrides, generation settings, enabled flag, or version pinning for an installed package. The agent's stored input values are NOT settable here — use `PUT /api/agents/{scope}/{name}/input-settings`, which validates them against the manifest input schema.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "applicationId", in: "path", required: true, schema: { type: "string" } },

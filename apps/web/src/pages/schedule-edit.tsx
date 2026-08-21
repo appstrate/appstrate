@@ -8,6 +8,7 @@ import {
   useUpdateSchedule,
   useDeleteSchedule,
   useScheduleFormDeps,
+  useScheduleFormDepsError,
 } from "../hooks/use-schedules";
 import { ScheduleForm } from "../components/schedule-form";
 import { PageHeader } from "../components/page-header";
@@ -21,6 +22,7 @@ export function ScheduleEditPage() {
 
   const { data: schedule, isLoading, error } = useScheduleById(id);
   const deps = useScheduleFormDeps(schedule?.packageId);
+  const depsError = useScheduleFormDepsError(schedule?.packageId);
   const updateSchedule = useUpdateSchedule();
   const deleteSchedule = useDeleteSchedule();
 
@@ -30,7 +32,10 @@ export function ScheduleEditPage() {
   // The agent detail is a SEPARATE query from the schedule: mounting the form
   // before it lands would seed the input state from empty settings, keeping a
   // since-locked field the user can no longer remove (400 `locked_input_field`
-  // on every save). `key={schedule.id}` gives no remount to repair it.
+  // on every save). `key={schedule.id}` gives no remount to repair it. When
+  // that query FAILS (deleted agent, revoked permission) the detail never
+  // lands, so waiting is waiting forever — say so instead.
+  if (depsError) return <ErrorState message={depsError.message} />;
   if (!deps) return <LoadingState />;
 
   const scheduleName = schedule.name || t("schedule.unnamed");

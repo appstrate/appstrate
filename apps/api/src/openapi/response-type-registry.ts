@@ -193,7 +193,7 @@ export const EXEMPT_SCHEMAS: Record<string, string> = {
   AgentManifest: "AFPS manifest standard; validated by AJV, not a shared-type",
   AgentSkillRef: "AFPS dependency sub-object embedded in AgentDetail.dependencies",
   AgentInputSettings:
-    "Request+response body of PUT /agents/{scope}/{name}/config; the SPA reads the same two fields off AgentDetail.input, which IS registered",
+    "Request+response body of PUT /agents/{scope}/{name}/input-settings; the SPA reads the same two fields off AgentDetail.input, which IS registered",
   FileConstraintsMap: "AFPS schema-wrapper sub-schema (structural map)",
   UIHintsMap: "AFPS schema-wrapper sub-schema (structural map)",
   // Error + auth/credential wire with no SPA shared-type consumer.

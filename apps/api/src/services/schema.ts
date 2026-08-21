@@ -4,8 +4,8 @@ import { createAjv } from "@appstrate/core/ajv";
 import { isFileField, type JSONSchemaObject, type JSONSchema7 } from "@appstrate/core/form";
 import {
   stripEmptyRequired,
-  validateConfig as validateConfigCore,
-  type ConfigValidationResult,
+  validateAgainstSchema as validateAgainstSchemaCore,
+  type SchemaValidationResult,
 } from "@appstrate/core/schema-validation";
 
 // --- AJV runtime validation ---
@@ -13,8 +13,8 @@ import {
 // Shared Ajv2020 + ajv-formats factory — mirrors the frontend RJSF validator so
 // client- and server-side validation agree. See packages/core/src/ajv.ts.
 //
-// `validateConfig` itself lives in `@appstrate/core/schema-validation`, a
-// published core export so out-of-tree consumers can apply the same gate.
+// `validateAgainstSchema` itself lives in `@appstrate/core/schema-validation`,
+// a published core export so out-of-tree consumers can apply the same gate.
 // `validateInput` and `validateOutput` stay here — they rely on server-only
 // concerns (file-field stripping, output overload).
 const ajv = createAjv({ coerceTypes: true });
@@ -40,7 +40,7 @@ function compileCached(schema: object): ReturnType<typeof ajv.compile> {
 
 // --- Section C: Validation functions ---
 
-export type ValidationResult = ConfigValidationResult;
+export type ValidationResult = SchemaValidationResult;
 
 /**
  * Shared AJV validation path for input/output.
@@ -51,9 +51,9 @@ export type ValidationResult = ConfigValidationResult;
  * - "output":  relaxes `additionalProperties: true` (extra fields like state/tokenUsage allowed),
  *              skips normalization, returns errors as pre-formatted strings.
  *
- * Config validation lives in `@appstrate/core/schema-validation`, published
- * for out-of-tree consumers; this server path delegates via the
- * `validateConfig` re-export below.
+ * Bare-schema validation lives in `@appstrate/core/schema-validation`,
+ * published for out-of-tree consumers; this module re-exports it below so all
+ * three validators share one import surface.
  */
 function runValidate(
   kind: "input",
@@ -135,10 +135,9 @@ function runValidate(
   return { valid: false, errors };
 }
 
-// Re-export the shared config validator so existing call sites
-// (services/agent-readiness.ts, route handlers) keep their import
-// surface unchanged.
-export const validateConfig = validateConfigCore;
+// Re-export the shared schema validator so the three validators share one
+// import surface.
+export const validateAgainstSchema = validateAgainstSchemaCore;
 
 /**
  * Validate a submitted credential bag against an integration auth's
