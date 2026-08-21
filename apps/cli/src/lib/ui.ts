@@ -7,6 +7,7 @@
  */
 
 import * as clack from "@clack/prompts";
+import { DEFAULT_IO, type CommandIO } from "./io.ts";
 import { DeviceFlowError } from "./device-flow.ts";
 import { ApiError, AuthError } from "./api.ts";
 import { InsecureInstanceError } from "./instance-url.ts";
@@ -136,9 +137,18 @@ export function formatError(err: unknown): string {
   return String(err);
 }
 
-export function exitWithError(err: unknown, code = 1): never {
-  clack.cancel(formatError(err));
-  process.exit(code);
+/**
+ * Render `err` and stop the process. `io` defaults to `DEFAULT_IO`, whose
+ * `cancel` is `clack.cancel` — so the production rendering is byte-for-byte
+ * what it has always been, on the same stream. Tests inject a sink instead of
+ * swapping the global streams (issue #1180); an `io` that supplies no
+ * `cancel` gets the plain message on stderr.
+ */
+export function exitWithError(err: unknown, io: CommandIO = DEFAULT_IO, code = 1): never {
+  const message = formatError(err);
+  if (io.cancel) io.cancel(message);
+  else io.stderr.write(`${message}\n`);
+  io.exit(code);
 }
 
 /**
