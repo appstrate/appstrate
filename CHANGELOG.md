@@ -171,10 +171,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Fixed
 
 - **Two indexes the schema declared but production never had** (#1182) —
-  `idx_runs_package_started` and `idx_runs_schedule_id` were the only two of
-  132 declared indexes absent from the production database, so every query
-  planned around them had been running without them. Migration
-  `0041_restore_squash_indexes.sql` creates both, guarded with
+  `idx_runs_package_started` and `idx_runs_schedule_id` were absent from the
+  production database. They were the only two missing of the 132 indexes the
+  schema declared when production was audited — 0039 has since dropped 18,
+  leaving 114 — so every query planned around them had been running without
+  them. Migration `0041_restore_squash_indexes.sql` creates both, guarded with
   `IF NOT EXISTS` because every database created FROM the squash already has
   them and the whole pending batch runs in one transaction — an unguarded
   `already exists` would abort the deploy for nearly every install.
@@ -195,8 +196,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (indexes present but undeclared are reported as informational — Postgres
   backs every primary key and unique constraint with one). Run it against
   production after a squash. `apps/api/test/unit/migration-index-parity.test.ts`
-  pins the other half in CI: it replays the journal into a throwaway PGlite and
-  fails if the snapshot declares an index no SQL creates.
+  pins the rest in CI: it replays the journal into a throwaway PGlite and fails
+  if the latest snapshot declares an index no SQL in the journal creates, then
+  drops these two to model the production population and re-runs 0041 against
+  it — both must come back, and the partial one must come back partial.
 
   **The rule this leaves behind:** a `DROP INDEX` must verify the SURVIVING
   index against the live database before dropping anything. Neither the TS

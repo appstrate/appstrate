@@ -36,13 +36,22 @@ it. An index the squash introduced therefore exists in the schema and in every f
 being absent there (issue #1182 found two). Before any `DROP INDEX`, verify the surviving index
 against the **live** database; the TS schema and `0000_init.sql` are not evidence.
 
+Run from the **repo root**, not from this directory:
+
 ```sh
-DATABASE_URL=postgres://… bun scripts/check-index-drift.ts
+cd ../.. && DATABASE_URL=postgres://… bun scripts/check-index-drift.ts
 ```
 
-Diffs the latest snapshot's declared indexes against `pg_indexes`. Exits 1 on a declared-but-absent
-index; extra indexes in the database (primary-key and unique-constraint backing indexes) are
-reported for information only.
+It reads the database's own migration watermark (`max(created_at)` in
+`drizzle.__drizzle_migrations`) and diffs against the snapshot matching it — not the newest snapshot
+on disk — so a database that has not yet run a pending release is not accused of missing every index
+that release adds. Pending migrations are named in the output. Exit 1 means either a declared index
+is absent, or the check could not run (unmigrated database, or a watermark matching no journal
+entry); every refusal says `Cannot check`, so it can never read as a clean result.
+
+Indexes present in the database but absent from the snapshot never fail the run. Those a constraint
+owns (`pg_constraint.conindid`) are counted as expected; the rest are listed by name as possible
+reverse drift — an index a squash may have dropped from the schema without a forward `DROP INDEX`.
 
 ## Dependencies
 
