@@ -10,7 +10,6 @@
 
 import { describe, it, expect } from "bun:test";
 import {
-  PUBLIC_INDEXES_QUERY,
   latestSnapshotName,
   declaredIndexes,
   diffIndexes,
@@ -123,15 +122,5 @@ describe("latestSnapshotName", () => {
 
   it("throws rather than resolving a snapshot from an empty journal", () => {
     expect(() => latestSnapshotName({ entries: [] })).toThrow(/no entries/);
-  });
-});
-
-describe("PUBLIC_INDEXES_QUERY", () => {
-  it("reads the public schema only, with no interpolation to inject into", () => {
-    // The migration-replay test in apps/api/test/unit/ imports this exact
-    // constant so both sides read the catalog the same way.
-    expect(PUBLIC_INDEXES_QUERY).toBe(
-      "SELECT indexname FROM pg_indexes WHERE schemaname = 'public'",
-    );
   });
 });

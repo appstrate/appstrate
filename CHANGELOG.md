@@ -168,6 +168,43 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   containers where it previously got none. The default is `info` in both
   `.env.example` and `docker-compose.yml`.
 
+### Fixed
+
+- **Two indexes the schema declared but production never had** (#1182) —
+  `idx_runs_package_started` and `idx_runs_schedule_id` were the only two of
+  132 declared indexes absent from the production database, so every query
+  planned around them had been running without them. Migration
+  `0041_restore_squash_indexes.sql` creates both, guarded with
+  `IF NOT EXISTS` because every database created FROM the squash already has
+  them and the whole pending batch runs in one transaction — an unguarded
+  `already exists` would abort the deploy for nearly every install.
+
+  **Why nothing looked wrong.** `0000_init.sql` is a SQUASH and production
+  predates it. Drizzle replays only the entries past a database's watermark,
+  so for a database older than the squash `0000_init` is history, never
+  pending work: anything the squash introduced by itself — rather than through
+  a forward migration production also ran — silently never arrived. The
+  bookkeeping was healthy throughout (39 rows, no gap), which is exactly why
+  this went unnoticed; no migration was skipped and no record was wrong, only
+  DDL was missing. The class is structural, not a one-off: the next squash
+  reopens it for every index, constraint and default it introduces.
+
+  **New operator check.** `DATABASE_URL=… bun scripts/check-index-drift.ts`
+  diffs the indexes declared by the latest Drizzle snapshot against
+  `pg_indexes` on a live database and exits non-zero on anything missing
+  (indexes present but undeclared are reported as informational — Postgres
+  backs every primary key and unique constraint with one). Run it against
+  production after a squash. `apps/api/test/unit/migration-index-parity.test.ts`
+  pins the other half in CI: it replays the journal into a throwaway PGlite and
+  fails if the snapshot declares an index no SQL creates.
+
+  **The rule this leaves behind:** a `DROP INDEX` must verify the SURVIVING
+  index against the live database before dropping anything. Neither the TS
+  schema nor `0000_init.sql` is evidence that an index exists in production —
+  migration 0039 dropped `idx_runs_package_id` on the grounds that
+  `idx_runs_package_started` covers it, and that cover was itself absent from
+  production at the time.
+
 ### Security
 
 - **The agent bundle export now requires each dependency type's read scope** —
