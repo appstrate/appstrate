@@ -27,6 +27,9 @@ import type { RunKindFilter } from "../hooks/use-paginated-runs";
 const KINDS = ["package", "inline"] as const;
 const SCOPES = ["me"] as const;
 
+/** The query parameters this screen filters on, and nothing else. */
+const FILTER_PARAMS = ["user", "kind", "status"] as const;
+
 /** `?status=failed,timeout` — the wire shape the endpoint takes. */
 function readList<T extends string>(raw: string | null, allowed: readonly T[]): T[] {
   if (!raw) return [];
@@ -53,6 +56,16 @@ export function RunsPage() {
       return next;
     });
   };
+
+  // ONE update, not one per dimension. Three `setParams` in the same tick each
+  // read the same committed location, so the last would win and the other two
+  // filters would survive a "Réinitialiser" that looked like it worked.
+  const resetFilters = () =>
+    setParams((prev) => {
+      const next = new URLSearchParams(prev);
+      for (const key of FILTER_PARAMS) next.delete(key);
+      return next;
+    });
 
   const filters: FilterSpec[] = [
     {
@@ -116,18 +129,18 @@ export function RunsPage() {
         kind={kind}
         status={statuses}
         toolbar={(total) => (
-          <ListToolbar filters={filters} count={t("runs.count", { count: total })} />
+          <ListToolbar
+            filters={filters}
+            onReset={resetFilters}
+            count={t("runs.count", { count: total })}
+          />
         )}
         // A filtered list that finds nothing has NOT run out of runs — it has
         // run out of matches, and the way out is the filter, not the agent.
         emptyState={
           filters.some((f) => f.values.length > 0) ? (
             <EmptyState message={t("runs.emptyFiltered")} icon={SearchX} compact>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => filters.forEach((f) => f.onChange([]))}
-              >
+              <Button variant="outline" size="sm" onClick={resetFilters}>
                 {t("toolbar.clearAll", { ns: "common" })}
               </Button>
             </EmptyState>

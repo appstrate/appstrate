@@ -252,7 +252,10 @@ The pattern:
   duplication.
 - **The menu is a `Command`**: searchable, square checkboxes, several values at
   once, and a centred "Effacer les filtres" at the bottom.
-- **One "Réinitialiser ✕"** at the end of the row when anything is filtered.
+- **One "Réinitialiser ✕"** at the end of the row when anything is filtered:
+  the only ONE-click way back to the whole list. The menu's own item drops one
+  dimension ("Effacer ce filtre"), unticking drops one value. It is the PAGE's
+  reset, not a loop over the filters — see the trap below.
 - **A tick adds, an untick removes, and nothing else happens.** This was got
   wrong once and the way it was wrong is worth keeping: "all values ticked
   narrows nothing, so store it as nothing ticked" is true of the RESULTS and
@@ -455,6 +458,13 @@ On how the work goes:
 - The two-axis code review runs after each substantive block.
 
 ## Traps hit more than once
+
+- **N URL updates in one tick collapse into one, and the last wins.** The
+  toolbar's "Réinitialiser" cleared each filter in turn, so three
+  `setSearchParams` all computed from the same committed location: the status
+  went and the scope and the kind stayed, on a button that looked like it had
+  worked. Anything that changes several query parameters at once has to be a
+  single update.
 
 - **`key` resets state by REMOUNTING, and takes the subtree's UI state with
   it.** Resetting the run list's page on a filter change that way closed the

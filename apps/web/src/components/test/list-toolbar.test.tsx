@@ -96,9 +96,22 @@ describe("the chosen values", () => {
 describe("the reset", () => {
   it("appears as soon as anything is filtered, once for the whole row", () => {
     const html = render(
-      <ListToolbar filters={filters({ status: ["failed"], kind: ["inline"] })} />,
+      <ListToolbar
+        filters={filters({ status: ["failed"], kind: ["inline"] })}
+        onReset={() => {}}
+      />,
     );
     expect([...html.matchAll(/Réinitialiser/g)]).toHaveLength(1);
+  });
+
+  it("is absent when the caller gave no way to reset in one go", () => {
+    // Deliberate: a missing reset is visible and harmless, where a reset that
+    // loops over the filters looks right and clears only the last one. These
+    // filters are URL parameters, and three `setSearchParams` in one tick all
+    // read the same committed location — the button cleared the status and
+    // left the scope and the kind exactly where they were.
+    const html = render(<ListToolbar filters={filters({ status: ["failed"] })} />);
+    expect(html).not.toContain("Réinitialiser");
   });
 });
 

@@ -25,6 +25,13 @@
  * - **One "Réinitialiser ✕"** at the end of the row, once anything is filtered:
  *   the only ONE-click way back to the whole list, whatever is on. Everything
  *   else drops one dimension (the menu's own item) or one value (untick it).
+ *   It is the CALLER's `onReset`, not a loop over the filters here, and that is
+ *   not a style choice: these filters live in the URL, and calling three
+ *   `setSearchParams` in one tick makes each of them compute from the same
+ *   committed location, so the last one wins and the other two survive. The
+ *   button cleared the status and left the scope and the kind exactly where
+ *   they were. A reset has to be ONE update, and only the caller knows how to
+ *   write it.
  *
  * And what the pattern deliberately does NOT do: write the operators. Values of
  * one dimension are alternatives, dimensions narrow each other — `(statut =
@@ -44,7 +51,7 @@ import { useTranslation } from "react-i18next";
 import { Check, LayoutGrid, PlusCircle, Rows3, X } from "lucide-react";
 import { cn } from "@appstrate/ui/cn";
 import type { ListView } from "@/stores/list-view-store";
-import { toggleValue } from "@/lib/toggle-value";
+import { toggleValue } from "../lib/toggle-value";
 import { Badge } from "@appstrate/ui/components/badge";
 import { Button } from "@appstrate/ui/components/button";
 import { Separator } from "@appstrate/ui/components/separator";
@@ -201,11 +208,18 @@ function ViewToggle({ view, onChange }: { view: ListView; onChange: (view: ListV
 
 export function ListToolbar({
   filters,
+  onReset,
   count,
   view,
   onViewChange,
 }: {
   filters: FilterSpec[];
+  /**
+   * Clears every dimension in ONE go. Without it there is no reset button —
+   * deliberately: a missing reset is visible and harmless, where a reset that
+   * loops over the filters looks right and clears only the last one.
+   */
+  onReset?: () => void;
   /**
    * What the list amounts to, at the far end of the row — IN THE CALLER'S OWN
    * WORDS. The toolbar counts nothing itself: it serves runs, schedules and
@@ -227,13 +241,8 @@ export function ListToolbar({
           <FacetedFilter filter={filter} />
         </Fragment>
       ))}
-      {isFiltered && (
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-8"
-          onClick={() => filters.forEach((filter) => filter.onChange([]))}
-        >
+      {isFiltered && onReset && (
+        <Button variant="ghost" size="sm" className="h-8" onClick={onReset}>
           {t("toolbar.reset")}
           <X />
         </Button>
