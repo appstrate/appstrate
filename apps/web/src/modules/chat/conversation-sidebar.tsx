@@ -28,7 +28,7 @@ import { DocumentPreview } from "../../components/document-preview";
 import { DocumentViewer } from "../../components/document-viewer";
 import { useDocument, useDocumentDownload, useDocuments } from "../../hooks/use-documents";
 import { useOrgOnlyScope, useOrgScope } from "../../hooks/use-org-scope";
-import { formatDateField } from "../../lib/markdown";
+import { formatDateField } from "../../lib/format-date";
 import type {
   ConversationSidebarAction,
   ConversationSidebarState,

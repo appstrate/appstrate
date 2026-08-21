@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { STD_RESPONSE_HEADERS, REQUEST_ID_ONLY_HEADERS } from "../headers.ts";
+
 export const uploadsPaths = {
   "/api/uploads": {
     post: {
@@ -76,10 +78,7 @@ export const uploadsPaths = {
       responses: {
         "201": {
           description: "Upload descriptor created.",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
@@ -142,7 +141,7 @@ export const uploadsPaths = {
             "organization's staging budget (`UPLOAD_STAGING_MAX_BYTES_PER_ORG`, summed over " +
             "unconsumed, unexpired uploads plus the declared `size`) would be exceeded. " +
             "Retrying is pointless until uploads are consumed or expire, or the quota is raised.",
-          headers: { "Request-Id": { $ref: "#/components/headers/RequestId" } },
+          headers: REQUEST_ID_ONLY_HEADERS,
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -225,13 +224,13 @@ export const uploadsPaths = {
       responses: {
         "204": {
           description: "Bytes accepted.",
-          headers: { "Request-Id": { $ref: "#/components/headers/RequestId" } },
+          headers: REQUEST_ID_ONLY_HEADERS,
         },
         "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "409": {
           description: "Upload content already written for this token.",
-          headers: { "Request-Id": { $ref: "#/components/headers/RequestId" } },
+          headers: REQUEST_ID_ONLY_HEADERS,
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },

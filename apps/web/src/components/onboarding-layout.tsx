@@ -11,7 +11,7 @@ import { useAppConfig } from "../hooks/use-app-config";
 import { NavUser } from "./nav-user";
 import { ArrowLeft, ArrowRight } from "lucide-react";
 
-export type StepKey = "create" | "plan" | "model" | "members" | "complete";
+type StepKey = "create" | "plan" | "model" | "members" | "complete";
 
 interface StepDef {
   key: StepKey;

@@ -482,11 +482,12 @@ export interface SidecarRuntimeDeps {
 /**
  * Blob-store cap for production sidecars. MUST stay well below the
  * sidecar container's cgroup memory limit (SIDECAR_MEMORY_BYTES =
- * 256 MiB, `apps/api/src/services/orchestrator/constants.ts`): at the
- * store's 256 MiB class default the kernel OOM-killer fires before the
+ * 256 MiB, `apps/api/src/services/orchestrator/constants.ts`): a cap at
+ * or near the cgroup limit means the kernel OOM-killer fires before the
  * store's own guard, killing every integration mid-run. 128 MiB leaves
  * headroom for the Bun runtime, spawned-runner bookkeeping, and
- * in-flight request buffers.
+ * in-flight request buffers. `BlobStore` takes no default for this
+ * reason — the value is always a deliberate choice by the caller.
  */
 const RUN_BLOB_STORE_MAX_BYTES = 128 * 1024 * 1024;
 

@@ -31,7 +31,7 @@ import { RunArtifactsBanner } from "../components/run-artifacts-banner";
 import { useMarkReadByRun } from "../hooks/use-notifications";
 import { ACTIVE_RUN_STATUSES, type EnrichedRun } from "@appstrate/shared-types";
 import type { components } from "../api/client";
-import { formatDateField } from "../lib/markdown";
+import { formatDateField } from "../lib/format-date";
 import { JsonView } from "../components/json-view";
 import { useRunMemories, useRunPinned } from "../hooks/use-persistence";
 import { runKeys, invalidateRunLogs } from "../lib/query-keys";

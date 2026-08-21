@@ -55,7 +55,7 @@ import { usePairingDismissConfirm } from "../hooks/use-pairing-dismiss-confirm";
  * `baseUrlOverride` is only meaningful for providers with `baseUrlOverridable: true`
  * (today: `openai-compatible`).
  */
-export interface CredentialFormData {
+interface CredentialFormData {
   label: string;
   providerId: string;
   apiKey?: string;

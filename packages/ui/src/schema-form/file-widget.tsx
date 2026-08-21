@@ -8,7 +8,8 @@ import { formatBytes as formatSize } from "@appstrate/core/format";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { Button, LABEL_CLASS } from "./primitives.tsx";
 import { cn } from "../cn.ts";
-import { createUploader, isUploadUri, type UploadFn } from "./upload-client.ts";
+import { isUploadUri } from "@appstrate/core/document-uri";
+import type { UploadFn } from "./upload-client.ts";
 import { fileMatchesAccept } from "./accept-match.ts";
 import type { SchemaFormContext } from "./context.ts";
 
@@ -64,8 +65,8 @@ const DEFAULT_LABELS: Required<FileWidgetLabels> = {
  *   - `{ type: "string", format: "uri", contentMediaType }`            → single
  *   - `{ type: "array", items: { type: "string", format: "uri", … } }` → multi
  *
- * The binary is uploaded directly to storage via the endpoint resolved from
- * `registry.formContext.uploadPath` (POST), and `onChange` writes back an
+ * The binary is uploaded directly to storage by the host-supplied
+ * `registry.formContext.upload` function, and `onChange` writes back an
  * `upload://upl_xxx` URI (or array of URIs). RJSF then validates the schema
  * on this URI — the server re-validates when the run is triggered.
  */
@@ -77,10 +78,7 @@ export function FileWidget(props: WidgetProps) {
     () => ({ ...DEFAULT_LABELS, ...(ctx.labels ?? {}) }),
     [ctx.labels],
   );
-  const upload = useMemo<UploadFn | null>(
-    () => ctx.upload ?? (ctx.uploadPath ? createUploader(ctx.uploadPath) : null),
-    [ctx.upload, ctx.uploadPath],
-  );
+  const upload: UploadFn | null = ctx.upload ?? null;
 
   const inputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);

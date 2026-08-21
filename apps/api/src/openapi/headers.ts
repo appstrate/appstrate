@@ -48,3 +48,28 @@ export const headers = {
     },
   },
 } as const;
+
+/**
+ * The response-header set every ordinary API response carries: the tracing id
+ * and the resolved API version. Referenced rather than re-spelled at each of
+ * the ~100 responses that declare it, so the pair cannot drift apart in one
+ * corner of the spec. Sites that carry extra headers (`Link`,
+ * `Idempotent-Replayed`, `RateLimit`…) spread this first and append their own,
+ * which keeps the emitted key order identical to the inline form.
+ */
+export const STD_RESPONSE_HEADERS = {
+  "Request-Id": { $ref: "#/components/headers/RequestId" },
+  "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+} as const;
+
+/**
+ * Tracing id alone — the set declared by the responses that document no version
+ * header, in practice the `204 No Content` bodies plus a scattering of 4xx
+ * errors. Kept as its own const rather than folded into `STD_RESPONSE_HEADERS`
+ * so this pass stays a pure deduplication: whether those responses *should*
+ * also advertise `Appstrate-Version` is a spec change, and a spec change is a
+ * baseline diff.
+ */
+export const REQUEST_ID_ONLY_HEADERS = {
+  "Request-Id": { $ref: "#/components/headers/RequestId" },
+} as const;

@@ -174,8 +174,6 @@ describe("discoverAvailableModels", () => {
     const result = await discoverAvailableModels(ctx.org.id, cred.id, deps);
 
     expect(result.outcome).toBe("ok");
-    expect(result.persisted).toBe(true);
-    expect(result.verifiedModelIds).toEqual(["m-featured", "m-extra"]);
     const info = await getOrgModelProviderCredential(ctx.org.id, cred.id);
     expect(info?.available_model_ids).toEqual(["m-featured", "m-extra"]);
   });
@@ -187,7 +185,6 @@ describe("discoverAvailableModels", () => {
     const result = await discoverAvailableModels(ctx.org.id, cred.id, deps);
 
     expect(result.outcome).toBe("auth_failed");
-    expect(result.persisted).toBe(false);
     // Aborted on the first candidate — no further probes burned.
     expect(calls).toEqual(["m-featured"]);
     const info = await getOrgModelProviderCredential(ctx.org.id, cred.id);
@@ -206,7 +203,6 @@ describe("discoverAvailableModels", () => {
     const result = await discoverAvailableModels(ctx.org.id, cred.id, allDown.deps);
 
     expect(result.outcome).toBe("nothing_verified");
-    expect(result.persisted).toBe(false);
     const info = await getOrgModelProviderCredential(ctx.org.id, cred.id);
     expect(info?.available_model_ids).toEqual(["m-featured"]);
   });
@@ -222,7 +218,8 @@ describe("discoverAvailableModels", () => {
     const result = await discoverAvailableModels(ctx.org.id, cred.id, deps);
 
     expect(result.outcome).toBe("ok");
-    expect(result.verifiedModelIds).toEqual(["m-featured"]);
+    const info = await getOrgModelProviderCredential(ctx.org.id, cred.id);
+    expect(info?.available_model_ids).toEqual(["m-featured"]);
     expect(calls.filter((m) => m === "m-featured")).toHaveLength(2);
   });
 
@@ -265,13 +262,11 @@ describe("discoverAvailableModels", () => {
 
     expect(calls()).toBe(0);
     expect(result.outcome).toBe("ok");
-    // Nothing is written — the list is derived on every read instead.
-    expect(result.persisted).toBe(false);
     // Zero upstream requests were spent, so nothing was "probed".
     expect(result.probedCount).toBe(0);
-    // "m-uncatalogued" is filtered out (not in the catalog); the rest come
-    // back in declaration order.
-    expect(result.verifiedModelIds).toEqual(["m-featured", "m-extra"]);
+    // Derived on read, not written: "m-uncatalogued" is filtered out (not in
+    // the catalog); the rest come back in declaration order. That nothing was
+    // written is pinned by the raw-column assertion in the next test.
     const info = await getOrgModelProviderCredential(ctx.org.id, cred.id);
     expect(info?.available_model_ids).toEqual(["m-featured", "m-extra"]);
   });
@@ -292,7 +287,7 @@ describe("discoverAvailableModels", () => {
     const { deps } = forbiddenProber();
     const result = await discoverAvailableModels(ctx.org.id, cred.id, deps);
 
-    expect(result.verifiedModelIds).toEqual(["m-featured", "m-extra"]);
+    expect(result.outcome).toBe("ok");
     const info = await getOrgModelProviderCredential(ctx.org.id, cred.id);
     expect(info?.available_model_ids).toEqual(["m-featured", "m-extra"]);
     // The column itself is still the stale value — discovery wrote nothing.

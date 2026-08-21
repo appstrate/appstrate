@@ -3,16 +3,15 @@
 
 /**
  * Thin RJSF wrapper integrated with the Appstrate dark theme. Ships in
- * `@appstrate/ui/schema-form` so every Appstrate frontend (main app,
- * portal, future surfaces) renders AFPS input/config/output schemas
- * identically.
+ * `@appstrate/ui/schema-form` so every Appstrate surface renders AFPS
+ * input/config/output schemas identically.
  *
  *   <SchemaForm
  *     wrapper={manifest.input}
  *     formData={…}
  *     onChange={…}
  *     onSubmit={…}
- *     uploadPath="/api/uploads"
+ *     upload={uploadClient}
  *   >
  *     {/* custom footer, or leave empty to let RJSF render a submit button *\/}
  *   </SchemaForm>
@@ -52,7 +51,7 @@ import type { SchemaFormContext } from "./context.ts";
 
 export type { SchemaWrapper } from "@appstrate/core/form";
 export type { FileWidgetLabels } from "./file-widget.tsx";
-export type { UploadFn, UploadDescriptor } from "./upload-client.ts";
+export type { UploadFn } from "./upload-client.ts";
 export type { SchemaFormContext } from "./context.ts";
 
 const widgets = {
@@ -85,12 +84,9 @@ export interface SchemaFormProps extends Omit<
   /** When true, render the default RJSF submit button. Default: false. */
   showSubmitButton?: boolean;
   /**
-   * Endpoint the `FileWidget` POSTs to for direct uploads. Must return an
-   * `UploadDescriptor`. Omit to disable uploads (the widget shows an error
-   * if the user tries to attach a file).
+   * Uploader the `FileWidget` calls for direct uploads. Omit to disable
+   * uploads (the widget shows an error if the user tries to attach a file).
    */
-  uploadPath?: string;
-  /** Escape hatch: provide your own uploader instead of the default fetch client. */
   upload?: UploadFn;
   /** Translated strings for the FileWidget. Defaults are English. */
   labels?: FileWidgetLabels & { addItem?: string };
@@ -111,7 +107,6 @@ export const SchemaForm = forwardRef<RjsfForm, SchemaFormProps>(function SchemaF
     showSubmitButton = false,
     children,
     uiSchema: extraUi,
-    uploadPath,
     upload,
     labels,
     formContext,
@@ -129,9 +124,8 @@ export const SchemaForm = forwardRef<RjsfForm, SchemaFormProps>(function SchemaF
   // Stable identity so downstream `useMemo`s in FileWidget actually memoize.
   const ctx = useMemo(
     () =>
-      ({ ...(formContext ?? {}), uploadPath, upload, labels }) as SchemaFormContext &
-        Record<string, unknown>,
-    [formContext, uploadPath, upload, labels],
+      ({ ...(formContext ?? {}), upload, labels }) as SchemaFormContext & Record<string, unknown>,
+    [formContext, upload, labels],
   );
 
   return (

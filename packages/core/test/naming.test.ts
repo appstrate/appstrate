@@ -9,7 +9,6 @@ import {
   encodePackageIdPath,
   isOwnedByOrg,
   isValidToolName,
-  normalizeToolName,
   TOOL_NAME_MAX_LEN,
   sanitizeFilename,
   attachmentDisposition,
@@ -195,29 +194,6 @@ describe("isValidToolName", () => {
   it("rejects empty / non-string input", () => {
     expect(isValidToolName("")).toBe(false);
     expect(isValidToolName(undefined as unknown as string)).toBe(false);
-  });
-});
-
-describe("normalizeToolName", () => {
-  it("returns valid names unchanged", () => {
-    expect(normalizeToolName("fs__read_file")).toBe("fs__read_file");
-  });
-
-  it("converts hyphens to underscores", () => {
-    expect(normalizeToolName("mcp-fs__read-file")).toBe("mcp_fs__read_file");
-  });
-
-  it("promotes the first single-underscore boundary when no __ exists", () => {
-    expect(normalizeToolName("fs_read_file")).toBe("fs__read_file");
-  });
-
-  it("lowercases mixed case", () => {
-    expect(normalizeToolName("FS__readFile")).toBe("fs__readfile");
-  });
-
-  it("caps to TOOL_NAME_MAX_LEN", () => {
-    const big = "a".repeat(80) + "__b";
-    expect(normalizeToolName(big).length).toBe(TOOL_NAME_MAX_LEN);
   });
 });
 

@@ -251,7 +251,6 @@ describe("guardSseTeardown", () => {
     });
     const res = await forwardMeteredResponse(upstream, anthropicMessagesAdapter, makeCtx(), {
       swap: { alias: "alias-model", real: "real-model" },
-      logLabel: "test",
       recordUsage: collectUsage().recordUsage,
     });
     const out = await readAll(res.body!);
@@ -309,7 +308,6 @@ describe("forwardMeteredResponse — aliased error synthesis and header allowlis
 
     const res = await forwardMeteredResponse(upstream, anthropicMessagesAdapter, makeCtx(), {
       swap,
-      logLabel: "test",
     });
 
     // Status flows for retry/backoff; the body is the neutral envelope —
@@ -338,9 +336,7 @@ describe("forwardMeteredResponse — aliased error synthesis and header allowlis
       headers: { "content-type": "application/json", server: "cloudflare" },
     });
 
-    const res = await forwardMeteredResponse(upstream, anthropicMessagesAdapter, makeCtx(), {
-      logLabel: "test",
-    });
+    const res = await forwardMeteredResponse(upstream, anthropicMessagesAdapter, makeCtx(), {});
 
     expect(res.status).toBe(529);
     // Permissive path intact: the fingerprinting header passes through.
@@ -359,7 +355,6 @@ describe("forwardMeteredResponse — aliased error synthesis and header allowlis
     const meter = collectUsage();
     const res = await forwardMeteredResponse(upstream, anthropicMessagesAdapter, makeCtx(), {
       swap,
-      logLabel: "test",
       recordUsage: meter.recordUsage,
     });
 
@@ -383,7 +378,6 @@ describe("forwardMeteredResponse — aliased error synthesis and header allowlis
     });
 
     const res = await forwardMeteredResponse(upstream, anthropicMessagesAdapter, makeCtx(), {
-      logLabel: "test",
       recordUsage: collectUsage().recordUsage,
     });
 
@@ -412,7 +406,6 @@ describe("forwardMeteredResponse — a paid 2xx never escapes the ledger", () =>
 
     const meter = collectUsage();
     const res = await forwardMeteredResponse(upstream, anthropicMessagesAdapter, makeCtx(), {
-      logLabel: "test",
       recordUsage: meter.recordUsage,
     });
     // The tap runs out-of-band of the client stream: drain the body first.
@@ -433,7 +426,6 @@ describe("forwardMeteredResponse — a paid 2xx never escapes the ledger", () =>
 
     const meter = collectUsage();
     await forwardMeteredResponse(upstream, openaiCompletionsAdapter, makeCtx(), {
-      logLabel: "test",
       recordUsage: meter.recordUsage,
     });
 
@@ -449,7 +441,6 @@ describe("forwardMeteredResponse — a paid 2xx never escapes the ledger", () =>
 
     const meter = collectUsage();
     await forwardMeteredResponse(upstream, openaiCompletionsAdapter, makeCtx(), {
-      logLabel: "test",
       recordUsage: meter.recordUsage,
     });
 

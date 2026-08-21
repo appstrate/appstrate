@@ -4,34 +4,35 @@
 /**
  * The single fixture corpus for the canonical-event contract.
  *
- * Two independent implementations describe the same payload contract:
+ * `isCanonicalRunEvent` (`src/types/canonical-events.ts`) is the runtime
+ * structural guard that narrows an open `RunEvent` into the discriminated
+ * union AND gates the CloudEvents `dataschema` attribute. This corpus is the
+ * only list of accept/reject cases for it; `test/types/canonical-events.test.ts`
+ * runs every fixture through the guard and asserts the `valid` label.
  *
- * - `isCanonicalRunEvent` (`src/types/canonical-events.ts`) — the runtime
- *   structural guard that narrows an open `RunEvent` into the discriminated
- *   union AND gates the CloudEvents `dataschema` attribute;
- * - the published JSON Schema documents generated from the Zod source in
- *   `src/events/canonical-event-schemas.ts`.
+ * A second reader used to exist — the JSON Schema documents generated from a
+ * Zod payload table in `src/events/canonical-event-schemas.ts`, run through
+ * ajv — and the corpus was unified so the two could not restate each other.
+ * That generator has been removed: its artifacts were never published to the
+ * `$id` hosts (404, see that module), so it guarded a shape nobody could read.
+ * The guard is now the sole definition.
  *
- * They must agree. Previously each test file carried its own hand-copied
- * list of fixtures, so "agreement" was an assertion maintained by hand and
- * the two lists could — and did — leave whole fields un-exercised. This
- * module is now the only list: `test/types/canonical-events.test.ts` runs
- * it through the guard, `test/events/canonical-event-schemas.test.ts` runs
- * it through ajv, and each asserts against the SAME `valid` label. Parity
- * is therefore structural rather than restated.
+ * ## `violates`
  *
- * ## `violates` and the coverage guard
+ * A fixture that puts a **wrong-typed value** at a field names that field in
+ * `violates`. This used to drive a mechanical coverage guard: the schema suite
+ * derived the constrained field paths from the generated documents (every
+ * subschema carrying `type` or `enum`) and failed unless each was named by a
+ * fixture — which is how `durationMs`, `usage`'s inner counters and
+ * `progress`/`error`'s `data` were caught going un-exercised. With no
+ * machine-readable schema left, that set cannot be derived, and hand-writing it
+ * would recreate exactly the maintained-by-inspection list the guard replaced.
+ * `violates` is therefore documentation now: it says which constraint a fixture
+ * is there to exercise, so adding a constraint to the guard means adding a
+ * fixture that names it.
  *
- * A fixture that puts a **wrong-typed value** at a field names that field
- * in `violates`. `canonical-event-schemas.test.ts` derives the set of
- * constrained field paths mechanically from the generated JSON Schema
- * documents (every subschema carrying `type` or `enum`) and fails unless
- * each one is named by at least one fixture. Adding a constraint to a Zod
- * schema therefore fails the suite until a fixture exercises it — the
- * blind spot cannot be reintroduced by inspection alone.
- *
- * Omission fixtures (a missing `required` field) deliberately carry no
- * `violates`: they exercise `required`, not the field's type constraint.
+ * Omission fixtures (a missing required field) deliberately carry no
+ * `violates`: they exercise presence, not the field's type constraint.
  */
 
 import type { RunEvent } from "@afps-spec/types";
@@ -42,21 +43,19 @@ export interface CanonicalEventFixture {
   /** Human-readable label, surfaced in assertion diffs. */
   readonly label: string;
   readonly event: RunEvent;
-  /**
-   * Expected verdict from BOTH `isCanonicalRunEvent` and the generated
-   * JSON Schema for `event.type`.
-   */
+  /** Expected verdict from `isCanonicalRunEvent`. */
   readonly valid: boolean;
   /**
    * Dotted path (within the CloudEvent `data` projection) at which this
-   * fixture places a wrong-typed value. Drives the coverage guard.
+   * fixture places a wrong-typed value. Documents which constraint the
+   * fixture exercises — see the module doc.
    */
   readonly violates?: string;
 }
 
 /**
  * Every fixture whose `type` IS canonical. Third-party types live in
- * {@link NON_CANONICAL_EVENTS} — they have no schema to compare against.
+ * {@link NON_CANONICAL_EVENTS} — the guard cannot know their shape.
  */
 export const CANONICAL_EVENT_CORPUS: readonly CanonicalEventFixture[] = [
   // --- memory.added ---------------------------------------------------

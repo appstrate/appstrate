@@ -36,7 +36,6 @@ export {
   buildBundleFromCatalog,
   bundleIntegrity,
   canonicalJsonStringify,
-  composeCatalogs,
   computeRecordEntries,
   emptyPackageCatalog,
   extractRootFromAfps,
@@ -52,7 +51,6 @@ export {
   serializeRecord,
   validateBundle,
   writeBundleToBuffer,
-  writeBundleToFile,
   type AfpsManifest,
   type BuildBundleOptions,
   type Bundle,
@@ -128,7 +126,7 @@ export * from "./runner/index.ts";
 export * from "./conformance/index.ts";
 export * from "./resolvers/index.ts";
 
-// Unified error taxonomy + RFC 9457 problem+json helper.
+// Unified error taxonomy.
 export {
   AfpsRuntimeError,
   RunCancelledError,
@@ -139,12 +137,8 @@ export {
   RunHistoryError,
   CredentialResolutionError,
   isAfpsError,
-  toProblem,
-  afpsErrorTypeUri,
-  AFPS_ERROR_CODES,
   type AfpsError,
   type AfpsErrorCode,
-  type ProblemDetails,
 } from "./errors.ts";
 
 // W3C Trace Context — distributed tracing header propagation.

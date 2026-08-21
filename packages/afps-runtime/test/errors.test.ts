@@ -11,15 +11,9 @@ import {
   RunTimeoutError,
   WorkloadExitError,
   isAfpsError,
-  toProblem,
-  afpsErrorTypeUri,
-  AFPS_ERROR_CODES,
 } from "../src/errors.ts";
 import { BundleError } from "../src/bundle/errors.ts";
 import { BundleSignaturePolicyError } from "../src/bundle/signature-policy.ts";
-// devDependency, test-only: the platform's RFC 9457 implementation is the
-// reference the runtime's `type` URIs must match byte for byte.
-import { ApiError } from "@appstrate/core/api-errors";
 
 describe("AfpsRuntimeError taxonomy", () => {
   it("each typed error exposes a stable code + name", () => {
@@ -88,125 +82,6 @@ describe("isAfpsError marker", () => {
     expect(isAfpsError(null)).toBe(false);
     expect(isAfpsError(undefined)).toBe(false);
     expect(isAfpsError({ code: "x" })).toBe(false);
-  });
-});
-
-describe("toProblem (RFC 9457)", () => {
-  it("emits problem+json from typed errors with code in the type URI", () => {
-    const err = new AuthorizedUrisError("AUTHORIZED_URIS_MISMATCH", "rejected", {
-      provider: "@appstrate/gmail",
-      target: "https://evil.com/",
-    });
-    const problem = toProblem(err);
-    expect(problem.code).toBe("AUTHORIZED_URIS_MISMATCH");
-    expect(problem.type).toBe("https://docs.appstrate.dev/errors/afps/AUTHORIZED-URIS-MISMATCH");
-    expect(problem.title).toBe("AuthorizedUrisError");
-    expect(problem.status).toBe(422);
-    expect(problem.detail).toBe("rejected");
-    expect(problem.errors).toEqual({ provider: "@appstrate/gmail", target: "https://evil.com/" });
-  });
-
-  it("respects fallback overrides", () => {
-    const err = new RunCancelledError("aborted");
-    const problem = toProblem(err, { type: "x", title: "y", status: 409 });
-    expect(problem.type).toBe("x");
-    expect(problem.title).toBe("y");
-    expect(problem.status).toBe(409);
-  });
-
-  it("falls back to a 500 envelope for plain Error", () => {
-    const problem = toProblem(new Error("boom"));
-    expect(problem.type).toBe("about:blank");
-    expect(problem.status).toBe(500);
-    expect(problem.detail).toBe("boom");
-    expect(problem.code).toBeUndefined();
-  });
-
-  it("falls back to a 500 envelope for non-Error values", () => {
-    const problem = toProblem("string error");
-    expect(problem.detail).toBe("string error");
-    expect(problem.status).toBe(500);
-  });
-});
-
-/**
- * The runtime and the platform must share ONE documentation host — but not
- * one flat namespace: their code catalogues overlap on names that mean
- * different things (`INTEGRITY_MISMATCH` vs `integrity_mismatch`). The
- * runtime therefore adds an `afps/` segment.
- *
- * These assertions pin the relationship rather than byte-identity: same
- * host and `/errors` root, same slug transform, differing by exactly the
- * namespace segment. Drift in either implementation fails here.
- *
- * Disjointness follows from that relationship, it is not an empirical fact
- * needing a scan of the platform's catalogue: core's `codeToType` maps
- * `_` → `-` and nothing else, so a platform URI has exactly ONE segment
- * under `/errors/`, while `afpsErrorTypeUri` always emits two. A collision
- * would require a platform error code containing a literal `/`. The pair
- * below is the one real name overlap between the two catalogues, kept as a
- * concrete witness that the namespace segment is what keeps them apart.
- */
-describe("toProblem type URI ↔ @appstrate/core namespace relationship", () => {
-  const ERRORS_ROOT = "https://docs.appstrate.dev/errors";
-
-  /** The URI core mints for the same code. */
-  function coreTypeUri(code: string): string {
-    return new ApiError({ status: 422, code, title: "t", detail: "d" }).toProblemDetail("req_test")
-      .type;
-  }
-
-  it("enumerates the AfpsErrorCode union exhaustively", () => {
-    // Compile-time exhaustiveness lives on the `satisfies Record<AfpsErrorCode, true>`
-    // in src/errors.ts; this pins the count so a silent shrink is visible.
-    expect(AFPS_ERROR_CODES).toHaveLength(38);
-    expect(new Set(AFPS_ERROR_CODES).size).toBe(AFPS_ERROR_CODES.length);
-  });
-
-  it("shares core's host and /errors root", () => {
-    for (const code of AFPS_ERROR_CODES) {
-      expect(coreTypeUri(code).startsWith(`${ERRORS_ROOT}/`)).toBe(true);
-      expect(afpsErrorTypeUri(code).startsWith(`${ERRORS_ROOT}/`)).toBe(true);
-    }
-  });
-
-  it("adds exactly the afps/ segment and nothing else", () => {
-    for (const code of AFPS_ERROR_CODES) {
-      expect(afpsErrorTypeUri(code)).toBe(
-        `${ERRORS_ROOT}/afps/${coreTypeUri(code).slice(ERRORS_ROOT.length + 1)}`,
-      );
-    }
-  });
-
-  it("would collide without the afps/ segment", () => {
-    expect(coreTypeUri("integrity_mismatch")).toBe(`${ERRORS_ROOT}/integrity-mismatch`);
-    expect(afpsErrorTypeUri("INTEGRITY_MISMATCH").toLowerCase()).not.toBe(
-      coreTypeUri("integrity_mismatch"),
-    );
-  });
-
-  it("applies an identical code→slug transform (underscores to dashes, no case folding)", () => {
-    for (const code of AFPS_ERROR_CODES) {
-      const coreSlug = coreTypeUri(code).slice(`${ERRORS_ROOT}/`.length);
-      const afpsSlug = afpsErrorTypeUri(code).slice(`${ERRORS_ROOT}/afps/`.length);
-      expect(afpsSlug).toBe(coreSlug);
-      expect(afpsSlug).not.toContain("_");
-      expect(afpsSlug).not.toContain("/");
-    }
-  });
-
-  it("routes toProblem through the namespaced URI — never the dead errors.* subdomain", () => {
-    for (const code of AFPS_ERROR_CODES) {
-      const uri = toProblem(new ResolverError(code as never, "boom")).type;
-      expect(uri).toBe(afpsErrorTypeUri(code));
-      expect(uri).not.toContain("errors.appstrate.dev");
-    }
-    expect(toProblem(new RunCancelledError("x")).type).toBe(
-      "https://docs.appstrate.dev/errors/afps/RUN-CANCELLED",
-    );
-    expect(toProblem(new BundleSignaturePolicyError("unsigned_required", "x")).type).toBe(
-      "https://docs.appstrate.dev/errors/afps/unsigned-required",
-    );
   });
 });
 

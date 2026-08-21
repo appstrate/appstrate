@@ -28,10 +28,35 @@ shapes closely enough that a floating range would break silently:
 
 ## Exports
 
-| Subpath           | Contents                                                                                                                                                                                                            |
-| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `.`               | `PiRunner`, `installSessionBridge`, `derivePiCompactionSettings`, `deriveProviderFromApi`, `PROVIDER_BY_API`, and the accompanying types (`PiRunnerOptions`, `PiModelConfig`, `BridgeableSession`, `InternalSink`). |
-| `./runtime-tools` | The built-in runtime tools the agent can call during a run.                                                                                                                                                         |
+Two subpaths, both declared in `package.json`. `src/index.ts` is the authoritative
+list — the groups below say what each cluster is FOR; they are not a narrower
+"supported subset", and nothing enforces one.
+
+| Subpath           | Contents                                                                  |
+| ----------------- | ------------------------------------------------------------------------- |
+| `.`               | Everything below.                                                         |
+| `./runtime-tools` | The built-in runtime tools the agent can call during a run, on their own. |
+
+From `.`:
+
+- **Running an agent** — `PiRunner` and its options (`PiRunnerOptions`,
+  `PiModelConfig`), `derivePiCompactionSettings`,
+  `prepareRequestedThinkingLevel` / `preserveRequestedThinkingLevel`,
+  `setPiRuntimeCredential`.
+- **Observing a session** — `installSessionBridge` plus `BridgeableSession` and
+  `InternalSink`, for a host that wants to attach to a session it already owns.
+- **Provider mapping** — `deriveProviderFromApi`, `PROVIDER_BY_API`.
+- **Pi SDK import surface** — `Type`, `loadPiCodingAgentSdk`, and the SDK types
+  (`Api`, `Model`, `Message`, `ExtensionAPI`, `ExtensionFactory`) re-exported so
+  consumers never import the vendor package directly. See `src/pi-sdk.ts`.
+- **Bundles and extensions** — `prepareBundleForPi`,
+  `buildApiCallExtensionFactory`.
+- **Container plumbing** (what Appstrate's own sandbox uses) —
+  `buildRuntimePiEnv`, `pickOperatorSidecarEnv`, `SIDECAR_OPERATOR_ENV_KEYS`,
+  `emitRuntimeReady`, `emitBootProgress`, `startSinkHeartbeat`.
+- **Runtime tools** — `RUNTIME_INJECTED_TOOLS` and friends,
+  `buildRuntimeToolFactories`, `callToolResultToPi`, `buildRuntimeToolExtensions`,
+  `buildPublishDocumentExtension`, `spillResourcesToWorkspace`.
 
 ## What it handles
 

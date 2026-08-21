@@ -36,9 +36,16 @@ const REPO_ROOT = dirname(dirname(dirname(WEB_SRC)));
  * in the list because it renders inside the SPA and reads `chat.json` through
  * the host-injected `t` (see its `runtime-context.ts`) — its keys live here,
  * so both guards must see its call sites or they mis-report in both
- * directions (unresolvable keys missed, live keys reported dead).
+ * directions (unresolvable keys missed, live keys reported dead). `packages/ui`
+ * joined for the same reason: `buildGenerationLabels()` names the whole
+ * `models.generation.*` family in `model-generation-labels.ts`, on behalf of
+ * both surfaces that render `ModelGenerationControls`.
  */
-const SOURCE_ROOTS = [WEB_SRC, join(REPO_ROOT, "packages/module-chat/src/ui")];
+const SOURCE_ROOTS = [
+  WEB_SRC,
+  join(REPO_ROOT, "packages/module-chat/src/ui"),
+  join(REPO_ROOT, "packages/ui/src"),
+];
 
 function loadNamespaces(lang: string): Map<string, Record<string, string>> {
   const dir = join(LOCALES_DIR, lang);
@@ -160,16 +167,14 @@ describe("t() keys", () => {
  */
 const DYNAMIC_KEY_PREFIXES = [
   "filter.", // components/document-list-panel.tsx — t(`filter.${p}`)
-  "generation.level.", // packages/module-chat/src/ui/model-select.tsx
-  "generation.levelShort.", // packages/module-chat/src/ui/model-select.tsx
   "integration.auth.type.", // components/integration-connect/{inline-connect-button,integration-connection-picker}.tsx
   "integration.connect.fields.", // components/integration-connect/credential-fields.tsx
   "library.tab.", // pages/library-page.tsx — t(`library.tab.${tab}`)
   "oauthClients.scopeLabels.", // modules/oidc/components/oauth-client-form-modal.tsx
   "oauthClients.signupRoleOption.", // modules/oidc/components/oauth-client-form-modal.tsx
   "packages.type.", // components/package-detail/shared-header.tsx, pages/unified-package-detail.tsx
-  "models.generation.levels.", // components/model-generation-fields.tsx
-  "models.generation.levelsShort.", // components/model-generation-fields.tsx
+  "models.generation.levels.", // packages/ui — model-generation-labels.ts buildGenerationLabels()
+  "models.generation.levelsShort.", // packages/ui — model-generation-labels.ts buildGenerationLabels()
   "run.artifacts.code.", // components/run-artifacts.ts — artifactFailureCodeKey()
   "run.connSource.", // components/run-info-tab.tsx — t(`run.connSource.${c.source}`)
   "run.status.", // packages/module-chat/src/ui/run-events.ts — runStatusLineKey()

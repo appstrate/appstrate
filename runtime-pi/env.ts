@@ -59,8 +59,6 @@ export interface RuntimeEnv {
   sink: { url: string; finalizeUrl: string; secret: string };
   /** Sidecar URL — present when the platform attached a sidecar. */
   sidecarUrl?: string;
-  /** Heartbeat ping interval (ms). */
-  heartbeatIntervalMs: number;
   /**
    * Wall-clock execution budget for the run, in seconds. Surfaced on
    * `ExecutionContext.timeoutSeconds`; the runner arms its own timeout
@@ -77,13 +75,6 @@ export interface RuntimeEnv {
    * and falls back to a fresh trace on malformed values.
    */
   traceparent?: string;
-  /**
-   * Wall-clock budget for the initial MCP handshake against the sidecar
-   * (in milliseconds). Wraps both the connect retry loop and the final
-   * attempt. Operators on slow registries can widen this when cold
-   * container pulls exceed the default. See issue #406.
-   */
-  mcpConnectDeadlineMs: number;
   /**
    * Optional per-call MCP tool timeout for the agent→sidecar client
    * (#779 annex). Third-party integration servers doing a cold OAuth
@@ -107,10 +98,27 @@ export interface RuntimeEnv {
   warnings: string[];
 }
 
-const DEFAULT_HEARTBEAT_INTERVAL_MS = 30_000;
 const DEFAULT_CONTEXT_WINDOW = 128_000;
 const DEFAULT_MAX_TOKENS = 16_384;
-const DEFAULT_MCP_CONNECT_DEADLINE_MS = 60_000;
+
+// Fixed timings, deliberately NOT operator knobs. Both were parsed from
+// `APPSTRATE_HEARTBEAT_INTERVAL_MS` / `APPSTRATE_MCP_CONNECT_DEADLINE_MS` and
+// documented as tunable, but no writer has ever existed on any topology: the
+// agent container's environment is exactly what `buildRuntimePiEnv()` returns,
+// neither key is in `SIDECAR_OPERATOR_ENV_KEYS`, and the process orchestrator's
+// allowlist carries no `APPSTRATE_*` at all. Setting either in a shell was a
+// no-op that read as configuration. Changing them is a code change; if an
+// operator knob is ever genuinely wanted, add the key to the platform-side
+// allowlist in the same commit that reintroduces the parse.
+
+/** Heartbeat ping interval against `{SINK_URL}/heartbeat`. */
+export const HEARTBEAT_INTERVAL_MS = 30_000;
+
+/**
+ * Wall-clock budget for the initial MCP handshake against the sidecar. Wraps
+ * both the connect retry loop and the final attempt. See issue #406.
+ */
+export const MCP_CONNECT_DEADLINE_MS = 60_000;
 // Read from core rather than mirrored here. The mirror was guarded by
 // `satisfies readonly ModelApiShape[]`, which cannot prove COMPLETENESS — a
 // shape added to core and emitted by the platform typechecked green and then
@@ -365,18 +373,6 @@ export function parseRuntimeEnv(source: NodeJS.ProcessEnv = process.env): Runtim
     );
   }
   const modelReasoningLevelMap = parseReasoningLevelMap(source.MODEL_REASONING_LEVEL_MAP, issues);
-  const heartbeatIntervalMs = parsePositiveInt(
-    "APPSTRATE_HEARTBEAT_INTERVAL_MS",
-    source.APPSTRATE_HEARTBEAT_INTERVAL_MS,
-    DEFAULT_HEARTBEAT_INTERVAL_MS,
-    issues,
-  );
-  const mcpConnectDeadlineMs = parsePositiveInt(
-    "APPSTRATE_MCP_CONNECT_DEADLINE_MS",
-    source.APPSTRATE_MCP_CONNECT_DEADLINE_MS,
-    DEFAULT_MCP_CONNECT_DEADLINE_MS,
-    issues,
-  );
   // Optional: a 0 fallback means "absent" (parsePositiveNumber only returns it
   // for a missing var, or after pushing an issue for a malformed one). We map
   // 0 → undefined so an absent budget leaves runner-side enforcement off.
@@ -418,9 +414,7 @@ export function parseRuntimeEnv(source: NodeJS.ProcessEnv = process.env): Runtim
     agentInput,
     sink: { url: sinkUrl!, finalizeUrl: sinkFinalizeUrl!, secret: sinkSecret! },
     sidecarUrl: sidecarUrl || undefined,
-    heartbeatIntervalMs,
     timeoutSeconds: agentTimeoutSeconds > 0 ? agentTimeoutSeconds : undefined,
-    mcpConnectDeadlineMs,
     ...(mcpToolTimeoutMs > 0 ? { mcpToolTimeoutMs } : {}),
     traceparent: source.TRACEPARENT || undefined,
     warnings,

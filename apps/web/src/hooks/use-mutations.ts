@@ -53,7 +53,7 @@ export function useSaveConfig(packageId: string) {
   });
 }
 
-export interface RunAgentParams {
+interface RunAgentParams {
   input?: Record<string, unknown>;
   /**
    * Version selector forwarded as `?version=`: `"draft"`, `"published"`, or

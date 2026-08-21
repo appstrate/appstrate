@@ -23,7 +23,7 @@ import type { AgentDetail } from "@appstrate/shared-types";
  * `RunOverridesPanel`); `dependencyOverrides` the per-skill
  * `dependency_overrides` map. Defaults across the board mirror plain "Lancer".
  */
-export interface RunWithOptionsSubmit {
+interface RunWithOptionsSubmit {
   input: Record<string, unknown>;
   version: string;
   overrides: RunOverridesValue;

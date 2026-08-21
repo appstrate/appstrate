@@ -9,8 +9,12 @@
  * sidecar automatically.
  */
 
-export { isBlockedHost, isBlockedUrl, resolveAndCheckHost } from "./ssrf.ts";
-export type { HostResolver } from "./ssrf.ts";
+// Straight from core. `./ssrf.ts` used to sit in the middle, re-exporting
+// these so this module could re-export them again; it added no behaviour and
+// no consumer imported them from there. `./ssrf.ts` keeps only the sidecar's
+// own egress-allowlist logic.
+export { isBlockedHost, isBlockedUrl, resolveAndCheckHost } from "@appstrate/core/ssrf";
+export type { HostResolver } from "@appstrate/core/ssrf";
 
 // Accepts both simple IDs (gmail) and scoped IDs (@appstrate/gmail)
 export const INTEGRATION_ID_RE = /^(@[a-z0-9][a-z0-9-]*\/)?[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
@@ -22,7 +26,18 @@ export const INTEGRATION_ID_RE = /^(@[a-z0-9][a-z0-9-]*\/)?[a-z0-9]([a-z0-9-]*[a
 // to the run-scoped BlobStore and surface as MCP `resource_link`
 // blocks; the absolute ceiling is `ABSOLUTE_MAX_RESPONSE_SIZE`.
 export const MAX_RESPONSE_SIZE = 256 * 1024; // 256 KB
-export const ABSOLUTE_MAX_RESPONSE_SIZE = 32 * 1024 * 1024; // 32 MB — hard cap when blob store is present (covers PDFs/images/archives), aligned with MAX_MCP_ENVELOPE_SIZE × 2
+// NAME COLLISION, read before touching: `@appstrate/afps-runtime/resolvers`
+// also exports an `ABSOLUTE_MAX_RESPONSE_SIZE`, it is 1 MB, and it means
+// something else — the schema cap on the agent-supplied
+// `responseMode.maxInlineBytes`. Both are loaded into THIS process (the sidecar
+// imports the resolvers for `executeApiCall`), so an import written from memory
+// silently picks the wrong ceiling by a factor of 32. This one is the
+// transport-buffer ceiling: how many upstream bytes the sidecar will hold
+// before refusing, applied only when a BlobStore is configured to spill them
+// into (otherwise MAX_RESPONSE_SIZE is the cap). Renaming the 1 MB one to
+// something like MAX_INLINE_RESPONSE_BYTES would end the ambiguity, but it
+// lives in packages/afps-runtime.
+export const ABSOLUTE_MAX_RESPONSE_SIZE = 32 * 1024 * 1024; // 32 MB — covers PDFs/images/archives, aligned with MAX_MCP_ENVELOPE_SIZE × 2
 export const OUTBOUND_TIMEOUT_MS = 30_000;
 export const LLM_PROXY_TIMEOUT_MS = 1_800_000; // 30 minutes (patched from 300_000 — was killing legitimate long-running agentic runs at exactly 5 min)
 
@@ -101,6 +116,17 @@ export function readPositiveByteEnv(
  * Note: the effective user-facing limit is also bounded by
  * {@link MAX_MCP_ENVELOPE_SIZE} since base64 inflation (~1.37×) plus
  * JSON-RPC overhead must fit in the MCP envelope.
+ *
+ * Second reader, different policy: `@appstrate/afps-runtime/resolvers`
+ * parses the SAME `SIDECAR_MAX_REQUEST_BODY_BYTES` for its own
+ * `MAX_REQUEST_BODY_SIZE`, and on a malformed value it silently falls back to
+ * 10 MB where this one throws at boot. So a typo'd override yields a sidecar
+ * that refuses to start OR a client-side check quietly running at the default,
+ * depending on which module observes it first — and both are loaded in the
+ * sidecar process. The strict reading is the correct one (a cap the operator
+ * thinks they raised and did not is a production incident waiting to happen);
+ * the fix is for the resolvers to consume this value rather than re-parse the
+ * variable, which is a change in packages/afps-runtime, not here.
  */
 export const MAX_REQUEST_BODY_SIZE = readPositiveByteEnv(
   "SIDECAR_MAX_REQUEST_BODY_BYTES",
@@ -122,24 +148,13 @@ export const MAX_MCP_ENVELOPE_SIZE = readPositiveByteEnv(
   16 * 1024 * 1024,
 );
 
-/**
- * Below this size, request bodies are buffered in memory so that the
- * 401-refresh-and-retry-once path can replay them with rotated
- * credentials. Above it, the sidecar streams the body upstream via
- * `duplex: "half"` and surfaces 401 to the caller (the AFPS resolver's
- * `{ fromFile }` resolution is reproducible — the LLM-driven retry
- * path will refresh credentials and re-call cleanly).
- */
-export const STREAMING_THRESHOLD = 1 * 1024 * 1024; // 1 MB
-
-/**
- * Hard ceiling on streamed request/response bodies. Above this the
- * sidecar refuses with 413 even when the caller opts into streaming
- * via `responseMode` or a `Content-Length` over
- * {@link STREAMING_THRESHOLD}. Provides a safety bound for memory
- * pressure regardless of streaming.
- */
-export const MAX_STREAMED_BODY_SIZE = 100 * 1024 * 1024; // 100 MB
+// `STREAMING_THRESHOLD` and `MAX_STREAMED_BODY_SIZE` used to be declared here
+// too, and had zero importers. The values that actually gate a request are the
+// same-named ones in `@appstrate/afps-runtime/resolvers`: `STREAMING_THRESHOLD`
+// is applied inside the shared outbound-HTTP engine, and `MAX_STREAMED_BODY_SIZE`
+// is imported from there by `mcp/api-upload-resolver.ts`. Two same-named
+// constants that agree only by coincidence are a coin-flip waiting to diverge,
+// so the unused pair is gone rather than kept "for symmetry".
 
 /**
  * Concatenate read chunks into one buffer, dropping each source
@@ -223,7 +238,6 @@ export {
   findUnresolvedPlaceholders,
   HOP_BY_HOP_HEADERS,
   filterHeaders,
-  buildInjectedCredentialHeader,
   applyInjectedCredentialHeader,
   normalizeAuthSchemeTemplates,
 } from "@appstrate/connect/proxy-primitives";

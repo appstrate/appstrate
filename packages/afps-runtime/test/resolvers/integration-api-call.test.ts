@@ -7,12 +7,13 @@ import {
   RemoteAppstrateIntegrationResolver,
   readIntegrationRefs,
   readApiCallIntegrationMetas,
-  apiCallToolName,
   type Bundle,
   type BundlePackage,
   type RunEvent,
   type ToolContext,
 } from "../../src/resolvers/index.ts";
+// Package-internal, deliberately not on the `resolvers` barrel.
+import { apiCallToolName } from "../../src/resolvers/integration-api-call.ts";
 import {
   BUNDLE_FORMAT_VERSION,
   bundleIntegrity,

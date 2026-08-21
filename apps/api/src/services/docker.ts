@@ -9,6 +9,18 @@ const DOCKER_SOCKET = getEnv().DOCKER_SOCKET;
 const DOCKER_API_TIMEOUT_MS = 30_000;
 
 /**
+ * PID ceiling for agent/sidecar containers — a fork-bomb bound, not a tunable.
+ *
+ * It was reachable as a `createContainer` option fed by
+ * `WorkloadResources.pidsLimit`, but nothing ever set that field
+ * (`run-limits.ts` resolves only memory and cpu), so this value was always the
+ * effective policy. Stated once here rather than hidden behind a `??` on a
+ * parameter with no producer. The image-pin holder containers use a much
+ * tighter literal at their own call site — they run one `sleep`.
+ */
+const AGENT_CONTAINER_PIDS_LIMIT = 256;
+
+/**
  * Naming prefix for per-run isolation networks. The orchestrator creates
  * `${EXEC_NETWORK_PREFIX}${runId}` for every run, and the cleanup helpers
  * match on this prefix to reclaim orphans from crashed runs. Kept in one
@@ -279,7 +291,6 @@ export interface CreateContainerOptions {
   adapterName: string;
   memory?: number;
   nanoCpus?: number;
-  pidsLimit?: number;
   networkId?: string;
   networkAlias?: string;
   extraHosts?: string[];
@@ -334,7 +345,11 @@ export async function createContainer(
       NanoCpus: options.nanoCpus ?? 2_000_000_000,
       SecurityOpt: ["no-new-privileges"],
       CapDrop: ["ALL"],
-      PidsLimit: options.pidsLimit ?? 256,
+      // Fixed, not caller-supplied: the `WorkloadResources.pidsLimit` that
+      // could have overridden it never had a producer — `run-limits.ts` sets
+      // only memory and cpu — so this default WAS the policy. It belongs next
+      // to those two if the limits ever become per-plan; until then, one place.
+      PidsLimit: AGENT_CONTAINER_PIDS_LIMIT,
       AutoRemove: false,
       NetworkMode: options.networkId ?? "bridge",
       ExtraHosts: options.extraHosts ?? [],

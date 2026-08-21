@@ -364,12 +364,12 @@ describe("runner server routes", () => {
     expect(received).toEqual(["l4", "l5"]);
   });
 
-  it("passes the stop-run result through and forwards the timeout", async () => {
+  it("passes the stop-run result through", async () => {
     const { app, calls } = makeApp();
-    const res = await post(app, RUNNER_ROUTES.stopRun, { runId: "run-1", timeoutSeconds: 9 });
+    const res = await post(app, RUNNER_ROUTES.stopRun, { runId: "run-1" });
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ result: "stopped" });
-    expect(calls).toEqual([{ method: "stopByRunId", args: ["run-1", 9] }]);
+    expect(calls).toEqual([{ method: "stopByRunId", args: ["run-1"] }]);
   });
 
   it("reports workload liveness", async () => {

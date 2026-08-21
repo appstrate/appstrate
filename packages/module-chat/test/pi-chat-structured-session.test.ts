@@ -162,7 +162,7 @@ describe("structured Pi session reconstruction", () => {
         parts: [],
         metadata: {
           appstrate: {
-            turn: { engine: "subscription", finishReason: "error", stepCount: 0 },
+            turn: { finishReason: "error", stepCount: 0 },
           },
         },
       } as unknown as UIMessage,

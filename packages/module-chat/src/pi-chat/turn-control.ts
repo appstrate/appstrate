@@ -13,8 +13,9 @@
  * pure/injectable so it is unit testable without a live model or a container.
  *
  * The other guard that used to live here — deadline vs explicit stop, and the
- * user-facing notice a deadline owes the user — is not Pi-specific and lives in
- * `../turn-closure.ts`.
+ * user-facing notice a deadline owes the user — lives next door in
+ * `./pi-turn-closure.ts`, alongside the terminal metadata every Pi exit path
+ * publishes.
  */
 
 import {

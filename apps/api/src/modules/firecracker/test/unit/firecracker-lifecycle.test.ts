@@ -108,7 +108,7 @@ describe("stopByRunId on a live VM", () => {
     const handle = { id: "fc-run_live-agent", runId: "run_live", role: "agent" as const };
     const exitPromise = orch.waitForExit(handle);
 
-    const result = await orch.stopByRunId("run_live", 1);
+    const result = await orch.stopByRunId("run_live");
 
     expect(result).toBe("stopped");
     expect(vm.stopping).toBe(true);
@@ -479,7 +479,7 @@ describe("bounded VMM reap after SIGKILL (D-state guard)", () => {
       exited: new Promise<number>(() => {}),
     } as unknown as BunProcess;
 
-    const result = await orch.stopByRunId("run_dstate", 0);
+    const result = await orch.stopByRunId("run_dstate");
     expect(result).toBe("stopped");
     expect(vm.stopping).toBe(true);
   });
@@ -508,7 +508,7 @@ describe("bounded VMM reap after SIGKILL (D-state guard)", () => {
       role: "agent" as const,
     };
     const exitPromise = orch.waitForExit(handle);
-    await orch.stopByRunId("run_dstate_wait", 0);
+    await orch.stopByRunId("run_dstate_wait");
     // Must resolve (bounded), with the killed code — not hang.
     expect(await exitPromise).toBe(137);
   });

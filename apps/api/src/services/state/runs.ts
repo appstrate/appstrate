@@ -1007,15 +1007,13 @@ export async function getRunAttribution(
   return row ?? null;
 }
 
-export type RecentRunsField = RunHistoryField;
-
 export async function getRecentRuns(
   scope: AppScope,
   packageId: string,
   actor: Actor | null,
   options: {
     limit?: number;
-    fields?: RecentRunsField[];
+    fields?: RunHistoryField[];
     excludeRunId?: string;
   } = {},
 ): Promise<Record<string, unknown>[]> {

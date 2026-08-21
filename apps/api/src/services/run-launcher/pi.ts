@@ -153,7 +153,7 @@ async function runPlatformContainerImpl(
   // leak the raw token into the agent container and skip the sidecar).
   const delivery = resolveCredentialDelivery({
     providerId: llmConfig.providerId,
-    hasCredentialId: !!llmConfig.credentialId,
+    credentialId: llmConfig.credentialId,
   });
 
   const prompt = await buildPlatformSystemPrompt(context, plan);
@@ -188,7 +188,7 @@ async function runPlatformContainerImpl(
     // process orchestrator has no sidecar to swap the bearer. API-key providers
     // are unaffected.
     assertOauthRunIsolation({
-      isOauthCredential: delivery.isOauthCredential,
+      isOauthCredential: delivery.kind === "oauth",
       providerId: llmConfig.providerId,
       orchestratorMode: getExecutionMode(),
     });
@@ -197,17 +197,12 @@ async function runPlatformContainerImpl(
     // Alias creation already rejects oauth credentials; fail-closed here for
     // any row predating that rule.
     assertOauthRunNotAliased({
-      isOauthCredential: delivery.isOauthCredential,
+      isOauthCredential: delivery.kind === "oauth",
       aliased: !!llmConfig.aliased,
       providerId: llmConfig.providerId,
     });
 
     const llmApiKey = llmConfig.apiKey;
-
-    // OAuth credentials must take the sidecar's OAuth branch — the API-key
-    // path can't refresh tokens or inject the provider's identity routing
-    // headers at request time.
-    const isOauthCredential = delivery.isOauthCredential;
 
     // Skip the sidecar entirely when the run declares no integrations AND
     // uses a static API key AND has no egress proxy. The sidecar's purposes
@@ -224,7 +219,7 @@ async function runPlatformContainerImpl(
     skipSidecar =
       !hasIntegrations &&
       !!llmConfig.apiKey &&
-      !isOauthCredential &&
+      delivery.kind !== "oauth" &&
       !plan.proxyUrl &&
       !llmConfig.aliased;
 
@@ -251,9 +246,10 @@ async function runPlatformContainerImpl(
     // agent container. Provider-specific shape (e.g. a structured JWT) is
     // built by the module's `buildApiKeyPlaceholder` hook — see
     // `deriveOauthPlaceholder` below.
-    const llmPlaceholder = isOauthCredential
-      ? deriveOauthPlaceholder(llmApiKey, llmConfig.providerId)
-      : deriveKeyPlaceholder(llmApiKey);
+    const llmPlaceholder =
+      delivery.kind === "oauth"
+        ? deriveOauthPlaceholder(llmApiKey, llmConfig.providerId)
+        : deriveKeyPlaceholder(llmApiKey);
 
     // Model-alias swap descriptor (LLM-gateway alias pattern). The container is
     // handed the public alias as MODEL_ID (below); the sidecar swaps it for the
@@ -277,26 +273,19 @@ async function runPlatformContainerImpl(
       : undefined;
 
     let sidecarLlm: LlmProxyConfig | undefined;
-    // M4 — pre-flight: an oauth run dereferences `credentialId` below.
-    // `resolveCredentialDelivery` already rejects an oauth provider without a
-    // credential id, so this branch is normally unreachable — kept as the
-    // in-file assertion that keeps the non-null `!` below justified, and as a
-    // last belt so a future call-site regression fails fast with a clear
-    // message instead of shipping `undefined` into an opaque sidecar boot
-    // crash AFTER both containers were already launched.
-    if (isOauthCredential && !llmConfig.credentialId) {
-      throw new Error(
-        `Run launcher: oauth-mode run for provider ` +
-          `"${llmConfig.providerId}" has no resolved credentialId — cannot deliver the credential.`,
-      );
-    }
-    if (isOauthCredential) {
+    // OAuth credentials must take the sidecar's OAuth branch — the API-key
+    // path can't refresh tokens or inject the provider's identity routing
+    // headers at request time. Narrowing `delivery` (rather than carrying a
+    // boolean) is what supplies `credentialId` here: `resolveCredentialDelivery`
+    // refused to build an `oauth` delivery without one, so there is nothing
+    // left to re-assert at this point.
+    if (delivery.kind === "oauth") {
       // OAuth subscription: the Pi SDK signs the subscription request shape
       // itself, so the sidecar just swaps the placeholder bearer for the real
       // token — no forging, no modelSwap (aliases rejected above).
       sidecarLlm = buildOauthSidecarLlm({
         baseUrl: llmConfig.baseUrl,
-        credentialId: llmConfig.credentialId!,
+        credentialId: delivery.credentialId,
       });
     } else if (llmApiKey) {
       // API-key flow: the sidecar forwards directly to the upstream

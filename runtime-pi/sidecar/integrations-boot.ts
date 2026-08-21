@@ -747,7 +747,9 @@ export function scrubStderrLine(line: string): string {
  * integration clients (#779 annex). Absent/invalid → `undefined` → the
  * MCP SDK default applies, unchanged behaviour. Third-party servers that
  * do a cold OAuth refresh on their first tool call can legitimately need
- * more; mirrors the `APPSTRATE_MCP_CONNECT_DEADLINE_MS` operator knob.
+ * more. Unlike the connect deadline (a fixed constant — no writer ever set
+ * `APPSTRATE_MCP_CONNECT_DEADLINE_MS`), this one IS reachable: the key is in
+ * `SIDECAR_OPERATOR_ENV_KEYS`, so the platform forwards it into the sidecar.
  */
 export function toolTimeoutMsFromEnv(env: NodeJS.ProcessEnv = process.env): number | undefined {
   const raw = env.APPSTRATE_MCP_TOOL_TIMEOUT_MS;

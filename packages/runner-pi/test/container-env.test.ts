@@ -353,9 +353,20 @@ describe("buildRuntimePiEnv", () => {
 
 describe("pickOperatorSidecarEnv", () => {
   // Snapshot/restore helper so each test sees a known starting env.
+  //
+  // It CLEARS every listed key before applying the caller's overrides, rather
+  // than only the keys the caller names. The tests below assert an exact shape,
+  // so any listed key that happens to be set in the ambient environment would
+  // otherwise leak into the result — which is exactly what happened when
+  // `LOG_LEVEL` joined `SIDECAR_OPERATOR_ENV_KEYS` (it is set by nearly every
+  // shell and by `.env`). Clearing the whole list keeps the isolation correct
+  // for whatever key is added next, instead of loosening the assertions.
   function withEnv(values: Record<string, string | undefined>, fn: () => void): void {
     const originals: Record<string, string | undefined> = {};
-    for (const key of SIDECAR_OPERATOR_ENV_KEYS) originals[key] = process.env[key];
+    for (const key of SIDECAR_OPERATOR_ENV_KEYS) {
+      originals[key] = process.env[key];
+      delete process.env[key];
+    }
     try {
       for (const [k, v] of Object.entries(values)) {
         if (v === undefined) delete process.env[k];

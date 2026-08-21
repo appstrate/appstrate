@@ -3,11 +3,12 @@
 /**
  * `isCanonicalRunEvent` against the shared fixture corpus.
  *
- * The accept/reject cases live in `test/fixtures/canonical-event-corpus.ts`
- * and are shared verbatim with `test/events/canonical-event-schemas.test.ts`,
- * which runs the same fixtures through the generated JSON Schemas. Both
- * files assert against the same `valid` label, so guard↔schema parity is
- * structural — neither file restates the other's verdict.
+ * The accept/reject cases live in `test/fixtures/canonical-event-corpus.ts`.
+ * This file is their only reader since the generated JSON Schema documents
+ * were removed (they were never published — see
+ * `src/events/canonical-event-schemas.ts`), which makes the guard the sole
+ * definition of the canonical payload shape and this suite the only thing
+ * pinning it.
  */
 
 import { describe, it, expect } from "bun:test";
@@ -37,9 +38,10 @@ describe("isCanonicalRunEvent", () => {
   });
 
   it("rejects non-finite numbers the wire cannot carry", () => {
-    // Deliberately stricter than an in-memory JSON Schema run — see
-    // NON_FINITE_DIVERGENCES. `canonical-event-schemas.test.ts` asserts the
-    // other half (ajv accepts them, JSON serialization does not).
+    // See NON_FINITE_DIVERGENCES: `NaN` / `±Infinity` are `number`s in JS, so
+    // a JSON-Schema validator accepts them in memory — but JSON cannot carry
+    // them, so the serialized payload holds `null`. The guard rejects them up
+    // front, which is why the stamped `dataschema` never contradicts the wire.
     for (const { label, event } of NON_FINITE_DIVERGENCES) {
       expect({ label, verdict: isCanonicalRunEvent(event) }).toEqual({ label, verdict: false });
     }

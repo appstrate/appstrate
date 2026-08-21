@@ -39,7 +39,7 @@ import type { ModelGenerationCapabilitiesOverride } from "./model-generation.ts"
  * attributes, bundler support). `packages/core/test/core-version.test.ts`
  * asserts it equals the published `version` field, so it cannot drift.
  */
-export const CORE_VERSION = "6.2.0";
+export const CORE_VERSION = "7.0.0";
 
 /** Metadata describing a module. */
 export interface ModuleManifest {
@@ -1197,12 +1197,6 @@ export interface RunStatusChangeParams {
 
 /**
  * Single field-level error entry carried on
- * {@link RunConnectionMissingParams.errors}. Aliases the core
- * {@link ValidationFieldError} (the shape platform routes return as 4xx
- * envelopes) so modules can forward it verbatim to downstream consumers
- * (webhook payloads, Slack messages) without remapping.
- */
-export type RunConnectionMissingError = ValidationFieldError;
 
 /** Parameters passed to the `onRunConnectionMissing` event. */
 export interface RunConnectionMissingParams {
@@ -1213,7 +1207,7 @@ export interface RunConnectionMissingParams {
   /** Actor whose request was blocked (user or end_user from the headless API). */
   actor: { type: "user" | "end_user"; id: string };
   /** Field-level errors that triggered the block (same shape as 4xx envelopes). */
-  errors: RunConnectionMissingError[];
+  errors: ValidationFieldError[];
 }
 
 // ---------------------------------------------------------------------------

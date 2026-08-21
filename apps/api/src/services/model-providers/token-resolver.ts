@@ -50,10 +50,13 @@ async function loadCredentialState(
   // ever bypassed by a refactor, the data layer refuses to surface a
   // credential outside the caller's org.
   const loaded = await loadCredentialRow(credentialId, expectedOrgId);
-  if (!loaded) {
+  // An undecryptable blob is reported as `blob: null` (the raw load keeps the
+  // row alive for metadata-only callers). Here it is indistinguishable from a
+  // missing credential — same 404 as before this path could see one.
+  if (!loaded || !loaded.blob) {
     throw notFound(`OAuth model provider credential not found: ${credentialId}`);
   }
-  if (!loaded.config || loaded.config.authMode !== "oauth2") {
+  if (loaded.config.authMode !== "oauth2") {
     throw notFound(
       `Credential ${credentialId} references provider ${loaded.providerId} which is not OAuth-enabled`,
     );
@@ -66,6 +69,9 @@ async function loadCredentialState(
     credentialId: loaded.id,
     orgId: loaded.orgId,
     blob: loaded.blob,
+    // `ModelProviderDefinition` is not a discriminated union on `authMode`, so
+    // the guard above narrows the property but not the object — the assertion
+    // is what carries that fact into `CredentialState`.
     config: loaded.config as ModelProviderConfig & { authMode: "oauth2" },
   };
 }

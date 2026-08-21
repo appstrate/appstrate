@@ -102,7 +102,6 @@ export const orgInvitations = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
-    index("idx_org_invitations_token").on(table.token),
     index("idx_org_invitations_org_id").on(table.orgId),
     index("idx_org_invitations_email").on(table.email),
   ],
@@ -137,7 +136,6 @@ export const apiKeys = pgTable(
     index("idx_api_keys_org_id").on(table.orgId),
     index("idx_api_keys_application_id").on(table.applicationId),
     uniqueIndex("idx_api_keys_key_hash").on(table.keyHash),
-    index("idx_api_keys_key_prefix").on(table.keyPrefix),
   ],
 );
 
@@ -221,6 +219,13 @@ export const modelProviderCredentials = pgTable(
     // (`updateOAuthCredentialTokens`). Mirrors
     // `integration_connections.refresh_failure_count`.
     refreshFailureCount: integer("refresh_failure_count").notNull().default(0),
+    // WRITTEN, NEVER READ in product code — the only reads are integration
+    // tests asserting the write happened. Note the asymmetry with the sibling
+    // above: `refresh_failure_count` IS read, and drives the reconnect
+    // decision; this timestamp is not part of that predicate. It is genuine
+    // debugging telemetry ("when did refresh last fail") with no surface, so
+    // exposing it in the credential DTO costs less than dropping data already
+    // collected. Left deliberately, not overlooked.
     lastRefreshFailureAt: timestamp("last_refresh_failure_at", { withTimezone: true }),
     /**
      * Model ids empirically verified against this credential — filled by
@@ -245,7 +250,6 @@ export const modelProviderCredentials = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => [
-    index("idx_model_provider_credentials_org_id").on(t.orgId),
     index("idx_model_provider_credentials_org_provider").on(t.orgId, t.providerId),
     // Partial index — only OAuth rows have a non-null expiry. Keeps the
     // index small even on installations with millions of api-key rows.
@@ -307,7 +311,22 @@ export const modelProviderPairings = pgTable(
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
     /** When the helper successfully POSTed credentials. NULL means still pending. */
     consumedAt: timestamp("consumed_at", { withTimezone: true }),
-    /** IP address that consumed the pairing — kept alongside `consumedAt` for audit. */
+    /**
+     * IP address that consumed the pairing.
+     *
+     * WRITTEN, NEVER READ — `services/model-providers/pairings.ts:141` is the
+     * only writer; no route, DTO, OpenAPI field or `cloud` consumer reads it.
+     * Its "for audit" justification does not survive contact with two facts:
+     * `cleanupExpiredPairings` DELETEs the row an hour after expiry, and the
+     * audit entry `handlePairRedeem` writes at redeem time omits the IP. So the
+     * forensic trail this was meant to leave is erased, and the record that
+     * survives does not carry it.
+     *
+     * Kept deliberately rather than dropped: the column holds real consumption
+     * IPs in production today. The open decision is build the reader (surface
+     * it on `GET /pairing/:id`, or put it in the audit `after` payload where it
+     * would outlive the row) or drop it — not "leave it here unexamined".
+     */
     consumedFromIp: text("consumed_from_ip"),
     /**
      * Final `model_provider_credentials.id` created or reconnected by the
@@ -321,12 +340,19 @@ export const modelProviderPairings = pgTable(
   },
   (table) => [
     index("idx_model_provider_pairings_org_id").on(table.orgId),
-    // Partial index — only unconsumed rows matter for the cleanup scan.
-    // Keeps the index footprint proportional to the (small) pending-pairing
-    // population, not the long-tail of consumed rows kept for the audit window.
-    index("idx_model_provider_pairings_expires_at")
-      .on(table.expiresAt)
-      .where(sql`consumed_at IS NULL`),
+    // NOTE — there is deliberately no `expires_at` index.
+    //
+    // There was one, partial on `consumed_at IS NULL`, justified as "only
+    // unconsumed rows matter for the cleanup scan". The cleanup scan
+    // (`services/model-providers/pairings.cleanupExpiredPairings`) is
+    // `DELETE ... WHERE expires_at < cutoff` with no `consumed_at` predicate —
+    // it deletes consumed rows too, on purpose, since the grace window is what
+    // bounds the table. The planner can therefore never prove the partial
+    // index's predicate and never used it, so it was maintained on every
+    // pending-pairing write and read by nothing. The only other `expires_at`
+    // reader, `consumePairing`, is anchored on the unique `token_hash`.
+    // If the cleanup scan ever becomes hot, add a NON-partial index on
+    // `expires_at` — the partial shape cannot serve that query.
   ],
 );
 

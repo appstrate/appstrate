@@ -141,6 +141,16 @@ const CONSOLE_ARCHIVE_MAX_FILES = 100;
 
 /** How often the exit reaper sweeps {@link FirecrackerOrchestrator.vms} (ms). */
 const EXIT_REAPER_INTERVAL_MS = 60_000;
+
+/**
+ * SIGTERM→SIGKILL grace when stopping a microVM. Matches the Docker and
+ * process backends so a cancel behaves the same whichever engine served the
+ * run. Backend policy, not a caller option: `stopWorkload`/`stopByRunId` used
+ * to accept a `timeoutSeconds`, but no production caller ever passed one — the
+ * platform always called them with a single argument — so the parameter only
+ * ever selected this same default.
+ */
+const SIGTERM_GRACE_SECONDS = 5;
 /**
  * Attempts for transiently-failing teardown host ops (TAP delete, cgroup
  * rmdir). Kept small: the only legitimate transient is the kernel still
@@ -1549,7 +1559,7 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
     });
   }
 
-  async stopWorkload(handle: WorkloadHandle, timeoutSeconds = 5): Promise<void> {
+  async stopWorkload(handle: WorkloadHandle): Promise<void> {
     const vm = this.vms.get(handle.runId);
     if (!vm) return;
     // Latch BEFORE the proc check (B4): a cancel landing in the boot
@@ -1558,7 +1568,7 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
     // kills the just-spawned VMM.
     vm.stopping = true;
     if (!vm.proc) return;
-    await this.killVm(vm, timeoutSeconds);
+    await this.killVm(vm, SIGTERM_GRACE_SECONDS);
   }
 
   async removeWorkload(handle: WorkloadHandle): Promise<void> {
@@ -1621,7 +1631,7 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
     yield* tailFileLines(vm.consolePath, () => exited, signal);
   }
 
-  async stopByRunId(runId: string, timeoutSeconds?: number): Promise<StopResult> {
+  async stopByRunId(runId: string): Promise<StopResult> {
     const vm = this.vms.get(runId);
     if (!vm) return "not_found";
     // Latch BEFORE the proc check (B4): a cancel in the boot window must
@@ -1633,7 +1643,7 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
     // log attributes the kill instead of mislabelling it a clean finalize.
     vm.teardownReason = "watchdog-kill";
     if (!vm.proc) return "already_stopped";
-    await this.killVm(vm, timeoutSeconds ?? 5);
+    await this.killVm(vm, SIGTERM_GRACE_SECONDS);
     return "stopped";
   }
 

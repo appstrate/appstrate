@@ -1675,10 +1675,23 @@ export function createPackagesRouter() {
       deleteGuard,
       makeDeleteHandler(rcfg),
     );
-    // Unscoped IDs
-    router.get(`/${path}/:id`, readGuard, rcfg.getHandler ?? makeGetHandler(rcfg));
-    router.put(`/${path}/:id`, requirePackageInOrg(), writeGuard, makeUpdateHandler(rcfg));
-    router.delete(`/${path}/:id`, requirePackageInOrg(), deleteGuard, makeDeleteHandler(rcfg));
+    // There is deliberately no unscoped `/:id` variant.
+    //
+    // There was one — GET/PUT/DELETE per package type, 12 endpoints — for an
+    // identifier shape that cannot be constructed. `buildPackageId()` returns
+    // `@${scope}/${name}` unconditionally (`@appstrate/core/naming`), inline
+    // runs mint `@scope/...` shadow ids, and `0000_init.sql` is a squashed
+    // init, so no pre-scope row survives anywhere and no backfill ever created
+    // one. Every `packages.id` in existence is scoped. The endpoints were
+    // reachable only by `%2F`-encoding a scoped id into the segment — which
+    // the SPA never emits (`apps/web/src/api/client.ts:31`) and no caller in
+    // this repo or its two out-of-tree consumers ever did.
+    //
+    // Removing them is an intentional contract deletion. `detect:breaking`
+    // has no waiver mechanism by design — the only way to accept a break is to
+    // regenerate `apps/api/src/openapi/baseline.json`, which is what the
+    // commit that removed these did, with the 12 flagged endpoints recorded in
+    // its message.
   }
 
   // --- Fork route ---

@@ -159,9 +159,9 @@ describe("runner protocol round-trip (real client ↔ real server)", () => {
     expect(lines).toEqual(["guest line 1", "guest line 2", "guest line 3"]);
 
     expect(await client.waitForExit(handle)).toBe(42);
-    expect(await client.stopByRunId("run-1", 5)).toBe("stopped");
+    expect(await client.stopByRunId("run-1")).toBe("stopped");
     const stopCall = fake.calls.find(([name]) => name === "stopByRunId");
-    expect(stopCall?.[1]).toEqual(["run-1", 5]);
+    expect(stopCall?.[1]).toEqual(["run-1"]);
 
     await client.removeIsolationBoundary(boundary);
     const removeCall = fake.calls.find(([name]) => name === "removeIsolationBoundary");

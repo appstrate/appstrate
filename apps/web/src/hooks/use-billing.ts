@@ -58,7 +58,7 @@ export const PLAN_DESCRIPTION_KEYS: Record<string, string> = {
   pro: "onboarding.planProDescription",
 };
 
-export interface BillingPlan {
+interface BillingPlan {
   id: string;
   name: string;
 }

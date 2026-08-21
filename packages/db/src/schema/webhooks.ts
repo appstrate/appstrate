@@ -58,7 +58,6 @@ export const webhooks = pgTable(
   },
   (table) => [
     index("idx_webhooks_org_id").on(table.orgId),
-    index("idx_webhooks_application_id").on(table.applicationId),
     index("idx_webhooks_app_enabled").on(table.applicationId, table.enabled),
     // Preserved verbatim from the module's raw-SQL migration (0000_initial.sql).
     check("webhooks_level_values", sql`level IN ('org', 'application')`),
@@ -85,9 +84,5 @@ export const webhookDeliveries = pgTable(
     error: text("error"), // error message if failed
     createdAt: timestamp("created_at").notNull().defaultNow(),
   },
-  (table) => [
-    index("idx_webhook_deliveries_webhook_id").on(table.webhookId),
-    index("idx_webhook_deliveries_event_id").on(table.eventId),
-    index("idx_webhook_deliveries_status").on(table.webhookId, table.status),
-  ],
+  (table) => [index("idx_webhook_deliveries_webhook_id").on(table.webhookId)],
 );

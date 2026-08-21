@@ -549,7 +549,7 @@ describe("RemoteFirecrackerOrchestrator misc calls", () => {
     const { fn, calls } = fetchStub(() => json({ result: "already_stopped" }));
     const orchestrator = new RemoteFirecrackerOrchestrator({ fetchFn: fn });
 
-    const result = await orchestrator.stopByRunId("r-1", 5);
+    const result = await orchestrator.stopByRunId("r-1");
 
     expect(result).toBe("already_stopped");
     expect(calls[0]?.url).toBe(`${BASE_URL}${RUNNER_ROUTES.stopRun}`);

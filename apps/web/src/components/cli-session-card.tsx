@@ -11,9 +11,9 @@ import {
   type CliSessionDisplay,
   type UaCategory,
 } from "../lib/cli-sessions";
-import { formatDateField } from "../lib/markdown";
+import { formatDateField } from "../lib/format-date";
 
-export interface CliSessionCardProps {
+interface CliSessionCardProps {
   session: CliSessionDisplay;
   /** Optional inline meta (e.g. "· user@example.com" on the admin variant). */
   meta?: ReactNode;

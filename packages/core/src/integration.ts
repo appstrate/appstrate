@@ -69,8 +69,6 @@ export const RESERVED_INTEGRATION_UPLOAD_PROTOCOLS = [
   "tus",
   "ms-resumable",
 ] as const;
-/** An upload-protocol identifier (open string; reserved values listed above). */
-export type IntegrationUploadProtocol = string;
 
 // ─────────────────────────────────────────────
 // Integration manifest (AFPS + Appstrate cross-field rules)
@@ -716,7 +714,8 @@ export interface ApiCallConfig {
    */
   legacyToolName?: string;
   /** Resumable upload protocols this auth's surface supports (open list). */
-  uploadProtocols: IntegrationUploadProtocol[];
+  /** Upload-protocol identifiers (open set; reserved values in RESERVED_INTEGRATION_UPLOAD_PROTOCOLS). */
+  uploadProtocols: string[];
   /**
    * Agent-facing name of the `api_upload` companion tool, present iff
    * {@link ApiCallConfig.uploadProtocols} is non-empty — i.e. exactly when the
@@ -854,16 +853,6 @@ export function resolveEffectiveToolSelection(
  */
 export function isApiCallToolName(name: string): boolean {
   return name === API_CALL_TOOL_NAME || name.startsWith(`${API_CALL_TOOL_NAME}__`);
-}
-
-/**
- * True when `name` is an api_upload tool name — the bare `api_upload` or a
- * per-auth `api_upload__{authToken}` variant. Like {@link isApiCallToolName},
- * these never appear in `tools_policy`: they are derived from the
- * `_meta["dev.appstrate/api"]` extension, not declared.
- */
-export function isApiUploadToolName(name: string): boolean {
-  return name === API_UPLOAD_TOOL_NAME || name.startsWith(`${API_UPLOAD_TOOL_NAME}__`);
 }
 
 /**

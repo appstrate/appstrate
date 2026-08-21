@@ -177,10 +177,10 @@ function isWireNumber(value: unknown): value is number {
 }
 
 /**
- * Counters constrained by `appstrate.metric`'s published `usage`
- * sub-schema. Asserted at compile time to be exactly `keyof TokenUsage`
- * (see the `_…Parity` tuple in `../events/canonical-event-schemas.ts`),
- * so a counter added to the interface cannot escape this check.
+ * Counters {@link isCanonicalRunEvent} checks inside `appstrate.metric`'s
+ * `usage` object. Asserted at compile time below to be exactly
+ * `keyof TokenUsage`, so a counter added to (or removed from) the interface
+ * cannot escape this check.
  */
 export const TOKEN_USAGE_COUNTERS = [
   "input_tokens",
@@ -272,3 +272,30 @@ export function isCanonicalRunEvent(event: RunEvent): event is CanonicalRunEvent
       return false;
   }
 }
+
+/** Fails to compile unless `T` is `true`. */
+type Assert<T extends true> = T;
+
+/**
+ * {@link TOKEN_USAGE_COUNTERS} — the runtime list {@link isCanonicalRunEvent}
+ * iterates — pinned to exactly `keyof TokenUsage`, in both directions. A
+ * counter added to the interface without an entry here would be accepted
+ * unchecked; one removed from the interface would leave a dead entry.
+ *
+ * These two assertions used to live beside the Zod payload table in
+ * `../events/canonical-event-schemas.ts`; they moved here with the table's
+ * removal because they were never about the published schemas — they guard the
+ * live structural guard, which is now the sole definition of the payload shape.
+ *
+ * A module-private annotation rather than an exported type alias: tsc checks
+ * `Assert<>` constraints identically either way, but a *type alias* nothing
+ * references trips `noUnusedLocals` (TS6196) even when the constraints hold,
+ * and TS has no per-declaration suppression. Annotating a `_`-prefixed constant
+ * and voiding it keeps the checks running with no public surface; the value is
+ * an empty array, only its type is load-bearing.
+ */
+const _tokenUsageCounterParity: [
+  Assert<(typeof TOKEN_USAGE_COUNTERS)[number] extends keyof TokenUsage ? true : false>,
+  Assert<keyof TokenUsage extends (typeof TOKEN_USAGE_COUNTERS)[number] ? true : false>,
+] = [] as never;
+void _tokenUsageCounterParity;

@@ -7,8 +7,6 @@
  * - {@link emptyPackageCatalog}: resolves nothing. Use for zero-dep roots.
  * - {@link InMemoryPackageCatalog}: holds a pre-supplied map. Dist-tags
  *   can be supplied via the `distTags` option.
- * - {@link composeCatalogs}: fallback chain — first non-null `resolve`
- *   wins; `fetch` routes to the catalog that resolved.
  */
 
 import semver from "semver";
@@ -44,10 +42,17 @@ export interface InMemoryCatalogOptions {
 }
 
 /**
- * Catalog backed by an in-memory list of {@link BundlePackage}s.
+ * Catalog backed by an in-memory list of {@link BundlePackage}s — the
+ * reference {@link PackageCatalog} implementation, and the one every
+ * bundle-build test resolves against.
  *
- * Used for inline runs (the posted payload is loaded into such a
- * catalog and composed in front of the org registry catalog — spec §9.5).
+ * It is NOT what the platform runs on. This doc used to claim it backed inline
+ * runs, "composed in front of the org registry catalog"; that never shipped.
+ * `apps/api/src/services/inline-run.ts` writes the posted payload to a hidden
+ * shadow package row and `RunPackageCatalog`
+ * (`apps/api/src/services/run-launcher/run-package-catalog.ts`) hand-rolls the
+ * DB↔draft routing, with owner tracking and a loud throw when a draft override
+ * misses — semantics a first-non-null fallback chain cannot express.
  */
 export class InMemoryPackageCatalog implements PackageCatalog {
   /** Index: packageId (`@scope/name`) → sorted list of versions. */
@@ -113,48 +118,9 @@ export class InMemoryPackageCatalog implements PackageCatalog {
   }
 }
 
-/**
- * Composite catalog — tries each underlying catalog in order; first
- * non-null `resolve` wins. `fetch` is routed to the catalog that
- * resolved, via a cache populated during `resolve`. Callers that skip
- * `resolve` and hand `fetch` an opaque identity pay a full sweep (each
- * catalog is queried until one succeeds).
- */
-export function composeCatalogs(...catalogs: PackageCatalog[]): PackageCatalog {
-  const resolveOwners = new Map<PackageIdentity, PackageCatalog>();
-
-  return {
-    async resolve(name, versionSpec) {
-      for (const cat of catalogs) {
-        const r = await cat.resolve(name, versionSpec);
-        if (r) {
-          resolveOwners.set(r.identity, cat);
-          return r;
-        }
-      }
-      return null;
-    },
-
-    async fetch(identity) {
-      const owner = resolveOwners.get(identity);
-      if (owner) return owner.fetch(identity);
-      // Fallback: sweep (cache miss).
-      let lastErr: unknown;
-      for (const cat of catalogs) {
-        try {
-          return await cat.fetch(identity);
-        } catch (err) {
-          lastErr = err;
-        }
-      }
-      throw (
-        lastErr ??
-        new BundleError(
-          "DEPENDENCY_UNRESOLVED",
-          `composeCatalogs: no catalog could fetch ${identity}`,
-          { identity },
-        )
-      );
-    },
-  };
-}
+// `composeCatalogs(...catalogs)` lived here: a first-non-null-`resolve`
+// fallback chain with a resolve-owner cache for `fetch`. Removed — it never
+// had a production caller. It was written for inline runs, but the platform's
+// `RunPackageCatalog` needs owner tracking and a loud throw on a missed draft
+// override, which a silent fallback chain cannot express, so it will not adopt
+// this. Reintroducing it means reintroducing the semantics gap.

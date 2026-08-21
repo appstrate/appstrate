@@ -191,7 +191,7 @@ export class McpApiUploadResolver {
         protocol: req.uploadProtocol,
         status: 0,
         headers: {},
-        error: `api_upload: file ${totalBytes} bytes exceeds streaming ceiling ${MAX_STREAMED_BODY_SIZE} (${Math.round(MAX_STREAMED_BODY_SIZE / 1024 / 1024)} MB). Set MAX_STREAMED_BODY_SIZE on the runtime to raise it.`,
+        error: `api_upload: file ${totalBytes} bytes exceeds the streaming ceiling of ${MAX_STREAMED_BODY_SIZE} bytes (${Math.round(MAX_STREAMED_BODY_SIZE / 1024 / 1024)} MB). This ceiling is compiled into the runtime — there is no setting that raises it. Split the payload into smaller files.`,
         bytesSent: 0,
       };
     }

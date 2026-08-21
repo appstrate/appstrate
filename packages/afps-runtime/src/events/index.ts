@@ -18,10 +18,5 @@ export {
 export {
   CANONICAL_EVENT_SCHEMAS,
   CANONICAL_EVENT_SCHEMA_VERSION,
-  buildCanonicalEventJsonSchema,
-  buildCanonicalEventJsonSchemas,
   canonicalEventSchemaUri,
-  serializeCanonicalEventJsonSchema,
-  type CanonicalEventJsonSchemaDocument,
-  type CanonicalEventSchemaEntry,
 } from "./canonical-event-schemas.ts";

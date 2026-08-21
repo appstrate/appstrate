@@ -3,8 +3,11 @@
 import { describe, expect, it } from "bun:test";
 import { readUIMessageStream, type UIMessage, type UIMessageChunk } from "ai";
 import { turnMetadataFromMessage } from "@appstrate/core/chat-turn-metadata";
-import { ChatTurnDeadlineError, turnDeadlineNoticeText } from "../src/turn-closure.ts";
-import { piFailureChunks } from "../src/pi-chat/pi-turn-closure.ts";
+import {
+  ChatTurnDeadlineError,
+  piFailureChunks,
+  turnDeadlineNoticeText,
+} from "../src/pi-chat/pi-turn-closure.ts";
 
 async function assemble(chunks: UIMessageChunk[]): Promise<UIMessage | undefined> {
   const stream = new ReadableStream<UIMessageChunk>({

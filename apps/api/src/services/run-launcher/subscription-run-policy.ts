@@ -48,6 +48,22 @@ export class OauthProviderMissingCredentialError extends Error {
 }
 
 /**
+ * How a run's model credential reaches the upstream provider.
+ *
+ * A discriminated union, not a boolean flag: the `oauth` arm CARRIES the
+ * credential id, so a caller that takes the oauth branch has the id in hand by
+ * construction. The previous shape (`{ isOauthCredential: boolean }`) forced
+ * every consumer to re-derive "oauth implies a credential id" — in practice
+ * with a re-check plus a non-null assertion at the point of use, duplicating
+ * the invariant this resolver already enforces.
+ */
+export type CredentialDelivery =
+  /** Oauth-class credential — bearer swapped server-side by the sidecar `/llm` gateway. */
+  | { readonly kind: "oauth"; readonly credentialId: string }
+  /** Static API-key provider — the placeholder is substituted for the real key inline. */
+  | { readonly kind: "api_key" };
+
+/**
  * Single resolver for "what kind of credential is this and how is it delivered".
  *
  * Classification is by the provider's declared `authMode` FIRST: any provider
@@ -62,18 +78,13 @@ export class OauthProviderMissingCredentialError extends Error {
  */
 export function resolveCredentialDelivery(params: {
   providerId: string;
-  /** Whether the resolved run actually carries a stored credential id. */
-  hasCredentialId: boolean;
-}): {
-  /** True for an oauth-class credential — delivered via the sidecar bearer-swap. */
-  isOauthCredential: boolean;
-} {
-  const { providerId, hasCredentialId } = params;
-  const isOauthCredential = isOAuthModelProvider(providerId);
-  if (isOauthCredential && !hasCredentialId) {
-    throw new OauthProviderMissingCredentialError(providerId);
-  }
-  return { isOauthCredential };
+  /** The stored credential id the run resolved, if any. */
+  credentialId: string | null | undefined;
+}): CredentialDelivery {
+  const { providerId, credentialId } = params;
+  if (!isOAuthModelProvider(providerId)) return { kind: "api_key" };
+  if (!credentialId) throw new OauthProviderMissingCredentialError(providerId);
+  return { kind: "oauth", credentialId };
 }
 
 /**

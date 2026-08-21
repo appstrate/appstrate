@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Tests for {@link PersistingEventSink} — the stateless write-through
- * used by the ingestion hot path. Covers the run_logs fan-out for every
- * routed event type, the `runs.tokenUsage` snapshot, and the `llm_usage`
- * ledger row (including the fail-closed `writeLedger` default).
+ * Tests for {@link persistRunEvent} — the stateless write-through used by
+ * the ingestion hot path. Covers the run_logs fan-out for every routed
+ * event type, the `runs.tokenUsage` snapshot, and the `llm_usage` ledger
+ * row (including the fail-closed `writeLedger` default).
  *
  * Reducer / `snapshot()` semantics belong to `createReducerSink()` and
  * are covered by `packages/afps-runtime/test/sinks/reducer-sink.test.ts`;
- * the reducer-plus-sink composition a read-back consumer writes is
+ * the reducer-plus-persist composition a read-back consumer writes is
  * covered end-to-end by `parity-e2e.test.ts`.
  */
 
@@ -17,16 +17,15 @@ import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedAgent, seedRun } from "../../helpers/seed.ts";
 import { installPackage } from "../../../src/services/application-packages.ts";
-import { PersistingEventSink } from "../../../src/services/run-launcher/appstrate-event-sink.ts";
+import { persistRunEvent } from "../../../src/services/run-launcher/appstrate-event-sink.ts";
 import { _resetRunMetricBroadcasterForTests } from "../../../src/services/run-metric-broadcaster.ts";
 import type { RunEvent } from "@appstrate/afps-runtime/types";
 import type { ModelCost } from "@appstrate/core/module";
-import { emptyRunResult } from "@appstrate/afps-runtime/runner";
 import { db } from "@appstrate/db/client";
 import { runLogs, llmUsage, runs } from "@appstrate/db/schema";
 import { eq, and, asc } from "drizzle-orm";
 
-describe("PersistingEventSink", () => {
+describe("persistRunEvent", () => {
   let ctx: TestContext;
   const agentId = "@testorg/persist-agent";
   let runId: string;
@@ -56,12 +55,15 @@ describe("PersistingEventSink", () => {
     runId = run.id;
   });
 
-  /** Sink with the production defaults — notably `writeLedger` off. */
-  function newSink() {
-    return new PersistingEventSink({
-      scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+  /** Persist with the production defaults — notably `writeLedger` off. */
+  function persist(e: RunEvent, opts: Parameters<typeof persistRunEvent>[4] = {}) {
+    return persistRunEvent(
+      db,
+      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
       runId,
-    });
+      e,
+      opts,
+    );
   }
 
   async function loadLogs() {
@@ -73,9 +75,8 @@ describe("PersistingEventSink", () => {
   }
 
   it("output.emitted → one result/output run_log row per emission", async () => {
-    const sink = newSink();
-    await sink.handle(event("output.emitted", { data: { a: 1, b: 2 } }));
-    await sink.handle(event("output.emitted", { data: { b: 3, c: 4 } }));
+    await persist(event("output.emitted", { data: { a: 1, b: 2 } }));
+    await persist(event("output.emitted", { data: { b: 3, c: 4 } }));
 
     const outputLogs = (await loadLogs()).filter((l) => l.event === "output");
     expect(outputLogs).toHaveLength(2);
@@ -85,19 +86,17 @@ describe("PersistingEventSink", () => {
   });
 
   // The `report` runtime tool was removed in favour of durable `outputs/`
-  // documents. A stale runner still emitting its event must be dropped by the
-  // sink's `default:` branch — no run_logs row, no throw.
+  // documents. A stale runner still emitting its event must be dropped by
+  // the dispatcher's `default:` branch — no run_logs row, no throw.
   it("drops the retired report.appended event entirely", async () => {
-    const sink = newSink();
-    await sink.handle(event("report.appended", { content: "# First" }));
+    await persist(event("report.appended", { content: "# First" }));
 
     expect(await loadLogs()).toHaveLength(0);
   });
 
   it("maps log.written into run_logs with the original level + message", async () => {
-    const sink = newSink();
-    await sink.handle(event("log.written", { level: "info", message: "booting" }));
-    await sink.handle(event("log.written", { level: "warn", message: "retry" }));
+    await persist(event("log.written", { level: "info", message: "booting" }));
+    await persist(event("log.written", { level: "warn", message: "retry" }));
 
     const progressLogs = (await loadLogs()).filter((l) => l.type === "progress");
     expect(progressLogs.map((l) => l.message)).toEqual(["booting", "retry"]);
@@ -108,8 +107,7 @@ describe("PersistingEventSink", () => {
   });
 
   it("maps appstrate.progress into progress run_logs with message/data/level", async () => {
-    const sink = newSink();
-    await sink.handle(
+    await persist(
       event("appstrate.progress", {
         message: "Tool: read_file",
         data: { tool: "read_file", args: { path: "/x" } },
@@ -125,16 +123,12 @@ describe("PersistingEventSink", () => {
   });
 
   it("appstrate.metric → single runner ledger row + tokenUsage snapshot when writeLedger is on", async () => {
-    const sink = new PersistingEventSink({
-      scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
-      runId,
-      writeLedger: true,
-    });
-    await sink.handle(
+    await persist(
       event("appstrate.metric", {
         usage: { input_tokens: 300, output_tokens: 125 },
         cost: 0.003,
       }),
+      { writeLedger: true },
     );
 
     const ledgerRows = await db
@@ -153,7 +147,7 @@ describe("PersistingEventSink", () => {
       output_tokens: 125,
     });
 
-    // runs.cost is intentionally NOT asserted here — the sink schedules a
+    // runs.cost is intentionally NOT asserted here — the metric branch schedules a
     // fire-and-forget run_metric broadcast that also refreshes runs.cost
     // (monotonic-max guarded) so a mid-run UI refresh sees the latest
     // value rather than null until finalize. That write race is covered
@@ -169,19 +163,15 @@ describe("PersistingEventSink", () => {
     // `cost_usd` wins regardless of arrival order.
     const totals = [0.001, 0.003, 0.006, 0.01, 0.015];
     await Promise.all(
-      totals.map((cost) => {
-        const sink = new PersistingEventSink({
-          scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
-          runId,
-          writeLedger: true,
-        });
-        return sink.handle(
+      totals.map((cost) =>
+        persist(
           event("appstrate.metric", {
             usage: { input_tokens: 100, output_tokens: 50 },
             cost,
           }),
-        );
-      }),
+          { writeLedger: true },
+        ),
+      ),
     );
 
     const rows = await db
@@ -195,28 +185,24 @@ describe("PersistingEventSink", () => {
   });
 
   it("monotonic upsert: a smaller subsequent cost cannot regress the recorded value", async () => {
-    const sink = new PersistingEventSink({
-      scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
-      runId,
-      writeLedger: true,
-    });
-
     // First emit — cost 0.01, tokens 200/100
-    await sink.handle(
+    await persist(
       event("appstrate.metric", {
         usage: { input_tokens: 200, output_tokens: 100 },
         cost: 0.01,
       }),
+      { writeLedger: true },
     );
 
     // Second emit — REGRESSES to cost 0.005 (a finalize fallback that
     // raced an earlier metric event with a higher running total). The
     // monotonic guard MUST keep the higher value.
-    await sink.handle(
+    await persist(
       event("appstrate.metric", {
         usage: { input_tokens: 50, output_tokens: 25 },
         cost: 0.005,
       }),
+      { writeLedger: true },
     );
 
     const rows = await db
@@ -230,21 +216,24 @@ describe("PersistingEventSink", () => {
   });
 
   it("monotonic upsert: a larger subsequent cost replaces the recorded value (streaming totals)", async () => {
-    const sink = new PersistingEventSink({
-      scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
-      runId,
-      writeLedger: true,
-    });
-
     // Three increasing emits — each must replace the previous row.
-    await sink.handle(
+    await persist(
       event("appstrate.metric", { usage: { input_tokens: 100, output_tokens: 0 }, cost: 0.001 }),
+      {
+        writeLedger: true,
+      },
     );
-    await sink.handle(
+    await persist(
       event("appstrate.metric", { usage: { input_tokens: 200, output_tokens: 50 }, cost: 0.005 }),
+      {
+        writeLedger: true,
+      },
     );
-    await sink.handle(
+    await persist(
       event("appstrate.metric", { usage: { input_tokens: 350, output_tokens: 120 }, cost: 0.012 }),
+      {
+        writeLedger: true,
+      },
     );
 
     const rows = await db
@@ -258,14 +247,9 @@ describe("PersistingEventSink", () => {
   });
 
   // Pins the FAIL-CLOSED default: a caller that never mentions `writeLedger`
-  // must not touch the billing ledger. Constructed inline (not via newSink())
-  // so the omitted flag is visible at the assertion site.
+  // must not touch the billing ledger — note the absent opts argument below.
   it("writeLedger off (default) → metric event still writes tokenUsage but no ledger row", async () => {
-    const sink = new PersistingEventSink({
-      scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
-      runId,
-    });
-    await sink.handle(
+    await persist(
       event("appstrate.metric", {
         usage: { input_tokens: 10, output_tokens: 5 },
         cost: 0.0005,
@@ -288,14 +272,11 @@ describe("PersistingEventSink", () => {
   // platform's own kickoff snapshot (`runs.model_cost` → `opts.modelCost`),
   // never from the container.
   describe("runner row pricing provenance", () => {
-    function ledgerSink(opts: { modelSource: string | null; modelCost: ModelCost | null }) {
-      return new PersistingEventSink({
-        scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
-        runId,
-        writeLedger: true,
-        modelSource: opts.modelSource,
-        modelCost: opts.modelCost,
-      });
+    function persistLedger(
+      e: RunEvent,
+      opts: { modelSource: string | null; modelCost: ModelCost | null },
+    ) {
+      return persist(e, { writeLedger: true, ...opts });
     }
 
     async function runnerRow() {
@@ -307,9 +288,9 @@ describe("PersistingEventSink", () => {
     }
 
     it("platform run whose model resolved NO pricing → `unpriced`, not a silent $0", async () => {
-      const sink = ledgerSink({ modelSource: "system", modelCost: null });
-      await sink.handle(
+      await persistLedger(
         event("appstrate.metric", { usage: { input_tokens: 900, output_tokens: 300 }, cost: 0 }),
+        { modelSource: "system", modelCost: null },
       );
 
       const row = await runnerRow();
@@ -323,12 +304,9 @@ describe("PersistingEventSink", () => {
       // `{}` from an older shape, or a hand-edited row — would sail through as
       // fully `priced`. The read path narrows with `modelCostSchema` so a
       // snapshot nobody can read is treated as no snapshot at all.
-      const sink = ledgerSink({
-        modelSource: "system",
-        modelCost: {} as unknown as ModelCost,
-      });
-      await sink.handle(
+      await persistLedger(
         event("appstrate.metric", { usage: { input_tokens: 900, output_tokens: 300 }, cost: 0 }),
+        { modelSource: "system", modelCost: {} as unknown as ModelCost },
       );
 
       const row = await runnerRow();
@@ -336,24 +314,24 @@ describe("PersistingEventSink", () => {
     });
 
     it("platform run with rates → `priced`", async () => {
-      const sink = ledgerSink({ modelSource: "org", modelCost: { input: 3, output: 15 } });
-      await sink.handle(
+      await persistLedger(
         event("appstrate.metric", {
           usage: { input_tokens: 900, output_tokens: 300 },
           cost: 0.007,
         }),
+        { modelSource: "org", modelCost: { input: 3, output: 15 } },
       );
 
       expect((await runnerRow())!.pricingStatus).toBe("priced");
     });
 
     it("platform run that read cache with no cache-read rate → `partial`", async () => {
-      const sink = ledgerSink({ modelSource: "system", modelCost: { input: 3, output: 15 } });
-      await sink.handle(
+      await persistLedger(
         event("appstrate.metric", {
           usage: { input_tokens: 100, output_tokens: 50, cache_read_input_tokens: 4000 },
           cost: 0.001,
         }),
+        { modelSource: "system", modelCost: { input: 3, output: 15 } },
       );
 
       expect((await runnerRow())!.pricingStatus).toBe("partial");
@@ -364,9 +342,9 @@ describe("PersistingEventSink", () => {
       // platform model — the same fact `notRunnerMirrorSql` keys on). Its
       // inference was accounted elsewhere; stamping a platform pricing gap on
       // it would mislabel every remote run.
-      const sink = ledgerSink({ modelSource: null, modelCost: null });
-      await sink.handle(
+      await persistLedger(
         event("appstrate.metric", { usage: { input_tokens: 900, output_tokens: 300 }, cost: 0.02 }),
+        { modelSource: null, modelCost: null },
       );
 
       const row = await runnerRow();
@@ -378,9 +356,9 @@ describe("PersistingEventSink", () => {
       // `writeRunnerLedgerRow` only skips events with neither usage nor cost —
       // this row lands at cost 0, and it is exactly the one the status exists
       // to qualify.
-      const sink = ledgerSink({ modelSource: "system", modelCost: null });
-      await sink.handle(
+      await persistLedger(
         event("appstrate.metric", { usage: { input_tokens: 42, output_tokens: 7 } }),
+        { modelSource: "system", modelCost: null },
       );
 
       const row = await runnerRow();
@@ -391,19 +369,13 @@ describe("PersistingEventSink", () => {
     });
   });
 
-  it("finalize is a no-op on the persisting sink", async () => {
-    const sink = newSink();
-    await expect(sink.finalize(emptyRunResult())).resolves.toBeUndefined();
-  });
+  it("appstrate.error → system/adapter_error run_log + the message is returned", async () => {
+    // Only `appstrate.error` returns non-null: that return value is how the
+    // ingestion path caches the last adapter error for the run.
+    expect(await persist(event("output.emitted", { data: {} }))).toBeNull();
 
-  it("appstrate.error → system/adapter_error run_log + lastError, most recent wins", async () => {
-    const sink = newSink();
-    expect(sink.lastError).toBeNull();
-
-    await sink.handle(event("appstrate.error", { message: "OOM killed" }));
-    await sink.handle(event("appstrate.error", { message: "boom" }));
-
-    expect(sink.lastError).toBe("boom");
+    expect(await persist(event("appstrate.error", { message: "OOM killed" }))).toBe("OOM killed");
+    expect(await persist(event("appstrate.error", { message: "boom" }))).toBe("boom");
 
     const systemLogs = (await loadLogs()).filter((l) => l.type === "system");
     expect(systemLogs).toHaveLength(2);

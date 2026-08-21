@@ -33,7 +33,7 @@ export type RunPricingStatus = NonNullable<RunWireDto["cost_pricing_status"]>;
 type CostTooltipKey =
   "run.costUnpricedTooltip" | "run.costUnpricedFloorTooltip" | "run.costPartialTooltip";
 
-export interface RunCostDisplay {
+interface RunCostDisplay {
   /** The value to render — a formatted amount, or the em-dash placeholder. */
   text: string;
   /**

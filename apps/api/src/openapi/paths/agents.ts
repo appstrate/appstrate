@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { STD_RESPONSE_HEADERS, REQUEST_ID_ONLY_HEADERS } from "../headers.ts";
+
 /**
  * Agents paths — includes both agents.ts and user-agents.ts endpoints
  * since they share base paths (e.g. /api/agents/{scope}/{name}).
@@ -19,10 +21,7 @@ export const agentsPaths = {
       responses: {
         "200": {
           description: "Agent list",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
@@ -109,10 +108,7 @@ export const agentsPaths = {
       responses: {
         "200": {
           description: "Configuration saved — returns the bare persisted configuration document",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               // Bare persisted configuration document (request body merged
@@ -145,10 +141,7 @@ export const agentsPaths = {
       responses: {
         "200": {
           description: "Agent proxy config",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
@@ -197,10 +190,7 @@ export const agentsPaths = {
       responses: {
         "200": {
           description: "Agent proxy updated — returns the bare proxy-setting resource",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               // Bare proxy-setting resource — same shape as GET …/proxy,
@@ -247,10 +237,7 @@ export const agentsPaths = {
       responses: {
         "200": {
           description: "Connection readiness",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/AgentConnectionReadiness" },
@@ -307,10 +294,7 @@ export const agentsPaths = {
       responses: {
         "200": {
           description: "Persistence rows",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
@@ -401,10 +385,7 @@ export const agentsPaths = {
       responses: {
         "200": {
           description: "Counts of deleted rows",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
@@ -446,10 +427,7 @@ export const agentsPaths = {
       responses: {
         "204": {
           description: "Memory deleted",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
@@ -474,10 +452,7 @@ export const agentsPaths = {
       responses: {
         "204": {
           description: "Pinned slot deleted",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
@@ -501,10 +476,7 @@ export const agentsPaths = {
       responses: {
         "200": {
           description: "Agent model config",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
@@ -565,10 +537,7 @@ export const agentsPaths = {
       responses: {
         "200": {
           description: "Agent model updated — returns the bare model-setting resource",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               // Bare model-setting resource — same shape as GET …/model,
@@ -631,10 +600,7 @@ export const agentsPaths = {
       responses: {
         "200": {
           description: "Skills updated",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
@@ -695,8 +661,7 @@ export const agentsPaths = {
         "200": {
           description: "The .afps-bundle archive",
           headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+            ...STD_RESPONSE_HEADERS,
             "Content-Disposition": {
               description: "Attachment filename for the downloaded archive",
               schema: { type: "string" },
@@ -725,9 +690,7 @@ export const agentsPaths = {
         "422": {
           description:
             "The bundle cannot be assembled from stored artifacts. `dependency_unresolved`: a declared dependency resolves to no published version, or it resolved but its artifact is absent from storage or out of this organization's scope — the detail names the dependency. `bundle_invalid`: a stored archive or manifest is malformed or exceeds an archive limit (for example an archive with no `manifest.json` at its root); the package must be republished. `bundle_signature_invalid`: rejected by `AFPS_SIGNATURE_POLICY`",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-          },
+          headers: REQUEST_ID_ONLY_HEADERS,
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },

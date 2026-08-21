@@ -160,7 +160,7 @@ export function useDeleteSchedule() {
   });
 }
 
-export interface ScheduleFormDeps {
+interface ScheduleFormDeps {
   inputSchema: JSONSchemaObject | undefined;
   /**
    * Full input wrapper (schema + ui_hints + file_constraints + property_order)

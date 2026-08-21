@@ -175,30 +175,35 @@ describe("resolveCredentialDelivery (oauth-class classification)", () => {
     seedTestModelProviders();
   });
 
-  it("classifies an oauth subscription credential as oauth-class (delivered via sidecar swap)", () => {
+  it("classifies an oauth subscription credential as oauth-class, carrying the credential id", () => {
+    // The oauth arm CARRIES the id — that is what removes the re-check plus
+    // non-null assertion the launcher used to need at the point of use.
     expect(
-      resolveCredentialDelivery({ providerId: "claude-code", hasCredentialId: true })
-        .isOauthCredential,
-    ).toBe(true);
+      resolveCredentialDelivery({ providerId: "claude-code", credentialId: "cred_1" }),
+    ).toEqual({ kind: "oauth", credentialId: "cred_1" });
     // codex is now oauth-class and runs on Pi like claude-code (no refuse path).
-    expect(
-      resolveCredentialDelivery({ providerId: "codex", hasCredentialId: true }).isOauthCredential,
-    ).toBe(true);
+    expect(resolveCredentialDelivery({ providerId: "codex", credentialId: "cred_2" })).toEqual({
+      kind: "oauth",
+      credentialId: "cred_2",
+    });
   });
 
-  it("classifies an api-key provider as non-oauth", () => {
-    expect(
-      resolveCredentialDelivery({ providerId: "openai", hasCredentialId: true }).isOauthCredential,
-    ).toBe(false);
+  it("classifies an api-key provider as api_key, credential id or not", () => {
+    expect(resolveCredentialDelivery({ providerId: "openai", credentialId: "cred_3" })).toEqual({
+      kind: "api_key",
+    });
+    expect(resolveCredentialDelivery({ providerId: "openai", credentialId: null })).toEqual({
+      kind: "api_key",
+    });
   });
 
   it("throws rather than downgrading an oauth provider that resolved no credential id", () => {
     // Classification is by `authMode` FIRST. Treating a missing credential id
     // as "not oauth-class" is what let the raw subscription bearer reach
-    // MODEL_API_KEY inside the agent container (skipSidecar requires
-    // !isOauthCredential). The invalid configuration must fail the run.
+    // MODEL_API_KEY inside the agent container (skipSidecar requires a
+    // non-oauth delivery). The invalid configuration must fail the run.
     expect(() =>
-      resolveCredentialDelivery({ providerId: "claude-code", hasCredentialId: false }),
+      resolveCredentialDelivery({ providerId: "claude-code", credentialId: null }),
     ).toThrow(OauthProviderMissingCredentialError);
   });
 });

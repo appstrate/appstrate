@@ -4,7 +4,12 @@ import { describe, expect, it } from "bun:test";
 import { mkdtemp, mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { PiRunner, type PiModelConfig, type Transport } from "../src/index.ts";
+import { PiRunner, type PiModelConfig } from "../src/index.ts";
+// `Transport` is an in-package type: the barrel stopped re-exporting it when
+// #1173 removed its only out-of-package consumer, so this test reads it from
+// the SDK import surface directly (the `no-restricted-imports` guard allows
+// `pi-sdk.ts`, not the vendor package).
+import type { Transport } from "../src/pi-sdk.ts";
 import { createCaptureSink, makeBundlePackage, makeContext, makeTestBundle } from "./helpers.ts";
 
 const TEST_JWT = [

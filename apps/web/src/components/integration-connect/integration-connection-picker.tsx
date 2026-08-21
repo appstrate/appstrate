@@ -62,7 +62,7 @@ import { isVersioned } from "../../lib/version-selector";
  * connection would beat a schedule pick anyway — surfacing the lock here is
  * the honest signal that the override would be ignored.
  */
-export type ConnectionPickerPersistence =
+type ConnectionPickerPersistence =
   { mode: "pin" } | { mode: "override"; value: string; onChange: (connectionId: string) => void };
 
 /**

@@ -31,7 +31,7 @@ const upsertSmtpSchema = z.object({
   secureMode: z.enum(["auto", "tls", "starttls", "none"]).optional(),
 });
 
-export type UpsertSmtpInput = z.infer<typeof upsertSmtpSchema>;
+type UpsertSmtpInput = z.infer<typeof upsertSmtpSchema>;
 
 const upsertSocialSchema = z.object({
   clientId: z.string().min(1, "Client ID is required"),
@@ -39,7 +39,7 @@ const upsertSocialSchema = z.object({
   scopes: z.array(z.string()).nullable().optional(),
 });
 
-export type UpsertSocialInput = z.infer<typeof upsertSocialSchema>;
+type UpsertSocialInput = z.infer<typeof upsertSocialSchema>;
 
 export function useSmtpConfig() {
   const orgId = useCurrentOrgId();

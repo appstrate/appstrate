@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { z } from "zod";
 import { Hono } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import { getActor } from "../lib/actor.ts";
@@ -15,6 +14,7 @@ import {
 import { notFound } from "../lib/errors.ts";
 import { getAppScope } from "../lib/scope.ts";
 import { setCursorLinkHeader } from "../lib/pagination-link.ts";
+import { parseListPagination } from "../lib/list-query.ts";
 
 export function createNotificationsRouter() {
   const router = new Hono<AppEnv>();
@@ -26,13 +26,8 @@ export function createNotificationsRouter() {
     const actor = getActor(c);
     const scope = getAppScope(c);
     const unread = c.req.query("unread") === "true";
-    const limit = z.coerce
-      .number()
-      .int()
-      .min(1)
-      .max(100)
-      .catch(20)
-      .parse(c.req.query("limit") ?? 20);
+    // Keyset-paginated on `startingAfter`, so only the helper's `limit` applies.
+    const { limit } = parseListPagination(c, { defaultLimit: 20 });
     const startingAfter = c.req.query("startingAfter");
     const result = await listNotifications(scope, actor, { unread, limit, startingAfter });
     const lastId = result.data.at(-1)?.id;

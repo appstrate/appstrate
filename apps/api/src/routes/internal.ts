@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { z } from "zod";
 import { Hono } from "hono";
 import type { Context } from "hono";
 import { eq, and } from "drizzle-orm";
@@ -14,6 +13,7 @@ import { getSystemPackages } from "../services/system-packages.ts";
 import { logger } from "../lib/logger.ts";
 import { isInvalidTextRepresentation } from "../lib/db-helpers.ts";
 import { listResponse } from "../lib/list-response.ts";
+import { parseListPagination } from "../lib/list-query.ts";
 import { parseSignedToken } from "../lib/run-token.ts";
 import { rateLimitByBearer } from "../middleware/rate-limit.ts";
 import {
@@ -179,16 +179,9 @@ export function createInternalRouter() {
     const { runId, run } = await verifyRunToken(c);
 
     // Parse query parameters
-    const limitParam = c.req.query("limit");
     const fieldsParam = c.req.query("fields");
 
-    const limit = z.coerce
-      .number()
-      .int()
-      .min(1)
-      .max(50)
-      .catch(10)
-      .parse(limitParam ?? 10);
+    const { limit } = parseListPagination(c, { defaultLimit: 10, maxLimit: 50 });
 
     // Unknown field names fail loudly with 400 so a stale runner schema can't
     // silently strip fields the agent is asking for.
@@ -249,14 +242,10 @@ export function createInternalRouter() {
       throw invalidRequest(`Query too long (max ${MAX_MEMORY_CONTENT} chars).`, "q");
     }
 
-    const limitParam = c.req.query("limit");
-    const limit = z.coerce
-      .number()
-      .int()
-      .min(1)
-      .max(RECALL_LIMIT_MAX)
-      .catch(RECALL_LIMIT_DEFAULT)
-      .parse(limitParam ?? RECALL_LIMIT_DEFAULT);
+    const { limit } = parseListPagination(c, {
+      defaultLimit: RECALL_LIMIT_DEFAULT,
+      maxLimit: RECALL_LIMIT_MAX,
+    });
 
     try {
       const actor: Actor | null = actorFromIds(run.userId, run.endUserId);

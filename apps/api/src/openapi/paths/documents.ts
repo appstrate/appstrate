@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { STD_RESPONSE_HEADERS, REQUEST_ID_ONLY_HEADERS } from "../headers.ts";
+
 // Shared Document object schema (mirrors DocumentDto in services/documents.ts).
 // Field casing follows CASING_CONVENTIONS.md carve-out 4b: `applicationId`,
 // `packageId`, `createdAt`, `expiresAt` are on the universal DB-convention list
@@ -240,10 +242,7 @@ export const documentsPaths = {
       responses: {
         "200": {
           description: "A page of documents.",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
@@ -283,10 +282,7 @@ export const documentsPaths = {
       responses: {
         "200": {
           description: "The document.",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: { "application/json": { schema: documentWithPreviewSchema } },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
@@ -310,7 +306,7 @@ export const documentsPaths = {
       responses: {
         "204": {
           description: "Deleted.",
-          headers: { "Request-Id": { $ref: "#/components/headers/RequestId" } },
+          headers: REQUEST_ID_ONLY_HEADERS,
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         ...pipelineResponses,
@@ -355,10 +351,7 @@ export const documentsPaths = {
           description:
             "The document, with `expiresAt` now null. No `preview_url` is minted on this " +
             "response — re-read `GET /api/documents/{id}` for a fresh one.",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: { "application/json": { schema: documentSchema } },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },

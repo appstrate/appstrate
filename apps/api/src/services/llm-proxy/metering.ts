@@ -296,7 +296,7 @@ export interface MeteredForwardContext {
   started: number;
 }
 
-/** Optional behaviours that differ between the proxy surfaces. */
+/** Per-call knobs of {@link forwardMeteredResponse}. */
 export interface MeteredForwardOptions {
   /**
    * Model-alias swap (issue #727). When set, the real upstream id echoed by the
@@ -315,8 +315,6 @@ export interface MeteredForwardOptions {
    * passes the field; it is `null` whenever no cache key was resolved).
    */
   cache?: { cacheKey: string; ttlSeconds: number } | null;
-  /** Log-line prefix for the out-of-band SSE-metering-failure error. */
-  logLabel: string;
   /**
    * Ledger writer. Defaults to {@link recordProxyUsage} (the single ledger
    * writer); injected by tests that exercise the forwarding branches without a
@@ -414,7 +412,7 @@ export async function forwardMeteredResponse(
   ctx: MeteredForwardContext,
   options: MeteredForwardOptions,
 ): Promise<Response> {
-  const { swap, cache, logLabel } = options;
+  const { swap, cache } = options;
 
   const record = options.recordUsage ?? recordProxyUsage;
   const meter = (usage: UpstreamUsage | null): Promise<void> =>
@@ -440,7 +438,7 @@ export async function forwardMeteredResponse(
         swap,
         upstream.headers,
         upstream.status,
-        `${logLabel}: upstream error on aliased model — synthesized envelope`,
+        "llm-proxy: upstream error on aliased model — synthesized envelope",
         {
           status: upstream.status,
           presetId: ctx.presetId,
@@ -465,7 +463,7 @@ export async function forwardMeteredResponse(
         // normally recovered by the durable retry queue; reaching this catch
         // means parsing failed or both persistence channels failed, and must
         // surface loudly rather than become an unhandled rejection.
-        logger.error(`${logLabel}: SSE usage metering failed`, {
+        logger.error("llm-proxy: SSE usage metering failed", {
           runId: ctx.runId,
           presetId: ctx.presetId,
           error: getErrorMessage(err),
@@ -477,7 +475,7 @@ export async function forwardMeteredResponse(
     // {@link guardSseTeardown} for why guarding after `pipeThrough` would leave
     // its internal pipe promise exposed.
     const guarded = guardSseTeardown(clientStream, (err) => {
-      logger.error(`${logLabel}: SSE client stream teardown failed`, {
+      logger.error("llm-proxy: SSE client stream teardown failed", {
         runId: ctx.runId,
         presetId: ctx.presetId,
         error: getErrorMessage(err),
@@ -506,7 +504,7 @@ export async function forwardMeteredResponse(
         swap,
         upstream.headers,
         502,
-        `${logLabel}: non-JSON 2xx on aliased model — synthesized envelope`,
+        "llm-proxy: non-JSON 2xx on aliased model — synthesized envelope",
         {
           status: upstream.status,
           presetId: ctx.presetId,

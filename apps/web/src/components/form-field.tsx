@@ -12,7 +12,7 @@ import {
 } from "@appstrate/ui/components/select";
 import { cn } from "@appstrate/ui/cn";
 
-export type FormFieldType =
+type FormFieldType =
   | "text"
   | "number"
   | "textarea"
@@ -24,7 +24,7 @@ export type FormFieldType =
   | "color"
   | "password";
 
-export interface FormFieldProps {
+interface FormFieldProps {
   id: string;
   label: string;
   required?: boolean;

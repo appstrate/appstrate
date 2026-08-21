@@ -20,7 +20,7 @@ import { MemoryRouter } from "react-router-dom";
 import { I18nextProvider } from "react-i18next";
 import type { EnrichedRun } from "@appstrate/shared-types";
 import agentsFr from "../../locales/fr/agents.json";
-import { formatDateField } from "../../lib/markdown.ts";
+import { formatDateField } from "../../lib/format-date.ts";
 import i18n, { i18nReady } from "../../i18n.ts";
 import { RunRow, RunRowDetails, ElapsedDuration } from "../run-row.tsx";
 

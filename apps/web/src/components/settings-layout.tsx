@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useEffect } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import type { LucideIcon } from "lucide-react";
 import { PageHeader, type BreadcrumbEntry } from "./page-header";
 import { SidebarNavLink } from "./sidebar-nav-link";
 import { AppVersion } from "./app-version";
-import { useSidebarStore } from "../stores/sidebar-store";
+import { useCollapsedGlobalSidebar } from "../hooks/use-collapsed-global-sidebar";
 import {
   Sidebar,
   SidebarContent,
@@ -24,7 +23,7 @@ import {
   SelectValue,
 } from "@appstrate/ui/components/select";
 
-export interface SettingsNavItem {
+interface SettingsNavItem {
   to: string;
   icon: LucideIcon;
   label: string;
@@ -47,16 +46,7 @@ export function SettingsLayout({ sections, title, emoji, breadcrumbs }: Settings
   const location = useLocation();
   const navigate = useNavigate();
 
-  // Auto-collapse the global sidebar while in settings, restore on leave.
-  // Uses transient setter so the user's persisted preference is untouched.
-  useEffect(() => {
-    const { open, setOpenTransient } = useSidebarStore.getState();
-    const prev = open;
-    setOpenTransient(false);
-    return () => {
-      useSidebarStore.getState().setOpenTransient(prev);
-    };
-  }, []);
+  useCollapsedGlobalSidebar();
 
   const visibleSections = sections
     .map((s) => ({ ...s, items: s.items.filter((i) => i.show !== false) }))

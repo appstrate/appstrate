@@ -10,7 +10,7 @@
  * derive from the same two values.
  */
 
-export interface McpClientConfig {
+interface McpClientConfig {
   /** Logical server name used as the `mcpServers` key / CLI argument. */
   serverName: string;
   /** Raw Streamable HTTP endpoint — the lowest-common-denominator input. */

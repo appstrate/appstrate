@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { STD_RESPONSE_HEADERS, REQUEST_ID_ONLY_HEADERS } from "../headers.ts";
+
 export const endUsersPaths = {
   "/api/end-users": {
     post: {
@@ -56,8 +58,7 @@ export const endUsersPaths = {
         "201": {
           description: "End-user created",
           headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+            ...STD_RESPONSE_HEADERS,
             "Idempotent-Replayed": { $ref: "#/components/headers/IdempotentReplayed" },
             RateLimit: { $ref: "#/components/headers/RateLimit" },
             "RateLimit-Policy": { $ref: "#/components/headers/RateLimitPolicy" },
@@ -175,8 +176,7 @@ export const endUsersPaths = {
         "200": {
           description: "Paginated end-user list",
           headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+            ...STD_RESPONSE_HEADERS,
             RateLimit: { $ref: "#/components/headers/RateLimit" },
             "RateLimit-Policy": { $ref: "#/components/headers/RateLimitPolicy" },
           },
@@ -243,10 +243,7 @@ export const endUsersPaths = {
       responses: {
         "200": {
           description: "End-user detail",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/EndUserObject" },
@@ -316,10 +313,7 @@ export const endUsersPaths = {
       responses: {
         "200": {
           description: "End-user updated",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/EndUserObject" },
@@ -373,9 +367,7 @@ export const endUsersPaths = {
       responses: {
         "204": {
           description: "End-user deleted",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-          },
+          headers: REQUEST_ID_ONLY_HEADERS,
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },

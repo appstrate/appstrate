@@ -32,7 +32,7 @@ import {
 } from "lucide-react";
 import { turnLimitReached } from "@appstrate/core/chat-turn-metadata";
 import { formatBytes } from "@appstrate/core/format";
-import { Button } from "./button.tsx";
+import { Button } from "@appstrate/ui/components/button";
 import { MarkdownText } from "./markdown-text.tsx";
 import { ToolFallback } from "./tool-fallback.tsx";
 import {
@@ -144,6 +144,7 @@ function ScrollToBottom() {
   return (
     <ThreadPrimitive.ScrollToBottom asChild>
       <Button
+        type="button"
         variant="outline"
         size="icon"
         className="absolute -top-10 rounded-full disabled:invisible"
@@ -261,6 +262,7 @@ function Composer({ slot }: { slot?: React.ReactNode }) {
         <div className="flex min-w-0 items-center gap-1">
           <ComposerPrimitive.AddAttachment multiple asChild>
             <Button
+              type="button"
               variant="ghost"
               size="icon"
               className="text-muted-foreground size-8 shrink-0 rounded-lg"
@@ -273,7 +275,12 @@ function Composer({ slot }: { slot?: React.ReactNode }) {
         </div>
         <ThreadPrimitive.If running={false}>
           <ComposerPrimitive.Send asChild>
-            <Button size="icon" className="size-8 shrink-0 rounded-lg" aria-label="Envoyer">
+            <Button
+              type="button"
+              size="icon"
+              className="size-8 shrink-0 rounded-lg"
+              aria-label="Envoyer"
+            >
               <SendHorizontalIcon />
             </Button>
           </ComposerPrimitive.Send>
@@ -281,6 +288,7 @@ function Composer({ slot }: { slot?: React.ReactNode }) {
         <ThreadPrimitive.If running>
           <ComposerPrimitive.Cancel asChild>
             <Button
+              type="button"
               size="icon"
               variant="secondary"
               className="size-8 shrink-0 rounded-lg"
@@ -424,7 +432,7 @@ function MessageError() {
             autoSend
             asChild
           >
-            <Button variant="outline" size="sm" className="shrink-0">
+            <Button type="button" variant="outline" size="sm" className="shrink-0">
               <RotateCcwIcon className="size-3.5" />
               {t("turn.retry")}
             </Button>
@@ -487,6 +495,7 @@ const IconButton = React.forwardRef<
 >(({ label, children, ...props }, ref) => (
   <Button
     ref={ref}
+    type="button"
     variant="ghost"
     size="icon"
     className="text-muted-foreground size-7 [&_svg]:size-3.5"

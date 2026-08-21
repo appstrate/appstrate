@@ -23,7 +23,7 @@ export function PreferencesDevicesPage() {
     "/api/auth/cli/sessions",
     {},
     {
-      // Unwrap the list envelope (legacy apiFetch behavior).
+      // The endpoint answers `{ data: [...] }`; hand callers the array.
       select: (envelope) => envelope.data,
     },
   );

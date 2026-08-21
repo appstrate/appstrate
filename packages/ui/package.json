@@ -35,6 +35,7 @@
   "exports": {
     "./schema-form": "./src/schema-form/index.tsx",
     "./components/sidebar-context": "./src/components/sidebar-context.ts",
+    "./components/model-generation-labels": "./src/components/model-generation-labels.ts",
     "./components/*": "./src/components/*.tsx",
     "./cn": "./src/cn.ts",
     "./use-mobile": "./src/use-mobile.ts"
@@ -89,7 +90,6 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "check": "tsc --noEmit",
     "test": "bun test"
   }
 }

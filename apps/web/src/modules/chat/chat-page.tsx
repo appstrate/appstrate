@@ -12,7 +12,7 @@ import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ChatPage, type OpenDocument } from "@appstrate/module-chat/ui";
 import { buildScopingHeaders } from "../../lib/scoping-headers";
-import { useSidebarStore } from "../../stores/sidebar-store";
+import { useCollapsedGlobalSidebar } from "../../hooks/use-collapsed-global-sidebar";
 import { useDocumentDownload, useDocumentImageSrc } from "../../hooks/use-documents";
 import { useUploadClient } from "../../hooks/use-upload";
 import {
@@ -22,17 +22,7 @@ import {
 import { ConversationContextActions, ConversationSidebar } from "./conversation-sidebar";
 
 export function ChatModulePage() {
-  // Auto-collapse the global sidebar while in chat, restore on leave (same
-  // pattern as settings/profile). Transient setter leaves the user's persisted
-  // preference untouched.
-  useEffect(() => {
-    const { open, setOpenTransient } = useSidebarStore.getState();
-    const prev = open;
-    setOpenTransient(false);
-    return () => {
-      useSidebarStore.getState().setOpenTransient(prev);
-    };
-  }, []);
+  useCollapsedGlobalSidebar();
   // Conversation id lives in the URL (`/chat/:conversationId`) so a refresh or
   // deep-link restores the open conversation. `replace` keeps message/title
   // updates out of the back-history.
