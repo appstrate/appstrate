@@ -3,32 +3,17 @@
 /**
  * The list toolbar, through what it renders without being opened.
  *
- * It is a port of shadcn's `DataTableFacetedFilter` + `DataTableToolbar` (the
- * Tasks example), so what is worth pinning is the part that survives a restyle:
- * where the chosen values are shown, when the button starts counting instead of
- * naming, and when the reset appears. The menu itself is a Radix popover and
- * stays unmounted until a pointer opens it — there is no DOM here to open it
- * with, so the ticking rule is tested through `toggleValue` directly.
+ * The filter menus are Radix popovers and stay unmounted until a pointer opens
+ * them; there is no DOM here to open one with, so the ticking rule is tested
+ * through `toggleValue` directly. What IS testable without a pointer is the
+ * bar's own shape: which controls it puts on the line, and whether the filter
+ * row is showing.
  */
 
 import { describe, it, expect } from "bun:test";
 import { ListToolbar, type FilterSpec } from "../list-toolbar.tsx";
 import { toggleValue } from "../../lib/toggle-value.ts";
-import { render as renderNode } from "./run-fixture.tsx";
-
-/**
- * The bar as the reader sees it.
- *
- * The toolbar keeps an invisible copy of its left end at the END of its markup,
- * laid out only to be measured — it is what decides whether the filters fold
- * into one button. Everything before it is the real bar, so the suite cuts
- * there rather than counting every control twice.
- */
-function render(node: Parameters<typeof renderNode>[0]): string {
-  const html = renderNode(node);
-  const ghost = html.indexOf("data-measure");
-  return ghost === -1 ? html : html.slice(0, ghost);
-}
+import { render } from "./run-fixture.tsx";
 
 function filters(over: Partial<Record<"status" | "kind", string[]>> = {}): FilterSpec[] {
   return [
@@ -76,62 +61,62 @@ describe("ticking a value", () => {
 describe("with nothing filtered", () => {
   const html = render(<ListToolbar filters={filters()} />);
 
-  it("shows one button per dimension, and no reset", () => {
-    expect(html).toContain("Statut");
-    expect(html).toContain("Type");
+  it("keeps the filters behind their button, and the row shut", () => {
+    expect(html).toContain("Filtres");
+    expect(html).not.toContain("Statut");
+    expect(html).not.toContain("Type");
+  });
+
+  it("invites: the button is dashed and carries no count", () => {
+    expect(html).toContain("border-dashed");
+    expect(html).toContain('aria-expanded="false"');
+  });
+
+  it("offers no reset — there is nothing to reset", () => {
     expect(html).not.toContain("Réinitialiser");
   });
-
-  it("invites: dashed, with a plus", () => {
-    expect([...html.matchAll(/border-dashed/g)]).toHaveLength(2);
-    expect([...html.matchAll(/lucide-circle-plus/g)]).toHaveLength(2);
-  });
 });
 
-describe("a dimension that is filtering", () => {
-  const html = render(<ListToolbar filters={filters({ status: ["failed"] })} />);
+describe("with something already filtering", () => {
+  const html = render(
+    <ListToolbar filters={filters({ status: ["failed", "timeout"], kind: ["inline"] })} />,
+  );
 
-  it("stops inviting: the border closes and the plus goes with it", () => {
-    // Dashed AND `+` mean "an empty slot you can fill". Once it is filled the
-    // button is a statement, not an invitation — and dropping both saves the
-    // width exactly where width is scarce, since a filter with values is the
-    // wide one. Kind is still empty here, so exactly one of each remains.
-    expect([...html.matchAll(/border-dashed/g)]).toHaveLength(1);
-    expect([...html.matchAll(/lucide-circle-plus/g)]).toHaveLength(1);
-  });
-});
-
-describe("the chosen values", () => {
-  it("live inside the dimension's own button", () => {
-    // One place, not a second row repeating it — which is what two earlier
-    // versions of this toolbar did, in two different ways.
-    const html = render(<ListToolbar filters={filters({ status: ["failed"] })} />);
-    const button = html.slice(html.indexOf("Statut"), html.indexOf("Type"));
-    expect(button).toContain("échoué");
+  it("opens the row by itself", () => {
+    // A list you did not filter yourself — a link someone sent you — has to say
+    // why it is short, and a badge saying "3" does not say which three.
+    expect(html).toContain('aria-expanded="true"');
+    expect(html).toContain("Statut");
+    expect(html).toContain("Type");
   });
 
-  it("are named while there are few of them", () => {
-    const html = render(<ListToolbar filters={filters({ status: ["failed", "timeout"] })} />);
+  it("counts what is on, on the button", () => {
+    expect(html).toContain("Filtres");
+    expect(html).toMatch(/>3</);
+  });
+
+  it("stops inviting: the button's border closes", () => {
+    expect(html).not.toContain("border-dashed");
+  });
+
+  it("names the values on each dimension's own trigger", () => {
     expect(html).toContain("échoué");
     expect(html).toContain("timeout");
-    expect(html).not.toContain("sélectionnés");
+    expect(html).toContain("Inline");
   });
 
-  it("give way to a count once there are more", () => {
-    const html = render(
+  it("counts instead of naming past two", () => {
+    const many = render(
       <ListToolbar filters={filters({ status: ["failed", "timeout", "success"] })} />,
     );
-    expect(html).toContain("3 sélectionnés");
+    expect(many).toContain("3 sélectionnés");
   });
 });
 
 describe("the reset", () => {
-  it("appears as soon as anything is filtered, once for the whole row", () => {
+  it("shows in the filter row once something is on", () => {
     const html = render(
-      <ListToolbar
-        filters={filters({ status: ["failed"], kind: ["inline"] })}
-        onReset={() => {}}
-      />,
+      <ListToolbar filters={filters({ status: ["failed"] })} onReset={() => {}} />,
     );
     expect([...html.matchAll(/Réinitialiser/g)]).toHaveLength(1);
   });
@@ -140,22 +125,35 @@ describe("the reset", () => {
     // Deliberate: a missing reset is visible and harmless, where a reset that
     // loops over the filters looks right and clears only the last one. These
     // filters are URL parameters, and three `setSearchParams` in one tick all
-    // read the same committed location — the button cleared the status and
-    // left the scope and the kind exactly where they were.
+    // read the same committed location.
     const html = render(<ListToolbar filters={filters({ status: ["failed"] })} />);
     expect(html).not.toContain("Réinitialiser");
   });
 });
 
+describe("the search", () => {
+  it("stays on the bar, whatever the filters are doing", () => {
+    // It used to travel into the disclosure row with the filters, which was
+    // simply a bug: it is the one thing you type into, and it does not move.
+    const withRowOpen = render(
+      <ListToolbar
+        filters={filters({ status: ["failed"] })}
+        search={{ value: "", onChange: () => {}, placeholder: "Rechercher des runs…" }}
+      />,
+    );
+    const bar = withRowOpen.slice(0, withRowOpen.indexOf("Statut"));
+    expect(bar).toContain("Rechercher des runs…");
+  });
+});
+
 describe("the result count", () => {
-  it("prints the caller's words, after the last filter", () => {
+  it("prints the caller's words, at the end of the bar", () => {
     // The toolbar counts nothing itself: it serves runs, schedules and
     // packages, and one that formats "3 runs" for all of them would one day
     // say it about agents.
-    const html = render(<ListToolbar filters={filters({ status: ["failed"] })} count="3 runs" />);
+    const html = render(<ListToolbar filters={filters()} count="3 runs" />);
     expect(html).toContain("3 runs");
-    // At the END of the row: it describes what the filters before it produced.
-    expect(html.indexOf("3 runs")).toBeGreaterThan(html.lastIndexOf("Type"));
+    expect(html.indexOf("3 runs")).toBeLessThan(html.indexOf("Filtres"));
   });
 
   it("says nothing when the caller has nothing to say", () => {

@@ -1,58 +1,62 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The bar above a list, built the way shadcn builds it.
+ * The bar above a list.
  *
- * This is a port of `DataTableFacetedFilter` + `DataTableToolbar` from the
- * shadcn Tasks example (`apps/v4/app/(app)/examples/tasks/components/`), which
- * is the reference implementation for filtering a table in the design system
- * this app already uses. Two earlier versions of this file were inventions —
- * the value on the trigger AND a chip repeating it below (the same words
- * twice), then chips with "et"/"ou" spelled out between them (a control nobody
- * has ever seen). The convention here is not ours to invent.
+ * The controls are shadcn's, ported from the Tasks example
+ * (`apps/v4/app/(app)/examples/tasks/components/` in `shadcn-ui/ui`, live at
+ * <https://ui.shadcn.com/examples/tasks>): the faceted filter with its dashed
+ * trigger and its `Command` menu, the column menu, the reset. What differs is
+ * where the filters LIVE.
  *
- * What the pattern is:
+ * shadcn keeps them inline in the bar. That works for their example, which is
+ * a full-width page with two of them. Ours sit to the right of a 256px sidebar,
+ * a screen can have three, and their width depends on how many values are
+ * picked and how long the translations run — so the bar spent several rounds
+ * either wrapping (flexbox sends the LAST child down, which is the end that
+ * must not move) or shedding through a ladder of breakpoints, then measuring
+ * itself with a ghost row and a `ResizeObserver` to decide when to fold.
  *
- * - **A dashed outline button per dimension**, with a `+` and the dimension's
- *   name. Dashed and `+` mean "a filter you can add" — that is the affordance,
- *   and it is why the button reads as neutral when nothing is chosen. It is
- *   also why it is `bg-transparent shadow-none`: shadcn's `outline` paints
- *   `bg-background` — WHITE here, since our page canvas is its own `--canvas` —
- *   so the button came out as a white pill on grey and the dashes had nothing
- *   to be dashed against. Their outline does carry a shadow, but a `shadow-xs`
- *   under a solid white button; ours is a `shadow-sm` (one step heavier on
- *   Tailwind 4's scale) and it was falling from a button with nothing in it.
- *   A see-through control casts no shadow.
- * - **The chosen values live INSIDE that button**, as small badges after a
- *   vertical rule: up to two of them, then "N sélectionnés". One place, no
- *   second row, no duplication. When the bar is cramped the names go and a
- *   plain digit stays — a filter then costs a word and a number, which is what
- *   keeps three of them on one line.
+ * All of that is gone. **The filters live behind one button, and open a row of
+ * their own** under the bar, where wrapping is not an accident but the point.
+ * One layout at every width, nothing to measure.
  *
- *   That last switch is a CONTAINER query, not a viewport one. shadcn's is
- *   `lg:` because their example IS the page; ours sits to the right of a 256px
- *   sidebar inside a padded column, so a 1440px window leaves the bar about
- *   800px — past `lg`, and out of room. The question is how much space the BAR
- *   has, so the bar is the container.
- * - **The menu is a `Command`**: searchable, square checkboxes, several values
- *   at once, and a centred "Effacer ce filtre" at the bottom — THIS dimension,
- *   which is why it is not called what the row's button is called.
- * - **One "Réinitialiser ✕"** at the end of the row, once anything is filtered:
- *   the only ONE-click way back to the whole list, whatever is on. Everything
- *   else drops one dimension (the menu's own item) or one value (untick it).
- *   It is the CALLER's `onReset`, not a loop over the filters here, and that is
- *   not a style choice: these filters live in the URL, and calling three
- *   `setSearchParams` in one tick makes each of them compute from the same
- *   committed location, so the last one wins and the other two survive. The
- *   button cleared the status and left the scope and the kind exactly where
- *   they were. A reset has to be ONE update, and only the caller knows how to
- *   write it.
+ * What that costs, and what pays it back:
+ *
+ * - **A row you asked for is not a row that appeared.** The filters get a
+ *   dedicated line that pushes the table down, and they may take two of them.
+ * - **The row opens ITSELF when something is filtered.** A list you did not
+ *   filter yourself — a link someone sent you — has to say why it is short. An
+ *   icon with a badge says "three filters"; the open row says which three.
+ * - **The search never moves.** It is the one thing you type into, it stays at
+ *   the left of the bar at every width. (It used to travel into the disclosure
+ *   row with the filters, which was simply a bug.)
+ * - **The right end sheds words before icons** as the bar narrows: the count
+ *   goes first, then the labels on the filter and column buttons, then the
+ *   label on the page's own action — which the CALLER writes with `@…/bar`, the
+ *   container this bar names, so the whole row degrades together. No overflow
+ *   menu: shadcn hides its View button and keeps "Add task" whole, and the
+ *   control a screen exists to offer is the last thing that should need a
+ *   second click to find.
+ *
+ * Two rules inside the filter menus that were got wrong once each, and are
+ * worth keeping written down:
+ *
+ * - **A tick adds, an untick removes, and nothing else happens.** A version
+ *   that also collapsed "every value ticked" to "nothing ticked" was true of
+ *   the RESULTS and nonsense as an interaction: Kind has two values, so ticking
+ *   the second silently unticked the first, and Scope has one, so its only box
+ *   could never stay ticked at all.
+ * - **The reset is the CALLER's**, not a loop over the filters here. These
+ *   filters live in the URL, and three `setSearchParams` in one tick each
+ *   compute from the same committed location: the last wins and the others
+ *   survive. The button cleared the status and left the scope and the kind
+ *   where they were.
  *
  * And what the pattern deliberately does NOT do: write the operators. Values of
  * one dimension are alternatives, dimensions narrow each other — `(statut =
  * échoué OU timeout) ET (type = agent)` — and no faceted filter anywhere spells
- * that out, because the badges sitting inside one button and the buttons
- * sitting side by side already say it.
+ * that out.
  *
  * One piece of the original we still cannot have: the per-value counts in the
  * menu. shadcn reads them off the rows it holds
@@ -60,9 +64,9 @@
  * count would describe the page rather than the list.
  */
 
-import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
+import { Fragment, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { Check, LayoutGrid, PlusCircle, Rows3, Search, SlidersHorizontal, X } from "lucide-react";
+import { Check, Filter, LayoutGrid, PlusCircle, Rows3, SlidersHorizontal, X } from "lucide-react";
 import { cn } from "@appstrate/ui/cn";
 import type { ListView } from "@/stores/list-view-store";
 import { toggleValue } from "../lib/toggle-value";
@@ -120,9 +124,6 @@ export interface FilterSpec {
 /** Beyond this many, the button counts instead of naming. */
 const NAMED_VALUES = 2;
 
-/** The `gap-2` between the two ends, in pixels — the measurement has to allow for it. */
-const GAP = 8;
-
 function FacetedFilter({ filter }: { filter: FilterSpec }) {
   const { t } = useTranslation("common");
   const chosen = new Set(filter.values);
@@ -153,29 +154,24 @@ function FacetedFilter({ filter }: { filter: FilterSpec }) {
           {selected.length > 0 && (
             <>
               <Separator orientation="vertical" className="mx-1.5 h-4" />
-              <Badge
-                variant="secondary"
-                className="rounded-sm px-1 font-normal @3xl/filters:hidden"
-              >
-                {selected.length}
-              </Badge>
-              <div className="hidden gap-1 @3xl/filters:flex">
-                {selected.length > NAMED_VALUES ? (
-                  <Badge variant="secondary" className="rounded-sm px-1 font-normal">
-                    {t("toolbar.selected", { count: selected.length })}
+              {/* Named while there are few, counted beyond — shadcn's rule, and
+                  no breakpoint any more: in a row of their own these buttons
+                  may wrap, so they never have to shorten for want of space. */}
+              {selected.length > NAMED_VALUES ? (
+                <Badge variant="secondary" className="rounded-sm px-1 font-normal">
+                  {t("toolbar.selected", { count: selected.length })}
+                </Badge>
+              ) : (
+                selected.map((option) => (
+                  <Badge
+                    key={option.value}
+                    variant="secondary"
+                    className="rounded-sm px-1 font-normal"
+                  >
+                    {option.label}
                   </Badge>
-                ) : (
-                  selected.map((option) => (
-                    <Badge
-                      key={option.value}
-                      variant="secondary"
-                      className="rounded-sm px-1 font-normal"
-                    >
-                      {option.label}
-                    </Badge>
-                  ))
-                )}
-              </div>
+                ))
+              )}
             </>
           )}
         </Button>
@@ -336,8 +332,8 @@ export function ListToolbar({
   /**
    * The text filter that opens shadcn's own toolbar — present only where the
    * screen can answer it truthfully. A list held whole in the browser can
-   * (packages); a list paginated server-side cannot, because the box would
-   * search the fifteen rows on screen and call it a search.
+   * (packages); a list paginated server-side needs an endpoint that searches
+   * (runs got a `q`), or the box would search the fifteen rows on screen.
    */
   search?: SearchSpec;
   filters: FilterSpec[];
@@ -360,7 +356,7 @@ export function ListToolbar({
   view?: ListView;
   onViewChange?: (view: ListView) => void;
   /**
-   * What the screen does, at the right end of the row beside the view controls.
+   * What the screen does, at the right end of the row.
    *
    * On a LIST screen this is where an action belongs, not in `PageHeader` —
    * shadcn puts "Add task" exactly here, and it means every table screen keeps
@@ -370,175 +366,89 @@ export function ListToolbar({
   actions?: ReactNode;
 }) {
   const { t } = useTranslation("common");
-  const isFiltered = filters.some((filter) => filter.values.length > 0);
-
-  const barRef = useRef<HTMLDivElement>(null);
-  const ghostRef = useRef<HTMLDivElement>(null);
-  const endRef = useRef<HTMLDivElement>(null);
-  const [collapsed, setCollapsed] = useState(false);
-  const [open, setOpen] = useState(false);
-
-  /**
-   * Does the left end still fit on the line?
-   *
-   * MEASURED, not guessed at a breakpoint, because the answer depends on things
-   * no breakpoint knows: how many filters this screen has (three on runs, none
-   * on schedules), how long their labels are once translated, and how wide the
-   * page's own actions turned out. A threshold tuned for the densest bar would
-   * collapse a two-control bar with 400px of empty space beside it.
-   *
-   * The measurement is taken on a GHOST — the same controls, laid out and
-   * invisible — so it reports the width the expanded row WOULD take even while
-   * the collapsed one is on screen. Measuring the real row instead would read
-   * "it fits" the moment it collapsed, expand, overflow, collapse, forever.
-   */
-  useEffect(() => {
-    const bar = barRef.current;
-    const ghost = ghostRef.current;
-    const end = endRef.current;
-    if (!bar || !ghost || !end) return;
-
-    const observer = new ResizeObserver(() => {
-      // `ResizeObserver` fires once on observe, so the first measurement lands
-      // here rather than in this effect's body — where setting state is what
-      // the Rules-of-React gate rejects.
-      const available = bar.clientWidth - end.offsetWidth - GAP;
-      setCollapsed(ghost.scrollWidth > available);
-    });
-    observer.observe(bar);
-    observer.observe(ghost);
-    return () => observer.disconnect();
-  }, []);
-
-  const searchField = search && (
-    <Input
-      value={search.value}
-      onChange={(event) => search.onChange(event.target.value)}
-      placeholder={search.placeholder}
-      // WHITE, unlike the filters beside it, and the difference is the point: a
-      // field is a surface you type into, so it takes the app's component
-      // surface like every other input. The filters are see-through because a
-      // dashed outline over the canvas is what says "empty slot". Our `Input`
-      // is `bg-transparent` by default, which on the grey canvas made the box
-      // grey inside.
-      className="bg-background h-8 w-[150px] @4xl/bar:w-[250px]"
-    />
-  );
-
-  const filterButtons = filters.map((filter) => (
-    <Fragment key={filter.id}>
-      <FacetedFilter filter={filter} />
-    </Fragment>
-  ));
-
-  const resetButton = isFiltered && onReset && (
-    <Button variant="ghost" size="sm" className="h-8 gap-1.5 px-2.5" onClick={onReset}>
-      <X />
-      <span className="hidden @xl/bar:inline">{t("toolbar.reset")}</span>
-    </Button>
-  );
-
   const activeCount = filters.reduce((total, filter) => total + filter.values.length, 0);
 
-  return (
-    // NEVER wraps. Not the row, not either end. Everything that would have gone
-    // to a second line is handled by shedding (the container queries below) and
-    // then by folding the left end into one button that opens a row of its own
-    // — a second line the reader ASKED for, which is a different thing from one
-    // that appeared because the window moved.
-    <div ref={barRef} className="@container/bar relative mb-4 space-y-2">
-      <div className="flex items-center gap-2">
-        {collapsed ? (
-          <div className="flex min-w-0 flex-1 items-center gap-2">
-            {search && (
-              <Button
-                variant="outline"
-                size="sm"
-                aria-label={search.placeholder}
-                aria-expanded={open}
-                className="h-8 bg-transparent px-2.5"
-                onClick={() => setOpen((wasOpen) => !wasOpen)}
-              >
-                <Search />
-              </Button>
-            )}
-            {filters.length > 0 && (
-              <Button
-                variant="outline"
-                size="sm"
-                aria-expanded={open}
-                className={cn(
-                  "h-8 gap-1.5 bg-transparent px-2.5",
-                  activeCount === 0 && "border-dashed",
-                )}
-                onClick={() => setOpen((wasOpen) => !wasOpen)}
-              >
-                {activeCount === 0 && <PlusCircle />}
-                {t("toolbar.filters")}
-                {activeCount > 0 && (
-                  <>
-                    <Separator orientation="vertical" className="mx-1.5 h-4" />
-                    <Badge variant="secondary" className="rounded-sm px-1 font-normal">
-                      {activeCount}
-                    </Badge>
-                  </>
-                )}
-              </Button>
-            )}
-          </div>
-        ) : (
-          // `@container/filters`: the filters shorten themselves against the
-          // room THIS end has, not the window's.
-          <div className="@container/filters flex min-w-0 flex-1 items-center gap-2">
-            {searchField}
-            {filterButtons}
-            {resetButton}
-          </div>
-        )}
+  // Open when something is already filtering: a list you did not filter
+  // yourself has to say why it is short, and a badge saying "3" does not. Only
+  // the FIRST render decides — closing the row afterwards is the reader's call
+  // and is not undone by the next keystroke.
+  const [open, setOpen] = useState(() => activeCount > 0);
 
-        {/* Never folds, never wraps. What it CAN do as the bar narrows is shed
-            what is informative before what is operative, in that order: the
-            count goes first, then the words on the column menu, then the words
-            on the page's own action — which the CALLER writes, using `@…/bar`
-            on its label, so the whole row degrades together.
-            What does NOT happen is an overflow menu. shadcn hides its View
-            button and keeps "Add task" whole: the control a screen exists to
-            offer is the last thing that should need a second click to find. Once
-            everything here is an icon it is about 150px, which fits a phone. */}
-        <div ref={endRef} className="flex shrink-0 items-center gap-2">
+  return (
+    <div className="@container/bar mb-4 space-y-2">
+      <div className="flex items-center gap-2">
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          {search && (
+            <Input
+              value={search.value}
+              onChange={(event) => search.onChange(event.target.value)}
+              placeholder={search.placeholder}
+              // WHITE, unlike the buttons beside it, and the difference is the
+              // point: a field is a surface you type into, so it takes the
+              // app's component surface like every other input. Our `Input` is
+              // `bg-transparent` by default, which on the grey canvas made the
+              // box grey inside.
+              className="bg-background h-8 w-full max-w-[250px]"
+            />
+          )}
+        </div>
+
+        <div className="flex shrink-0 items-center gap-2">
           {count !== undefined && (
             <span className="text-muted-foreground hidden text-sm @2xl/bar:inline">{count}</span>
           )}
+
+          {filters.length > 0 && (
+            <Button
+              variant="outline"
+              size="sm"
+              aria-expanded={open}
+              title={t("toolbar.filters")}
+              className={cn(
+                // `px-2.5 gap-1.5` is what shadcn's own `size="sm"` resolves to
+                // for a button carrying an icon (`has-[>svg]:px-2.5`); ours is a
+                // flat `px-3 gap-2`.
+                "h-8 gap-1.5 bg-transparent px-2.5 shadow-none",
+                // Dashed means "an empty slot you can fill". Once something is
+                // in it the button is a statement, not an invitation.
+                activeCount === 0 && "border-dashed",
+              )}
+              onClick={() => setOpen((wasOpen) => !wasOpen)}
+            >
+              <Filter />
+              <span className="hidden @xl/bar:inline">{t("toolbar.filters")}</span>
+              {activeCount > 0 && (
+                <Badge variant="secondary" className="rounded-sm px-1 font-normal">
+                  {activeCount}
+                </Badge>
+              )}
+            </Button>
+          )}
+
           {columns && <ColumnsMenu columns={columns} />}
           {view && onViewChange && <ViewToggle view={view} onChange={onViewChange} />}
           {actions}
         </div>
       </div>
 
-      {/* The row the reader asked for. */}
-      {collapsed && open && (
-        <div className="@container/filters flex flex-wrap items-center gap-2">
-          {searchField}
-          {filterButtons}
-          {resetButton}
+      {/* The filters' own line. It may take two — that is what a dedicated row
+          is for, and it is the difference between a line you opened and a line
+          that appeared because the window moved. */}
+      {open && filters.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2">
+          {filters.map((filter) => (
+            <Fragment key={filter.id}>
+              <FacetedFilter filter={filter} />
+            </Fragment>
+          ))}
+          {activeCount > 0 && onReset && (
+            <Button variant="ghost" size="sm" className="h-8 gap-1.5 px-2.5" onClick={onReset}>
+              <X />
+              {t("toolbar.reset")}
+            </Button>
+          )}
         </div>
       )}
-
-      {/* The ghost: what the expanded left end WOULD measure, laid out and
-          invisible, so the decision to fold does not depend on its own outcome.
-          Last in the DOM and out of flow, so it costs nothing to anything above
-          — including a test, which can cut the markup here and read the bar the
-          reader sees. */}
-      <div
-        ref={ghostRef}
-        aria-hidden
-        data-measure=""
-        className="pointer-events-none invisible absolute top-0 left-0 flex w-max items-center gap-2"
-      >
-        {searchField}
-        {filterButtons}
-        {resetButton}
-      </div>
     </div>
   );
 }
