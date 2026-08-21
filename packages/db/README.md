@@ -29,6 +29,21 @@ bun run db:generate   # Generate migration from schema changes
 bun run db:migrate    # Apply pending migrations
 ```
 
+## Index drift
+
+`drizzle/0000_init.sql` is a squash, and any database created before it — production — never ran
+it. An index the squash introduced therefore exists in the schema and in every fresh database while
+being absent there (issue #1182 found two). Before any `DROP INDEX`, verify the surviving index
+against the **live** database; the TS schema and `0000_init.sql` are not evidence.
+
+```sh
+DATABASE_URL=postgres://… bun scripts/check-index-drift.ts
+```
+
+Diffs the latest snapshot's declared indexes against `pg_indexes`. Exits 1 on a declared-but-absent
+index; extra indexes in the database (primary-key and unique-constraint backing indexes) are
+reported for information only.
+
 ## Dependencies
 
 - `drizzle-orm` + `postgres` — ORM and PostgreSQL driver

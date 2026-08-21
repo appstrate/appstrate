@@ -7,8 +7,10 @@
     "verify-module-contract.ts",
     "verify-package-resolves.ts",
     "check-consumer-versions.ts",
+    "check-index-drift.ts",
     "lib/config-to-input.ts",
     "test/check-consumer-versions.test.ts",
+    "test/check-index-drift.test.ts",
     "test/config-to-input.test.ts"
   ]
 }
