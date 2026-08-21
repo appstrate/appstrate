@@ -2,49 +2,68 @@
 
 /**
  * Tests for the run command's console EventSinks (JSONL + human).
- * Captures stdout/stderr writes via temporary patches — the sinks use
- * raw process.stdout/stderr.write so we intercept at that layer.
+ *
+ * Output is read back through the sink's own `writeStdout` / `writeStderr`
+ * injection points — never by reassigning the global `process.stdout.write`
+ * / `process.stderr.write`. That is issue #1180: `bun test` runs every
+ * package in one process, so a buffer installed on a global stream also
+ * collects writes from concurrent suites, and `expect(...).toBe("")` becomes
+ * a coin flip that names an innocent test when it fails. The buffers below
+ * belong to exactly one sink, so what they hold is evidence about that sink
+ * and nothing else.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { describe, it, expect, beforeEach } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { createConsoleSink } from "../src/commands/run/sink.ts";
+import type { EventSink } from "@appstrate/afps-runtime/interfaces";
 import type { RunEvent } from "@appstrate/afps-runtime/types";
 import type { RunResult } from "@appstrate/afps-runtime/runner";
 
-interface CapturedStreams {
-  stdout: string;
-  stderr: string;
-  restore: () => void;
+/**
+ * `SinkOptions` is intentionally not exported from `sink.ts` (nothing outside
+ * needs to name it), so derive it from the factory instead of duplicating the
+ * shape here — it then tracks any future option for free.
+ */
+type SinkOptions = NonNullable<Parameters<typeof createConsoleSink>[0]>;
+
+interface MemoryStreams {
+  /** Everything this sink wrote to stdout, in write order. */
+  readonly stdout: string;
+  /** Everything this sink wrote to stderr, in write order. */
+  readonly stderr: string;
+  /**
+   * Build a sink wired to these buffers. Takes the sink's own options so a
+   * test reads exactly as it did against `createConsoleSink` — only the
+   * writers are supplied for it.
+   */
+  sink(opts?: Omit<SinkOptions, "writeStdout" | "writeStderr">): EventSink;
 }
 
-function captureStreams(): CapturedStreams {
-  const origOut = process.stdout.write.bind(process.stdout);
-  const origErr = process.stderr.write.bind(process.stderr);
-  let stdout = "";
-  let stderr = "";
-  (process.stdout as unknown as { write: (c: string | Uint8Array) => boolean }).write = (c) => {
-    stdout += typeof c === "string" ? c : new TextDecoder().decode(c);
-    return true;
-  };
-  (process.stderr as unknown as { write: (c: string | Uint8Array) => boolean }).write = (c) => {
-    stderr += typeof c === "string" ? c : new TextDecoder().decode(c);
-    return true;
-  };
+function memoryStreams(): MemoryStreams {
+  const out: string[] = [];
+  const err: string[] = [];
   return {
     get stdout() {
-      return stdout;
+      return out.join("");
     },
     get stderr() {
-      return stderr;
+      return err.join("");
     },
-    restore() {
-      (process.stdout as unknown as { write: typeof origOut }).write = origOut;
-      (process.stderr as unknown as { write: typeof origErr }).write = origErr;
+    sink(opts = {}) {
+      return createConsoleSink({
+        ...opts,
+        writeStdout: (chunk) => {
+          out.push(chunk);
+        },
+        writeStderr: (chunk) => {
+          err.push(chunk);
+        },
+      });
     },
-  } as CapturedStreams;
+  };
 }
 
 const RUN_ID = "run_sink_test";
@@ -62,14 +81,13 @@ function emptyResult(): RunResult {
 }
 
 describe("createConsoleSink — JSONL mode", () => {
-  let streams: CapturedStreams;
+  let streams: MemoryStreams;
   beforeEach(() => {
-    streams = captureStreams();
+    streams = memoryStreams();
   });
-  afterEach(() => streams.restore());
 
   it("emits one JSON line per event", async () => {
-    const sink = createConsoleSink({ json: true });
+    const sink = streams.sink({ json: true });
     await sink.handle(progressEvent("hello"));
     await sink.handle(progressEvent("world"));
 
@@ -83,7 +101,7 @@ describe("createConsoleSink — JSONL mode", () => {
   });
 
   it("emits a terminal appstrate.finalize envelope on finalize", async () => {
-    const sink = createConsoleSink({ json: true });
+    const sink = streams.sink({ json: true });
     const result = emptyResult();
     await sink.finalize(result);
 
@@ -97,7 +115,7 @@ describe("createConsoleSink — JSONL mode", () => {
   it("writes final result to outputPath when provided", async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), "sink-test-"));
     const out = path.join(dir, "result.json");
-    const sink = createConsoleSink({ json: true, outputPath: out });
+    const sink = streams.sink({ json: true, outputPath: out });
     await sink.finalize({ ...emptyResult(), output: { hello: true } });
     const read = await fs.readFile(out, "utf8");
     expect(read).toContain('"hello": true');
@@ -106,14 +124,13 @@ describe("createConsoleSink — JSONL mode", () => {
 });
 
 describe("createConsoleSink — human mode", () => {
-  let streams: CapturedStreams;
+  let streams: MemoryStreams;
   beforeEach(() => {
-    streams = captureStreams();
+    streams = memoryStreams();
   });
-  afterEach(() => streams.restore());
 
   it("writes progress text to stdout", async () => {
-    const sink = createConsoleSink({});
+    const sink = streams.sink({});
     await sink.handle(progressEvent("doing stuff"));
     expect(streams.stdout).toContain("doing stuff");
   });
@@ -121,7 +138,7 @@ describe("createConsoleSink — human mode", () => {
   // The `report` runtime tool is gone; a stale emitter's event falls into the
   // sink's quiet default branch instead of printing anything.
   it("prints nothing for the retired report.appended event", async () => {
-    const sink = createConsoleSink({});
+    const sink = streams.sink({});
     await sink.handle({
       type: "report.appended",
       timestamp: 0,
@@ -132,13 +149,13 @@ describe("createConsoleSink — human mode", () => {
   });
 
   it("writes tool progress with tool name on stdout", async () => {
-    const sink = createConsoleSink({});
+    const sink = streams.sink({});
     await sink.handle(progressEvent("Tool: read_file", { tool: "read_file" }));
     expect(streams.stdout).toContain("read_file");
   });
 
   it("writes args line when start event carries args (normal verbosity)", async () => {
-    const sink = createConsoleSink({});
+    const sink = streams.sink({});
     await sink.handle(
       progressEvent("Tool: read_file", {
         tool: "read_file",
@@ -152,7 +169,7 @@ describe("createConsoleSink — human mode", () => {
   });
 
   it("truncates args at the compact limit (200 chars)", async () => {
-    const sink = createConsoleSink({});
+    const sink = streams.sink({});
     await sink.handle(progressEvent("Tool: t", { tool: "t", args: { data: "x".repeat(500) } }));
     // The truncation marker '...' must appear, and the line must not
     // contain the full 500-char string.
@@ -161,7 +178,7 @@ describe("createConsoleSink — human mode", () => {
   });
 
   it("writes a result line on tool_execution_end (success)", async () => {
-    const sink = createConsoleSink({});
+    const sink = streams.sink({});
     await sink.handle(
       progressEvent("Tool result: bash", {
         tool: "bash",
@@ -175,7 +192,7 @@ describe("createConsoleSink — human mode", () => {
   });
 
   it("writes a result line with ✗ glyph on tool error", async () => {
-    const sink = createConsoleSink({});
+    const sink = streams.sink({});
     await sink.handle(
       progressEvent("Tool error: bash", {
         tool: "bash",
@@ -189,7 +206,7 @@ describe("createConsoleSink — human mode", () => {
   });
 
   it("collapses multi-line results to a single line in normal mode", async () => {
-    const sink = createConsoleSink({});
+    const sink = streams.sink({});
     await sink.handle(
       progressEvent("Tool result: bash", {
         tool: "bash",
@@ -206,7 +223,7 @@ describe("createConsoleSink — human mode", () => {
   });
 
   it("preserves multi-line results in verbose mode (indented)", async () => {
-    const sink = createConsoleSink({ verbosity: "verbose" });
+    const sink = streams.sink({ verbosity: "verbose" });
     await sink.handle(
       progressEvent("Tool result: bash", {
         tool: "bash",
@@ -221,7 +238,7 @@ describe("createConsoleSink — human mode", () => {
   });
 
   it("pretty-prints args as multi-line JSON in verbose mode", async () => {
-    const sink = createConsoleSink({ verbosity: "verbose" });
+    const sink = streams.sink({ verbosity: "verbose" });
     await sink.handle(
       progressEvent("Tool: read_file", {
         tool: "read_file",
@@ -235,7 +252,7 @@ describe("createConsoleSink — human mode", () => {
   });
 
   it("suppresses tool name, args, and result in quiet mode", async () => {
-    const sink = createConsoleSink({ verbosity: "quiet" });
+    const sink = streams.sink({ verbosity: "quiet" });
     await sink.handle(
       progressEvent("Tool: read_file", {
         tool: "read_file",
@@ -253,7 +270,7 @@ describe("createConsoleSink — human mode", () => {
   });
 
   it("quiet mode still routes appstrate.error to stderr", async () => {
-    const sink = createConsoleSink({ verbosity: "quiet" });
+    const sink = streams.sink({ verbosity: "quiet" });
     await sink.handle({
       type: "appstrate.error",
       timestamp: 0,
@@ -264,14 +281,14 @@ describe("createConsoleSink — human mode", () => {
   });
 
   it("renders tool with no args and no result as just the name", async () => {
-    const sink = createConsoleSink({});
+    const sink = streams.sink({});
     await sink.handle(progressEvent("Tool: ping", { tool: "ping" }));
     expect(streams.stdout).toContain("→ tool: ping");
     expect(streams.stdout.split("\n").filter(Boolean)).toHaveLength(1);
   });
 
   it("renders the bridge's truncation marker as a human-readable size", async () => {
-    const sink = createConsoleSink({});
+    const sink = streams.sink({});
     await sink.handle(
       progressEvent("Tool result: read_file", {
         tool: "read_file",
@@ -289,7 +306,7 @@ describe("createConsoleSink — human mode", () => {
     // terminal `[run failed]` is the only fatal indicator. Using ✗
     // here would visually contradict a successful finalize that
     // follows.
-    const sink = createConsoleSink({});
+    const sink = streams.sink({});
     await sink.handle({
       type: "appstrate.error",
       timestamp: 0,
@@ -303,7 +320,7 @@ describe("createConsoleSink — human mode", () => {
   });
 
   it("renders MCP envelope results without leaking the JSON framing", async () => {
-    const sink = createConsoleSink({});
+    const sink = streams.sink({});
     await sink.handle(
       progressEvent("Tool result: log", {
         tool: "log",
@@ -317,7 +334,7 @@ describe("createConsoleSink — human mode", () => {
   });
 
   it("renders the bridge's truncation marker in human units", async () => {
-    const sink = createConsoleSink({});
+    const sink = streams.sink({});
     await sink.handle(
       progressEvent("Tool result: read_file", {
         tool: "read_file",
@@ -342,7 +359,7 @@ describe("createConsoleSink — human mode", () => {
   });
 
   it("shows short toolCallId suffix in normal mode for parallel correlation", async () => {
-    const sink = createConsoleSink({});
+    const sink = streams.sink({});
     await sink.handle(
       progressEvent("Tool: bash", {
         tool: "bash",
@@ -358,7 +375,7 @@ describe("createConsoleSink — human mode", () => {
   });
 
   it("omits toolCallId suffix entirely when Pi did not forward one", async () => {
-    const sink = createConsoleSink({});
+    const sink = streams.sink({});
     await sink.handle(
       progressEvent("Tool: bash", {
         tool: "bash",
@@ -370,7 +387,7 @@ describe("createConsoleSink — human mode", () => {
   });
 
   it("appends short toolCallId suffix (last 8 chars) in verbose mode", async () => {
-    const sink = createConsoleSink({ verbosity: "verbose" });
+    const sink = streams.sink({ verbosity: "verbose" });
     await sink.handle(
       progressEvent("Tool: bash", {
         tool: "bash",
@@ -385,7 +402,7 @@ describe("createConsoleSink — human mode", () => {
   });
 
   it("matches start and end events via toolCallId in verbose mode", async () => {
-    const sink = createConsoleSink({ verbosity: "verbose" });
+    const sink = streams.sink({ verbosity: "verbose" });
     await sink.handle(
       progressEvent("Tool: api_call", {
         tool: "api_call",
@@ -414,20 +431,20 @@ describe("createConsoleSink — human mode", () => {
   });
 
   it("prints run complete on successful finalize", async () => {
-    const sink = createConsoleSink({});
+    const sink = streams.sink({});
     await sink.finalize(emptyResult());
     expect(streams.stdout).toContain("run complete");
   });
 
   it("prints failure line when result has error", async () => {
-    const sink = createConsoleSink({});
+    const sink = streams.sink({});
     await sink.finalize({ ...emptyResult(), error: { message: "bad" } });
     expect(streams.stdout).toContain("bad");
     expect(streams.stdout).toContain("failed");
   });
 
   it("formats metric with token counts + cost", async () => {
-    const sink = createConsoleSink({});
+    const sink = streams.sink({});
     await sink.handle({
       type: "appstrate.metric",
       timestamp: 0,
@@ -441,7 +458,7 @@ describe("createConsoleSink — human mode", () => {
   });
 
   it("remains silent on unmapped events (no stdout, no stderr)", async () => {
-    const sink = createConsoleSink({});
+    const sink = streams.sink({});
     await sink.handle({
       type: "@my-org/audit.logged",
       timestamp: 0,
@@ -464,70 +481,74 @@ describe("createConsoleSink — human mode", () => {
 // bridge would re-aspirate them, dispatching every event twice. The
 // `writeStdout` injection lets `run.ts` route console output through
 // `bridge.writeRaw`, bypassing the interceptor.
+//
+// These three tests wire the two writers by hand rather than through
+// `memoryStreams()` — the injection itself is the subject here, so it has to
+// be visible at the call site. Each also pins the *neighbouring* channel:
+// a chunk that lands on the wrong stream would corrupt the JSONL contract
+// (stderr text inside `--json` output) or hide an advisory error in the
+// machine-readable stream.
 
 describe("createConsoleSink — writeStdout injection", () => {
   it("routes JSONL emissions through the injected writer (not process.stdout)", async () => {
     const captured: string[] = [];
-    const streams = captureStreams();
-    try {
-      const sink = createConsoleSink({
-        json: true,
-        writeStdout: (chunk) => {
-          captured.push(chunk);
-        },
-      });
-      await sink.handle(progressEvent("hello"));
-      await sink.finalize(emptyResult());
-      // Two writes captured by the injected writer; nothing leaked to
-      // the actual process.stdout (the captureStreams patch confirms it).
-      expect(captured).toHaveLength(2);
-      expect(captured[0]!.includes('"hello"')).toBe(true);
-      expect(captured[1]!.includes("appstrate.finalize")).toBe(true);
-      expect(streams.stdout).toBe("");
-    } finally {
-      streams.restore();
-    }
+    const stderrChunks: string[] = [];
+    const sink = createConsoleSink({
+      json: true,
+      writeStdout: (chunk) => {
+        captured.push(chunk);
+      },
+      writeStderr: (chunk) => {
+        stderrChunks.push(chunk);
+      },
+    });
+    await sink.handle(progressEvent("hello"));
+    await sink.finalize(emptyResult());
+    // Exactly two writes, both on the injected stdout writer: a third
+    // (or a missing) chunk is what a re-aspirating bridge would produce.
+    expect(captured).toHaveLength(2);
+    expect(captured[0]!.includes('"hello"')).toBe(true);
+    expect(captured[1]!.includes("appstrate.finalize")).toBe(true);
+    expect(stderrChunks.join("")).toBe("");
   });
 
   it("routes human-mode emissions through the injected writer", async () => {
     const captured: string[] = [];
-    const streams = captureStreams();
-    try {
-      const sink = createConsoleSink({
-        writeStdout: (chunk) => {
-          captured.push(chunk);
-        },
-      });
-      await sink.handle(progressEvent("doing stuff"));
-      await sink.finalize(emptyResult());
-      expect(captured.join("")).toContain("doing stuff");
-      expect(captured.join("")).toContain("run complete");
-      expect(streams.stdout).toBe("");
-    } finally {
-      streams.restore();
-    }
+    const stderrChunks: string[] = [];
+    const sink = createConsoleSink({
+      writeStdout: (chunk) => {
+        captured.push(chunk);
+      },
+      writeStderr: (chunk) => {
+        stderrChunks.push(chunk);
+      },
+    });
+    await sink.handle(progressEvent("doing stuff"));
+    await sink.finalize(emptyResult());
+    expect(captured.join("")).toContain("doing stuff");
+    expect(captured.join("")).toContain("run complete");
+    expect(stderrChunks.join("")).toBe("");
   });
 
-  it("keeps appstrate.error on real stderr (writeStdout is stdout-only)", async () => {
+  it("keeps appstrate.error on stderr (writeStdout is stdout-only)", async () => {
     const captured: string[] = [];
-    const streams = captureStreams();
-    try {
-      const sink = createConsoleSink({
-        writeStdout: (chunk) => {
-          captured.push(chunk);
-        },
-      });
-      await sink.handle({
-        type: "appstrate.error",
-        timestamp: 0,
-        runId: RUN_ID,
-        message: "boom",
-      } as RunEvent);
-      // The injected writer is stdout-scoped; errors still hit real stderr.
-      expect(captured).toHaveLength(0);
-      expect(streams.stderr).toContain("boom");
-    } finally {
-      streams.restore();
-    }
+    const stderrChunks: string[] = [];
+    const sink = createConsoleSink({
+      writeStdout: (chunk) => {
+        captured.push(chunk);
+      },
+      writeStderr: (chunk) => {
+        stderrChunks.push(chunk);
+      },
+    });
+    await sink.handle({
+      type: "appstrate.error",
+      timestamp: 0,
+      runId: RUN_ID,
+      message: "boom",
+    } as RunEvent);
+    // The stdout writer is stdout-scoped; errors take the stderr writer.
+    expect(captured).toHaveLength(0);
+    expect(stderrChunks.join("")).toContain("boom");
   });
 });
