@@ -569,6 +569,18 @@ On how the work goes:
   over a table row means every native `title` under it stops firing. Raise the
   titled element with `relative z-10`; raising the whole cell instead makes the
   column dead to clicks.
+- **`@/…` resolves at typecheck but NOT under `bun test` from the root.** A
+  type-only import through the alias is erased and never notices; the day
+  something imports a VALUE through it, the whole suite fails on a module that
+  typechecks fine. Relative paths for runtime imports in components, like every
+  other lib import there.
+- **A patch that does not match applies NOTHING, silently.** Prettier reformats
+  on every write, so a string copied from an earlier read stops matching, and a
+  scripted edit reports success having changed nothing. It cost three passes of
+  doc updates that were never written. Re-read the target, or assert the match.
+- **The MCP browser belongs to whoever opened it.** Killing `chrome-profile-beta`
+  to clear a stale lock closes the browser of another live session. Ask before,
+  or work without it.
 - **Vite does not hot-reload an edit inside `packages/`** the way it does one in
   `apps/web`. A behaviour change in `packages/ui` that "did not work" needs a
   hard reload before you believe it.
@@ -617,25 +629,43 @@ So the strategy the reference itself suggests:
    list, `empty` found the onboarding bounce, `error` finds the banner
    placements. A pattern applied to six screens from its nominal state alone is
    six screens to fix.
-5. **Order**: the table pattern (Runs first, most looked at) — DONE — then the
-   list toolbar and the reference empty state — DONE — then the remaining
-   column sets: schedules DONE, packages (agents, skills, MCP servers) DONE
-   behind the `view-toggle`, integrations left. Then run detail (`rd-*`, the biggest single screen), then the command
-   palette (it gives the header's search icon its reason to exist), then Usage
-   — the only screen with no reference at all, which is exactly why it is not
-   first.
+5. **Order.** DONE: the table pattern (`dt-*`), the list bar (`lt-*`), the
+   reference empty state (`empty-*`), and three column sets — runs, schedules,
+   packages (agents + skills + MCP servers, behind the `view-toggle`). LEFT, in
+   order: **integrations** (its own page, its own tabs, and its catalogue is
+   already whole in the browser, which is why a client-side search lands there
+   next), then **run detail** (`rd-*`, the biggest single screen and untouched),
+   then the **command palette** (`cmdk-*`, which gives the header's search icon
+   its reason to exist), then **Usage** — the only screen with no reference at
+   all, which is exactly why it is not first.
 6. **Where the reference is silent, derive rather than invent**: grey canvas +
    white cards, the control IS the setting, excursion → modal / destination →
    page. Those four decide most cases on their own.
 7. **When the reference contradicts what the screen shows, the screen wins** —
    it already happened once, with `:root` against the saved state.
-8. **Merge in slices.** The branch is 31 commits and the shell is independent
-   of the screens. A shell-only PR can land before the first table exists;
+8. **Merge in slices.** The branch is past fifty commits and the shell is
+   independent of the screens. A shell-only PR can land before the first table exists;
    keeping everything for one big-bang merge makes the review worse and the
    revert coarser.
 
 ## Open
 
+- **NOTHING SINCE THE TABLE HAS BEEN SEEN IN A BROWSER.** The toolbar was
+  rebuilt several times over — filters behind a disclosure, the two button
+  treatments, the view toggle moved and restyled, the count moved to a footer,
+  the icon-only degradation — and the lab was unavailable for all of it (the
+  MCP browser belonged to another session). Tests and the gate are green, which
+  says nothing about what it looks like. **First thing on resuming: open
+  `/runs`, `/schedules`, `/agents` in the lab, on all four scenarios, and at a
+  narrow width.** Specifically to check: the container-query thresholds on the
+  bar (`@xl/bar` for the utility labels, `@lg/bar` for the action labels) were
+  chosen on paper.
+- **The API gained three things** for the toolbar, all tested: `GET /api/runs`
+  takes several statuses at once (`?status=failed,timeout` → `IN (…)`), a free
+  text `?q=` (agent scope and name, the error, and the run number when the query
+  is digits — substring, no index, `pg_trgm` the day a workspace holds hundreds
+  of thousands of runs), and `?user=me` composes with every other filter
+  instead of taking a separate path.
 - **`?user=me` combines now** (`listGlobalRuns({ mine })`). It used to take a
   separate query that dropped `kind`, `status` and the date range on the floor,
   so the screen showed two filters as active and the server applied one — the
@@ -668,6 +698,16 @@ So the strategy the reference itself suggests:
   not the column, it is validation, a resized variant, deletion with the org,
   and the settings screen.
 - **Library browsing** (skills, integrations, templates) reuses `PanelDialog`.
+- **The page-action rule is applied to LIST screens only.** On a screen with a
+  list, the action sits at the right end of the bar; a screen without one keeps
+  it at title height in `PageHeader`. Olivier's ask is that it be the same place
+  either way — top-right of the body, whether the page holds a table or free
+  content. Getting there means the bar (or something bar-shaped) on every screen
+  that has an action, which is a sweep of the detail and settings pages, done on
+  purpose rather than in passing.
+- **Integrations is the one list still card-only**, and the one place a real
+  `lt-search` can land first: that page already filters its catalogue
+  client-side because it holds the whole thing.
 
 ## Chat
 
