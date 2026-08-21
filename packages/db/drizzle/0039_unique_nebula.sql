@@ -3,11 +3,30 @@
 -- Forward-only and data-safe: DROP INDEX touches no rows, needs no backfill,
 -- and breaks nothing that already exists. No column or table is altered here.
 --
+-- PRODUCTION NOTE on the FIRST ENTRY of the table below.
+-- `idx_runs_package_started` is declared in `src/schema/runs.ts` and created
+-- in `0000_init.sql`, but it does NOT exist on the production database, and
+-- neither does `idx_runs_schedule_id` — the two adjacent lines 633-634 of
+-- that same file.
+-- They are the only two of 132 declared indexes missing there. 0000_init is a
+-- squash, and production predates it, so anything introduced *by* the squash
+-- rather than by a forward migration never reached a database created before
+-- it. That drift is pre-existing and independent of this migration; it is
+-- recorded here because it makes the stated justification wrong for the one
+-- database that matters.
+--
+-- The drop is safe there anyway, and this was checked against production rather
+-- than argued: `idx_runs_package_run_number` on (package_id, run_number) is a
+-- non-partial leading-prefix cover, and `EXPLAIN` shows the planner ALREADY
+-- choosing it for `WHERE package_id = ?` in preference to the index being
+-- dropped. Removing an index the planner does not use changes no plan.
+--
 -- 14 are strict LEADING-PREFIX duplicates: a btree on (a) under an existing
 -- non-partial index or constraint on (a, b, ...) serves every lookup, sort and
 -- FK-cascade scan the narrow one does, by construction. Verified mechanically
 -- column-by-column, both sides confirmed non-partial:
 --   idx_runs_package_id                   < idx_runs_package_started
+--                                          (see the production note below)
 --   idx_run_logs_run_id                   < idx_run_logs_lookup
 --   idx_llm_usage_org_id                  < idx_llm_usage_org_created
 --   idx_credential_proxy_usage_org_id     < idx_credential_proxy_usage_org_created
