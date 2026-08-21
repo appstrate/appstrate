@@ -28,18 +28,18 @@ import { listModelPresets, PROXY_SUPPORTED_APIS, type ModelPreset } from "../../
 
 export type ModelSource = "env" | "preset";
 
-export interface ModelFlags {
+interface ModelFlags {
   modelApi?: string;
   model?: string;
   llmApiKey?: string;
 }
 
-export interface ResolvedModel {
+interface ResolvedModel {
   model: Model<Api>;
   apiKey: string;
 }
 
-export interface PresetResolutionInputs {
+interface PresetResolutionInputs {
   /** CLI profile (for `GET /api/models` + bearer token lookup). */
   profileName: string;
   /** Preset id. Optional — falls back to the org default when omitted. */

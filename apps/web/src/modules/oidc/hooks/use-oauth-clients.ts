@@ -13,7 +13,6 @@ import { useOrgOnlyScope } from "@/hooks/use-org-scope";
 
 /** Wire shapes from the OpenAPI spec. */
 export type OAuthClient = components["schemas"]["OAuthClientObject"];
-export type OAuthClientWithSecret = components["schemas"]["OAuthClientWithSecret"];
 export type SignupRole = OAuthClient["signupRole"];
 
 type CreateOAuthClientBody =

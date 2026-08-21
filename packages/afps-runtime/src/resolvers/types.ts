@@ -13,14 +13,7 @@
 
 import type { Bundle, BundlePackage } from "../bundle/types.ts";
 
-export type {
-  DependencyRef,
-  JSONSchema,
-  Tool,
-  ToolContext,
-  ToolResult,
-  RunEvent,
-} from "@afps-spec/types";
+export type { DependencyRef, JSONSchema, Tool, ToolContext, ToolResult } from "@afps-spec/types";
 
 // ─────────────────────────────────────────────
 // Bundle surface passed to resolvers — the spec {@link Bundle} is the

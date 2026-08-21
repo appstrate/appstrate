@@ -70,7 +70,7 @@ const INDEX_HTML = "./apps/web/dist/index.html";
  *   instance serves previews from a separate domain, else `'self'` (previews are
  *   minted on `APP_URL`, the same origin as this document).
  */
-export function buildSpaCsp(): string {
+function buildSpaCsp(): string {
   const usercontent = getEnv().USERCONTENT_URL;
   const previewOrigin = usercontent ? new URL(usercontent).origin : "'self'";
   return `frame-src ${previewOrigin}`;

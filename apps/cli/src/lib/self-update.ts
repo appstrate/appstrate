@@ -101,7 +101,7 @@ export function assetName(info: PlatformInfo): string {
   return `appstrate-${info.platform}-${info.arch}`;
 }
 
-export interface ReleaseUrls {
+interface ReleaseUrls {
   binary: string;
   checksums: string;
   checksumsSig: string;
@@ -387,7 +387,7 @@ export async function resolveTargetVersion(
   return normalizeVersion((parsed as { tag_name: string }).tag_name);
 }
 
-export interface PerformCurlUpdateOptions {
+interface PerformCurlUpdateOptions {
   /** Resolved tag name without the `v` prefix, e.g. `1.2.3`. */
   targetVersion: string;
   /** Detected platform (also used for the asset name). */

@@ -95,7 +95,7 @@ let queueDepthProvider: (() => number | Promise<number> | null | undefined) | nu
 
 // ─── Init / shutdown ─────────────────────────────────────────────
 
-export interface InitObservabilityOptions {
+interface InitObservabilityOptions {
   /** Force enabled-state, overriding env derivation (used by tests). */
   enabled?: boolean;
   /** Inject a span exporter (tests use {@link InMemorySpanExporter}). */
@@ -354,7 +354,7 @@ function parentContext(traceparent?: string | null): Context {
   });
 }
 
-export interface SpanOptions {
+interface SpanOptions {
   kind?: SpanKind;
   /** W3C traceparent to parent this span under (cross-process linking). */
   traceparent?: string | null;

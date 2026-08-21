@@ -36,7 +36,7 @@ import {
 } from "@appstrate/afps-runtime/bundle";
 import { downloadVersionZip } from "../package-storage.ts";
 
-export interface DbPackageCatalogOptions {
+interface DbPackageCatalogOptions {
   /** Org whose packages are visible (plus system packages, `orgId IS NULL`). */
   orgId: string;
 }

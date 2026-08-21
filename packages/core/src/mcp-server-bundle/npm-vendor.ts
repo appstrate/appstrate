@@ -83,7 +83,7 @@ export interface NpmVendorDeps {
   now?: () => Date;
 }
 
-export interface NpmVendorInput {
+interface NpmVendorInput {
   identifier: string;
   versionRange: string;
 }

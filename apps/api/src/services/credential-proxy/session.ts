@@ -30,7 +30,7 @@ export function isValidSessionId(sessionId: string): boolean {
   return UUID_V4.test(sessionId);
 }
 
-export type SessionBindResult =
+type SessionBindResult =
   { kind: "bound" } | { kind: "reused" } | { kind: "mismatch"; boundTo: string };
 
 /**

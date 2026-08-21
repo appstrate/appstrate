@@ -94,7 +94,7 @@ export type ApiCallRequestBody =
       value: unknown;
     };
 
-export interface ApiCallArgs {
+interface ApiCallArgs {
   integrationId: string;
   targetUrl: string;
   method: string;
@@ -112,7 +112,7 @@ export interface ApiCallArgs {
  * NOT been read yet — the caller decides whether to buffer (HTTP
  * handler with truncation) or pass through (MCP `responseToToolResult`).
  */
-export interface ApiCallSuccess {
+interface ApiCallSuccess {
   ok: true;
   response: Response;
   /**
@@ -134,13 +134,13 @@ export interface ApiCallSuccess {
   authRefreshed: boolean;
 }
 
-export interface ApiCallFailure {
+interface ApiCallFailure {
   ok: false;
   status: number;
   error: string;
 }
 
-export type ApiCallResult = ApiCallSuccess | ApiCallFailure;
+type ApiCallResult = ApiCallSuccess | ApiCallFailure;
 
 /**
  * The integration-agnostic half of {@link ApiCallDeps}: everything the

@@ -92,7 +92,7 @@ export type { IntegrationCredentialsWire };
  *   header_prefix         → headerPrefix         (per delivery plan)
  *   allow_server_override → allowServerOverride  (per delivery plan)
  */
-export function normalizeIntegrationCredentialsWire(raw: unknown): IntegrationCredentialsWire {
+function normalizeIntegrationCredentialsWire(raw: unknown): IntegrationCredentialsWire {
   const r = (raw ?? {}) as Record<string, unknown>;
   const rawAuths = Array.isArray(r.auths) ? (r.auths as Record<string, unknown>[]) : [];
   const auths: ResolvedAuthCredentials[] = rawAuths.map((a) => {
@@ -129,7 +129,7 @@ export function normalizeIntegrationCredentialsWire(raw: unknown): IntegrationCr
   return { auths, deliveryPlans, expiresAtEpochMs };
 }
 
-export interface CreateIntegrationCredentialsSourceOptions {
+interface CreateIntegrationCredentialsSourceOptions {
   /** Package id (e.g. `@vendor/integration`). */
   integrationId: string;
   /** Platform base URL (e.g. `http://appstrate-api:3000`). */

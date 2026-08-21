@@ -31,7 +31,7 @@ import {
   shutdownObservability,
 } from "./otel.ts";
 
-export interface TelemetryProviderDeps {
+interface TelemetryProviderDeps {
   /** Platform client-IP resolver (`ctx.services.http.clientIp`). */
   clientIp: (c: Context) => string;
 }

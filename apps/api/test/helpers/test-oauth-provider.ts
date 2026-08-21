@@ -107,7 +107,7 @@ export function mintTestOAuthHooksToken(payload: { accountId?: string; email?: s
  * resolvable providerId for a static system key therefore seed against THIS
  * provider, not `test-oauth`.
  */
-export const TEST_API_KEY_PROVIDER_ID = "test-apikey";
+const TEST_API_KEY_PROVIDER_ID = "test-apikey";
 
 const testApiKeyProvider: ModelProviderDefinition = {
   providerId: TEST_API_KEY_PROVIDER_ID,

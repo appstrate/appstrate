@@ -54,7 +54,7 @@ function newId(): string {
 }
 
 /** Claims needed to mint a capability token — `jti`/`exp` are filled in here. */
-export type ConnectSessionInput = Omit<ConnectSessionClaims, "jti" | "exp" | "v" | "csrf">;
+type ConnectSessionInput = Omit<ConnectSessionClaims, "jti" | "exp" | "v" | "csrf">;
 
 /**
  * Mint the initial capability token and build the agent-facing connect URL.

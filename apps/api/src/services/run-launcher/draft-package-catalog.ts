@@ -44,7 +44,7 @@ import {
 import { asRecord } from "@appstrate/core/safe-json";
 import { downloadPackageFiles } from "../package-items/storage.ts";
 
-export interface DraftPackageCatalogOptions {
+interface DraftPackageCatalogOptions {
   /** Org whose draft packages are visible (plus system packages, `orgId IS NULL`). */
   orgId: string;
 }

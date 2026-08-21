@@ -93,7 +93,7 @@ async function dockerFetch(
  * Check if an image exists locally. One inspect, never a pull — the warmer
  * needs "present or not" as a distinct answer from `ensureImage`.
  */
-export async function imageExists(image: string): Promise<boolean> {
+async function imageExists(image: string): Promise<boolean> {
   const res = await dockerFetch(`/images/${encodeURIComponent(image)}/json`);
   return res.ok;
 }
@@ -287,7 +287,7 @@ export async function ensureImagePin(
   return existing ? "replaced" : "created";
 }
 
-export interface CreateContainerOptions {
+interface CreateContainerOptions {
   image: string;
   adapterName: string;
   memory?: number;

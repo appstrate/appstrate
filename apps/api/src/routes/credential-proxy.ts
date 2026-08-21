@@ -43,7 +43,7 @@ import { getErrorMessage } from "@appstrate/core/errors";
 import { MAX_STREAMED_BODY_SIZE } from "@appstrate/afps-runtime/resolvers";
 
 /** Wall-clock timeout for piping an upstream streaming response to the client. */
-export const STREAMING_PIPE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+const STREAMING_PIPE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 import { filterHeaders, stripUpstreamResponseHeaders } from "@appstrate/connect/proxy-primitives";
 import { getActor } from "../lib/actor.ts";
 import { logger } from "../lib/logger.ts";

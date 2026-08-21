@@ -114,7 +114,7 @@ export function inlineAgentManifest(integrations: string[] = []): Record<string,
 }
 
 /** AFPS integration manifest with a single api_key auth exposing a `search` tool. */
-export function connectionTestIntegrationManifest(id: string) {
+function connectionTestIntegrationManifest(id: string) {
   return localIntegrationManifest({
     name: id,
     serverName: `${id}-server`,

@@ -14,7 +14,7 @@ import { credentialProxyUsage } from "@appstrate/db/schema";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { logger } from "../lib/logger.ts";
 
-export interface InsertCredentialProxyUsageInput {
+interface InsertCredentialProxyUsageInput {
   orgId: string;
   apiKeyId: string | null;
   userId: string | null;

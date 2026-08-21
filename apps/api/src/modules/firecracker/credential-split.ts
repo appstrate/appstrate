@@ -75,7 +75,7 @@ export interface MmdsPayload {
   agent_env: Record<string, string>;
 }
 
-export interface CredentialSplit {
+interface CredentialSplit {
   /**
    * Sidecar env for the config drive — the input minus the brokered
    * secrets. `undefined` when the input sidecar env was `undefined`

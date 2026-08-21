@@ -40,7 +40,7 @@ function compileCached(schema: object): ReturnType<typeof ajv.compile> {
 
 // --- Section C: Validation functions ---
 
-export type ValidationResult = ConfigValidationResult;
+type ValidationResult = ConfigValidationResult;
 
 /**
  * Shared AJV validation path for input/output.

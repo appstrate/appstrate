@@ -24,9 +24,9 @@ import type { AppScope } from "../lib/scope.ts";
 import { validatePinTarget } from "./integration-pins-service.ts";
 
 /** Identical wire shape to {@link IntegrationOrgDefault}; aliased for the canonical pattern (cf. `PinSummary`). */
-export type OrgDefaultSummary = IntegrationOrgDefault;
+type OrgDefaultSummary = IntegrationOrgDefault;
 
-export interface UpsertOrgDefaultInput {
+interface UpsertOrgDefaultInput {
   connectionId: string;
   enforce: boolean;
   createdBy: string | null;

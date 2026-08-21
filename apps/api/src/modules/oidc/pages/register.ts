@@ -13,7 +13,7 @@ import { renderLayout } from "./layout.ts";
 import { renderSocialButtons, renderSocialSignInScript } from "./social-sign-in-script.ts";
 import type { ResolvedAppBranding } from "../services/branding.ts";
 
-export interface RegisterPageProps {
+interface RegisterPageProps {
   queryString: string;
   error?: string;
   email?: string;

@@ -24,7 +24,7 @@ import { loadTokens } from "../lib/keyring.ts";
 import { decodeJwtPayload } from "../lib/jwt-identity.ts";
 import { formatError } from "../lib/ui.ts";
 
-export interface TokenOptions {
+interface TokenOptions {
   profile?: string;
 }
 

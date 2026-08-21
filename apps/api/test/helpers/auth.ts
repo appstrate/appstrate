@@ -29,7 +29,6 @@ import {
   profiles,
 } from "@appstrate/db/schema";
 import type { OrgRole } from "@appstrate/shared-types";
-import { getTestApp } from "./app.ts";
 
 let counter = 0;
 function nextId() {
@@ -164,35 +163,6 @@ export async function createTestUser(
   ]);
 
   return { id: userId, email, name, cookie: await signSessionCookie(token) };
-}
-
-/**
- * Create a session for an existing user via sign-in.
- * Returns the signed session cookie.
- */
-export async function createTestSession(
-  email: string,
-  password: string = "TestPassword123!",
-): Promise<string> {
-  const app = getTestApp();
-
-  const res = await app.request("/api/auth/sign-in/email", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, password }),
-  });
-
-  if (res.status !== 200) {
-    const body = await res.text();
-    throw new Error(`Sign-in failed (${res.status}): ${body}`);
-  }
-
-  const setCookie = res.headers.get("set-cookie") ?? "";
-  const match = setCookie.match(/better-auth\.session_token=([^;]+)/);
-  if (!match) {
-    throw new Error(`No session cookie in sign-in response: ${setCookie}`);
-  }
-  return `better-auth.session_token=${match[1]}`;
 }
 
 /**

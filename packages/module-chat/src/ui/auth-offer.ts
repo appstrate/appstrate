@@ -15,7 +15,7 @@
 
 import { readConnectOffer } from "../connect-offer.ts";
 
-export interface AuthOffer {
+interface AuthOffer {
   authUrl: string;
   state?: string;
 }

@@ -36,7 +36,7 @@ import { getModelProvider } from "./registry.ts";
 import { invalidRequest, notFound } from "../../lib/errors.ts";
 import { logger } from "../../lib/logger.ts";
 
-export interface ImportOAuthModelProviderResult {
+interface ImportOAuthModelProviderResult {
   /** UUID of the `model_provider_credentials` row. */
   credentialId: string;
   providerId: string;
@@ -50,7 +50,7 @@ export interface ImportOAuthModelProviderResult {
  * function derives one from the provider's `displayName` when the helper
  * doesn't supply it.
  */
-export type ImportOAuthModelProviderInput = Omit<CreateOAuthCredentialInput, "label"> & {
+type ImportOAuthModelProviderInput = Omit<CreateOAuthCredentialInput, "label"> & {
   label?: string;
   /** Existing credential to update in place; omitted for a new connection. */
   credentialId?: string;

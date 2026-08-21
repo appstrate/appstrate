@@ -23,12 +23,12 @@ type DbTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
  * Drizzle table shape required by `scopedWhere`: must expose an `orgId`
  * column, and optionally an `applicationId` column for app-scoped tables.
  */
-export interface OrgScopedTable {
+interface OrgScopedTable {
   orgId: AnyColumn;
   applicationId?: AnyColumn;
 }
 
-export interface ScopedWhereOptions {
+interface ScopedWhereOptions {
   orgId: string | undefined;
   applicationId?: string | undefined;
   /** Additional conditions to AND with the scope (undefined entries are skipped). */
@@ -118,7 +118,7 @@ export function isInvalidTextRepresentation(err: unknown): boolean {
 
 // --- System + DB merge ---
 
-export interface MergeSystemAndDbOptions<SystemDef, DbRow extends { id: string }, Out> {
+interface MergeSystemAndDbOptions<SystemDef, DbRow extends { id: string }, Out> {
   /** System registry map (id → definition). */
   system: ReadonlyMap<string, SystemDef>;
   /** Database rows for the current org. */
@@ -192,7 +192,7 @@ export function buildUpdateSet(
 
 // --- One-default invariant ---
 
-export interface SetExactlyOneDefaultOptions {
+interface SetExactlyOneDefaultOptions {
   /** Clear `is_default` across the whole scope. Runs first. */
   clear: (tx: DbTransaction) => Promise<unknown>;
   /**
@@ -228,7 +228,7 @@ export async function setExactlyOneDefault(opts: SetExactlyOneDefaultOptions): P
  * then falls to the system cascade). `org-models` and `org-proxies` store this
  * exact shape; this folds their byte-identical pointer logic into one place.
  */
-export interface DefaultPointer {
+interface DefaultPointer {
   /** Read the pointer (system id, custom UUID, or null). Single read path. */
   getDefaultId(orgId: string): Promise<string | null>;
   /**
@@ -262,7 +262,7 @@ export interface DefaultPointer {
 /** Org `organizations` columns usable as a default pointer (nullable `text`). */
 type OrgPointerField = "defaultModelId" | "defaultProxyId";
 
-export interface CreateDefaultPointerOptions {
+interface CreateDefaultPointerOptions {
   /** Domain table whose rows the pointer can name (needs a `uuid` `id` column). */
   table: PgTable & { id: PgColumn };
   /**

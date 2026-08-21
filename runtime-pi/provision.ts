@@ -30,7 +30,7 @@ import { getErrorMessage } from "@appstrate/core/errors";
  * (0.12+0.24+0.48+0.96+1.92+2+2+2 s), a slightly larger total budget than the
  * previous 6×500ms (7.5 s), still well inside the boot gate.
  */
-export const PROVISION_MAX_ATTEMPTS = 9;
+const PROVISION_MAX_ATTEMPTS = 9;
 
 export interface ProvisionDeps {
   /** The run-scoped event sink URL (`…/api/runs/:id/events`). The workspace

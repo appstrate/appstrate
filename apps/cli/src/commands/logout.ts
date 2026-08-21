@@ -22,7 +22,7 @@ import { normalizeInstance } from "../lib/instance-url.ts";
 import { getProfile } from "../lib/config.ts";
 import { CLI_CLIENT_ID } from "../lib/cli-client.ts";
 
-export interface LogoutOptions {
+interface LogoutOptions {
   profile?: string;
 }
 

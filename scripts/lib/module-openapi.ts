@@ -17,7 +17,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
 import type { AppstrateModule, OpenApiSchemaEntry } from "@appstrate/core/module";
 
-export interface CollectedModuleOpenApi {
+interface CollectedModuleOpenApi {
   /** OpenAPI 3.1 path items, keyed by path string. */
   paths: Record<string, unknown>;
   /** OpenAPI 3.1 component schemas, keyed by schema name. */
@@ -35,7 +35,7 @@ export interface CollectedModuleOpenApi {
 }
 
 /** A discovered workspace-package module under `packages/module-*`. */
-export interface WorkspaceModuleDir {
+interface WorkspaceModuleDir {
   /** Package directory name, e.g. "module-chat". */
   name: string;
   /** Absolute path to the package's `src` directory. */

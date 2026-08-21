@@ -38,7 +38,7 @@ export interface BuildStructuredPiTurnOptions {
   baseTokens: number;
 }
 
-export interface StructuredPiTurn {
+interface StructuredPiTurn {
   history: Message[];
   prompt: string;
   branchHeadId: string;

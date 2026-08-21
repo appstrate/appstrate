@@ -25,9 +25,9 @@ import { checkOrgRunRateLimit } from "./org-run-rate-limit.ts";
 import { getRunningRunCountForOrg } from "./state/runs.ts";
 import { callHook, hasHook } from "../lib/modules/module-loader.ts";
 
-export type PreflightGateError = { code: string; message: string; status?: number };
+type PreflightGateError = { code: string; message: string; status?: number };
 
-export interface PreflightGatesInput {
+interface PreflightGatesInput {
   orgId: string;
   agent: LoadedPackage;
   /**
@@ -73,13 +73,13 @@ export interface PreflightGatesInput {
 }
 
 /** Per-sub-gate wall-clock timings (ms), surfaced for the pipeline timing log. */
-export interface PreflightGateTimings {
+interface PreflightGateTimings {
   rateLimitMs: number;
   concurrencyMs: number;
   beforeUsageHookMs: number;
 }
 
-export interface PreflightGatesOk {
+interface PreflightGatesOk {
   ok: true;
   /** Agent potentially cloned with a capped `timeout` — pass this to downstream code. */
   agent: LoadedPackage;
@@ -89,7 +89,7 @@ export interface PreflightGatesOk {
   timings: PreflightGateTimings;
 }
 
-export type PreflightGatesResult = PreflightGatesOk | { ok: false; error: PreflightGateError };
+type PreflightGatesResult = PreflightGatesOk | { ok: false; error: PreflightGateError };
 
 /**
  * Run every shared gate in order. Stops at the first rejection and

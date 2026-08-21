@@ -17,7 +17,7 @@ import { renderSocialButtons, renderSocialSignInScript } from "./social-sign-in-
 import { renderExpiryWarning, renderLoginExpiryScript } from "./login-expiry-script.ts";
 import type { ResolvedAppBranding } from "../services/branding.ts";
 
-export interface LoginPageProps {
+interface LoginPageProps {
   /** Raw query string from the authorize redirect — forwarded to the form action. */
   queryString: string;
   /** Optional error message to display above the form. */

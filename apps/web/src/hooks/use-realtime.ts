@@ -14,7 +14,7 @@ import { getCurrentApplicationId } from "./use-current-application";
 
 // Re-export so existing consumers (run-detail.tsx) keep importing the metric
 // event type from here; the source of truth is the shared Zod schema.
-export type { RunUpdateEvent, RunLogEvent, RunMetricEvent } from "@appstrate/shared-types";
+export type { RunLogEvent, RunMetricEvent } from "@appstrate/shared-types";
 
 interface RunRealtimeHandlers {
   onStatusChange?: (payload: RunUpdateEvent) => void;

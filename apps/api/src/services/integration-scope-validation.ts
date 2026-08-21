@@ -155,7 +155,7 @@ function asManifest(value: unknown): Record<string, unknown> | null {
   return value as Record<string, unknown>;
 }
 
-export interface ValidateAgentIntegrationSelectionsInput {
+interface ValidateAgentIntegrationSelectionsInput {
   /** Raw agent manifest (already shape-validated by `validateManifest`). */
   manifest: Record<string, unknown>;
   /** Org owning the agent — bounds the integration visibility lookup. */

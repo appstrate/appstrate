@@ -60,8 +60,6 @@ import { type WriteOutMetrics, formatWriteOut, sizeOfBody } from "./api/write-ou
 // here so `import { apiCommand, isHttpMethod, ApiCommandOptions } from
 // "./commands/api.ts"` keeps working unchanged after the split.
 export { isHttpMethod } from "./api/method.ts";
-export { HostMismatchError } from "./api/url.ts";
-export type { WriteOutMetrics } from "./api/write-out.ts";
 export type { ApiCommandIO, ApiCommandOptions } from "./api/types.ts";
 
 /**

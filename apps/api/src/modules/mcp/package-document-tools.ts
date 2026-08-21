@@ -20,7 +20,7 @@ import {
 import { recordAudit } from "../../services/audit.ts";
 import { asString, textResult } from "./tool-results.ts";
 
-export interface PackageDocumentToolContext {
+interface PackageDocumentToolContext {
   permissions: ReadonlySet<string>;
   actor: Actor;
   scope: AppScope;

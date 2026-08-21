@@ -143,7 +143,7 @@ export interface MitmCredentialSource {
   activeInputs?(): ActiveConnectInputs | null;
 }
 
-export interface CreateMitmListenerOptions {
+interface CreateMitmListenerOptions {
   caBundle: CaBundle;
   minter: CertMinter;
   credentials: MitmCredentialSource;
@@ -626,7 +626,7 @@ export function extractSni(buf: Buffer): string | null {
  * request parts, or a fail-closed marker carrying the first unresolved
  * placeholder name.
  */
-export type ConnectInputSubstitutionResult =
+type ConnectInputSubstitutionResult =
   { url: string; bodyText: string | null; headers: Record<string, string> } | { failed: string };
 
 /**

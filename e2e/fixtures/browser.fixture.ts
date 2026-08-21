@@ -11,7 +11,7 @@ import { test as base, expect, type Page } from "@playwright/test";
 import { registerUser, createOrg, type AuthResult, type OrgResult } from "../helpers/seed.ts";
 import { createApiClient, createOrgOnlyClient, type ApiClient } from "../helpers/api-client.ts";
 
-export interface BrowserContext {
+interface BrowserContext {
   auth: AuthResult;
   org: OrgResult;
 }

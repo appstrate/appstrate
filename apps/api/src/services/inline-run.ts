@@ -20,7 +20,7 @@ import { packages, runs } from "@appstrate/db/schema";
 import type { AgentManifest, LoadedPackage } from "../types/index.ts";
 import type { Actor } from "../lib/actor.ts";
 import { logger } from "../lib/logger.ts";
-import type { InlineRunBody, InlineRunPreflightResult } from "./inline-run-preflight.ts";
+import type { InlineRunPreflightResult } from "./inline-run-preflight.ts";
 import { collectMountedDocumentIds, type ParsedInput } from "./input-parser.ts";
 import { prepareAndExecuteRun } from "./run-pipeline.ts";
 import { assertExplicitModelExists } from "./org-models.ts";
@@ -33,8 +33,6 @@ import {
 } from "@appstrate/core/document-uri";
 import { asJSONSchemaObject, type JSONSchemaObject } from "@appstrate/core/form";
 import { invalidRequest, validationFailed } from "../lib/errors.ts";
-
-export type { InlineRunBody };
 
 /** Reserved scope for inline-run shadow packages. Never publishable. */
 export const INLINE_SHADOW_SCOPE = "inline";
@@ -61,7 +59,7 @@ export function generateShadowPackageId(): string {
   return `@${INLINE_SHADOW_SCOPE}/r-${crypto.randomUUID()}`;
 }
 
-export interface InsertShadowPackageParams {
+interface InsertShadowPackageParams {
   orgId: string;
   createdBy: string | null;
   manifest: AgentManifest;
@@ -270,7 +268,7 @@ function manifestInputProperties(manifest: unknown): Record<string, unknown> | u
 }
 
 /** Result of {@link injectContextDocuments}. */
-export interface ContextDocumentsInjection {
+interface ContextDocumentsInjection {
   /** Manifest with the reserved field declared. Unchanged when there is nothing to mount. */
   manifest: AgentManifest;
   /**

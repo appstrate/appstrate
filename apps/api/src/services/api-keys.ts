@@ -42,7 +42,7 @@ export function extractKeyPrefix(rawKey: string): string {
   return rawKey.slice(0, 8);
 }
 
-export interface ValidatedApiKey {
+interface ValidatedApiKey {
   keyId: string;
   userId: string;
   email: string;

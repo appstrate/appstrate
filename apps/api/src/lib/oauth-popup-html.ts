@@ -39,11 +39,11 @@ function appOrigin(): string {
 }
 
 /** Channel name shared with the chat auth card (`packages/module-chat`). */
-export const INTEGRATION_BROADCAST_CHANNEL = "appstrate_integration";
+const INTEGRATION_BROADCAST_CHANNEL = "appstrate_integration";
 /** postMessage / BroadcastChannel message type the chat card listens for. */
-export const INTEGRATION_MESSAGE_TYPE = "appstrate:integration_connection";
+const INTEGRATION_MESSAGE_TYPE = "appstrate:integration_connection";
 
-export interface OAuthCallbackDetail {
+interface OAuthCallbackDetail {
   /** Signed state echoed by the provider — correlates the waiting card. */
   state?: string | undefined;
   /** `@scope/name` of the integration just connected. */

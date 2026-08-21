@@ -51,7 +51,7 @@ import { DbPackageCatalog } from "./db-package-catalog.ts";
 import { DraftPackageCatalog } from "./draft-package-catalog.ts";
 import { VERSION_SELECTOR_DRAFT } from "../agent-version-resolver.ts";
 
-export interface RunPackageCatalogOptions {
+interface RunPackageCatalogOptions {
   /** Org whose packages are visible (plus system packages, `orgId IS NULL`). */
   orgId: string;
   /**

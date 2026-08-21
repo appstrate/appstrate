@@ -22,11 +22,6 @@ import {
 
 import { BundleError } from "./errors.ts";
 
-export type {
-  CompanionViolationReason,
-  CompanionFileViolation,
-} from "@appstrate/afps-shared/companion-files";
-
 /**
  * Validate companion-file presence per AFPS §3.3 / §3.4 for the given
  * package type. Returns the first violation or `null`. Map-based adapter

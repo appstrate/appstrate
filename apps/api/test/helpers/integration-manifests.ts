@@ -314,31 +314,6 @@ export function connectToolBlock(opts: {
   return { tool: {}, _meta: { "dev.appstrate/connect": meta } };
 }
 
-/**
- * AFPS declarative `connect.login` block. `outputs` values are Arazzo
- * runtime-expression strings or extractor objects; `success_criteria` is the
- * Arazzo criterion array (was the 1.x `okStatus`).
- */
-export function connectLoginBlock(opts: {
-  request: {
-    method: string;
-    url: string;
-    headers?: Record<string, string>;
-    body?: string;
-    content_type?: string;
-  };
-  successCriteria?: Array<{ condition: string }>;
-  outputs: Record<string, unknown>;
-  expiresInOutput?: string;
-  identityOutputs?: string[];
-}): Record<string, unknown> {
-  const login: Record<string, unknown> = { request: opts.request, outputs: opts.outputs };
-  if (opts.successCriteria) login.success_criteria = opts.successCriteria;
-  if (opts.expiresInOutput) login.expires_in_output = opts.expiresInOutput;
-  if (opts.identityOutputs) login.identity_outputs = opts.identityOutputs;
-  return { login };
-}
-
 /** Build a minimal AFPS mcp-server (MCPB) manifest for the local-source path. */
 export function mcpServerManifest(opts: {
   /**

@@ -20,7 +20,7 @@ import { getCache } from "../infra/index.ts";
 // Types
 // ---------------------------------------------------------------------------
 
-export interface CachedResult {
+interface CachedResult {
   statusCode: number;
   headers: Record<string, string>;
   body: string;

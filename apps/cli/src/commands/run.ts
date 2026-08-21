@@ -76,13 +76,12 @@ import {
 } from "@appstrate/afps-runtime/sinks";
 import type { EventSink } from "@appstrate/afps-runtime/interfaces";
 import { emptyRunResult, type RunResult } from "@appstrate/afps-runtime/runner";
-import { loadSnapshotFile, mergeSnapshotIntoContext, SnapshotError } from "./run/snapshot.ts";
+import { loadSnapshotFile, mergeSnapshotIntoContext } from "./run/snapshot.ts";
 import { parseRunTarget, PackageSpecError } from "./run/package-spec.ts";
-import { fetchBundleForRun, BundleFetchError } from "./run/bundle-fetch.ts";
+import { fetchBundleForRun } from "./run/bundle-fetch.ts";
 import {
   fetchRunConfigPayload,
   mergeRunConfig,
-  RunConfigFetchError,
   type InheritedRunConfig,
 } from "./run/inherit-config.ts";
 import {
@@ -91,7 +90,7 @@ import {
   ExecutionModeError,
   type ExecutionMode,
 } from "./run/mode.ts";
-import { runRemote, RemoteRunError } from "./run/remote-runner.ts";
+import { runRemote } from "./run/remote-runner.ts";
 import { resolveSignalPolicy, readStdinIsTty } from "./run/signal-policy.ts";
 import { validateConfig } from "@appstrate/core/schema-validation";
 import type { JSONSchemaObject } from "@appstrate/core/form";
@@ -1202,18 +1201,7 @@ async function resolveBundleSource(
 }
 
 // Re-export error types for the CLI's formatError pipeline.
-export {
-  ModelResolutionError,
-  ResolverConfigError,
-  ReportConfigError,
-  ReportStartError,
-  SnapshotError,
-  PackageSpecError,
-  BundleFetchError,
-  RunConfigFetchError,
-  ExecutionModeError,
-  RemoteRunError,
-};
+export { ResolverConfigError };
 
 /**
  * Test-only access to the resolver-input builder. Exercised by
@@ -1235,7 +1223,7 @@ export async function _buildResolverInputsForTesting(
  * no config schema (so validation is a no-op). Mirrors the unexported
  * helper in `@appstrate/afps-runtime/bundle/platform-prompt-inputs`.
  */
-export function readBundleConfigSchema(
+function readBundleConfigSchema(
   bundle: import("@appstrate/afps-runtime/bundle").Bundle,
 ): JSONSchemaObject | undefined {
   const rootPkg = bundle.packages.get(bundle.root);

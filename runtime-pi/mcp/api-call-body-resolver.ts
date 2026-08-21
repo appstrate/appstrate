@@ -41,7 +41,7 @@ export class ApiCallBodyResolveError extends Error {
   }
 }
 
-export interface ResolveApiCallBodyOptions {
+interface ResolveApiCallBodyOptions {
   /** Workspace root `fromFile` paths resolve under (symlink/escape refused). */
   workspace: string;
   /** Max raw (pre-base64) bytes. Defaults to {@link MAX_REQUEST_BODY_SIZE}. */

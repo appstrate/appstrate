@@ -74,7 +74,7 @@ const PROBE_CONCURRENCY = 4;
  * so a round that verified nothing answers with the list that still stands
  * rather than an empty array that never was one.
  */
-export interface ModelDiscoveryResult {
+interface ModelDiscoveryResult {
   outcome: "ok" | "auth_failed" | "nothing_verified" | "no_candidates" | "credential_not_found";
   /**
    * Candidates probed (after dedupe + cap). Always 0 for `mode: "static"`

@@ -18,7 +18,7 @@ import { html, type RawHtml } from "./html.ts";
 import { renderLayout } from "./layout.ts";
 import type { ResolvedAppBranding } from "../services/branding.ts";
 
-export interface ResetPasswordPageProps {
+interface ResetPasswordPageProps {
   queryString: string;
   /** Reset token from the email link — embedded as a hidden form field. */
   token: string;
@@ -29,7 +29,7 @@ export interface ResetPasswordPageProps {
   success?: boolean;
 }
 
-export interface InvalidTokenPageProps {
+interface InvalidTokenPageProps {
   queryString: string;
   branding: ResolvedAppBranding;
 }

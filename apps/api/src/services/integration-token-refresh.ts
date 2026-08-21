@@ -41,9 +41,7 @@ import {
 } from "./integration-connections.ts";
 import { getEnv } from "@appstrate/env";
 
-export type { IntegrationRefreshContext };
-
-export interface IntegrationRefreshResult {
+interface IntegrationRefreshResult {
   /** Decrypted credentials — snake_case wire keys only (`projectToStringMap`). */
   fields: Record<string, string>;
   /** Parsed `expires_at` from the token response, or `null` if upstream did not return `expires_in`. */
@@ -273,7 +271,7 @@ async function doRefresh(
  * - `transient`: any other failure (network, 5xx, parse). The cached
  *   credential may still be usable; the connection row is untouched.
  */
-export type RefreshClassification =
+type RefreshClassification =
   | { status: "refreshed"; result: IntegrationRefreshResult }
   | { status: "revoked"; error: RefreshError }
   | { status: "transient"; error: unknown };

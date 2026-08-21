@@ -78,7 +78,6 @@ const CONSOLE_FETCH_TIMEOUT_MS = 5_000;
  * reporting or the sink closes). Re-exported so this module's public type
  * surface (RemoteOrchestratorDeps) is unchanged.
  */
-export type { BootHeartbeatOutcome };
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
@@ -103,7 +102,7 @@ function parseLogLine(raw: string): string | undefined {
   }
 }
 
-export interface RemoteOrchestratorDeps {
+interface RemoteOrchestratorDeps {
   /**
    * Injected by tests — canned Response objects, no network. The init is
    * widened with Bun's `unix` extension: over a UDS runner URL every call

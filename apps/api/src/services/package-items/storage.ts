@@ -5,20 +5,15 @@ import { computeIntegrity } from "@appstrate/core/integrity";
 import { verifyArtifactIntegrity } from "@appstrate/core/integrity";
 import * as storage from "@appstrate/db/storage";
 import { logger } from "../../lib/logger.ts";
-import {
-  PACKAGE_ITEMS_BUCKET,
-  SYSTEM_STORAGE_NAMESPACE,
-  packageItemKey,
-  packageItemOwnerNamespace,
-} from "./config.ts";
+import { PACKAGE_ITEMS_BUCKET, SYSTEM_STORAGE_NAMESPACE, packageItemKey } from "./config.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { unzipPackageArchive } from "../package-archive.ts";
 
 // Re-exported for the existing import sites (`system-packages.ts` and friends)
-// — the constant + namespace resolver now live in the leaf `config.ts` so the
-// deletion outbox and the orphan scanner can derive keys without pulling this
-// module's storage/zip graph.
-export { SYSTEM_STORAGE_NAMESPACE, packageItemKey, packageItemOwnerNamespace };
+// — the constant now lives in the leaf `config.ts` so the deletion outbox and
+// the orphan scanner can derive keys without pulling this module's storage/zip
+// graph.
+export { SYSTEM_STORAGE_NAMESPACE };
 
 // ─────────────────────────────────────────────
 // Package item Storage (full ZIP)

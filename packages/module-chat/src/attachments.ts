@@ -21,7 +21,7 @@ import type { ResolvedChatAttachment } from "@appstrate/core/chat-contract";
 import { formatBytes } from "@appstrate/core/format";
 
 /** Is `part` an ai-SDK `file` part? */
-export function isFileUIPart(part: unknown): part is FileUIPart {
+function isFileUIPart(part: unknown): part is FileUIPart {
   return (
     typeof part === "object" &&
     part !== null &&
@@ -41,7 +41,7 @@ function partSize(part: FileUIPart): number | null {
  * `[Attached document: rapport.pdf — document://doc_abc123 — application/pdf, 2.3 MB]`.
  * Size is included when the materialized part carries it.
  */
-export function attachmentTextBlock(part: FileUIPart): string {
+function attachmentTextBlock(part: FileUIPart): string {
   const name = part.filename ?? "document";
   const size = partSize(part);
   const sizeSuffix = size !== null ? `, ${formatBytes(size)}` : "";

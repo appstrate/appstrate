@@ -129,7 +129,7 @@ export async function readOrBuildBundle(
 // Conflict detection
 // ---------------------------------------------------------------------------
 
-export interface BundleConflict {
+interface BundleConflict {
   identity: string;
   reason: "integrity_mismatch" | "foreign_org_owner";
   existingIntegrity?: string;
@@ -218,7 +218,7 @@ export async function detectBundleConflicts(
 // Import
 // ---------------------------------------------------------------------------
 
-export interface ImportedPackageResult {
+interface ImportedPackageResult {
   identity: string;
   status: "inserted" | "reused";
   version_id: number | null;
@@ -229,7 +229,7 @@ export interface ImportedPackageResult {
   type?: string;
 }
 
-export interface ImportBundleResult {
+interface ImportBundleResult {
   imported: ImportedPackageResult[];
   root_installed: boolean;
   root_package_id: string;
@@ -243,7 +243,7 @@ export interface ImportBundleResult {
   warnings: string[];
 }
 
-export interface BundleImportAuditRecord {
+interface BundleImportAuditRecord {
   resourceId: string;
   after: {
     type: string | null;
@@ -277,7 +277,7 @@ export function bundleImportAuditRecords(
   });
 }
 
-export interface BundleImportPreflight {
+interface BundleImportPreflight {
   bundle: Bundle;
   conflicts: BundleConflict[];
 }

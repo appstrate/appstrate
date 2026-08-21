@@ -13,7 +13,7 @@
  * profile's org context.
  */
 
-export interface AccessTokenIdentity {
+interface AccessTokenIdentity {
   userId: string;
   email: string;
 }

@@ -217,7 +217,7 @@ async function buildSignedHeaders(
  * stricter `AppScope` — preventing a session from minting an app-level
  * webhook without first pinning an application.
  */
-export type CreateWebhookInput =
+type CreateWebhookInput =
   | {
       level: "org";
       scope: OrgScope;

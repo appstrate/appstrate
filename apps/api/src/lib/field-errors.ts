@@ -17,7 +17,7 @@ import type { ValidationFieldError } from "./errors.ts";
 
 const PATH_PREFIX_RE = /^([A-Za-z_][A-Za-z0-9_.[\]]*): (.+)$/s;
 
-export interface PathMessageParseOptions {
+interface PathMessageParseOptions {
   /** `code` attached to every generated entry. */
   code: string;
   /** `title` attached to every generated entry. */

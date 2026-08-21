@@ -26,21 +26,21 @@ import {
 } from "../lib/applications.ts";
 import { askText, select, exitWithError } from "../lib/ui.ts";
 
-export interface AppBaseOptions {
+interface AppBaseOptions {
   profile?: string;
 }
 
-export interface AppSwitchOptions extends AppBaseOptions {
+interface AppSwitchOptions extends AppBaseOptions {
   /** Positional `[id]` — when absent, use interactive picker. */
   ref?: string;
 }
 
-export interface AppCreateOptions extends AppBaseOptions {
+interface AppCreateOptions extends AppBaseOptions {
   /** Positional `[name]` — when absent, prompt interactively. */
   name?: string;
 }
 
-export interface AppCommandDeps {
+interface AppCommandDeps {
   /** Return null when the picker cannot run (e.g. non-TTY). */
   pickApp?: (apps: Application[], currentAppId?: string) => Promise<Application | null>;
   /** Return null when the prompt cannot run. */

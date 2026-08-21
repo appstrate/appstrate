@@ -56,7 +56,7 @@ export interface ExistingInstall {
   existingEnv: EnvVars;
 }
 
-export interface InstallModeResult {
+interface InstallModeResult {
   mode: InstallMode;
   existing: ExistingInstall;
 }
@@ -130,7 +130,7 @@ const COMPOSE_FILENAMES = [
  * NOT confuse deeper keys (environment values, `# minio: disabled` comments)
  * with service names.
  */
-export function parseComposeServiceKeys(text: string): Set<string> {
+function parseComposeServiceKeys(text: string): Set<string> {
   const keys = new Set<string>();
   let inServices = false;
   let serviceIndent: number | null = null;

@@ -76,7 +76,7 @@ import { isValidRedirectUri } from "./redirect-uri.ts";
 
 export type OAuthClientLevel = "instance" | "org" | "application";
 
-export type OAuthAdminValidationField =
+type OAuthAdminValidationField =
   "scopes" | "redirectUris" | "referencedOrgId" | "referencedApplicationId" | "signupPolicy";
 
 export class OAuthAdminValidationError extends Error {
@@ -152,7 +152,7 @@ export interface OAuthClientRecord {
   updatedAt: string | null;
 }
 
-export interface OAuthClientWithSecret extends OAuthClientRecord {
+interface OAuthClientWithSecret extends OAuthClientRecord {
   clientSecret: string;
 }
 
@@ -303,7 +303,7 @@ export async function getClient(clientId: string): Promise<OAuthClientRecord | n
 
 // ─── Create ───────────────────────────────────────────────────────────────────
 
-export interface CreateOrgClientInput {
+interface CreateOrgClientInput {
   level: "org";
   name: string;
   redirectUris: string[];
@@ -317,7 +317,7 @@ export interface CreateOrgClientInput {
   signupRole?: SignupRole;
 }
 
-export interface CreateApplicationClientInput {
+interface CreateApplicationClientInput {
   level: "application";
   name: string;
   redirectUris: string[];
@@ -329,7 +329,7 @@ export interface CreateApplicationClientInput {
   allowSignup?: boolean;
 }
 
-export interface CreateInstanceClientInput {
+interface CreateInstanceClientInput {
   level: "instance";
   name: string;
   redirectUris: string[];
@@ -340,7 +340,7 @@ export interface CreateInstanceClientInput {
   allowSignup?: boolean;
 }
 
-export type CreateClientInput =
+type CreateClientInput =
   CreateInstanceClientInput | CreateOrgClientInput | CreateApplicationClientInput;
 
 export async function createClient(input: CreateClientInput): Promise<OAuthClientWithSecret> {
@@ -508,7 +508,7 @@ export async function rotateClientSecret(clientId: string): Promise<OAuthClientW
   return row ? { ...mapRow(row), clientSecret: plaintextSecret } : null;
 }
 
-export interface UpdateClientInput {
+interface UpdateClientInput {
   redirectUris?: string[];
   postLogoutRedirectUris?: string[];
   scopes?: string[];
@@ -922,13 +922,13 @@ export async function createInstanceClientFromEnv(
   return mapRow(inserted[0]!);
 }
 
-export interface InstanceClientDriftMismatch {
+interface InstanceClientDriftMismatch {
   field: string;
   stored: unknown;
   declared: unknown;
 }
 
-export type InstanceClientDriftResult =
+type InstanceClientDriftResult =
   | { kind: "not-found" }
   | { kind: "wrong-level"; storedLevel: string }
   | { kind: "match" }

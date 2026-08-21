@@ -30,7 +30,7 @@ interface Entry<V> {
   expiresAt: number;
 }
 
-export interface TtlCache<V> {
+interface TtlCache<V> {
   get(key: string): V | null | undefined;
   set(key: string, value: V | null): void;
   delete(key: string): Promise<void>;

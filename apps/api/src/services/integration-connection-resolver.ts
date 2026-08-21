@@ -110,7 +110,7 @@ export interface IntegrationRequirement {
   requiredAuthKey?: string;
 }
 
-export interface ResolveConnectionsInput {
+interface ResolveConnectionsInput {
   /** The integrations this run needs and what they need from each. */
   requirements: IntegrationRequirement[];
   /**
@@ -538,7 +538,7 @@ function indexPins(
  * package row). Integration manifests are fetched here. Pins,
  * connections, override columns are all read in parallel.
  */
-export interface ResolveConnectionsForRunInput {
+interface ResolveConnectionsForRunInput {
   agentManifest: Record<string, unknown>;
   packageId: string;
   actor: Actor;
@@ -601,7 +601,7 @@ export async function resolveConnectionsForRun(
  * run-creation returns a result object) surface the identical shape; this is
  * the single definition of that shape.
  */
-export interface MissingConnectionError {
+interface MissingConnectionError {
   status: 412;
   code: "missing_integration_connection";
   title: "Missing Integration Connection";
@@ -609,7 +609,7 @@ export interface MissingConnectionError {
   errors: ResolutionFieldError[];
 }
 
-export type ResolveRunConnectionsOutcome =
+type ResolveRunConnectionsOutcome =
   | { ok: true; resolved: ResolvedConnectionMap | null }
   | { ok: false; error: MissingConnectionError };
 

@@ -9,7 +9,7 @@
  * chain. They are one algorithm with one parameter, not two algorithms.
  */
 
-export interface IfNoneMatchOptions {
+interface IfNoneMatchOptions {
   /**
    * Whether `*` counts as a match. Default `true`, which is the plain reading
    * of the RFC: `*` means "if any current representation exists".

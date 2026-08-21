@@ -63,14 +63,14 @@ import type { OrgRole } from "../../../types/index.ts";
 import type { AuthIdentity } from "../auth/types.ts";
 import { getClientCached } from "./oauth-admin.ts";
 
-export interface OrgSignupPolicy {
+interface OrgSignupPolicy {
   /** When false, non-members are rejected with `OrgSignupClosedError`. */
   allowSignup: boolean;
   /** Role assigned on auto-join. `owner` is disallowed by the schema. */
   signupRole: Exclude<OrgRole, "owner">;
 }
 
-export interface ResolvedOrgMembership {
+interface ResolvedOrgMembership {
   userId: string;
   orgId: string;
   role: OrgRole;
@@ -188,7 +188,7 @@ async function findMembership(
  * the `beforeSignup` / `afterSignup` guards and `buildOrgLevelClaims` in
  * `auth/plugins.ts` without duplicating DB lookups.
  */
-export interface ClientSignupPolicy {
+interface ClientSignupPolicy {
   clientId: string;
   level: "org" | "application" | "instance";
   allowSignup: boolean;

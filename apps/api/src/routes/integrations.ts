@@ -190,7 +190,7 @@ export const updateConnectionSchema = z
     message: "at least one of label, shared_with_org must be provided",
   });
 
-export const oauthClientSchema = z.object({
+const oauthClientSchema = z.object({
   client_id: z.string().min(1),
   /**
    * Shared shape only — the concrete bodies below layer their own semantics on

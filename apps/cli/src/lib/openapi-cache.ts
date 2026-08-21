@@ -72,7 +72,7 @@ export interface OpenApiOperation {
  * "invalidate and re-warm" without losing cache benefits on the next
  * invocation.
  */
-export interface FetchOptions {
+interface FetchOptions {
   noCache?: boolean;
   refresh?: boolean;
 }

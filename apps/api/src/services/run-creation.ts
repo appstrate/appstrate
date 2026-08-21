@@ -37,12 +37,12 @@ import { runPreflightGates } from "./run-preflight-gates.ts";
 // Types
 // ---------------------------------------------------------------------------
 
-export interface SinkRequest {
+interface SinkRequest {
   /** Client-requested TTL in seconds. Clamped to REMOTE_RUN_SINK_MAX_TTL_SECONDS. */
   ttlSeconds?: number;
 }
 
-export interface CreateRunInput {
+interface CreateRunInput {
   runId: string;
   orgId: string;
   applicationId: string;
@@ -68,7 +68,7 @@ export interface CreateRunInput {
   runnerKind?: string | null;
 }
 
-export type CreateRunResult =
+type CreateRunResult =
   | {
       ok: true;
       runId: string;

@@ -20,8 +20,6 @@ const DEFAULT_CONFIG: AppConfig = {
   trustedOrigins: [],
 };
 
-export type { AppConfig };
-
 export function useAppConfig(): AppConfig {
   return window.__APP_CONFIG__ ?? DEFAULT_CONFIG;
 }

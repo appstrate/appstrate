@@ -24,7 +24,7 @@ import {
   type ModelReasoningLevel,
 } from "@appstrate/core/model-generation";
 
-export interface RuntimeEnv {
+interface RuntimeEnv {
   /** Run identifier injected by the platform on container create. */
   runId: string;
   /** Workspace root inside the container. */

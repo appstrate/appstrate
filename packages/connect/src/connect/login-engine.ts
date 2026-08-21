@@ -61,13 +61,13 @@ import { decodeJwtPayload } from "@appstrate/core/jwt";
 import { resolveAndCheckHost, type HostResolver } from "@appstrate/core/ssrf";
 import { isAllowedInternalIdpHost } from "../oauth-egress.ts";
 
-export interface LoginLimits {
+interface LoginLimits {
   // Per-request timeout. Maps to the manifest field `connect.limits.request_timeout_ms`.
   stepTimeoutMs: number;
   maxResponseBytes: number;
 }
 
-export const DEFAULT_LOGIN_LIMITS: LoginLimits = {
+const DEFAULT_LOGIN_LIMITS: LoginLimits = {
   stepTimeoutMs: 15_000,
   maxResponseBytes: 1_000_000,
 };
@@ -77,7 +77,7 @@ export const DEFAULT_LOGIN_LIMITS: LoginLimits = {
  * expression string, an AFPS extractor object, or an Arazzo Selector Object
  * (`{ context, selector, type }`).
  */
-export type LoginOutput =
+type LoginOutput =
   | string
   | { from: "cookie"; name: string }
   | { from: "jwt"; token: string; path: string }
@@ -89,13 +89,13 @@ export type LoginOutput =
  * expression yielding the document to query (typically `$response.body`);
  * `selector` is the type-specific query string.
  */
-export interface ArazzoSelectorObject {
+interface ArazzoSelectorObject {
   context: string;
   selector: string;
   type: "jsonpath" | "xpath" | "jsonpointer";
 }
 
-export interface LoginRequest {
+interface LoginRequest {
   method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   url: string;
   headers?: Record<string, string>;
@@ -103,7 +103,7 @@ export interface LoginRequest {
   content_type?: string;
 }
 
-export interface ArazzoCriterion {
+interface ArazzoCriterion {
   condition: string;
   /**
    * AFPS §7.7 Arazzo criterion type. When omitted (or `"simple"`), the
@@ -138,7 +138,7 @@ export interface LoginConfig {
   };
 }
 
-export interface LoginContext {
+interface LoginContext {
   /** Transient bootstrap secrets (e.g. password) for `{{...}}`. Never persisted by the engine. */
   inputs: Record<string, string>;
   /** Integration URL allowlist (global). The request URL must match unless allowAllUris. */
@@ -150,7 +150,7 @@ export interface LoginContext {
   now?: () => number;
 }
 
-export interface LoginResult {
+interface LoginResult {
   outputs: Record<string, string>;
   identityClaims: Record<string, string>;
   expiresAt: string | null;

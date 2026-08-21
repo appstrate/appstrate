@@ -44,7 +44,7 @@ function isValidLogoUrl(raw: string): boolean {
   return !isBlockedUrl(raw);
 }
 
-export const AppBrandingSchema = z
+const AppBrandingSchema = z
   .object({
     name: z.string().min(1).max(200).optional(),
     logoUrl: z.url().refine(isValidLogoUrl, "logoUrl must be a public HTTPS URL").optional(),
@@ -61,7 +61,7 @@ export const AppBrandingSchema = z
   })
   .strict();
 
-export type AppBranding = z.infer<typeof AppBrandingSchema>;
+type AppBranding = z.infer<typeof AppBrandingSchema>;
 
 /** Fully resolved branding — every field populated, ready to render. */
 export interface ResolvedAppBranding {

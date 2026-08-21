@@ -19,7 +19,7 @@ import { html, type RawHtml } from "./html.ts";
 import { renderLayout } from "./layout.ts";
 import type { ResolvedAppBranding } from "../services/branding.ts";
 
-export interface VerifyEmailSentPageProps {
+interface VerifyEmailSentPageProps {
   queryString: string;
   branding: ResolvedAppBranding;
   /** Email address the verification link was sent to (pre-filled for display). */

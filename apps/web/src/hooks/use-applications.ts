@@ -1,11 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useQueryClient } from "@tanstack/react-query";
-import { $api, type components } from "../api/client";
+import { $api } from "../api/client";
 import { useOrgOnlyScope } from "./use-org-scope";
-
-/** Wire shape from the OpenAPI spec (components.schemas.ApplicationObject). */
-export type ApplicationInfo = components["schemas"]["ApplicationObject"];
 
 export function useApplications() {
   const scope = useOrgOnlyScope();

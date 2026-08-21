@@ -50,7 +50,7 @@ const credentialProxyLimitsSchema = z
   .strict();
 
 export type LlmProxyLimits = z.infer<typeof llmProxyLimitsSchema>;
-export type CredentialProxyLimits = z.infer<typeof credentialProxyLimitsSchema>;
+type CredentialProxyLimits = z.infer<typeof credentialProxyLimitsSchema>;
 
 // ---------------------------------------------------------------------------
 // Registry

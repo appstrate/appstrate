@@ -31,7 +31,7 @@ import { runCommand } from "../lib/install/os.ts";
 import { resolveInstall } from "../lib/install/project.ts";
 import { reportRunning, resolveRunningUrls } from "../lib/install/report.ts";
 
-export interface LifecycleOptions {
+interface LifecycleOptions {
   /**
    * Override the install directory. Defaults to `~/appstrate` via
    * `resolveInstall`, which then reads the recorded project name from
@@ -40,14 +40,14 @@ export interface LifecycleOptions {
   dir?: string;
 }
 
-export interface LogsOptions extends LifecycleOptions {
+interface LogsOptions extends LifecycleOptions {
   /** Stream new lines as they arrive (`docker compose logs -f`). */
   follow?: boolean;
   /** Optional service-name filter (e.g. `postgres` or `appstrate`). */
   service?: string;
 }
 
-export interface UninstallOptions extends LifecycleOptions {
+interface UninstallOptions extends LifecycleOptions {
   /**
    * When true: `docker compose down -v` (volumes removed) + `rm -rf
    * <dir>` after confirmation. When false (the default): `docker

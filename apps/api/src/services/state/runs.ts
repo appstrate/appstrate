@@ -898,7 +898,7 @@ const notRunnerMirrorSql = sql<boolean>`NOT (
 )`;
 
 /** A run's attributable spend and how much of it is backed by real rates. */
-export interface RunSpend {
+interface RunSpend {
   /** Total attributable spend in USD. */
   costUsd: number;
   /**
@@ -1395,7 +1395,7 @@ export async function deletePackageRuns(scope: AppScope, packageId: string): Pro
   });
 }
 
-export type RunListPage = ListEnvelope<EnrichedRun> & { total: number };
+type RunListPage = ListEnvelope<EnrichedRun> & { total: number };
 
 export async function listRunsWithFilter(
   filter: SQL,
@@ -1464,9 +1464,9 @@ export async function listPackageRuns(
  * parameter against it, so the tuple and the type cannot drift.
  */
 export const GLOBAL_RUN_KINDS = ["all", "package", "inline"] as const;
-export type GlobalRunKind = (typeof GLOBAL_RUN_KINDS)[number];
+type GlobalRunKind = (typeof GLOBAL_RUN_KINDS)[number];
 
-export interface ListGlobalRunsOptions {
+interface ListGlobalRunsOptions {
   limit?: number;
   offset?: number;
   kind?: GlobalRunKind;
@@ -1669,7 +1669,7 @@ export async function getRunFull(scope: AppScope, id: string, actor: Actor | nul
  * callers must verify run ownership via `getRun(scope, runId)` first.
  */
 export const RUN_LOG_LEVELS = ["debug", "info", "warn", "error"] as const;
-export type RunLogLevel = (typeof RUN_LOG_LEVELS)[number];
+type RunLogLevel = (typeof RUN_LOG_LEVELS)[number];
 
 export async function listRunLogs(args: {
   runId: string;

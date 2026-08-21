@@ -14,7 +14,7 @@
 
 import { BundleError } from "./errors.ts";
 
-export interface ParseManifestOptions {
+interface ParseManifestOptions {
   /** Optional package identity (e.g. `@scope/name@1.2.3`) attached to the error message + details. */
   identity?: string;
 }

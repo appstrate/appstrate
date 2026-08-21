@@ -13,7 +13,6 @@ import {
   RUNNER_BIN_PATH,
   RUNNER_ENV_PATH,
   RUNNER_RUNTIME_DIR,
-  RUNNER_SERVICE_NAME,
   runnerDataPaths,
 } from "./constants.ts";
 
@@ -377,4 +376,3 @@ export function firewallCommands(
 }
 
 /** Re-export for callers that only need the service name string. */
-export { RUNNER_SERVICE_NAME };

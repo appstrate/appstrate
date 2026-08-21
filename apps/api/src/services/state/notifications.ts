@@ -27,7 +27,7 @@ function recipientFilter(actor: Actor): SQL {
 }
 
 /** Shape returned to the notifications list endpoint. */
-export interface NotificationDto {
+interface NotificationDto {
   id: string;
   type: string;
   run_id: string | null;
@@ -36,7 +36,7 @@ export interface NotificationDto {
   created_at: string;
 }
 
-export interface NotificationListResult {
+interface NotificationListResult {
   data: NotificationDto[];
   /** True when another page follows (keyset pagination — see listNotifications). */
   has_more: boolean;

@@ -51,7 +51,7 @@ function readDeclaredProtocols(inputSchema: unknown): UploadProtocol[] {
   return enumRaw.filter((p): p is UploadProtocol => typeof p === "string" && known.has(p));
 }
 
-export interface BuildApiUploadFactoryOptions {
+interface BuildApiUploadFactoryOptions {
   /** The advertised `{ns}__api_upload` tool from the sidecar's `tools/list`. */
   tool: { name: string; description?: string; inputSchema?: unknown };
   /**

@@ -58,7 +58,7 @@ export function getConfigDir(): string {
   return join(homedir(), ".config", "appstrate");
 }
 
-export function getConfigPath(): string {
+function getConfigPath(): string {
   return join(getConfigDir(), "config.toml");
 }
 

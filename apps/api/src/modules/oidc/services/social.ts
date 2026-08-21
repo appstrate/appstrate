@@ -32,16 +32,16 @@ import { createTtlCache } from "./ttl-cache.ts";
 import { logger } from "../../../lib/logger.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 
-export type { SocialProviderId, SocialProviderView };
+export type { SocialProviderId };
 
-export interface ResolvedSocialProvider {
+interface ResolvedSocialProvider {
   clientId: string;
   clientSecret: string;
   scopes: string[] | null;
   source: "per-app";
 }
 
-export interface UpsertSocialProviderInput {
+interface UpsertSocialProviderInput {
   clientId: string;
   clientSecret: string;
   scopes?: string[] | null;

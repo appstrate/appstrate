@@ -35,7 +35,7 @@ import { extractAssistantMessages } from "./stream-parse.ts";
 import { trackTurn } from "./inflight.ts";
 import { getResumableContext } from "./resumable.ts";
 
-export interface FinalizeChatStreamOptions {
+interface FinalizeChatStreamOptions {
   /** The engine's UI-message-stream Response. */
   engineResponse: Response;
   /** Resumable producer key — the id stored as `chat_sessions.active_stream_id`. */

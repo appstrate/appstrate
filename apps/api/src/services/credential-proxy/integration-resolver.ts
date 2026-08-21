@@ -55,7 +55,7 @@ export class IntegrationCredentialNotFoundError extends Error {
   }
 }
 
-export interface ResolveIntegrationProxyInput {
+interface ResolveIntegrationProxyInput {
   /** Integration package id from `X-Integration-Id` (`@scope/name`). */
   integrationId: string;
   applicationId: string;
@@ -64,7 +64,7 @@ export interface ResolveIntegrationProxyInput {
   connectionId?: string;
 }
 
-export interface ResolvedIntegrationProxyCredentials {
+interface ResolvedIntegrationProxyCredentials {
   payload: ProxyCredentialsPayload;
   /** The decrypted connection id — used by the route's 401 force-refresh path. */
   connectionId: string;

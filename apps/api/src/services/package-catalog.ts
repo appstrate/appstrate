@@ -28,7 +28,7 @@ interface DbPackageRow {
  * paths) and callers that display (detail DTOs, missing ones included) read
  * the same array; absence is a flag, never a shorter list (#878).
  */
-export interface DeclaredSkill {
+interface DeclaredSkill {
   id: string;
   /** Range declared by the manifest, or caret-of-current when it carries none. */
   version: string;

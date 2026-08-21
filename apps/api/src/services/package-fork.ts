@@ -22,13 +22,13 @@ import { packageVersions } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
 import { asRecord } from "@appstrate/core/safe-json";
 
-export interface ForkResult {
+interface ForkResult {
   packageId: string;
   type: string;
   forked_from: string;
 }
 
-export type ForkError =
+type ForkError =
   | { code: "ALREADY_OWNED" }
   | { code: "NOT_FOUND" }
   | { code: "NAME_COLLISION"; existingId: string }

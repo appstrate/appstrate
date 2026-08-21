@@ -48,9 +48,7 @@ export interface ResolvedSmtpConfig {
   source: "per-app" | "instance";
 }
 
-export type { SmtpConfigView };
-
-export interface UpsertSmtpConfigInput {
+interface UpsertSmtpConfigInput {
   host: string;
   port: number;
   username: string;

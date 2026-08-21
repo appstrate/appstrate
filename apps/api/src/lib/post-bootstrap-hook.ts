@@ -24,7 +24,7 @@ import { createDefaultApplication } from "../services/applications.ts";
 import { provisionDefaultAgentForOrg } from "../services/default-agent.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 
-export interface PostBootstrapOrgArgs {
+interface PostBootstrapOrgArgs {
   orgId: string;
   slug: string;
   userId: string;

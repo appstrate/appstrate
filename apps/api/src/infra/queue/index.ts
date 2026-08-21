@@ -4,14 +4,7 @@ import { hasRedis } from "../mode.ts";
 import { LocalQueue } from "./local-queue.ts";
 import type { JobQueue, JobAddOptions } from "./interface.ts";
 
-export type {
-  JobQueue,
-  QueueJob,
-  JobHandler,
-  JobAddOptions,
-  CronPattern,
-  WorkerOptions,
-} from "./interface.ts";
+export type { JobQueue, QueueJob } from "./interface.ts";
 export { PermanentJobError } from "./interface.ts";
 
 /** Create a job queue — BullMQ when Redis is available, in-memory otherwise. */

@@ -54,7 +54,7 @@ const OUTBOUND_TIMEOUT_MS = 30_000;
  * store implementation lives in `infra/cookie-jar/`; we only depend on the
  * narrow contract here so the core stays free of infra imports.
  */
-export interface CookieJarAdapter {
+interface CookieJarAdapter {
   get(sessionId: string, integrationKey: string): Promise<string[]>;
   set(
     sessionId: string,
@@ -64,7 +64,7 @@ export interface CookieJarAdapter {
   ): Promise<void>;
 }
 
-export interface ProxyCallInput {
+interface ProxyCallInput {
   /** Application that owns the credentials. */
   applicationId: string;
   /**
@@ -141,7 +141,7 @@ export interface ProxyCallInput {
   fetch?: typeof fetch;
 }
 
-export interface ProxyCallResult {
+interface ProxyCallResult {
   status: number;
   headers: Headers;
   body: ReadableStream<Uint8Array> | null;

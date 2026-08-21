@@ -440,7 +440,7 @@ async function setupTransparentEgress(runNetwork: string): Promise<TransparentEg
   }
 }
 
-export function createDockerIntegrationRuntimeAdapter(): IntegrationRuntimeAdapter {
+function createDockerIntegrationRuntimeAdapter(): IntegrationRuntimeAdapter {
   const containerIds: string[] = [];
   /** Per-spawn host temp directories holding decoded fileMounts bytes. */
   const hostTempDirsByContainer: Map<string, string[]> = new Map();

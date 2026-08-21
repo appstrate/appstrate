@@ -253,7 +253,7 @@ export function printBootstrapFollowup(
  * Same shape as the `TierResolverDeps` / `PortResolverDeps` seams one
  * level down.
  */
-export interface InstallCommandDeps {
+interface InstallCommandDeps {
   /** Terminal Tier 0 installer (clone + bun install + dev server). */
   installTier0?: typeof installTier0;
   /** Terminal Docker-tier installer (compose write + `docker compose up`). */
@@ -600,7 +600,7 @@ export function assertLoopbackPortMatches(appUrl: string, port: number): void {
 }
 
 /** DI seam for the cross-check with `docker compose ls` — tests inject a fake, production uses the real helper. */
-export interface PortResolverDeps {
+interface PortResolverDeps {
   findRunningComposeProject?: (name: string) => Promise<RunningComposeProject | null>;
   /**
    * When the preferred port is busy under non-interactive mode, probe
@@ -816,7 +816,7 @@ async function ensurePortFree(
  * DI seam for `resolveTier()` — production wires `clack` + the real
  * Docker probe; tests inject deterministic stubs.
  */
-export interface TierResolverDeps {
+interface TierResolverDeps {
   select?: typeof clack.select;
   isCancel?: typeof clack.isCancel;
   note?: typeof clack.note;
@@ -924,7 +924,7 @@ export async function resolveTier(
  * DI seam for `resolveDir()` — lets tests exercise the `--yes` short
  * circuit without spawning a real askText prompt.
  */
-export interface DirResolverDeps {
+interface DirResolverDeps {
   /** When true, accept `defaultInstallDir()` without prompting. */
   autoConfirm?: boolean;
 }
@@ -1014,7 +1014,7 @@ export type RunBackendConfig =
       plaintextOptIn: boolean;
     };
 
-export interface RunBackendInputs {
+interface RunBackendInputs {
   /** `--run-adapter` flag (env `APPSTRATE_RUN_ADAPTER` applied as fallback here). */
   runAdapter?: string;
   /** `--runner-url` — an existing remote daemon URL (implies the remote topology). */
@@ -1034,7 +1034,7 @@ export interface RunBackendInputs {
  * network-interface probe + token minting; tests inject deterministic
  * stubs so no prompt, no `os.networkInterfaces()`, no randomness leaks in.
  */
-export interface RunBackendResolverDeps {
+interface RunBackendResolverDeps {
   select?: typeof clack.select;
   isCancel?: typeof clack.isCancel;
   askText?: typeof askText;
@@ -1705,7 +1705,7 @@ async function preflightProjectCollision(
  * of an existing docker install (no token to preserve). Returns a new config
  * (never mutates the input) so the caller resolves the final token exactly once.
  */
-export function seedUpgradeRunnerToken(
+function seedUpgradeRunnerToken(
   runBackend: RunBackendConfig,
   mode: InstallMode,
   existing: ExistingInstall,

@@ -27,8 +27,8 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { commandExists, runCommand, waitForHttp } from "./os.ts";
 
 /** Known location of the user-local Bun install produced by the upstream installer. */
-export const BUN_HOME = join(homedir(), ".bun");
-export const BUN_BIN = join(BUN_HOME, "bin");
+const BUN_HOME = join(homedir(), ".bun");
+const BUN_BIN = join(BUN_HOME, "bin");
 
 export class GitMissingError extends Error {
   constructor() {
@@ -95,7 +95,7 @@ export async function installBun(): Promise<void> {
   }
 }
 
-export interface CloneSourceOptions {
+interface CloneSourceOptions {
   /** Semver-ish tag, e.g. `v1.2.3`. Falls back to `main` when undefined (dev). */
   version?: string;
   /** Override for tests so we don't actually clone github. */

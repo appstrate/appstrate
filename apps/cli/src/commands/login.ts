@@ -57,7 +57,7 @@ import {
   type Application,
 } from "../lib/applications.ts";
 
-export interface LoginOptions {
+interface LoginOptions {
   profile?: string;
   instance?: string;
   /** `--org <id-or-slug>` — non-interactive pin, fails if no match. */
@@ -88,7 +88,7 @@ export interface LoginOptions {
  * either hook to signal "user opted out / cannot prompt" — the caller
  * leaves `orgId` unset and prints a follow-up hint.
  */
-export interface LoginDeps {
+interface LoginDeps {
   /** Interactive picker when the user belongs to ≥2 orgs. */
   pickOrg?: (orgs: Org[]) => Promise<Org | null>;
   /** Prompt the user for a new org name + optional slug. */

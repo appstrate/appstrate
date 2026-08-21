@@ -77,7 +77,7 @@ export interface BillingPlanDetail {
   document_storage_bytes?: number;
 }
 
-export interface BillingInfo {
+interface BillingInfo {
   plan: BillingPlan;
   plans: BillingPlanDetail[];
   usage_percent: number;

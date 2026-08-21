@@ -100,7 +100,7 @@ export class CliTokenError extends Error {
 }
 
 /** RFC 6749 / RFC 8628 error codes the CLI callers render directly. */
-export type CliTokenErrorCode =
+type CliTokenErrorCode =
   | "authorization_pending"
   | "slow_down"
   | "expired_token"
@@ -110,7 +110,7 @@ export type CliTokenErrorCode =
   | "invalid_client"
   | "server_error";
 
-export interface TokenPair {
+interface TokenPair {
   accessToken: string;
   refreshToken: string;
   /** Seconds until the access token expires. */
@@ -657,7 +657,7 @@ export async function revokeRefreshToken(params: {
  * session" because BA cookie sessions are orthogonal to refresh-token
  * families. The CLI, when it ever reuses this endpoint, can populate it.
  */
-export interface CliSessionListEntry {
+interface CliSessionListEntry {
   familyId: string;
   deviceName: string | null;
   userAgent: string | null;
@@ -925,7 +925,7 @@ export async function lookupCliDeviceName(familyId: string): Promise<string | nu
  * Members tab can render "X's MacBook · last used 3 min ago" without
  * the dashboard performing a second per-row lookup.
  */
-export interface AdminCliSessionListEntry extends CliSessionListEntry {
+interface AdminCliSessionListEntry extends CliSessionListEntry {
   userId: string;
   userEmail: string | null;
   userName: string | null;

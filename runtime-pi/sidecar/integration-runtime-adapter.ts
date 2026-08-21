@@ -132,7 +132,7 @@ export interface IntegrationRuntimeAdapter {
  * the run runtime. There is NO availability probing / auto-detection: the
  * sidecar never guesses its backend.
  */
-export interface IntegrationRuntimeAdapterEntry {
+interface IntegrationRuntimeAdapterEntry {
   readonly id: string;
   create(): IntegrationRuntimeAdapter;
 }

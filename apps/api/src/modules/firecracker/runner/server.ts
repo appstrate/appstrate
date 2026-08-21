@@ -77,7 +77,7 @@ export interface RunnerOrchestrator extends RunOrchestrator {
   readConsole(id: string, tailBytes: number): Promise<string | null>;
 }
 
-export interface RunnerAppDeps {
+interface RunnerAppDeps {
   orchestrator: RunnerOrchestrator;
   /** Shared bearer secret — every request must present it. */
   token: string;

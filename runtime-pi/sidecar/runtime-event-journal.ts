@@ -25,14 +25,14 @@ import {
 import { logger } from "./logger.ts";
 
 /** A canonical run event as appended by a runtime-tool handler. */
-export type JournalEvent = Record<string, unknown>;
+type JournalEvent = Record<string, unknown>;
 
 interface Entry {
   seq: number;
   event: JournalEvent;
 }
 
-export interface JournalBatch {
+interface JournalBatch {
   /** Events with sequence strictly greater than the requested cursor. */
   events: JournalEvent[];
   /** Highest sequence in the journal (the drainer's new cursor). */

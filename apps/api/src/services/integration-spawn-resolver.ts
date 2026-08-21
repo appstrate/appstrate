@@ -77,7 +77,7 @@ import {
   type AfpsManifestAuth,
 } from "./integration-manifest-helpers.ts";
 
-export interface ResolveIntegrationsInput {
+interface ResolveIntegrationsInput {
   /**
    * The run's org — required tenant boundary for package resolution
    * (defense in depth against a cross-tenant reference): a spawn may only
@@ -148,7 +148,7 @@ export interface DroppedIntegration {
  * an integration it declared is otherwise indistinguishable from an agent
  * that simply never called that integration's tools.
  */
-export interface ResolveIntegrationSpawnsResult {
+interface ResolveIntegrationSpawnsResult {
   readonly specs: IntegrationSpawnSpec[];
   readonly dropped: DroppedIntegration[];
 }

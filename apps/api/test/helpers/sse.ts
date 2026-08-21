@@ -33,7 +33,7 @@ export function eventData<E extends RealtimeEvent["event"]>(
   return frame.data as EventDataMap[E];
 }
 
-export interface SSEEvent {
+interface SSEEvent {
   event: string;
   data: string;
   /**
@@ -43,56 +43,6 @@ export interface SSEEvent {
    * because pre-existing fixtures predate id support.
    */
   id?: string;
-}
-
-/**
- * Async generator that parses an SSE ReadableStream into structured events.
- *
- * Reads chunks from the stream, splits by double-newline delimiters,
- * and extracts `event:` and `data:` fields from each SSE frame.
- */
-export async function* parseSSEStream(body: ReadableStream<Uint8Array>): AsyncGenerator<SSEEvent> {
-  const reader = body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      buffer += decoder.decode(value, { stream: true });
-
-      // Split on double newline (SSE frame delimiter)
-      const frames = buffer.split("\n\n");
-      // Keep the last incomplete frame in the buffer
-      buffer = frames.pop()!;
-
-      for (const frame of frames) {
-        if (!frame.trim()) continue;
-
-        let event = "";
-        let data = "";
-        let id: string | undefined;
-
-        for (const line of frame.split("\n")) {
-          if (line.startsWith("event:")) {
-            event = line.slice("event:".length).trim();
-          } else if (line.startsWith("data:")) {
-            data = line.slice("data:".length).trim();
-          } else if (line.startsWith("id:")) {
-            id = line.slice("id:".length).trim();
-          }
-        }
-
-        if (event) {
-          yield { event, data, ...(id !== undefined ? { id } : {}) };
-        }
-      }
-    }
-  } finally {
-    reader.releaseLock();
-  }
 }
 
 /**

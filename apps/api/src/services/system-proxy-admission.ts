@@ -33,7 +33,7 @@ import { getRunningRunCountForOrg } from "./state/runs.ts";
 import { callHook, hasHook } from "../lib/modules/module-loader.ts";
 import { ApiError } from "../lib/errors.ts";
 
-export type SystemProxyUsageContext =
+type SystemProxyUsageContext =
   | {
       context: "run";
       packageId: string;

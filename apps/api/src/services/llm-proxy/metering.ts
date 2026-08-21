@@ -297,7 +297,7 @@ export interface MeteredForwardContext {
 }
 
 /** Per-call knobs of {@link forwardMeteredResponse}. */
-export interface MeteredForwardOptions {
+interface MeteredForwardOptions {
   /**
    * Model-alias swap (issue #727). When set, the real upstream id echoed by the
    * upstream is rewritten back to the alias on the success branches (SSE

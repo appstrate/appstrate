@@ -32,7 +32,7 @@ import {
   type RunStatus,
 } from "./run-events.ts";
 
-export interface RunLogStream {
+interface RunLogStream {
   logs: RunLogLine[];
   status: RunStatus | undefined;
   packageId: string | undefined;

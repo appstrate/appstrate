@@ -57,7 +57,7 @@ export async function confirm(message: string, initialValue = true): Promise<boo
   return value;
 }
 
-export interface SelectOption<T> {
+interface SelectOption<T> {
   value: T;
   label: string;
   hint?: string;

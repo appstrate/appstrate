@@ -34,7 +34,7 @@ import { eq, and } from "drizzle-orm";
 import { validateAgentIntegrationSelections } from "./integration-scope-validation.ts";
 import { getLatestVersionInfo, getVersionDetail } from "./package-versions.ts";
 
-export interface Finding {
+interface Finding {
   packageId: string;
   /** `draft`, or the published version label. */
   artifact: string;

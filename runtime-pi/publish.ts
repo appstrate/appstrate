@@ -331,7 +331,7 @@ async function fileSha256(abs: string): Promise<string> {
   return hasher.digest("hex");
 }
 
-export interface SweepOutputsDeps {
+interface SweepOutputsDeps {
   /** The uploader from {@link createRunDocumentUploader}. */
   uploader: DocumentUploader;
   /** Absolute workspace root — the sweep scans `<workspace>/outputs/`. */

@@ -32,7 +32,7 @@ import { parseScopedName } from "@appstrate/core/naming";
 export type ReportMode = "auto" | "true" | "false";
 export type ReportFallback = "abort" | "console";
 
-export interface ReportOptions {
+interface ReportOptions {
   mode: ReportMode;
   fallback: ReportFallback;
   /** Requested sink TTL in seconds. Clamped by the server. */
@@ -77,7 +77,7 @@ export interface ReportSession {
 }
 
 /** User-provided execution-environment metadata attached to the run record. */
-export interface ReportContextSnapshot {
+interface ReportContextSnapshot {
   os: string;
   cliVersion: string;
   gitSha?: string;

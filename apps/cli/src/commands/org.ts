@@ -24,23 +24,23 @@ import { listOrgs, createOrg, resolveOrgRef, type Org } from "../lib/orgs.ts";
 import { listApplications, findDefaultApplication, type Application } from "../lib/applications.ts";
 import { askText, select, exitWithError } from "../lib/ui.ts";
 
-export interface OrgBaseOptions {
+interface OrgBaseOptions {
   profile?: string;
 }
 
-export interface OrgSwitchOptions extends OrgBaseOptions {
+interface OrgSwitchOptions extends OrgBaseOptions {
   /** Positional `[id-or-slug]` — when absent, use interactive picker. */
   ref?: string;
 }
 
-export interface OrgCreateOptions extends OrgBaseOptions {
+interface OrgCreateOptions extends OrgBaseOptions {
   /** Positional `[name]` — when absent, prompt interactively. */
   name?: string;
   /** `--slug <slug>` (optional override — server derives from name if unset). */
   slug?: string;
 }
 
-export interface OrgCommandDeps {
+interface OrgCommandDeps {
   /** Return null when the picker cannot run (e.g. non-TTY). */
   pickOrg?: (orgs: Org[], currentOrgId?: string) => Promise<Org | null>;
   /** Return null when the prompt cannot run. */

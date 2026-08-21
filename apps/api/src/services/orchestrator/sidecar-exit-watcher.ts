@@ -7,13 +7,13 @@ export interface UnexpectedSidecarExit {
   tail?: string;
 }
 
-export interface SidecarExitWatcherError {
+interface SidecarExitWatcherError {
   runId: string;
   containerId: string;
   error: unknown;
 }
 
-export interface SidecarExitWatcherDependencies {
+interface SidecarExitWatcherDependencies {
   waitForExit(containerId: string): Promise<number>;
   streamLogs(containerId: string, signal: AbortSignal): AsyncIterable<string>;
   onUnexpectedExit(exit: UnexpectedSidecarExit): void;

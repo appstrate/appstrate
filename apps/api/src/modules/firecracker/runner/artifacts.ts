@@ -77,7 +77,7 @@ import { logger as defaultLogger } from "./logger.ts";
 export const GUEST_PROTOCOL_VERSION = 2;
 
 /** GitHub Release download base for this repo (versioned + `latest`). */
-export const DEFAULT_ARTIFACTS_BASE_URL = "https://github.com/appstrate/appstrate/releases";
+const DEFAULT_ARTIFACTS_BASE_URL = "https://github.com/appstrate/appstrate/releases";
 
 /** Combined manifest asset name (one per release, all arches). */
 const MANIFEST_ASSET_NAME = "firecracker-artifacts-manifest.json";
@@ -109,7 +109,7 @@ const MANIFEST_SIGNATURE_ASSET_NAME = "firecracker-artifacts-manifest.json.sig";
  * placeholder cannot verify anything): set FIRECRACKER_ARTIFACTS_PUBKEY, or use
  * FIRECRACKER_ARTIFACTS_LOCAL=1 to build guest artifacts locally.
  */
-export const ARTIFACTS_SIGNING_PUBKEY = "__FIRECRACKER_ARTIFACTS_ED25519_PUBKEY__";
+const ARTIFACTS_SIGNING_PUBKEY = "__FIRECRACKER_ARTIFACTS_ED25519_PUBKEY__";
 
 /**
  * Absolute ceiling on the DECLARED uncompressed rootfs size.
@@ -160,13 +160,11 @@ const artifactsManifestSchema = z.object({
   artifacts: z.record(z.string(), archArtifactsSchema),
 });
 
-export type ArtifactsManifest = z.infer<typeof artifactsManifestSchema>;
-
 // ---------------------------------------------------------------------------
 // Public config + dependency injection surface
 // ---------------------------------------------------------------------------
 
-export interface ArtifactsConfig {
+interface ArtifactsConfig {
   /** FIRECRACKER_KERNEL_PATH — where the engine reads the guest kernel. */
   kernelPath: string;
   /** FIRECRACKER_ROOTFS_PATH — where the engine reads the guest rootfs. */
