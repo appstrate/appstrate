@@ -727,7 +727,7 @@ export const runsPaths = {
       tags: ["Runs"],
       summary: "List runs across the application (global view)",
       description:
-        "Org + application scoped paginated list. Supports filtering by `user=me` (self-owned, also implicit for end-user impersonation), `kind` (all, package, inline), `status`, a date range, and the chat session that launched the run. Inline runs surface via `package_ephemeral: true` on each row. Every filter combines: `user=me` narrows to the caller's own runs (plus the unattributed schedule and system ones, for a member) and still honours `kind`, `status`, the date range and `chat_session_id`.",
+        "Org + application scoped paginated list. Supports filtering by `user=me` (self-owned, also implicit for end-user impersonation), `kind` (all, package, inline), `status`, a date range, and the chat session that launched the run. Inline runs surface via `package_ephemeral: true` on each row. Every filter combines: `user=me` narrows to the caller's own runs (plus the unattributed schedule and system ones, for a member) and still honours `kind`, `status`, `q`, the date range and `chat_session_id`.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
@@ -766,6 +766,13 @@ export const runsPaths = {
           in: "query",
           schema: { type: "string" },
           description: "Return only runs launched from this chat session.",
+        },
+        {
+          name: "q",
+          in: "query",
+          schema: { type: "string", maxLength: 200 },
+          description:
+            "Free-text filter, combined with every other filter. Matches the agent the run executed (scope and name, as stamped on the run) and the error it ended on, case-insensitively and anywhere in the value. A query of digits (optionally prefixed with `#`) also matches the run number. Longer than 200 characters is rejected with `400`.",
         },
       ],
       responses: {

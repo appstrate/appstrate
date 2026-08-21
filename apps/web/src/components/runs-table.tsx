@@ -64,16 +64,18 @@ function DocumentCounts({ run }: { run: EnrichedRun }) {
   );
 }
 
-export function RunsTable({
-  runs,
+/**
+ * The column set, as a value the caller holds.
+ *
+ * A hook rather than a constant because every header is translated, and a value
+ * the CALLER holds because the toolbar's column menu and the table have to be
+ * talking about the same columns — the menu names them, the table draws
+ * whatever is left of them.
+ */
+export function useRunColumns({
   agentName,
   hideAgentName = false,
-  isLoading,
-  isError,
-  empty,
-  banner,
 }: {
-  runs: EnrichedRun[];
   /** What to call the agent a run executed — see `use-run-agent-name.ts`. */
   agentName: (run: EnrichedRun) => string;
   /**
@@ -82,14 +84,7 @@ export function RunsTable({
    * resolved: the row's accessible label is built from it.
    */
   hideAgentName?: boolean;
-  isLoading?: boolean;
-  /** The request failed — which is not the same thing as an empty list. */
-  isError?: boolean;
-  /** Replaces the default "no runs" state, for a surface that can say more. */
-  empty?: ReactNode;
-  /** Pinned above the first row (e.g. a scheduled next run). */
-  banner?: ReactNode;
-}) {
+}): DataColumn<EnrichedRun>[] {
   const { t } = useTranslation(["agents"]);
 
   const columns: DataColumn<EnrichedRun>[] = [
@@ -200,6 +195,32 @@ export function RunsTable({
     },
   ];
 
+  return hideAgentName ? columns.filter((c) => c.id !== "agent") : columns;
+}
+
+export function RunsTable({
+  runs,
+  columns,
+  agentName,
+  isLoading,
+  isError,
+  empty,
+  banner,
+}: {
+  runs: EnrichedRun[];
+  /** From {@link useRunColumns}, minus whatever the reader hid. */
+  columns: DataColumn<EnrichedRun>[];
+  agentName: (run: EnrichedRun) => string;
+  isLoading?: boolean;
+  /** The request failed — which is not the same thing as an empty list. */
+  isError?: boolean;
+  /** Replaces the default "no runs" state, for a surface that can say more. */
+  empty?: ReactNode;
+  /** Pinned above the first row (e.g. a scheduled next run). */
+  banner?: ReactNode;
+}) {
+  const { t } = useTranslation(["agents"]);
+
   // A failed request is NOT an empty list. The lab's `error` scenario is what
   // showed it: with `GET /api/runs` answering 500, the page said "Aucun run" —
   // telling a user their history is empty when the truth is that it could not
@@ -213,7 +234,7 @@ export function RunsTable({
   return (
     <DataTable
       label={t("runs.tableLabel")}
-      columns={hideAgentName ? columns.filter((c) => c.id !== "agent") : columns}
+      columns={columns}
       rows={runs}
       isLoading={isLoading}
       empty={fallback}

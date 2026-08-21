@@ -22,6 +22,8 @@ interface UsePaginatedRunsOptions {
    * as one comma-separated value — "everything that broke" is one question.
    */
   status?: RunStatus[];
+  /** Free text, matched server-side against the agent, the error and the run number. */
+  search?: string;
   limit: number;
   offset: number;
 }
@@ -32,6 +34,7 @@ export function usePaginatedRuns({
   user,
   kind,
   status,
+  search,
   limit,
   offset,
 }: UsePaginatedRunsOptions) {
@@ -58,6 +61,7 @@ export function usePaginatedRuns({
     user,
     kind,
     statusKey,
+    search,
     limit,
     offset,
   );
@@ -88,6 +92,7 @@ export function usePaginatedRuns({
             user,
             kind: kind && kind !== "all" ? kind : undefined,
             status: statusKey,
+            q: search || undefined,
           },
         },
       });

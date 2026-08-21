@@ -23,20 +23,13 @@ import { ActorLabel } from "./actor-label";
 import { EmptyState, ErrorState } from "./page-states";
 import { formatDateField } from "../lib/markdown";
 
-export function SchedulesTable({
-  schedules,
+/** The column set, as a value the caller holds — see `useRunColumns` on why. */
+export function useScheduleColumns({
   agentName,
-  isLoading,
-  isError,
-  empty,
 }: {
-  schedules: EnrichedSchedule[];
   /** What to call the agent a schedule fires. */
   agentName: (schedule: EnrichedSchedule) => string;
-  isLoading?: boolean;
-  isError?: boolean;
-  empty?: React.ReactNode;
-}) {
+}): DataColumn<EnrichedSchedule>[] {
   const { t } = useTranslation(["settings", "agents", "common"]);
 
   const columns: DataColumn<EnrichedSchedule>[] = [
@@ -135,6 +128,25 @@ export function SchedulesTable({
       ),
     },
   ];
+
+  return columns;
+}
+
+export function SchedulesTable({
+  schedules,
+  columns,
+  isLoading,
+  isError,
+  empty,
+}: {
+  schedules: EnrichedSchedule[];
+  /** From {@link useScheduleColumns}, minus whatever the reader hid. */
+  columns: DataColumn<EnrichedSchedule>[];
+  isLoading?: boolean;
+  isError?: boolean;
+  empty?: React.ReactNode;
+}) {
+  const { t } = useTranslation(["settings", "agents", "common"]);
 
   return (
     <DataTable

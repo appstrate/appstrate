@@ -44,9 +44,7 @@ const GLOBAL_SYNC = read("../../hooks/use-global-run-sync.ts");
 
 describe("dashboard reuses its own runs", () => {
   it("renders the rows it already holds, not a second fetching list", () => {
-    expect(DASHBOARD).toContain(
-      "<RunsTable runs={runs.slice(0, RECENT_RUNS_COUNT)} agentName={agentName} />",
-    );
+    expect(DASHBOARD).toContain("runs={runs.slice(0, RECENT_RUNS_COUNT)}");
     // `<RunList …>` here is what issues the duplicate query.
     expect(code(DASHBOARD)).not.toMatch(/<RunList[\s/>]/);
   });

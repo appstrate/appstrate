@@ -96,7 +96,18 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
       const statuses = (url.searchParams.get("status") ?? "").split(",").filter(Boolean);
       const kind = url.searchParams.get("kind");
       const mine = url.searchParams.get("user") === "me";
+      // `?q=` — the agent, the error, the number, like the endpoint.
+      const q = (url.searchParams.get("q") ?? "").trim().toLowerCase();
       const filtered = all.filter((r) => {
+        if (q) {
+          const number = q.replace(/^#/, "");
+          const hit =
+            (r.agent_name ?? "").toLowerCase().includes(q) ||
+            (r.agent_scope ?? "").toLowerCase().includes(q) ||
+            (r.error ?? "").toLowerCase().includes(q) ||
+            (/^\d+$/.test(number) && r.runNumber === Number(number));
+          if (!hit) return false;
+        }
         if (statuses.length > 0 && !statuses.includes(r.status)) return false;
         if (kind === "inline" && r.package_ephemeral !== true) return false;
         if (kind === "package" && r.package_ephemeral === true) return false;

@@ -9,6 +9,7 @@ import { useUnreadCount, useMarkAllRead } from "../hooks/use-notifications";
 import { PageHeader } from "../components/page-header";
 import { EmptyState } from "../components/page-states";
 import { ListToolbar, type FilterSpec } from "../components/list-toolbar";
+import { useSearchPlaceholder } from "../lib/search-placeholder";
 import { RunList } from "../components/run-list";
 import type { RunKindFilter } from "../hooks/use-paginated-runs";
 
@@ -28,7 +29,7 @@ const KINDS = ["package", "inline"] as const;
 const SCOPES = ["me"] as const;
 
 /** The query parameters this screen filters on, and nothing else. */
-const FILTER_PARAMS = ["user", "kind", "status"] as const;
+const FILTER_PARAMS = ["user", "kind", "status", "q"] as const;
 
 /** `?status=failed,timeout` — the wire shape the endpoint takes. */
 function readList<T extends string>(raw: string | null, allowed: readonly T[]): T[] {
@@ -41,10 +42,12 @@ export function RunsPage() {
   const { data: unreadCount } = useUnreadCount();
   const markAllRead = useMarkAllRead();
   const [params, setParams] = useSearchParams();
+  const searchPlaceholder = useSearchPlaceholder(t("runs.entity"));
 
   const scopes = readList(params.get("user"), SCOPES);
   const kinds = readList(params.get("kind"), KINDS);
   const statuses = readList(params.get("status"), runStatusValues);
+  const search = params.get("q") ?? "";
 
   // Pushed, not replaced: a filter is a place you went, and Back has to undo
   // it — the same obligation the URL brings everywhere else in this app.
@@ -66,6 +69,20 @@ export function RunsPage() {
       for (const key of FILTER_PARAMS) next.delete(key);
       return next;
     });
+
+  // The text filter is a URL parameter like the others, so a search is a link
+  // too. Replaced rather than pushed: typing eight characters would otherwise
+  // put eight entries in the history and make Back useless.
+  const setSearch = (value: string) =>
+    setParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        if (value) next.set("q", value);
+        else next.delete("q");
+        return next;
+      },
+      { replace: true },
+    );
 
   const filters: FilterSpec[] = [
     {
@@ -113,11 +130,18 @@ export function RunsPage() {
         user={user}
         kind={kind}
         status={statuses}
-        toolbar={(total) => (
+        search={search}
+        toolbar={({ total, columns }) => (
           <ListToolbar
+            search={{
+              value: search,
+              onChange: setSearch,
+              placeholder: searchPlaceholder,
+            }}
             filters={filters}
             onReset={resetFilters}
             count={t("runs.count", { count: total })}
+            columns={columns}
             // On a list screen the action belongs beside the view controls,
             // not at title height: every table screen then keeps its controls
             // and its actions in the same corner.
@@ -137,7 +161,7 @@ export function RunsPage() {
         // A filtered list that finds nothing has NOT run out of runs — it has
         // run out of matches, and the way out is the filter, not the agent.
         emptyState={
-          filters.some((f) => f.values.length > 0) ? (
+          search || filters.some((f) => f.values.length > 0) ? (
             <EmptyState message={t("runs.emptyFiltered")} icon={SearchX} compact>
               <Button variant="outline" size="sm" onClick={resetFilters}>
                 {t("toolbar.clearAll", { ns: "common" })}

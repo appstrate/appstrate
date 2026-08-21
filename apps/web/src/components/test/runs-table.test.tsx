@@ -9,16 +9,34 @@
  */
 
 import { describe, it, expect } from "bun:test";
+import type { EnrichedRun } from "@appstrate/shared-types";
 import agentsFr from "../../locales/fr/agents.json";
-import { RunsTable } from "../runs-table.tsx";
+import { RunsTable, useRunColumns } from "../runs-table.tsx";
 import { makeRun, render, STARTED_AT } from "./run-fixture.tsx";
 import { formatDateField } from "../../lib/markdown.ts";
 
 const STARTED_AT_LABEL = formatDateField(STARTED_AT);
 const agentName = () => "Rapport trimestriel";
 
+/**
+ * The column set is a hook now — the toolbar's column menu and the table have
+ * to name the same columns — so the suite goes through a component that holds
+ * it, exactly as a screen does.
+ */
+function Harness({
+  runs,
+  hideAgentName,
+  ...props
+}: {
+  runs: EnrichedRun[];
+  hideAgentName?: boolean;
+} & Omit<Parameters<typeof RunsTable>[0], "runs" | "columns" | "agentName">) {
+  const columns = useRunColumns({ agentName, hideAgentName });
+  return <RunsTable runs={runs} columns={columns} agentName={agentName} {...props} />;
+}
+
 function table(runs = [makeRun()], props = {}) {
-  return render(<RunsTable runs={runs} agentName={agentName} {...props} />);
+  return render(<Harness runs={runs} {...props} />);
 }
 
 describe("the runs column set", () => {

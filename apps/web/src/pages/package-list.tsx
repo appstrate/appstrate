@@ -9,9 +9,12 @@ import { Button } from "@appstrate/ui/components/button";
 import { useAgents } from "../hooks/use-packages";
 import { useUnreadCountsByAgent } from "../hooks/use-notifications";
 import { PackageCard } from "../components/package-card";
-import { PackagesTable } from "../components/packages-table";
+import { PackagesTable, usePackageColumns } from "../components/packages-table";
+import { columnMenu, visibleColumns } from "../components/data-table";
+import { useColumnVisibility } from "../stores/column-visibility-store";
 import { ListToolbar } from "../components/list-toolbar";
 import { usePackageViewStore } from "../stores/list-view-store";
+import { useSearchPlaceholder } from "../lib/search-placeholder";
 import { PageHeader, type BreadcrumbEntry } from "../components/page-header";
 import { ImportModal } from "../components/import-modal";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
@@ -41,6 +44,8 @@ interface PackageTabProps {
   emptyMessage: string;
   emptyHint: ReactNode;
   emptyIcon: LucideIcon;
+  /** What the list holds, plural, for the search box: "Agents", "Skills". */
+  entity: string;
   extraActions?: ReactNode;
   emptyExtraActions?: ReactNode;
   headerContent?: ReactNode;
@@ -67,6 +72,7 @@ export function PackageTab({
   emptyMessage,
   emptyHint,
   emptyIcon,
+  entity,
   extraActions,
   emptyExtraActions,
   headerContent,
@@ -78,6 +84,9 @@ export function PackageTab({
   // the box searches the whole list rather than the page on screen — which is
   // exactly why the run list, paginated server-side, has no box.
   const [query, setQuery] = useState("");
+  const allColumns = usePackageColumns();
+  const searchPlaceholder = useSearchPlaceholder(entity);
+  const visibility = useColumnVisibility("packages");
 
   if (isLoading) return <LoadingState />;
   if (error) return <ErrorState message={error.message} />;
@@ -110,10 +119,12 @@ export function PackageTab({
         search={{
           value: query,
           onChange: setQuery,
-          placeholder: t("list.searchPlaceholder"),
+          placeholder: searchPlaceholder,
         }}
         filters={[]}
         count={query ? t("list.count", { count: shown.length }) : undefined}
+        // Only the table view has columns to choose from.
+        columns={view === "table" ? columnMenu(allColumns, visibility) : undefined}
         view={view}
         onViewChange={setView}
         actions={extraActions}
@@ -126,7 +137,7 @@ export function PackageTab({
           </Button>
         </EmptyState>
       ) : view === "table" ? (
-        <PackagesTable items={shown} />
+        <PackagesTable items={shown} columns={visibleColumns(allColumns, visibility.hidden)} />
       ) : (
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
           {shown.map((item) => (
@@ -160,6 +171,7 @@ export function PackageList() {
     <div>
       <PackageTab
         title={t("list.tabAgents")}
+        entity={t("list.tabAgents")}
         emoji="⚡"
         breadcrumbs={[{ label: t("list.tabAgents") }]}
         items={items}

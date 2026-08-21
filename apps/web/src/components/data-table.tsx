@@ -77,6 +77,28 @@ interface DataTableProps<T> {
   label: string;
 }
 
+/**
+ * The columns a reader may hide, and the menu spec that goes with them.
+ *
+ * A column with no header cannot be named in a menu (the actions column), so it
+ * is never offered — and never hidden either.
+ */
+export function columnMenu<T>(
+  columns: DataColumn<T>[],
+  visibility: { hidden: string[]; toggle: (id: string) => void },
+) {
+  return {
+    options: columns.filter((c) => c.header).map((c) => ({ id: c.id, label: c.header })),
+    hidden: visibility.hidden,
+    onToggle: visibility.toggle,
+  };
+}
+
+/** What is left once the reader's hidden columns are taken out. */
+export function visibleColumns<T>(columns: DataColumn<T>[], hidden: string[]): DataColumn<T>[] {
+  return columns.filter((c) => !c.header || !hidden.includes(c.id));
+}
+
 const SKELETON_ROWS = 3;
 
 function trackList<T>(columns: DataColumn<T>[]): string {

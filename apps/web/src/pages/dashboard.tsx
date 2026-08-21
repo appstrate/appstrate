@@ -10,7 +10,9 @@ import { usePaginatedRuns } from "../hooks/use-paginated-runs";
 import { LoadingState, ErrorState } from "../components/page-states";
 import { PackageCard } from "../components/package-card";
 import { ScheduleCard } from "../components/schedule-card";
-import { RunsTable } from "../components/runs-table";
+import { RunsTable, useRunColumns } from "../components/runs-table";
+import { visibleColumns } from "../components/data-table";
+import { useColumnVisibility } from "../stores/column-visibility-store";
 import { useRunAgentName } from "../hooks/use-run-agent-name";
 
 /** Rows shown under "recent runs" — a prefix of the page's own run query. */
@@ -30,6 +32,11 @@ export function DashboardPage() {
   const { data: agents, isLoading: agentsLoading, error: agentsError } = useAgents();
   const { data: unreadCounts } = useUnreadCountsByAgent();
   const agentName = useRunAgentName();
+  // The same table, so the same preference: a column hidden on the runs page
+  // is hidden in this card too.
+  const allRunColumns = useRunColumns({ agentName });
+  const runColumnVisibility = useColumnVisibility("runs");
+  const runColumns = visibleColumns(allRunColumns, runColumnVisibility.hidden);
   const { data: schedules } = useAllSchedules();
 
   const isLoading = runsLoading || agentsLoading;
@@ -168,7 +175,11 @@ export function DashboardPage() {
             with it a second `COUNT` + enriched page read, for rows the 15 above
             already contain. The table takes rows, never a query, which is what
             makes that possible. */}
-        <RunsTable runs={runs.slice(0, RECENT_RUNS_COUNT)} agentName={agentName} />
+        <RunsTable
+          runs={runs.slice(0, RECENT_RUNS_COUNT)}
+          columns={runColumns}
+          agentName={agentName}
+        />
       </section>
     </div>
   );

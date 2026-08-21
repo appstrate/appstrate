@@ -16,10 +16,13 @@
  * - **A dashed outline button per dimension**, with a `+` and the dimension's
  *   name. Dashed and `+` mean "a filter you can add" — that is the affordance,
  *   and it is why the button reads as neutral when nothing is chosen. It is
- *   also why it is `bg-transparent`: shadcn's `outline` paints `bg-background`,
- *   which is WHITE here (the page canvas is its own `--canvas`), so the button
- *   came out as a white pill on grey and the dashes had nothing to be dashed
- *   against. The surface has to show through the outline.
+ *   also why it is `bg-transparent shadow-none`: shadcn's `outline` paints
+ *   `bg-background` — WHITE here, since our page canvas is its own `--canvas` —
+ *   so the button came out as a white pill on grey and the dashes had nothing
+ *   to be dashed against. Their outline does carry a shadow, but a `shadow-xs`
+ *   under a solid white button; ours is a `shadow-sm` (one step heavier on
+ *   Tailwind 4's scale) and it was falling from a button with nothing in it.
+ *   A see-through control casts no shadow.
  * - **The chosen values live INSIDE that button**, as small badges after a
  *   vertical rule: up to two of them, then "N sélectionnés". One place, no
  *   second row, no duplication.
@@ -52,7 +55,7 @@
 
 import { Fragment, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { Check, LayoutGrid, PlusCircle, Rows3, X } from "lucide-react";
+import { Check, LayoutGrid, PlusCircle, Rows3, SlidersHorizontal, X } from "lucide-react";
 import { cn } from "@appstrate/ui/cn";
 import type { ListView } from "@/stores/list-view-store";
 import { toggleValue } from "../lib/toggle-value";
@@ -70,10 +73,25 @@ import {
   CommandSeparator,
 } from "@appstrate/ui/components/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/components/popover";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@appstrate/ui/components/dropdown-menu";
 
 export interface FilterOption {
   value: string;
   label: string;
+}
+
+/** What the "Colonnes" menu needs: what there is, what is hidden, how to flip one. */
+export interface ColumnMenuSpec {
+  options: Array<{ id: string; label: string }>;
+  hidden: string[];
+  onToggle: (id: string) => void;
 }
 
 export interface SearchSpec {
@@ -103,7 +121,11 @@ function FacetedFilter({ filter }: { filter: FilterSpec }) {
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <Button variant="outline" size="sm" className="h-8 border-dashed bg-transparent">
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-8 border-dashed bg-transparent shadow-none"
+        >
           <PlusCircle />
           {filter.label}
           {selected.length > 0 && (
@@ -182,6 +204,64 @@ function FacetedFilter({ filter }: { filter: FilterSpec }) {
 }
 
 /**
+ * Which columns the reader wants to see, shadcn's `DataTableViewOptions`.
+ *
+ * A table has more columns than any one person needs at once, and which ones
+ * they need is not something the designer can know: the same run list is read
+ * for "what broke" (result), for "who ran what" (trigger) and for "how long
+ * does this take" (duration). Hiding is per TABLE and remembered, so the choice
+ * survives the next visit.
+ *
+ * The last visible column cannot be hidden — a table with no columns is not a
+ * state worth being able to reach.
+ */
+function ColumnsMenu({ columns }: { columns: ColumnMenuSpec }) {
+  const { t } = useTranslation("common");
+  const hidden = new Set(columns.hidden);
+  const visibleCount = columns.options.filter((option) => !hidden.has(option.id)).length;
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="outline" size="sm" className="h-8">
+          <SlidersHorizontal />
+          {t("toolbar.columns")}
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-48">
+        <DropdownMenuLabel>{t("toolbar.columnsLabel")}</DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        {columns.options.map((option) => {
+          const isVisible = !hidden.has(option.id);
+          return (
+            <DropdownMenuItem
+              key={option.id}
+              disabled={isVisible && visibleCount === 1}
+              onSelect={(event) => {
+                event.preventDefault();
+                columns.onToggle(option.id);
+              }}
+            >
+              <div
+                className={cn(
+                  "flex size-4 items-center justify-center rounded-[4px] border",
+                  isVisible
+                    ? "border-primary bg-primary text-primary-foreground"
+                    : "border-input [&_svg]:invisible",
+                )}
+              >
+                <Check className="text-primary-foreground size-3.5" />
+              </div>
+              <span>{option.label}</span>
+            </DropdownMenuItem>
+          );
+        })}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+/**
  * Cards or table, for the lists the reference design draws both ways
  * (`view-toggle`). shadcn's slot at this end of the row holds column
  * visibility; ours holds the same kind of thing — how the list is drawn, not
@@ -222,6 +302,7 @@ export function ListToolbar({
   filters,
   onReset,
   count,
+  columns,
   view,
   onViewChange,
   actions,
@@ -247,6 +328,8 @@ export function ListToolbar({
    * component that will one day say it about agents.
    */
   count?: ReactNode;
+  /** Present on a table whose columns the reader may hide. */
+  columns?: ColumnMenuSpec;
   /** Present only on the lists the reference draws both as cards and as rows. */
   view?: ListView;
   onViewChange?: (view: ListView) => void;
@@ -270,7 +353,13 @@ export function ListToolbar({
           value={search.value}
           onChange={(event) => search.onChange(event.target.value)}
           placeholder={search.placeholder}
-          className="h-8 w-[150px] lg:w-[250px]"
+          // WHITE, unlike the filters beside it, and the difference is the
+          // point: a field is a surface you type into, so it takes the app's
+          // component surface like every other input. The filters are
+          // see-through because a dashed outline over the canvas is what says
+          // "empty slot". Our `Input` is `bg-transparent` by default, which on
+          // the grey canvas made the box grey inside.
+          className="bg-background h-8 w-[150px] lg:w-[250px]"
         />
       )}
       {filters.map((filter) => (
@@ -286,6 +375,7 @@ export function ListToolbar({
       )}
       <div className="ml-auto flex shrink-0 items-center gap-3">
         {count !== undefined && <span className="text-muted-foreground text-sm">{count}</span>}
+        {columns && <ColumnsMenu columns={columns} />}
         {view && onViewChange && <ViewToggle view={view} onChange={onViewChange} />}
         {actions}
       </div>

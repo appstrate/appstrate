@@ -9,7 +9,10 @@ import { useAgents } from "../hooks/use-packages";
 import { useAllSchedules } from "../hooks/use-schedules";
 import { PageHeader } from "../components/page-header";
 import { EmptyState } from "../components/page-states";
-import { SchedulesTable } from "../components/schedules-table";
+import { SchedulesTable, useScheduleColumns } from "../components/schedules-table";
+import { columnMenu, visibleColumns } from "../components/data-table";
+import { ListToolbar } from "../components/list-toolbar";
+import { useColumnVisibility } from "../stores/column-visibility-store";
 
 export function SchedulesListPage() {
   const { t } = useTranslation(["settings", "common"]);
@@ -26,18 +29,29 @@ export function SchedulesListPage() {
   const agentName = (packageId: string) =>
     agents?.find((a) => a.id === packageId)?.display_name ?? packageId;
 
+  const allColumns = useScheduleColumns({
+    agentName: (schedule) => agentName(schedule.packageId),
+  });
+  const visibility = useColumnVisibility("schedules");
+  const columns = visibleColumns(allColumns, visibility.hidden);
+
   return (
     <div>
       <PageHeader
         title={t("schedules.title")}
         emoji="📅"
         breadcrumbs={[{ label: t("schedules.title") }]}
+      />
+
+      <ListToolbar
+        filters={[]}
+        columns={columnMenu(allColumns, visibility)}
         actions={isAdmin ? create : undefined}
       />
 
       <SchedulesTable
         schedules={schedules ?? []}
-        agentName={(schedule) => agentName(schedule.packageId)}
+        columns={columns}
         isLoading={isLoading}
         isError={isError}
         empty={

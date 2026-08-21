@@ -15,8 +15,11 @@ import { useTranslation } from "react-i18next";
 import { Button } from "@appstrate/ui/components/button";
 import { usePaginatedRuns, type RunKindFilter } from "../hooks/use-paginated-runs";
 import { useRunAgentName } from "../hooks/use-run-agent-name";
-import { RunsTable } from "./runs-table";
+import { RunsTable, useRunColumns } from "./runs-table";
+import { columnMenu, visibleColumns } from "./data-table";
+import { useColumnVisibility } from "../stores/column-visibility-store";
 import type { EnrichedRun, RunStatus } from "@appstrate/shared-types";
+import type { ColumnMenuSpec } from "./list-toolbar";
 
 interface RunListProps {
   packageId?: string;
@@ -39,15 +42,17 @@ interface RunListProps {
   kind?: RunKindFilter;
   /** Filter runs by lifecycle status — one, or several at once. */
   status?: RunStatus[];
+  /** Free text: the agent a run executed, the error it ended on, its number. */
+  search?: string;
   /**
-   * The bar above the table, given the number of rows the filters left.
+   * The bar above the table.
    *
-   * A render prop rather than a `count` the page reads for itself: the query
-   * lives here, and a page asking for the same rows a second time to count
-   * them is the duplicate `GET /api/runs` the dashboard already had to be
-   * cured of. The page still owns WHAT the bar says.
+   * A render prop rather than props the page reads for itself: the query and
+   * the columns live here, and a page asking for the same rows a second time
+   * to count them is the duplicate `GET /api/runs` the dashboard already had
+   * to be cured of. The page still owns WHAT the bar says.
    */
-  toolbar?: (total: number) => React.ReactNode;
+  toolbar?: (bar: { total: number; columns: ColumnMenuSpec }) => React.ReactNode;
 }
 
 export function RunList({
@@ -62,17 +67,23 @@ export function RunList({
   user,
   kind,
   status,
+  search,
   toolbar,
 }: RunListProps) {
   const { t } = useTranslation(["agents"]);
   const agentName = useRunAgentName(fixedAgentName);
+  const allColumns = useRunColumns({ agentName, hideAgentName });
+  // Per TABLE, not per screen: the run list keeps its columns wherever it is
+  // shown — the runs page, an agent's tab, a schedule's history.
+  const visibility = useColumnVisibility("runs");
+  const columns = visibleColumns(allColumns, visibility.hidden);
 
   // Paging resets when the filters change — WITHOUT remounting this component.
   // It used to be a `key` at the call site, which is the idiomatic way to reset
   // state; but the toolbar renders inside here, so remounting closed its open
   // menu on every tick and made multi-select unusable. The page is derived
   // from the filter set instead: a new set reads as page zero straight away.
-  const signature = `${user ?? ""}|${kind ?? ""}|${status?.join(",") ?? ""}`;
+  const signature = `${user ?? ""}|${kind ?? ""}|${status?.join(",") ?? ""}|${search ?? ""}`;
   const [paging, setPaging] = useState({ signature, page: 0 });
   const page = paging.signature === signature ? paging.page : 0;
   const setPage = (next: number) => setPaging({ signature, page: next });
@@ -83,6 +94,7 @@ export function RunList({
     user,
     kind,
     status,
+    search,
     limit: pageSize,
     offset: page * pageSize,
   });
@@ -96,12 +108,12 @@ export function RunList({
 
   return (
     <div className="space-y-2">
-      {toolbar?.(total)}
+      {toolbar?.({ total, columns: columnMenu(allColumns, visibility) })}
 
       <RunsTable
         runs={runs}
+        columns={columns}
         agentName={agentName}
-        hideAgentName={hideAgentName}
         isLoading={showLoading}
         isError={isError}
         empty={emptyState}

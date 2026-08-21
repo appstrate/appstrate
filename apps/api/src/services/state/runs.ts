@@ -10,6 +10,7 @@ import {
   asc,
   desc,
   isNull,
+  ilike,
   inArray,
   count,
   gte,
@@ -1488,6 +1489,18 @@ export interface ListGlobalRunsOptions {
   endUserId?: string | null;
   chatSessionId?: string;
   /**
+   * Free text: the agent a run executed (its scope and name, as stamped on the
+   * run) and the error it ended on. A query that is only digits also matches
+   * the run NUMBER, which is how people refer to a run out loud.
+   *
+   * Deliberately NOT a full-text index: this is a substring match inside one
+   * org and one application, on a page of rows the tenant filter has already
+   * narrowed. It will want an index the day a single workspace holds a few
+   * hundred thousand runs, and `pg_trgm` on those two columns is the answer
+   * then.
+   */
+  search?: string;
+  /**
    * Narrow to what the caller may call their own: their own runs plus the
    * unattributed ones (schedule- and system-triggered) for a member, strictly
    * their own for an end-user — {@link actorScopeFilter} owns that semantic.
@@ -1514,6 +1527,7 @@ export async function listGlobalRuns(
     endDate,
     endUserId,
     chatSessionId,
+    search,
     mine = false,
     actor = null,
   } = options;
@@ -1555,6 +1569,21 @@ export async function listGlobalRuns(
           )
         : sql`false`,
     );
+  }
+
+  if (search) {
+    // `%` and `_` are wildcards in LIKE: a user typing them means the
+    // characters, not the pattern.
+    const pattern = `%${search.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+    const matches: SQL[] = [
+      ilike(runs.agentName, pattern),
+      ilike(runs.agentScope, pattern),
+      ilike(runs.error, pattern),
+    ];
+    // "#129" and "129" both mean the run number.
+    const asNumber = Number(search.replace(/^#/, ""));
+    if (Number.isInteger(asNumber) && asNumber > 0) matches.push(eq(runs.runNumber, asNumber));
+    conditions.push(or(...matches)!);
   }
 
   // Kind filter via JOINed `packages.ephemeral`. After migration 0017, runs

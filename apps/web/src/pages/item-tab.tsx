@@ -63,6 +63,7 @@ export function ItemTab({
         items={items}
         isLoading={isLoading}
         emoji={presentation.emoji}
+        entity={title}
         emptyMessage={t("packages.emptyItems", { type: typeLabel })}
         emptyHint={t("packages.emptyItemsHint", { type: typeLabel })}
         emptyIcon={presentation.emptyIcon}

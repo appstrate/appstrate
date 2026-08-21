@@ -869,6 +869,85 @@ describe("Runs API", () => {
       expect(body.param).toBe("status");
     });
 
+    it("matches the agent and the error on ?q, and combines with the rest", async () => {
+      await seedAgent({ id: "@runorg/search-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
+      const byName = await seedRun({
+        packageId: "@runorg/search-agent",
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        userId: ctx.user.id,
+        status: "success",
+        agentScope: "@runorg",
+        agentName: "quarterly-books",
+      });
+      const byError = await seedRun({
+        packageId: "@runorg/search-agent",
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        userId: ctx.user.id,
+        status: "failed",
+        agentScope: "@runorg",
+        agentName: "something-else",
+        error: "clicSEQUR refused the 2FA code",
+      });
+
+      const onName = await app.request("/api/runs?q=quarter", { headers: authHeaders(ctx) });
+      const named = (await onName.json()) as { data: { id: string }[] };
+      expect(named.data.map((r) => r.id)).toEqual([byName.id]);
+
+      // Case-insensitive, and anywhere in the value.
+      const onError = await app.request("/api/runs?q=CLICSEQUR", { headers: authHeaders(ctx) });
+      const errored = (await onError.json()) as { data: { id: string }[] };
+      expect(errored.data.map((r) => r.id)).toEqual([byError.id]);
+
+      // Combined with a status: text AND status, like every other pair.
+      const both = await app.request("/api/runs?q=@runorg&status=failed", {
+        headers: authHeaders(ctx),
+      });
+      const combined = (await both.json()) as { data: { id: string }[] };
+      expect(combined.data.map((r) => r.id)).toEqual([byError.id]);
+    });
+
+    it("reads a numeric ?q as the run number", async () => {
+      await seedAgent({ id: "@runorg/numeric-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
+      // `runNumber` is stamped by the run pipeline, not by a column default,
+      // so a seeded row has none unless it is given one.
+      const run = await seedRun({
+        packageId: "@runorg/numeric-agent",
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        userId: ctx.user.id,
+        status: "success",
+        runNumber: 4242,
+      });
+
+      const res = await app.request("/api/runs?q=%234242", { headers: authHeaders(ctx) });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { data: { id: string }[] };
+      expect(body.data.map((r) => r.id)).toContain(run.id);
+    });
+
+    it("treats LIKE wildcards as characters, not patterns", async () => {
+      // `%` matches everything in LIKE. Typed by a user it means a percent sign,
+      // and a search that silently returns the whole list is the widening this
+      // endpoint spends 400s avoiding elsewhere.
+      await seedAgent({ id: "@runorg/wildcard-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
+      await seedRun({
+        packageId: "@runorg/wildcard-agent",
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        userId: ctx.user.id,
+        status: "success",
+      });
+
+      const res = await app.request("/api/runs?q=%25", { headers: authHeaders(ctx) });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { total: number };
+      expect(body.total).toBe(0);
+    });
+
     it("lists all org runs when no ?user param is given", async () => {
       await seedTwoMembersRuns();
 

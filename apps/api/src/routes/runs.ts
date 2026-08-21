@@ -421,6 +421,12 @@ export function createRunsRouter() {
     const startDateRaw = c.req.query("start_date");
     const endDateRaw = c.req.query("end_date");
     const chatSessionId = c.req.query("chat_session_id") || undefined;
+    // Free text. Bounded because it reaches an unindexed substring match, and
+    // an unbounded one is a cheap way to make the endpoint expensive.
+    const search = c.req.query("q")?.trim() || undefined;
+    if (search && search.length > 200) {
+      throw invalidRequest("q must be 200 characters or fewer", "q");
+    }
     const startDate = startDateRaw ? new Date(startDateRaw) : undefined;
     const endDate = endDateRaw ? new Date(endDateRaw) : undefined;
     if (startDate && Number.isNaN(startDate.getTime())) {
@@ -438,6 +444,7 @@ export function createRunsRouter() {
       startDate,
       endDate,
       chatSessionId,
+      search,
       mine,
       actor,
     });

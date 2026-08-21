@@ -88,10 +88,25 @@ export const paginatedRunsKeys = {
     user: string | null | undefined,
     kind: string | null | undefined,
     status: string | null | undefined,
+    search: string | null | undefined,
     limit: number,
     offset: number,
   ) =>
-    ["paginated-runs", orgId, applicationId, endpoint, user, kind, status, limit, offset] as const,
+    [
+      "paginated-runs",
+      orgId,
+      applicationId,
+      endpoint,
+      user,
+      kind,
+      status,
+      search,
+      // The OFFSET stays last: `placeholderData` keeps the rows on screen only
+      // when everything before it matched, which is what tells paging apart
+      // from a changed question.
+      limit,
+      offset,
+    ] as const,
 };
 
 /**

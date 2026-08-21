@@ -23,7 +23,8 @@ import { RunAgentButton } from "./run-agent-button";
 import { packageDetailPath } from "../lib/package-paths";
 import type { CardItem } from "../pages/package-list";
 
-export function PackagesTable({ items }: { items: CardItem[] }) {
+/** The column set, as a value the caller holds — see `useRunColumns` on why. */
+export function usePackageColumns(): DataColumn<CardItem>[] {
   const { t } = useTranslation(["agents", "common"]);
 
   const columns: DataColumn<CardItem>[] = [
@@ -119,6 +120,19 @@ export function PackagesTable({ items }: { items: CardItem[] }) {
         ) : null,
     },
   ];
+
+  return columns;
+}
+
+export function PackagesTable({
+  items,
+  columns,
+}: {
+  items: CardItem[];
+  /** From {@link usePackageColumns}, minus whatever the reader hid. */
+  columns: DataColumn<CardItem>[];
+}) {
+  const { t } = useTranslation(["agents", "common"]);
 
   return (
     <DataTable
