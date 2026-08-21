@@ -1,0 +1,63 @@
+-- Re-create two indexes that the schema declares but production does not have.
+--
+-- `idx_runs_package_started` and `idx_runs_schedule_id` are declared in
+-- src/schema/runs.ts (lines 337 and 341) and created in 0000_init.sql
+-- (lines 633-634). They are the only two of 132 declared indexes absent from
+-- the production database. The DDL below is those two lines verbatim, with
+-- `IF NOT EXISTS` added and nothing else changed.
+--
+-- WHY THEY ARE MISSING. 0000_init.sql is a SQUASH, and production predates it.
+-- Drizzle replays only the journal entries past a database's watermark, so for
+-- a database created before the squash 0000_init is history, never pending
+-- work. Anything the squash introduced *by itself* — rather than through a
+-- forward migration that production also ran — therefore never reached it.
+-- These two indexes were introduced that way.
+--
+-- NOT A WATERMARK PROBLEM, and deliberately not fixed like one.
+-- `drizzle.__drizzle_migrations` on production is healthy: 39 rows, no gap. No
+-- migration was skipped and no record is wrong, so there is nothing in the
+-- bookkeeping table to repair. What is missing is DDL, and the instrument for
+-- missing DDL is a forward migration — this file. Rewriting the watermark
+-- instead would re-run every intervening migration against a database that
+-- already applied them.
+--
+-- WHY `IF NOT EXISTS`. Every database created FROM the squash — every dev
+-- machine, every test database, every fresh install — already has both
+-- indexes, because 0000_init.sql created them there. This migration runs
+-- against two populations with different starting states and must be a no-op
+-- for one of them. Unguarded, `relation "..." already exists` would abort the
+-- whole batch (drizzle's pg dialect wraps every pending migration in ONE
+-- `session.transaction(...)`) and wedge the deploy for every fresh install,
+-- which is nearly all of them. An index that is already present IS the
+-- intended end state; skipping it is correct, not a silent failure. Same
+-- reasoning as the `IF EXISTS` guards in 0039 and the `to_regclass(...)`
+-- guards in 0002_fold_webhooks_tables.sql.
+--
+-- WHY NOT `CONCURRENTLY`. It is impossible here, not merely unwanted. Postgres
+-- forbids CREATE INDEX CONCURRENTLY inside a transaction block, and the whole
+-- pending batch runs inside one transaction (see above). A CONCURRENTLY
+-- statement in a drizzle migration fails at runtime, every time.
+--
+-- LOCK NOTE. A plain CREATE INDEX takes ACCESS EXCLUSIVE on `runs` and holds
+-- it until the build finishes, blocking readers and writers of that table
+-- meanwhile. `runs` holds 4345 rows in production today, so the build is
+-- effectively instantaneous and no lock fence is warranted. Recorded because
+-- the calculus is row-count dependent: on a large `runs` these two statements
+-- would be a stall on a hot write path, and would have to leave the drizzle
+-- batch entirely in order to use CONCURRENTLY.
+--
+-- SIDE EFFECT WORTH NAMING. 0039 dropped `idx_runs_package_id` on the grounds
+-- that `idx_runs_package_started` is a leading-prefix cover, and its own header
+-- records that the cover was absent on production. That drop was justified
+-- there by a different index (`idx_runs_package_run_number`), so nothing was
+-- broken; restoring `idx_runs_package_started` simply makes the stated
+-- justification true on production as well.
+--
+-- THIS CLASS OF DRIFT RECURS. It is structural, not a one-off mistake: the
+-- next time this folder is squashed, every index, constraint and default the
+-- new squash introduces without a matching forward migration will again be
+-- absent from every database that predates it, and the journal will look
+-- perfectly healthy while that is true. Only a diff of the declared schema
+-- against a live production catalog surfaces it.
+CREATE INDEX IF NOT EXISTS "idx_runs_package_started" ON "runs" USING btree ("package_id","started_at");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "idx_runs_schedule_id" ON "runs" USING btree ("schedule_id") WHERE "runs"."schedule_id" IS NOT NULL;
