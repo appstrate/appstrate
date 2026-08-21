@@ -166,7 +166,6 @@ export function ToolCallCard({
   result,
   isError,
   toolCallId,
-  artifact,
   timing,
 }: {
   phase: ToolPhase;
@@ -177,7 +176,6 @@ export function ToolCallCard({
   result: unknown;
   isError?: boolean;
   toolCallId: string;
-  artifact?: unknown;
   timing?: unknown;
 }) {
   const [open, setOpen] = React.useState(false);
@@ -190,7 +188,6 @@ export function ToolCallCard({
     is_error: isError,
     http_status: status,
     duration_ms: durationMs,
-    artifact,
   });
 
   const border = phase === "error" ? "border-destructive/40" : "";
@@ -247,7 +244,6 @@ function buildRunLaunch(props: AnyToolProps, runId: string | undefined): React.R
     is_error: props.isError,
     http_status: httpStatusOf(unwrapped),
     duration_ms: readDurationMs(props.timing),
-    artifact: props.artifact,
   });
   const agentLabel = extractAgentLabel(props.args);
   const phase = deriveToolPhase(props);
@@ -336,7 +332,6 @@ export const InvokeOperationToolUI = makeAssistantToolUI<
         result={result}
         isError={props.isError}
         toolCallId={props.toolCallId}
-        artifact={props.artifact}
         timing={props.timing}
       />
     );
@@ -360,7 +355,6 @@ export const SearchOperationsToolUI = makeAssistantToolUI<Record<string, unknown
       result={props.result}
       isError={props.isError}
       toolCallId={props.toolCallId}
-      artifact={props.artifact}
       timing={props.timing}
     />
   ),
@@ -378,7 +372,6 @@ export const DescribeOperationToolUI = makeAssistantToolUI<Record<string, unknow
       result={props.result}
       isError={props.isError}
       toolCallId={props.toolCallId}
-      artifact={props.artifact}
       timing={props.timing}
     />
   ),
@@ -395,7 +388,6 @@ export const GetMeToolUI = makeAssistantToolUI<Record<string, unknown>, unknown>
       result={props.result}
       isError={props.isError}
       toolCallId={props.toolCallId}
-      artifact={props.artifact}
       timing={props.timing}
     />
   ),

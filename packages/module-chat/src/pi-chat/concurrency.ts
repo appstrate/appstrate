@@ -31,13 +31,54 @@ export interface PiChatSlot {
 }
 
 let active = 0;
+let highWaterMark = 0;
+let rejected = 0;
+
+/**
+ * The cap and where it came from, resolved in ONE place.
+ *
+ * Both facts fall out of the same parse on purpose: read separately they could
+ * disagree after any change to what counts as valid, and a boot warning that
+ * disagrees with the cap actually applied is worse than no warning.
+ *
+ * Absent, empty, non-numeric and non-positive all mean "no operator decision" —
+ * a typo'd cap must not read as deliberate just because the variable is set.
+ */
+function resolveChatConcurrency(): { max: number; fromEnv: boolean } {
+  const raw = process.env[ENV_VAR];
+  const parsed = raw === undefined ? Number.NaN : Number.parseInt(raw, 10);
+  return Number.isInteger(parsed) && parsed > 0
+    ? { max: parsed, fromEnv: true }
+    : { max: DEFAULT_MAX_CONCURRENCY, fromEnv: false };
+}
 
 /** Resolve the configured cap, falling back to the default on absent/invalid input. */
-export const piChatMaxConcurrency = (): number => {
-  const raw = process.env[ENV_VAR];
-  if (!raw) return DEFAULT_MAX_CONCURRENCY;
-  const n = Number.parseInt(raw, 10);
-  return Number.isInteger(n) && n > 0 ? n : DEFAULT_MAX_CONCURRENCY;
+export const piChatMaxConcurrency = (): number => resolveChatConcurrency().max;
+
+/** Whether the cap is the built-in default rather than an operator decision. */
+export const piChatConcurrencyIsDefault = (): boolean => !resolveChatConcurrency().fromEnv;
+
+/**
+ * Saturation snapshot for capacity sizing.
+ *
+ * The cap alone tells an operator nothing: a process that never exceeded 2
+ * concurrent turns and one that sits pinned at the ceiling look identical from
+ * outside, and only the second needs a bigger cap. `highWaterMark` is the most
+ * concurrent turns this process ever held; `rejected` counts the 429s it
+ * answered. Both are process-local and reset on restart — they are a sizing
+ * signal, not a ledger.
+ */
+export const piChatConcurrencyStats = (): {
+  active: number;
+  highWaterMark: number;
+  rejected: number;
+  max: number;
+} => ({ active, highWaterMark, rejected, max: piChatMaxConcurrency() });
+
+/** Test seam — production has no reason to forget the high-water mark. */
+export const resetPiChatConcurrencyStats = (): void => {
+  highWaterMark = 0;
+  rejected = 0;
 };
 
 /**
@@ -45,8 +86,19 @@ export const piChatMaxConcurrency = (): number => {
  * when the engine is already at capacity (caller should 429).
  */
 export const acquirePiChatSlot = (): PiChatSlot | null => {
-  if (active >= piChatMaxConcurrency()) return null;
+  if (active >= piChatMaxConcurrency()) {
+    rejected += 1;
+    return null;
+  }
   active += 1;
+  if (active > highWaterMark) {
+    highWaterMark = active;
+    // Reported when the peak is REACHED, not only when a turn is refused: an
+    // operator sizing the cap needs to see 5-of-6 long before anyone gets a
+    // 429, and by the time a refusal logs the saturation is already known.
+    // Bounded by construction — at most `max` lines per process lifetime.
+    logger.info("chat concurrency peak", { highWaterMark, max: piChatMaxConcurrency() });
+  }
   let released = false;
   return {
     release() {
@@ -106,12 +158,34 @@ export function releaseOnClose<T>(
 }
 
 /**
+ * Warn once at boot when the cap is still the built-in default.
+ *
+ * EVERY chat turn holds a slot for its whole duration, so this cap is the
+ * ceiling on concurrent chats per API process — the (cap + 1)-th simultaneous
+ * chat is refused. The default of 6 is a conservative product value, not a
+ * sizing decision, and the only measurements that exist are local. An operator
+ * who never saw this line would discover the ceiling from user reports.
+ */
+export function warnIfDefaultChatConcurrency(): void {
+  const { max, fromEnv } = resolveChatConcurrency();
+  if (fromEnv) return;
+  logger.warn(
+    `${ENV_VAR} is unset or invalid — chat is capped at ${max} concurrent turns per API process. ` +
+      "Set it from measured capacity before serving production chat traffic.",
+  );
+}
+
+/**
  * RFC 9457 `429` returned (instead of a stream) when the Pi chat engine is at
  * its session cap, so the client backs off rather than the instance spinning up
  * unbounded sessions.
  */
 export function chatCapacityResponse(): Response {
   const retryAfterSeconds = 5;
+  // The one line an operator needs to size the cap: a refusal is only
+  // actionable next to the ceiling that produced it and how often it has been
+  // hit. Logged here rather than at the call site so every refusal reports it.
+  logger.warn("chat at capacity — turn refused", piChatConcurrencyStats());
   return new Response(
     JSON.stringify({
       type: "https://docs.appstrate.dev/errors/chat-capacity",

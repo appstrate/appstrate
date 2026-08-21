@@ -81,9 +81,8 @@ export interface CheckEgressUrlOptions {
 /**
  * Canonical platform-egress guard for a fetch to an operator/agent-supplied
  * URL. ONE decision site for {parse, scheme floor, allowlist-aware literal +
- * DNS-rebind host gate} so the egress sites (LLM upstream, Claude Code
- * subscription gateway, org proxy test, org model test, credential proxy
- * target, remote-MCP spawn) cannot drift apart.
+ * DNS-rebind host gate} so the egress sites (LLM upstream, org proxy test, org
+ * model test, credential proxy target, remote-MCP spawn) cannot drift apart.
  *
  * Non-throwing: returns a discriminated result so each caller maps a block to
  * its own shape (invalidRequest / TestResult / ProxyAuthorizationError / skip).
