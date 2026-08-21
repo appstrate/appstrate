@@ -62,6 +62,13 @@ on — without it the chat, billing and webhooks surfaces are invisible in the l
 A missing fixture logs `[lab] no fixture for GET /api/… → 404`. That is the
 console telling you about a hole, not a bug.
 
+The `error` scenario used to 500 EVERY endpoint, the session included, so it
+landed on the login form and no inner screen ever showed its error state — the
+scenario was unusable for the thing it exists for. Identity, orgs and
+applications now survive it (`ERROR_SCENARIO_SURVIVORS`): the failure a user
+actually meets is one request breaking under a shell that still stands. It
+found a real one on its first run — the run list said "Aucun run" on a 500.
+
 The chat's own endpoints are fixtured too: a conversation with real turns
 (`chatHistory`) and the resume probe (`/sessions/:id/stream` → 204, the real
 server's "nothing is generating"). Without those two the lab only ever showed an
@@ -165,6 +172,59 @@ Tried and dropped, so they are not tried again:
   four things plus two buttons in 256px and the workspace truncated to "Defa…".
 - **Org over workspace on two lines.** It gave the workspace a weight the org
   already carries.
+
+## The table
+
+`components/data-table.tsx` + `components/runs-table.tsx`. One table, many
+column sets — the reference says it itself: it does not draw four list screens,
+it draws `.data-table` and four `--cols` values.
+
+A caller describes its columns and nothing else. Each column is ONE literal
+carrying its width, its breakpoint behaviour, its alignment and its content, so
+adding a column is one edit rather than the same id typed into five parallel
+maps (it was, briefly).
+
+- **Grid tracks, not table layout.** `minmax(0,1fr)` says "take what is left"
+  where `table-layout: fixed` needs percentages recomputed at every change.
+  **Every track must be content-independent** (px or fr): each row is its own
+  grid container, so an `auto` track is measured per row and the columns stop
+  lining up — the one thing the table is for.
+- **The markup stays a real `<table>`, and every ARIA role is re-declared.**
+  Overriding `display` on table elements DROPS their implicit roles in Chrome
+  and Firefox; without `role="table"`/`"row"`/`"cell"` a grid-displayed table
+  announces as a pile of divs.
+- **The row is a LINK**, in the first column that survives the narrow
+  breakpoint (a link parked in `#131`, which is secondary, leaves the row
+  unclickable on a phone), stretched over the row with `after:inset-0`. That
+  overlay is also the trap: it paints over the other cells and takes the HOVER
+  with the click, so a native `title` stops firing. Anything that answers to
+  the pointer raises itself (`relative z-10`) — the titled ELEMENT, not its
+  cell, so the dead zone is the size of the text.
+- **Secondary columns drop with their track** below `md`. Both templates ride
+  as custom properties on the table; dropping a cell without its track shifts
+  every column after it.
+- Naming is not the table's business: `use-run-agent-name.ts` resolves what to
+  call the agent a run executed and ALWAYS returns a name. Hiding the COLUMN
+  must not blank the name — the row's accessible label is built from it.
+
+Runs is the first column set (`dt-runs`): number, agent, status, trigger,
+**result**, documents, duration, date. The result column is new — a failed
+run's error was invisible on the very screen whose job is to say which one
+broke.
+
+Still open on the table, deliberately:
+
+- **Sortable heads.** The reference has them (`.th-sort`, `.th-sort.active svg`
+  in `--accent`). `GET /api/runs` takes no sort parameter, so the head would
+  either lie or sort one page of fifteen. It waits for the endpoint.
+- **The list toolbar** (`lt-*`: search, filter chips, clear, actions) and the
+  **reference empty state** (`empty-state`, concentric rings behind a badge)
+  are their own patterns, next in the order. The run screen still wears its two
+  shadcn tab strips as filters.
+- The heavy scenario pages at fifteen rows like the real screen does, so what
+  it proves is pagination and the widest content, not volume in one viewport.
+  The 200 rows are still the right fixture: they are what makes "Page 1 sur 14"
+  and a long error in a narrow column visible at all.
 
 ## Tokens
 
@@ -301,6 +361,10 @@ On how the work goes:
   browser is already running. Same for Vite: check `lsof -iTCP:5173-5180` and
   kill the strays before starting, or the lab answers on a port you are not
   looking at.
+- **A stretched link overlay eats hover, not just clicks.** `after:inset-0`
+  over a table row means every native `title` under it stops firing. Raise the
+  titled element with `relative z-10`; raising the whole cell instead makes the
+  column dead to clicks.
 - **Vite does not hot-reload an edit inside `packages/`** the way it does one in
   `apps/web`. A behaviour change in `packages/ui` that "did not work" needs a
   hard reload before you believe it.
@@ -349,10 +413,13 @@ So the strategy the reference itself suggests:
    list, `empty` found the onboarding bounce, `error` finds the banner
    placements. A pattern applied to six screens from its nominal state alone is
    six screens to fix.
-5. **Order**: the table pattern (Runs first, most looked at), then run detail
-   (`rd-*`, the biggest single screen), then the command palette (it gives the
-   header's search icon its reason to exist), then Usage — the only screen with
-   no reference at all, which is exactly why it is not first.
+5. **Order**: the table pattern (Runs first, most looked at) — DONE, see
+   "The table" — then the list toolbar (`lt-*`) and the reference empty state,
+   which the table screen is still missing, then the other three column sets
+   (agents, schedules, integrations), then run detail (`rd-*`, the biggest
+   single screen), then the command palette (it gives the header's search icon
+   its reason to exist), then Usage — the only screen with no reference at all,
+   which is exactly why it is not first.
 6. **Where the reference is silent, derive rather than invent**: grey canvas +
    white cards, the control IS the setting, excursion → modal / destination →
    page. Those four decide most cases on their own.
