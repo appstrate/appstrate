@@ -18,23 +18,10 @@ import type { CommandIO } from "../src/lib/io.ts";
 import { exitWithError } from "../src/lib/ui.ts";
 import { createMemoryIO } from "./helpers/memory-io.ts";
 import { ExitError } from "./helpers/process-exit.ts";
+import { runIsolated } from "./helpers/isolated-process.ts";
 
 const IO_MODULE = JSON.stringify(`${import.meta.dir}/../src/lib/io.ts`);
 const UI_MODULE = JSON.stringify(`${import.meta.dir}/../src/lib/ui.ts`);
-
-/** Run `code` in a child `bun` process that owns its own stdout/stderr. */
-async function runIsolated(code: string) {
-  const proc = Bun.spawn([process.execPath, "-e", code], {
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-  const [stdout, stderr, exitCode] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-    proc.exited,
-  ]);
-  return { stdout, stderr, exitCode };
-}
 
 describe("DEFAULT_IO", () => {
   it("writes to the real process streams and exits with the given code", async () => {

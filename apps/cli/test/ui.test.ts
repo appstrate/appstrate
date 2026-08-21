@@ -22,26 +22,9 @@
 import { describe, it, expect } from "bun:test";
 import { askText, confirm, intro, outro, spinner } from "../src/lib/ui.ts";
 import { createMemoryIO } from "./helpers/memory-io.ts";
+import { runIsolated } from "./helpers/isolated-process.ts";
 
 const UI_MODULE = JSON.stringify(`${import.meta.dir}/../src/lib/ui.ts`);
-
-/**
- * Run `code` in a child `bun` process that owns its own stdout/stderr.
- *
- * Deliberately *not* shared with the identical helper in `io.test.ts`: the
- * point of both is that the test observes real process streams without
- * reassigning this process's own, and a shared helper in `test/helpers/`
- * would be a third file to keep in step for ten lines of `Bun.spawn`.
- */
-async function runIsolated(code: string) {
-  const proc = Bun.spawn([process.execPath, "-e", code], { stdout: "pipe", stderr: "pipe" });
-  const [stdout, stderr] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ]);
-  await proc.exited;
-  return { stdout, stderr };
-}
 
 describe("askText non-TTY guard", () => {
   it("throws before clack when stdin is not a TTY", async () => {
