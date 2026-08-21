@@ -19,6 +19,40 @@ const API_BARREL_BAN = {
   message:
     "Use the typed OpenAPI client from src/api/client.ts ($api / client) — the legacy fetch helpers are gone.",
 };
+// Zod 4 string-format bans (single source of truth). Declared here because the
+// CLI-test block below re-declares `no-restricted-syntax` for a subset of the
+// same files — flat config replaces (not merges) a rule's options across
+// blocks, so a later block that forgot these would silently switch the Zod
+// guard off for `apps/cli/test/**`.
+const ZOD4_STRING_FORMAT_BANS = [
+  {
+    selector:
+      "CallExpression[callee.property.name='email'][callee.object.callee.object.name='z'][callee.object.callee.property.name='string']",
+    message: "Zod 4: use z.email() instead of z.string().email().",
+  },
+  {
+    selector:
+      "CallExpression[callee.property.name='url'][callee.object.callee.object.name='z'][callee.object.callee.property.name='string']",
+    message: "Zod 4: use z.url() instead of z.string().url().",
+  },
+  {
+    selector:
+      "CallExpression[callee.property.name='uuid'][callee.object.callee.object.name='z'][callee.object.callee.property.name='string']",
+    message: "Zod 4: use z.uuid() instead of z.string().uuid().",
+  },
+];
+
+// Assignments to the global process streams / exit, banned in CLI tests.
+// The selectors deliberately match through casts — the pattern this replaces
+// wrote `(process as unknown as { exit: … }).exit = original`, so anchoring on
+// `left.object.name === 'process'` alone would miss the exact code that caused
+// the bug. Matching a `process` node *inside* the assignment target catches the
+// plain form and every `as`-wrapped variant of it.
+const globalIoBan = (target, selector) => ({
+  selector,
+  message: `CLI tests must not assign to ${target}. \`bun test\` runs every package in one process, so a global capture buffer also collects what other suites, libraries and the runner write — the assertion then fails non-deterministically and names an innocent test (issue #1180). Pass the command an injected CommandIO instead: createMemoryIO() from test/helpers/memory-io.ts.`,
+});
+
 const AUTH_CLIENT_BAN = {
   // Matches "../lib/auth-client", "../../lib/auth-client" and
   // "@/lib/auth-client". Only hooks/use-auth.ts (the seam) may import it.
@@ -58,23 +92,39 @@ export default tseslint.config(
     // and must not creep back in.
     files: ["**/src/**/*.{ts,tsx}", "**/test/**/*.ts"],
     rules: {
+      "no-restricted-syntax": ["error", ...ZOD4_STRING_FORMAT_BANS],
+    },
+  },
+  {
+    // Global-stream capture guard (issue #1180): CLI tests used to assert on
+    // output by swapping the *global* `process.stdout.write` /
+    // `process.stderr.write` / `process.exit` for the duration of a test. The
+    // whole repo runs in one `bun test` process, so that buffer is not owned by
+    // the test writing to it — `expect(captured).toBe("")` was a coin flip that
+    // blamed whichever command happened to be running. Commands take a
+    // `CommandIO` (src/lib/io.ts); tests build a private sink with
+    // `createMemoryIO()` (test/helpers/memory-io.ts).
+    //
+    // This re-declares `no-restricted-syntax` for a subset of the block above,
+    // which fully REPLACES its options here — hence the explicit spread of the
+    // Zod 4 bans, so they keep firing in `apps/cli/test/**` too.
+    files: ["apps/cli/test/**/*.ts"],
+    rules: {
       "no-restricted-syntax": [
         "error",
-        {
-          selector:
-            "CallExpression[callee.property.name='email'][callee.object.callee.object.name='z'][callee.object.callee.property.name='string']",
-          message: "Zod 4: use z.email() instead of z.string().email().",
-        },
-        {
-          selector:
-            "CallExpression[callee.property.name='url'][callee.object.callee.object.name='z'][callee.object.callee.property.name='string']",
-          message: "Zod 4: use z.url() instead of z.string().url().",
-        },
-        {
-          selector:
-            "CallExpression[callee.property.name='uuid'][callee.object.callee.object.name='z'][callee.object.callee.property.name='string']",
-          message: "Zod 4: use z.uuid() instead of z.string().uuid().",
-        },
+        ...ZOD4_STRING_FORMAT_BANS,
+        globalIoBan(
+          "process.stdout.write",
+          "AssignmentExpression > MemberExpression.left[property.name='write'] MemberExpression[object.name='process'][property.name='stdout']",
+        ),
+        globalIoBan(
+          "process.stderr.write",
+          "AssignmentExpression > MemberExpression.left[property.name='write'] MemberExpression[object.name='process'][property.name='stderr']",
+        ),
+        globalIoBan(
+          "process.exit",
+          "AssignmentExpression > MemberExpression.left[property.name='exit'] Identifier[name='process']",
+        ),
       ],
     },
   },
