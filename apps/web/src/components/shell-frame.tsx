@@ -12,7 +12,9 @@
  */
 
 import type { ReactNode } from "react";
+import { PanelLeft, Search } from "lucide-react";
 import { NavUser } from "@/components/nav-user";
+import { OrgSwitcher } from "@/components/org-switcher";
 import { NotificationBell } from "@/components/notification-bell";
 import { ProductSwitcher } from "@/components/product-switcher";
 import { ShellBreadcrumb } from "@/components/shell-breadcrumb";
@@ -25,6 +27,7 @@ import {
   SidebarHeader,
   SidebarTrigger,
 } from "@appstrate/ui/components/sidebar";
+import { useSidebar } from "@appstrate/ui/components/sidebar-context";
 
 export function ShellSidebar({
   children,
@@ -34,21 +37,49 @@ export function ShellSidebar({
   children: ReactNode;
   contentClassName?: string;
 }) {
+  const { state } = useSidebar();
+  const collapsed = state === "collapsed";
+
   return (
     <Sidebar collapsible="icon">
-      <SidebarHeader className="border-sidebar-border h-header justify-center border-b">
-        <ProductSwitcher />
+      {/* Head: the brand cell with the product name, and beside it the two
+          controls that act on the whole shell (search, collapse) — the Mistral
+          arrangement. Under it, at the width of the navigation, the context the
+          navigation applies to. */}
+      <SidebarHeader className="border-sidebar-border gap-1 border-b px-2 py-2">
+        <div className="flex h-8 items-center gap-1">
+          <ProductSwitcher />
+          {!collapsed && (
+            <>
+              {/* Not wired to anything yet: there is no global search in the
+                  app. Present so the arrangement can be judged; it is disabled
+                  rather than inert so nobody wonders why nothing happens. */}
+              <button
+                type="button"
+                disabled
+                title="Recherche globale (à brancher)"
+                aria-label="Rechercher"
+                className="text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground shrink-0 rounded-md p-1.5 disabled:opacity-40"
+              >
+                <Search className="size-4" />
+              </button>
+              <SidebarTrigger className="text-muted-foreground size-7 shrink-0">
+                <PanelLeft className="size-4" />
+              </SidebarTrigger>
+            </>
+          )}
+        </div>
+        <OrgSwitcher variant="row" />
       </SidebarHeader>
       <SidebarContent className={cn("gap-0", contentClassName)}>{children}</SidebarContent>
-      {/* Foot of the sidebar: the meta rows, then the collapse control. No
-          credits gauge — a permanent progress bar spends attention every second
-          on a number that is consulted every few weeks. It belongs behind the
-          Usage row, not in front of the navigation. The org/workspace switcher
-          used to live here too and now opens the header trail. */}
+      {/* Foot: what is ABOUT the workspace, then who you are. No credits gauge —
+          a permanent progress bar spends attention every second on a number
+          consulted every few weeks; it belongs behind the Usage row. */}
       <SidebarFooter className="gap-0 p-0">
         <SidebarMeta />
-        <div className="border-sidebar-border flex items-center justify-end border-t px-2 py-1.5">
-          <SidebarTrigger />
+        <div className="border-sidebar-border border-t p-2">
+          {collapsed ? <SidebarTrigger className="mb-1" /> : null}
+          <NavUser variant="row" />
         </div>
       </SidebarFooter>
     </Sidebar>
@@ -82,7 +113,6 @@ export function ShellHeader({
         <div className="flex shrink-0 items-center gap-1">
           {actions}
           <NotificationBell />
-          <NavUser />
         </div>
       </div>
     </header>

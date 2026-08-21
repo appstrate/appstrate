@@ -11,7 +11,6 @@
  */
 import { Fragment } from "react";
 import { Link } from "react-router-dom";
-import { OrgSwitcher } from "@/components/org-switcher";
 import { useBreadcrumbStore } from "@/stores/breadcrumb-store";
 
 function Separator() {
@@ -30,10 +29,9 @@ export function ShellBreadcrumb() {
       aria-label="breadcrumb"
       className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden text-sm"
     >
-      <OrgSwitcher />
       {entries.map((crumb, i) => (
         <Fragment key={i}>
-          <Separator />
+          {i > 0 && <Separator />}
           {crumb.node ? (
             crumb.node
           ) : crumb.href ? (

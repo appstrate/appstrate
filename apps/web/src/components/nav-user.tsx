@@ -34,6 +34,11 @@ function getInitials(name: string): string {
 
 interface NavUserProps {
   /**
+   * `avatar` is the round button in the header's right corner; `row` is the
+   * full-width identity line at the foot of the sidebar (avatar, name, email).
+   */
+  variant?: "avatar" | "row";
+  /**
    * Drop every entry that needs an organization to be resolvable.
    *
    * `/preferences` lives under `MainLayout`, behind `OrgGate`: a user with no
@@ -44,7 +49,7 @@ interface NavUserProps {
   minimal?: boolean;
 }
 
-export function NavUser({ minimal = false }: NavUserProps) {
+export function NavUser({ minimal = false, variant = "avatar" }: NavUserProps) {
   const { t } = useTranslation();
   const { user, profile, logout } = useAuth();
   const { theme, setTheme } = useTheme();
@@ -64,20 +69,43 @@ export function NavUser({ minimal = false }: NavUserProps) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label={t("userMenu.ariaLabel")}
-          className="rounded-full"
-        >
-          <Avatar className="size-8 rounded-full">
-            <AvatarFallback className="bg-spark text-spark-foreground rounded-full text-sm font-medium">
-              {initials}
-            </AvatarFallback>
-          </Avatar>
-        </Button>
+        {variant === "row" ? (
+          <button
+            type="button"
+            aria-label={t("userMenu.ariaLabel")}
+            className="hover:bg-sidebar-accent data-[state=open]:bg-sidebar-accent flex w-full items-center gap-2 rounded-md p-2 text-left transition-colors group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:p-0!"
+          >
+            <Avatar className="size-7 shrink-0 rounded-full">
+              <AvatarFallback className="bg-spark text-spark-foreground rounded-full text-xs font-medium">
+                {initials}
+              </AvatarFallback>
+            </Avatar>
+            <span className="grid min-w-0 flex-1 leading-tight group-data-[collapsible=icon]:hidden">
+              <span className="truncate text-sm font-medium">{displayName}</span>
+              <span className="text-muted-foreground truncate text-xs">{user.email}</span>
+            </span>
+          </button>
+        ) : (
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label={t("userMenu.ariaLabel")}
+            className="rounded-full"
+          >
+            <Avatar className="size-8 rounded-full">
+              <AvatarFallback className="bg-spark text-spark-foreground rounded-full text-sm font-medium">
+                {initials}
+              </AvatarFallback>
+            </Avatar>
+          </Button>
+        )}
       </DropdownMenuTrigger>
-      <DropdownMenuContent className="min-w-56 rounded-lg" side="bottom" align="end" sideOffset={4}>
+      <DropdownMenuContent
+        className="min-w-56 rounded-lg"
+        side={variant === "row" ? "right" : "bottom"}
+        align="end"
+        sideOffset={4}
+      >
         <DropdownMenuLabel className="p-0 font-normal">
           <div className="flex items-center gap-2 px-1 py-1.5 text-left text-sm">
             <Avatar className="size-8 rounded-lg">

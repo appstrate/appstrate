@@ -68,7 +68,7 @@ function ColumnHeader({
   );
 }
 
-export function OrgSwitcher() {
+export function OrgSwitcher({ variant = "chip" }: { variant?: "chip" | "row" }) {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const location = useLocation();
@@ -139,33 +139,62 @@ export function OrgSwitcher() {
       }}
     >
       <PopoverTrigger asChild>
-        {/* Deliberately NOT shaped like the trail segments next to it. A
+        {/* Two shapes, one control. `chip` sits in the header trail;
+            `row` sits in the sidebar, under the brand cell, at full width.
+            Deliberately NOT shaped like the trail segments next to it. A
             breadcrumb segment means "go up a level" — cheap and reversible.
             This one replaces the whole context. The coloured avatar and the
             up/down chevron (never a right chevron) are what say so. */}
-        <button
-          type="button"
-          data-testid="org-switcher-button"
-          aria-label={t("switcher.orgAriaLabel")}
-          className="hover:bg-accent data-[state=open]:bg-accent flex min-w-0 shrink items-center gap-1.5 rounded-md py-1 pr-1.5 pl-1 text-sm transition-colors"
-        >
-          <OrgAvatar name={currentOrg.name} className="size-5 rounded-[5px] text-[0.65rem]" />
-          <span className="truncate font-semibold">{currentOrg.name}</span>
-          {currentApp && (
-            <>
-              {/* The workspace stays visible even when there is only one: a
-                  level nobody ever sees is a level nobody learns. */}
-              <span className="text-border" aria-hidden>
-                |
-              </span>
-              <span className="truncate font-semibold">{currentApp.name}</span>
-            </>
-          )}
-          <ChevronsUpDown className="text-muted-foreground size-3.5 shrink-0" />
-        </button>
+        {variant === "row" ? (
+          <button
+            type="button"
+            data-testid="org-switcher-button"
+            aria-label={t("switcher.orgAriaLabel")}
+            className="hover:bg-sidebar-accent data-[state=open]:bg-sidebar-accent flex h-9 w-full items-center gap-2 rounded-md px-2 text-sm transition-colors group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0!"
+          >
+            <OrgAvatar
+              name={currentOrg.name}
+              className="size-5 shrink-0 rounded-[5px] text-[0.65rem]"
+            />
+            <span className="min-w-0 flex-1 truncate text-left font-medium group-data-[collapsible=icon]:hidden">
+              {currentOrg.name}
+              {currentApp && (
+                <>
+                  <span className="text-border mx-1" aria-hidden>
+                    |
+                  </span>
+                  {currentApp.name}
+                </>
+              )}
+            </span>
+            <ChevronsUpDown className="text-muted-foreground size-3.5 shrink-0 group-data-[collapsible=icon]:hidden" />
+          </button>
+        ) : (
+          <button
+            type="button"
+            data-testid="org-switcher-button"
+            aria-label={t("switcher.orgAriaLabel")}
+            className="hover:bg-accent data-[state=open]:bg-accent flex min-w-0 shrink items-center gap-1.5 rounded-md py-1 pr-1.5 pl-1 text-sm transition-colors"
+          >
+            <OrgAvatar name={currentOrg.name} className="size-5 rounded-[5px] text-[0.65rem]" />
+            <span className="truncate font-semibold">{currentOrg.name}</span>
+            {currentApp && (
+              <>
+                {/* The workspace stays visible even when there is only one: a
+                    level nobody ever sees is a level nobody learns. */}
+                <span className="text-border" aria-hidden>
+                  |
+                </span>
+                <span className="truncate font-semibold">{currentApp.name}</span>
+              </>
+            )}
+            <ChevronsUpDown className="text-muted-foreground size-3.5 shrink-0" />
+          </button>
+        )}
       </PopoverTrigger>
       <PopoverContent
         align="start"
+        side={variant === "row" ? "right" : "bottom"}
         sideOffset={6}
         className="w-[540px] max-w-[calc(100vw-2rem)] overflow-hidden rounded-xl p-0"
       >
