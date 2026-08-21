@@ -18628,8 +18628,8 @@ export interface operations {
                 offset?: number;
                 /** @description Filter runs by kind. Omit (or send an empty value) for every kind. Any value outside the enum is rejected with `400`; it is never ignored, so a filtered response is never silently widened. */
                 kind?: "all" | "package" | "inline";
-                /** @description Filter runs by lifecycle status. Omit (or send an empty value) for every status. Any value outside the enum is rejected with `400`; it is never ignored, so a filtered response is never silently widened. */
-                status?: "pending" | "running" | "success" | "failed" | "timeout" | "cancelled";
+                /** @description Filter runs by lifecycle status: one member of `pending`, `running`, `success`, `failed`, `timeout`, `cancelled`, or several separated by commas (`failed,timeout` returns both). Omit (or send an empty value) for every status. Any value outside the enum is rejected with `400` — for the whole list, never by dropping the offending member, so a filtered response is never silently widened. */
+                status?: string;
                 start_date?: string;
                 end_date?: string;
                 /** @description Return only runs launched from this chat session. */

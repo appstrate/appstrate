@@ -14,23 +14,27 @@ import { describe, it, expect } from "bun:test";
 import { ListToolbar, type FilterSpec } from "../list-toolbar.tsx";
 import { render } from "./run-fixture.tsx";
 
-function filters(over: Partial<Record<"status" | "kind", string>> = {}): FilterSpec[] {
+function filters(over: Partial<Record<"status" | "kind", string[]>> = {}): FilterSpec[] {
   return [
     {
       id: "status",
       label: "Statut",
-      value: over.status,
+      values: over.status ?? [],
       options: [
         { value: "failed", label: "échoué" },
         { value: "success", label: "succès" },
+        { value: "timeout", label: "timeout" },
       ],
       onChange: () => {},
     },
     {
       id: "kind",
       label: "Type",
-      value: over.kind,
-      options: [{ value: "inline", label: "Inline" }],
+      values: over.kind ?? [],
+      options: [
+        { value: "inline", label: "Inline" },
+        { value: "package", label: "Agents" },
+      ],
       onChange: () => {},
     },
   ];
@@ -45,39 +49,37 @@ describe("with nothing filtered", () => {
     expect(html).not.toContain("Statut :");
     expect(html).not.toContain("Tout effacer");
   });
+});
 
-  it("leaves every trigger unmarked", () => {
-    // State, not styling: `data-filtered` is what says a dimension is on, so
-    // the assertion survives a restyle and fails on a behaviour change.
-    expect(html).not.toContain("data-filtered");
+describe("the trigger", () => {
+  it("says what the dimension is, never what is chosen in it", () => {
+    // The chips are one line below and say exactly that; a trigger that
+    // repeated them was the same words twice, on a button that changed width
+    // every time you filtered.
+    const html = render(<ListToolbar filters={filters({ status: ["failed"] })} />);
+    const triggerRow = html.slice(0, html.indexOf("Statut :"));
+    expect(triggerRow).not.toContain("échoué");
   });
 });
 
-describe("with one filter on", () => {
-  const html = render(<ListToolbar filters={filters({ status: "failed" })} />);
-
-  it("says so on the trigger, in the chosen value's own words", () => {
-    // Not "1 filtre": the value is what you need to read to know what you are
-    // looking at. The reference puts a count badge there, which only tells you
-    // something when a dimension takes several values at once; these take one.
-    expect(html).toContain("échoué");
-    expect(html).toContain("data-filtered");
-  });
-
-  it("repeats it as a removable chip", () => {
-    expect(html).toContain("Statut :");
+describe("chips", () => {
+  it("gives each chosen VALUE its own, removable on its own", () => {
+    // What a trigger cannot express, and the reason the chips are not a
+    // duplicate: two statuses, two chips, and you can drop one of them.
+    const html = render(<ListToolbar filters={filters({ status: ["failed", "timeout"] })} />);
     expect(html).toContain('aria-label="Retirer le filtre Statut : échoué"');
+    expect(html).toContain('aria-label="Retirer le filtre Statut : timeout"');
   });
 
-  it("offers no clear-all for a single filter — the chip already is one", () => {
+  it("offers no clear-all for a single chip — the chip already is one", () => {
+    const html = render(<ListToolbar filters={filters({ status: ["failed"] })} />);
     expect(html).not.toContain("Tout effacer");
   });
-});
 
-describe("with two filters on", () => {
-  const html = render(<ListToolbar filters={filters({ status: "failed", kind: "inline" })} />);
-
-  it("chips both and offers to clear them at once", () => {
+  it("offers one once there are several, across dimensions", () => {
+    const html = render(
+      <ListToolbar filters={filters({ status: ["failed"], kind: ["inline"] })} />,
+    );
     expect(html).toContain('aria-label="Retirer le filtre Statut : échoué"');
     expect(html).toContain('aria-label="Retirer le filtre Type : Inline"');
     expect(html).toContain("Tout effacer");
@@ -89,7 +91,7 @@ describe("the result count", () => {
     // The toolbar counts nothing itself: it serves runs, schedules and
     // packages, and one that formats "3 runs" for all of them would one day
     // say it about agents.
-    const html = render(<ListToolbar filters={filters({ status: "failed" })} count="3 runs" />);
+    const html = render(<ListToolbar filters={filters({ status: ["failed"] })} count="3 runs" />);
     expect(html).toContain("3 runs");
     // At the END of the row: it describes what the filters before it produced.
     expect(html.indexOf("3 runs")).toBeGreaterThan(html.lastIndexOf("Type"));

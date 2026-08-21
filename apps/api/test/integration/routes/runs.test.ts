@@ -817,6 +817,58 @@ describe("Runs API", () => {
       expect(body.data.map((r) => r.id)).toContain(scheduled.id);
     });
 
+    it("takes several statuses at once", async () => {
+      // "Everything that broke" is one question. Asking it as two requests and
+      // stitching the pages together gets the ordering and the total wrong.
+      await seedAgent({
+        id: "@runorg/multistatus-agent",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+      });
+      const failed = await seedRun({
+        packageId: "@runorg/multistatus-agent",
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        userId: ctx.user.id,
+        status: "failed",
+      });
+      const timedOut = await seedRun({
+        packageId: "@runorg/multistatus-agent",
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        userId: ctx.user.id,
+        status: "timeout",
+      });
+      await seedRun({
+        packageId: "@runorg/multistatus-agent",
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        userId: ctx.user.id,
+        status: "success",
+      });
+
+      const res = await app.request("/api/runs?status=failed,timeout", {
+        headers: authHeaders(ctx),
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { data: { id: string }[]; total: number };
+      expect(body.total).toBe(2);
+      expect(body.data.map((r) => r.id).sort()).toEqual([failed.id, timedOut.id].sort());
+    });
+
+    it("rejects the whole list when one member is unknown, never just that member", async () => {
+      // Dropping the bad member would WIDEN the answer for a caller reading it
+      // as narrowed — the failure mode this endpoint spends 400s to avoid.
+      const res = await app.request("/api/runs?status=failed,succes", {
+        headers: authHeaders(ctx),
+      });
+
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { param?: string };
+      expect(body.param).toBe("status");
+    });
+
     it("lists all org runs when no ?user param is given", async () => {
       await seedTwoMembersRuns();
 

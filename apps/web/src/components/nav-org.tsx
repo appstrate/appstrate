@@ -39,7 +39,7 @@ export function NavOrg() {
   // so they don't contribute to `runningRuns`. Check them separately.
   const { data: runningInline } = usePaginatedRuns({
     kind: "inline",
-    status: "running",
+    status: ["running"],
     limit: 1,
     offset: 0,
   });

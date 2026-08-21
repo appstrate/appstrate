@@ -755,12 +755,9 @@ export const runsPaths = {
         {
           name: "status",
           in: "query",
-          schema: {
-            type: "string",
-            enum: ["pending", "running", "success", "failed", "timeout", "cancelled"],
-          },
+          schema: { type: "string", example: "failed,timeout" },
           description:
-            "Filter runs by lifecycle status. Omit (or send an empty value) for every status. Any value outside the enum is rejected with `400`; it is never ignored, so a filtered response is never silently widened.",
+            "Filter runs by lifecycle status: one member of `pending`, `running`, `success`, `failed`, `timeout`, `cancelled`, or several separated by commas (`failed,timeout` returns both). Omit (or send an empty value) for every status. Any value outside the enum is rejected with `400` — for the whole list, never by dropping the offending member, so a filtered response is never silently widened.",
         },
         { name: "start_date", in: "query", schema: { type: "string", format: "date-time" } },
         { name: "end_date", in: "query", schema: { type: "string", format: "date-time" } },

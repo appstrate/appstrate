@@ -1,40 +1,41 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The bar above a list: what is being filtered, and what you can do to the
- * whole list.
+ * The bar above a list: what is narrowing it, and how it is drawn.
  *
- * The reference calls it `lt-*` and draws it once for every list screen —
- * buttons that open a menu, a count when a filter is on, the active filters
- * repeated underneath as chips you can take off one at a time. Runs wore two
- * stacked tab strips instead, which read as navigation (they were `Tabs`)
- * rather than as filtering, cost a full row each, and could not grow a third
- * dimension without becoming a wall.
+ * The reference calls it `lt-*` and draws it once for every list screen. Runs
+ * wore two stacked tab strips instead, which read as navigation (they were
+ * `Tabs`), cost a full row each, and could not grow a third dimension without
+ * becoming a wall.
  *
- * Two rules it encodes:
+ * **The chips are the only place a filter shows.** The trigger says what the
+ * dimension IS, never what is chosen in it — that was tried, and with the chips
+ * right underneath it was the same words twice, plus a row of buttons that
+ * changed width every time you filtered. (The reference does mark its trigger,
+ * but with a COUNT, which is not the value and only earns its place once the
+ * chip row can be scrolled away. Ours never is.)
  *
- * - **A filter that is on says so twice.** Once on its own button, once as a
- *   chip. The chip is not decoration: it is the only affordance that removes
- *   ONE filter without opening the menu that set it, and it is what makes a
- *   list you did not filter yourself readable at a glance.
- * - **The state belongs in the URL**, not in the component. A filtered list is
- *   the thing people paste to each other ("look at the failed ones") — the
- *   same argument that put settings behind real URLs, and it comes with the
- *   same obligation: Back has to undo a filter, so the caller pushes, never
- *   replaces.
+ * **Every dimension takes several values**, and that is what stops the chips
+ * from being a duplicate: one chip per VALUE, each removable on its own, which
+ * a trigger cannot express. Where a dimension has two values (kind) or one
+ * (scope), selecting them all means selecting none, and it normalises to no
+ * filter — so the control never claims more than it does, and the three menus
+ * still work the same way.
+ *
+ * **The state belongs in the URL**, pushed, not replaced: a filtered list is
+ * what people paste to each other, and the rule that gave modals real URLs
+ * brings the same obligation — Back has to undo a filter.
  *
  * What is NOT here: the page's own actions. They have a home — `PageHeader`'s
  * `actions` slot, at title height — and moving one down here would make Runs
  * the only screen whose primary button is not where every other screen's is.
- * The end of the row belongs to what describes the list itself: how many rows
- * the filters left.
  */
 
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Check, ChevronDown, LayoutGrid, Rows3, X } from "lucide-react";
-import type { ListView } from "@/stores/list-view-store";
 import { cn } from "@appstrate/ui/cn";
+import type { ListView } from "@/stores/list-view-store";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -53,48 +54,54 @@ export interface FilterSpec {
   id: string;
   /** What the dimension is called: "Statut", "Type". */
   label: string;
-  /** The chosen value, or undefined when the dimension is not filtered. */
-  value?: string;
+  /** The chosen values. Empty means the dimension is not filtering. */
+  values: string[];
   options: FilterOption[];
-  onChange: (value?: string) => void;
+  onChange: (values: string[]) => void;
 }
 
-function activeLabel(filter: FilterSpec): string | undefined {
-  return filter.options.find((o) => o.value === filter.value)?.label;
+/** Selecting every value narrows nothing, so it is stored as no filter at all. */
+function normalise(filter: FilterSpec, values: string[]): string[] {
+  return values.length === filter.options.length ? [] : values;
 }
 
 function FilterMenu({ filter }: { filter: FilterSpec }) {
   const { t } = useTranslation("common");
-  const active = activeLabel(filter);
+  const chosen = new Set(filter.values);
+
+  const toggle = (value: string) => {
+    const next = chosen.has(value)
+      ? filter.values.filter((v) => v !== value)
+      : [...filter.values, value];
+    filter.onChange(normalise(filter, next));
+  };
 
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger
-        // Whether a filter is on is state, not styling: it rides on an
-        // attribute so it can be read without inferring it from a class name.
-        data-filtered={active ? "" : undefined}
-        className={cn(
-          "bg-card inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border px-2.5 text-sm font-medium shadow-sm transition-colors",
-          "hover:bg-accent data-[state=open]:bg-accent",
-          active && "border-primary text-primary",
-        )}
-      >
+      <DropdownMenuTrigger className="bg-card hover:bg-accent data-[state=open]:bg-accent inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border px-2.5 text-sm font-medium shadow-sm transition-colors">
         {filter.label}
-        {active && <span className="text-primary/70 max-w-32 truncate">· {active}</span>}
         <ChevronDown className="text-muted-foreground size-3.5 shrink-0" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="min-w-44">
         <DropdownMenuLabel>{filter.label}</DropdownMenuLabel>
         <DropdownMenuSeparator />
-        {/* "All" is an option, not the absence of one: a menu whose only way
-            back is the chip hides the way back inside another control. */}
-        <DropdownMenuItem onSelect={() => filter.onChange(undefined)}>
-          <Check className={cn("size-4", filter.value && "invisible")} />
+        {/* "All" is an item, not the absence of one: a menu whose only way back
+            is the chip row hides the way back inside another control. */}
+        <DropdownMenuItem onSelect={() => filter.onChange([])}>
+          <Check className={cn("size-4", chosen.size > 0 && "invisible")} />
           {t("toolbar.any")}
         </DropdownMenuItem>
         {filter.options.map((option) => (
-          <DropdownMenuItem key={option.value} onSelect={() => filter.onChange(option.value)}>
-            <Check className={cn("size-4", filter.value !== option.value && "invisible")} />
+          <DropdownMenuItem
+            key={option.value}
+            // The menu stays open: picking two statuses is one gesture, and a
+            // menu that closes on the first tick makes the second one a chore.
+            onSelect={(event) => {
+              event.preventDefault();
+              toggle(option.value);
+            }}
+          >
+            <Check className={cn("size-4", !chosen.has(option.value) && "invisible")} />
             {option.label}
           </DropdownMenuItem>
         ))}
@@ -158,7 +165,16 @@ export function ListToolbar({
   onViewChange?: (view: ListView) => void;
 }) {
   const { t } = useTranslation("common");
-  const active = filters.filter((f) => f.value !== undefined);
+
+  /** Every chosen value, across every dimension: one chip each. */
+  const chips = filters.flatMap((filter) =>
+    filter.values.map((value) => ({
+      key: `${filter.id}:${value}`,
+      filter,
+      value,
+      label: filter.options.find((o) => o.value === value)?.label ?? value,
+    })),
+  );
 
   return (
     <div className="mb-4 space-y-2">
@@ -172,29 +188,31 @@ export function ListToolbar({
         </div>
       </div>
 
-      {active.length > 0 && (
+      {chips.length > 0 && (
         <div className="flex flex-wrap items-center gap-1.5">
-          {active.map((filter) => (
+          {chips.map((chip) => (
             <button
-              key={filter.id}
+              key={chip.key}
               type="button"
-              onClick={() => filter.onChange(undefined)}
+              onClick={() =>
+                chip.filter.onChange(chip.filter.values.filter((v) => v !== chip.value))
+              }
               className="border-primary bg-primary-soft text-primary inline-flex items-center gap-1 rounded-full border py-0.5 pr-1.5 pl-2.5 text-xs font-medium"
               aria-label={t("toolbar.removeFilter", {
-                filter: filter.label,
-                value: activeLabel(filter),
+                filter: chip.filter.label,
+                value: chip.label,
               })}
             >
               <span className="max-w-48 truncate">
-                {filter.label} : {activeLabel(filter)}
+                {chip.filter.label} : {chip.label}
               </span>
               <X className="size-3 shrink-0 opacity-70" />
             </button>
           ))}
-          {active.length > 1 && (
+          {chips.length > 1 && (
             <button
               type="button"
-              onClick={() => active.forEach((f) => f.onChange(undefined))}
+              onClick={() => filters.forEach((f) => f.onChange([]))}
               className="text-muted-foreground hover:text-foreground px-1.5 text-xs underline-offset-2 hover:underline"
             >
               {t("toolbar.clearAll")}

@@ -92,11 +92,12 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
       // The three filters the toolbar sets, applied the way the API applies
       // them — together. `user=me` is "mine OR nobody's" for a member, which
       // is what `actorScopeFilter` means server-side.
-      const status = url.searchParams.get("status");
+      // `?status=failed,timeout` — several at once, like the endpoint.
+      const statuses = (url.searchParams.get("status") ?? "").split(",").filter(Boolean);
       const kind = url.searchParams.get("kind");
       const mine = url.searchParams.get("user") === "me";
       const filtered = all.filter((r) => {
-        if (status && r.status !== status) return false;
+        if (statuses.length > 0 && !statuses.includes(r.status)) return false;
         if (kind === "inline" && r.package_ephemeral !== true) return false;
         if (kind === "package" && r.package_ephemeral === true) return false;
         if (mine && r.userId != null && r.userId !== f.USER_ID) return false;

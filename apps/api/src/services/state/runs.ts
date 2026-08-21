@@ -1473,13 +1473,16 @@ export interface ListGlobalRunsOptions {
   offset?: number;
   kind?: GlobalRunKind;
   /**
+   * One status or several — "everything that broke" is `["failed", "timeout"]`,
+   * one question rather than two requests stitched together client-side.
+   *
    * `RunStatus`, not `string`. This used to take a `string` and quietly drop
    * anything outside the enum (`if (status && isRunStatus(status))`), which
    * turned a typo into "no status filter" — the whole list, read as filtered.
    * The route now rejects an unknown value with a 400; the narrow type is what
    * keeps a future caller from re-opening that hole.
    */
-  status?: RunStatus;
+  status?: RunStatus | RunStatus[];
   startDate?: Date;
   endDate?: Date;
   endUserId?: string | null;
@@ -1524,7 +1527,13 @@ export async function listGlobalRuns(
     if (!actor) throw new Error("listGlobalRuns: `mine` requires an actor");
     conditions.push(actorScopeFilter(actor, { userId: runs.userId, endUserId: runs.endUserId }));
   }
-  if (status) conditions.push(eq(runs.status, status));
+  if (status) {
+    const wanted = Array.isArray(status) ? status : [status];
+    // An empty list would produce `IN ()` — SQL for "nothing", where the caller
+    // meant "no status filter". Absence is how you say that.
+    if (wanted.length === 1) conditions.push(eq(runs.status, wanted[0]!));
+    else if (wanted.length > 1) conditions.push(inArray(runs.status, wanted));
+  }
   if (startDate) conditions.push(gte(runs.startedAt, startDate));
   if (endDate) conditions.push(lte(runs.startedAt, endDate));
   if (endUserId) conditions.push(eq(runs.endUserId, endUserId));

@@ -141,6 +141,34 @@ function closedSetQuery<T extends string>(
   return raw as T;
 }
 
+/**
+ * The same closed set, several values at a time: `?status=failed,timeout`.
+ *
+ * "Everything that broke" is one question, not two — asking it as two requests
+ * and stitching the pages together client-side gets the ordering and the total
+ * wrong. One value stays valid, so this widens the parameter without moving it.
+ *
+ * Same rule as {@link closedSetQuery} on the way in: an unrecognised member is
+ * a 400 for the whole list, never a silently dropped one, because dropping a
+ * member WIDENS the answer to a caller reading it as narrowed. A repeated value
+ * is not an error, only redundant — it collapses.
+ */
+function closedSetListQuery<T extends string>(
+  c: Context<AppEnv>,
+  name: string,
+  allowed: readonly T[],
+): T[] | undefined {
+  const raw = c.req.query(name);
+  if (raw === undefined || raw === "") return undefined;
+  const parts = raw.split(",").map((part) => part.trim());
+  for (const part of parts) {
+    if (!(allowed as readonly string[]).includes(part)) {
+      throw invalidRequest(`${name} must be one of: ${allowed.join(", ")}`, name);
+    }
+  }
+  return [...new Set(parts)] as T[];
+}
+
 // --- Router ---
 
 export function createRunsRouter() {
@@ -389,7 +417,7 @@ export function createRunsRouter() {
     const mine = userFilter === "me" || !!endUser;
 
     const kind = closedSetQuery(c, "kind", GLOBAL_RUN_KINDS);
-    const status = closedSetQuery(c, "status", runStatusValues);
+    const status = closedSetListQuery(c, "status", runStatusValues);
     const startDateRaw = c.req.query("start_date");
     const endDateRaw = c.req.query("end_date");
     const chatSessionId = c.req.query("chat_session_id") || undefined;

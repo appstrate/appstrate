@@ -237,9 +237,14 @@ navigation, cost a row each, and had nowhere to put a third dimension — which
 is why `status`, a filter `GET /api/runs` has always accepted, was not offered
 at all.
 
-- **A filter that is on says so twice**: on its own button, and as a chip
-  underneath. The chip is the only affordance that removes ONE filter without
-  reopening the menu that set it.
+- **The chips are the ONLY place a filter shows.** The trigger says what the
+  dimension is, never what is chosen in it. The first version marked the
+  trigger with the value ("Statut · échoué") and repeated it as a chip one line
+  below — literally the same words twice, on a row of buttons that changed
+  width every time you filtered.
+- **Every dimension takes several values**, and that is what stops the chips
+  from being a duplicate: one chip per VALUE, each removable on its own, which
+  a trigger cannot express. The menu stays open while you tick.
 - **The state is in the URL, pushed, not replaced.** A filtered list is what
   people paste to each other; and the same rule that gave modals real URLs
   brings the same obligation — Back has to undo a filter.
@@ -261,9 +266,15 @@ Deviations from the reference, on purpose:
   the box would either do nothing or filter one page of fifteen client-side and
   call it a search. It waits for the endpoint, like the sortable heads and the
   header's own search icon.
-- **No count badge on the trigger** (`lt-btn .lt-badge`). A count tells you
-  something when a dimension takes several values at once; these take one, so
-  the trigger shows the VALUE — "Statut · échoué" says more than "Statut 1".
+- **A dimension whose values are mutually exclusive is still a multi-select.**
+  Kind has two values and scope has one, so ticking them all means ticking
+  none — which normalises to no filter. The alternative was radio menus beside
+  checkbox menus, differing for a reason the user cannot see (which parameters
+  the endpoint happens to take as a list).
+- **No count badge on the trigger** (`lt-btn .lt-badge`). A count would say
+  "Statut 2" where the chips one line below already say WHICH two. The
+  reference's badge earns its place when the chip row can be scrolled away or
+  collapsed; ours never is.
 - **One empty state, not two.** The reference keeps `empty-list` (a bare icon
   and a line, inside a list frame) beside `empty-state` (the rings). We keep
   the rings for both, at two sizes: consistency between screens beats saving a
@@ -433,6 +444,16 @@ On how the work goes:
 - The two-axis code review runs after each substantive block.
 
 ## Traps hit more than once
+
+- **`key` resets state by REMOUNTING, and takes the subtree's UI state with
+  it.** Resetting the run list's page on a filter change that way closed the
+  toolbar's open menu on every tick, because the toolbar renders inside the
+  list. Derive the reset instead (`page` from a filter signature) whenever
+  something interactive lives in the keyed subtree.
+- **`placeholderData: (prev) => prev` keeps the previous rows for ANY key
+  change**, not just paging. Ticking a filter left a whole unfiltered page
+  sitting under a chip that was already on screen. Compare the previous key and
+  keep the rows only when the offset is what moved.
 
 - **`<button>` centres its flex content by default.** Rows with a subtitle sat
   left of rows without one; the brand cell drifted to the middle of the sidebar.

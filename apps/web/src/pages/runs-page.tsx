@@ -5,20 +5,33 @@ import { useTranslation } from "react-i18next";
 import { SearchX } from "lucide-react";
 import { runStatusValues } from "@appstrate/shared-types";
 import { Button } from "@appstrate/ui/components/button";
-import { EmptyState } from "../components/page-states";
 import { useUnreadCount, useMarkAllRead } from "../hooks/use-notifications";
 import { PageHeader } from "../components/page-header";
+import { EmptyState } from "../components/page-states";
 import { ListToolbar, type FilterSpec } from "../components/list-toolbar";
 import { RunList } from "../components/run-list";
 import type { RunKindFilter } from "../hooks/use-paginated-runs";
 
 /**
  * The filters live in the URL, so a filtered list is a link. They also come
- * back as one closed set rather than two tab strips: three dimensions of
- * filtering drawn as tabs is three rows of chrome above five rows of data, and
- * `status` — which the API has always accepted — had nowhere to go at all.
+ * back as one closed set rather than two tab strips: three dimensions drawn as
+ * tabs is three rows of chrome above five rows of data, and `status` — which
+ * the API has always accepted — had nowhere to go at all.
+ *
+ * Each dimension takes SEVERAL values. It matters for one of them: "everything
+ * that broke" is `failed` or `timeout`, one question the endpoint now answers
+ * in one request. The other two have two values and one, so selecting them all
+ * means selecting none — which the toolbar normalises away, so all three menus
+ * behave alike without any of them pretending to more than it does.
  */
-const KINDS: RunKindFilter[] = ["package", "inline"];
+const KINDS = ["package", "inline"] as const;
+const SCOPES = ["me"] as const;
+
+/** `?status=failed,timeout` — the wire shape the endpoint takes. */
+function readList<T extends string>(raw: string | null, allowed: readonly T[]): T[] {
+  if (!raw) return [];
+  return raw.split(",").filter((v): v is T => (allowed as readonly string[]).includes(v));
+}
 
 export function RunsPage() {
   const { t } = useTranslation(["agents", "common"]);
@@ -26,17 +39,17 @@ export function RunsPage() {
   const markAllRead = useMarkAllRead();
   const [params, setParams] = useSearchParams();
 
-  const scope = params.get("user") === "me" ? "me" : undefined;
-  const kind = KINDS.find((k) => k === params.get("kind"));
-  const status = runStatusValues.find((s) => s === params.get("status"));
+  const scopes = readList(params.get("user"), SCOPES);
+  const kinds = readList(params.get("kind"), KINDS);
+  const statuses = readList(params.get("status"), runStatusValues);
 
   // Pushed, not replaced: a filter is a place you went, and Back has to undo
   // it — the same obligation the URL brings everywhere else in this app.
-  const setParam = (key: string) => (value?: string) => {
+  const setParam = (key: string) => (values: string[]) => {
     setParams((prev) => {
       const next = new URLSearchParams(prev);
-      if (value === undefined) next.delete(key);
-      else next.set(key, value);
+      if (values.length === 0) next.delete(key);
+      else next.set(key, values.join(","));
       return next;
     });
   };
@@ -45,14 +58,14 @@ export function RunsPage() {
     {
       id: "user",
       label: t("runs.filterScope"),
-      value: scope,
+      values: scopes,
       options: [{ value: "me", label: t("runs.filterMine") }],
       onChange: setParam("user"),
     },
     {
       id: "kind",
       label: t("runs.filterKind"),
-      value: kind,
+      values: kinds,
       options: [
         { value: "package", label: t("runs.filterKindPackage") },
         { value: "inline", label: t("runs.filterKindInline") },
@@ -62,7 +75,7 @@ export function RunsPage() {
     {
       id: "status",
       label: t("runs.filterStatus"),
-      value: status,
+      values: statuses,
       options: runStatusValues.map((value) => ({
         value,
         label: t(`status.${value}`, { ns: "common" }),
@@ -70,6 +83,10 @@ export function RunsPage() {
       onChange: setParam("status"),
     },
   ];
+
+  // `kind` is single on the wire — two values means both, which is no filter,
+  // and the toolbar has already normalised that to an empty list.
+  const kind: RunKindFilter | undefined = kinds.length === 1 ? kinds[0] : undefined;
 
   return (
     <div>
@@ -90,28 +107,23 @@ export function RunsPage() {
         }
       />
 
-      {/* Keyed on the filters: a changed filter starts again at page one, and
-          the previous page's rows do not flash under the new query. */}
       <RunList
-        key={`${scope}-${kind}-${status}`}
         pageSize={15}
-        user={scope}
+        user={scopes.length > 0 ? "me" : undefined}
         kind={kind}
-        status={status}
+        status={statuses}
         toolbar={(total) => (
           <ListToolbar filters={filters} count={t("runs.count", { count: total })} />
         )}
         // A filtered list that finds nothing has NOT run out of runs — it has
         // run out of matches, and the way out is the filter, not the agent.
         emptyState={
-          filters.some((f) => f.value !== undefined) ? (
+          filters.some((f) => f.values.length > 0) ? (
             <EmptyState message={t("runs.emptyFiltered")} icon={SearchX} compact>
-              {/* The same clear the chips use: wiping the whole query string
-                  would take any other parameter the page grows with it. */}
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => filters.forEach((f) => f.onChange(undefined))}
+                onClick={() => filters.forEach((f) => f.onChange([]))}
               >
                 {t("toolbar.clearAll", { ns: "common" })}
               </Button>

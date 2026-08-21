@@ -16,11 +16,12 @@ interface UsePaginatedRunsOptions {
   user?: "me";
   kind?: RunKindFilter;
   /**
-   * `RunStatus`, not `string`: `GET /api/runs` now rejects a value outside the
-   * enum with a 400 instead of quietly returning every status, so a typo here
-   * has to be a compile error rather than a runtime surprise.
+   * `RunStatus`, not `string`: `GET /api/runs` rejects a value outside the enum
+   * with a 400 instead of quietly returning every status, so a typo here has to
+   * be a compile error rather than a runtime surprise. Several statuses travel
+   * as one comma-separated value — "everything that broke" is one question.
    */
-  status?: RunStatus;
+  status?: RunStatus[];
   limit: number;
   offset: number;
 }
@@ -38,25 +39,31 @@ export function usePaginatedRuns({
   const applicationId = useCurrentApplicationId();
 
   // Key segment only — the typed call below selects the matching spec path.
+  // One value on the wire, so one value in the key: an array would key on its
+  // identity, and a fresh `["failed"]` each render is a fresh cache entry.
+  const statusKey = status && status.length > 0 ? status.join(",") : undefined;
+
   const endpoint = scheduleId
     ? `/schedules/${scheduleId}/runs`
     : packageId
       ? `/agents/${packageId}/runs`
       : `/runs`;
 
+  // Key pinned to the legacy shape: use-global-run-sync (and run mutations)
+  // invalidate by the ["paginated-runs"] prefix.
+  const currentKey = paginatedRunsKeys.list(
+    orgId,
+    applicationId,
+    endpoint,
+    user,
+    kind,
+    statusKey,
+    limit,
+    offset,
+  );
+
   return useQuery({
-    // Key pinned to the legacy shape: use-global-run-sync (and run mutations)
-    // invalidate by the ["paginated-runs"] prefix.
-    queryKey: paginatedRunsKeys.list(
-      orgId,
-      applicationId,
-      endpoint,
-      user,
-      kind,
-      status,
-      limit,
-      offset,
-    ),
+    queryKey: currentKey,
     // `user`/`kind`/`status` are only declared (and only ever passed by
     // callers) on the global /api/runs view.
     queryFn: async (): Promise<ListEnvelope<EnrichedRun>> => {
@@ -75,12 +82,30 @@ export function usePaginatedRuns({
       }
       const { data } = await client.GET("/api/runs", {
         params: {
-          query: { limit, offset, user, kind: kind && kind !== "all" ? kind : undefined, status },
+          query: {
+            limit,
+            offset,
+            user,
+            kind: kind && kind !== "all" ? kind : undefined,
+            status: statusKey,
+          },
         },
       });
       return data!;
     },
-    placeholderData: (prev) => prev,
+    // Keep the rows on screen while PAGING, drop them when the filters change.
+    // Blanket `(prev) => prev` did both, so ticking a status left the whole
+    // unfiltered page sitting under a filter chip that was already on screen.
+    // The offset is the last segment of the key; everything before it is what
+    // the user asked for.
+    placeholderData: (prev, prevQuery) => {
+      const previousKey = prevQuery?.queryKey as unknown[] | undefined;
+      if (!previousKey) return undefined;
+      const sameQuestion = previousKey
+        .slice(0, -1)
+        .every((segment, i) => segment === (currentKey[i] as unknown));
+      return sameQuestion ? prev : undefined;
+    },
     enabled: !!applicationId && (scheduleId ? !!scheduleId : packageId ? !!packageId : true),
   });
 }

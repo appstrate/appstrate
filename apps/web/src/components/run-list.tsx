@@ -37,8 +37,8 @@ interface RunListProps {
   user?: "me";
   /** Filter runs by kind -- "all" | "package" | "inline" */
   kind?: RunKindFilter;
-  /** Filter runs by lifecycle status. */
-  status?: RunStatus;
+  /** Filter runs by lifecycle status — one, or several at once. */
+  status?: RunStatus[];
   /**
    * The bar above the table, given the number of rows the filters left.
    *
@@ -65,8 +65,17 @@ export function RunList({
   toolbar,
 }: RunListProps) {
   const { t } = useTranslation(["agents"]);
-  const [page, setPage] = useState(0);
   const agentName = useRunAgentName(fixedAgentName);
+
+  // Paging resets when the filters change — WITHOUT remounting this component.
+  // It used to be a `key` at the call site, which is the idiomatic way to reset
+  // state; but the toolbar renders inside here, so remounting closed its open
+  // menu on every tick and made multi-select unusable. The page is derived
+  // from the filter set instead: a new set reads as page zero straight away.
+  const signature = `${user ?? ""}|${kind ?? ""}|${status?.join(",") ?? ""}`;
+  const [paging, setPaging] = useState({ signature, page: 0 });
+  const page = paging.signature === signature ? paging.page : 0;
+  const setPage = (next: number) => setPaging({ signature, page: next });
 
   const { data, isLoading, isError } = usePaginatedRuns({
     packageId,
@@ -112,7 +121,7 @@ export function RunList({
             <Button
               variant="outline"
               size="sm"
-              onClick={() => setPage((p) => p - 1)}
+              onClick={() => setPage(page - 1)}
               disabled={page === 0}
             >
               {t("pagination.previous", { ns: "common" })}
@@ -120,7 +129,7 @@ export function RunList({
             <Button
               variant="outline"
               size="sm"
-              onClick={() => setPage((p) => p + 1)}
+              onClick={() => setPage(page + 1)}
               disabled={page >= totalPages - 1}
             >
               {t("pagination.next", { ns: "common" })}
