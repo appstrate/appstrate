@@ -68,12 +68,14 @@ export function ItemTab({
         emptyIcon={presentation.emptyIcon}
         extraActions={
           <>
-            <Button variant="outline" onClick={() => setImportOpen(true)}>
+            <Button variant="outline" size="sm" className="h-8" onClick={() => setImportOpen(true)}>
               {t("nav.import", { ns: "common" })}
             </Button>
             {!readOnly && (
               <Link to={packageNewPath(type)}>
-                <Button>{t("list.createItem", { ns: "agents", type: typeLabel })}</Button>
+                <Button size="sm" className="h-8">
+                  {t("list.createItem", { ns: "agents", type: typeLabel })}
+                </Button>
               </Link>
             )}
           </>

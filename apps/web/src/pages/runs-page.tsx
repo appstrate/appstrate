@@ -106,22 +106,7 @@ export function RunsPage() {
 
   return (
     <div>
-      {/* The page's action stays at title height, where every other screen
-          keeps its own — the toolbar below is about the list, not the page. */}
-      <PageHeader
-        title={t("runs.title")}
-        emoji="▶️"
-        breadcrumbs={[{ label: t("runs.title") }]}
-        actions={
-          <Button
-            variant="outline"
-            onClick={() => markAllRead.mutate({})}
-            disabled={markAllRead.isPending || !unreadCount}
-          >
-            {t("runs.markAllRead")}
-          </Button>
-        }
-      />
+      <PageHeader title={t("runs.title")} emoji="▶️" breadcrumbs={[{ label: t("runs.title") }]} />
 
       <RunList
         pageSize={15}
@@ -133,6 +118,20 @@ export function RunsPage() {
             filters={filters}
             onReset={resetFilters}
             count={t("runs.count", { count: total })}
+            // On a list screen the action belongs beside the view controls,
+            // not at title height: every table screen then keeps its controls
+            // and its actions in the same corner.
+            actions={
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8"
+                onClick={() => markAllRead.mutate({})}
+                disabled={markAllRead.isPending || !unreadCount}
+              >
+                {t("runs.markAllRead")}
+              </Button>
+            }
           />
         )}
         // A filtered list that finds nothing has NOT run out of runs — it has

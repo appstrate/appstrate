@@ -15,7 +15,11 @@
  *
  * - **A dashed outline button per dimension**, with a `+` and the dimension's
  *   name. Dashed and `+` mean "a filter you can add" — that is the affordance,
- *   and it is why the button reads as neutral when nothing is chosen.
+ *   and it is why the button reads as neutral when nothing is chosen. It is
+ *   also why it is `bg-transparent`: shadcn's `outline` paints `bg-background`,
+ *   which is WHITE here (the page canvas is its own `--canvas`), so the button
+ *   came out as a white pill on grey and the dashes had nothing to be dashed
+ *   against. The surface has to show through the outline.
  * - **The chosen values live INSIDE that button**, as small badges after a
  *   vertical rule: up to two of them, then "N sélectionnés". One place, no
  *   second row, no duplication.
@@ -54,6 +58,7 @@ import type { ListView } from "@/stores/list-view-store";
 import { toggleValue } from "../lib/toggle-value";
 import { Badge } from "@appstrate/ui/components/badge";
 import { Button } from "@appstrate/ui/components/button";
+import { Input } from "@appstrate/ui/components/input";
 import { Separator } from "@appstrate/ui/components/separator";
 import {
   Command,
@@ -69,6 +74,12 @@ import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/component
 export interface FilterOption {
   value: string;
   label: string;
+}
+
+export interface SearchSpec {
+  value: string;
+  onChange: (value: string) => void;
+  placeholder: string;
 }
 
 export interface FilterSpec {
@@ -92,7 +103,7 @@ function FacetedFilter({ filter }: { filter: FilterSpec }) {
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <Button variant="outline" size="sm" className="h-8 border-dashed">
+        <Button variant="outline" size="sm" className="h-8 border-dashed bg-transparent">
           <PlusCircle />
           {filter.label}
           {selected.length > 0 && (
@@ -207,12 +218,21 @@ function ViewToggle({ view, onChange }: { view: ListView; onChange: (view: ListV
 }
 
 export function ListToolbar({
+  search,
   filters,
   onReset,
   count,
   view,
   onViewChange,
+  actions,
 }: {
+  /**
+   * The text filter that opens shadcn's own toolbar — present only where the
+   * screen can answer it truthfully. A list held whole in the browser can
+   * (packages); a list paginated server-side cannot, because the box would
+   * search the fifteen rows on screen and call it a search.
+   */
+  search?: SearchSpec;
   filters: FilterSpec[];
   /**
    * Clears every dimension in ONE go. Without it there is no reset button —
@@ -230,12 +250,29 @@ export function ListToolbar({
   /** Present only on the lists the reference draws both as cards and as rows. */
   view?: ListView;
   onViewChange?: (view: ListView) => void;
+  /**
+   * What the screen does, at the right end of the row beside the view controls.
+   *
+   * On a LIST screen this is where an action belongs, not in `PageHeader` —
+   * shadcn puts "Add task" exactly here, and it means every table screen keeps
+   * its controls and its actions in the same corner. Screens without a list
+   * keep theirs at title height.
+   */
+  actions?: ReactNode;
 }) {
   const { t } = useTranslation("common");
   const isFiltered = filters.some((filter) => filter.values.length > 0);
 
   return (
     <div className="mb-4 flex flex-wrap items-center gap-2">
+      {search && (
+        <Input
+          value={search.value}
+          onChange={(event) => search.onChange(event.target.value)}
+          placeholder={search.placeholder}
+          className="h-8 w-[150px] lg:w-[250px]"
+        />
+      )}
       {filters.map((filter) => (
         <Fragment key={filter.id}>
           <FacetedFilter filter={filter} />
@@ -250,6 +287,7 @@ export function ListToolbar({
       <div className="ml-auto flex shrink-0 items-center gap-3">
         {count !== undefined && <span className="text-muted-foreground text-sm">{count}</span>}
         {view && onViewChange && <ViewToggle view={view} onChange={onViewChange} />}
+        {actions}
       </div>
     </div>
   );

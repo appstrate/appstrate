@@ -246,7 +246,11 @@ The pattern:
 
 - **A dashed outline button per dimension**, with a `+` and the dimension's
   name. Dashed and `+` mean "a filter you can add"; that is why it reads as
-  neutral until something is chosen.
+  neutral until something is chosen. It has to be **`bg-transparent`**: shadcn's
+  `outline` variant paints `bg-background`, which is WHITE here (our page canvas
+  is its own `--canvas`), so the buttons came out as white pills on grey and the
+  dashes had nothing to be dashed against. Any port of a shadcn control onto the
+  canvas has this to check.
 - **The chosen values live INSIDE that button**, as small badges after a
   vertical rule: up to two named, then "N sélectionnés". One place, one row, no
   duplication.
@@ -283,11 +287,13 @@ The pattern:
 
 Two pieces of the original we cannot have yet, both for want of an endpoint:
 
-- **The text search that opens shadcn's toolbar.** `GET /api/runs` takes no
-  text query, so the box would either do nothing or filter one page of fifteen
-  client-side and call it a search. Same reason as the sortable heads and the
-  header's own search icon. The integrations page is where it can land first:
-  its catalogue is already all in the browser.
+- **The text search that opens shadcn's toolbar, ON THE RUN LIST.** `GET
+/api/runs` takes no text query, so the box would filter the fifteen rows on
+  screen and call it a search. It is present on the package lists (agents,
+  skills, MCP servers), where the catalogue arrives whole and a client-side
+  filter is the truth; integrations can have it next, for the same reason. For
+  runs it waits on a `q` parameter — agent name and error message are what it
+  would search.
 - **The per-value counts in the menu.** shadcn reads them off the rows it has
   (`column.getFacetedUniqueValues()`); ours are paginated server-side, so a
   count would describe the page rather than the list.
@@ -432,11 +438,18 @@ something that contradicts one.
   menu by reflex, and a second door costs less than a first door nobody finds.
 - **Nothing permanent in the navigation for a number read every few weeks.**
   The credits gauge was removed on those grounds; it belongs behind Usage.
-- **The header's right end stays personal.** Page actions have a home — the
-  `actions` slot of `PageHeader`, at title height. The bell and the profile do
-  not move to make room for CTAs: that corner has to read the same on every
-  screen, and the free space is between the trail and the bell, which is where
-  the chat put its context tabs.
+- **The header's right end stays personal.** The bell and the profile do not
+  move to make room for CTAs: that corner has to read the same on every screen,
+  and the free space is between the trail and the bell, which is where the chat
+  put its context tabs. (The SHELL header, that is. Where a page's own actions
+  go is the next entry, and it changed.)
+- **On a list screen, the page's actions sit at the right end of the TOOLBAR
+  row**, beside the view controls — where shadcn puts "Add task". Every table
+  screen then keeps its controls and its actions in the same corner, and the
+  title row stays clean. Screens with no list keep theirs at title height, in
+  `PageHeader`'s `actions`. This revises the earlier call ("page actions have a
+  home, the `actions` slot at title height"), which was made before there was a
+  toolbar to put them on.
 - **Direct manipulation in forms.** No Edit button revealing a field. Fields,
   dropdowns and toggles, Notion-style rows, as a systematic pattern.
 - **A modal must have a URL.** Non-negotiable — support has to be able to say

@@ -3,7 +3,7 @@
 import { type ReactNode, useState } from "react";
 import { Link } from "react-router-dom";
 import { Trans, useTranslation } from "react-i18next";
-import { type LucideIcon, Layers } from "lucide-react";
+import { type LucideIcon, Layers, SearchX } from "lucide-react";
 import type { PackageType } from "@appstrate/core/validation";
 import { Button } from "@appstrate/ui/components/button";
 import { useAgents } from "../hooks/use-packages";
@@ -46,6 +46,17 @@ interface PackageTabProps {
   headerContent?: ReactNode;
 }
 
+/** Name, description and keywords — everything a card puts on screen. */
+function matches(item: CardItem, query: string): boolean {
+  if (!query) return true;
+  const q = query.toLowerCase();
+  return (
+    item.displayName.toLowerCase().includes(q) ||
+    (item.description?.toLowerCase().includes(q) ?? false) ||
+    (item.keywords?.some((keyword) => keyword.toLowerCase().includes(q)) ?? false)
+  );
+}
+
 export function PackageTab({
   title,
   emoji,
@@ -60,14 +71,19 @@ export function PackageTab({
   emptyExtraActions,
   headerContent,
 }: PackageTabProps) {
+  const { t } = useTranslation(["agents", "common"]);
   const view = usePackageViewStore((s) => s.view);
   const setView = usePackageViewStore((s) => s.setView);
+  // Client-side on purpose, and honestly so: this catalogue arrives whole, so
+  // the box searches the whole list rather than the page on screen — which is
+  // exactly why the run list, paginated server-side, has no box.
+  const [query, setQuery] = useState("");
 
   if (isLoading) return <LoadingState />;
   if (error) return <ErrorState message={error.message} />;
 
   const header = title ? (
-    <PageHeader title={title} emoji={emoji} breadcrumbs={breadcrumbs} actions={extraActions}>
+    <PageHeader title={title} emoji={emoji} breadcrumbs={breadcrumbs}>
       {headerContent}
     </PageHeader>
   ) : null;
@@ -85,19 +101,35 @@ export function PackageTab({
     );
   }
 
+  const shown = items.filter((item) => matches(item, query));
+
   return (
     <>
       {header}
-      {/* No filters on this family yet, so no count either: the reference's
-          result count answers "how many did the filters leave", and with
-          nothing filtering it would only repeat what is on screen. The toolbar
-          is here for the view toggle. */}
-      <ListToolbar filters={[]} view={view} onViewChange={setView} />
-      {view === "table" ? (
-        <PackagesTable items={items} />
+      <ListToolbar
+        search={{
+          value: query,
+          onChange: setQuery,
+          placeholder: t("list.searchPlaceholder"),
+        }}
+        filters={[]}
+        count={query ? t("list.count", { count: shown.length }) : undefined}
+        view={view}
+        onViewChange={setView}
+        actions={extraActions}
+      />
+      {shown.length === 0 ? (
+        // Nothing MATCHED, which is not the same sentence as nothing exists.
+        <EmptyState message={t("list.noMatch")} icon={SearchX} compact>
+          <Button variant="outline" size="sm" onClick={() => setQuery("")}>
+            {t("toolbar.clearAll", { ns: "common" })}
+          </Button>
+        </EmptyState>
+      ) : view === "table" ? (
+        <PackagesTable items={shown} />
       ) : (
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-          {items.map((item) => (
+          {shown.map((item) => (
             <PackageCard key={item.id} {...item} />
           ))}
         </div>
@@ -139,11 +171,18 @@ export function PackageList() {
         extraActions={
           isAdmin ? (
             <>
-              <Button variant="outline" onClick={() => setImportOpen(true)}>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8"
+                onClick={() => setImportOpen(true)}
+              >
                 {t("nav.import", { ns: "common" })}
               </Button>
               <Link to="/agents/new">
-                <Button>{t("list.create")}</Button>
+                <Button size="sm" className="h-8">
+                  {t("list.create")}
+                </Button>
               </Link>
             </>
           ) : undefined
