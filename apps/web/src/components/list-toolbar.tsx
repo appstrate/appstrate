@@ -25,7 +25,15 @@
  *   A see-through control casts no shadow.
  * - **The chosen values live INSIDE that button**, as small badges after a
  *   vertical rule: up to two of them, then "N sélectionnés". One place, no
- *   second row, no duplication.
+ *   second row, no duplication. When the bar is cramped the names go and a
+ *   plain digit stays — a filter then costs a word and a number, which is what
+ *   keeps three of them on one line.
+ *
+ *   That last switch is a CONTAINER query, not a viewport one. shadcn's is
+ *   `lg:` because their example IS the page; ours sits to the right of a 256px
+ *   sidebar inside a padded column, so a 1440px window leaves the bar about
+ *   800px — past `lg`, and out of room. The question is how much space the BAR
+ *   has, so the bar is the container.
  * - **The menu is a `Command`**: searchable, square checkboxes, several values
  *   at once, and a centred "Effacer ce filtre" at the bottom — THIS dimension,
  *   which is why it is not called what the row's button is called.
@@ -46,11 +54,10 @@
  * that out, because the badges sitting inside one button and the buttons
  * sitting side by side already say it.
  *
- * Two pieces of the original we cannot have yet, both for want of an endpoint:
- * the text search that opens the toolbar (`GET /api/runs` takes no text query)
- * and the per-value counts in the menu (shadcn reads them off the rows it has;
- * ours are paginated server-side, so a count would describe the page rather
- * than the list).
+ * One piece of the original we still cannot have: the per-value counts in the
+ * menu. shadcn reads them off the rows it holds
+ * (`column.getFacetedUniqueValues()`); ours are paginated server-side, so a
+ * count would describe the page rather than the list.
  */
 
 import { Fragment, type ReactNode } from "react";
@@ -131,10 +138,10 @@ function FacetedFilter({ filter }: { filter: FilterSpec }) {
           {selected.length > 0 && (
             <>
               <Separator orientation="vertical" className="mx-2 h-4" />
-              <Badge variant="secondary" className="rounded-sm px-1 font-normal lg:hidden">
+              <Badge variant="secondary" className="rounded-sm px-1 font-normal @3xl:hidden">
                 {selected.length}
               </Badge>
-              <div className="hidden gap-1 lg:flex">
+              <div className="hidden gap-1 @3xl:flex">
                 {selected.length > NAMED_VALUES ? (
                   <Badge variant="secondary" className="rounded-sm px-1 font-normal">
                     {t("toolbar.selected", { count: selected.length })}
@@ -354,7 +361,9 @@ export function ListToolbar({
     // takes what is left (`flex-1 min-w-0`) and wraps inside its own share;
     // `items-start` keeps the right group on the first line when it does.
     <div className="mb-4 flex items-start gap-2">
-      <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+      {/* `@container`: the filters shorten themselves against the width THIS
+          group has, not the window's — see the note on the trigger. */}
+      <div className="@container flex min-w-0 flex-1 flex-wrap items-center gap-2">
         {search && (
           <Input
             value={search.value}
