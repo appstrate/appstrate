@@ -38,12 +38,15 @@ const code = (source: string) =>
 const DASHBOARD = read("../../pages/dashboard.tsx");
 const SCHEDULE_CARD = read("../schedule-card.tsx");
 const RUN_LIST = read("../run-list.tsx");
+const RUNS_TABLE = read("../runs-table.tsx");
 const NOTIFICATIONS = read("../../hooks/use-notifications.ts");
 const GLOBAL_SYNC = read("../../hooks/use-global-run-sync.ts");
 
 describe("dashboard reuses its own runs", () => {
-  it("renders the presentational rows, not a second fetching list", () => {
-    expect(DASHBOARD).toContain("<RunRows runs={runs.slice(0, RECENT_RUNS_COUNT)} />");
+  it("renders the rows it already holds, not a second fetching list", () => {
+    expect(DASHBOARD).toContain(
+      "<RunsTable runs={runs.slice(0, RECENT_RUNS_COUNT)} agentName={agentName} />",
+    );
     // `<RunList …>` here is what issues the duplicate query.
     expect(code(DASHBOARD)).not.toMatch(/<RunList[\s/>]/);
   });
@@ -52,11 +55,15 @@ describe("dashboard reuses its own runs", () => {
     expect([...DASHBOARD.matchAll(/usePaginatedRuns\(/g)]).toHaveLength(1);
   });
 
-  it("still exposes a fetching RunList for the pages that page through runs", () => {
+  it("keeps the table free of queries, and the fetching list exported", () => {
     // The split must not have turned the paginated list into a dead export:
-    // /runs, the agent tab and the schedule detail all rely on it.
+    // /runs, the agent tab and the schedule detail all rely on it. And the
+    // table must stay row-taking — the day it fetches for itself, mounting it
+    // under a page that already has the rows brings the duplicate query back.
     expect(RUN_LIST).toContain("export function RunList(");
-    expect(RUN_LIST).toContain("export function RunRows(");
+    expect(RUNS_TABLE).toContain("export function RunsTable(");
+    expect(code(RUNS_TABLE)).not.toContain("useQuery");
+    expect(code(RUNS_TABLE)).not.toContain("usePaginatedRuns");
   });
 });
 

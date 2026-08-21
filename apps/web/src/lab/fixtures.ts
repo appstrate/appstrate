@@ -241,16 +241,30 @@ const STATUS_CYCLE = [
   "timeout",
 ] as const satisfies readonly Run["status"][];
 
+/**
+ * What a run that ended badly says about it. The heavy rows used to carry no
+ * error at all, so the run table's result column was 200 em-dashes and the one
+ * thing volume is meant to test there — a long message truncating in a narrow
+ * column — could not be looked at.
+ */
+const FAILURE_MESSAGES: Partial<Record<Run["status"], string>> = {
+  failed:
+    "TypeError: Cannot read properties of undefined (reading 'rows') at normalizeStatement (/app/src/parse.ts:114:22)",
+  timeout: "Délai dépassé après 15 min : le conteneur n'a rendu aucun événement.",
+};
+
 /** 200 rows: pagination, virtualisation and scroll behaviour under real volume. */
-export const heavyRuns: Run[] = Array.from({ length: 200 }, (_, i) =>
-  makeRun({
+export const heavyRuns: Run[] = Array.from({ length: 200 }, (_, i) => {
+  const status = STATUS_CYCLE[i % STATUS_CYCLE.length] ?? "success";
+  return makeRun({
     id: `run_h_${i}`,
-    status: STATUS_CYCLE[i % STATUS_CYCLE.length] ?? "success",
+    status,
+    error: FAILURE_MESSAGES[status] ?? null,
     runNumber: 200 - i,
     started_at: ago(i * 17),
     completed_at: ago(i * 17 - 2),
-  }),
-);
+  });
+});
 
 /* -------------------------------------------------------------------------- */
 /* Agents                                                                      */

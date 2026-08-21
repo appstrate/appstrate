@@ -3,8 +3,44 @@
 import { useTranslation } from "react-i18next";
 import { CheckCircle2, XCircle, Clock, Ban } from "lucide-react";
 import { Spinner } from "./spinner";
+import { cn } from "@appstrate/ui/cn";
 import { Badge as UIBadge } from "@appstrate/ui/components/badge";
 import type { BadgeProps } from "@appstrate/ui/components/badge";
+
+/**
+ * The outline counterpart to {@link Badge}: it qualifies WHAT a row is
+ * ("Inline", "Distant", "Supprimé") where the status badge says how it ended.
+ *
+ * Here rather than in one of its callers because both run surfaces render the
+ * same three of them — the table and the strip under the run-detail header —
+ * and they were splitting the same twenty-word class string between two files
+ * the moment the list stopped being a row.
+ */
+export function MetaBadge({
+  label,
+  title,
+  italic,
+}: {
+  label: string;
+  /** Why the badge is there, for the badge that explains a missing action. */
+  title?: string;
+  italic?: boolean;
+}) {
+  return (
+    <span
+      title={title}
+      className={cn(
+        "border-border text-muted-foreground shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-medium tracking-wide uppercase",
+        italic && "italic",
+        // A badge that explains itself on hover has to stay above a table
+        // row's link overlay, or the row takes the hover with the click.
+        title && "relative z-10",
+      )}
+    >
+      {label}
+    </span>
+  );
+}
 
 const statusVariantMap: Record<string, BadgeProps["variant"]> = {
   success: "success",

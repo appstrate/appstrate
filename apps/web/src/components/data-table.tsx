@@ -25,9 +25,12 @@
  *   link address" are how a run gets opened in a second tab. So the link lives
  *   in the first cell and stretches over the row through `after:absolute
  *   after:inset-0`: the whole row is a target, one node per row is focusable,
- *   and the browser keeps every behaviour a link has. Anything interactive in
- *   another cell has to sit above that overlay (`relative z-10`) or the row
- *   swallows its clicks.
+ *   and the browser keeps every behaviour a link has. THE PRICE: that overlay
+ *   paints over the other cells, so anything that answers to the pointer —
+ *   a button, or just a `title` a truncated cell needs to stay readable — has
+ *   to be RAISED above it (`relative z-10`) or the row swallows the hover with
+ *   the click. Raise the titled element itself, not its cell: the dead zone is
+ *   then the size of the text rather than the size of the column.
  * - **Secondary columns drop with their track.** `secondary: true` hides the
  *   cell AND removes the track below `md`; the two have to happen together or
  *   the row keeps a gap where the column was.
@@ -121,8 +124,8 @@ export function DataTable<T>({
                 role="columnheader"
                 key={col.id}
                 className={cn(
-                  "text-muted-foreground min-w-0 truncate text-left text-[0.68rem] font-semibold tracking-[0.05em] uppercase",
-                  col.align === "end" && "text-right",
+                  "text-muted-foreground min-w-0 truncate text-[0.68rem] font-semibold tracking-[0.05em] uppercase",
+                  col.align === "end" ? "text-right" : "text-left",
                   col.secondary && "hidden md:block",
                 )}
               >

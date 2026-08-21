@@ -38,6 +38,7 @@ describe("the runs column set", () => {
     expect(html).toContain("#42");
     expect(html).toContain("Rapport trimestriel");
     expect(html).toContain("Alice"); // trigger
+    expect(html).toContain('aria-label="eu-proxy"'); // the egress it went through
     expect(html).toContain("4.2s"); // duration
     expect(html).toContain(STARTED_AT_LABEL);
   });
@@ -55,8 +56,10 @@ describe("the result column", () => {
     const message = "Connexion refusée : le code 2FA a expiré.";
     const html = table([makeRun({ status: "failed", error: message })]);
     expect(html).toContain(message);
-    // Truncated in place, so the full text stays reachable on hover.
-    expect(html).toContain(`title="${message}"`);
+    // Truncated in place, so the full text stays reachable on hover — which
+    // costs a `relative z-10`: the row's link overlay paints over the cells,
+    // and an unraised `title` never fires. The tooltip IS the column's point.
+    expect(html).toMatch(/class="[^"]*relative z-10[^"]*"[^>]*title="Connexion refusée/);
   });
 
   it("says nothing rather than inventing a result on a run that worked", () => {

@@ -10,7 +10,8 @@ import { usePaginatedRuns } from "../hooks/use-paginated-runs";
 import { LoadingState, ErrorState } from "../components/page-states";
 import { PackageCard } from "../components/package-card";
 import { ScheduleCard } from "../components/schedule-card";
-import { RunRows } from "../components/run-list";
+import { RunsTable } from "../components/runs-table";
+import { useRunAgentName } from "../hooks/use-run-agent-name";
 
 /** Rows shown under "recent runs" — a prefix of the page's own run query. */
 const RECENT_RUNS_COUNT = 7;
@@ -28,6 +29,7 @@ export function DashboardPage() {
   });
   const { data: agents, isLoading: agentsLoading, error: agentsError } = useAgents();
   const { data: unreadCounts } = useUnreadCountsByAgent();
+  const agentName = useRunAgentName();
   const { data: schedules } = useAllSchedules();
 
   const isLoading = runsLoading || agentsLoading;
@@ -164,8 +166,9 @@ export function DashboardPage() {
             `<RunList pageSize={7}>` here instead issued a second
             `GET /api/runs` (a different `limit` is a different query key), and
             with it a second `COUNT` + enriched page read, for rows the 15 above
-            already contain. */}
-        <RunRows runs={runs.slice(0, RECENT_RUNS_COUNT)} />
+            already contain. The table takes rows, never a query, which is what
+            makes that possible. */}
+        <RunsTable runs={runs.slice(0, RECENT_RUNS_COUNT)} agentName={agentName} />
       </section>
     </div>
   );

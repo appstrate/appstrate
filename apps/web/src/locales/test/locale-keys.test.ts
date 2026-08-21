@@ -173,7 +173,6 @@ const DYNAMIC_KEY_PREFIXES = [
   "run.artifacts.code.", // components/run-artifacts.ts — artifactFailureCodeKey()
   "run.connSource.", // components/run-info-tab.tsx — t(`run.connSource.${c.source}`)
   "run.status.", // packages/module-chat/src/ui/run-events.ts — runStatusLineKey()
-  "runs.column.", // components/runs-table.tsx — t(`runs.column.${id}`), one per column set
   "status.", // components/status-badge.tsx — t(`status.${status}`)
   "switcher.role.", // components/org-switcher.tsx — t(`switcher.role.${org.role}`)
 ];

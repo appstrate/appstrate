@@ -13,192 +13,210 @@
  * error was invisible in the list — you had to open the run to learn what
  * broke, on the very screen whose job is to tell you which one did.
  *
- * A column set is a list of ids, so the four surfaces that show runs (the runs
- * page, an agent's runs tab, a schedule's history, the dashboard's recent
- * card) subtract instead of re-drawing: inside an agent, the agent column says
- * nothing new and goes.
- */
-
-import { useTranslation } from "react-i18next";
-import { FileInput, FileOutput } from "lucide-react";
-import type { EnrichedRun } from "@appstrate/shared-types";
-import { DataTable, type DataColumn } from "./data-table";
-import { Badge } from "./status-badge";
-import { RunTrigger } from "./run-trigger";
-import { RunDuration } from "./run-duration";
-import { formatDateField } from "../lib/markdown";
-
-type RunColumnId = "num" | "agent" | "status" | "trigger" | "result" | "docs" | "duration" | "date";
-
-/**
+ * The set is ONE array of column literals. Widths, breakpoint behaviour,
+ * alignment and content sit together per column, so adding one is one edit
+ * rather than the same key typed into five parallel maps.
+ *
  * Every track is content-INDEPENDENT (px or fr), and that is a constraint, not
  * a style: each row is its own grid container, so an `auto` track would be
  * measured per row and the columns would stop lining up — the one thing the
  * table exists to do.
  */
-const WIDTHS: Record<RunColumnId, string> = {
-  num: "56px",
-  agent: "minmax(0,1.3fr)",
-  status: "104px",
-  trigger: "minmax(0,1fr)",
-  result: "minmax(0,1.1fr)",
-  docs: "60px",
-  duration: "76px",
-  date: "132px",
-};
 
-/**
- * What survives at 375px: who ran, how it ended, how long it took. The rest
- * drops with its track — a phone has room for the answer, not for the
- * paperwork around it.
- */
-const SECONDARY: ReadonlySet<RunColumnId> = new Set<RunColumnId>([
-  "num",
-  "trigger",
-  "result",
-  "docs",
-  "date",
-]);
+import type { ReactNode } from "react";
+import { useTranslation } from "react-i18next";
+import { FileInput, FileOutput, PlayCircle, Shield } from "lucide-react";
+import type { EnrichedRun } from "@appstrate/shared-types";
+import { DataTable, type DataColumn } from "./data-table";
+import { Badge, MetaBadge } from "./status-badge";
+import { RunTrigger } from "./run-trigger";
+import { RunDuration } from "./run-duration";
+import { EmptyState, ErrorState } from "./page-states";
+import { formatDateField } from "../lib/markdown";
 
-/** The column set, in order. */
-const RUN_COLUMNS: readonly RunColumnId[] = [
-  "num",
-  "agent",
-  "status",
-  "trigger",
-  "result",
-  "docs",
-  "duration",
-  "date",
-];
-
-function BadgeText({ label, title, italic }: { label: string; title?: string; italic?: boolean }) {
+function DocumentCounts({ run }: { run: EnrichedRun }) {
+  const { t } = useTranslation(["agents"]);
+  const { input, output } = run.document_counts;
+  if (!input && !output) return null;
   return (
-    <span
-      title={title}
-      className={`border-border text-muted-foreground shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-medium tracking-wide uppercase ${
-        italic ? "italic" : ""
-      }`}
-    >
-      {label}
+    // `relative z-10`: these carry a `title`, and the row's link overlay would
+    // otherwise take the hover with the click (see `data-table.tsx`).
+    <span className="text-muted-foreground relative z-10 flex items-center gap-1.5 text-xs">
+      {input > 0 && (
+        <span
+          className="flex items-center gap-0.5"
+          title={t("run.inputDocuments", { count: input })}
+        >
+          <FileInput size={12} className="shrink-0" />
+          {input}
+        </span>
+      )}
+      {output > 0 && (
+        <span
+          className="flex items-center gap-0.5"
+          title={t("run.outputDocuments", { count: output })}
+        >
+          <FileOutput size={12} className="shrink-0" />
+          {output}
+        </span>
+      )}
     </span>
   );
 }
 
 export function RunsTable({
   runs,
-  hideAgentName = false,
   agentName,
+  hideAgentName = false,
   isLoading,
+  isError,
   empty,
   banner,
 }: {
   runs: EnrichedRun[];
+  /** What to call the agent a run executed — see `use-run-agent-name.ts`. */
+  agentName: (run: EnrichedRun) => string;
   /**
    * Inside an agent — or a schedule, which fixes one — the agent column repeats
-   * the page title on every row. The set subtracts it; the table grows no
-   * special case.
+   * the page title on every row, so the set drops it. The NAME is still
+   * resolved: the row's accessible label is built from it.
    */
   hideAgentName?: boolean;
-  /** Resolves the display name of the agent a run executed. */
-  agentName: (run: EnrichedRun) => string | undefined;
   isLoading?: boolean;
-  empty?: React.ReactNode;
-  banner?: React.ReactNode;
+  /** The request failed — which is not the same thing as an empty list. */
+  isError?: boolean;
+  /** Replaces the default "no runs" state, for a surface that can say more. */
+  empty?: ReactNode;
+  /** Pinned above the first row (e.g. a scheduled next run). */
+  banner?: ReactNode;
 }) {
   const { t } = useTranslation(["agents"]);
 
-  const cells: Record<RunColumnId, (run: EnrichedRun) => React.ReactNode> = {
-    num: (run) =>
-      run.runNumber == null ? null : (
-        <span className="text-muted-foreground font-mono text-xs">#{run.runNumber}</span>
-      ),
-    agent: (run) => {
-      const name = agentName(run);
-      // `packageId == null` on a non-inline run means the source agent was
-      // deleted (FK SET NULL): the run survives, its agent page does not.
-      const isOrphaned = run.packageId == null && run.package_ephemeral !== true;
-      return (
+  const columns: DataColumn<EnrichedRun>[] = [
+    {
+      id: "num",
+      header: t("runs.column.num"),
+      width: "56px",
+      secondary: true,
+      cell: (run) =>
+        run.runNumber == null ? null : (
+          <span className="text-muted-foreground font-mono text-xs">#{run.runNumber}</span>
+        ),
+    },
+    {
+      id: "agent",
+      header: t("runs.column.agent"),
+      width: "minmax(0,1.3fr)",
+      cell: (run) => (
         <>
-          {name && <span className="truncate font-medium">{name}</span>}
-          {run.package_ephemeral === true && <BadgeText label={t("runs.inlineBadge")} />}
-          {isOrphaned && (
-            <BadgeText
+          <span className="truncate font-medium">{agentName(run)}</span>
+          {run.package_ephemeral === true && <MetaBadge label={t("runs.inlineBadge")} />}
+          {/* `packageId == null` on a non-inline run means the source agent was
+              deleted (FK SET NULL): the run survives, its agent page does not. */}
+          {run.packageId == null && run.package_ephemeral !== true && (
+            <MetaBadge
               label={t("runs.deletedAgentBadge")}
               title={t("runs.deletedAgentTitle")}
               italic
             />
           )}
           {run.runOrigin === "remote" && (
-            <BadgeText label={t("runs.remoteBadge")} title={t("runs.remoteBadgeTitle")} />
+            <MetaBadge label={t("runs.remoteBadge")} title={t("runs.remoteBadgeTitle")} />
           )}
         </>
-      );
-    },
-    status: (run) => <Badge status={run.status} compact unread={run.unread} />,
-    trigger: (run) => <RunTrigger run={run} />,
-    result: (run) =>
-      run.error ? (
-        <span className="text-destructive truncate font-mono text-xs" title={run.error}>
-          {run.error}
-        </span>
-      ) : (
-        <span className="text-muted-foreground/50">—</span>
       ),
-    docs: (run) => {
-      const { input, output } = run.document_counts;
-      if (!input && !output) return null;
-      return (
-        <span className="text-muted-foreground flex items-center gap-1.5 text-xs">
-          {input > 0 && (
-            <span
-              className="flex items-center gap-0.5"
-              title={t("run.inputDocuments", { count: input })}
-            >
-              <FileInput size={12} className="shrink-0" />
-              {input}
-            </span>
-          )}
-          {output > 0 && (
-            <span
-              className="flex items-center gap-0.5"
-              title={t("run.outputDocuments", { count: output })}
-            >
-              <FileOutput size={12} className="shrink-0" />
-              {output}
-            </span>
-          )}
-        </span>
-      );
     },
-    duration: (run) => (
-      <RunDuration status={run.status} startedAt={run.started_at} duration={run.duration} />
-    ),
-    date: (run) => (
-      <span className="text-muted-foreground truncate text-xs">
-        {run.started_at ? formatDateField(run.started_at) : ""}
-      </span>
-    ),
-  };
+    {
+      id: "status",
+      header: t("runs.column.status"),
+      width: "104px",
+      cell: (run) => <Badge status={run.status} compact unread={run.unread} />,
+    },
+    {
+      id: "trigger",
+      header: t("runs.column.trigger"),
+      width: "minmax(0,0.8fr)",
+      secondary: true,
+      cell: (run) => (
+        <>
+          <RunTrigger run={run} />
+          {/* Which egress the run went through. It sits beside the trigger
+              because both answer "how did this run reach the outside" — and it
+              is here at all because dropping it was an oversight, not a call. */}
+          {run.proxy_label && (
+            <Shield
+              size={12}
+              className="text-muted-foreground relative z-10 shrink-0"
+              aria-label={run.proxy_label}
+            />
+          )}
+        </>
+      ),
+    },
+    {
+      id: "result",
+      header: t("runs.column.result"),
+      width: "minmax(0,1.5fr)",
+      secondary: true,
+      cell: (run) =>
+        run.error ? (
+          <span
+            className="text-destructive relative z-10 truncate font-mono text-xs"
+            title={run.error}
+          >
+            {run.error}
+          </span>
+        ) : (
+          <span className="text-muted-foreground/50">—</span>
+        ),
+    },
+    {
+      id: "docs",
+      header: t("runs.column.docs"),
+      width: "60px",
+      secondary: true,
+      cell: (run) => <DocumentCounts run={run} />,
+    },
+    {
+      id: "duration",
+      header: t("runs.column.duration"),
+      width: "76px",
+      align: "end",
+      cell: (run) => (
+        <RunDuration status={run.status} startedAt={run.started_at} duration={run.duration} />
+      ),
+    },
+    {
+      id: "date",
+      header: t("runs.column.date"),
+      width: "132px",
+      align: "end",
+      secondary: true,
+      cell: (run) => (
+        <span className="text-muted-foreground truncate text-xs">
+          {run.started_at ? formatDateField(run.started_at) : ""}
+        </span>
+      ),
+    },
+  ];
 
-  const cols: DataColumn<EnrichedRun>[] = RUN_COLUMNS.filter(
-    (id) => !(hideAgentName && id === "agent"),
-  ).map((id) => ({
-    id,
-    header: t(`runs.column.${id}`),
-    width: WIDTHS[id],
-    align: id === "duration" || id === "date" ? "end" : undefined,
-    secondary: SECONDARY.has(id),
-    cell: cells[id],
-  }));
+  // A failed request is NOT an empty list. The lab's `error` scenario is what
+  // showed it: with `GET /api/runs` answering 500, the page said "Aucun run" —
+  // telling a user their history is empty when the truth is that it could not
+  // be read.
+  const fallback = isError ? (
+    <ErrorState />
+  ) : (
+    (empty ?? <EmptyState message={t("detail.emptyRuns")} icon={PlayCircle} compact />)
+  );
 
   return (
     <DataTable
       label={t("runs.tableLabel")}
-      columns={cols}
+      columns={hideAgentName ? columns.filter((c) => c.id !== "agent") : columns}
       rows={runs}
       isLoading={isLoading}
-      empty={empty}
+      empty={fallback}
       banner={banner}
       rowKey={(run) => run.id}
       // A deleted agent has no agent page, so `/agents/:packageId/runs/:id`
@@ -207,7 +225,7 @@ export function RunsTable({
         run.packageId == null ? undefined : `/agents/${run.packageId}/runs/${run.id}`
       }
       rowLabel={(run) =>
-        t("runs.rowLabel", { number: run.runNumber ?? "?", agent: agentName(run) ?? "" })
+        t("runs.rowLabel", { number: run.runNumber ?? "?", agent: agentName(run) })
       }
       rowState={(run) => ({ runNumber: run.runNumber })}
     />

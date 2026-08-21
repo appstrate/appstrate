@@ -18,7 +18,7 @@
 import type { ReactNode } from "react";
 import { ChevronDown } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { Badge } from "./status-badge";
+import { Badge, MetaBadge } from "./status-badge";
 import { RunTokensReadout } from "./run-tokens-readout";
 import { RunDuration } from "./run-duration";
 import { Button } from "@appstrate/ui/components/button";
@@ -73,45 +73,33 @@ export function RunDetailRow({ run }: { run: EnrichedRun }) {
   const isOrphaned = run.packageId == null && run.package_ephemeral !== true;
 
   return (
-    <div className="flex items-center gap-2 px-3 py-3 text-sm sm:py-2">
-      <div className="flex min-w-0 flex-1 items-center gap-2">
-        <Badge status={run.status} compact unread={run.unread} />
-        {isOrphaned && (
-          <span
-            className="border-border text-muted-foreground shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-medium tracking-wide uppercase italic"
-            title={t("runs.deletedAgentTitle")}
-          >
-            {t("runs.deletedAgentBadge")}
-          </span>
-        )}
-        {run.runOrigin === "remote" && (
-          <span
-            className="border-border text-muted-foreground shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-medium tracking-wide uppercase"
-            title={t("runs.remoteBadgeTitle")}
-          >
-            {t("runs.remoteBadge")}
-          </span>
-        )}
-        <div className="ml-auto flex shrink-0 items-center gap-2">
-          {/* How long the run took is a primary figure, not a wide-viewport
+    <div className="flex min-w-0 items-center gap-2 px-3 py-3 text-sm sm:py-2">
+      <Badge status={run.status} compact unread={run.unread} />
+      {isOrphaned && (
+        <MetaBadge label={t("runs.deletedAgentBadge")} title={t("runs.deletedAgentTitle")} italic />
+      )}
+      {run.runOrigin === "remote" && (
+        <MetaBadge label={t("runs.remoteBadge")} title={t("runs.remoteBadgeTitle")} />
+      )}
+      <div className="ml-auto flex shrink-0 items-center gap-2">
+        {/* How long the run took is a primary figure, not a wide-viewport
               bonus — it stays visible at every breakpoint (#1046). */}
-          <RunDuration status={run.status} startedAt={run.started_at} duration={run.duration} />
-          <Popover>
-            <PopoverTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="size-7"
-                aria-label={t("run.detailsPanel")}
-              >
-                <ChevronDown />
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent align="end" className="w-72 p-3">
-              <RunDetailPanel run={run} />
-            </PopoverContent>
-          </Popover>
-        </div>
+        <RunDuration status={run.status} startedAt={run.started_at} duration={run.duration} />
+        <Popover>
+          <PopoverTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-7"
+              aria-label={t("run.detailsPanel")}
+            >
+              <ChevronDown />
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent align="end" className="w-72 p-3">
+            <RunDetailPanel run={run} />
+          </PopoverContent>
+        </Popover>
       </div>
     </div>
   );
