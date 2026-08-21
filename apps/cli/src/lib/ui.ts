@@ -12,12 +12,45 @@ import { DeviceFlowError } from "./device-flow.ts";
 import { ApiError, AuthError } from "./api.ts";
 import { InsecureInstanceError } from "./instance-url.ts";
 
-export function intro(title: string): void {
-  clack.intro(title);
+/**
+ * Adapt a `CommandIO` into the stream clack renders to.
+ *
+ * clack accepts an `output` sink on every helper, so this is the seam that
+ * lets a command's framing (`intro`, `outro`, the spinners) land in a
+ * caller-owned buffer instead of the process-global stdout — the coupling
+ * issue #1180 is about. Only the *bytes* are redirected: everything else is
+ * inherited from the real stream, because clack asks its output for more
+ * than `write`. `spinner()` reads `output.columns` to wrap frames (a bare
+ * four-member sink has none, and clack would silently fall back to 80
+ * columns, rewrapping every spinner line on a wider terminal) and hands the
+ * stream to `node:readline`, which expects a stream. Prototyping off
+ * `process.stdout` keeps the geometry, the `isTTY` flags and the readline
+ * interop exactly as they are today, so the default path stays
+ * byte-for-byte what it renders now.
+ *
+ * The trailing arguments cover `write(chunk, cb)` / `write(chunk, enc, cb)`:
+ * readline passes a continuation there and stalls its cursor bookkeeping if
+ * nobody calls it.
+ */
+function clackOutput(io: CommandIO): typeof process.stdout {
+  return Object.create(process.stdout, {
+    write: {
+      value(chunk: string | Uint8Array, ...rest: unknown[]): boolean {
+        io.stdout.write(chunk);
+        const done = rest.find((arg) => typeof arg === "function") as (() => void) | undefined;
+        done?.();
+        return true;
+      },
+    },
+  }) as typeof process.stdout;
 }
 
-export function outro(message: string): void {
-  clack.outro(message);
+export function intro(title: string, io: CommandIO = DEFAULT_IO): void {
+  clack.intro(title, { output: clackOutput(io) });
+}
+
+export function outro(message: string, io: CommandIO = DEFAULT_IO): void {
+  clack.outro(message, { output: clackOutput(io) });
 }
 
 /**
@@ -96,8 +129,11 @@ export async function select<T>(
   return value as T;
 }
 
-export function spinner(): { start(msg: string): void; stop(msg?: string): void } {
-  return clack.spinner();
+export function spinner(io: CommandIO = DEFAULT_IO): {
+  start(msg: string): void;
+  stop(msg?: string): void;
+} {
+  return clack.spinner({ output: clackOutput(io) });
 }
 
 /**

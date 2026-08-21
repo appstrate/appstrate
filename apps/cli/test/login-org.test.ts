@@ -15,10 +15,15 @@
  *   - non-TTY + ≥2 orgs → leaves orgId unset, prints hint
  *   - failure listing orgs does not fail the login
  *
- * Follows the same stdout-capture + tmp-XDG + FakeKeyring pattern as
- * `whoami.test.ts`. We inject the interactive prompts via `LoginDeps`
- * rather than replacing `@clack/prompts` globally (CLAUDE.md bans
- * `mock.module`).
+ * Follows the same tmp-XDG + FakeKeyring pattern as `whoami.test.ts`.
+ * Everything the command needs from the outside world is injected, never
+ * swapped globally (CLAUDE.md bans `mock.module`): the interactive prompts
+ * arrive via `LoginDeps`, and stdout / stderr / exit via the `CommandIO`
+ * sink each test builds with `createMemoryIO()`. The sink matters for the
+ * same reason the prompt seam does — `bun test` runs every package in one
+ * process, so a test that reassigned `process.stdout.write` would collect
+ * writes from suites it has nothing to do with and assert on them
+ * (issue #1180). A per-test sink only ever holds this command's output.
  */
 
 import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll } from "bun:test";
@@ -54,31 +59,11 @@ type FetchCall = { url: string; method: string | undefined; body?: string };
 let tmpDir: string;
 let originalXdg: string | undefined;
 const originalFetch = globalThis.fetch;
-const originalExit = process.exit;
-const originalStdoutWrite = process.stdout.write.bind(process.stdout);
-const originalStderrWrite = process.stderr.write.bind(process.stderr);
 
 let fetchCalls: FetchCall[];
-let stdoutChunks: string[];
-let stderrChunks: string[];
 
 import { ExitError } from "./helpers/process-exit.ts";
-
-function captureIo(): void {
-  stdoutChunks = [];
-  stderrChunks = [];
-  process.stdout.write = ((chunk: string | Uint8Array): boolean => {
-    stdoutChunks.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf-8"));
-    return true;
-  }) as typeof process.stdout.write;
-  process.stderr.write = ((chunk: string | Uint8Array): boolean => {
-    stderrChunks.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf-8"));
-    return true;
-  }) as typeof process.stderr.write;
-  (process as unknown as { exit: (code?: number) => never }).exit = ((code?: number): never => {
-    throw new ExitError(code ?? 0);
-  }) as (code?: number) => never;
-}
+import { createMemoryIO } from "./helpers/memory-io.ts";
 
 /**
  * Build a JWT with `sub` + `email` claims so `decodeAccessTokenIdentity`
@@ -207,15 +192,11 @@ beforeEach(async () => {
   FakeKeyring.store.clear();
   _setKeyringFactoryForTesting((p) => new FakeKeyring(p));
   fetchCalls = [];
-  captureIo();
 });
 
 afterEach(async () => {
   _setKeyringFactoryForTesting(null);
   globalThis.fetch = originalFetch;
-  process.stdout.write = originalStdoutWrite;
-  process.stderr.write = originalStderrWrite;
-  (process as unknown as { exit: typeof originalExit }).exit = originalExit;
   await rm(tmpDir, { recursive: true, force: true });
 });
 
@@ -231,6 +212,7 @@ async function readPinnedAppId(profile = "default"): Promise<string | undefined>
 
 describe("login org-pin branch", () => {
   it("auto-pins the single org when the user belongs to exactly one", async () => {
+    const { io, stdout } = createMemoryIO();
     installDefaultResponders({
       listOrgs: () =>
         new Response(
@@ -243,18 +225,22 @@ describe("login org-pin branch", () => {
         ),
     });
 
-    await loginCommand({
-      profile: "default",
-      instance: "https://app.example.com",
-    });
+    await loginCommand(
+      {
+        profile: "default",
+        instance: "https://app.example.com",
+      },
+      io,
+    );
 
     expect(await readPinnedOrgId()).toBe("org_only");
-    const out = stdoutChunks.join("");
+    const out = stdout();
     expect(out).toContain('to "Solo"');
     expect(out).toContain("org_only");
   });
 
   it("uses the injected picker and persists the chosen org when ≥2 orgs", async () => {
+    const { io } = createMemoryIO();
     installDefaultResponders({
       listOrgs: () =>
         new Response(
@@ -271,16 +257,19 @@ describe("login org-pin branch", () => {
     });
 
     const orgsSeen: Org[][] = [];
-    await loginCommand({
-      profile: "default",
-      instance: "https://app.example.com",
-      deps: {
-        pickOrg: async (orgs) => {
-          orgsSeen.push(orgs);
-          return orgs[1]!;
+    await loginCommand(
+      {
+        profile: "default",
+        instance: "https://app.example.com",
+        deps: {
+          pickOrg: async (orgs) => {
+            orgsSeen.push(orgs);
+            return orgs[1]!;
+          },
         },
       },
-    });
+      io,
+    );
 
     expect(await readPinnedOrgId()).toBe("org_2");
     expect(orgsSeen).toHaveLength(1);
@@ -288,6 +277,7 @@ describe("login org-pin branch", () => {
   });
 
   it("inline-creates an org when the user has none and accepts the prompt", async () => {
+    const { io } = createMemoryIO();
     let createBody: unknown;
     installDefaultResponders({
       createOrg: (body) => {
@@ -305,19 +295,23 @@ describe("login org-pin branch", () => {
       },
     });
 
-    await loginCommand({
-      profile: "default",
-      instance: "https://app.example.com",
-      deps: {
-        promptCreateOrg: async () => ({ name: "Fresh", slug: "fresh" }),
+    await loginCommand(
+      {
+        profile: "default",
+        instance: "https://app.example.com",
+        deps: {
+          promptCreateOrg: async () => ({ name: "Fresh", slug: "fresh" }),
+        },
       },
-    });
+      io,
+    );
 
     expect(createBody).toEqual({ name: "Fresh", slug: "fresh" });
     expect(await readPinnedOrgId()).toBe("org_new");
   });
 
   it("honors --org <slug> and pins the matching org non-interactively", async () => {
+    const { io } = createMemoryIO();
     installDefaultResponders({
       listOrgs: () =>
         new Response(
@@ -333,22 +327,26 @@ describe("login org-pin branch", () => {
         ),
     });
 
-    await loginCommand({
-      profile: "default",
-      instance: "https://app.example.com",
-      org: "beta",
-      // Picker should NOT be called when --org is provided.
-      deps: {
-        pickOrg: async () => {
-          throw new Error("picker should not run");
+    await loginCommand(
+      {
+        profile: "default",
+        instance: "https://app.example.com",
+        org: "beta",
+        // Picker should NOT be called when --org is provided.
+        deps: {
+          pickOrg: async () => {
+            throw new Error("picker should not run");
+          },
         },
       },
-    });
+      io,
+    );
 
     expect(await readPinnedOrgId()).toBe("org_2");
   });
 
   it("honors --org <id> the same way as slug", async () => {
+    const { io } = createMemoryIO();
     installDefaultResponders({
       listOrgs: () =>
         new Response(
@@ -364,16 +362,20 @@ describe("login org-pin branch", () => {
         ),
     });
 
-    await loginCommand({
-      profile: "default",
-      instance: "https://app.example.com",
-      org: "org_1",
-    });
+    await loginCommand(
+      {
+        profile: "default",
+        instance: "https://app.example.com",
+        org: "org_1",
+      },
+      io,
+    );
 
     expect(await readPinnedOrgId()).toBe("org_1");
   });
 
   it("exits with an actionable error when --org <ref> does not match", async () => {
+    const { io } = createMemoryIO();
     installDefaultResponders({
       listOrgs: () =>
         new Response(
@@ -387,17 +389,21 @@ describe("login org-pin branch", () => {
     });
 
     await expect(
-      loginCommand({
-        profile: "default",
-        instance: "https://app.example.com",
-        org: "does-not-exist",
-      }),
+      loginCommand(
+        {
+          profile: "default",
+          instance: "https://app.example.com",
+          org: "does-not-exist",
+        },
+        io,
+      ),
     ).rejects.toBeInstanceOf(ExitError);
 
     expect(await readPinnedOrgId()).toBeUndefined();
   });
 
   it("honors --create-org <name> without listing orgs first", async () => {
+    const { io } = createMemoryIO();
     let createBody: unknown;
     let listCalled = false;
     installDefaultResponders({
@@ -422,11 +428,14 @@ describe("login org-pin branch", () => {
       },
     });
 
-    await loginCommand({
-      profile: "default",
-      instance: "https://app.example.com",
-      createOrg: "Forced",
-    });
+    await loginCommand(
+      {
+        profile: "default",
+        instance: "https://app.example.com",
+        createOrg: "Forced",
+      },
+      io,
+    );
 
     expect(listCalled).toBe(false);
     expect(createBody).toEqual({ name: "Forced" });
@@ -434,6 +443,7 @@ describe("login org-pin branch", () => {
   });
 
   it("with --no-org skips the pin entirely, prints a hint, leaves orgId unset", async () => {
+    const { io, stdout } = createMemoryIO();
     let orgsCalled = false;
     installDefaultResponders({
       listOrgs: () => {
@@ -444,35 +454,43 @@ describe("login org-pin branch", () => {
       },
     });
 
-    await loginCommand({
-      profile: "default",
-      instance: "https://app.example.com",
-      noOrg: true,
-    });
+    await loginCommand(
+      {
+        profile: "default",
+        instance: "https://app.example.com",
+        noOrg: true,
+      },
+      io,
+    );
 
     expect(orgsCalled).toBe(false);
     expect(await readPinnedOrgId()).toBeUndefined();
-    expect(stdoutChunks.join("")).toContain("No org pinned");
+    expect(stdout()).toContain("No org pinned");
   });
 
   it("tolerates a failing /api/orgs call — login succeeds unpinned", async () => {
+    const { io, stdout, stderr } = createMemoryIO();
     installDefaultResponders({
       listOrgs: () => new Response("boom", { status: 500 }),
     });
 
-    await loginCommand({
-      profile: "default",
-      instance: "https://app.example.com",
-    });
+    await loginCommand(
+      {
+        profile: "default",
+        instance: "https://app.example.com",
+      },
+      io,
+    );
 
     expect(await readPinnedOrgId()).toBeUndefined();
     const tokens = await loadTokens("default");
     expect(tokens?.accessToken).toBeTruthy();
-    expect(stderrChunks.join("")).toContain("Failed to list organizations");
-    expect(stdoutChunks.join("")).toContain("No org pinned");
+    expect(stderr()).toContain("Failed to list organizations");
+    expect(stdout()).toContain("No org pinned");
   });
 
   it("surfaces a POST /api/orgs failure when --create-org cannot proceed", async () => {
+    const { io } = createMemoryIO();
     installDefaultResponders({
       createOrg: () =>
         new Response(JSON.stringify({ message: "slug_taken" }), {
@@ -482,11 +500,14 @@ describe("login org-pin branch", () => {
     });
 
     await expect(
-      loginCommand({
-        profile: "default",
-        instance: "https://app.example.com",
-        createOrg: "Acme",
-      }),
+      loginCommand(
+        {
+          profile: "default",
+          instance: "https://app.example.com",
+          createOrg: "Acme",
+        },
+        io,
+      ),
     ).rejects.toBeInstanceOf(ExitError);
 
     expect(await readPinnedOrgId()).toBeUndefined();
@@ -497,6 +518,7 @@ describe("login org-pin branch", () => {
   });
 
   it("preserves a prior orgId across a re-login when /api/orgs flakes (same user)", async () => {
+    const { io, stderr } = createMemoryIO();
     // First login — pin an org.
     installDefaultResponders({
       listOrgs: () =>
@@ -511,7 +533,7 @@ describe("login org-pin branch", () => {
           { status: 200, headers: { "Content-Type": "application/json" } },
         ),
     });
-    await loginCommand({ profile: "default", instance: "https://app.example.com" });
+    await loginCommand({ profile: "default", instance: "https://app.example.com" }, io);
     expect(await readPinnedOrgId()).toBe("org_first");
 
     // Second login — /api/orgs errors out. Without preservation we'd
@@ -519,13 +541,14 @@ describe("login org-pin branch", () => {
     installDefaultResponders({
       listOrgs: () => new Response("boom", { status: 500 }),
     });
-    await loginCommand({ profile: "default", instance: "https://app.example.com" });
+    await loginCommand({ profile: "default", instance: "https://app.example.com" }, io);
 
     expect(await readPinnedOrgId()).toBe("org_first");
-    expect(stderrChunks.join("")).toContain("Failed to list organizations");
+    expect(stderr()).toContain("Failed to list organizations");
   });
 
   it("does NOT preserve orgId when re-logging-in as a different user", async () => {
+    const { io } = createMemoryIO();
     // First login — user A pins an org.
     installDefaultResponders({
       listOrgs: () =>
@@ -538,7 +561,7 @@ describe("login org-pin branch", () => {
           { status: 200, headers: { "Content-Type": "application/json" } },
         ),
     });
-    await loginCommand({ profile: "default", instance: "https://app.example.com" });
+    await loginCommand({ profile: "default", instance: "https://app.example.com" }, io);
     expect(await readPinnedOrgId()).toBe("org_A");
 
     // Second login — same profile name, DIFFERENT user. /api/orgs
@@ -559,12 +582,13 @@ describe("login org-pin branch", () => {
         ),
       listOrgs: () => new Response("boom", { status: 500 }),
     });
-    await loginCommand({ profile: "default", instance: "https://app.example.com" });
+    await loginCommand({ profile: "default", instance: "https://app.example.com" }, io);
 
     expect(await readPinnedOrgId()).toBeUndefined();
   });
 
   it("writes orgId in addition to the pre-existing profile fields", async () => {
+    const { io } = createMemoryIO();
     installDefaultResponders({
       listOrgs: () =>
         new Response(
@@ -577,10 +601,13 @@ describe("login org-pin branch", () => {
         ),
     });
 
-    await loginCommand({
-      profile: "default",
-      instance: "https://app.example.com",
-    });
+    await loginCommand(
+      {
+        profile: "default",
+        instance: "https://app.example.com",
+      },
+      io,
+    );
 
     const cfg = await readConfig();
     const profile = cfg.profiles.default;
@@ -614,6 +641,7 @@ describe("login app-pin cascade", () => {
     );
 
   it("auto-pins the default application after org pin (one app)", async () => {
+    const { io, stdout } = createMemoryIO();
     installDefaultResponders({
       listOrgs: oneOrg,
       listApplications: () =>
@@ -626,18 +654,22 @@ describe("login app-pin cascade", () => {
         ),
     });
 
-    await loginCommand({
-      profile: "default",
-      instance: "https://app.example.com",
-    });
+    await loginCommand(
+      {
+        profile: "default",
+        instance: "https://app.example.com",
+      },
+      io,
+    );
 
     expect(await readPinnedAppId()).toBe("app_only");
-    const out = stdoutChunks.join("");
+    const out = stdout();
     expect(out).toContain('/ app "Only"');
     expect(out).toContain("app_only");
   });
 
   it("pins the isDefault app when ≥2 applications exist", async () => {
+    const { io } = createMemoryIO();
     installDefaultResponders({
       listOrgs: oneOrg,
       listApplications: () =>
@@ -653,12 +685,13 @@ describe("login app-pin cascade", () => {
         ),
     });
 
-    await loginCommand({ profile: "default", instance: "https://app.example.com" });
+    await loginCommand({ profile: "default", instance: "https://app.example.com" }, io);
 
     expect(await readPinnedAppId()).toBe("app_default");
   });
 
   it("warns on stderr and leaves applicationId unset when ≥2 apps but no default", async () => {
+    const { io, stdout, stderr } = createMemoryIO();
     installDefaultResponders({
       listOrgs: oneOrg,
       listApplications: () =>
@@ -674,14 +707,15 @@ describe("login app-pin cascade", () => {
         ),
     });
 
-    await loginCommand({ profile: "default", instance: "https://app.example.com" });
+    await loginCommand({ profile: "default", instance: "https://app.example.com" }, io);
 
     expect(await readPinnedAppId()).toBeUndefined();
-    expect(stderrChunks.join("")).toContain("none marked default");
-    expect(stdoutChunks.join("")).toContain("No app pinned");
+    expect(stderr()).toContain("none marked default");
+    expect(stdout()).toContain("No app pinned");
   });
 
   it("warns on stderr when the org has zero applications", async () => {
+    const { io, stderr } = createMemoryIO();
     installDefaultResponders({
       listOrgs: () =>
         new Response(
@@ -699,13 +733,14 @@ describe("login app-pin cascade", () => {
         }),
     });
 
-    await loginCommand({ profile: "default", instance: "https://app.example.com" });
+    await loginCommand({ profile: "default", instance: "https://app.example.com" }, io);
 
     expect(await readPinnedAppId()).toBeUndefined();
-    expect(stderrChunks.join("")).toContain("No applications found");
+    expect(stderr()).toContain("No applications found");
   });
 
   it("honors --app <id> for non-interactive pinning", async () => {
+    const { io } = createMemoryIO();
     installDefaultResponders({
       listOrgs: () =>
         new Response(
@@ -729,16 +764,20 @@ describe("login app-pin cascade", () => {
         ),
     });
 
-    await loginCommand({
-      profile: "default",
-      instance: "https://app.example.com",
-      app: "app_2",
-    });
+    await loginCommand(
+      {
+        profile: "default",
+        instance: "https://app.example.com",
+        app: "app_2",
+      },
+      io,
+    );
 
     expect(await readPinnedAppId()).toBe("app_2");
   });
 
   it("exits with an actionable error when --app <id> does not match", async () => {
+    const { io } = createMemoryIO();
     installDefaultResponders({
       listOrgs: () =>
         new Response(
@@ -760,15 +799,19 @@ describe("login app-pin cascade", () => {
     });
 
     await expect(
-      loginCommand({
-        profile: "default",
-        instance: "https://app.example.com",
-        app: "app_does_not_exist",
-      }),
+      loginCommand(
+        {
+          profile: "default",
+          instance: "https://app.example.com",
+          app: "app_does_not_exist",
+        },
+        io,
+      ),
     ).rejects.toBeInstanceOf(ExitError);
   });
 
   it("honors --create-app <name> and skips the list fetch", async () => {
+    const { io } = createMemoryIO();
     let createBody: unknown;
     let listCalled = false;
     installDefaultResponders({
@@ -794,11 +837,14 @@ describe("login app-pin cascade", () => {
       },
     });
 
-    await loginCommand({
-      profile: "default",
-      instance: "https://app.example.com",
-      createApp: "Forced",
-    });
+    await loginCommand(
+      {
+        profile: "default",
+        instance: "https://app.example.com",
+        createApp: "Forced",
+      },
+      io,
+    );
 
     expect(listCalled).toBe(false);
     expect(createBody).toEqual({ name: "Forced" });
@@ -806,6 +852,7 @@ describe("login app-pin cascade", () => {
   });
 
   it("with --no-app skips the app cascade entirely (no fetch, no hint)", async () => {
+    const { io, stdout } = createMemoryIO();
     let appsCalled = false;
     installDefaultResponders({
       listApplications: () => {
@@ -814,19 +861,23 @@ describe("login app-pin cascade", () => {
       },
     });
 
-    await loginCommand({
-      profile: "default",
-      instance: "https://app.example.com",
-      noApp: true,
-    });
+    await loginCommand(
+      {
+        profile: "default",
+        instance: "https://app.example.com",
+        noApp: true,
+      },
+      io,
+    );
 
     expect(appsCalled).toBe(false);
     expect(await readPinnedAppId()).toBeUndefined();
     // No "No app pinned" hint when the user opted out.
-    expect(stdoutChunks.join("")).not.toContain("No app pinned");
+    expect(stdout()).not.toContain("No app pinned");
   });
 
   it("skips the app cascade when no org was pinned (no X-Org-Id to fetch with)", async () => {
+    const { io, stdout } = createMemoryIO();
     let appsCalled = false;
     installDefaultResponders({
       listApplications: () => {
@@ -835,20 +886,24 @@ describe("login app-pin cascade", () => {
       },
     });
 
-    await loginCommand({
-      profile: "default",
-      instance: "https://app.example.com",
-      noOrg: true,
-    });
+    await loginCommand(
+      {
+        profile: "default",
+        instance: "https://app.example.com",
+        noOrg: true,
+      },
+      io,
+    );
 
     expect(appsCalled).toBe(false);
     expect(await readPinnedAppId()).toBeUndefined();
     // The "No org pinned" hint fires; the app hint does not (skipped upstream).
-    expect(stdoutChunks.join("")).toContain("No org pinned");
-    expect(stdoutChunks.join("")).not.toContain("No app pinned");
+    expect(stdout()).toContain("No org pinned");
+    expect(stdout()).not.toContain("No app pinned");
   });
 
   it("tolerates a failing /api/applications call — login succeeds org-pinned but app-unpinned", async () => {
+    const { io, stderr } = createMemoryIO();
     installDefaultResponders({
       listOrgs: () =>
         new Response(
@@ -862,17 +917,21 @@ describe("login app-pin cascade", () => {
       listApplications: () => new Response("boom", { status: 500 }),
     });
 
-    await loginCommand({
-      profile: "default",
-      instance: "https://app.example.com",
-    });
+    await loginCommand(
+      {
+        profile: "default",
+        instance: "https://app.example.com",
+      },
+      io,
+    );
 
     expect(await readPinnedOrgId()).toBe("org_1");
     expect(await readPinnedAppId()).toBeUndefined();
-    expect(stderrChunks.join("")).toContain("Failed to list applications");
+    expect(stderr()).toContain("Failed to list applications");
   });
 
   it("preserves a prior applicationId across same-user re-login when /api/applications flakes", async () => {
+    const { io } = createMemoryIO();
     // First login — default-path cascade pins app_default via the
     // shared responder defaults.
     installDefaultResponders({
@@ -894,7 +953,7 @@ describe("login app-pin cascade", () => {
           { status: 200, headers: { "Content-Type": "application/json" } },
         ),
     });
-    await loginCommand({ profile: "default", instance: "https://app.example.com" });
+    await loginCommand({ profile: "default", instance: "https://app.example.com" }, io);
     expect(await readPinnedAppId()).toBe("app_pinned");
 
     // Second login — app fetch flakes. Without preservation we'd drop
@@ -911,12 +970,13 @@ describe("login app-pin cascade", () => {
         ),
       listApplications: () => new Response("boom", { status: 500 }),
     });
-    await loginCommand({ profile: "default", instance: "https://app.example.com" });
+    await loginCommand({ profile: "default", instance: "https://app.example.com" }, io);
 
     expect(await readPinnedAppId()).toBe("app_pinned");
   });
 
   it("does NOT preserve applicationId when re-logging-in as a different user", async () => {
+    const { io } = createMemoryIO();
     // First login — user A pins.
     installDefaultResponders({
       listOrgs: () =>
@@ -937,7 +997,7 @@ describe("login app-pin cascade", () => {
           { status: 200, headers: { "Content-Type": "application/json" } },
         ),
     });
-    await loginCommand({ profile: "default", instance: "https://app.example.com" });
+    await loginCommand({ profile: "default", instance: "https://app.example.com" }, io);
     expect(await readPinnedAppId()).toBe("app_A");
 
     // Second login — different user, network flakes. Preservation must not kick in.
@@ -957,7 +1017,7 @@ describe("login app-pin cascade", () => {
       listOrgs: () => new Response("boom", { status: 500 }),
       listApplications: () => new Response("boom", { status: 500 }),
     });
-    await loginCommand({ profile: "default", instance: "https://app.example.com" });
+    await loginCommand({ profile: "default", instance: "https://app.example.com" }, io);
 
     expect(await readPinnedAppId()).toBeUndefined();
   });
