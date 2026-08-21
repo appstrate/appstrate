@@ -12,7 +12,7 @@ import { PackageCard } from "../components/package-card";
 import { PackagesTable, usePackageColumns } from "../components/packages-table";
 import { columnMenu, visibleColumns } from "../components/data-table";
 import { useColumnVisibility } from "../stores/column-visibility-store";
-import { ListToolbar } from "../components/list-toolbar";
+import { ListFooter, ListToolbar } from "../components/list-toolbar";
 import { usePackageViewStore } from "../stores/list-view-store";
 import { useSearchPlaceholder } from "../lib/search-placeholder";
 import { PageHeader, type BreadcrumbEntry } from "../components/page-header";
@@ -122,13 +122,13 @@ export function PackageTab({
           placeholder: searchPlaceholder,
         }}
         filters={[]}
-        count={query ? t("list.count", { count: shown.length }) : undefined}
         // Only the table view has columns to choose from.
         columns={view === "table" ? columnMenu(allColumns, visibility) : undefined}
         view={view}
         onViewChange={setView}
         actions={extraActions}
       />
+      {shown.length > 0 && query && <ListFooter count={t("list.count", { count: shown.length })} />}
       {shown.length === 0 ? (
         // Nothing MATCHED, which is not the same sentence as nothing exists.
         <EmptyState message={t("list.noMatch")} icon={SearchX} compact>

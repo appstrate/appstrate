@@ -19,7 +19,7 @@ import { RunsTable, useRunColumns } from "./runs-table";
 import { columnMenu, visibleColumns } from "./data-table";
 import { useColumnVisibility } from "../stores/column-visibility-store";
 import type { EnrichedRun, RunStatus } from "@appstrate/shared-types";
-import type { ColumnMenuSpec } from "./list-toolbar";
+import { ListFooter, type ColumnMenuSpec } from "./list-toolbar";
 
 interface RunListProps {
   packageId?: string;
@@ -47,12 +47,18 @@ interface RunListProps {
   /**
    * The bar above the table.
    *
-   * A render prop rather than props the page reads for itself: the query and
-   * the columns live here, and a page asking for the same rows a second time
-   * to count them is the duplicate `GET /api/runs` the dashboard already had
-   * to be cured of. The page still owns WHAT the bar says.
+   * A render prop rather than props the page reads for itself: the columns live
+   * here, and the bar's column menu has to name the same ones the table draws.
+   * The page still owns WHAT the bar says.
    */
-  toolbar?: (bar: { total: number; columns: ColumnMenuSpec }) => React.ReactNode;
+  toolbar?: (bar: { columns: ColumnMenuSpec }) => React.ReactNode;
+  /**
+   * What the list amounts to, under the table — IN THE CALLER'S OWN WORDS. A
+   * render prop because the query lives here: a page asking for the same rows a
+   * second time to count them is the duplicate `GET /api/runs` the dashboard
+   * already had to be cured of.
+   */
+  countLabel?: (total: number) => React.ReactNode;
 }
 
 export function RunList({
@@ -69,6 +75,7 @@ export function RunList({
   status,
   search,
   toolbar,
+  countLabel,
 }: RunListProps) {
   const { t } = useTranslation(["agents"]);
   const agentName = useRunAgentName(fixedAgentName);
@@ -107,8 +114,8 @@ export function RunList({
   const showLoading = isLoading && page === 0;
 
   return (
-    <div className="space-y-2">
-      {toolbar?.({ total, columns: columnMenu(allColumns, visibility) })}
+    <div>
+      {toolbar?.({ columns: columnMenu(allColumns, visibility) })}
 
       <RunsTable
         runs={runs}
@@ -120,19 +127,20 @@ export function RunList({
         banner={page === 0 ? firstPageBanner : undefined}
       />
 
-      {paginated && totalPages > 1 && (
-        <div className="flex items-center justify-end gap-4 pt-1">
-          <span className="text-muted-foreground text-sm">
-            {t("pagination.pageOf", {
-              page: page + 1,
-              total: totalPages,
-              ns: "common",
-            })}
-          </span>
-          <div className="flex gap-2">
+      <ListFooter count={countLabel?.(total)}>
+        {paginated && totalPages > 1 && (
+          <>
+            <span>
+              {t("pagination.pageOf", {
+                page: page + 1,
+                total: totalPages,
+                ns: "common",
+              })}
+            </span>
             <Button
               variant="outline"
               size="sm"
+              className="h-8"
               onClick={() => setPage(page - 1)}
               disabled={page === 0}
             >
@@ -141,14 +149,15 @@ export function RunList({
             <Button
               variant="outline"
               size="sm"
+              className="h-8"
               onClick={() => setPage(page + 1)}
               disabled={page >= totalPages - 1}
             >
               {t("pagination.next", { ns: "common" })}
             </Button>
-          </div>
-        </div>
-      )}
+          </>
+        )}
+      </ListFooter>
     </div>
   );
 }

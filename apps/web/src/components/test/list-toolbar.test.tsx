@@ -11,7 +11,7 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { ListToolbar, type FilterSpec } from "../list-toolbar.tsx";
+import { ListFooter, ListToolbar, type FilterSpec } from "../list-toolbar.tsx";
 import { toggleValue } from "../../lib/toggle-value.ts";
 import { render } from "./run-fixture.tsx";
 
@@ -67,9 +67,17 @@ describe("with nothing filtered", () => {
     expect(html).not.toContain("Type");
   });
 
-  it("invites: the button is dashed and carries no count", () => {
-    expect(html).toContain("border-dashed");
+  it("carries no count, and says the row is shut", () => {
+    expect(html).not.toMatch(/>\d</);
     expect(html).toContain('aria-expanded="false"');
+  });
+
+  it("wears no surface — it adjusts the view, it does not act on the data", () => {
+    // Three tiers on one row, and the surface is what separates them: Filters
+    // and Columns are a border on the canvas, the page's own action keeps a
+    // white, slightly raised one.
+    expect(html).toContain("bg-transparent");
+    expect(html).toContain("shadow-none");
   });
 
   it("offers no reset — there is nothing to reset", () => {
@@ -93,10 +101,6 @@ describe("with something already filtering", () => {
   it("counts what is on, on the button", () => {
     expect(html).toContain("Filtres");
     expect(html).toMatch(/>3</);
-  });
-
-  it("stops inviting: the button's border closes", () => {
-    expect(html).not.toContain("border-dashed");
   });
 
   it("names the values on each dimension's own trigger", () => {
@@ -147,17 +151,32 @@ describe("the search", () => {
 });
 
 describe("the result count", () => {
-  it("prints the caller's words, at the end of the bar", () => {
-    // The toolbar counts nothing itself: it serves runs, schedules and
-    // packages, and one that formats "3 runs" for all of them would one day
-    // say it about agents.
-    const html = render(<ListToolbar filters={filters()} count="3 runs" />);
-    expect(html).toContain("3 runs");
-    expect(html.indexOf("3 runs")).toBeLessThan(html.indexOf("Filtres"));
+  it("is not on the bar at all — it belongs under the table", () => {
+    // A toolbar is what you act WITH, a footer is what the table came to.
+    // shadcn keeps it in the pagination row for the same reason, and it frees
+    // the end of the bar that runs out of room first.
+    const html = render(<ListToolbar filters={filters()} />);
+    expect(html).not.toContain("runs");
+  });
+});
+
+describe("the footer", () => {
+  it("prints the caller's words, and the page controls beside them", () => {
+    const html = render(
+      <ListFooter count="50 runs">
+        <span>Page 1 sur 14</span>
+      </ListFooter>,
+    );
+    expect(html).toContain("50 runs");
+    expect(html.indexOf("50 runs")).toBeLessThan(html.indexOf("Page 1 sur 14"));
   });
 
-  it("says nothing when the caller has nothing to say", () => {
-    expect(render(<ListToolbar filters={filters()} />)).not.toContain("runs");
+  it("renders for a count alone — the arrows are the option, not the point", () => {
+    expect(render(<ListFooter count="3 runs" />)).toContain("3 runs");
+  });
+
+  it("renders nothing when there is nothing to say", () => {
+    expect(render(<ListFooter />)).toBe("");
   });
 });
 

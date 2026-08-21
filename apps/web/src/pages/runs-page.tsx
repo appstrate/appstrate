@@ -131,7 +131,8 @@ export function RunsPage() {
         kind={kind}
         status={statuses}
         search={search}
-        toolbar={({ total, columns }) => (
+        countLabel={(total) => t("runs.count", { count: total })}
+        toolbar={({ columns }) => (
           <ListToolbar
             search={{
               value: search,
@@ -140,7 +141,6 @@ export function RunsPage() {
             }}
             filters={filters}
             onReset={resetFilters}
-            count={t("runs.count", { count: total })}
             columns={columns}
             // On a list screen the action belongs beside the view controls,
             // not at title height: every table screen then keeps its controls

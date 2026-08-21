@@ -124,6 +124,22 @@ export interface FilterSpec {
 /** Beyond this many, the button counts instead of naming. */
 const NAMED_VALUES = 2;
 
+/**
+ * What the bar's own controls look like: an outline and nothing else.
+ *
+ * Three tiers on one row, and the surface is what separates them. Filters and
+ * Columns adjust the VIEW, so they are a border on the canvas — no fill, no
+ * shadow. The page's own action does something to the data, so it keeps a
+ * surface: white and slightly raised (or filled, when it is a create). Reading
+ * left to right you can tell what is a setting from what is a deed without
+ * reading a word.
+ *
+ * `px-2.5 gap-1.5` is what shadcn's `size="sm"` resolves to for a button
+ * carrying an icon (`has-[>svg]:px-2.5`); ours is a flat `px-3 gap-2`, which is
+ * where the extra width inside every one of them came from.
+ */
+const UTILITY_BUTTON = "h-8 gap-1.5 bg-transparent px-2.5 shadow-none";
+
 function FacetedFilter({ filter }: { filter: FilterSpec }) {
   const { t } = useTranslation("common");
   const chosen = new Set(filter.values);
@@ -245,7 +261,7 @@ function ColumnsMenu({ columns }: { columns: ColumnMenuSpec }) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="outline" size="sm" className="h-8 gap-1.5 px-2.5" title={label}>
+        <Button variant="outline" size="sm" className={UTILITY_BUTTON} title={label}>
           <SlidersHorizontal />
           <span className="hidden @xl/bar:inline">{label}</span>
         </Button>
@@ -323,7 +339,6 @@ export function ListToolbar({
   search,
   filters,
   onReset,
-  count,
   columns,
   view,
   onViewChange,
@@ -343,13 +358,6 @@ export function ListToolbar({
    * loops over the filters looks right and clears only the last one.
    */
   onReset?: () => void;
-  /**
-   * What the list amounts to, at the far end of the row — IN THE CALLER'S OWN
-   * WORDS. The toolbar counts nothing itself: it serves runs, schedules and
-   * packages, and a component that formats "3 runs" for all of them is a
-   * component that will one day say it about agents.
-   */
-  count?: ReactNode;
   /** Present on a table whose columns the reader may hide. */
   columns?: ColumnMenuSpec;
   /** Present only on the lists the reference draws both as cards and as rows. */
@@ -394,25 +402,13 @@ export function ListToolbar({
         </div>
 
         <div className="flex shrink-0 items-center gap-2">
-          {count !== undefined && (
-            <span className="text-muted-foreground hidden text-sm @2xl/bar:inline">{count}</span>
-          )}
-
           {filters.length > 0 && (
             <Button
               variant="outline"
               size="sm"
               aria-expanded={open}
               title={t("toolbar.filters")}
-              className={cn(
-                // `px-2.5 gap-1.5` is what shadcn's own `size="sm"` resolves to
-                // for a button carrying an icon (`has-[>svg]:px-2.5`); ours is a
-                // flat `px-3 gap-2`.
-                "h-8 gap-1.5 bg-transparent px-2.5 shadow-none",
-                // Dashed means "an empty slot you can fill". Once something is
-                // in it the button is a statement, not an invitation.
-                activeCount === 0 && "border-dashed",
-              )}
+              className={UTILITY_BUTTON}
               onClick={() => setOpen((wasOpen) => !wasOpen)}
             >
               <Filter />
@@ -449,6 +445,28 @@ export function ListToolbar({
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * Under the table: what it amounts to, and how to move through it.
+ *
+ * The count used to sit at the right end of the toolbar. It reads better here,
+ * which is also where shadcn keeps it (`data-table-pagination.tsx`, "N row(s)
+ * selected" on the left of the page controls): a toolbar is what you act WITH,
+ * a footer is what the table came to. It frees the bar's right end for controls
+ * as well, which is the end that runs out of room first.
+ *
+ * Rendered even with one page — the count is the point, the arrows are the
+ * option.
+ */
+export function ListFooter({ count, children }: { count?: ReactNode; children?: ReactNode }) {
+  if (count === undefined && !children) return null;
+  return (
+    <div className="text-muted-foreground mt-3 flex items-center justify-between gap-4 text-sm">
+      <span className="min-w-0 truncate">{count}</span>
+      {children && <div className="flex shrink-0 items-center gap-2">{children}</div>}
     </div>
   );
 }

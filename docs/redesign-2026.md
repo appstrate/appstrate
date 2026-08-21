@@ -264,14 +264,20 @@ The pattern, and where it deviates:
   the left of the bar at every width, and it is the one control there with a
   WHITE background — a field is a surface. (It used to travel into the
   disclosure row with the filters, which was simply a bug.)
-- **A dashed outline means "an empty slot you can fill"**, on the filters
-  button and on each dimension's trigger; once something is in it the border
-  closes, because the control is a statement now, not an invitation. Those
-  buttons are `bg-transparent`: shadcn's `outline` paints `bg-background`,
-  which is WHITE here (our page canvas is its own `--canvas`), so they came out
-  as white pills on grey and the dashes had nothing to be dashed against. Their
-  shadow went for the same reason — a see-through control casts none. Any port
-  of a shadcn control onto the canvas has this to check.
+- **Three tiers on one row, and the SURFACE is what separates them.** Filters
+  and Columns adjust the view, so they are an outline on the canvas: solid grey
+  border, no fill, no shadow. The page's own action does something to the data,
+  so it keeps a surface — white and slightly raised, or filled when it is a
+  create. Reading left to right you can tell a setting from a deed without
+  reading a word.
+  Note the trap in getting there: shadcn's `outline` variant paints
+  `bg-background`, which is WHITE here (our page canvas is its own `--canvas`),
+  so every one of them came out as a white pill on grey. Any port of a shadcn
+  control onto the canvas has this to check.
+- **Dashed stays for the DIMENSION triggers only**, inside the filter row,
+  where the metaphor holds: each one is an empty slot you can fill, and its
+  border closes once it is filled. The Filters button itself is solid — it
+  opens a panel, it is not a slot.
 - **The chosen values live INSIDE each dimension's trigger**, up to two named,
   then "N sélectionnés" — shadcn's own rule, and it no longer needs the
   breakpoint that shortened it, since in a row of their own the buttons wrap.
@@ -300,16 +306,22 @@ The pattern, and where it deviates:
 - **On a list screen the page's action IS in the bar**, at the right end beside
   the view controls, where shadcn puts "Add task". Screens with no list keep
   theirs at title height.
-- **The right end sheds words before icons** as the bar narrows: the count
-  first, then the labels on the filters and columns buttons, then the label on
-  the page's own action — which the CALLER writes with `@…/bar`, the container
+- **The right end sheds words before icons** as the bar narrows: the labels on
+  the filters and columns buttons first, then the label on the page's own
+  action — which the CALLER writes with `@…/bar`, the container
   the bar names, so the whole row degrades together. **No overflow menu**:
   shadcn hides its View button and keeps "Add task" whole, and the control a
   screen exists to offer is the last thing that should need a second click to
   find.
-- The count reaches the toolbar through a render prop on `RunList`
-  (`toolbar={({ total, columns }) => …}`), because the query and the columns
-  live in the list. A page asking for the same rows again to count them is the
+- **The count is NOT on the bar — it is under the table**, in the footer with
+  the page controls, which is where shadcn keeps it too
+  (`data-table-pagination.tsx`). A toolbar is what you act WITH; a footer is
+  what the table came to. It also frees the end of the bar that runs out of
+  room first. The footer renders for a count alone: the arrows are the option,
+  the count is the point.
+- Both the count and the column menu reach their places through render props on
+  `RunList` (`countLabel`, `toolbar`), because the query and the columns live
+  in the list. A page asking for the same rows again to count them is the
   duplicate `GET /api/runs` the dashboard already had to be cured of.
 
 **The search** is answered wherever the data actually is: client-side over
