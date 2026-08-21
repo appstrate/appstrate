@@ -144,11 +144,18 @@ Tier 0 (zero-install) requires only Bun.
 - **New API route**: route file in `routes/` + OpenAPI path file in `openapi/paths/` + wire in `index.ts`. Run `bun run verify:openapi`, then `bun run generate:api` to refresh the SPA's generated types (`verify:api-types` in `check` fails otherwise). Every 2xx JSON response must declare a schema (verify-openapi step 6).
 - **DB migration (core)**: edit `packages/db/src/schema.ts` → `bun run db:generate` (needs `DATABASE_URL` for drizzle-kit). Applied automatically at boot (PGlite + PostgreSQL) — no manual `db:migrate`.
 - **Module tables**: there are none separately — a module's tables live in the core schema (`packages/db/src/schema/<domain>.ts`) and migrate with core. No per-module migration step.
-- **Quality gate**: `bun run check` — 14 tasks, not 2: `turbo typecheck lint format:check` plus
+- **Quality gate**: `bun run check` — 15 tasks, not 2: `turbo typecheck lint format:check` plus
   `verify:openapi`, `verify:api-types`, `verify:type-coverage`, `verify:compose-defaults`,
   `detect:breaking`, `build:system-packages:check`, `lint:manifest-casing`, `conformance:check`,
-  `verify:module-isolation`, `typecheck:scripts`, `verify:module-contract`. There is no `turbo check`
-  task — the root script drives turbo directly.
+  `verify:module-isolation`, `typecheck:scripts`, `verify:module-contract`, `verify:dead-code`.
+  There is no `turbo check` task — the root script drives turbo directly.
+- **Dead code**: `verify:dead-code` runs knip over every workspace and fails on an exported symbol
+  with no reader, a file nothing reaches, or a declared dependency nothing imports. `eslint`'s
+  `no-unused-vars` cannot see any of that — it only sees locals. Config and the reasoning behind
+  every entry/ignore: `knip.config.ts`. An entry must say _what reaches the file_; an ignore must
+  say _why knip is structurally blind_. Public exports of the **published** packages
+  (`@appstrate/core`, `@appstrate/afps-runtime`, `@appstrate/module-*`) are out of scope by design —
+  their readers live out of tree.
 - **Tests**: `bun test` from root runs all packages in one process. See **Testing** below.
 
 ### Frontend
