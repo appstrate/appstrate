@@ -32,7 +32,11 @@ export const runsPaths = {
         "stored archive cannot be assembled), `422 bundle_signature_invalid` (rejected by " +
         "`AFPS_SIGNATURE_POLICY`), or `500 bundle_integrity_mismatch` (the stored bytes no " +
         "longer match the integrity hash recorded at publish time — republish the package). " +
-        "No run row is created in any of those cases.",
+        "No run row is created in any of those cases. " +
+        "The body is closed: an unknown field, or a field whose type does not match, is a " +
+        "`400` rather than a silently ignored value, and a malformed JSON body is a `400` " +
+        "rather than an input-less run. Send no body at all for a run whose input resolves " +
+        "entirely from stored values.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
@@ -97,6 +101,11 @@ export const runsPaths = {
                   additionalProperties: { type: "string" },
                 },
               },
+              // An unknown field is a 400, never a silent drop (#1187) — the
+              // same rule `POST /api/runs/remote` and `POST /api/runs/inline`
+              // apply. A caller pinned to an older field name learns it stopped
+              // being honoured instead of getting a run with other parameters.
+              additionalProperties: false,
             },
             example: {
               input: { message: "Summarize my latest emails" },
@@ -370,7 +379,7 @@ export const runsPaths = {
       tags: ["Runs"],
       summary: "Execute an inline agent (no persisted package)",
       description:
-        "Run an agent defined entirely in the request body. The platform creates a shadow `packages` row (ephemeral = true), runs it through the standard pipeline, and returns `201` + the created run resource (same shape as `GET /runs/{id}`; the shadow package id is the resource's `packageId`). Stream progress via `GET /api/realtime/runs/{id}`. See `docs/specs/INLINE_RUNS.md`.",
+        "Run an agent defined entirely in the request body. The platform creates a shadow `packages` row (ephemeral = true), runs it through the standard pipeline, and returns `201` + the created run resource (same shape as `GET /runs/{id}`; the shadow package id is the resource's `packageId`). Stream progress via `GET /api/realtime/runs/{id}`. See `docs/specs/INLINE_RUNS.md`. The body is closed: an unknown field is a `400`, never a silently dropped value — `dependency_overrides` in particular is NOT honoured on this surface and is refused rather than ignored.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
@@ -427,7 +436,15 @@ export const runsPaths = {
                 },
                 modelId: { type: ["string", "null"] },
                 proxyId: { type: ["string", "null"] },
+                generation: {
+                  $ref: "#/components/schemas/ModelGenerationSettings",
+                  description:
+                    "Per-run temperature/reasoning override, same contract as " +
+                    "`POST /api/agents/{scope}/{name}/run`. Omitted properties inherit the " +
+                    "manifest's model settings.",
+                },
               },
+              additionalProperties: false,
             },
             example: {
               manifest: {
@@ -639,7 +656,14 @@ export const runsPaths = {
                 },
                 modelId: { type: ["string", "null"] },
                 proxyId: { type: ["string", "null"] },
+                generation: {
+                  $ref: "#/components/schemas/ModelGenerationSettings",
+                  description:
+                    "Same field as `POST /api/runs/inline` — validated for shape, never applied; " +
+                    "no run is created.",
+                },
               },
+              additionalProperties: false,
             },
           },
         },

@@ -33,9 +33,8 @@ interface Scope {
   applicationId: string;
 }
 
-function fakeCtx(body: unknown, scope: Scope, userId: string): Context {
+function fakeCtx(scope: Scope, userId: string): Context {
   return {
-    req: { json: async () => body },
     get: (key: string) =>
       key === "orgId"
         ? scope.orgId
@@ -109,7 +108,8 @@ describe("parseRequestInput — reserved context-documents field", () => {
     ]);
     const runId = `run_${crypto.randomUUID()}`;
     const parsed = await parseRequestInput(
-      fakeCtx({}, scope, ctx.user.id),
+      fakeCtx(scope, ctx.user.id),
+      {},
       runId,
       asJSONSchemaObject(manifest.input!.schema),
       { injectedInput: inputPatch },
@@ -169,7 +169,8 @@ describe("parseRequestInput — reserved context-documents field", () => {
     );
     const runId = `run_${crypto.randomUUID()}`;
     const parsed = await parseRequestInput(
-      fakeCtx({}, scope, ctx.user.id),
+      fakeCtx(scope, ctx.user.id),
+      {},
       runId,
       asJSONSchemaObject(manifest.input!.schema),
       { injectedInput: inputPatch },
@@ -209,7 +210,8 @@ describe("parseRequestInput — reserved context-documents field", () => {
     const runId = `run_${crypto.randomUUID()}`;
     await expect(
       parseRequestInput(
-        fakeCtx({}, { orgId: other.orgId, applicationId: other.defaultAppId }, other.user.id),
+        fakeCtx({ orgId: other.orgId, applicationId: other.defaultAppId }, other.user.id),
+        {},
         runId,
         asJSONSchemaObject(manifest.input!.schema),
         { injectedInput: inputPatch },
@@ -227,7 +229,8 @@ describe("parseRequestInput — reserved context-documents field", () => {
     ]);
     await expect(
       parseRequestInput(
-        fakeCtx({}, { orgId: ctx.orgId, applicationId: ctx.defaultAppId }, ctx.user.id),
+        fakeCtx({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, ctx.user.id),
+        {},
         `run_${crypto.randomUUID()}`,
         asJSONSchemaObject(manifest.input!.schema),
         { injectedInput: inputPatch },

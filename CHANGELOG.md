@@ -77,6 +77,43 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **BREAKING: the launch body is validated. An unknown field is a `400`, not a
+  silent drop.** The three launch surfaces handled an undeclared field three
+  different ways: `POST /api/runs/remote` refused it (`.strict()`),
+  `POST /api/runs/inline` stripped it (a non-strict `z.object`), and
+  `POST /api/agents/{scope}/{name}/run` — which had no schema at all, only a
+  `c.req.json<T>()` cast — ignored it and answered `201`. The last one is the
+  failure that matters: the release above removed `config` from that body with
+  no alias and no deprecation window, so a CLI, SDK or CI job still sending it
+  got an accepted run executing with parameters nobody asked for, with no
+  error, no log and no echoed field. Silently dropping a value the caller sent
+  is how a run does something other than what was asked — the rule
+  `assertFieldsUnlocked` already states, and the one `run_and_wait` was fixed
+  on in the same release. Each surface now owns a `.strict()` schema for its
+  own fields, and `parseRequestInput` receives an already-validated body
+  instead of re-reading the request.
+
+  Three observable changes, all on the way in:
+
+  - an unknown field, or a declared field of the wrong type, is `400`
+    `validation_failed` on all three surfaces;
+  - a malformed JSON body is `400` instead of being swallowed into `{}` and
+    launched as an input-less run (the `c.req.json().catch(() => ({}))`
+    dialect `readJsonBody` was written to replace — the launch body was its
+    last user in the API);
+  - `dependency_overrides` on `POST /api/runs/inline` is `400`. It was
+    accepted there and then dropped: `triggerInlineRun` never forwarded it, so
+    a caller pinning a dependency got a run that ignored the pin.
+
+  An empty body is still a valid launch (a run whose input resolves entirely
+  from stored values sends none), and every documented field is unchanged.
+
+- **`generation` is documented on the inline launch surfaces.** It was accepted
+  and honoured by `POST /api/runs/inline` and `/inline/validate` but absent
+  from the spec, so no generated client could reach it. The agent-run body is
+  now registered in the Zod<>OpenAPI comparison, which is what turns that kind
+  of drift into a failing check.
+
 - **An agent declares ONE parameter schema, `input`. `config` is gone.** An
   AFPS manifest used to carry two — `input`, asked on every run, and `config`,
   set once at setup. Whether a value is asked every time or stored once is a

@@ -56,59 +56,101 @@ import { readJsonBody } from "../lib/request-body.ts";
 import { modelGenerationSettingsSchema } from "@appstrate/core/model-generation";
 
 /**
+ * Wire-shape guard for the agent-run body (`POST /agents/{scope}/{name}/run`).
+ *
+ * `.strict()` on purpose (#1187). This surface had NO body schema at all: the
+ * body was read with `c.req.json<RunRequestBody>()`, a cast that validates
+ * nothing, so an unknown field was dropped without a trace and a malformed body
+ * became `{}` — a 201 for a run executing with parameters nobody asked for.
+ * That is the exact failure `assertFieldsUnlocked` states as a rule
+ * (`input-resolution.ts`) and the one #1179 fixed on the MCP surface, and the
+ * launch body was the last place the rule did not hold. `POST /runs/remote` was
+ * already `.strict()`; the three launch surfaces now agree.
+ *
+ * Deep semantics stay downstream in `parseRequestInput` (is this dependency
+ * spec resolvable, does the replayed run belong to this agent) — this schema
+ * only settles which fields exist and of what type.
+ */
+export const runAgentBodySchema = z
+  .object({
+    input: z.record(z.string(), z.unknown()).optional(),
+    /**
+     * Replay a prior run's persisted input. Emptiness and the mutual exclusion
+     * with `input` are checked in `parseRequestInput`, which owns the message
+     * naming the field — neither is a shape.
+     */
+    rerun_from: z.string().optional(),
+    modelId: z.string().optional(),
+    generation: modelGenerationSettingsSchema.optional(),
+    proxyId: z.string().optional(),
+    /** `.min(1)` for the same reason it is set on the inline schema below. */
+    connection_overrides: z.record(z.string(), z.string().min(1)).optional(),
+    dependency_overrides: z.record(z.string(), z.string()).optional(),
+  })
+  .strict();
+
+/**
  * Wire-shape guard for the inline-run body (`POST /runs/inline` +
  * `/inline/validate`). Mirrors the `InlineRunBody` TS type: every field
  * is optional and the semantic validation (manifest/input/AJV) happens
  * downstream in the preflight — this schema only rejects a malformed body or a
  * grossly wrong-typed field (e.g. `input: "foo"`) with a 400 instead of letting
  * it cast through and surface later as a 500.
+ *
+ * `.strict()` since #1187, like the two other launch surfaces. It also closes
+ * a live silent drop: `dependency_overrides` was accepted here (the parser read
+ * it straight off the raw body) and then never applied — `triggerInlineRun`
+ * does not forward it. Undeclared here, it is now a 400 instead of a run that
+ * quietly ignored the pin it was handed.
  */
-const inlineRunBodySchema = z.object({
-  manifest: z.unknown().optional(),
-  prompt: z.unknown().optional(),
-  input: z.record(z.string(), z.unknown()).optional(),
-  modelId: z.string().nullable().optional(),
-  generation: modelGenerationSettingsSchema.optional(),
-  proxyId: z.string().nullable().optional(),
-  /**
-   * `document://` URIs to mount read-only into the run's `documents/` directory
-   * without declaring a file field in the manifest (fan-in by reference). Entry
-   * shape is checked downstream by `normalizeContextDocumentUris` so the error
-   * names the offending URI rather than a Zod path.
-   */
-  context_documents: z.array(z.unknown()).optional(),
-  /**
-   * Per-integration connection picks for this run (resolver mechanism #2).
-   * Declared here so the parse keeps the field for the preflight's readiness
-   * gate, which runs BEFORE `parseRequestInput` and would otherwise never see
-   * it.
-   *
-   * `.min(1)` is owned here rather than delegated to `parseRequestInput`: an
-   * empty-string id is falsy at the resolver's `resolveOne`, so readiness would
-   * answer 412 before the parser's field-precise 400 could fire — and
-   * `POST /runs/inline/validate` never calls the parser at all, so the guard
-   * would have no owner there and the validator would disagree with the launch
-   * on the same body.
-   */
-  connection_overrides: z.record(z.string(), z.string().min(1)).optional(),
-  /**
-   * Not a field — a rejection. `rerun_from` is an agent-route concept (replay a
-   * cataloged agent's prior input) and means nothing here, so its presence must
-   * fail loudly rather than be silently stripped and half-applied: the inline
-   * preflight validates the raw `input`, which a replay would not populate.
-   *
-   * Declared as `z.undefined()` so the rule lives in the schema and travels
-   * with it, instead of being re-derived from a second `c.req.json()` read of
-   * the same body. It also puts the failure on the documented side of the error
-   * convention (see `responses.ts` → `ValidationError`): body-level failures
-   * answer `validation_failed` with a populated `errors[]`, and `invalid_request`
-   * is for single-field failures OUTSIDE the body. The hand-rolled throw this
-   * replaced emitted `invalid_request` from inside a body check.
-   */
-  rerun_from: z
-    .undefined({ error: "`rerun_from` is not supported for inline runs — pass `input` directly" })
-    .optional(),
-});
+const inlineRunBodySchema = z
+  .object({
+    manifest: z.unknown().optional(),
+    prompt: z.unknown().optional(),
+    input: z.record(z.string(), z.unknown()).optional(),
+    modelId: z.string().nullable().optional(),
+    generation: modelGenerationSettingsSchema.optional(),
+    proxyId: z.string().nullable().optional(),
+    /**
+     * `document://` URIs to mount read-only into the run's `documents/` directory
+     * without declaring a file field in the manifest (fan-in by reference). Entry
+     * shape is checked downstream by `normalizeContextDocumentUris` so the error
+     * names the offending URI rather than a Zod path.
+     */
+    context_documents: z.array(z.unknown()).optional(),
+    /**
+     * Per-integration connection picks for this run (resolver mechanism #2).
+     * Declared here so the parse keeps the field for the preflight's readiness
+     * gate, which runs BEFORE `parseRequestInput` and would otherwise never see
+     * it.
+     *
+     * `.min(1)` is owned here rather than delegated to `parseRequestInput`: an
+     * empty-string id is falsy at the resolver's `resolveOne`, so readiness would
+     * answer 412 before the parser's field-precise 400 could fire — and
+     * `POST /runs/inline/validate` never calls the parser at all, so the guard
+     * would have no owner there and the validator would disagree with the launch
+     * on the same body.
+     */
+    connection_overrides: z.record(z.string(), z.string().min(1)).optional(),
+    /**
+     * Not a field — a rejection. `rerun_from` is an agent-route concept (replay a
+     * cataloged agent's prior input) and means nothing here, so its presence must
+     * fail loudly rather than be silently stripped and half-applied: the inline
+     * preflight validates the raw `input`, which a replay would not populate.
+     *
+     * Declared as `z.undefined()` so the rule lives in the schema and travels
+     * with it, instead of being re-derived from a second `c.req.json()` read of
+     * the same body. It also puts the failure on the documented side of the error
+     * convention (see `responses.ts` → `ValidationError`): body-level failures
+     * answer `validation_failed` with a populated `errors[]`, and `invalid_request`
+     * is for single-field failures OUTSIDE the body. The hand-rolled throw this
+     * replaced emitted `invalid_request` from inside a body check.
+     */
+    rerun_from: z
+      .undefined({ error: "`rerun_from` is not supported for inline runs — pass `input` directly" })
+      .optional(),
+  })
+  .strict();
 
 /**
  * Resolve the traceparent to seed the run-execution trace tree with, honoring
@@ -175,6 +217,14 @@ export function createRunsRouter() {
       const agent = c.get("package");
       const orgId = c.get("orgId");
       const actor = getActor(c);
+
+      // Body first: it is a property of the request, so a body this surface
+      // cannot honour fails before any lookup. `allowEmpty` keeps the launch
+      // contract "no body == no input" (a run whose input is entirely resolved
+      // from stored values needs no body at all) while MALFORMED JSON now 400s
+      // instead of being swallowed into `{}` and launched as an input-less run.
+      const body = await readJsonBody(c, runAgentBodySchema, { allowEmpty: true });
+
       // Version selector from query param: `draft`, `published`, or a
       // version spec (exact / dist-tag / semver range). Omitted ≡ `published`
       // for EVERY caller (latest published; 404 when none, #636) — the working
@@ -205,6 +255,7 @@ export function createRunsRouter() {
 
         const inputResult = await parseRequestInput(
           c,
+          body,
           runId,
           effectiveAgent.manifest.input?.schema
             ? asJSONSchemaObject(effectiveAgent.manifest.input.schema)
@@ -671,6 +722,7 @@ export function createRunsRouter() {
       try {
         const parsed = await parseRequestInput(
           c,
+          body,
           runId,
           effectiveManifest.input?.schema
             ? asJSONSchemaObject(effectiveManifest.input.schema)

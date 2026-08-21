@@ -402,7 +402,7 @@ export interface paths {
         put?: never;
         /**
          * Execute an agent
-         * @description Start an agent run (fire-and-forget — the response does not wait for execution). Returns `201` + the created run resource — same shape as `GET /runs/{id}` — including the resolved `model_label` / `model_source`. Rate-limited to 20/min. The body is JSON. File-typed input fields (`format: uri` + `contentMediaType` in the agent's input schema) accept either of two forms: (1) an `upload://upl_xxx` reference from `createUpload` — stage the bytes first by PUTting them to the signed URL (see `createUpload` for the step-by-step recipe); or (2) an inline RFC 2397 data URI `data:<mime>;name=<filename>;base64,<payload>` with up to 4 MiB of decoded content (`name` is optional) — the single-call path for JSON-only clients such as MCP. Inline bytes are written to the run workspace as a document and the payload is stripped from the persisted run input (the stored value keeps only a `data:<mime>;name=<doc>;base64,` marker). Declared binary MIMEs are verified by magic-byte sniffing in both forms. Send `rerun_from` instead of `input` to replay a previous run's input — same documents, new overrides — without re-uploading. The effective model is resolved at run creation with precedence: request `modelId` > agent model setting > org default model > system default. Without an explicit `modelId`, a change to the org default model between triggers applies to the next run — send `modelId` to pin a specific model per run. A run against a published version assembles its bundle from stored artifacts before the container starts, so a bad artifact fails the trigger rather than the run: `422 dependency_unresolved` (a pin with no published version), `422 bundle_invalid` (the stored archive cannot be assembled), `422 bundle_signature_invalid` (rejected by `AFPS_SIGNATURE_POLICY`), or `500 bundle_integrity_mismatch` (the stored bytes no longer match the integrity hash recorded at publish time — republish the package). No run row is created in any of those cases.
+         * @description Start an agent run (fire-and-forget — the response does not wait for execution). Returns `201` + the created run resource — same shape as `GET /runs/{id}` — including the resolved `model_label` / `model_source`. Rate-limited to 20/min. The body is JSON. File-typed input fields (`format: uri` + `contentMediaType` in the agent's input schema) accept either of two forms: (1) an `upload://upl_xxx` reference from `createUpload` — stage the bytes first by PUTting them to the signed URL (see `createUpload` for the step-by-step recipe); or (2) an inline RFC 2397 data URI `data:<mime>;name=<filename>;base64,<payload>` with up to 4 MiB of decoded content (`name` is optional) — the single-call path for JSON-only clients such as MCP. Inline bytes are written to the run workspace as a document and the payload is stripped from the persisted run input (the stored value keeps only a `data:<mime>;name=<doc>;base64,` marker). Declared binary MIMEs are verified by magic-byte sniffing in both forms. Send `rerun_from` instead of `input` to replay a previous run's input — same documents, new overrides — without re-uploading. The effective model is resolved at run creation with precedence: request `modelId` > agent model setting > org default model > system default. Without an explicit `modelId`, a change to the org default model between triggers applies to the next run — send `modelId` to pin a specific model per run. A run against a published version assembles its bundle from stored artifacts before the container starts, so a bad artifact fails the trigger rather than the run: `422 dependency_unresolved` (a pin with no published version), `422 bundle_invalid` (the stored archive cannot be assembled), `422 bundle_signature_invalid` (rejected by `AFPS_SIGNATURE_POLICY`), or `500 bundle_integrity_mismatch` (the stored bytes no longer match the integrity hash recorded at publish time — republish the package). No run row is created in any of those cases. The body is closed: an unknown field, or a field whose type does not match, is a `400` rather than a silently ignored value, and a malformed JSON body is a `400` rather than an input-less run. Send no body at all for a run whose input resolves entirely from stored values.
          */
         post: operations["runAgent"];
         delete?: never;
@@ -3797,7 +3797,7 @@ export interface paths {
         put?: never;
         /**
          * Execute an inline agent (no persisted package)
-         * @description Run an agent defined entirely in the request body. The platform creates a shadow `packages` row (ephemeral = true), runs it through the standard pipeline, and returns `201` + the created run resource (same shape as `GET /runs/{id}`; the shadow package id is the resource's `packageId`). Stream progress via `GET /api/realtime/runs/{id}`. See `docs/specs/INLINE_RUNS.md`.
+         * @description Run an agent defined entirely in the request body. The platform creates a shadow `packages` row (ephemeral = true), runs it through the standard pipeline, and returns `201` + the created run resource (same shape as `GET /runs/{id}`; the shadow package id is the resource's `packageId`). Stream progress via `GET /api/realtime/runs/{id}`. See `docs/specs/INLINE_RUNS.md`. The body is closed: an unknown field is a `400`, never a silently dropped value — `dependency_overrides` in particular is NOT honoured on this surface and is refused rather than ignored.
          */
         post: operations["runInline"];
         delete?: never;
@@ -18125,6 +18125,8 @@ export interface operations {
                     };
                     modelId?: string | null;
                     proxyId?: string | null;
+                    /** @description Per-run temperature/reasoning override, same contract as `POST /api/agents/{scope}/{name}/run`. Omitted properties inherit the manifest's model settings. */
+                    generation?: components["schemas"]["ModelGenerationSettings"];
                 };
             };
         };
@@ -18302,6 +18304,8 @@ export interface operations {
                     };
                     modelId?: string | null;
                     proxyId?: string | null;
+                    /** @description Same field as `POST /api/runs/inline` — validated for shape, never applied; no run is created. */
+                    generation?: components["schemas"]["ModelGenerationSettings"];
                 };
             };
         };
