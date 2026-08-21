@@ -347,34 +347,49 @@ export function ListToolbar({
   const isFiltered = filters.some((filter) => filter.values.length > 0);
 
   return (
-    <div className="mb-4 flex flex-wrap items-center gap-2">
-      {search && (
-        <Input
-          value={search.value}
-          onChange={(event) => search.onChange(event.target.value)}
-          placeholder={search.placeholder}
-          // WHITE, unlike the filters beside it, and the difference is the
-          // point: a field is a surface you type into, so it takes the app's
-          // component surface like every other input. The filters are
-          // see-through because a dashed outline over the canvas is what says
-          // "empty slot". Our `Input` is `bg-transparent` by default, which on
-          // the grey canvas made the box grey inside.
-          className="bg-background h-8 w-[150px] lg:w-[250px]"
-        />
-      )}
-      {filters.map((filter) => (
-        <Fragment key={filter.id}>
-          <FacetedFilter filter={filter} />
-        </Fragment>
-      ))}
-      {isFiltered && onReset && (
-        <Button variant="ghost" size="sm" className="h-8" onClick={onReset}>
-          {t("toolbar.reset")}
-          <X />
-        </Button>
-      )}
-      <div className="ml-auto flex shrink-0 items-center gap-3">
-        {count !== undefined && <span className="text-muted-foreground text-sm">{count}</span>}
+    // TWO groups, and only the left one may wrap. With `flex-wrap` on the whole
+    // row it was the RIGHT group that went to the next line as soon as a filter
+    // grew a badge — the count, the columns, the view and the action all
+    // dropping below, which is the one thing that must not move. The left group
+    // takes what is left (`flex-1 min-w-0`) and wraps inside its own share;
+    // `items-start` keeps the right group on the first line when it does.
+    <div className="mb-4 flex items-start gap-2">
+      <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+        {search && (
+          <Input
+            value={search.value}
+            onChange={(event) => search.onChange(event.target.value)}
+            placeholder={search.placeholder}
+            // WHITE, unlike the filters beside it, and the difference is the
+            // point: a field is a surface you type into, so it takes the app's
+            // component surface like every other input. The filters are
+            // see-through because a dashed outline over the canvas is what says
+            // "empty slot". Our `Input` is `bg-transparent` by default, which on
+            // the grey canvas made the box grey inside.
+            className="bg-background h-8 w-[150px] lg:w-[250px]"
+          />
+        )}
+        {filters.map((filter) => (
+          <Fragment key={filter.id}>
+            <FacetedFilter filter={filter} />
+          </Fragment>
+        ))}
+        {isFiltered && onReset && (
+          <Button variant="ghost" size="sm" className="h-8" onClick={onReset}>
+            {t("toolbar.reset")}
+            <X />
+          </Button>
+        )}
+      </div>
+
+      {/* Never wraps. What it CAN do on a narrow screen is drop what is
+          informative rather than operative — the count first, then the column
+          menu, which is shadcn's own answer (`hidden lg:flex` on their View).
+          The view toggle and the action are two small things and they stay. */}
+      <div className="flex shrink-0 items-center gap-3">
+        {count !== undefined && (
+          <span className="text-muted-foreground hidden text-sm sm:inline">{count}</span>
+        )}
         {columns && <ColumnsMenu columns={columns} />}
         {view && onViewChange && <ViewToggle view={view} onChange={onViewChange} />}
         {actions}
