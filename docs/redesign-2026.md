@@ -228,74 +228,77 @@ Still open on the table, deliberately:
 
 ## The toolbar, and the empty state
 
-`components/list-toolbar.tsx` (`lt-*`) and the `EmptyState` in
-`components/page-states.tsx` (`empty-state`). Both are shared, both are meant to
-sit above and inside every list.
+`components/list-toolbar.tsx` is a **port of shadcn's `DataTableFacetedFilter` +
+`DataTableToolbar`** (the Tasks example,
+`apps/v4/app/(app)/examples/tasks/components/` in `shadcn-ui/ui`), which is the
+reference implementation for filtering a table in the design system this app is
+already built on. Live: <https://ui.shadcn.com/examples/tasks>.
 
-The toolbar replaced two stacked `Tabs` strips on the run screen. Tabs read as
-navigation, cost a row each, and had nowhere to put a third dimension — which
-is why `status`, a filter `GET /api/runs` has always accepted, was not offered
-at all.
+It got there the long way, and the detour is the lesson: two versions of this
+file were INVENTIONS. The first put the chosen value on the trigger AND
+repeated it as a chip below (the same words twice, on a row of buttons that
+changed width as you filtered). The second replaced that with chips carrying
+"et" and "ou" spelled out between them, which is a control nobody has ever
+shipped. Filtering a list is the most-solved problem in this design system;
+none of it was ours to invent.
 
+The pattern:
+
+- **A dashed outline button per dimension**, with a `+` and the dimension's
+  name. Dashed and `+` mean "a filter you can add"; that is why it reads as
+  neutral until something is chosen.
+- **The chosen values live INSIDE that button**, as small badges after a
+  vertical rule: up to two named, then "N sélectionnés". One place, one row, no
+  duplication.
+- **The menu is a `Command`**: searchable, square checkboxes, several values at
+  once, and a centred "Effacer les filtres" at the bottom.
+- **One "Réinitialiser ✕"** at the end of the row when anything is filtered.
 - **A tick adds, an untick removes, and nothing else happens.** This was got
-  wrong once, and the way it was wrong is worth keeping: "all values ticked
+  wrong once and the way it was wrong is worth keeping: "all values ticked
   narrows nothing, so store it as nothing ticked" is true of the RESULTS and
   nonsense as an interaction. Kind has two values, so ticking the second
   silently unticked the first; Scope has one, so its only box could never stay
-  ticked at all. A control never reads the results, and never rewrites what you
-  asked for: a combination that matches nothing is answered BY the table, which
-  says so and hands the filters back.
-- **The chips are the ONLY place a filter shows.** The trigger says what the
-  dimension is, never what is chosen in it. The first version marked the
-  trigger with the value ("Statut · échoué") and repeated it as a chip one line
-  below — literally the same words twice, on a row of buttons that changed
-  width every time you filtered.
-- **Every dimension takes several values**, and that is what stops the chips
-  from being a duplicate: one chip per VALUE, each removable on its own, which
-  a trigger cannot express. The menu stays open while you tick.
-- **The state is in the URL, pushed, not replaced.** A filtered list is what
-  people paste to each other; and the same rule that gave modals real URLs
-  brings the same obligation — Back has to undo a filter.
-- **"Tous" is an item in the menu**, not the absence of one. A menu whose only
-  way back is the chip hides the way back inside another control.
+  ticked at all. A control never reads the results, and never rewrites what was
+  asked for.
+- **The operators are never written.** Values of one dimension are
+  alternatives, dimensions narrow each other — `(statut = échoué OU timeout) ET
+(type = agent)`, which is what the query does (`IN (…)` per dimension, `AND`
+  between them). No faceted filter anywhere spells that out: badges inside one
+  button and buttons side by side already say it.
+- **The state is in the URL**, pushed, not replaced: a filtered list is what
+  people paste to each other, and the rule that gave modals real URLs brings
+  the same obligation — Back has to undo a filter.
 - **The page's action is NOT in the toolbar.** It goes in `PageHeader`'s
-  `actions` slot at title height, like every other screen's — the recorded call
-  the reference's own `lt-actions` would have contradicted. What the end of the
-  toolbar row carries instead is the reference's `result-count`: how many rows
-  the filters left.
-- The count comes to the toolbar through a render prop on `RunList`
+  `actions` slot at title height, like every other screen's. What the end of the
+  toolbar row carries instead is the redesign reference's `result-count` and,
+  where the list is drawn two ways, the view toggle — shadcn's own slot there
+  holds column visibility, which is the same kind of thing.
+- The count reaches the toolbar through a render prop on `RunList`
   (`toolbar={(total) => …}`), because the query lives in the list. A page
   asking for the same rows again to count them is the duplicate
   `GET /api/runs` the dashboard already had to be cured of.
 
-Deviations from the reference, on purpose:
+Two pieces of the original we cannot have yet, both for want of an endpoint:
 
-- **No search field** (`lt-search`). `GET /api/runs` takes no text query, so
-  the box would either do nothing or filter one page of fifteen client-side and
-  call it a search. It waits for the endpoint, like the sortable heads and the
-  header's own search icon.
-- **Every dimension is a multi-select, including the narrow ones.** The
-  alternative was radio menus beside checkbox menus, differing for a reason
-  nobody can see: which parameters the endpoint happens to take as a list.
-  Squaring a tick with a wire that takes one value is the PAGE's job (two kinds
-  ticked is spelled "no kind parameter"), never the control's.
-- **No count badge on the trigger** (`lt-btn .lt-badge`). A count would say
-  "Statut 2" where the chips one line below already say WHICH two. The
-  reference's badge earns its place when the chip row can be scrolled away or
-  collapsed; ours never is.
-- **One empty state, not two.** The reference keeps `empty-list` (a bare icon
-  and a line, inside a list frame) beside `empty-state` (the rings). We keep
-  the rings for both, at two sizes: consistency between screens beats saving a
-  treatment inside one, and a second variant is a second thing to keep in step.
+- **The text search that opens shadcn's toolbar.** `GET /api/runs` takes no
+  text query, so the box would either do nothing or filter one page of fifteen
+  client-side and call it a search. Same reason as the sortable heads and the
+  header's own search icon. The integrations page is where it can land first:
+  its catalogue is already all in the browser.
+- **The per-value counts in the menu.** shadcn reads them off the rows it has
+  (`column.getFacetedUniqueValues()`); ours are paginated server-side, so a
+  count would describe the page rather than the list.
 
-The empty state itself is the reference's: the icon in a raised badge at the
-centre of three rings. A 40px glyph at 40% opacity on an empty card read as a
-rendering failure rather than as a state someone designed. Same props, so every
-screen that had one got it.
+The empty state is the redesign reference's (`empty-state`): the icon in a
+raised badge at the centre of three rings. A 40px glyph at 40% opacity on an
+empty card read as a rendering failure rather than as a state someone designed.
+Same props, so every screen that had one got it.
 
 **An empty list and a filtered list that finds nothing are different
 sentences.** The run screen says "no run matches these filters" and hands the
-filters back; only a genuinely empty list says there are no runs.
+filters back; only a genuinely empty list says there are no runs. The filters
+themselves never read the results: they stay clickable whatever the table
+holds.
 
 ## Schedules
 

@@ -1,60 +1,60 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The bar above a list: what is narrowing it, and how it is drawn.
+ * The bar above a list, built the way shadcn builds it.
  *
- * The reference calls it `lt-*` and draws it once for every list screen. Runs
- * wore two stacked tab strips instead, which read as navigation (they were
- * `Tabs`), cost a full row each, and could not grow a third dimension without
- * becoming a wall.
+ * This is a port of `DataTableFacetedFilter` + `DataTableToolbar` from the
+ * shadcn Tasks example (`apps/v4/app/(app)/examples/tasks/components/`), which
+ * is the reference implementation for filtering a table in the design system
+ * this app already uses. Two earlier versions of this file were inventions —
+ * the value on the trigger AND a chip repeating it below (the same words
+ * twice), then chips with "et"/"ou" spelled out between them (a control nobody
+ * has ever seen). The convention here is not ours to invent.
  *
- * **The chips are the only place a filter shows.** The trigger says what the
- * dimension IS, never what is chosen in it — that was tried, and with the chips
- * right underneath it was the same words twice, plus a row of buttons that
- * changed width every time you filtered. (The reference does mark its trigger,
- * but with a COUNT, which is not the value and only earns its place once the
- * chip row can be scrolled away. Ours never is.)
+ * What the pattern is:
  *
- * **Every dimension takes several values**, and that is what stops the chips
- * from being a duplicate: one chip per VALUE, each removable on its own, which
- * a trigger cannot express.
+ * - **A dashed outline button per dimension**, with a `+` and the dimension's
+ *   name. Dashed and `+` mean "a filter you can add" — that is the affordance,
+ *   and it is why the button reads as neutral when nothing is chosen.
+ * - **The chosen values live INSIDE that button**, as small badges after a
+ *   vertical rule: up to two of them, then "N sélectionnés". One place, no
+ *   second row, no duplication.
+ * - **The menu is a `Command`**: searchable, square checkboxes, several values
+ *   at once, and a centred "Effacer les filtres" at the bottom.
+ * - **One "Réinitialiser ✕"** at the end of the row when anything is filtered.
  *
- * **A tick adds, an untick removes, and nothing else happens.** Ticking every
- * value of a dimension is a legitimate state — it shows everything of that
- * kind — and the menu keeps showing exactly what was ticked. A previous version
- * was clever here: "all ticked narrows nothing, so store it as no filter". It
- * is true of the RESULTS and nonsense as an interaction — Kind has two values,
- * so ticking the second silently unticked the first, and Scope has one, so its
- * only box could never stay ticked at all. The mapping to what the endpoint
- * takes (one `kind`, so two ticks means no `kind` parameter) is the caller's
- * business and stays out of sight.
+ * And what the pattern deliberately does NOT do: write the operators. Values of
+ * one dimension are alternatives, dimensions narrow each other — `(statut =
+ * échoué OU timeout) ET (type = agent)` — and no faceted filter anywhere spells
+ * that out, because the badges sitting inside one button and the buttons
+ * sitting side by side already say it.
  *
- * The controls never read the results, either: a filter is clickable whatever
- * the table holds, and a combination that matches nothing is answered BY the
- * table, which says so and hands the filters back.
- *
- * **The state belongs in the URL**, pushed, not replaced: a filtered list is
- * what people paste to each other, and the rule that gave modals real URLs
- * brings the same obligation — Back has to undo a filter.
- *
- * What is NOT here: the page's own actions. They have a home — `PageHeader`'s
- * `actions` slot, at title height — and moving one down here would make Runs
- * the only screen whose primary button is not where every other screen's is.
+ * Two pieces of the original we cannot have yet, both for want of an endpoint:
+ * the text search that opens the toolbar (`GET /api/runs` takes no text query)
+ * and the per-value counts in the menu (shadcn reads them off the rows it has;
+ * ours are paginated server-side, so a count would describe the page rather
+ * than the list).
  */
 
-import type { ReactNode } from "react";
+import { Fragment, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { Check, ChevronDown, LayoutGrid, Rows3, X } from "lucide-react";
+import { Check, LayoutGrid, PlusCircle, Rows3, X } from "lucide-react";
 import { cn } from "@appstrate/ui/cn";
 import type { ListView } from "@/stores/list-view-store";
+import { toggleValue } from "@/lib/toggle-value";
+import { Badge } from "@appstrate/ui/components/badge";
+import { Button } from "@appstrate/ui/components/button";
+import { Separator } from "@appstrate/ui/components/separator";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@appstrate/ui/components/dropdown-menu";
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+  CommandSeparator,
+} from "@appstrate/ui/components/command";
+import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/components/popover";
 
 export interface FilterOption {
   value: string;
@@ -71,61 +71,100 @@ export interface FilterSpec {
   onChange: (values: string[]) => void;
 }
 
-/**
- * Ticking a value adds it, unticking removes it. That is the whole rule, and it
- * is exported so a test can hold it: the version that also collapsed "all
- * ticked" to "nothing ticked" made the second tick of a two-value dimension
- * untick the first, and a one-value dimension impossible to tick at all.
- */
-export function toggleValue(values: string[], value: string): string[] {
-  return values.includes(value) ? values.filter((v) => v !== value) : [...values, value];
-}
+/** Beyond this many, the button counts instead of naming. */
+const NAMED_VALUES = 2;
 
-function FilterMenu({ filter }: { filter: FilterSpec }) {
+function FacetedFilter({ filter }: { filter: FilterSpec }) {
   const { t } = useTranslation("common");
   const chosen = new Set(filter.values);
-
-  const toggle = (value: string) => filter.onChange(toggleValue(filter.values, value));
+  const selected = filter.options.filter((option) => chosen.has(option.value));
 
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger className="bg-card hover:bg-accent data-[state=open]:bg-accent inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border px-2.5 text-sm font-medium shadow-sm transition-colors">
-        {filter.label}
-        <ChevronDown className="text-muted-foreground size-3.5 shrink-0" />
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="min-w-44">
-        <DropdownMenuLabel>{filter.label}</DropdownMenuLabel>
-        <DropdownMenuSeparator />
-        {/* "All" is an item, not the absence of one: a menu whose only way back
-            is the chip row hides the way back inside another control. */}
-        <DropdownMenuItem onSelect={() => filter.onChange([])}>
-          <Check className={cn("size-4", chosen.size > 0 && "invisible")} />
-          {t("toolbar.any")}
-        </DropdownMenuItem>
-        {filter.options.map((option) => (
-          <DropdownMenuItem
-            key={option.value}
-            // The menu stays open: picking two statuses is one gesture, and a
-            // menu that closes on the first tick makes the second one a chore.
-            onSelect={(event) => {
-              event.preventDefault();
-              toggle(option.value);
-            }}
-          >
-            <Check className={cn("size-4", !chosen.has(option.value) && "invisible")} />
-            {option.label}
-          </DropdownMenuItem>
-        ))}
-      </DropdownMenuContent>
-    </DropdownMenu>
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button variant="outline" size="sm" className="h-8 border-dashed">
+          <PlusCircle />
+          {filter.label}
+          {selected.length > 0 && (
+            <>
+              <Separator orientation="vertical" className="mx-2 h-4" />
+              <Badge variant="secondary" className="rounded-sm px-1 font-normal lg:hidden">
+                {selected.length}
+              </Badge>
+              <div className="hidden gap-1 lg:flex">
+                {selected.length > NAMED_VALUES ? (
+                  <Badge variant="secondary" className="rounded-sm px-1 font-normal">
+                    {t("toolbar.selected", { count: selected.length })}
+                  </Badge>
+                ) : (
+                  selected.map((option) => (
+                    <Badge
+                      key={option.value}
+                      variant="secondary"
+                      className="rounded-sm px-1 font-normal"
+                    >
+                      {option.label}
+                    </Badge>
+                  ))
+                )}
+              </div>
+            </>
+          )}
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-52 p-0" align="start">
+        <Command>
+          <CommandInput placeholder={filter.label} />
+          <CommandList>
+            <CommandEmpty>{t("toolbar.noResults")}</CommandEmpty>
+            <CommandGroup>
+              {filter.options.map((option) => {
+                const isSelected = chosen.has(option.value);
+                return (
+                  <CommandItem
+                    key={option.value}
+                    onSelect={() => filter.onChange(toggleValue(filter.values, option.value))}
+                  >
+                    <div
+                      className={cn(
+                        "flex size-4 items-center justify-center rounded-[4px] border",
+                        isSelected
+                          ? "border-primary bg-primary text-primary-foreground"
+                          : "border-input [&_svg]:invisible",
+                      )}
+                    >
+                      <Check className="text-primary-foreground size-3.5" />
+                    </div>
+                    <span>{option.label}</span>
+                  </CommandItem>
+                );
+              })}
+            </CommandGroup>
+            {selected.length > 0 && (
+              <>
+                <CommandSeparator />
+                <CommandGroup>
+                  <CommandItem
+                    onSelect={() => filter.onChange([])}
+                    className="justify-center text-center"
+                  >
+                    {t("toolbar.clearFilters")}
+                  </CommandItem>
+                </CommandGroup>
+              </>
+            )}
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
   );
 }
 
 /**
- * Cards or table, for the lists the reference draws both ways (`view-toggle`).
- *
- * Two icons rather than two words: the choice is between two pictures of the
- * same data, and the pictures are what the icons are.
+ * Cards or table, for the lists the reference design draws both ways
+ * (`view-toggle`). shadcn's slot at this end of the row holds column
+ * visibility; ours holds the same kind of thing — how the list is drawn, not
+ * what it contains.
  */
 function ViewToggle({ view, onChange }: { view: ListView; onChange: (view: ListView) => void }) {
   const { t } = useTranslation("common");
@@ -176,61 +215,30 @@ export function ListToolbar({
   onViewChange?: (view: ListView) => void;
 }) {
   const { t } = useTranslation("common");
-
-  /** Every chosen value, across every dimension: one chip each. */
-  const chips = filters.flatMap((filter) =>
-    filter.values.map((value) => ({
-      key: `${filter.id}:${value}`,
-      filter,
-      value,
-      label: filter.options.find((o) => o.value === value)?.label ?? value,
-    })),
-  );
+  const isFiltered = filters.some((filter) => filter.values.length > 0);
 
   return (
-    <div className="mb-4 space-y-2">
-      <div className="flex flex-wrap items-center gap-2">
-        {filters.map((filter) => (
-          <FilterMenu key={filter.id} filter={filter} />
-        ))}
-        <div className="ml-auto flex shrink-0 items-center gap-3">
-          {count !== undefined && <span className="text-muted-foreground text-sm">{count}</span>}
-          {view && onViewChange && <ViewToggle view={view} onChange={onViewChange} />}
-        </div>
-      </div>
-
-      {chips.length > 0 && (
-        <div className="flex flex-wrap items-center gap-1.5">
-          {chips.map((chip) => (
-            <button
-              key={chip.key}
-              type="button"
-              onClick={() =>
-                chip.filter.onChange(chip.filter.values.filter((v) => v !== chip.value))
-              }
-              className="border-primary bg-primary-soft text-primary inline-flex items-center gap-1 rounded-full border py-0.5 pr-1.5 pl-2.5 text-xs font-medium"
-              aria-label={t("toolbar.removeFilter", {
-                filter: chip.filter.label,
-                value: chip.label,
-              })}
-            >
-              <span className="max-w-48 truncate">
-                {chip.filter.label} : {chip.label}
-              </span>
-              <X className="size-3 shrink-0 opacity-70" />
-            </button>
-          ))}
-          {chips.length > 1 && (
-            <button
-              type="button"
-              onClick={() => filters.forEach((f) => f.onChange([]))}
-              className="text-muted-foreground hover:text-foreground px-1.5 text-xs underline-offset-2 hover:underline"
-            >
-              {t("toolbar.clearAll")}
-            </button>
-          )}
-        </div>
+    <div className="mb-4 flex flex-wrap items-center gap-2">
+      {filters.map((filter) => (
+        <Fragment key={filter.id}>
+          <FacetedFilter filter={filter} />
+        </Fragment>
+      ))}
+      {isFiltered && (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-8"
+          onClick={() => filters.forEach((filter) => filter.onChange([]))}
+        >
+          {t("toolbar.reset")}
+          <X />
+        </Button>
       )}
+      <div className="ml-auto flex shrink-0 items-center gap-3">
+        {count !== undefined && <span className="text-muted-foreground text-sm">{count}</span>}
+        {view && onViewChange && <ViewToggle view={view} onChange={onViewChange} />}
+      </div>
     </div>
   );
 }

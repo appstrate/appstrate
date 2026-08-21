@@ -3,15 +3,17 @@
 /**
  * The list toolbar, through what it renders without being opened.
  *
- * The menus are Radix and stay unmounted until a pointer opens them, and there
- * is no DOM here — but the menus are the least of it. What the toolbar has to
- * get right is the part that is always visible: which filters read as ON, and
- * the chips, which are the only way to remove ONE filter without going back
- * into the menu that set it.
+ * It is a port of shadcn's `DataTableFacetedFilter` + `DataTableToolbar` (the
+ * Tasks example), so what is worth pinning is the part that survives a restyle:
+ * where the chosen values are shown, when the button starts counting instead of
+ * naming, and when the reset appears. The menu itself is a Radix popover and
+ * stays unmounted until a pointer opens it — there is no DOM here to open it
+ * with, so the ticking rule is tested through `toggleValue` directly.
  */
 
 import { describe, it, expect } from "bun:test";
-import { ListToolbar, toggleValue, type FilterSpec } from "../list-toolbar.tsx";
+import { ListToolbar, type FilterSpec } from "../list-toolbar.tsx";
+import { toggleValue } from "../../lib/toggle-value.ts";
 import { render } from "./run-fixture.tsx";
 
 function filters(over: Partial<Record<"status" | "kind", string[]>> = {}): FilterSpec[] {
@@ -48,7 +50,7 @@ describe("ticking a value", () => {
   });
 
   it("does nothing else — ticking the last box keeps every tick", () => {
-    // The version that also collapsed "all ticked" to "nothing ticked" was true
+    // A version that also collapsed "all ticked" to "nothing ticked" was true
     // of the RESULTS and nonsense as an interaction: Kind has two values, so
     // ticking the second silently unticked the first, and Scope has one, so its
     // only box could never stay ticked at all.
@@ -60,46 +62,43 @@ describe("ticking a value", () => {
 describe("with nothing filtered", () => {
   const html = render(<ListToolbar filters={filters()} />);
 
-  it("shows the dimensions and no chips", () => {
+  it("shows one button per dimension, and no reset", () => {
     expect(html).toContain("Statut");
     expect(html).toContain("Type");
-    expect(html).not.toContain("Statut :");
-    expect(html).not.toContain("Tout effacer");
+    expect(html).not.toContain("Réinitialiser");
   });
 });
 
-describe("the trigger", () => {
-  it("says what the dimension is, never what is chosen in it", () => {
-    // The chips are one line below and say exactly that; a trigger that
-    // repeated them was the same words twice, on a button that changed width
-    // every time you filtered.
+describe("the chosen values", () => {
+  it("live inside the dimension's own button", () => {
+    // One place, not a second row repeating it — which is what two earlier
+    // versions of this toolbar did, in two different ways.
     const html = render(<ListToolbar filters={filters({ status: ["failed"] })} />);
-    const triggerRow = html.slice(0, html.indexOf("Statut :"));
-    expect(triggerRow).not.toContain("échoué");
+    const button = html.slice(html.indexOf("Statut"), html.indexOf("Type"));
+    expect(button).toContain("échoué");
   });
-});
 
-describe("chips", () => {
-  it("gives each chosen VALUE its own, removable on its own", () => {
-    // What a trigger cannot express, and the reason the chips are not a
-    // duplicate: two statuses, two chips, and you can drop one of them.
+  it("are named while there are few of them", () => {
     const html = render(<ListToolbar filters={filters({ status: ["failed", "timeout"] })} />);
-    expect(html).toContain('aria-label="Retirer le filtre Statut : échoué"');
-    expect(html).toContain('aria-label="Retirer le filtre Statut : timeout"');
+    expect(html).toContain("échoué");
+    expect(html).toContain("timeout");
+    expect(html).not.toContain("sélectionnés");
   });
 
-  it("offers no clear-all for a single chip — the chip already is one", () => {
-    const html = render(<ListToolbar filters={filters({ status: ["failed"] })} />);
-    expect(html).not.toContain("Tout effacer");
+  it("give way to a count once there are more", () => {
+    const html = render(
+      <ListToolbar filters={filters({ status: ["failed", "timeout", "success"] })} />,
+    );
+    expect(html).toContain("3 sélectionnés");
   });
+});
 
-  it("offers one once there are several, across dimensions", () => {
+describe("the reset", () => {
+  it("appears as soon as anything is filtered, once for the whole row", () => {
     const html = render(
       <ListToolbar filters={filters({ status: ["failed"], kind: ["inline"] })} />,
     );
-    expect(html).toContain('aria-label="Retirer le filtre Statut : échoué"');
-    expect(html).toContain('aria-label="Retirer le filtre Type : Inline"');
-    expect(html).toContain("Tout effacer");
+    expect([...html.matchAll(/Réinitialiser/g)]).toHaveLength(1);
   });
 });
 
