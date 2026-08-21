@@ -30,8 +30,10 @@
  * the filters left.
  */
 
+import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { Check, ChevronDown, X } from "lucide-react";
+import { Check, ChevronDown, LayoutGrid, Rows3, X } from "lucide-react";
+import type { ListView } from "@/stores/list-view-store";
 import { cn } from "@appstrate/ui/cn";
 import {
   DropdownMenu,
@@ -101,13 +103,59 @@ function FilterMenu({ filter }: { filter: FilterSpec }) {
   );
 }
 
+/**
+ * Cards or table, for the lists the reference draws both ways (`view-toggle`).
+ *
+ * Two icons rather than two words: the choice is between two pictures of the
+ * same data, and the pictures are what the icons are.
+ */
+function ViewToggle({ view, onChange }: { view: ListView; onChange: (view: ListView) => void }) {
+  const { t } = useTranslation("common");
+  const options: Array<{ id: ListView; icon: typeof Rows3; label: string }> = [
+    { id: "cards", icon: LayoutGrid, label: t("toolbar.viewCards") },
+    { id: "table", icon: Rows3, label: t("toolbar.viewTable") },
+  ];
+
+  return (
+    <div className="bg-card inline-flex shrink-0 overflow-hidden rounded-md border shadow-sm">
+      {options.map(({ id, icon: Icon, label }) => (
+        <button
+          key={id}
+          type="button"
+          onClick={() => onChange(id)}
+          aria-label={label}
+          aria-pressed={view === id}
+          className={cn(
+            "grid size-8 place-items-center border-l p-0 transition-colors first:border-l-0",
+            view === id
+              ? "bg-primary-soft text-primary"
+              : "text-muted-foreground hover:bg-accent hover:text-foreground",
+          )}
+        >
+          <Icon className="size-4" />
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export function ListToolbar({
   filters,
   count,
+  view,
+  onViewChange,
 }: {
   filters: FilterSpec[];
-  /** How many rows the filters left, at the far end of the row. */
-  count?: number;
+  /**
+   * What the list amounts to, at the far end of the row — IN THE CALLER'S OWN
+   * WORDS. The toolbar counts nothing itself: it serves runs, schedules and
+   * packages, and a component that formats "3 runs" for all of them is a
+   * component that will one day say it about agents.
+   */
+  count?: ReactNode;
+  /** Present only on the lists the reference draws both as cards and as rows. */
+  view?: ListView;
+  onViewChange?: (view: ListView) => void;
 }) {
   const { t } = useTranslation("common");
   const active = filters.filter((f) => f.value !== undefined);
@@ -118,11 +166,10 @@ export function ListToolbar({
         {filters.map((filter) => (
           <FilterMenu key={filter.id} filter={filter} />
         ))}
-        {count !== undefined && (
-          <span className="text-muted-foreground ml-auto shrink-0 text-sm">
-            {t("toolbar.count", { count })}
-          </span>
-        )}
+        <div className="ml-auto flex shrink-0 items-center gap-3">
+          {count !== undefined && <span className="text-muted-foreground text-sm">{count}</span>}
+          {view && onViewChange && <ViewToggle view={view} onChange={onViewChange} />}
+        </div>
       </div>
 
       {active.length > 0 && (

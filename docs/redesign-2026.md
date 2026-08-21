@@ -217,10 +217,10 @@ Still open on the table, deliberately:
 - **Sortable heads.** The reference has them (`.th-sort`, `.th-sort.active svg`
   in `--accent`). `GET /api/runs` takes no sort parameter, so the head would
   either lie or sort one page of fifteen. It waits for the endpoint.
-- **A second column set per screen.** Runs and schedules have theirs; agents
-  and integrations are still card grids, and the reference keeps cards for
-  them too (`ac-*`, `rcard-*`) behind a `view-toggle`. That toggle, and the
-  preference behind it, is the next piece.
+- **Integrations** are the one list still card-only. That page is its own
+  (its own tabs, its own client-side search over the loaded catalogue), so it
+  is also where a real `lt-search` can land first — the data is already in the
+  browser there.
 - The heavy scenario pages at fifteen rows like the real screen does, so what
   it proves is pagination and the widest content, not volume in one viewport.
   The 200 rows are still the right fixture: they are what makes "Page 1 sur 14"
@@ -295,6 +295,28 @@ Two things the columns fixed rather than moved:
   strip, so a disabled schedule never said which agent it fires.
 - **A paused schedule shows no next run.** The database keeps `next_run_at`
   when a schedule is disabled; printing it promises a run that is not coming.
+
+## Packages, and the two views
+
+`components/packages-table.tsx` — the third column set, over the `CardItem` the
+cards already take, so agents, skills and MCP servers switch views without
+either side learning anything about the other.
+
+The reference keeps CARDS for this family (`ac-*`, `rcard-*`) and puts the table
+beside them behind a `view-toggle`, and it is right to. A card carries a
+description at a length you can read, which is what choosing an agent needs;
+the table is for the other moment — twenty of them, and you want to know which
+are system, which are running, at what version, down one column.
+
+- The preference is in **localStorage, not the URL**: a view is a habit, and a
+  link to a list should open on the reader's habit rather than impose the
+  sender's. One store for the whole family — someone who wants the table for
+  agents wants it for skills.
+- **No result count on that toolbar.** The count answers "how many did the
+  filters leave"; with nothing filtering it only repeats what is on screen.
+- The count, when there is one, is passed as the CALLER'S OWN WORDS. A toolbar
+  that formats "3 runs" for everyone is a toolbar that will one day say it
+  about agents — it did, for about ten minutes.
 
 ## Tokens
 
@@ -485,9 +507,8 @@ So the strategy the reference itself suggests:
    six screens to fix.
 5. **Order**: the table pattern (Runs first, most looked at) — DONE — then the
    list toolbar and the reference empty state — DONE — then the remaining
-   column sets: schedules DONE, agents and integrations left, and those two
-   need the `view-toggle` first because the reference keeps cards for them.
-   Then run detail (`rd-*`, the biggest single screen), then the command
+   column sets: schedules DONE, packages (agents, skills, MCP servers) DONE
+   behind the `view-toggle`, integrations left. Then run detail (`rd-*`, the biggest single screen), then the command
    palette (it gives the header's search icon its reason to exist), then Usage
    — the only screen with no reference at all, which is exactly why it is not
    first.

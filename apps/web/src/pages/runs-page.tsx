@@ -98,7 +98,9 @@ export function RunsPage() {
         user={scope}
         kind={kind}
         status={status}
-        toolbar={(total) => <ListToolbar filters={filters} count={total} />}
+        toolbar={(total) => (
+          <ListToolbar filters={filters} count={t("runs.count", { count: total })} />
+        )}
         // A filtered list that finds nothing has NOT run out of runs — it has
         // run out of matches, and the way out is the filter, not the agent.
         emptyState={

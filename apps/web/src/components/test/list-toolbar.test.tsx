@@ -85,18 +85,29 @@ describe("with two filters on", () => {
 });
 
 describe("the result count", () => {
-  it("says how many rows the filters left, after the last filter", () => {
-    const html = render(<ListToolbar filters={filters({ status: "failed" })} count={3} />);
+  it("prints the caller's words, after the last filter", () => {
+    // The toolbar counts nothing itself: it serves runs, schedules and
+    // packages, and one that formats "3 runs" for all of them would one day
+    // say it about agents.
+    const html = render(<ListToolbar filters={filters({ status: "failed" })} count="3 runs" />);
     expect(html).toContain("3 runs");
     // At the END of the row: it describes what the filters before it produced.
     expect(html.indexOf("3 runs")).toBeGreaterThan(html.lastIndexOf("Type"));
   });
 
-  it("says nothing when the caller has no count to give", () => {
+  it("says nothing when the caller has nothing to say", () => {
     expect(render(<ListToolbar filters={filters()} />)).not.toContain("runs");
   });
+});
 
-  it("counts in the singular when there is one", () => {
-    expect(render(<ListToolbar filters={filters()} count={1} />)).toContain("1 run");
+describe("the view toggle", () => {
+  it("appears only for a list that is drawn both ways", () => {
+    expect(render(<ListToolbar filters={filters()} />)).not.toContain("aria-pressed");
+  });
+
+  it("marks the view in use", () => {
+    const html = render(<ListToolbar filters={filters()} view="table" onViewChange={() => {}} />);
+    expect(html).toContain('aria-label="Vue tableau" aria-pressed="true"');
+    expect(html).toContain('aria-label="Vue cartes" aria-pressed="false"');
   });
 });

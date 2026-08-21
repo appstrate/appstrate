@@ -9,6 +9,9 @@ import { Button } from "@appstrate/ui/components/button";
 import { useAgents } from "../hooks/use-packages";
 import { useUnreadCountsByAgent } from "../hooks/use-notifications";
 import { PackageCard } from "../components/package-card";
+import { PackagesTable } from "../components/packages-table";
+import { ListToolbar } from "../components/list-toolbar";
+import { usePackageViewStore } from "../stores/list-view-store";
 import { PageHeader, type BreadcrumbEntry } from "../components/page-header";
 import { ImportModal } from "../components/import-modal";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
@@ -57,6 +60,9 @@ export function PackageTab({
   emptyExtraActions,
   headerContent,
 }: PackageTabProps) {
+  const view = usePackageViewStore((s) => s.view);
+  const setView = usePackageViewStore((s) => s.setView);
+
   if (isLoading) return <LoadingState />;
   if (error) return <ErrorState message={error.message} />;
 
@@ -82,11 +88,20 @@ export function PackageTab({
   return (
     <>
       {header}
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-        {items.map((item) => (
-          <PackageCard key={item.id} {...item} />
-        ))}
-      </div>
+      {/* No filters on this family yet, so no count either: the reference's
+          result count answers "how many did the filters leave", and with
+          nothing filtering it would only repeat what is on screen. The toolbar
+          is here for the view toggle. */}
+      <ListToolbar filters={[]} view={view} onViewChange={setView} />
+      {view === "table" ? (
+        <PackagesTable items={items} />
+      ) : (
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+          {items.map((item) => (
+            <PackageCard key={item.id} {...item} />
+          ))}
+        </div>
+      )}
     </>
   );
 }
