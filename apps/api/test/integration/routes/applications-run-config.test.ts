@@ -57,15 +57,40 @@ describe("GET /api/applications/:applicationId/packages/:scope/:name/run-config"
     const body = (await res.json()) as Record<string, unknown>;
     expect(body).toEqual({
       generation: { temperature: 0.2, reasoningLevel: "high" },
+      input: { values: {}, locked_fields: [] },
       modelId: "claude-sonnet",
       proxyId: null,
       version_pin: "1.2.3",
     });
-    // The agent's stored input values are deliberately absent: this endpoint
-    // is CLI-facing, and a CLI-triggered platform run has the server resolve
-    // the whole author -> editor -> schedule -> caller chain. Exposing them
-    // here would be a second source of truth for the same values.
+    // `input` carries the per-application layer, and it is NOT a second source
+    // of truth. This endpoint feeds `appstrate run @scope/agent`, which fetches
+    // the bundle and executes it LOCALLY — that path never reaches the server's
+    // resolver, so without these values it applies author defaults only and
+    // runs the agent with parameters the dashboard would not have used. Layers
+    // 3-4 stay server-owned; `resolveEffectiveInput` keeps one implementation.
     expect(body).not.toHaveProperty("config");
+  });
+
+  it("carries the stored values and locks the editor set", async () => {
+    await seedPackage({
+      orgId: ctx.orgId,
+      id: "@testorg/agent",
+      type: "agent",
+      draftManifest: { name: "@testorg/agent", version: "1.0.0", type: "agent" },
+    });
+    await db.insert(applicationPackages).values({
+      applicationId: ctx.defaultAppId,
+      packageId: "@testorg/agent",
+      inputSettings: { values: { folder: "archive" }, locked: ["folder"] },
+    });
+
+    const res = await app.request(
+      `/api/applications/${ctx.defaultAppId}/packages/@testorg/agent/run-config`,
+      { headers: authHeaders(ctx) },
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body.input).toEqual({ values: { folder: "archive" }, locked_fields: ["folder"] });
   });
 
   it("returns 404 when the package is not installed in the app", async () => {
