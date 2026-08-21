@@ -553,7 +553,7 @@ describe("RemoteFirecrackerOrchestrator misc calls", () => {
 
     expect(result).toBe("already_stopped");
     expect(calls[0]?.url).toBe(`${BASE_URL}${RUNNER_ROUTES.stopRun}`);
-    expect(bodyOf(calls[0] as RecordedCall)).toEqual({ runId: "r-1", timeoutSeconds: 5 });
+    expect(bodyOf(calls[0] as RecordedCall)).toEqual({ runId: "r-1" });
   });
 
   it("cleanupOrphans is a no-op that resolves to zeros WITHOUT any HTTP call", async () => {
