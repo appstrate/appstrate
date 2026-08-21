@@ -32,13 +32,24 @@ bump on each side.
 - `WorkloadResources.pidsLimit` (`./platform-types`) — no producer ever set it,
   so the Docker backend's own 256 default was always the effective policy.
 
+### Added
+
+- `MODEL_API_SHAPES` (`./sidecar-types`) — the runtime array `ModelApiShape` is
+  now derived from. See the `Changed` note below for why the type-only union
+  was not enough.
+- `OrchestratorRegistration.appliesWorkspaceTmpfsCap?: boolean`
+  (`./platform-types`) — lets a backend declare that it enforces the workspace
+  tmpfs size cap itself, so the prompt builder can tell the agent whether the
+  cap is real. Optional, so existing out-of-tree registrations stay assignable.
+
 ### Changed
 
 - `PlatformOrchestrator.stopWorkload(handle, timeoutSeconds?)` →
   `stopWorkload(handle)`, and `stopByRunId(runId, timeoutSeconds?)` →
   `stopByRunId(runId)`. The parameter was `undefined` at every production entry
   point, so every backend fell back to its own 5-second SIGTERM grace — now
-  stated once per backend as a named constant. Out-of-tree implementers stay
+  stated once, as a single `SIGTERM_GRACE_SECONDS` the docker, process and
+  firecracker backends all read. Out-of-tree implementers stay
   assignable: an implementation that still declares the optional parameter
   satisfies the narrowed signature.
 - `ModelApiShape` (`./sidecar-types`) is now derived from a new exported

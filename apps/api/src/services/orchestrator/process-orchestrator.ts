@@ -36,17 +36,11 @@ import type {
 } from "@appstrate/core/platform-types";
 import { buildBaseSidecarEnv } from "./sidecar-env.ts";
 import { drainStream, tailFileLines } from "./subprocess-util.ts";
+import { SIGTERM_GRACE_SECONDS } from "./constants.ts";
 
 const DATA_DIR = resolve("./data/runs");
 const SIDECAR_ENTRY = join(import.meta.dir, "../../../../../runtime-pi/sidecar/server.ts");
 const AGENT_ENTRY = join(import.meta.dir, "../../../../../runtime-pi/entrypoint.ts");
-
-/**
- * SIGTERM→SIGKILL grace on `stopWorkload`. Matches the Docker backend's
- * `stopContainer` default so a cancel behaves the same on either engine.
- * Backend policy, not a caller option — see `PlatformOrchestrator.stopWorkload`.
- */
-const SIGTERM_GRACE_SECONDS = 5;
 
 /**
  * Naming prefix for per-run shared workspace directories. Mirrors the

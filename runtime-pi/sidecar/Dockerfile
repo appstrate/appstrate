@@ -89,9 +89,11 @@ WORKDIR /build/runtime-pi/sidecar
 # `NODE_ENV !== "production"` precisely so a runtime misuse fails loudly in dev
 # and degrades to a silent no-op in production, where crashing a live run costs
 # more than a swallowed bad number. Without this flag the builder's ambient
-# (absent) NODE_ENV bakes in `undefined`, the guard is permanently true, and the
+# (absent) NODE_ENV bakes in `"development"`, the guard is permanently true, and the
 # shipped sidecar THROWS on exactly the path documented as defensive.
-# Verified: `bun build --compile` ignores runtime env; `--define` fixes it.
+# Verified empirically: `bun build --compile` ignores runtime env (a binary
+# built with NODE_ENV unset prints "development", not `undefined`, and setting
+# NODE_ENV=production at run time does not change it); `--define` fixes it.
 RUN bun build --compile --minify server.ts \
       --define 'process.env.NODE_ENV="production"' \
       --outfile sidecar
@@ -131,11 +133,15 @@ RUN apk add --no-cache libstdc++ libgcc ca-certificates docker-cli openssl
 
 COPY --from=builder --chmod=0555 /build/runtime-pi/sidecar/sidecar /usr/local/bin/sidecar
 
-# For SUBPROCESSES only (the sidecar shells out to `docker` to spawn runner
-# containers); the sidecar binary itself does NOT read this. Its own
-# `process.env.NODE_ENV` was substituted as a literal at bundle time by the
-# `--define` on the build above — an `ENV` here cannot reach it. Both are
-# needed, and neither replaces the other.
+# Belt-and-braces for any bundled dependency that reads NODE_ENV *dynamically*
+# (`process.env["NODE_ENV"]`, a destructure, an indirect lookup) — `--define`
+# rewrites the literal `process.env.NODE_ENV` textually and cannot reach those.
+# The sidecar's OWN reads are all static and were already substituted at bundle
+# time by the `--define` above, so this line does not serve them. It does not
+# serve subprocesses either: `docker` is a Go binary that ignores NODE_ENV and
+# passes its containers an explicit env map, and the process adapter spawns with
+# an explicit `env:` rather than inheriting. Cheap, and the only remaining hole
+# `--define` leaves open.
 ENV NODE_ENV=production
 
 USER nobody:nobody

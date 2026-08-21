@@ -4,6 +4,7 @@ import { hostname } from "node:os";
 import { logger } from "../lib/logger.ts";
 import { getEnv } from "@appstrate/env";
 import { classifyDockerNetworkError, createContainerWithImagePull } from "./docker-errors.ts";
+import { SIGTERM_GRACE_SECONDS } from "./orchestrator/constants.ts";
 
 const DOCKER_SOCKET = getEnv().DOCKER_SOCKET;
 const DOCKER_API_TIMEOUT_MS = 30_000;
@@ -537,8 +538,8 @@ export async function removeContainer(containerId: string): Promise<void> {
   await assertDockerOk(res, "remove container", [404]);
 }
 
-export async function stopContainer(containerId: string, timeout = 5): Promise<void> {
-  const res = await dockerFetch(`/containers/${containerId}/stop?t=${timeout}`, {
+export async function stopContainer(containerId: string): Promise<void> {
+  const res = await dockerFetch(`/containers/${containerId}/stop?t=${SIGTERM_GRACE_SECONDS}`, {
     method: "POST",
   });
 
@@ -549,10 +550,7 @@ export async function stopContainer(containerId: string, timeout = 5): Promise<v
  * Stop all containers belonging to a run, identified by label.
  * Returns "stopped" if any containers were found, "not_found" otherwise.
  */
-export async function stopContainersByRun(
-  runId: string,
-  timeout = 5,
-): Promise<"stopped" | "not_found"> {
+export async function stopContainersByRun(runId: string): Promise<"stopped" | "not_found"> {
   const filters = JSON.stringify({
     label: [`appstrate.run=${runId}`, "appstrate.managed=true"],
   });
@@ -560,7 +558,7 @@ export async function stopContainersByRun(
   if (!res.ok) return "not_found";
   const containers = (await res.json()) as Array<{ Id: string }>;
   if (containers.length === 0) return "not_found";
-  await Promise.allSettled(containers.map((c) => stopContainer(c.Id, timeout)));
+  await Promise.allSettled(containers.map((c) => stopContainer(c.Id)));
   return "stopped";
 }
 

@@ -129,26 +129,36 @@ export function filterSensitiveHeaders(
  * of the generic family rule because Anthropic keys appear upper-cased in some
  * upstream error text, and the generic rule is deliberately case-sensitive.
  *
- * NOTE the deliberate absence of `\b` on the `Bearer|Basic` and `sk-ant-`
- * rules. Those two literals are specific enough to need no word anchor, and an
- * anchor there is actively harmful: in a percent-encoded URL —
- * `?h=Authorization%3A%20Bearer%20sk-ant-…`, the shape upstream error bodies
- * and redirect targets actually carry — the `0` of `%20` sits immediately
- * before `B`, so `\b` never matches and the key ships verbatim to the operator
- * log. `\b` is kept ONLY on the generic `sk|pk|ghp|…` family rule, which is
- * where it earns its place (it is what keeps "skeletons" and "pkgroots"
- * readable).
+ * NOTE two deliberate deviations from the obvious regexes.
+ *
+ * First, `\b` is absent on the `Bearer|Basic` and `sk-ant-` rules. Those two
+ * literals are specific enough to need no word anchor, and an anchor there is
+ * actively harmful: in percent-encoded text the `0` of `%20` sits immediately
+ * before `B`, so `\b` never matches. `\b` is kept ONLY on the generic
+ * `sk|pk|ghp|…` family rule, which is where it earns its place (it is what
+ * keeps "skeletons" and "pkgroots" readable).
+ *
+ * Second, the separator groups accept percent-encoded forms (`%20` for space,
+ * `%3A`/`%3D`/`%22`/`%27` for `:`/`=`/`"`/`'`). Dropping `\b` alone was NOT
+ * enough and the earlier comment here wrongly claimed otherwise: `%20` is not
+ * `\s`, so `(Bearer|Basic)\s+` could not match `Bearer%20<token>` with or
+ * without the anchor. That shape — an upstream error body or a redirect target
+ * echoing `?h=Authorization%3A%20Bearer%20…` — is exactly what these rules
+ * exist for, and only `sk-ant-` keys were being caught in it; an opaque
+ * Vertex/Azure/generic OAuth bearer shipped verbatim to the operator log.
+ * Each separator alternative starts with a distinct character (`%` is in none
+ * of the literal classes), so the groups stay unambiguous and linear-time.
  */
 export function scrubSecretMaterial(text: string): string {
   return text
-    .replace(/(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]+/gi, "$1 [redacted]")
+    .replace(/(Bearer|Basic)(?:\s|%20)+[A-Za-z0-9._~+/=-]+/gi, "$1 [redacted]")
     .replace(/\beyJ[A-Za-z0-9._-]{10,}/g, "[redacted-jwt]")
     .replace(/sk-ant-[A-Za-z0-9._-]+/gi, "[redacted-key]")
     .replace(/\b(sk|pk|ghp|gho|ghs|xox[baprs])[-_][A-Za-z0-9._-]{6,}/g, "[redacted-key]")
     .replace(/\bAKIA[A-Z0-9]{12,}/g, "[redacted-key]")
     .replace(/\bya29\.[A-Za-z0-9._-]{6,}/g, "[redacted-key]")
     .replace(
-      /\b(token|secret|password|api[_-]?key|authorization|access[_-]?token|refresh[_-]?token)(["'\s:=]+)[^\s"',&]+/gi,
+      /\b(token|secret|password|api[_-]?key|authorization|access[_-]?token|refresh[_-]?token)((?:["'\s:=]|%20|%3A|%3D|%22|%27)+)[^\s"',&]+/gi,
       "$1$2[redacted]",
     );
 }

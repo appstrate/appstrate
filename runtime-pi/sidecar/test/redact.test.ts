@@ -154,12 +154,17 @@ describe("scrubSecretMaterial", () => {
     );
   });
 
-  // Regression: the first version of this function put `\b` on the
-  // `Bearer|Basic` and `sk-ant-` rules. In a percent-encoded URL the `0` of
-  // `%20` sits immediately before the literal, so the anchor never matched and
-  // the key shipped verbatim to the operator log — a LEAK the predecessor
-  // (unanchored) did not have. These are the exact shapes upstream error
-  // bodies and redirect targets carry.
+  // Regression, in two parts, because the first fix was incomplete.
+  //
+  // 1. The first version put `\b` on the `Bearer|Basic` and `sk-ant-` rules.
+  //    In percent-encoded text the `0` of `%20` sits immediately before the
+  //    literal, so the anchor never matched and the key shipped verbatim.
+  // 2. Dropping `\b` was NOT sufficient, and the commit that did it claimed
+  //    otherwise. `%20` is not `\s`, so `(Bearer|Basic)\s+` still could not
+  //    match `Bearer%20<token>` — the assertions below only passed because
+  //    every fixture token began with `sk-ant-`, which its own rule catches.
+  //    Hence the OPAQUE token cases: they fail unless the separator groups
+  //    themselves accept the percent-encoded forms.
   it("masks credentials that are not preceded by a word boundary", () => {
     const key = "sk-ant-api03-9fK2mQzXbT4LpR7wV";
     expect(
@@ -168,6 +173,20 @@ describe("scrubSecretMaterial", () => {
     expect(scrubSecretMaterial(`/cb#Bearer%20${key}`)).not.toContain(key);
     expect(scrubSecretMaterial(`a${key}`)).not.toContain(key);
     expect(scrubSecretMaterial("_Bearer tokABC123xyz")).not.toContain("tokABC123xyz");
+  });
+
+  it("masks percent-encoded credentials that no key-shape rule would catch", () => {
+    // Deliberately opaque: matches no vendor prefix, no JWT header, no AWS or
+    // Google shape. Only the separator handling can redact this.
+    const opaque = "A1b2C3d4E5f6G7h8I9j0";
+    expect(
+      scrubSecretMaterial(`https://api.x/cb?h=Authorization%3A%20Bearer%20${opaque}`),
+    ).not.toContain(opaque);
+    expect(scrubSecretMaterial(`/cb#Bearer%20${opaque}`)).not.toContain(opaque);
+    expect(scrubSecretMaterial(`x?a=Basic%20${opaque}`)).not.toContain(opaque);
+    expect(scrubSecretMaterial(`/cb?access_token%3D${opaque}&next=1`)).not.toContain(opaque);
+    // The surviving text still tells the operator which header was involved.
+    expect(scrubSecretMaterial(`/cb?access_token%3D${opaque}&next=1`)).toContain("next=1");
   });
 
   it("leaves prose that merely starts with a key prefix alone", () => {

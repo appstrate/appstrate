@@ -713,7 +713,6 @@ export interface ApiCallConfig {
    * Present only when it differs from {@link ApiCallConfig.toolName}.
    */
   legacyToolName?: string;
-  /** Resumable upload protocols this auth's surface supports (open list). */
   /** Upload-protocol identifiers (open set; reserved values in RESERVED_INTEGRATION_UPLOAD_PROTOCOLS). */
   uploadProtocols: string[];
   /**

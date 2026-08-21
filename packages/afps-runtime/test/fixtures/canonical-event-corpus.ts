@@ -17,22 +17,22 @@
  * `$id` hosts (404, see that module), so it guarded a shape nobody could read.
  * The guard is now the sole definition.
  *
- * ## `violates`
+ * ## Labels
  *
- * A fixture that puts a **wrong-typed value** at a field names that field in
- * `violates`. This used to drive a mechanical coverage guard: the schema suite
- * derived the constrained field paths from the generated documents (every
- * subschema carrying `type` or `enum`) and failed unless each was named by a
- * fixture — which is how `durationMs`, `usage`'s inner counters and
- * `progress`/`error`'s `data` were caught going un-exercised. With no
- * machine-readable schema left, that set cannot be derived, and hand-writing it
- * would recreate exactly the maintained-by-inspection list the guard replaced.
- * `violates` is therefore documentation now: it says which constraint a fixture
- * is there to exercise, so adding a constraint to the guard means adding a
- * fixture that names it.
+ * Each fixture's `label` names the constraint it exercises — e.g.
+ * "memory.added — numeric content" is the wrong-typed-value case for
+ * `content`, and "— missing content" is the omission case. Adding a
+ * constraint to the guard means adding a fixture whose label names it.
  *
- * Omission fixtures (a missing required field) deliberately carry no
- * `violates`: they exercise presence, not the field's type constraint.
+ * There was a `violates` field restating that in machine-readable form. It
+ * drove a mechanical coverage guard: the schema suite derived the constrained
+ * field paths from the generated documents (every subschema carrying `type` or
+ * `enum`) and failed unless each was named by a fixture — which is how
+ * `durationMs`, `usage`'s inner counters and `progress`/`error`'s `data` were
+ * caught going un-exercised. With no machine-readable schema left, that set
+ * cannot be derived, and hand-writing it would recreate exactly the
+ * maintained-by-inspection list the guard replaced. The field was then a
+ * second, unread copy of what `label` already says, so it is gone.
  */
 
 import type { RunEvent } from "@afps-spec/types";
@@ -45,12 +45,6 @@ export interface CanonicalEventFixture {
   readonly event: RunEvent;
   /** Expected verdict from `isCanonicalRunEvent`. */
   readonly valid: boolean;
-  /**
-   * Dotted path (within the CloudEvent `data` projection) at which this
-   * fixture places a wrong-typed value. Documents which constraint the
-   * fixture exercises — see the module doc.
-   */
-  readonly violates?: string;
 }
 
 /**
@@ -83,13 +77,11 @@ export const CANONICAL_EVENT_CORPUS: readonly CanonicalEventFixture[] = [
     label: "memory.added — numeric content",
     event: { ...base, type: "memory.added", content: 42 },
     valid: false,
-    violates: "content",
   },
   {
     label: "memory.added — unknown scope",
     event: { ...base, type: "memory.added", content: "x", scope: "global" },
     valid: false,
-    violates: "scope",
   },
 
   // --- pinned.set -----------------------------------------------------
@@ -134,7 +126,6 @@ export const CANONICAL_EVENT_CORPUS: readonly CanonicalEventFixture[] = [
     label: "pinned.set — numeric key",
     event: { ...base, type: "pinned.set", key: 42, content: 1 },
     valid: false,
-    violates: "key",
   },
   {
     label: "pinned.set — empty key",
@@ -145,7 +136,6 @@ export const CANONICAL_EVENT_CORPUS: readonly CanonicalEventFixture[] = [
     label: "pinned.set — unknown scope",
     event: { ...base, type: "pinned.set", key: "k", content: 1, scope: "everyone" },
     valid: false,
-    violates: "scope",
   },
 
   // --- output.emitted -------------------------------------------------
@@ -180,7 +170,6 @@ export const CANONICAL_EVENT_CORPUS: readonly CanonicalEventFixture[] = [
     label: "log.written — unknown level",
     event: { ...base, type: "log.written", level: "debug", message: "x" },
     valid: false,
-    violates: "level",
   },
   {
     label: "log.written — missing message",
@@ -191,7 +180,6 @@ export const CANONICAL_EVENT_CORPUS: readonly CanonicalEventFixture[] = [
     label: "log.written — numeric message",
     event: { ...base, type: "log.written", level: "warn", message: 42 },
     valid: false,
-    violates: "message",
   },
 
   // --- appstrate.progress ---------------------------------------------
@@ -214,19 +202,16 @@ export const CANONICAL_EVENT_CORPUS: readonly CanonicalEventFixture[] = [
     label: "appstrate.progress — numeric message",
     event: { ...base, type: "appstrate.progress", message: 42 },
     valid: false,
-    violates: "message",
   },
   {
     label: "appstrate.progress — string data",
     event: { ...base, type: "appstrate.progress", message: "m", data: "str" },
     valid: false,
-    violates: "data",
   },
   {
     label: "appstrate.progress — null data",
     event: { ...base, type: "appstrate.progress", message: "m", data: null },
     valid: false,
-    violates: "data",
   },
 
   // --- appstrate.error -------------------------------------------------
@@ -249,19 +234,16 @@ export const CANONICAL_EVENT_CORPUS: readonly CanonicalEventFixture[] = [
     label: "appstrate.error — numeric message",
     event: { ...base, type: "appstrate.error", message: 42 },
     valid: false,
-    violates: "message",
   },
   {
     label: "appstrate.error — numeric data",
     event: { ...base, type: "appstrate.error", message: "m", data: 42 },
     valid: false,
-    violates: "data",
   },
   {
     label: "appstrate.error — array data",
     event: { ...base, type: "appstrate.error", message: "m", data: [] },
     valid: false,
-    violates: "data",
   },
 
   // --- appstrate.metric ------------------------------------------------
@@ -305,25 +287,21 @@ export const CANONICAL_EVENT_CORPUS: readonly CanonicalEventFixture[] = [
     label: "appstrate.metric — scalar usage",
     event: { ...base, type: "appstrate.metric", usage: 42 },
     valid: false,
-    violates: "usage",
   },
   {
     label: "appstrate.metric — array usage",
     event: { ...base, type: "appstrate.metric", usage: [] },
     valid: false,
-    violates: "usage",
   },
   {
     label: "appstrate.metric — string input_tokens",
     event: { ...base, type: "appstrate.metric", usage: { input_tokens: "5" } },
     valid: false,
-    violates: "usage.input_tokens",
   },
   {
     label: "appstrate.metric — null output_tokens",
     event: { ...base, type: "appstrate.metric", usage: { output_tokens: null } },
     valid: false,
-    violates: "usage.output_tokens",
   },
   {
     label: "appstrate.metric — array cache_creation_input_tokens",
@@ -333,7 +311,6 @@ export const CANONICAL_EVENT_CORPUS: readonly CanonicalEventFixture[] = [
       usage: { cache_creation_input_tokens: [] },
     },
     valid: false,
-    violates: "usage.cache_creation_input_tokens",
   },
   {
     label: "appstrate.metric — object cache_read_input_tokens",
@@ -343,31 +320,26 @@ export const CANONICAL_EVENT_CORPUS: readonly CanonicalEventFixture[] = [
       usage: { cache_read_input_tokens: {} },
     },
     valid: false,
-    violates: "usage.cache_read_input_tokens",
   },
   {
     label: "appstrate.metric — negative cost",
     event: { ...base, type: "appstrate.metric", cost: -1 },
     valid: false,
-    violates: "cost",
   },
   {
     label: "appstrate.metric — string cost",
     event: { ...base, type: "appstrate.metric", cost: "0.5" },
     valid: false,
-    violates: "cost",
   },
   {
     label: "appstrate.metric — string durationMs",
     event: { ...base, type: "appstrate.metric", durationMs: "later" },
     valid: false,
-    violates: "durationMs",
   },
   {
     label: "appstrate.metric — array durationMs alongside a valid cost",
     event: { ...base, type: "appstrate.metric", cost: 0.5, durationMs: [] },
     valid: false,
-    violates: "durationMs",
   },
 ];
 

@@ -1300,8 +1300,8 @@ if (orphans.length === 0) {
   console.log(`\n  Endpoints registered in code but missing from the spec (${orphans.length}):`);
   for (const ep of orphans) console.log(`    - ${ep}`);
   console.log(
-    `\n  Either document the endpoint in apps/api/src/openapi/paths/ + add it to ` +
-      `expectedEndpoints, or add a justified entry to CODE_TO_SPEC_ALLOWLIST in this file.`,
+    `\n  Either document the endpoint in apps/api/src/openapi/paths/, or add a ` +
+      `justified entry to CODE_TO_SPEC_ALLOWLIST in this file.`,
   );
 }
 
@@ -1411,6 +1411,36 @@ if (undocumentedInCode.length === 0) {
     `\n  Either delete the path entry from apps/api/src/openapi/paths/ (or the ` +
       `module's openApiPaths()), or add a justified entry to SPEC_ONLY_ALLOWLIST ` +
       `in this file.`,
+  );
+}
+
+// Both allowlists are hand-maintained sets of exemptions, and an exemption that
+// no longer applies is the failure mode the deleted `expectedEndpoints` array
+// used to cover from the other direction: SPEC_ONLY_ALLOWLIST names endpoints
+// §5b must not flag, so a documented endpoint that gets deleted from the spec
+// stops being enumerated by ANY check here — the only remaining signal is
+// `detect:breaking` against the committed baseline, which a legitimate
+// `openapi:baseline` regeneration wipes. Assert both sets stay live. This is
+// the same contract §5's ALLOWED_SKIP_FILES and §7's staleExempt already
+// enforce for their own exemption lists.
+const staleSpecOnly = [...SPEC_ONLY_ALLOWLIST].filter((ep) => !specEndpoints.has(ep)).sort();
+const staleCodeToSpec = [...CODE_TO_SPEC_ALLOWLIST].filter((ep) => !codeEndpoints.has(ep)).sort();
+
+if (staleSpecOnly.length === 0 && staleCodeToSpec.length === 0) {
+  console.log(`  OK — both endpoint allowlists are free of stale entries.`);
+} else {
+  exitCode = 1;
+  for (const [label, stale, set] of [
+    ["SPEC_ONLY_ALLOWLIST", staleSpecOnly, "the spec"],
+    ["CODE_TO_SPEC_ALLOWLIST", staleCodeToSpec, "code"],
+  ] as const) {
+    if (stale.length === 0) continue;
+    console.log(`\n  Stale ${label} entries — no longer present in ${set} (${stale.length}):`);
+    for (const ep of stale) console.log(`    - ${ep}`);
+  }
+  console.log(
+    `\n  Delete the stale entries. An exemption that outlives its endpoint hides ` +
+      `the endpoint's later removal from every check in this script.`,
   );
 }
 

@@ -167,10 +167,10 @@ function isJsonObject(value: unknown): value is Record<string, unknown> {
 
 /**
  * A number the wire can actually carry. `NaN` and `±Infinity` are
- * `number`s in JS, but `JSON.stringify` turns them into `null` — which
- * fails the published `type: "number"` constraint. An event carrying one
- * is therefore NOT canonical, even though an in-memory JSON Schema
- * validator (ajv) would accept the pre-serialization value.
+ * `number`s in JS, but `JSON.stringify` turns them into `null`, so a
+ * consumer never receives the value the producer held. An event carrying
+ * one is therefore NOT canonical, even though the in-memory value passes
+ * a `typeof x === "number"` check.
  */
 function isWireNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);

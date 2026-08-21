@@ -72,6 +72,7 @@ import type {
 } from "@appstrate/core/platform-types";
 import { logger } from "./runner/logger.ts";
 import { buildBaseSidecarEnv } from "../../services/orchestrator/sidecar-env.ts";
+import { SIGTERM_GRACE_SECONDS } from "../../services/orchestrator/constants.ts";
 import {
   drainStream,
   spawnCollect,
@@ -142,15 +143,6 @@ const CONSOLE_ARCHIVE_MAX_FILES = 100;
 /** How often the exit reaper sweeps {@link FirecrackerOrchestrator.vms} (ms). */
 const EXIT_REAPER_INTERVAL_MS = 60_000;
 
-/**
- * SIGTERM→SIGKILL grace when stopping a microVM. Matches the Docker and
- * process backends so a cancel behaves the same whichever engine served the
- * run. Backend policy, not a caller option: `stopWorkload`/`stopByRunId` used
- * to accept a `timeoutSeconds`, but no production caller ever passed one — the
- * platform always called them with a single argument — so the parameter only
- * ever selected this same default.
- */
-const SIGTERM_GRACE_SECONDS = 5;
 /**
  * Attempts for transiently-failing teardown host ops (TAP delete, cgroup
  * rmdir). Kept small: the only legitimate transient is the kernel still
