@@ -32,7 +32,7 @@ describe("requireAgent (via agent config route)", () => {
     const res = await app.request("/api/agents/@testorg/my-agent/config", {
       method: "PUT",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify({}),
+      body: JSON.stringify({ values: {}, locked_fields: [] }),
     });
     expect(res.status).toBe(200);
   });

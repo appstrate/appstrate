@@ -68,11 +68,17 @@ export const modelIdSchema = z.object({
  * design); `locked_fields` names the input fields no caller may set at
  * launch. Both are full replacements, not patches: the editor form owns the
  * whole document, so an omitted key means "cleared", never "unchanged".
+ *
+ * Both members are therefore MANDATORY and the object is `.strict()`: a body
+ * that omits one, or that carries an unknown key, is a 400 rather than a
+ * silent erasure of the stored values and locks.
  */
-export const agentInputSettingsSchema = z.object({
-  values: z.record(z.string(), z.unknown()).default({}),
-  locked_fields: z.array(z.string().min(1)).default([]),
-});
+export const agentInputSettingsSchema = z
+  .object({
+    values: z.record(z.string(), z.unknown()),
+    locked_fields: z.array(z.string().min(1)),
+  })
+  .strict();
 
 /**
  * Parse the `actor_type` / `actor_id` query-param pair shared by the

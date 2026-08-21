@@ -15,6 +15,7 @@
 import { describe, it, expect } from "bun:test";
 import {
   MIGRATED_SCHEMA_VERSION,
+  blockingCollisions,
   hasConfigReference,
   hasConfigSection,
   inputPropertyNames,
@@ -145,6 +146,28 @@ describe("mergeConfigIntoInput — collisions", () => {
     expect(wrapperOf(manifest)["file_constraints"]).toBeUndefined();
     expect(report.uiHintsCarried).toEqual([]);
     expect(report.fileConstraintsCarried).toEqual([]);
+  });
+});
+
+describe("blockingCollisions", () => {
+  // `application_packages.config` is never rewritten, so a collided name's
+  // stored value survives typed by the property the merge just dropped.
+  const collisions = mergeConfigIntoInput(
+    baseManifest({
+      input: { schema: { type: "object", properties: { mode: { type: "integer" } } } },
+      config: { schema: { type: "object", properties: { mode: { type: "string" } } } },
+    }),
+  ).report.collisions;
+
+  it("blocks a collision whose name carries a stored value", () => {
+    // Stored `{ mode: "fast" }` now validates against `{type:"integer"}`: every
+    // launch 400s and `PUT …/config` refuses the same value.
+    expect(blockingCollisions(collisions, ["mode"])).toEqual(["mode"]);
+  });
+
+  it("leaves a collision with no stored value informational", () => {
+    expect(blockingCollisions(collisions, [])).toEqual([]);
+    expect(blockingCollisions(collisions, ["other"])).toEqual([]);
   });
 });
 

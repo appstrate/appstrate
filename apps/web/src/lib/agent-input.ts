@@ -167,6 +167,23 @@ export function initialInputValues(
 }
 
 /**
+ * Seed for a launch form whose SCHEMA can still change under it — the
+ * run-with-options modal, where the version selector re-pins the wrapper after
+ * the state has been created.
+ *
+ * The two layers behind a field have different lifetimes: the editor's stored
+ * `values` live on the application row and are version-independent, while an
+ * author `default` belongs to the schema of the version being launched. Seeding
+ * a default would therefore freeze the version selected at open time onto every
+ * later pick; the version-pinned wrapper supplies its own defaults through the
+ * form's normal rendering path instead. Locked keys are dropped, as everywhere
+ * else: the run route refuses them (400 `locked_input_field`).
+ */
+export function storedInputValues(settings: AgentInputSettings): Record<string, unknown> {
+  return withoutLockedFields(settings.values, settings.locked_fields);
+}
+
+/**
  * Compact, unambiguous rendering of a resolved value for a read-only display.
  * `undefined` means no layer supplies one.
  */

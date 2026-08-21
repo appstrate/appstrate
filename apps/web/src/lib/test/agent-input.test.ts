@@ -19,6 +19,7 @@ import {
   initialInputValues,
   partitionInputFields,
   resolvedInputDefaults,
+  storedInputValues,
   subsetWrapper,
   withoutLockedFields,
   type AgentInputSettings,
@@ -145,6 +146,29 @@ describe("initialInputValues", () => {
       query: "hello",
     });
     expect(seeded).toEqual({ query: "hello" });
+  });
+});
+
+describe("storedInputValues", () => {
+  // The run-with-options modal seeds from this ONCE and then lets the user
+  // re-pin the version. Anything seeded here rides out as caller input — the
+  // top precedence layer — so it must not carry a fact that belongs to the
+  // version the modal happened to open on.
+  it("omits the author default, leaving it to the selected version's schema", () => {
+    // `folder` has `default: "inbox"` in WRAPPER and no stored value.
+    expect(storedInputValues(settings({ values: { limit: 10 } }))).toEqual({ limit: 10 });
+  });
+
+  it("keeps the stored value, which is version-independent", () => {
+    expect(storedInputValues(settings({ values: { folder: "archive" } }))).toEqual({
+      folder: "archive",
+    });
+  });
+
+  it("drops a stored value the caller is no longer allowed to set", () => {
+    expect(
+      storedInputValues(settings({ values: { folder: "archive" }, locked_fields: ["folder"] })),
+    ).toEqual({});
   });
 });
 

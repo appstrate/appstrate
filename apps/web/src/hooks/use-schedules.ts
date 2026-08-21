@@ -163,7 +163,7 @@ export interface ScheduleFormDeps {
    * consumer needing those reads them off this same object rather than a
    * second prop that could drift from it.
    */
-  inputWrapper: AgentDetail["input"] | undefined;
+  inputWrapper: AgentDetail["input"];
   persistedModelId: string | null;
   persistedGenerationConfig: ModelGenerationSettings | null;
   persistedProxyId: string | null;
@@ -185,7 +185,9 @@ export interface ScheduleFormDeps {
 /**
  * Aggregates the agent-detail / model / proxy lookups that both
  * `ScheduleCreatePage` and `ScheduleEditPage` feed into `<ScheduleForm>`.
- * Returns `null` while inputs aren't ready or no agent is selected.
+ * Returns `null` until the agent detail has landed — or when no agent is
+ * selected — so a consumer can never mount a form on settings it does not
+ * have yet.
  *
  * `version` (#770) pins the agent-detail projection to a published version so
  * the input / integrations / skills the form renders match the version the run
@@ -199,13 +201,19 @@ export function useScheduleFormDeps(
   const { data: agentModel } = useAgentModel(packageId);
   const { data: agentProxy } = useAgentProxy(packageId);
 
-  if (!packageId) return null;
+  // Null until the AGENT DETAIL itself lands, not merely until an agent is
+  // picked: `ScheduleForm` seeds its input state once, in a `useState`
+  // initialiser, and a form mounted on empty settings would seed a field that
+  // has since been locked — unremovable through the UI and refused on save
+  // (400 `locked_input_field`). `key={schedule.id}` means no remount when the
+  // detail arrives, so the only safe answer while it is in flight is "not yet".
+  if (!packageId || !agentDetail) return null;
 
-  const integrationDeps = (agentDetail?.dependencies?.integrations ?? []).map((d) => ({
+  const integrationDeps = (agentDetail.dependencies?.integrations ?? []).map((d) => ({
     id: d.id,
     ...(d.tools ? { tools: d.tools } : {}),
   }));
-  const skillDeps = (agentDetail?.dependencies?.skills ?? []).map((s) => ({
+  const skillDeps = (agentDetail.dependencies?.skills ?? []).map((s) => ({
     id: s.id,
     ...(s.version ? { version: s.version } : {}),
     ...(s.name ? { name: s.name } : {}),
@@ -213,12 +221,12 @@ export function useScheduleFormDeps(
   return {
     // The detail's own object — a fresh literal here would change identity on
     // every render and defeat the launch form's memoized partition.
-    inputWrapper: agentDetail?.input,
+    inputWrapper: agentDetail.input,
     persistedModelId: agentModel?.modelId ?? null,
     persistedGenerationConfig: agentModel?.generation ?? null,
     persistedProxyId: agentProxy?.proxyId ?? null,
-    persistedVersion: agentDetail?.version ?? null,
-    hasFileInputs: schemaHasFileFields(agentDetail?.input.schema),
+    persistedVersion: agentDetail.version ?? null,
+    hasFileInputs: schemaHasFileFields(agentDetail.input.schema),
     agentIntegrations: integrationDeps,
     skills: skillDeps,
   };

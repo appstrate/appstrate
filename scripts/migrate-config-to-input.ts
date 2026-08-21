@@ -30,6 +30,12 @@
  * verbatim — same keys, no transformation) nor `application_packages.locked_fields`
  * (no agent may silently acquire a lock it never had). Both are asserted.
  *
+ * That carry-over is only safe while the surviving `input` property means what
+ * the stored value was written against. On a property-name COLLISION it does
+ * not: the merge keeps `input`'s property and drops `config`'s, which is the
+ * one that typed the value. `--apply` therefore refuses while any collided name
+ * still has a stored value — see `blockingCollisions`.
+ *
  * WHY REPUBLISH AND NOT UPDATE
  *
  * `package_versions.manifest` is jsonb and technically updatable, but the
@@ -80,6 +86,7 @@ import { updateOrgItem } from "../apps/api/src/services/package-items/crud.ts";
 import { updateSchedule } from "../apps/api/src/services/scheduler.ts";
 import {
   asObject,
+  blockingCollisions,
   hasConfigReference,
   hasConfigSection,
   inputPropertyNames,
@@ -217,6 +224,12 @@ interface AgentFinding {
   schedules: ScheduleRow[];
   /** Stored editor values whose key has no property in the migrated `input`. */
   orphanStoredValueKeys: string[];
+  /**
+   * Collided property names that also carry a stored editor value — the merge
+   * dropped the `config` property that typed it, so the value now validates
+   * against `input`'s schema. Blocks `--apply`.
+   */
+  collidingStoredValueKeys: string[];
 }
 
 interface Inventory {
@@ -333,14 +346,20 @@ async function buildInventory(): Promise<Inventory> {
     const migratedProps = new Set(
       inputPropertyNames(merged ? merged.manifest : (draftManifest ?? {})),
     );
-    const orphanStoredValueKeys = [
+    const storedValueKeys = [
       ...new Set(
         installRows
           .filter((i) => i.packageId === agent.id)
-          .flatMap((i) => Object.keys(asObject(i.config) ?? {}))
-          .filter((key) => !migratedProps.has(key)),
+          .flatMap((i) => Object.keys(asObject(i.config) ?? {})),
       ),
     ];
+    const orphanStoredValueKeys = storedValueKeys.filter((key) => !migratedProps.has(key));
+    // A collided name whose stored value survives is unrecoverable by script —
+    // see `blockingCollisions`. Reported as an anomaly, not a warning.
+    const collidingStoredValueKeys = blockingCollisions(
+      merged?.report.collisions ?? [],
+      storedValueKeys,
+    );
 
     findings.push({
       packageId: agent.id,
@@ -358,6 +377,7 @@ async function buildInventory(): Promise<Inventory> {
       latestTaggedVersion: latestTagByPackage.get(agent.id) ?? null,
       schedules: scheduleFindings,
       orphanStoredValueKeys,
+      collidingStoredValueKeys,
     });
   }
 
@@ -513,7 +533,14 @@ function reportInventory(inv: Inventory): void {
 
 /** Report shapes this migration has no rule for. Returns true when apply must refuse. */
 function reportAnomalies(inv: Inventory): boolean {
-  if (inv.nonAgentAnomalies.length === 0 && inv.systemAnomalies.length === 0) return false;
+  const collisionAnomalies = inv.findings.filter((f) => f.collidingStoredValueKeys.length > 0);
+  if (
+    inv.nonAgentAnomalies.length === 0 &&
+    inv.systemAnomalies.length === 0 &&
+    collisionAnomalies.length === 0
+  ) {
+    return false;
+  }
   out("── Anomalies ─────────────────────────────────────────────────");
   if (inv.nonAgentAnomalies.length > 0) {
     out("  Non-agent packages carrying a `config` section (outside AFPS §3.2):");
@@ -524,6 +551,17 @@ function reportAnomalies(inv: Inventory): boolean {
     out("  System agents (org_id IS NULL) carrying a `config` section:");
     for (const id of inv.systemAnomalies) out(`    ${id}`);
     out("  Rebuild them from `system-packages/` via scripts/build-system-packages.ts.");
+  }
+  if (collisionAnomalies.length > 0) {
+    out("  Collisions whose stored value was typed by the DROPPED `config` property:");
+    for (const f of collisionAnomalies) {
+      out(`    ${f.packageId}  ${list(f.collidingStoredValueKeys)}`);
+    }
+    out("  `application_packages.config` is never rewritten, so those values would be read");
+    out("  as `input` and validated against the property `input` kept — a type mismatch");
+    out("  fails EVERY launch, and `PUT /api/agents/{scope}/{name}/config` refuses the same");
+    out("  value, so it cannot be cleared from the UI either. Which type was meant is not");
+    out("  in the data: reconcile the stored value or the schema by hand first.");
   }
   out();
   return true;

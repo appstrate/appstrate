@@ -24,6 +24,12 @@ export function ScheduleCreatePage() {
 
   if (!isAdmin) return null;
   if (agentsLoading) return <LoadingState />;
+  // Same reason as the edit page: `ScheduleForm` seeds its input state once, in
+  // a `useState` initialiser, and `key={effectiveAgentId}` gives no remount when
+  // the agent detail lands later — a form mounted on empty settings classifies
+  // nothing as pre-filled and renders the "Avancé" fold blank. With no agent at
+  // all there is nothing to wait for, so the (empty) selector stays reachable.
+  if (effectiveAgentId && !deps) return <LoadingState />;
 
   return (
     <div className="p-6">

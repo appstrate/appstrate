@@ -192,6 +192,31 @@ export function mergeConfigIntoInput(manifest: JsonObject): MergeOutcome {
   };
 }
 
+/**
+ * The collided property names that ALSO carry a stored editor value — the
+ * subset an operator has to reconcile by hand before this migration may run.
+ *
+ * On a collision `mergeConfigIntoInput` drops the `config` property whole and
+ * keeps `input`'s. The migration deliberately never rewrites
+ * `application_packages.config`, whose keys are read as `input` values from
+ * then on — so for a colliding name the stored value was typed by the property
+ * that was just dropped, and is now validated against a schema it was never
+ * written for. `{type:"integer"}` against a stored `"fast"` fails AJV on every
+ * launch (`coerceTypes` cannot rescue it) and `PUT /api/agents/{scope}/{name}/config`
+ * refuses the same value, so the agent becomes unlaunchable with no way to
+ * clear it. Which of the two types was meant is not knowable from the data.
+ *
+ * A collision with no stored value behind it breaks nothing and stays
+ * informational.
+ */
+export function blockingCollisions(
+  collisions: readonly string[],
+  storedValueKeys: readonly string[],
+): string[] {
+  const stored = new Set(storedValueKeys);
+  return collisions.filter((key) => stored.has(key));
+}
+
 /** Top-level `input.schema.properties` names of a (migrated) manifest. */
 export function inputPropertyNames(manifest: unknown): string[] {
   const input = asObject(asObject(manifest)?.["input"]);

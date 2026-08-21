@@ -27,6 +27,11 @@ export function ScheduleEditPage() {
   if (!isAdmin) return null;
   if (isLoading) return <LoadingState />;
   if (error || !schedule) return <ErrorState message={error?.message} />;
+  // The agent detail is a SEPARATE query from the schedule: mounting the form
+  // before it lands would seed the input state from empty settings, keeping a
+  // since-locked field the user can no longer remove (400 `locked_input_field`
+  // on every save). `key={schedule.id}` gives no remount to repair it.
+  if (!deps) return <LoadingState />;
 
   const scheduleName = schedule.name || t("schedule.unnamed");
 
@@ -69,14 +74,14 @@ export function ScheduleEditPage() {
           user_id: schedule.userId ?? undefined,
           end_user_id: schedule.endUserId ?? undefined,
         }}
-        inputWrapper={deps?.inputWrapper}
-        persistedModelId={deps?.persistedModelId ?? null}
-        persistedGenerationConfig={deps?.persistedGenerationConfig ?? null}
-        persistedProxyId={deps?.persistedProxyId ?? null}
-        persistedVersion={deps?.persistedVersion ?? null}
+        inputWrapper={deps.inputWrapper}
+        persistedModelId={deps.persistedModelId}
+        persistedGenerationConfig={deps.persistedGenerationConfig}
+        persistedProxyId={deps.persistedProxyId}
+        persistedVersion={deps.persistedVersion}
         packageId={schedule.packageId}
-        agentIntegrations={deps?.agentIntegrations ?? []}
-        blockedMessage={deps?.hasFileInputs ? t("schedule.fileInputBlocked") : undefined}
+        agentIntegrations={deps.agentIntegrations}
+        blockedMessage={deps.hasFileInputs ? t("schedule.fileInputBlocked") : undefined}
         isPending={updateSchedule.isPending}
         onSubmit={(data) => {
           updateSchedule.mutate(

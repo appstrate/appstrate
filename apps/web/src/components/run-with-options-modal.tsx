@@ -7,7 +7,7 @@ import { Button } from "@appstrate/ui/components/button";
 import { Spinner } from "./spinner";
 import type { SchemaWrapper } from "@appstrate/core/form";
 import { AgentInputForm, type AgentInputFormHandle } from "./agent-input-form";
-import { initialInputValues } from "../lib/agent-input";
+import { storedInputValues } from "../lib/agent-input";
 import { RunOverridesPanel, type RunOverridesValue } from "./run-overrides-panel";
 import { AgentVersionField } from "./package-version-select";
 import { DependencyOverridesSection } from "./dependency-overrides-section";
@@ -94,10 +94,13 @@ function RunWithOptionsForm({
   isPending?: boolean;
 }) {
   const { t } = useTranslation(["agents", "common"]);
-  // Seeded from the draft detail the parent already holds — the stored values
-  // and locks are per-application, so they do not move with the version pick.
+  // Seeded from the STORED values only — they are per-application and do not
+  // move with the version pick. Author `default`s deliberately stay out: they
+  // belong to the selected version's schema, and seeding the draft's here would
+  // send them as caller input (the top precedence layer) for whatever version
+  // the user later selects. The version-pinned wrapper supplies its own.
   const [inputData, setInputData] = useState<Record<string, unknown>>(() =>
-    initialInputValues(agent.input, agent.input),
+    storedInputValues(agent.input),
   );
   const [version, setVersion] = useState<string>(DEFAULT_VERSION);
   const [overrides, setOverrides] = useState<RunOverridesValue>({});

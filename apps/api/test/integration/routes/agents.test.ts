@@ -18,6 +18,7 @@ import {
   initSystemModelProviderKeys,
 } from "../../../src/services/model-registry.ts";
 import {
+  getPackageConfig,
   installPackage,
   updateInstalledPackage,
 } from "../../../src/services/application-packages.ts";
@@ -344,6 +345,84 @@ describe("Agents API", () => {
       expect(body.values).toEqual({ key: "value" });
       expect(body.locked_fields).toEqual(["key"]);
       expect("validation" in body).toBe(false);
+    });
+
+    it("rejects a body missing locked_fields with 400 and leaves the stored row intact", async () => {
+      await seedAgent({
+        id: "@myorg/partial-agent",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        draftManifest: {
+          name: "@myorg/partial-agent",
+          version: "0.1.0",
+          type: "agent",
+          description: "Test",
+          input: {
+            schema: { type: "object", properties: { folder: { type: "string" } } },
+          },
+        },
+      });
+      await installPackage(
+        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        "@myorg/partial-agent",
+      );
+      await updateInstalledPackage(
+        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        "@myorg/partial-agent",
+        {
+          config: { folder: "archive" },
+          lockedFields: ["folder"],
+        },
+      );
+
+      const res = await app.request("/api/agents/@myorg/partial-agent/config", {
+        method: "PUT",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ values: { folder: "sent" } }),
+      });
+
+      expect(res.status).toBe(400);
+      const stored = await getPackageConfig(ctx.defaultAppId, "@myorg/partial-agent");
+      expect(stored.config).toEqual({ folder: "archive" });
+      expect(stored.lockedFields).toEqual(["folder"]);
+    });
+
+    it("rejects a body carrying an unknown key with 400 and leaves the stored row intact", async () => {
+      await seedAgent({
+        id: "@myorg/unknown-key-agent",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        draftManifest: {
+          name: "@myorg/unknown-key-agent",
+          version: "0.1.0",
+          type: "agent",
+          description: "Test",
+          input: {
+            schema: { type: "object", properties: { folder: { type: "string" } } },
+          },
+        },
+      });
+      await installPackage(
+        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        "@myorg/unknown-key-agent",
+      );
+      await updateInstalledPackage(
+        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        "@myorg/unknown-key-agent",
+        { config: { folder: "archive" }, lockedFields: ["folder"] },
+      );
+
+      // The pre-refactor body shape: bare field names at the top level.
+      const res = await app.request("/api/agents/@myorg/unknown-key-agent/config", {
+        method: "PUT",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ values: {}, locked_fields: [], folder: "sent" }),
+      });
+
+      expect(res.status).toBe(400);
+      const stored = await getPackageConfig(ctx.defaultAppId, "@myorg/unknown-key-agent");
+      expect(stored.config).toEqual({ folder: "archive" });
+      expect(stored.lockedFields).toEqual(["folder"]);
     });
 
     it("rejects a wrong-typed stored value with 400", async () => {
