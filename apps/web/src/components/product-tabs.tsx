@@ -9,10 +9,12 @@
  * how far it scales: past four it stops working, and that is the point at
  * which a launcher would be the right answer instead.
  *
- * Each tab wears the tile its product wears everywhere else — Studio blue,
- * Chat coral — so the thing you press and the thing you get look alike. In the
- * icon rail the labels go and the tiles stack, which is the only part of this
- * control that survives 48px.
+ * The icons are plain, not coloured tiles: the only coloured mark in the
+ * column should be the organisation's own, one line up — two competing brands
+ * in eight lines of chrome is one too many. Selection is carried by the
+ * segmented control itself (white fill, shadow), which is what a tab strip is
+ * for. In the icon rail the labels go and the icons stack, which is the only
+ * part of this control that survives 48px.
  *
  * Docs & API left the set: it is a link out, not a place in the app, and the
  * profile menu already carries it — where people look for documentation by
@@ -30,8 +32,6 @@ interface Product {
   id: string;
   label: string;
   icon: ReactNode;
-  /** Tailwind background for the icon tile. */
-  tint: string;
   to: string;
   active: boolean;
   enabled: boolean;
@@ -50,8 +50,7 @@ export function ProductTabs() {
     {
       id: "studio",
       label: t("products.studio"),
-      icon: <Blocks className="size-[15px]" />,
-      tint: "bg-primary",
+      icon: <Blocks className="size-4" />,
       to: "/",
       active: !inChat,
       enabled: true,
@@ -59,8 +58,7 @@ export function ProductTabs() {
     {
       id: "chat",
       label: t("products.chat"),
-      icon: <MessageSquare className="size-[15px]" />,
-      tint: "bg-spark",
+      icon: <MessageSquare className="size-4" />,
       to: "/chat",
       active: inChat,
       enabled: Boolean(features.chat),
@@ -71,7 +69,7 @@ export function ProductTabs() {
     <div
       role="tablist"
       aria-label={t("products.ariaLabel")}
-      className="bg-sidebar-accent/70 flex gap-1 rounded-lg p-1 group-data-[collapsible=icon]:flex-col group-data-[collapsible=icon]:gap-1.5 group-data-[collapsible=icon]:bg-transparent group-data-[collapsible=icon]:p-0"
+      className="bg-sidebar-accent/40 flex gap-0.5 rounded-lg p-0.5 group-data-[collapsible=icon]:flex-col group-data-[collapsible=icon]:gap-1.5 group-data-[collapsible=icon]:bg-transparent group-data-[collapsible=icon]:p-0"
     >
       {products.map((p) => (
         <Link
@@ -80,18 +78,14 @@ export function ProductTabs() {
           role="tab"
           aria-selected={p.active}
           className={cn(
-            "flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-sm font-medium transition-colors",
+            "flex h-7 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md px-2 text-sm font-medium transition-colors",
             "group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:flex-none group-data-[collapsible=icon]:px-0!",
             p.active
               ? "bg-card text-foreground shadow-sm"
               : "text-muted-foreground hover:text-foreground",
           )}
         >
-          <span
-            className={`${p.tint} flex size-5 shrink-0 items-center justify-center rounded-[5px] text-white group-data-[collapsible=icon]:size-6 group-data-[collapsible=icon]:rounded-md`}
-          >
-            {p.icon}
-          </span>
+          <span className="flex shrink-0 items-center justify-center">{p.icon}</span>
           <span className="truncate group-data-[collapsible=icon]:hidden">{p.label}</span>
         </Link>
       ))}

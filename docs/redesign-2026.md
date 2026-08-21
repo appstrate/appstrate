@@ -251,6 +251,10 @@ On how the work goes:
   The scroll belongs on `SidebarInset`, header sticky inside it.
 - **Fields inside a popover** inherit the base layer's input styling (border,
   padding, focus ring) and have to undo it explicitly.
+- **Every `button` gets `px-3 py-1.5` from the base layer.** An icon button has
+  to reset `p-0` or the padding eats the icon: an 18px glyph in a 32px box was
+  rendering 8px wide, and it reads as "the icon is too small" rather than as a
+  padding bug.
 - **A link inside a button is invalid markup** — the switcher gears had to move
   out of the row button and sit beside it.
 - **The MCP browser and the dev server get orphaned** between sessions. Kill

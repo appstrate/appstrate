@@ -44,10 +44,12 @@ export function ShellSidebar({
       <SidebarHeader className="border-sidebar-border h-header justify-center border-b px-2 py-0">
         <OrgSwitcher variant="brand" />
       </SidebarHeader>
-      {/* Below the rule, the products — and a second rule closes the band
-          before the navigation starts. Three bands: whose data, which tool,
-          what you do in it. */}
-      <div className="border-sidebar-border border-b px-2 py-2 group-data-[collapsible=icon]:px-0">
+      {/* Below the header's rule, the products. No second rule: the tabs are
+          their own enclosure, and a line under them would cut the column into
+          more pieces than it has ideas. More air above than below, so the tabs
+          read as the head of the navigation rather than as a tail of the rule
+          they sit under. */}
+      <div className="px-2 pt-4 pb-1 group-data-[collapsible=icon]:px-0">
         <ProductTabs />
       </div>
       <SidebarContent className={cn("gap-0", contentClassName)}>{children}</SidebarContent>
@@ -112,9 +114,12 @@ export function ShellHeader({
             disabled
             title="Recherche globale (à brancher)"
             aria-label="Rechercher"
-            className="text-muted-foreground hover:bg-accent hover:text-foreground inline-flex size-8 shrink-0 items-center justify-center rounded-md disabled:opacity-40"
+            // `p-0` is not decoration: the base layer gives every `button`
+            // `px-3 py-1.5`, which leaves an 18px icon 8px of room in a 32px
+            // box and squashes it. Same reset the notification bell carries.
+            className="text-muted-foreground hover:bg-accent hover:text-foreground inline-flex size-8 shrink-0 items-center justify-center rounded-md p-0 disabled:opacity-40"
           >
-            <Search className="size-4" />
+            <Search size={18} />
           </button>
           <NotificationBell />
         </div>
