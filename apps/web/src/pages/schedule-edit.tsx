@@ -52,7 +52,6 @@ export function ScheduleEditPage() {
           timezone: schedule.timezone ?? "UTC",
           enabled: schedule.enabled ?? true,
           input: schedule.input ?? {},
-          config_override: schedule.config_override ?? null,
           model_id_override: schedule.model_id_override ?? null,
           generation_config_override: schedule.generation_config_override ?? null,
           proxy_id_override: schedule.proxy_id_override ?? null,
@@ -70,9 +69,8 @@ export function ScheduleEditPage() {
           user_id: schedule.userId ?? undefined,
           end_user_id: schedule.endUserId ?? undefined,
         }}
-        inputSchema={deps?.inputSchema}
-        configSchema={deps?.configSchema}
-        persistedConfig={deps?.persistedConfig ?? {}}
+        inputWrapper={deps?.inputWrapper}
+        inputSettings={deps?.inputSettings}
         persistedModelId={deps?.persistedModelId ?? null}
         persistedGenerationConfig={deps?.persistedGenerationConfig ?? null}
         persistedProxyId={deps?.persistedProxyId ?? null}

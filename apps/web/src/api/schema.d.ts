@@ -248,8 +248,8 @@ export interface paths {
         };
         get?: never;
         /**
-         * Save agent configuration
-         * @description Save agent configuration values. Validated against manifest config schema.
+         * Save agent input settings
+         * @description Save the agent's stored input values and field locks for this application. `values` are validated against the manifest `input.schema` with `required` dropped (a required field left empty is asked at launch). Locking a required field that has no value — no author `default` and no entry in `values` — is refused with 400 `locked_required_field_empty`.
          */
         put: operations["saveAgentConfig"];
         post?: never;
@@ -576,7 +576,7 @@ export interface paths {
         };
         /**
          * List installed packages
-         * @description List all packages installed in this application, with their config and version.
+         * @description List all packages installed in this application, with their model/proxy/version overrides.
          */
         get: operations["listInstalledPackages"];
         put?: never;
@@ -600,12 +600,12 @@ export interface paths {
         };
         /**
          * Get installed package
-         * @description Get an installed package detail with its config.
+         * @description Get an installed package detail with its model/proxy/version overrides.
          */
         get: operations["getInstalledPackage"];
         /**
-         * Update installed package config
-         * @description Update configuration, model/proxy overrides, or version pinning for an installed package.
+         * Update installed package overrides
+         * @description Update the model/proxy overrides, generation settings, enabled flag, or version pinning for an installed package. The agent's stored input values are NOT settable here — use `PUT /api/agents/{scope}/{name}/config`, which validates them against the manifest input schema.
          */
         put: operations["updateInstalledPackage"];
         post?: never;
@@ -628,7 +628,7 @@ export interface paths {
         };
         /**
          * Get the resolved per-app run configuration
-         * @description Returns the configuration applied when this application runs the given package: agent config, model override, proxy override, and pinned version label. Used by the CLI to reproduce a UI run without stitching together three separate calls; the UI uses the same source for its run-from-app flow.
+         * @description Returns the configuration applied when this application runs the given package: model override, generation settings, proxy override, and pinned version label. Used by the CLI to reproduce a UI run without stitching together three separate calls; the UI uses the same source for its run-from-app flow.
          */
         get: operations["getApplicationPackageRunConfig"];
         put?: never;
@@ -3929,7 +3929,7 @@ export interface paths {
         put?: never;
         /**
          * Validate an inline manifest without firing a run
-         * @description Dry-run validator. Runs the same preflight as `POST /api/runs/inline` — manifest shape, config + input against manifest schemas, and integration readiness — but never inserts a shadow package, never fires the pipeline, and never consumes run credits. Returns `200 { valid: true }` on success, `400` problem+json (with the accumulated validation errors) otherwise. Lets developers iterate on a manifest without leaving run history behind.
+         * @description Dry-run validator. Runs the same preflight as `POST /api/runs/inline` — manifest shape, input against the manifest schema, and integration readiness — but never inserts a shadow package, never fires the pipeline, and never consumes run credits. Returns `200 { valid: true }` on success, `400` problem+json (with the accumulated validation errors) otherwise. Lets developers iterate on a manifest without leaving run history behind.
          *
          *     **Rate limit:** shares the same per-user bucket as `POST /api/runs/inline` (`INLINE_RUN_LIMITS.rate_per_min`). Iterative validation calls count against the same quota as actual runs — tight loops can trigger `429`.
          */
@@ -4646,21 +4646,16 @@ export interface components {
             updatedAt?: string;
             /** @description Optimistic lock version (user agents only) */
             lock_version?: number;
-            /** @description AFPS schema wrapper for agent configuration (set once, reused across runs). */
-            config: {
+            /** @description AFPS schema wrapper for the agent's parameters, plus the per-application stored values and field locks. Resolution order at launch: author default (JSON Schema `default`) < stored value (`values`) < schedule value < caller input. A field named in `locked_fields` is not asked at launch and a caller that sets it is refused with 400 `locked_input_field`. */
+            input: {
                 /** @description Pure JSON Schema 2020-12 object */
                 schema: Record<string, never>;
-                /** @description Current configuration values */
-                current: Record<string, never>;
-                file_constraints?: components["schemas"]["FileConstraintsMap"];
-                ui_hints?: components["schemas"]["UIHintsMap"];
-                /** @description Presentation order for schema properties */
-                property_order?: string[];
-            };
-            /** @description AFPS schema wrapper for per-run input. */
-            input?: {
-                /** @description Pure JSON Schema 2020-12 object */
-                schema?: Record<string, never>;
+                /** @description Values stored once for this application (editor defaults). */
+                values: {
+                    [key: string]: unknown;
+                };
+                /** @description Input fields no caller may set at launch. */
+                locked_fields: string[];
                 file_constraints?: components["schemas"]["FileConstraintsMap"];
                 ui_hints?: components["schemas"]["UIHintsMap"];
                 /** @description Presentation order for schema properties */
@@ -4706,6 +4701,15 @@ export interface components {
             has_unarchived_changes?: boolean;
             /** @description Run timeout that will actually be enforced, in seconds: the manifest's `timeout` (or the platform default when it declares none) clamped to this deployment's `PLATFORM_RUN_LIMITS.timeout_ceiling_seconds`. Compare with `manifest.timeout` to detect a capped declaration. Emitted for system agents too, which do not expose `manifest`. */
             effective_timeout_seconds: number;
+        };
+        /** @description The agent's stored input settings for one application: the values the editor set once (layer 2 of the input resolution) and the fields it froze. Both are full replacements — an omitted key means cleared, never unchanged. */
+        AgentInputSettings: {
+            /** @description Values stored for this application. Validated against the manifest `input.schema` with `required` dropped: leaving a required field empty here means it is asked at launch. */
+            values: {
+                [key: string]: unknown;
+            };
+            /** @description Input fields no caller may set at launch. A run or schedule that sets one is refused with 400 `locked_input_field`. A required field may not be locked unless it has a value (author `default` or an entry in `values`) — otherwise the write is refused with 400 `locked_required_field_empty`. */
+            locked_fields: string[];
         };
         AgentListItem: {
             id: string;
@@ -4975,14 +4979,12 @@ export interface components {
             /** Format: date-time */
             updatedAt: string;
         };
-        /** @description A package installed in an application with its config and overrides. */
+        /** @description A package installed in an application with its model/proxy/version overrides. */
         ApplicationPackage: {
             /** @enum {string} */
             object?: "application_package";
             /** @description Package ID from org catalog */
             packageId: string;
-            /** @description Application-specific configuration */
-            config: Record<string, never>;
             generationConfig: components["schemas"]["ModelGenerationSettings"] | null;
             /** @description Model override for this app */
             modelId: string | null;
@@ -5594,14 +5596,6 @@ export interface components {
             metadata: {
                 [key: string]: unknown;
             } | null;
-            /** @description Snapshot of the effective agent config (merged overrides) at run creation */
-            config: {
-                [key: string]: unknown;
-            } | null;
-            /** @description Per-run config delta — the raw object the caller sent in the request body. `config` is the resolved (deep-merged) snapshot; `config_override` is the raw delta that the dashboard uses to badge 'default vs override'. Null when the run used persisted defaults verbatim. */
-            config_override: {
-                [key: string]: unknown;
-            } | null;
             /** @description Effective generation controls resolved and frozen when the run was created. */
             generation: components["schemas"]["ModelGenerationSettings"] | null;
             /** @description Raw per-invocation generation layer, before agent defaults are applied. */
@@ -5701,9 +5695,6 @@ export interface components {
             cron_expression: string;
             timezone: string | null;
             input: {
-                [key: string]: unknown;
-            } | null;
-            config_override: {
                 [key: string]: unknown;
             } | null;
             generation_config_override: components["schemas"]["ModelGenerationSettings"] | null;
@@ -6566,13 +6557,11 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": {
-                    [key: string]: unknown;
-                };
+                "application/json": components["schemas"]["AgentInputSettings"];
             };
         };
         responses: {
-            /** @description Configuration saved — returns the bare persisted configuration document */
+            /** @description Saved — returns the bare persisted input-settings resource */
             200: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
@@ -6580,9 +6569,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["AgentInputSettings"];
                 };
             };
             400: components["responses"]["ValidationError"];
@@ -7010,9 +6997,6 @@ export interface operations {
                  *       "input": {
                  *         "message": "Summarize my latest emails"
                  *       },
-                 *       "config": {
-                 *         "dryRun": true
-                 *       },
                  *       "dependency_overrides": {
                  *         "@test/test-skill": "draft"
                  *       }
@@ -7029,10 +7013,6 @@ export interface operations {
                     generation?: components["schemas"]["ModelGenerationSettings"];
                     /** @description Proxy ID override for this run, or "none" to disable proxying. Takes priority over agent and org defaults. */
                     proxyId?: string;
-                    /** @description Per-run config override. Deep-merged with the per-application persisted config (`application_packages.config`): override leaves replace, plain-object children merge recursively, arrays are replaced wholesale, `null` at a leaf sets the value to null (validated as missing for required string fields), missing keys fall through. Re-validated against the manifest config schema after the merge — a 400 `invalid_config` is returned if the merged result violates the schema. Top-level `null` is rejected (returns 400) — omit the field to inherit persisted defaults, send `{}` for an explicit empty override. Mirrors the OpenAPI Assistants `runs.create { instructions, model, tools }` and Argo Workflows `submitOptions.parameters` SOTA — every client (UI, CLI, SDK) reaches the same resolved config for the same `(persisted, override)` pair. */
-                    config?: {
-                        [key: string]: unknown;
-                    };
                     /** @description Per-integration connection picks for THIS run (flat-connections mechanism #2). Flat map: `{ "@scope/integration": "<connection_id>" }` — one connection per integration; the chosen connection carries its own authKey. Loses to admin pins (mechanism #1), beats the schedule-frozen layer (#3) and the actor-fallback (#4). Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same pick. Returns 412 `missing_integration_connection` if the chosen id is not accessible to the actor. */
                     connection_overrides?: {
                         [key: string]: string;
@@ -7075,12 +7055,6 @@ export interface operations {
                      *       "checkpoint": {},
                      *       "error": null,
                      *       "metadata": null,
-                     *       "config": {
-                     *         "dryRun": true
-                     *       },
-                     *       "config_override": {
-                     *         "dryRun": true
-                     *       },
                      *       "generation": {
                      *         "temperature": 0.2,
                      *         "reasoningLevel": "high"
@@ -7127,7 +7101,7 @@ export interface operations {
                     "application/json": components["schemas"]["Run"];
                 };
             };
-            /** @description Agent readiness validation failed (empty prompt, missing skill, or incomplete config) */
+            /** @description Agent readiness validation failed (empty prompt, missing skill, or inactive integration) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -7374,8 +7348,6 @@ export interface operations {
                     /** @default UTC */
                     timezone?: string;
                     input?: Record<string, never>;
-                    /** @description Per-schedule config delta. Deep-merged with the application's persisted `config` every time the schedule fires. */
-                    config_override?: Record<string, never>;
                     /** @description Temperature/reasoning overrides applied to every run fired by this schedule. */
                     generation_config_override?: components["schemas"]["ModelGenerationSettings"];
                     /** @description Override the persisted model on every run triggered by this schedule. */
@@ -7425,7 +7397,6 @@ export interface operations {
                      *         "folder": "inbox",
                      *         "maxEmails": 50
                      *       },
-                     *       "config_override": null,
                      *       "generation_config_override": null,
                      *       "model_id_override": null,
                      *       "proxy_id_override": null,
@@ -7888,8 +7859,6 @@ export interface operations {
                 "application/json": {
                     /** @description Package ID from org catalog */
                     packageId: string;
-                    /** @description Initial configuration */
-                    config?: Record<string, never>;
                 };
             };
         };
@@ -7970,7 +7939,6 @@ export interface operations {
         requestBody?: {
             content: {
                 "application/json": {
-                    config?: Record<string, never>;
                     generationConfig?: components["schemas"]["ModelGenerationSettings"] | null;
                     modelId?: string | null;
                     proxyId?: string | null;
@@ -7980,7 +7948,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Updated package config */
+            /** @description Updated installed package */
             200: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
@@ -8053,9 +8021,6 @@ export interface operations {
                 content: {
                     /**
                      * @example {
-                     *       "config": {
-                     *         "dryRun": true
-                     *       },
                      *       "generation": {
                      *         "temperature": 0.2,
                      *         "reasoningLevel": "high"
@@ -8066,7 +8031,6 @@ export interface operations {
                      *     }
                      */
                     "application/json": {
-                        config: Record<string, never>;
                         generation: components["schemas"]["ModelGenerationSettings"] | null;
                         modelId: string | null;
                         proxyId: string | null;
@@ -18722,8 +18686,6 @@ export interface operations {
                     prompt: string;
                     /** @description Run input validated against manifest.input.schema (AJV). File fields take `upload://upl_xxx` references (from `createUpload`), `document://doc_xxx` references, or inline `data:<mime>;name=<filename>;base64,<payload>` URIs (≤4 MiB decoded) — same contract as `POST /agents/{scope}/{name}/run`. */
                     input?: Record<string, never>;
-                    /** @description Per-run config overrides validated against manifest.config.schema (AJV). */
-                    config?: Record<string, never>;
                     /** @description `document://doc_xxx` URIs to mount read-only into the run's `documents/` directory — fan-in by reference, without declaring a file field in the manifest. The platform declares a reserved `_context_documents` input field for them, so they go through the same ACL, byte/count caps and `document_links` chaining as any other document input, and are announced to the agent in its prompt. A manifest (or `input`) that already declares `_context_documents` is rejected with a `400` — the name is reserved. */
                     context_documents?: string[];
                     /** @description Per-integration connection picks for THIS run (flat-connections mechanism #2). Flat map: `{ "@scope/integration": "<connection_id>" }` — one connection per integration; the chosen connection carries its own authKey. Loses to admin pins (mechanism #1), beats the schedule-frozen layer (#3) and the actor-fallback (#4). Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same pick. Returns 412 `missing_integration_connection` if the chosen id is not accessible to the actor. */
@@ -18766,8 +18728,6 @@ export interface operations {
                      *       "checkpoint": {},
                      *       "error": null,
                      *       "metadata": null,
-                     *       "config": null,
-                     *       "config_override": null,
                      *       "generation": null,
                      *       "generation_override": null,
                      *       "started_at": "2026-01-15T10:30:00Z",
@@ -18903,7 +18863,6 @@ export interface operations {
                     manifest: Record<string, never>;
                     prompt: string;
                     input?: Record<string, never>;
-                    config?: Record<string, never>;
                     /** @description Same field as `POST /api/runs/inline` — validated here for shape and for the reserved `_context_documents` name collision, never mounted. */
                     context_documents?: string[];
                     /** @description Same field as `POST /api/runs/inline` — applied to the integration readiness check so a pick that clears `must_choose_connection` here clears it on the real launch too. Never persisted; no run is created. */
@@ -18979,7 +18938,6 @@ export interface operations {
                         /** @description Full AFPS manifest (agent type). All referenced skills/integrations must already exist in the org or system catalog. */
                         manifest: Record<string, never>;
                         prompt: string;
-                        config?: Record<string, never>;
                     } | {
                         /** @constant */
                         kind: "registry";
@@ -18995,7 +18953,6 @@ export interface operations {
                         spec?: string;
                         /** @description Optional SRI digest (`sha256-…`) the runner received with the bundle download. Triggers a structured warn-log when the resolved version's stored artifact integrity diverges (dist-tag drift, mid-flight draft edit). Never a rejection signal. */
                         integrity?: string;
-                        config?: Record<string, never>;
                     };
                     applicationId: string;
                     /** @description Run input, validated against the agent's input schema. File fields (`format: uri` + `contentMediaType`) accept ONLY inline `data:<mime>;name=<file>;base64,<payload>` URIs on remote runs — `upload://` and `document://` references are rejected (400), because the run executes on the caller's host, whose workspace the platform never provisions. */
@@ -19134,10 +19091,6 @@ export interface operations {
                      *       },
                      *       "error": null,
                      *       "metadata": null,
-                     *       "config": {
-                     *         "folder": "inbox"
-                     *       },
-                     *       "config_override": null,
                      *       "generation": {
                      *         "reasoningLevel": "medium"
                      *       },
@@ -19252,8 +19205,6 @@ export interface operations {
                      *       "checkpoint": {},
                      *       "error": "Cancelled by user",
                      *       "metadata": null,
-                     *       "config": null,
-                     *       "config_override": null,
                      *       "generation": null,
                      *       "generation_override": null,
                      *       "started_at": "2026-01-15T10:30:00Z",
@@ -19975,7 +19926,6 @@ export interface operations {
                      *         "folder": "inbox",
                      *         "maxEmails": 50
                      *       },
-                     *       "config_override": null,
                      *       "generation_config_override": null,
                      *       "model_id_override": null,
                      *       "proxy_id_override": null,
@@ -20019,8 +19969,6 @@ export interface operations {
                     timezone?: string;
                     enabled?: boolean;
                     input?: Record<string, never>;
-                    /** @description Per-schedule config delta. Pass `null` to clear the override. */
-                    config_override?: Record<string, never> | null;
                     /** @description Temperature/reasoning overrides for scheduled runs. Pass null to clear. */
                     generation_config_override?: components["schemas"]["ModelGenerationSettings"] | null;
                     model_id_override?: string | null;

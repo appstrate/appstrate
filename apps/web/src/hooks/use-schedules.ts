@@ -1,11 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import {
-  schemaHasFileFields,
-  type JSONSchemaObject,
-  type SchemaWrapper,
-} from "@appstrate/core/form";
+import { schemaHasFileFields, type SchemaWrapper } from "@appstrate/core/form";
 import { client, type paths } from "../api/client";
 import { splitPackageRef } from "../lib/package-paths";
 import { useCurrentOrgId } from "./use-org";
@@ -17,6 +13,7 @@ import { useAgentProxy } from "./use-proxies";
 import { onMutationError } from "./use-mutations";
 import { scheduleKeys } from "../lib/query-keys";
 import type { ScheduleWireDto, EnrichedSchedule } from "@appstrate/shared-types";
+import type { AgentInputSettings } from "../lib/agent-input";
 
 // `useScheduleRuns` used to live here: the schedule CARD fetched a schedule's
 // runs purely to count active/unread/last-number, once per card. Those three
@@ -77,6 +74,9 @@ export function useSchedules(packageId: string | undefined) {
   });
 }
 
+/** Stable "no agent loaded yet" settings — see `useScheduleFormDeps`. */
+const EMPTY_INPUT_SETTINGS: AgentInputSettings = { values: {}, locked_fields: [] };
+
 function invalidateSchedules(qc: ReturnType<typeof useQueryClient>) {
   qc.invalidateQueries({ queryKey: scheduleKeys.listAll });
   qc.invalidateQueries({ queryKey: scheduleKeys.detailAll });
@@ -95,7 +95,6 @@ export function useCreateSchedule(packageId: string) {
       cron_expression: string;
       timezone?: string;
       input?: Record<string, unknown>;
-      config_override?: Record<string, unknown> | null;
       model_id_override?: string | null;
       generation_config_override?: ModelGenerationSettings | null;
       proxy_id_override?: string | null;
@@ -106,7 +105,7 @@ export function useCreateSchedule(packageId: string) {
       const { scope, name } = splitPackageRef(packageId);
       const { data: created } = await client.POST("/api/agents/{scope}/{name}/schedules", {
         params: { path: { scope, name } },
-        // Spec body types `input`/`config_override` as bare objects.
+        // Spec body types `input` as a bare object.
         body: data as CreateScheduleBody,
       });
       return created!;
@@ -129,7 +128,6 @@ export function useUpdateSchedule() {
       timezone?: string;
       input?: Record<string, unknown>;
       enabled?: boolean;
-      config_override?: Record<string, unknown> | null;
       model_id_override?: string | null;
       generation_config_override?: ModelGenerationSettings | null;
       proxy_id_override?: string | null;
@@ -139,7 +137,7 @@ export function useUpdateSchedule() {
     }): Promise<ScheduleWireDto> => {
       const { data: updated } = await client.PUT("/api/schedules/{id}", {
         params: { path: { id } },
-        // Spec body types `input`/`config_override` as bare objects.
+        // Spec body types `input` as a bare object.
         body: data as UpdateScheduleBody,
       });
       return updated!;
@@ -161,15 +159,14 @@ export function useDeleteSchedule() {
 }
 
 export interface ScheduleFormDeps {
-  inputSchema: JSONSchemaObject | undefined;
   /**
    * Full input wrapper (schema + ui_hints + file_constraints + property_order)
-   * — the run-options modal feeds this to `<SchemaForm>` so version-pinned
-   * input renders with full fidelity, not just the bare schema (#770).
+   * — the launch surfaces feed this to `<SchemaForm>` so version-pinned input
+   * renders with full fidelity, not just the bare schema (#770).
    */
   inputWrapper: SchemaWrapper | undefined;
-  configSchema: JSONSchemaObject | undefined;
-  persistedConfig: Record<string, unknown>;
+  /** Stored values + field locks for this application — layer 2 of resolution. */
+  inputSettings: AgentInputSettings;
   persistedModelId: string | null;
   persistedGenerationConfig: ModelGenerationSettings | null;
   persistedProxyId: string | null;
@@ -194,8 +191,8 @@ export interface ScheduleFormDeps {
  * Returns `null` while inputs aren't ready or no agent is selected.
  *
  * `version` (#770) pins the agent-detail projection to a published version so
- * the config / input / integrations / skills the form renders match the version
- * the run will execute. Omitted → `draft` (the editor working copy).
+ * the input / integrations / skills the form renders match the version the run
+ * will execute. Omitted → `draft` (the editor working copy).
  */
 export function useScheduleFormDeps(
   packageId: string | undefined,
@@ -207,7 +204,6 @@ export function useScheduleFormDeps(
 
   if (!packageId) return null;
 
-  const inputSchema = agentDetail?.input?.schema ?? undefined;
   const integrationDeps = (agentDetail?.dependencies?.integrations ?? []).map((d) => ({
     id: d.id,
     ...(d.tools ? { tools: d.tools } : {}),
@@ -218,15 +214,15 @@ export function useScheduleFormDeps(
     ...(s.name ? { name: s.name } : {}),
   }));
   return {
-    inputSchema,
-    inputWrapper: agentDetail?.input ?? undefined,
-    configSchema: agentDetail?.config?.schema ?? undefined,
-    persistedConfig: agentDetail?.config?.current ?? {},
+    inputWrapper: agentDetail?.input,
+    // The detail's own object — a fresh literal here would change identity on
+    // every render and defeat the launch form's memoized partition.
+    inputSettings: agentDetail?.input ?? EMPTY_INPUT_SETTINGS,
     persistedModelId: agentModel?.modelId ?? null,
     persistedGenerationConfig: agentModel?.generation ?? null,
     persistedProxyId: agentProxy?.proxyId ?? null,
     persistedVersion: agentDetail?.version ?? null,
-    hasFileInputs: schemaHasFileFields(inputSchema),
+    hasFileInputs: schemaHasFileFields(agentDetail?.input.schema),
     agentIntegrations: integrationDeps,
     skills: skillDeps,
   };

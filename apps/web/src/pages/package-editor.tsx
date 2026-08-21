@@ -152,9 +152,9 @@ function AgentEditorInner({
     manifestToSchemaFields(state.manifest),
   );
 
-  const getSchemaFields = (key: "input" | "output" | "config") => schemaFields[key] ?? [];
+  const getSchemaFields = (key: "input" | "output") => schemaFields[key] ?? [];
 
-  const onSchemaChange = (key: "input" | "output" | "config") => (fields: SchemaField[]) => {
+  const onSchemaChange = (key: "input" | "output") => (fields: SchemaField[]) => {
     setSchemaFields((prev) => ({ ...prev, [key]: fields }));
     const wrapper = fieldsToSchema(fields, key);
     if (wrapper) {
@@ -266,12 +266,6 @@ function AgentEditorInner({
             mode="output"
             fields={getSchemaFields("output")}
             onChange={onSchemaChange("output")}
-          />
-          <SchemaSection
-            title={t("editor.configTitle")}
-            mode="config"
-            fields={getSchemaFields("config")}
-            onChange={onSchemaChange("config")}
           />
         </>
       )}

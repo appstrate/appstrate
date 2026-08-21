@@ -2,14 +2,12 @@
 
 import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import type RjsfForm from "@rjsf/core";
 import { Modal } from "./modal";
 import { Button } from "@appstrate/ui/components/button";
 import { Spinner } from "./spinner";
-import { LazySchemaForm as SchemaForm } from "./lazy-schema-form";
-import type { SchemaWrapper, JSONSchemaObject } from "@appstrate/core/form";
-import { useSchemaFormLabels } from "../hooks/use-schema-form-labels";
-import { useUploadClient } from "../hooks/use-upload";
+import type { SchemaWrapper } from "@appstrate/core/form";
+import { AgentInputForm, type AgentInputFormHandle } from "./agent-input-form";
+import { initialInputValues } from "../lib/agent-input";
 import { RunOverridesPanel, type RunOverridesValue } from "./run-overrides-panel";
 import { AgentVersionField } from "./package-version-select";
 import { DependencyOverridesSection } from "./dependency-overrides-section";
@@ -19,7 +17,7 @@ import type { AgentDetail } from "@appstrate/shared-types";
 /**
  * Everything the modal collects, mapped 1:1 onto the run API body by the
  * caller: `version` rides the `?version=` query; `overrides` carries the
- * schedule-shaped delta for model / proxy / config / connections (reused from
+ * schedule-shaped delta for model / proxy / connections (reused from
  * `RunOverridesPanel`); `dependencyOverrides` the per-skill
  * `dependency_overrides` map. Defaults across the board mirror plain "Lancer".
  */
@@ -46,14 +44,12 @@ interface RunWithOptionsModalProps {
   isPending?: boolean;
 }
 
-const EMPTY_SCHEMA: JSONSchemaObject = { type: "object", properties: {} };
-
 /**
  * "Run with options" — the advanced run launcher. Surfaces every per-run
- * override the run API accepts (input, version, model, proxy, config,
- * connection overrides, and per-skill dependency overrides), so the dashboard
- * reaches parity with a hand-built run POST. Composed from existing pieces:
- * the input SchemaForm (as in `RunModal`), `RunOverridesPanel` (the schedule
+ * override the run API accepts (input, version, model, proxy, connection
+ * overrides, and per-skill dependency overrides), so the dashboard reaches
+ * parity with a hand-built run POST. Composed from existing pieces:
+ * `AgentInputForm` (as in `RunModal`), `RunOverridesPanel` (the schedule
  * editor's override surface), and the per-skill `DependencyOverridesSection`.
  */
 export function RunWithOptionsModal({
@@ -98,52 +94,37 @@ function RunWithOptionsForm({
   isPending?: boolean;
 }) {
   const { t } = useTranslation(["agents", "common"]);
-  const [inputData, setInputData] = useState<Record<string, unknown>>({});
+  // Seeded from the draft detail the parent already holds — the stored values
+  // and locks are per-application, so they do not move with the version pick.
+  const [inputData, setInputData] = useState<Record<string, unknown>>(() =>
+    initialInputValues(agent.input, agent.input),
+  );
   const [version, setVersion] = useState<string>(DEFAULT_VERSION);
   const [overrides, setOverrides] = useState<RunOverridesValue>({});
   const [dependencyOverrides, setDependencyOverrides] = useState<Record<string, string>>({});
-  const inputFormRef = useRef<RjsfForm>(null);
-  // Deps follow the selected version (#770): the config / input / integrations /
-  // skills the modal renders match what the run will execute, not the draft.
+  const inputFormRef = useRef<AgentInputFormHandle>(null);
+  // Deps follow the selected version (#770): the input / integrations / skills
+  // the modal renders match what the run will execute, not the draft.
   const deps = useScheduleFormDeps(agent.id, version);
-  const labels = useSchemaFormLabels();
-  const upload = useUploadClient();
 
-  // Version-pinned input wrapper / skills (fall back to the draft props the
-  // parent passed while the version-aware detail is still loading).
-  const inputWrapper: SchemaWrapper = deps?.inputWrapper ?? agent.input ?? { schema: EMPTY_SCHEMA };
-  const hasInputFields =
-    !!inputWrapper.schema?.properties && Object.keys(inputWrapper.schema.properties).length > 0;
+  // Version-pinned input wrapper / skills (fall back to the draft the parent
+  // passed while the version-aware detail is still loading).
+  const inputWrapper: SchemaWrapper = deps?.inputWrapper ?? agent.input;
   const skills = deps?.skills ?? agent.dependencies?.skills ?? [];
 
   const fire = (input: Record<string, unknown>) =>
     onSubmit({ input, version, overrides, dependencyOverrides });
 
-  const handleSubmit = () => {
-    // Route through rjsf validation first when the agent declares input —
-    // its onSubmit fires `fire(formData)` with the validated payload.
-    if (hasInputFields && inputFormRef.current) {
-      inputFormRef.current.submit();
-      return;
-    }
-    fire(inputData);
-  };
-
   return (
     <div className="space-y-5">
-      {hasInputFields && (
-        <div className="space-y-2">
-          <SchemaForm
-            ref={inputFormRef}
-            wrapper={inputWrapper}
-            formData={inputData}
-            upload={upload}
-            labels={labels}
-            onChange={(e) => setInputData(e.formData as Record<string, unknown>)}
-            onSubmit={(e) => fire(e.formData as Record<string, unknown>)}
-          />
-        </div>
-      )}
+      <AgentInputForm
+        ref={inputFormRef}
+        wrapper={inputWrapper}
+        settings={agent.input}
+        value={inputData}
+        onChange={setInputData}
+        onSubmit={fire}
+      />
 
       {/* Run version — default `draft` (= plain "Lancer", which forces draft).
           The only leading option is `draft`; a run has no schedule-style
@@ -160,8 +141,6 @@ function RunWithOptionsForm({
       {deps && (
         <RunOverridesPanel
           packageId={agent.id}
-          configSchema={deps.configSchema}
-          persistedConfig={deps.persistedConfig}
           persistedModelId={deps.persistedModelId}
           persistedGenerationConfig={deps.persistedGenerationConfig}
           persistedProxyId={deps.persistedProxyId}
@@ -182,7 +161,7 @@ function RunWithOptionsForm({
         <Button variant="outline" onClick={onClose} disabled={isPending}>
           {t("btn.cancel")}
         </Button>
-        <Button onClick={handleSubmit} disabled={isPending}>
+        <Button onClick={() => inputFormRef.current?.submit()} disabled={isPending}>
           {isPending ? <Spinner /> : t("input.run")}
         </Button>
       </div>

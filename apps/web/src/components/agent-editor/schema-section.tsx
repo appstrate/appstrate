@@ -68,7 +68,7 @@ export interface SchemaField {
   arrayEnumItems?: string;
 }
 
-type SchemaMode = "input" | "output" | "config" | "credentials";
+type SchemaMode = "input" | "output" | "credentials";
 
 interface SchemaSectionProps {
   title: string;
@@ -98,13 +98,12 @@ function emptyField(mode: SchemaMode): SchemaField {
     type: "string",
     description: "",
     required: false,
-    ...(mode === "input" ? { placeholder: "", default: "" } : {}),
-    ...(mode === "config" ? { default: "", enumValues: "" } : {}),
+    ...(mode === "input" ? { placeholder: "", default: "", enumValues: "" } : {}),
   };
 }
 
 function hasDetailsRow(mode: SchemaMode): boolean {
-  return mode === "input" || mode === "config";
+  return mode === "input";
 }
 
 function SortableFieldCard({
@@ -136,7 +135,7 @@ function SortableFieldCard({
   const isArray = field.type === "array";
 
   // Credential keys must match the sidecar substitution contract (underscore-based,
-  // no hyphens) — agent/tool input/config keys stay slug-based (hyphen-based,
+  // no hyphens) — agent/tool input keys stay slug-based (hyphen-based,
   // URL-safe). See @appstrate/core/naming#CREDENTIAL_KEY_RE.
   const keyTransform =
     mode === "credentials"
@@ -288,7 +287,7 @@ function SortableFieldCard({
             </>
           ) : (
             <>
-              {(mode === "input" || mode === "config") && (
+              {mode === "input" && (
                 <Input
                   type="text"
                   placeholder={t("editor.fieldDefault")}
@@ -308,7 +307,7 @@ function SortableFieldCard({
                   disabled={readOnly}
                 />
               )}
-              {mode === "config" && (
+              {mode === "input" && (
                 <Input
                   type="text"
                   placeholder={t("editor.fieldEnum")}

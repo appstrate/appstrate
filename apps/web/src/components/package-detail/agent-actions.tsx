@@ -160,7 +160,6 @@ export function AgentActions({
                 ? { generation: overrides.generation_config_override }
                 : {}),
               ...(proxy ? { proxyId: proxy } : {}),
-              ...(overrides.config_override ? { config: overrides.config_override } : {}),
               ...(overrides.connection_overrides
                 ? { connectionOverrides: overrides.connection_overrides }
                 : {}),

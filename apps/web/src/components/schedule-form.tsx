@@ -22,10 +22,9 @@ import {
   CollapsibleContent,
 } from "@appstrate/ui/components/collapsible";
 import { ChevronDown } from "lucide-react";
-import { LazySchemaForm as SchemaForm } from "./lazy-schema-form";
-import { useSchemaFormLabels } from "../hooks/use-schema-form-labels";
-import { useUploadClient } from "../hooks/use-upload";
-import type { JSONSchemaObject, SchemaWrapper } from "@appstrate/core/form";
+import type { SchemaWrapper } from "@appstrate/core/form";
+import { AgentInputForm } from "./agent-input-form";
+import { hasInputFields, initialInputValues, type AgentInputSettings } from "../lib/agent-input";
 import { RunOverridesPanel, type RunOverridesValue } from "./run-overrides-panel";
 import { AgentVersionField } from "./package-version-select";
 import { ActorSelect, type ActorValue } from "./actor-select";
@@ -61,12 +60,6 @@ export interface ScheduleSaveData {
   timezone?: string;
   input?: Record<string, unknown>;
   enabled?: boolean;
-  /**
-   * Per-schedule override layer. Frozen at create/update; deep-merged with
-   * the application's persisted config every time the schedule fires.
-   * `null` clears a previously-set override on edit.
-   */
-  config_override?: Record<string, unknown> | null;
   model_id_override?: string | null;
   generation_config_override?: ModelGenerationSettings | null;
   proxy_id_override?: string | null;
@@ -95,7 +88,6 @@ interface ScheduleFormProps {
     timezone?: string;
     enabled?: boolean;
     input?: Record<string, unknown>;
-    config_override?: Record<string, unknown> | null;
     model_id_override?: string | null;
     generation_config_override?: ModelGenerationSettings | null;
     proxy_id_override?: string | null;
@@ -105,11 +97,10 @@ interface ScheduleFormProps {
   };
   /** The schedule's current actor (edit mode) — used to detect a real change. */
   currentActor?: ActorValue;
-  inputSchema?: JSONSchemaObject;
-  /** Agent's config schema — drives the override panel's config form. */
-  configSchema?: JSONSchemaObject;
-  /** Persisted application config — the merge baseline for the override delta. */
-  persistedConfig?: Record<string, unknown>;
+  /** The agent's input wrapper (schema + hints + order). */
+  inputWrapper?: SchemaWrapper;
+  /** Stored values + field locks — the platform layers behind the input form. */
+  inputSettings?: AgentInputSettings;
   /** Persisted defaults — passed straight through to RunOverridesPanel. */
   persistedModelId?: string | null;
   persistedGenerationConfig?: ModelGenerationSettings | null;
@@ -144,9 +135,8 @@ export function ScheduleForm({
   mode,
   defaultValues,
   currentActor,
-  inputSchema,
-  configSchema,
-  persistedConfig,
+  inputWrapper,
+  inputSettings,
   agentIntegrations,
   persistedModelId,
   persistedGenerationConfig,
@@ -168,14 +158,15 @@ export function ScheduleForm({
 
   const [confirmDelete, setConfirmDelete] = useState(false);
 
-  const schema: JSONSchemaObject = inputSchema || { type: "object" as const, properties: {} };
-  const hasInputSchema = Object.keys(schema.properties).length > 0;
-  const wrapper: SchemaWrapper = { schema };
-  const labels = useSchemaFormLabels();
-  const upload = useUploadClient();
+  const settings: AgentInputSettings = inputSettings ?? { values: {}, locked_fields: [] };
+  const hasInput = hasInputFields(inputWrapper);
 
-  const [inputValues, setInputValues] = useState<Record<string, unknown>>(
-    () => defaultValues?.input ?? {},
+  // Seeded from the schedule's frozen values on top of the agent's resolved
+  // defaults, minus every locked field: a schedule that still carries a value
+  // for a field locked since it was saved would be refused on the next save
+  // (400 `locked_input_field`).
+  const [inputValues, setInputValues] = useState<Record<string, unknown>>(() =>
+    initialInputValues(inputWrapper, settings, defaultValues?.input),
   );
 
   // Override-layer state — mirrors the Run modal's accordion, except
@@ -183,7 +174,6 @@ export function ScheduleForm({
   // every fire (vs. the Run modal which only applies them once).
   const [overrides, setOverrides] = useState<RunOverridesValue>(() => {
     const v: RunOverridesValue = {};
-    if (defaultValues?.config_override) v.config_override = defaultValues.config_override;
     if (defaultValues?.connection_overrides)
       v.connection_overrides = defaultValues.connection_overrides;
     if (defaultValues?.model_id_override) v.model_id_override = defaultValues.model_id_override;
@@ -192,7 +182,7 @@ export function ScheduleForm({
     if (defaultValues?.proxy_id_override) v.proxy_id_override = defaultValues.proxy_id_override;
     return v;
   });
-  // Version override lives outside the model/proxy/config panel: a schedule
+  // Version override lives outside the model/proxy panel: a schedule
   // "inherits" (no pin → resolve at fire time) or pins a specific version.
   // `undefined` = inherit (no override stored).
   const [versionOverride, setVersionOverride] = useState<string | undefined>(
@@ -212,7 +202,6 @@ export function ScheduleForm({
     );
   };
   const initialOverridesNonEmpty =
-    !!(defaultValues?.config_override && Object.keys(defaultValues.config_override).length > 0) ||
     !!defaultValues?.model_id_override ||
     !!defaultValues?.generation_config_override ||
     !!defaultValues?.proxy_id_override ||
@@ -257,7 +246,7 @@ export function ScheduleForm({
   });
 
   const onFormSubmit = handleSubmit((data) => {
-    const input = hasInputSchema ? inputValues : undefined;
+    const input = hasInput ? inputValues : undefined;
 
     // On create: omit empty overrides entirely (server stores null).
     // On edit: send `null` for cleared overrides so the row resets to
@@ -265,7 +254,6 @@ export function ScheduleForm({
     // existing override untouched per the Zod schema's optional rule.
     const overridePayload = isEdit
       ? {
-          config_override: overrides.config_override ?? null,
           model_id_override: overrides.model_id_override ?? null,
           generation_config_override: overrides.generation_config_override ?? null,
           proxy_id_override: overrides.proxy_id_override ?? null,
@@ -273,7 +261,6 @@ export function ScheduleForm({
           connection_overrides: overrides.connection_overrides ?? null,
         }
       : {
-          ...(overrides.config_override ? { config_override: overrides.config_override } : {}),
           ...(overrides.model_id_override
             ? { model_id_override: overrides.model_id_override }
             : {}),
@@ -442,23 +429,23 @@ export function ScheduleForm({
             <p className="text-muted-foreground text-xs">{t("schedule.actorHint")}</p>
           </div>
 
-          {/* Input fields (conditional) */}
-          {hasInputSchema && (
+          {/* Agent parameters — same three display states as a run launch:
+              locked fields read-only, pre-filled ones folded into "Avancé". */}
+          {hasInput && (
             <div className="space-y-3">
               <Label>{t("schedule.inputTitle")}</Label>
-              <SchemaForm
-                wrapper={wrapper}
-                formData={inputValues}
-                upload={upload}
-                labels={labels}
-                onChange={(e) => setInputValues(e.formData as Record<string, unknown>)}
+              <AgentInputForm
+                wrapper={inputWrapper}
+                settings={settings}
+                value={inputValues}
+                onChange={setInputValues}
               />
             </div>
           )}
 
-          {/* Overrides accordion — surfaces per-schedule overrides for config,
-          model, proxy, and version. Same UX vocabulary as the Run modal so
-          users learn the override layer once. */}
+          {/* Overrides accordion — surfaces per-schedule overrides for model,
+          proxy, and version. Same UX vocabulary as the Run modal so users
+          learn the override layer once. */}
           {packageId && (
             <Collapsible open={overridesOpen} onOpenChange={setOverridesOpen}>
               <CollapsibleTrigger asChild>
@@ -494,8 +481,6 @@ export function ScheduleForm({
                 />
                 <RunOverridesPanel
                   packageId={packageId}
-                  configSchema={configSchema}
-                  persistedConfig={persistedConfig ?? {}}
                   persistedModelId={persistedModelId ?? null}
                   persistedGenerationConfig={persistedGenerationConfig ?? null}
                   persistedProxyId={persistedProxyId ?? null}

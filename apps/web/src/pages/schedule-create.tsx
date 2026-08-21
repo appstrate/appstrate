@@ -43,9 +43,8 @@ export function ScheduleCreatePage() {
         agents={agents?.map((f) => ({ id: f.id, displayName: f.display_name ?? f.id })) ?? []}
         selectedAgentId={effectiveAgentId}
         onAgentChange={setSelectedAgentId}
-        inputSchema={deps?.inputSchema}
-        configSchema={deps?.configSchema}
-        persistedConfig={deps?.persistedConfig ?? {}}
+        inputWrapper={deps?.inputWrapper}
+        inputSettings={deps?.inputSettings}
         persistedModelId={deps?.persistedModelId ?? null}
         persistedGenerationConfig={deps?.persistedGenerationConfig ?? null}
         persistedProxyId={deps?.persistedProxyId ?? null}

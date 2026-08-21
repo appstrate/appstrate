@@ -15,7 +15,7 @@ import {
   useAgents,
 } from "../hooks/use-packages";
 import type { AgentDetail, OrgPackageItemDetail, PackageType } from "@appstrate/shared-types";
-import type { JSONSchemaObject } from "@appstrate/core/form";
+import type { SchemaWrapper } from "@appstrate/core/form";
 import { usePermissions } from "../hooks/use-permissions";
 import { usePackageInstallState, useTogglePackageInstall } from "../hooks/use-library";
 import { useCurrentApplicationId } from "../hooks/use-current-application";
@@ -68,43 +68,40 @@ type DetailTab =
   | "content"
   | "usedBy";
 
-const EMPTY_CONFIG_SCHEMA: JSONSchemaObject = { type: "object", properties: {} };
+/** A version that declares no parameters — distinct from "use the draft". */
+const EMPTY_INPUT_WRAPPER: SchemaWrapper = { schema: { type: "object", properties: {} } };
 
 // ─── Agent Run Button (inline, no wrapper) ────────────────────────────
 
 function AgentRunButtonInline({
   packageId,
   versionLabel,
-  configSchemaOverride,
 }: {
   packageId: string;
   versionLabel: string | undefined;
-  configSchemaOverride?: JSONSchemaObject;
 }) {
   const { t } = useTranslation("agents");
   const { data: detail } = usePackageDetail("agent", packageId);
   const { data: models } = useModels();
   const { data: agentModel } = useAgentModel(packageId);
-  const readiness = useAgentReadiness(detail, agentModel?.modelId, models, configSchemaOverride);
+  const readiness = useAgentReadiness(detail, agentModel?.modelId, models);
   // Launch-time integration readiness — drives the non-blocking orange badge.
   // Same server resolver as the run-kickoff 412 (see useAgentIntegrationsReadiness).
   const integrationsReady = useAgentIntegrationsReadiness(packageId);
 
   if (!detail) return null;
 
-  const { hasRequiredConfig, hasModel, hasPrompt, hasRequiredSkills } = readiness;
+  const { hasModel, hasPrompt, hasRequiredSkills } = readiness;
   // Integration connection gaps don't disable Run — they surface as a warning
   // badge here and the recovery modal at run-kickoff (412 → MissingConnectionsModal).
-  const runDisabled = !hasPrompt || !hasRequiredSkills || !hasRequiredConfig || !hasModel;
+  const runDisabled = !hasPrompt || !hasRequiredSkills || !hasModel;
   const runDisabledTitle = !hasPrompt
     ? t("detail.titleEmptyPrompt")
     : !hasRequiredSkills
       ? t("detail.titleMissingSkill")
-      : !hasRequiredConfig
-        ? t("detail.titleConfig")
-        : !hasModel
-          ? t("detail.titleModel")
-          : undefined;
+      : !hasModel
+        ? t("detail.titleModel")
+        : undefined;
 
   return (
     <RunAgentButton
@@ -222,20 +219,8 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
     "content",
     "usedBy",
   ];
-  // Configuration tab visibility (uses draft schema — version-aware override applied after loading)
-  const draftConfigSchema = agentDetail?.config?.schema;
-  const hasDraftConfigSchema = !!(
-    draftConfigSchema?.properties && Object.keys(draftConfigSchema.properties).length > 0
-  );
   const hasModelsAvailable = !!orgModels && orgModels.length > 0;
   const hasProxiesAvailable = !!orgProxies && orgProxies.length > 0;
-  const hasMissingRequiredConfig =
-    type === "agent" &&
-    hasDraftConfigSchema &&
-    draftConfigSchema?.required?.some((key) => {
-      const val = agentDetail?.config?.current?.[key];
-      return val === undefined || val === null || val === "";
-    });
   // Agents open on their runs. Every other type opens where its SUBSTANCE
   // lives, which `lib/package-files.ts` already encodes and which does not
   // depend on how much metadata the author happened to fill in: a skill IS its
@@ -282,24 +267,20 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   // pinned, the live draft otherwise. Same rule the file explorer follows.
   const effectiveManifest = isHistoricalVersion ? versionDetail?.manifest : currentManifest;
 
-  // ── Version-aware config schema ──
-  // When viewing a historical version, use that version's config schema (or empty if none).
-  // An empty schema means "no config fields" — distinct from undefined which means "use draft".
-  const versionConfigSchema = (() => {
-    const config = versionDetail?.manifest?.config as { schema?: JSONSchemaObject } | undefined;
-    return config?.schema;
-  })();
-  const effectiveConfigSchema = isHistoricalVersion
-    ? (versionConfigSchema ?? EMPTY_CONFIG_SCHEMA)
-    : agentDetail?.config?.schema;
-  const hasEffectiveConfigSchema = !!(
-    effectiveConfigSchema?.properties && Object.keys(effectiveConfigSchema.properties).length > 0
+  // ── Version-aware input wrapper ──
+  // A pinned version edits its OWN parameter schema; an absent one means that
+  // version declared none — distinct from `undefined`, which means "use draft".
+  const effectiveInputWrapper = isHistoricalVersion
+    ? ((versionDetail?.manifest?.input as SchemaWrapper | undefined) ?? EMPTY_INPUT_WRAPPER)
+    : agentDetail?.input;
+  const hasEffectiveInputFields = !!(
+    effectiveInputWrapper?.schema?.properties &&
+    Object.keys(effectiveInputWrapper.schema.properties).length > 0
   );
-  // Override showConfigTab for historical versions with their own config schema
   const effectiveShowConfigTab =
     isAdmin &&
     type === "agent" &&
-    (hasEffectiveConfigSchema || hasModelsAvailable || hasProxiesAvailable);
+    (hasEffectiveInputFields || hasModelsAvailable || hasProxiesAvailable);
 
   const downloadVersion = (isHistoricalVersion ? versionDetail?.version : version) ?? undefined;
 
@@ -371,11 +352,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
         hasUnarchivedChanges={hasArchivableChanges}
         actionsLeft={
           type === "agent" ? (
-            <AgentRunButtonInline
-              packageId={packageId}
-              versionLabel={versionLabel}
-              configSchemaOverride={isHistoricalVersion ? effectiveConfigSchema : undefined}
-            />
+            <AgentRunButtonInline packageId={packageId} versionLabel={versionLabel} />
           ) : undefined
         }
         actionsRight={
@@ -478,13 +455,6 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
         </div>
       )}
 
-      {type === "agent" && hasMissingRequiredConfig && (
-        <div className="border-warning/30 bg-warning/5 mb-4 flex items-center gap-3 rounded-lg border px-4 py-3 text-sm">
-          <span className="text-warning text-base leading-none">⚠</span>
-          <span className="text-warning">{t("detail.configAlert")}</span>
-        </div>
-      )}
-
       {/* Tab bar */}
       <Tabs value={tab} onValueChange={(v) => setTab(v as DetailTab)} className="mb-4">
         <div className="max-w-full overflow-x-auto pb-1">
@@ -502,7 +472,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
       {type === "agent" && tab === "configuration" && (
         <AgentConfigurationTab
           packageId={packageId}
-          configSchemaOverride={isHistoricalVersion ? effectiveConfigSchema : undefined}
+          inputWrapperOverride={isHistoricalVersion ? effectiveInputWrapper : undefined}
           isHistorical={isHistoricalVersion}
         />
       )}
@@ -510,11 +480,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
         <AgentConnectionsSection packageId={packageId} detail={agentDetail} />
       )}
       {type === "agent" && tab === "runs" && (
-        <AgentRunsTab
-          packageId={packageId}
-          versionLabel={versionLabel}
-          configSchemaOverride={isHistoricalVersion ? effectiveConfigSchema : undefined}
-        />
+        <AgentRunsTab packageId={packageId} versionLabel={versionLabel} />
       )}
       {type === "agent" && tab === "schedules" && <AgentSchedulesTab packageId={packageId} />}
       {type === "agent" && tab === "memory" && <AgentMemoryTab packageId={packageId} />}

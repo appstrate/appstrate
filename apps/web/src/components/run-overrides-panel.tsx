@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { Label } from "@appstrate/ui/components/label";
 import {
@@ -10,10 +9,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@appstrate/ui/components/select";
-import { LazySchemaForm as SchemaForm } from "./lazy-schema-form";
-import { useSchemaFormLabels } from "../hooks/use-schema-form-labels";
-import { useUploadClient } from "../hooks/use-upload";
-import type { JSONSchemaObject, SchemaWrapper } from "@appstrate/core/form";
 import { useModels } from "../hooks/use-models";
 import { isModelSelectable } from "../lib/model-selectability";
 import { ModelUnselectableNote } from "./model-availability-badge";
@@ -39,8 +34,6 @@ const INHERIT = "__inherit__";
 const NONE = "none";
 
 export interface RunOverridesValue {
-  /** Override delta — deep-merged with persisted config on the server. */
-  config_override?: Record<string, unknown>;
   /** Per-run model id override. */
   model_id_override?: string;
   /** Per-run/schedule generation layer. */
@@ -66,10 +59,6 @@ interface AgentIntegrationRef {
 
 export interface RunOverridesPanelProps {
   packageId: string;
-  /** Agent's config schema; absent when the agent has no configurable fields. */
-  configSchema?: JSONSchemaObject;
-  /** Persisted application-level config — the merge baseline. */
-  persistedConfig: Record<string, unknown>;
   /** Persisted model id (or null = inherit org default). */
   persistedModelId: string | null;
   /** Persisted generation defaults shown as the inherit baseline. */
@@ -95,25 +84,23 @@ export interface RunOverridesPanelProps {
 }
 
 /**
- * Override editor for the agent's resolution defaults — model, proxy, config,
- * and integration connections. Shared by the schedule editor and the run
- * launcher, where these four carry identical semantics ("inherit" = the agent
- * default). Emits a delta payload (`onChange`): each field is present only when
- * it differs from the persisted default, so the caller never re-implements diff
+ * Override editor for the agent's resolution defaults — model, proxy and
+ * integration connections. Shared by the schedule editor and the run launcher,
+ * where these three carry identical semantics ("inherit" = the agent default).
+ * Emits a delta payload (`onChange`): each field is present only when it
+ * differs from the persisted default, so the caller never re-implements diff
  * detection.
  *
- * Version is deliberately NOT here — its semantics are context-specific (a
- * schedule inherits/pins; a run defaults to `draft` and applies every pick), so
- * each caller composes {@link AgentVersionField} itself.
+ * Agent parameters are deliberately NOT here — they are the agent's single
+ * `input` schema, rendered by {@link AgentInputForm} at the top of every launch
+ * surface, not an override layer.
  *
- * Source of truth for the merge semantics:
- * `@appstrate/core/schema-validation` (`deepMergeConfig`), shared with
- * the run pipeline.
+ * Version is deliberately NOT here either — its semantics are context-specific
+ * (a schedule inherits/pins; a run defaults to `draft` and applies every pick),
+ * so each caller composes {@link AgentVersionField} itself.
  */
 export function RunOverridesPanel({
   packageId,
-  configSchema,
-  persistedConfig,
   persistedModelId,
   persistedGenerationConfig,
   persistedProxyId,
@@ -126,24 +113,6 @@ export function RunOverridesPanel({
   const { data: orgModels } = useModels();
   const { data: orgProxies } = useProxies();
   const { data: registry } = useProvidersRegistry();
-  const labels = useSchemaFormLabels();
-  const upload = useUploadClient();
-
-  // Local form state for the SchemaForm. Initialised with the resolved
-  // config the user would otherwise run with (persisted ∪ current
-  // override) so the form reflects the merged starting point.
-  const [configValues, setConfigValues] = useState<Record<string, unknown>>(() => ({
-    ...persistedConfig,
-    ...(value.config_override ?? {}),
-  }));
-
-  const wrapper: SchemaWrapper | null = useMemo(
-    () => (configSchema ? { schema: configSchema } : null),
-    [configSchema],
-  );
-
-  const hasConfigFields =
-    !!configSchema?.properties && Object.keys(configSchema.properties).length > 0;
 
   // The inherited row stays visible even when the default is unavailable, so
   // users can still clear an override and see which model will be resolved.
@@ -182,18 +151,6 @@ export function RunOverridesPanel({
       onChange(rest);
     } else {
       onChange({ ...value, proxy_id_override: next });
-    }
-  };
-
-  const setConfigForm = (formData: Record<string, unknown>) => {
-    setConfigValues(formData);
-    const delta = computeConfigDelta(persistedConfig, formData);
-    if (delta === null) {
-      const { config_override: _omit, ...rest } = value;
-      void _omit;
-      onChange(rest);
-    } else {
-      onChange({ ...value, config_override: delta });
     }
   };
 
@@ -290,24 +247,6 @@ export function RunOverridesPanel({
               ))}
             </SelectContent>
           </Select>
-        </div>
-      )}
-
-      {hasConfigFields && wrapper && (
-        <div className="space-y-2">
-          <Label>{t("run.overrides.configLabel", { ns: "agents" })}</Label>
-          <p className="text-muted-foreground text-xs">
-            {t("run.overrides.configHint", { ns: "agents" })}
-          </p>
-          <div className="border-border bg-card rounded-md border p-3">
-            <SchemaForm
-              wrapper={wrapper}
-              formData={configValues}
-              upload={upload}
-              labels={labels}
-              onChange={(e) => setConfigForm(e.formData as Record<string, unknown>)}
-            />
-          </div>
         </div>
       )}
 
@@ -429,37 +368,4 @@ function IntegrationOverrideRow({
       />
     </div>
   );
-}
-
-/**
- * Walk the form values vs. the persisted baseline and return only the keys
- * whose value differs. Returns `null` when the form values exactly match
- * the persisted config, signalling "no override to send".
- *
- * Detection is shallow on the top-level keys plus a structural compare
- * (JSON stringify) on nested values — sufficient because the SchemaForm
- * always rewrites the entire object on every keystroke, and the server
- * deep-merges on receipt anyway. Replays still work: any key the user
- * touched ends up in the override delta verbatim.
- */
-function computeConfigDelta(
-  persisted: Record<string, unknown>,
-  current: Record<string, unknown>,
-): Record<string, unknown> | null {
-  const delta: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(current)) {
-    const baseline = persisted[key];
-    if (!structurallyEqual(baseline, value)) {
-      delta[key] = value;
-    }
-  }
-  return Object.keys(delta).length === 0 ? null : delta;
-}
-
-function structurallyEqual(a: unknown, b: unknown): boolean {
-  if (a === b) return true;
-  if (a == null || b == null) return false;
-  if (typeof a !== typeof b) return false;
-  if (typeof a !== "object") return false;
-  return JSON.stringify(a) === JSON.stringify(b);
 }
