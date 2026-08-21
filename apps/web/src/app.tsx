@@ -18,9 +18,7 @@ import { AppSidebar } from "./components/app-sidebar";
 import { useBackgroundLocation } from "./lib/modal-route";
 import { NavigateKeepingState } from "./components/navigate-keeping-state";
 import { RedirectAppSettings } from "./components/redirect-app-settings";
-import { ShellBreadcrumb } from "./components/shell-breadcrumb";
-import { NotificationBell } from "./components/notification-bell";
-import { NavUser } from "./components/nav-user";
+import { ShellHeader } from "./components/shell-frame";
 import { LoadingState } from "./components/page-states";
 import { PendingPairingsWatcher } from "./components/pending-pairings-watcher";
 
@@ -32,7 +30,7 @@ import { useApplicationResolver } from "./hooks/use-current-application";
 import { useSidebarStore } from "./stores/sidebar-store";
 import { Spinner } from "./components/spinner";
 import { HostedConnectPage } from "./pages/hosted-connect";
-import { SidebarInset, SidebarProvider, SidebarTrigger } from "@appstrate/ui/components/sidebar";
+import { SidebarInset, SidebarProvider } from "@appstrate/ui/components/sidebar";
 import { AppToaster } from "./components/app-toaster";
 
 // Module-owned pages live under `apps/web/src/modules/<name>/` and are
@@ -225,17 +223,7 @@ function MainLayout() {
           header above it kept the full width, and the profile would sit 15px
           further right than the content it is supposed to line up with. */}
       <SidebarInset className="bg-canvas h-svh overflow-y-auto">
-        <header className="bg-canvas h-header sticky top-0 z-20 flex shrink-0 items-center border-b">
-          <div className="max-w-page px-gutter mx-auto flex w-full items-center gap-2">
-            {/* Mobile-only trigger — desktop collapse lives in the sidebar */}
-            <SidebarTrigger className="md:hidden" />
-            <ShellBreadcrumb />
-            <div className="flex shrink-0 items-center gap-1">
-              <NotificationBell />
-              <NavUser />
-            </div>
-          </div>
-        </header>
+        <ShellHeader />
         {/* Full-bleed surfaces (anything that owns its own height) opt out
             with `data-full-bleed` on their root. */}
         <div className="max-w-page px-gutter mx-auto w-full pt-8 pb-18 has-[[data-full-bleed]]:max-w-none has-[[data-full-bleed]]:p-0">

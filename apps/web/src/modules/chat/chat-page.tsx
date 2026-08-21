@@ -105,6 +105,7 @@ export function ChatModulePage() {
       conversationId={conversationId ?? null}
       onConversationChange={onConversationChange}
       headerActions={<ConversationContextActions state={sidebarState} dispatch={dispatchSidebar} />}
+      t={translate}
     >
       <div className="relative flex min-h-0 min-w-0 flex-1">
         <div className="min-w-0 flex-1">

@@ -180,23 +180,7 @@ const Sidebar = React.forwardRef<
               <SheetTitle>Sidebar</SheetTitle>
               <SheetDescription>Displays the mobile sidebar.</SheetDescription>
             </SheetHeader>
-            {/* Picking a destination closes the drawer — on a phone it covers
-                the very screen it just navigated to. Only menu rows and links
-                count: the in-row actions (rename, delete) are buttons too, and
-                they must leave the drawer open to do their work.
-
-                Bubble phase, NOT capture: a capture handler would flush the
-                close synchronously (discrete event) and unmount this subtree
-                BEFORE the bubble dispatch, swallowing the row's own onClick. */}
-            <div
-              className="flex h-full w-full flex-col"
-              onClick={(event) => {
-                const el = event.target as HTMLElement;
-                if (el.closest('[data-sidebar="menu-button"], a[href]')) setOpenMobile(false);
-              }}
-            >
-              {children}
-            </div>
+            <div className="flex h-full w-full flex-col">{children}</div>
           </SheetContent>
         </Sheet>
       );
@@ -535,7 +519,17 @@ const SidebarMenuButton = React.forwardRef<
     ref,
   ) => {
     const Comp = asChild ? Slot : "button";
-    const { isMobile, state } = useSidebar();
+    const { isMobile, state, setOpenMobile } = useSidebar();
+
+    // On a phone the sidebar is a drawer over the page, so picking a row has to
+    // close it — otherwise it covers the very screen it just navigated to. It
+    // belongs here rather than on the drawer: a menu row is what navigates, and
+    // the other buttons a row can carry (rename, delete) must leave the drawer
+    // open to do their work.
+    const onClick = (event: React.MouseEvent<HTMLButtonElement>) => {
+      props.onClick?.(event);
+      if (isMobile) setOpenMobile(false);
+    };
 
     const button = (
       <Comp
@@ -545,6 +539,7 @@ const SidebarMenuButton = React.forwardRef<
         data-active={isActive}
         className={cn(sidebarMenuButtonVariants({ variant, size }), className)}
         {...props}
+        onClick={onClick}
       />
     );
 

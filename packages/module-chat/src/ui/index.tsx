@@ -39,8 +39,14 @@ import type {
   UploadFile,
   UseDocumentImageSrc,
 } from "./runtime-context.ts";
-export type { OpenDocument } from "./runtime-context.ts";
+export type {
+  ChatTranslate,
+  GetHeaders,
+  OpenDocument,
+  SelectConversation,
+} from "./runtime-context.ts";
 export { ChatConversationList, ChatConversationTitle } from "./thread-list.tsx";
+export { ChatHeadersProvider, SelectConversationProvider } from "./runtime-context.ts";
 import { ModelSelect } from "./model-select.tsx";
 import { fetchModels, type OrgModelOption } from "./models-data.ts";
 import { isModelLive } from "../model-liveness.ts";

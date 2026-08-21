@@ -9,14 +9,17 @@
  *
  * Both pieces are mounted by the HOST SHELL, not by `ChatPage`: the list is the
  * chat's navigation (it sits in the shell sidebar, where Studio's nav sits) and
- * the title is where-you-are (it sits in the shell breadcrumb). They therefore
- * ship as self-contained wrappers — `ChatConversationList` and
- * `ChatConversationTitle` — that carry the same context `ChatPage` publishes,
- * so the host mounts them anywhere in its tree with only `getHeaders` in hand.
- * Both read the SAME React Query key as the thread, so one request feeds all.
+ * the title is where-you-are (it sits in the shell breadcrumb). They read the
+ * same two contexts `ChatPage` publishes — the host puts those up once, around
+ * the whole shell — and the same React Query key as the thread, so one request
+ * feeds all of it.
+ *
+ * The list renders into the host's sidebar (a `SidebarProvider` must be above
+ * it): it IS the chat's navigation, so it uses the same rows, groups and active
+ * fill as Studio's, or the two products would not read as one app.
  */
 
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { PlusIcon, PencilIcon, Trash2Icon, Loader2Icon } from "lucide-react";
 import {
@@ -26,14 +29,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@appstrate/ui/components/sidebar";
-import {
-  ChatHeadersProvider,
-  SelectConversationProvider,
-  useChatHeaders,
-  useSelectConversation,
-  type GetHeaders,
-  type SelectConversation,
-} from "./runtime-context.ts";
+import { useChatHeaders, useSelectConversation, type ChatTranslate } from "./runtime-context.ts";
 import {
   renameSession,
   deleteSession,
@@ -44,22 +40,23 @@ import { useSessions } from "./use-sessions.ts";
 
 /**
  * ISO timestamp → compact relative time ("5 min", "2 h", "3 j"), as of `now`.
- * `Intl.RelativeTimeFormat` always prefixes "il y a", so we format by hand.
+ * `Intl.RelativeTimeFormat` always prefixes "il y a" / "ago", three words more
+ * than a 56px column holds, so the unit comes from the bundle (plural rules
+ * included) and only the number is computed here.
  */
-function relativeTime(iso: string, now: number): string {
+function relativeTime(iso: string, now: number, t: ChatTranslate): string {
   const sec = Math.round((now - new Date(iso).getTime()) / 1000);
   if (Number.isNaN(sec)) return "";
-  if (sec < 60) return "à l'instant";
+  if (sec < 60) return t("list.time.now");
   const min = Math.round(sec / 60);
-  if (min < 60) return `${min} min`;
+  if (min < 60) return t("list.time.minutes", { count: min });
   const hour = Math.round(min / 60);
-  if (hour < 24) return `${hour} h`;
+  if (hour < 24) return t("list.time.hours", { count: hour });
   const day = Math.round(hour / 24);
-  if (day < 30) return `${day} j`;
+  if (day < 30) return t("list.time.days", { count: day });
   const month = Math.round(day / 30);
-  if (month < 12) return `${month} mois`;
-  const year = Math.round(day / 365);
-  return `${year} an${year > 1 ? "s" : ""}`;
+  if (month < 12) return t("list.time.months", { count: month });
+  return t("list.time.years", { count: Math.round(day / 365) });
 }
 
 /**
@@ -90,7 +87,13 @@ function useNowTick(): number {
  * unread until it is opened; `activeId` is never counted, since looking at it
  * IS reading it.
  */
-function ThreadList({ activeId }: { activeId: string | null }) {
+export function ChatConversationList({
+  activeId,
+  t,
+}: {
+  activeId: string | null;
+  t: ChatTranslate;
+}) {
   const select = useSelectConversation();
   const { data: sessions, isLoading } = useSessions();
   const now = useNowTick();
@@ -100,15 +103,15 @@ function ThreadList({ activeId }: { activeId: string | null }) {
       <SidebarGroup className="pb-0">
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton onClick={() => select?.(null)} tooltip="Nouvelle conversation">
+            <SidebarMenuButton onClick={() => select?.(null)} tooltip={t("list.new")}>
               <PlusIcon />
-              <span>Nouvelle conversation</span>
+              <span>{t("list.new")}</span>
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
       </SidebarGroup>
       <SidebarGroup className="min-h-0 flex-1 group-data-[collapsible=icon]:hidden">
-        <SidebarGroupLabel>Conversations</SidebarGroupLabel>
+        <SidebarGroupLabel>{t("list.label")}</SidebarGroupLabel>
         <SidebarMenu className="min-h-0 flex-1 overflow-y-auto">
           {list.map((s) => (
             <ConversationRow
@@ -117,71 +120,17 @@ function ThreadList({ activeId }: { activeId: string | null }) {
               active={s.id === activeId}
               unread={s.unread && s.id !== activeId}
               now={now}
+              t={t}
             />
           ))}
         </SidebarMenu>
         {!isLoading && list.length === 0 && (
           <p className="text-sidebar-foreground/70 px-2 py-6 text-center text-xs">
-            Envoie un message ! Ton historique de conversations apparaîtra ici.
+            {t("list.empty")}
           </p>
         )}
       </SidebarGroup>
     </>
-  );
-}
-
-/**
- * The list, mounted by the host in its sidebar. Self-contained: it carries the
- * same two contexts `ChatPage` publishes, so the host needs only `getHeaders`
- * and its own navigation callback — the sessions query key is shared, so this
- * and the thread issue ONE request between them.
- */
-export function ChatConversationList({
-  getHeaders,
-  activeId,
-  onConversationChange,
-}: {
-  getHeaders?: GetHeaders;
-  activeId: string | null;
-  onConversationChange?: SelectConversation;
-}) {
-  return (
-    <ChatProviders getHeaders={getHeaders} onConversationChange={onConversationChange}>
-      <ThreadList activeId={activeId} />
-    </ChatProviders>
-  );
-}
-
-/** The active conversation's title, mounted by the host in its breadcrumb. */
-export function ChatConversationTitle({
-  getHeaders,
-  activeId,
-}: {
-  getHeaders?: GetHeaders;
-  activeId: string | null;
-}) {
-  return (
-    <ChatProviders getHeaders={getHeaders}>
-      <ActiveConversationTitle activeId={activeId} />
-    </ChatProviders>
-  );
-}
-
-function ChatProviders({
-  getHeaders,
-  onConversationChange,
-  children,
-}: {
-  getHeaders?: GetHeaders;
-  onConversationChange?: SelectConversation;
-  children: ReactNode;
-}) {
-  return (
-    <ChatHeadersProvider value={getHeaders ?? null}>
-      <SelectConversationProvider value={onConversationChange ?? null}>
-        {children}
-      </SelectConversationProvider>
-    </ChatHeadersProvider>
   );
 }
 
@@ -206,11 +155,13 @@ function ConversationRow({
   active,
   unread,
   now,
+  t,
 }: {
   session: SessionSummary;
   active: boolean;
   unread: boolean;
   now: number;
+  t: ChatTranslate;
 }) {
   const getHeaders = useChatHeaders();
   const select = useSelectConversation();
@@ -248,7 +199,7 @@ function ConversationRow({
         className="pr-16"
       >
         <span className={`block w-full truncate text-left ${unread ? "font-semibold" : ""}`}>
-          {session.title ?? "Nouvelle conversation"}
+          {session.title ?? t("list.untitled")}
         </span>
       </SidebarMenuButton>
       {/* Fixed-width right slot: spinner / unread dot / timestamp have different
@@ -258,17 +209,17 @@ function ConversationRow({
         {session.generating ? (
           <Loader2Icon
             className="text-sidebar-foreground/70 size-3.5 animate-spin"
-            aria-label="Opération en cours"
+            aria-label={t("list.generating")}
           />
         ) : unread ? (
           <span
             className="bg-primary size-2 rounded-full transition-opacity group-hover/menu-item:opacity-0"
-            aria-label="Réponse non lue"
-            title="Réponse non lue"
+            aria-label={t("list.unread")}
+            title={t("list.unread")}
           />
         ) : (
           <span className="text-sidebar-foreground/70 text-xs transition-opacity group-hover/menu-item:opacity-0">
-            {relativeTime(session.updatedAt, now)}
+            {relativeTime(session.updatedAt, now, t)}
           </span>
         )}
         {/* pointer-events must track visibility: opacity-0 alone keeps the
@@ -277,8 +228,8 @@ function ConversationRow({
         <div className="pointer-events-none absolute right-0 flex items-center gap-0.5 rounded-md p-0.5 opacity-0 transition-opacity group-hover/menu-item:pointer-events-auto group-hover/menu-item:opacity-100">
           <button
             type="button"
-            aria-label="Renommer"
-            title="Renommer"
+            aria-label={t("list.rename")}
+            title={t("list.rename")}
             onClick={() => setEditing(true)}
             className="text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-border rounded-md p-0.5"
           >
@@ -286,8 +237,8 @@ function ConversationRow({
           </button>
           <button
             type="button"
-            aria-label="Supprimer"
-            title="Supprimer"
+            aria-label={t("list.delete")}
+            title={t("list.delete")}
             onClick={() => void onDelete()}
             className="text-sidebar-foreground/70 hover:text-destructive hover:bg-destructive/10 rounded-md p-0.5"
           >
@@ -299,17 +250,24 @@ function ConversationRow({
   );
 }
 
-/** Active-conversation title + rename for the shell breadcrumb. */
-function ActiveConversationTitle({ activeId }: { activeId: string | null }) {
+/**
+ * Active-conversation title + rename, for the host's breadcrumb. Renders
+ * nothing until the conversation is known — the host publishes the trail
+ * segment on the same condition, so an unknown conversation costs no segment
+ * rather than a segment with a made-up name.
+ */
+export function ChatConversationTitle({
+  activeId,
+  t,
+}: {
+  activeId: string | null;
+  t: ChatTranslate;
+}) {
   const { editing, setEditing, save } = useInlineRename(activeId ?? "");
   const { data: sessions } = useSessions();
   if (!activeId) return null;
   const session = sessions?.find((s) => s.id === activeId);
-  // The list has not arrived yet, or the URL names a conversation that is gone.
-  // Still render the segment: the host has already drawn the separator before
-  // it, and a trail that ends on a lone "/" reads as a broken page. Not
-  // renameable — there is nothing known to rename.
-  if (!session) return <span className="truncate text-sm font-medium">Nouvelle conversation</span>;
+  if (!session) return null;
 
   if (editing) {
     return (
@@ -321,10 +279,12 @@ function ActiveConversationTitle({ activeId }: { activeId: string | null }) {
       type="button"
       onClick={() => setEditing(true)}
       className="hover:bg-accent flex max-w-full min-w-0 items-center gap-1 rounded-md px-1.5 py-0.5"
-      title="Renommer"
+      title={t("list.rename")}
     >
-      <span className="min-w-0 flex-1 truncate text-left text-sm font-medium">
-        {session.title ?? "Nouvelle conversation"}
+      {/* `font-semibold`, like every other last breadcrumb segment: this is
+          where you are, and it carries the same weight in both products. */}
+      <span className="min-w-0 flex-1 truncate text-left text-sm font-semibold">
+        {session.title ?? t("list.untitled")}
       </span>
       <PencilIcon className="text-muted-foreground size-3.5 shrink-0" />
     </button>

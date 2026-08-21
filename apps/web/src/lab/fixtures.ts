@@ -346,11 +346,13 @@ type ChatSession = (typeof chatSessions)["data"][number];
 
 /**
  * A long history — what the conversation list in the shell sidebar has to hold
- * without pushing the new-conversation row or the meta block off screen. Titles
- * of very different lengths on purpose: truncation and the fixed-width right
- * slot (timestamp / unread dot / spinner) are what break first.
+ * without pushing the new-conversation row or the meta block off screen. 200
+ * rows, the same volume as the other heavy fixtures, and the list is NOT
+ * virtualised. Titles of very different lengths on purpose: truncation and the
+ * fixed-width right slot (timestamp / unread dot / spinner) are what break
+ * first.
  */
-export const heavyChatSessions: ChatSession[] = Array.from({ length: 60 }, (_, i) => ({
+export const heavyChatSessions: ChatSession[] = Array.from({ length: 200 }, (_, i) => ({
   object: "chat_session",
   id: `chat_h_${i}`,
   title:

@@ -25,6 +25,19 @@ guard (`apps/web/src/locales/test/locale-keys.test.ts`) fails on orphan i18n
 keys, and it caught thirteen of them because typecheck and build were green and
 nobody ran the tests. Run them.
 
+Two things about that gate in this worktree:
+
+- **`bun run check` needs a `.env`** — `detect:breaking` boots the API's env
+  schema, so without one it fails on missing secrets and never reviews a line of
+  the change. Copy the mother repo's (`../../appstrate-main/.env`); it is
+  gitignored. It was missing `CONNECT_SESSION_SECRET`, added by hand.
+- **`bun test` from the root is not green on a clean checkout.** The
+  MITM/sidecar suites (`runtime-pi/sidecar/test/…`) fail locally for want of a
+  CA bundle — 15/15 fail on `e18faa6b1` with no changes applied. Verify a
+  suspicious failure by stashing rather than assuming, then run the touched
+  packages (`bun test apps/web packages/ui packages/module-chat`) for a signal
+  you can read.
+
 ## The lab
 
 `src/lab` answers every backend call in the browser from fixtures. The scenario
@@ -204,7 +217,12 @@ On how the work goes:
   out of the row button and sit beside it.
 - **The MCP browser and the dev server get orphaned** between sessions. Kill
   `chrome-profile-beta` and remove its `Singleton*` locks if the MCP says the
-  browser is already running.
+  browser is already running. Same for Vite: check `lsof -iTCP:5173-5180` and
+  kill the strays before starting, or the lab answers on a port you are not
+  looking at.
+- **Vite does not hot-reload an edit inside `packages/`** the way it does one in
+  `apps/web`. A behaviour change in `packages/ui` that "did not work" needs a
+  hard reload before you believe it.
 
 ## Process
 
@@ -218,7 +236,6 @@ On how the work goes:
 
 ## Open
 
-- **Chat has its own shell** — see the section above for everything known.
 - **Usage page**, scoped by user: observability, not billing — who spends what,
   on which agent, with which model, for the agents a user can reach.
   `/api/runs` already accepts `start_date` / `end_date` / `user=me`, and each
@@ -234,33 +251,60 @@ On how the work goes:
   such field. Deferred by decision.
 - **Library browsing** (skills, integrations, templates) reuses `PanelDialog`.
 
-## Chat — what is known, before starting
+## Chat
 
-`/chat` and `/chat/:conversationId` still render inside `MainLayout`, so the
-Studio sidebar is present. Confirmed target: its own shell without it.
+The chat has its own shell — `apps/web/src/modules/chat/chat-shell.tsx`. Its
+routes sit beside MainLayout's rather than inside them, and the
+`setOpenTransient(false)` trick that collapsed the Studio sidebar on mount is
+gone (so is the setter — it had no other caller).
 
-What is already there:
+It does not borrow Studio's navigation, it borrows the FRAME both products
+share: `components/shell-frame.tsx` holds `ShellSidebar` (brand cell with the
+product switcher, meta block, collapse control) and `ShellHeader` (56px, the
+trail, bell, profile). Each product passes only what is its own — Studio its
+navigation, the chat its conversations. Written once, so the two cannot drift;
+they already had, by one font weight, when the chat kept its own copy.
 
-- `apps/web/src/modules/chat/` is the app-side shell: `chat-page.tsx` plus its
-  OWN `conversation-sidebar.tsx` and `conversation-sidebar-state.ts`. So the
-  chat already has a second sidebar; the Studio one next to it is the problem.
-- `chat-page.tsx` calls `useSidebarStore.getState().setOpenTransient(false)` on
-  mount and restores on unmount — the same collapse-the-app-sidebar trick that
-  was just removed from `SettingsLayout`, and for the same reason: it is making
-  room for a sidebar that should not have been competing with it. Removing that
-  effect is part of the job, not a side quest.
-- Root is `data-full-bleed` with `h-[calc(100dvh-var(--spacing-header))]`, so it
-  already opts out of the 1300px page frame and subtracts the header token.
-- The UI itself is packaged in `packages/module-chat/src/ui/` (assistant-ui
-  based). The app-side files are the shell around it.
-- Gated on `features.chat` from `window.__APP_CONFIG__`; the lab enables it.
-  `/api/chat/sessions` has a fixture; the rest of the chat endpoints do not.
-- `useChatUnreadCount` still exists — it drove the nav badge that was removed
-  when the chat left the navigation. It has no consumer right now.
+- **The list and the title left the module.** `ChatPage` rendered both, which
+  is why the chat had two sidebars and two stacked bars. They are shell
+  furniture — the list IS the navigation, the title IS where-you-are — so the
+  module exports them (`ChatConversationList`, `ChatConversationTitle`) and the
+  shell raises the chat's two contexts once, over everything. One sessions
+  query feeds the list, the title and the thread. What is left in `ChatPage` is
+  the thread.
+- **The title is published to the breadcrumb store**, like every other page's
+  trail, not drawn by a second breadcrumb. `ChatTitleCrumb` publishes it only
+  when the conversation is KNOWN — a cold load or a deleted conversation costs
+  no segment at all, which beats a segment carrying a made-up name. The
+  separator ships with the segment, so nothing dangles either way.
+- **Its own open state**, `useChatSidebarStore`, persisted under its own key.
+  Two surfaces, two preferences — and Studio's is then left strictly alone,
+  which is what the transient setter was working around.
+- **The mobile drawer is the shadcn Sheet**, not the module's hand-rolled one.
+  Picking a row closes it, from `SidebarMenuButton` itself: on a phone the
+  drawer covers the very screen it just navigated to. Studio had that bug too,
+  so both products got the fix. The in-row rename and delete buttons are not
+  menu rows, so they still work with the drawer open.
+- **The list speaks the bundle**, not hard-coded French: `list.*` in
+  `chat.json`, plural families for the relative-time column. It sits beside an
+  i18n'd Studio nav; half a translated sidebar is worse than none.
+- **`heavyChatSessions`** (200 rows, same volume as the other heavy fixtures)
+  makes the "Charge" scenario exercise what the sidebar has to hold. The list
+  is not virtualised — that is the point of the fixture.
+- `useChatUnreadCount` still has no consumer — it drove the nav badge that left
+  with the chat.
 
-The shape to aim for: the product switcher stays (it is how you get back to
-Studio), the Studio navigation goes, the conversation sidebar takes its place.
-Fleet's reference screenshot has Chat and Inbox at the top of its own sidebar.
+Open on this surface:
+
+- **The header is tight on a phone**: chip + title + the context panel's four
+  tabs + bell + profile. Nothing overflows, but one "Contexte" button instead
+  of four tabs would breathe. Left as is until it actually bothers someone.
+- **Every row exposes rename and delete to the keyboard** (they are only
+  visually hidden), so tabbing through a long history is three stops per
+  conversation. True before the move; the longer list makes it worth naming.
+- **The title still opens on a pencil**, not the field itself — the one place
+  the form pattern's rule is not applied. A breadcrumb is not a form, so it may
+  be right; it is at least worth deciding on purpose.
 
 ## Rule of thumb that decided several of these
 
