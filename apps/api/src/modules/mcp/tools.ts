@@ -902,11 +902,6 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
             "run produces files, require descriptive, task-specific names that remain clear " +
             "outside this run; never generic names such as `report.md`, `summary.md`, or `output.md`.",
         },
-        config: {
-          type: "object",
-          description: "Per-run config override (either kind).",
-          additionalProperties: true,
-        },
         connection_overrides: {
           type: "object",
           additionalProperties: { type: "string" },
@@ -918,7 +913,7 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
             "list and retry the SAME call with it here. Each key is the integration id itself " +
             "(`@scope/integration`) — NOT the `integrations.<id>` field path the error reports " +
             "it under, which matches no integration and is ignored. TOP-LEVEL argument, " +
-            "alongside `manifest`/`config` — pass the object itself; JSON-encoding it is " +
+            "alongside `manifest`/`input` — pass the object itself; JSON-encoding it is " +
             "refused before the launch.",
         },
         context_documents: {

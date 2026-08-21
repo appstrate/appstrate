@@ -23,16 +23,6 @@ const VALID_MANIFEST = {
   // Declares an output schema below, so the `output` runtime tool must be
   // enabled (enforced by agentManifestSchema's superRefine).
   runtime_tools: ["output"],
-  config: {
-    schema: {
-      type: "object",
-      properties: {
-        max_emails: { type: "number", default: 20, description: "Max emails" },
-        language: { type: "string", default: "fr", enum: ["fr", "en"], description: "Language" },
-      },
-      required: [],
-    },
-  },
   input: {
     schema: {
       type: "object",
@@ -121,10 +111,10 @@ describe("validateManifest", () => {
     expect(result.errors).toHaveLength(0);
   });
 
-  it("accepts manifest with empty config schema", () => {
+  it("accepts manifest with an empty input schema", () => {
     const manifest = {
       ...VALID_MANIFEST,
-      config: { schema: { type: "object", properties: {} } },
+      input: { schema: { type: "object", properties: {} } },
     };
     const result = validateManifest(manifest);
     expect(result.valid).toBe(true);
@@ -157,7 +147,7 @@ describe("validateManifest", () => {
   it("rejects old-format schema (flat record without type: object)", () => {
     const oldFormat = {
       ...VALID_MANIFEST,
-      config: {
+      input: {
         schema: {
           max_emails: { type: "number", default: 20, required: false },
           clickup_list_id: { type: "string", required: true },
@@ -172,7 +162,7 @@ describe("validateManifest", () => {
   it("rejects invalid field type in schema properties", () => {
     const bad = {
       ...VALID_MANIFEST,
-      config: {
+      input: {
         schema: {
           type: "object",
           properties: {
@@ -208,7 +198,7 @@ describe("validateManifest", () => {
   it("accepts required as an array of strings on schema level", () => {
     const manifest = {
       ...VALID_MANIFEST,
-      config: {
+      input: {
         schema: {
           type: "object",
           properties: {
