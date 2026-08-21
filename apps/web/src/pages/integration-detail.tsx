@@ -1009,36 +1009,35 @@ function PinManagementSection({ packageId }: { packageId: string }) {
       {/* Existing pins */}
       {(pins ?? []).length > 0 ? (
         <div className="border-border bg-background mb-3 overflow-hidden rounded-md border">
-          <table className="w-full text-xs">
-            <thead className="bg-muted/40 text-muted-foreground">
-              <tr>
-                <th className="px-3 py-2 text-left font-medium">
+          <Table className="text-xs">
+            <TableHeader className="bg-muted/40">
+              <TableRow className="hover:bg-transparent">
+                <TableHead className="h-auto px-3 py-2">
                   {t("integration.admin.pinManagement.colAgent")}
-                </th>
-                <th className="px-3 py-2 text-left font-medium">
+                </TableHead>
+                <TableHead className="h-auto px-3 py-2">
                   {t("integration.admin.pinManagement.colAuth")}
-                </th>
-                <th className="px-3 py-2 text-left font-medium">
+                </TableHead>
+                <TableHead className="h-auto px-3 py-2">
                   {t("integration.admin.pinManagement.colConnection")}
-                </th>
-                <th className="w-12 px-3 py-2"></th>
-              </tr>
-            </thead>
-            <tbody>
+                </TableHead>
+                <TableHead className="h-auto w-12 px-3 py-2" />
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {(pins ?? []).map((p) => (
-                <tr
+                <TableRow
                   key={`${p.packageId}-${p.auth_key}`}
-                  className="border-border border-t"
                   data-testid={`pin-row-${p.packageId}-${p.auth_key}`}
                 >
-                  <td className="px-3 py-2">{agentDisplayName(p.packageId)}</td>
-                  <td className="px-3 py-2">
+                  <TableCell className="px-3 py-2">{agentDisplayName(p.packageId)}</TableCell>
+                  <TableCell className="px-3 py-2">
                     <span className="bg-muted text-muted-foreground rounded px-1.5 py-0.5 font-mono text-[10px]">
                       {p.auth_key}
                     </span>
-                  </td>
-                  <td className="px-3 py-2">{connectionDisplay(p.connection_id)}</td>
-                  <td className="px-3 py-2">
+                  </TableCell>
+                  <TableCell className="px-3 py-2">{connectionDisplay(p.connection_id)}</TableCell>
+                  <TableCell className="px-3 py-2">
                     <Button
                       size="icon"
                       variant="ghost"
@@ -1053,11 +1052,11 @@ function PinManagementSection({ packageId }: { packageId: string }) {
                     >
                       <Trash2 className="h-3 w-3" />
                     </Button>
-                  </td>
-                </tr>
+                  </TableCell>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         </div>
       ) : (
         <p className="text-muted-foreground mb-3 text-xs italic">

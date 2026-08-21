@@ -174,8 +174,6 @@ describe("discoverAvailableModels", () => {
     const result = await discoverAvailableModels(ctx.org.id, cred.id, deps);
 
     expect(result.outcome).toBe("ok");
-    expect(result.persisted).toBe(true);
-    expect(result.verifiedModelIds).toEqual(["m-featured", "m-extra"]);
     const info = await getOrgModelProviderCredential(ctx.org.id, cred.id);
     expect(info?.available_model_ids).toEqual(["m-featured", "m-extra"]);
   });
@@ -187,14 +185,19 @@ describe("discoverAvailableModels", () => {
     const result = await discoverAvailableModels(ctx.org.id, cred.id, deps);
 
     expect(result.outcome).toBe("auth_failed");
-    expect(result.persisted).toBe(false);
     // Aborted on the first candidate — no further probes burned.
     expect(calls).toEqual(["m-featured"]);
-    const info = await getOrgModelProviderCredential(ctx.org.id, cred.id);
-    // `[]`, not null: the DTO resolves through `resolveCredentialModelIds`,
-    // which coalesces a never-written column to an empty list. What matters
-    // is that the failed round wrote nothing.
-    expect(info?.available_model_ids).toEqual([]);
+    // Read the RAW column, not the DTO. The DTO resolves through
+    // `resolveCredentialModelIds`, which coalesces a never-written column to
+    // `[]` — so asserting `[]` there cannot tell "never wrote" from "wrote an
+    // empty list", and a regression that WIPES a good list on `auth_failed`
+    // would pass. The whole point of this test is that the failed round wrote
+    // nothing, so it has to assert on the thing that would have been written.
+    const [row] = await db
+      .select({ ids: modelProviderCredentials.availableModelIds })
+      .from(modelProviderCredentials)
+      .where(eq(modelProviderCredentials.id, cred.id));
+    expect(row?.ids).toBeNull();
   });
 
   it("keeps the previous list when nothing verifies (network incident ≠ empty plan)", async () => {
@@ -206,7 +209,6 @@ describe("discoverAvailableModels", () => {
     const result = await discoverAvailableModels(ctx.org.id, cred.id, allDown.deps);
 
     expect(result.outcome).toBe("nothing_verified");
-    expect(result.persisted).toBe(false);
     const info = await getOrgModelProviderCredential(ctx.org.id, cred.id);
     expect(info?.available_model_ids).toEqual(["m-featured"]);
   });
@@ -222,7 +224,8 @@ describe("discoverAvailableModels", () => {
     const result = await discoverAvailableModels(ctx.org.id, cred.id, deps);
 
     expect(result.outcome).toBe("ok");
-    expect(result.verifiedModelIds).toEqual(["m-featured"]);
+    const info = await getOrgModelProviderCredential(ctx.org.id, cred.id);
+    expect(info?.available_model_ids).toEqual(["m-featured"]);
     expect(calls.filter((m) => m === "m-featured")).toHaveLength(2);
   });
 
@@ -265,13 +268,11 @@ describe("discoverAvailableModels", () => {
 
     expect(calls()).toBe(0);
     expect(result.outcome).toBe("ok");
-    // Nothing is written — the list is derived on every read instead.
-    expect(result.persisted).toBe(false);
     // Zero upstream requests were spent, so nothing was "probed".
     expect(result.probedCount).toBe(0);
-    // "m-uncatalogued" is filtered out (not in the catalog); the rest come
-    // back in declaration order.
-    expect(result.verifiedModelIds).toEqual(["m-featured", "m-extra"]);
+    // Derived on read, not written: "m-uncatalogued" is filtered out (not in
+    // the catalog); the rest come back in declaration order. That nothing was
+    // written is pinned by the raw-column assertion in the next test.
     const info = await getOrgModelProviderCredential(ctx.org.id, cred.id);
     expect(info?.available_model_ids).toEqual(["m-featured", "m-extra"]);
   });
@@ -292,7 +293,7 @@ describe("discoverAvailableModels", () => {
     const { deps } = forbiddenProber();
     const result = await discoverAvailableModels(ctx.org.id, cred.id, deps);
 
-    expect(result.verifiedModelIds).toEqual(["m-featured", "m-extra"]);
+    expect(result.outcome).toBe("ok");
     const info = await getOrgModelProviderCredential(ctx.org.id, cred.id);
     expect(info?.available_model_ids).toEqual(["m-featured", "m-extra"]);
     // The column itself is still the stale value — discovery wrote nothing.

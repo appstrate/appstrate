@@ -69,7 +69,17 @@ export const integrationPins = pgTable(
     connectionId: uuid("connection_id")
       .notNull()
       .references(() => integrationConnections.id, { onDelete: "cascade" }),
-    /** Who set the pin — admin id for admin pins, same as `user_id` for member pins. */
+    /**
+     * Who set the pin — admin id for admin pins, same as `user_id` for member
+     * pins.
+     *
+     * WRITTEN, NEVER READ — written at four sites in
+     * `integration-pins-service.ts`, never SELECTed, filtered, or serialized
+     * into any DTO or OpenAPI response, and write-only since the column was
+     * introduced (no reader was ever removed). Kept rather than dropped because
+     * an admin pin's author is plausibly wanted in the UI — that is the open
+     * decision, and dropping would discard attribution already collected.
+     */
     createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
@@ -88,7 +98,6 @@ export const integrationPins = pgTable(
     ),
     // Resolver hot path: fetch all pins for (app, agent) in one round trip,
     // then partition by user_id at app level.
-    index("idx_integration_pins_app_pkg").on(table.applicationId, table.packageId),
     // Reverse lookup: "what pins reference this connection?" — used by
     // the unshare-guard (refuse turning sharedWithOrg off if pinned) AND
     // by the impact-list confirm modal on /connections destructive delete.

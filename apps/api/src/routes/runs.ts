@@ -27,6 +27,7 @@ import { idempotency } from "../middleware/idempotency.ts";
 import { invalidRequest, notFound, conflict, internalError } from "../lib/errors.ts";
 import { listResponse } from "../lib/list-response.ts";
 import { setOffsetLinkHeader, setSinceLinkHeader } from "../lib/pagination-link.ts";
+import { parseListPagination } from "../lib/list-query.ts";
 import { requireAgent } from "../middleware/guards.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { stopWorkloadAndWait } from "../services/stop-workload.ts";
@@ -90,6 +91,23 @@ const inlineRunBodySchema = z.object({
    * on the same body.
    */
   connection_overrides: z.record(z.string(), z.string().min(1)).optional(),
+  /**
+   * Not a field — a rejection. `rerun_from` is an agent-route concept (replay a
+   * cataloged agent's prior input) and means nothing here, so its presence must
+   * fail loudly rather than be silently stripped and half-applied: the inline
+   * preflight validates the raw `input`, which a replay would not populate.
+   *
+   * Declared as `z.undefined()` so the rule lives in the schema and travels
+   * with it, instead of being re-derived from a second `c.req.json()` read of
+   * the same body. It also puts the failure on the documented side of the error
+   * convention (see `responses.ts` → `ValidationError`): body-level failures
+   * answer `validation_failed` with a populated `errors[]`, and `invalid_request`
+   * is for single-field failures OUTSIDE the body. The hand-rolled throw this
+   * replaced emitted `invalid_request` from inside a body check.
+   */
+  rerun_from: z
+    .undefined({ error: "`rerun_from` is not supported for inline runs — pass `input` directly" })
+    .optional(),
 });
 
 /**
@@ -325,19 +343,7 @@ export function createRunsRouter() {
   router.get(`/agents/${SCOPED_PACKAGE_ROUTE}/runs`, requireAgent(), async (c) => {
     const agent = c.get("package");
     const scope = getAppScope(c);
-    const limit = z.coerce
-      .number()
-      .int()
-      .min(1)
-      .max(100)
-      .catch(50)
-      .parse(c.req.query("limit") ?? 50);
-    const offset = z.coerce
-      .number()
-      .int()
-      .min(0)
-      .catch(0)
-      .parse(c.req.query("offset") ?? 0);
+    const { limit, offset } = parseListPagination(c, { defaultLimit: 50 });
     const endUser = c.get("endUser");
     const result = await listPackageRuns(scope, agent.id, {
       limit,
@@ -362,19 +368,7 @@ export function createRunsRouter() {
   router.get("/runs", async (c) => {
     const actor = getActor(c);
     const scope = getAppScope(c);
-    const limit = z.coerce
-      .number()
-      .int()
-      .min(1)
-      .max(100)
-      .catch(20)
-      .parse(c.req.query("limit") ?? 20);
-    const offset = z.coerce
-      .number()
-      .int()
-      .min(0)
-      .catch(0)
-      .parse(c.req.query("offset") ?? 0);
+    const { limit, offset } = parseListPagination(c, { defaultLimit: 20 });
     // `user` is a closed set of one: `me`. Validated BEFORE the end-user branch
     // below so the param means the same thing for every caller, instead of a
     // typo surviving in an end-user integration until it runs under an org
@@ -518,14 +512,11 @@ export function createRunsRouter() {
 
     const minLevel = z.enum(RUN_LOG_LEVELS).optional().catch(undefined).parse(c.req.query("level"));
 
-    const limit = z.coerce
-      .number()
-      .int()
-      .min(1)
-      .max(1000)
-      .default(1000)
-      .catch(1000)
-      .parse(c.req.query("limit"));
+    // Log pages are limit-only (`since` is the cursor), so the helper's
+    // `offset` is dropped. The old inline form also carried a `.default(1000)`
+    // ahead of `.catch(1000)`: dead, because `.catch` already absorbs the
+    // `undefined` an absent `?limit=` produces.
+    const { limit } = parseListPagination(c, { defaultLimit: 1000, maxLimit: 1000 });
 
     // Ownership was just verified via getRun(scope) above — we can hand
     // off to the org-scoped log reader safely. Over-fetch by one row so
@@ -638,20 +629,9 @@ export function createRunsRouter() {
       const applicationId = c.get("applicationId");
       const actor = getActor(c);
 
+      // `rerun_from` is rejected by `inlineRunBodySchema` itself — see the field
+      // note there. No second read of the body here.
       const body = await readJsonBody(c, inlineRunBodySchema);
-
-      // `rerun_from` is an agent-route concept (replay a cataloged agent's
-      // prior input). The inline body schema strips it, but the shared input
-      // parser below reads the raw JSON body — reject it explicitly so a
-      // stray field fails loudly instead of being half-applied (preflight
-      // validates the raw `input`, which a replay would not populate).
-      const rawBody = (await c.req.json().catch(() => null)) as Record<string, unknown> | null;
-      if (rawBody && "rerun_from" in rawBody) {
-        throw invalidRequest(
-          "`rerun_from` is not supported for inline runs — pass `input` directly",
-          "rerun_from",
-        );
-      }
 
       // Preflight BEFORE any input document streams — a bad manifest or
       // readiness problem 4xxes without touching storage.

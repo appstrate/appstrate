@@ -17,7 +17,7 @@ import {
   resolveTurnClosure,
   turnDeadlineNoticeText,
   turnNoticeChunks,
-} from "../src/turn-closure.ts";
+} from "../src/pi-chat/pi-turn-closure.ts";
 import { PiChatUiStreamMapper } from "../src/pi-chat/ui-stream-mapper.ts";
 
 const TEN_MINUTES = 10 * 60_000;

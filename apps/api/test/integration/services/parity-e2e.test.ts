@@ -7,7 +7,7 @@
  *   1. A scripted generator yields a canonical RunEvent sequence.
  *   2. Each event is driven through the pair a read-back consumer
  *      composes: the runtime reducer (incremental aggregation) and the
- *      platform's {@link PersistingEventSink} (run_logs fan-out).
+ *      platform's {@link persistRunEvent} (run_logs fan-out).
  *   3. The incremental reduction matches what any runtime consumer would
  *      get from `reduceEvents` over the same stream.
  *   4. run_logs rows reflect the expected DB side-effects (output +
@@ -19,7 +19,7 @@ import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedAgent, seedRun } from "../../helpers/seed.ts";
 import { installPackage } from "../../../src/services/application-packages.ts";
-import { PersistingEventSink } from "../../../src/services/run-launcher/appstrate-event-sink.ts";
+import { persistRunEvent } from "../../../src/services/run-launcher/appstrate-event-sink.ts";
 import type { RunEvent } from "@appstrate/afps-runtime/types";
 import { createReducerSink } from "@appstrate/afps-runtime/sinks";
 import { reduceEvents } from "@appstrate/afps-runtime/runner";
@@ -47,7 +47,7 @@ describe("Parity E2E — full adapter stack", () => {
     runId = run.id;
   });
 
-  it("reducer + PersistingEventSink over a streamed script match reduceEvents and fan out to run_logs", async () => {
+  it("reducer + persistRunEvent over a streamed script match reduceEvents and fan out to run_logs", async () => {
     const script: RunEvent[] = [
       {
         type: "appstrate.progress",
@@ -74,20 +74,17 @@ describe("Parity E2E — full adapter stack", () => {
     ];
 
     // A consumer that needs a read-back aggregate composes the runtime
-    // reducer with the platform's persisting sink and drives both — the
-    // platform's own ingestion path only ever builds the persisting half.
+    // reducer with the platform's write-through and drives both — the
+    // platform's own ingestion path only ever calls the write-through half.
     const reducer = createReducerSink();
-    const persisting = new PersistingEventSink({
-      scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
-      runId,
-    });
+    const scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
 
     async function* scripted() {
       for (const ev of script) yield ev;
     }
     for await (const ev of scripted()) {
       await reducer.sink.handle(ev);
-      await persisting.handle(ev);
+      await persistRunEvent(db, scope, runId, ev);
     }
 
     // Reducer agreement: folding the stream event-by-event MUST land on the

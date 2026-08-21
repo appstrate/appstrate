@@ -13,7 +13,7 @@ import { useOrgScope } from "./use-org-scope";
 export type DocumentDto =
   paths["/api/documents"]["get"]["responses"][200]["content"]["application/json"]["data"][number];
 
-export interface DocumentListFilters {
+interface DocumentListFilters {
   purpose?: "user_upload" | "agent_output";
   runId?: string;
   contextChatSessionId?: string;

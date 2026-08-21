@@ -66,22 +66,21 @@ const MAX_CANDIDATES = 24;
  */
 const PROBE_CONCURRENCY = 4;
 
+/**
+ * What a discovery run reports back. Deliberately narrow: the verified ids are
+ * NOT echoed here, because the row (probe path) or the definition+catalog
+ * (`mode: "static"`) is the single place they are read from — see
+ * `resolveCredentialModelIds`. The caller re-reads through the credential DTO,
+ * so a round that verified nothing answers with the list that still stands
+ * rather than an empty array that never was one.
+ */
 export interface ModelDiscoveryResult {
-  /** Outcome of the run. `persisted` only on `ok`. */
   outcome: "ok" | "auth_failed" | "nothing_verified" | "no_candidates" | "credential_not_found";
-  /** Ids that answered 2xx, in candidate order. Empty unless `ok`. */
-  verifiedModelIds: string[];
   /**
    * Candidates probed (after dedupe + cap). Always 0 for `mode: "static"`
    * providers — they consider candidates without any upstream request.
    */
   probedCount: number;
-  /**
-   * True when the verified list was written to the credential row. Always
-   * false for `mode: "static"` providers: their list is derived on read, so
-   * there is nothing to store.
-   */
-  persisted: boolean;
 }
 
 export interface ModelDiscoveryDeps {
@@ -119,7 +118,7 @@ async function persistVerifiedModels(
     .where(
       and(eq(modelProviderCredentials.id, credentialId), eq(modelProviderCredentials.orgId, orgId)),
     );
-  return { outcome: "ok", verifiedModelIds: verified, probedCount, persisted: true };
+  return { outcome: "ok", probedCount };
 }
 
 /**
@@ -140,12 +139,7 @@ export async function discoverAvailableModels(
 ): Promise<ModelDiscoveryResult> {
   const creds = await loadInferenceCredentials(orgId, credentialId);
   if (!creds) {
-    return {
-      outcome: "credential_not_found",
-      verifiedModelIds: [],
-      probedCount: 0,
-      persisted: false,
-    };
+    return { outcome: "credential_not_found", probedCount: 0 };
   }
   const def = getModelProvider(creds.providerId);
 
@@ -167,15 +161,13 @@ export async function discoverAvailableModels(
       // distinction any more (there is no previous list to protect), but the
       // outcome should stay honest about an empty answer.
       outcome: served.length > 0 ? "ok" : "no_candidates",
-      verifiedModelIds: served,
       probedCount: 0,
-      persisted: false,
     };
   }
 
   const candidates = (def ? resolveDiscoveryCandidates(def) : []).slice(0, MAX_CANDIDATES);
   if (candidates.length === 0) {
-    return { outcome: "no_candidates", verifiedModelIds: [], probedCount: 0, persisted: false };
+    return { outcome: "no_candidates", probedCount: 0 };
   }
 
   // Probe one candidate (with the single 429 retry). Returns "auth" on a
@@ -222,7 +214,7 @@ export async function discoverAvailableModels(
       credentialId,
       providerId: creds.providerId,
     });
-    return { outcome: "auth_failed", verifiedModelIds: [], probedCount, persisted: false };
+    return { outcome: "auth_failed", probedCount };
   }
 
   // Preserve candidate (declaration) order regardless of completion order.
@@ -234,12 +226,7 @@ export async function discoverAvailableModels(
       providerId: creds.providerId,
       probedCount: candidates.length,
     });
-    return {
-      outcome: "nothing_verified",
-      verifiedModelIds: [],
-      probedCount: candidates.length,
-      persisted: false,
-    };
+    return { outcome: "nothing_verified", probedCount: candidates.length };
   }
 
   logger.info("model discovery persisted", {

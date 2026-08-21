@@ -47,7 +47,7 @@ export function useUpsertMemberIntegrationPin() {
   });
 }
 
-export interface DeleteMemberPinInput {
+interface DeleteMemberPinInput {
   agentPackageId: string;
   integrationId: string;
 }

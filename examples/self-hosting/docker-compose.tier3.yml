@@ -256,6 +256,13 @@ services:
       # override the sidecar-side defaults via .env.
       - SIDECAR_MAX_REQUEST_BODY_BYTES
       - SIDECAR_MAX_MCP_ENVELOPE_BYTES
+      # Sidecar token/concurrency knobs. Bare passthrough, no default: the
+      # sidecar owns the compiled defaults and re-stating them here is the
+      # drift class `verify:compose-defaults` exists to catch. Forwarded only
+      # when the operator actually sets them.
+      - SIDECAR_INLINE_TOOL_OUTPUT_TOKENS
+      - SIDECAR_RUN_TOOL_OUTPUT_BUDGET_TOKENS
+      - SIDECAR_API_CALL_CONCURRENCY
       # ── Defensive workaround for better-auth 1.6+ namespace clash ──
       # NOTE: empty default (NOT `{}`) — better-auth 1.6+ has its own
       # `BETTER_AUTH_SECRETS` env var with CSV `v1:secret` format and crashes

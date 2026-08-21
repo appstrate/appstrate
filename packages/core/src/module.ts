@@ -1195,15 +1195,6 @@ export interface RunStatusChangeParams {
   extra?: Record<string, unknown>;
 }
 
-/**
- * Single field-level error entry carried on
- * {@link RunConnectionMissingParams.errors}. Aliases the core
- * {@link ValidationFieldError} (the shape platform routes return as 4xx
- * envelopes) so modules can forward it verbatim to downstream consumers
- * (webhook payloads, Slack messages) without remapping.
- */
-export type RunConnectionMissingError = ValidationFieldError;
-
 /** Parameters passed to the `onRunConnectionMissing` event. */
 export interface RunConnectionMissingParams {
   orgId: string;
@@ -1213,7 +1204,7 @@ export interface RunConnectionMissingParams {
   /** Actor whose request was blocked (user or end_user from the headless API). */
   actor: { type: "user" | "end_user"; id: string };
   /** Field-level errors that triggered the block (same shape as 4xx envelopes). */
-  errors: RunConnectionMissingError[];
+  errors: ValidationFieldError[];
 }
 
 // ---------------------------------------------------------------------------

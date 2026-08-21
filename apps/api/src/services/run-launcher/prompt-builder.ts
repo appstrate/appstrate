@@ -36,19 +36,23 @@ import {
 import { getEnv } from "@appstrate/env";
 import { getExecutionMode, type ExecutionMode } from "../../infra/mode.ts";
 import { fetchIntegrationPromptDocs } from "../integration-service.ts";
+import { orchestratorAppliesWorkspaceTmpfsCap } from "../orchestrator/index.ts";
 
 /**
  * Workspace tmpfs cap (MB) to state in the prompt, or 0 to stay silent.
  *
- * `WORKSPACE_TMPFS_SIZE_MB` configures a real mount only on the docker
- * backend (docker-orchestrator.ts, `createIsolationBoundary`). The
- * process backend gives the run a plain directory under `os.tmpdir()`
- * without applying this setting, and a module-contributed backend's
- * workspace is opaque to core. Fail closed on anything but docker:
- * stating a cap that the selected backend does not use would be misleading.
+ * `WORKSPACE_TMPFS_SIZE_MB` only configures a real mount on a backend that
+ * declares `appliesWorkspaceTmpfsCap`. The process backend gives the run a
+ * plain directory under `os.tmpdir()` without applying the setting, and a
+ * module-contributed backend's workspace is opaque to core. The question is
+ * asked of the orchestrator REGISTRY rather than by naming a backend id: the
+ * registry is what a module-contributed backend can answer, and the microVM
+ * equivalent of the same fact (`writableRootTmpfsPercent`, used 40 lines
+ * below) already comes from there. Fail-closed — an undeclared backend stays
+ * silent, because stating a cap the backend does not apply is misinformation.
  */
 function promptWorkspaceTmpfsSizeMb(executionMode: ExecutionMode): number {
-  return executionMode === "docker" ? getEnv().WORKSPACE_TMPFS_SIZE_MB : 0;
+  return orchestratorAppliesWorkspaceTmpfsCap(executionMode) ? getEnv().WORKSPACE_TMPFS_SIZE_MB : 0;
 }
 
 export async function buildPlatformSystemPrompt(

@@ -11,9 +11,9 @@
  * `pinned.set`, or any third-party `@scope/tool.verb`.
  *
  * Canonical events additionally carry `dataschema`, a stable versioned
- * URI pointing at the published JSON Schema for their `data` payload, so
- * a consumer can validate the payload without reading Appstrate source.
- * The schemas themselves live in `./canonical-event-schemas.ts`.
+ * IDENTIFIER for the shape of their `data` payload. No document is served
+ * at those URIs and none ever was — see `./canonical-event-schemas.ts`,
+ * which documents why, and which is where the URIs live.
  *
  * Specification: CloudEvents 1.0 (`dataschema` is §3.1, OPTIONAL).
  */
@@ -75,13 +75,11 @@ export function buildCloudEventEnvelope(opts: BuildEnvelopeOptions): CloudEventE
   // through without the attribute rather than pointing at a schema they
   // would fail. Omission is conformant — the attribute is OPTIONAL.
   //
-  // `isCanonicalRunEvent` is a deliberate SUBSET of the published schemas:
-  // it mirrors every constraint they express and additionally rejects
-  // non-finite numbers, which `JSON.stringify` would turn into `null`.
-  // Rejecting more than the schema is always safe (it only omits an
-  // OPTIONAL attribute); accepting more would not be, so the two are kept
-  // in lockstep by `test/fixtures/canonical-event-corpus.ts` plus a
-  // coverage check derived from the generated JSON Schema documents.
+  // `isCanonicalRunEvent` is the sole definition of the canonical payload
+  // shape. It additionally rejects non-finite numbers, which `JSON.stringify`
+  // would turn into `null` — rejecting more is always safe here, since it only
+  // omits an OPTIONAL attribute. Its accept/reject verdicts are pinned by
+  // `test/fixtures/canonical-event-corpus.ts`.
   const dataschema = isCanonicalRunEvent(event) ? canonicalEventSchemaUri(event.type) : undefined;
 
   return {

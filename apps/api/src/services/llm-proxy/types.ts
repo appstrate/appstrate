@@ -17,8 +17,8 @@ export type LlmProxyPrincipal =
 /**
  * Build the {@link LlmProxyPrincipal} from the resolved auth identity: an API
  * key (`apiKeyId` present) is an `"api_key"` principal, otherwise a cookie
- * session is a `"jwt_user"`. Shared by every proxy surface so the principal
- * shape can't drift between them.
+ * session is a `"jwt_user"`. Named rather than inlined at its single caller so
+ * the two-branch rule stays one readable statement of who minted the call.
  */
 export function buildLlmProxyPrincipal(args: {
   apiKeyId: string | null | undefined;

@@ -60,6 +60,8 @@ import {
   translateResolutionError,
   isUserConnectionCreationBlocked,
 } from "./integration-connection-resolver.ts";
+import type { ConnectionResolutionResult } from "@appstrate/core/integration";
+import type { IntegrationManifestCache } from "./integration-service.ts";
 
 // Canonical wire shapes live in @appstrate/shared-types so the frontend
 // hook and OpenAPI spec can't drift from the service. Local aliases keep
@@ -612,19 +614,35 @@ function pickStatusForSource(source: ConnectionResolutionSource): IntegrationPic
  * fallback) + scope check the runtime uses — so the UI never re-implements
  * it. Per-candidate `missingScopes` are an additional display annotation
  * (the resolver only scope-checks the one resolved connection).
+ *
+ * `agentManifest` and `resolution` are REQUIRED and caller-supplied, which is
+ * load-bearing rather than stylistic. This function used to load the package
+ * itself and read `agent.manifest` — always the DRAFT — while its only caller
+ * had already resolved the manifest for the requested `version`. On
+ * `?version=<pinned>` the response therefore described the pinned version in
+ * `blocks_run` and the draft in every `integrations[].resolution`, defeating
+ * the reason #770 introduced the selector. Taking both as parameters makes
+ * that divergence unrepresentable: there is no manifest in scope here to read
+ * the wrong one from. It also removes an N+1 — the cascade ran once per
+ * declared integration, each time re-fetching the package and every manifest.
  */
-export async function resolveAgentIntegrationPick(args: {
+async function resolveAgentIntegrationPick(args: {
   scope: AppScope;
   agentPackageId: string;
   integrationId: string;
   actor: Actor;
   isAdmin: boolean;
+  /** The manifest of the version under inspection — never re-read from the package. */
+  agentManifest: Record<string, unknown>;
+  /** Agent-level `includeInert: true` cascade, resolved once for every integration. */
+  resolution: ConnectionResolutionResult;
+  /** Agent-level member pins, fetched once. */
+  memberPins: MemberPinSummary[];
+  /** Shared integration-manifest memo, so N integrations cost N fetches, not N². */
+  manifestCache: IntegrationManifestCache;
 }): Promise<IntegrationAgentResolution> {
-  const { scope, agentPackageId, integrationId, actor, isAdmin } = args;
+  const { scope, agentPackageId, integrationId, actor, isAdmin, agentManifest, resolution } = args;
 
-  const agent = await getPackage(agentPackageId, scope.orgId);
-  if (!agent) throw notFound(`Agent '${agentPackageId}' not found in this organization`);
-  const agentManifest = agent.manifest as unknown as Record<string, unknown>;
   const agentEntry = parseManifestIntegrations(agentManifest).find((e) => e.id === integrationId);
   // AFPS §4.4 — preserve the wildcard literal `"*"` so `missingScopesForConnection`
   // can route through the default-scopes branch of `requiredScopesForAgent`.
@@ -633,33 +651,17 @@ export async function resolveAgentIntegrationPick(args: {
   const agentTools: readonly string[] | "*" = agentEntry?.tools ?? [];
   const agentScopes = agentEntry?.scopes ?? [];
 
-  const manifestRes = await fetchIntegrationManifest(integrationId);
+  const manifestRes = await fetchIntegrationManifest(integrationId, args.manifestCache);
   const manifest = manifestRes.ok ? manifestRes.manifest : null;
 
-  const userId = actor.type === "user" ? actor.id : null;
+  const memberPins = args.memberPins;
 
-  const [candidatesRaw, adminPins, memberPins, blocked, orgDefault, resolution] = await Promise.all(
-    [
-      listAccessibleConnections(scope, integrationId, actor),
-      listIntegrationPins(scope, integrationId),
-      userId
-        ? listMemberPinsForAgent(scope, agentPackageId, userId)
-        : Promise.resolve([] as MemberPinSummary[]),
-      isUserConnectionCreationBlocked(scope.applicationId, integrationId),
-      getOrgDefault(scope, integrationId),
-      resolveConnectionsForRun({
-        agentManifest,
-        packageId: agentPackageId,
-        actor,
-        scope: { orgId: scope.orgId, applicationId: scope.applicationId },
-        // The picker manages connections for EVERY declared integration, incl.
-        // inert ones (auth_key but no tools/scopes). Opting in here makes the
-        // cascade honour their pins too — so we reuse its verdict + `source`
-        // rather than re-deriving the precedence in this service.
-        includeInert: true,
-      }),
-    ],
-  );
+  const [candidatesRaw, adminPins, blocked, orgDefault] = await Promise.all([
+    listAccessibleConnections(scope, integrationId, actor),
+    listIntegrationPins(scope, integrationId),
+    isUserConnectionCreationBlocked(scope.applicationId, integrationId),
+    getOrgDefault(scope, integrationId),
+  ]);
 
   const adminPinnedConnectionId =
     adminPins.find((p) => p.packageId === agentPackageId)?.connection_id ?? null;
@@ -763,15 +765,17 @@ export interface AgentConnectionReadiness {
 }
 
 /**
- * Bulk connection readiness for an agent. Replaces the N per-integration
- * `resolveAgentIntegrationPick` round-trips with a single agent-level call.
+ * Bulk connection readiness for an agent. Resolves the manifest ONCE for the
+ * requested version and runs each cascade once for the whole agent, so a page
+ * load costs two cascades regardless of how many integrations are declared.
  *
  * `blocks_run` / `errors` come from `resolveConnectionsForRun` with the RUN
  * semantics (`includeInert: false` + the required-auth carve-out) — the exact
  * resolver call the run-kickoff 412 uses — so the UI's pre-run signal can never
- * disagree with the actual gate. The per-integration `resolution` DTOs use
- * `includeInert: true` (inside `resolveAgentIntegrationPick`) so every declared
- * integration, even an inert one, stays manageable in the Connexions tab.
+ * disagree with the actual gate. The per-integration `resolution` DTOs come
+ * from a second `includeInert: true` cascade over the same manifest, so every
+ * declared integration, even an inert one, stays manageable in the Connexions
+ * tab. Both are handed to the picks; nothing downstream re-reads the package.
  */
 export async function resolveAgentConnectionReadiness(args: {
   scope: AppScope;
@@ -796,16 +800,39 @@ export async function resolveAgentConnectionReadiness(args: {
   const agentManifest = agent.manifest as unknown as Record<string, unknown>;
   const declared = parseManifestIntegrations(agentManifest);
 
-  // Authoritative run-blocking verdict — the same resolver call the run gate runs.
-  const runResolution = await resolveConnectionsForRun({
-    agentManifest,
-    packageId: agent.id,
-    actor,
-    scope: { orgId: scope.orgId, applicationId: scope.applicationId },
-  });
+  // One memo shared by BOTH cascades and every per-integration pick below.
+  // Without it each pick re-fetched every integration manifest, so an agent
+  // declaring N integrations paid O(N²) manifest reads for one page load.
+  const manifestCache: IntegrationManifestCache = new Map();
+  const userId = actor.type === "user" ? actor.id : null;
+
+  // Two cascades, deliberately — they answer different questions over the SAME
+  // resolved manifest. The run gate excludes inert integrations (and applies
+  // the required-auth carve-out); the management DTO includes them so an inert
+  // integration stays pinnable in the Connexions tab. Neither is derivable from
+  // the other, but both are agent-level: one call each, not one per integration.
+  const [runResolution, pickResolution, memberPins] = await Promise.all([
+    resolveConnectionsForRun({
+      agentManifest,
+      packageId: agent.id,
+      actor,
+      scope: { orgId: scope.orgId, applicationId: scope.applicationId },
+      manifestCache,
+    }),
+    resolveConnectionsForRun({
+      agentManifest,
+      packageId: agent.id,
+      actor,
+      scope: { orgId: scope.orgId, applicationId: scope.applicationId },
+      includeInert: true,
+      manifestCache,
+    }),
+    userId
+      ? listMemberPinsForAgent(scope, agent.id, userId)
+      : Promise.resolve([] as MemberPinSummary[]),
+  ]);
   const blockingIds = new Set(runResolution.errors.map((e) => e.integrationId));
 
-  // Per-integration management DTO (includeInert:true inside the pick).
   const resolutions = await Promise.all(
     declared.map((e) =>
       resolveAgentIntegrationPick({
@@ -814,6 +841,10 @@ export async function resolveAgentConnectionReadiness(args: {
         integrationId: e.id,
         actor,
         isAdmin,
+        agentManifest,
+        resolution: pickResolution,
+        memberPins,
+        manifestCache,
       }),
     ),
   );

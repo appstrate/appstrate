@@ -4,12 +4,20 @@ import { useTranslation } from "react-i18next";
 import { Coins, FileCode2 } from "lucide-react";
 import { cn } from "@appstrate/ui/cn";
 import { formatDuration } from "@appstrate/core/format";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@appstrate/ui/components/table";
 import { JsonView } from "./json-view";
 import { SectionCard } from "./section-card";
 import { EmptyState } from "./page-states";
 import { RunTrigger } from "./run-trigger";
 import { RunCostReadout } from "./run-cost-readout";
-import { formatDateField } from "../lib/markdown";
+import { formatDateField } from "../lib/format-date";
 import { fractionOfWindow, formatWindowPercent, readRunContext } from "./run-context";
 import type { RunTurnRow } from "./log-utils";
 import { ACTIVE_RUN_STATUSES, type EnrichedRun, type TokenUsage } from "@appstrate/shared-types";
@@ -80,71 +88,75 @@ function TurnsTable({ turns }: { turns: RunTurnRow[] }) {
 
   return (
     <>
-      <div className="overflow-x-auto">
-        <table className="w-full border-collapse text-sm">
-          <thead>
-            <tr className="text-muted-foreground border-border border-b text-xs">
-              <th scope="col" className="py-1.5 pr-3 text-left font-medium">
-                {t("run.turnIndex")}
-              </th>
-              <th scope="col" className="py-1.5 pr-3 text-right font-medium">
-                {t("run.turnContextTokens")}
-              </th>
-              {hasWindow && (
-                <th scope="col" className="py-1.5 pr-3 text-right font-medium">
-                  {t("run.turnContextShare")}
-                </th>
-              )}
-              <th scope="col" className="py-1.5 pr-3 text-right font-medium">
-                {t("run.turnOutputTokens")}
-              </th>
-              <th scope="col" className="py-1.5 text-right font-medium">
-                {t("run.turnLatency")}
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {turns.map((turn) => {
-              const fraction = fractionOfWindow(turn.contextTokens, denominator);
-              return (
-                <tr key={turn.index} className="border-border/40 border-b last:border-b-0">
-                  <th scope="row" className="py-1 pr-3 text-left font-normal tabular-nums">
-                    {turn.index}
-                  </th>
-                  <td className="relative py-1 pr-3 text-right tabular-nums">
-                    {/* Tinted by what the bar is measured against, so the two
-                      denominators are not the same picture: the accent fill
-                      means "share of the model window", the neutral fill means
-                      "share of this run's own peak". */}
-                    <span
-                      aria-hidden
-                      className={cn(
-                        "absolute inset-y-0.5 right-0 rounded-sm",
-                        hasWindow ? "bg-primary/15" : "bg-muted-foreground/15",
-                      )}
-                      style={{ width: `${fraction * 100}%` }}
-                    />
-                    <span className="relative">{turn.contextTokens.toLocaleString()}</span>
-                  </td>
-                  {hasWindow && (
-                    <td className="text-muted-foreground py-1 pr-3 text-right tabular-nums">
-                      {formatWindowPercent(fraction, i18n.language)}
-                    </td>
-                  )}
-                  <td className="py-1 pr-3 text-right tabular-nums">
-                    {turn.outputTokens.toLocaleString()}
-                  </td>
-                  <td className="text-muted-foreground py-1 text-right tabular-nums">
-                    {/* Omitted by the runner when it could not observe the turn's
-                      start — an em dash is honest, a 0 would read as instant. */}
-                    {turn.latencyMs !== undefined ? formatDuration(turn.latencyMs) : "—"}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+      {/* Dense metrics grid, so every cell trims the design system's default
+          padding — the components are still what defines the table's structure,
+          borders and hover behaviour. */}
+      <Table className="border-collapse">
+        <TableHeader>
+          <TableRow className="text-muted-foreground text-xs hover:bg-transparent">
+            <TableHead scope="col" className="h-auto px-0 py-1.5 pr-3">
+              {t("run.turnIndex")}
+            </TableHead>
+            <TableHead scope="col" className="h-auto px-0 py-1.5 pr-3 text-right">
+              {t("run.turnContextTokens")}
+            </TableHead>
+            {hasWindow && (
+              <TableHead scope="col" className="h-auto px-0 py-1.5 pr-3 text-right">
+                {t("run.turnContextShare")}
+              </TableHead>
+            )}
+            <TableHead scope="col" className="h-auto px-0 py-1.5 pr-3 text-right">
+              {t("run.turnOutputTokens")}
+            </TableHead>
+            <TableHead scope="col" className="h-auto px-0 py-1.5 text-right">
+              {t("run.turnLatency")}
+            </TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {turns.map((turn) => {
+            const fraction = fractionOfWindow(turn.contextTokens, denominator);
+            return (
+              <TableRow key={turn.index} className="border-border/40">
+                <TableHead
+                  scope="row"
+                  className="text-foreground h-auto px-0 py-1 pr-3 font-normal tabular-nums"
+                >
+                  {turn.index}
+                </TableHead>
+                <TableCell className="relative px-0 py-1 pr-3 text-right tabular-nums">
+                  {/* Tinted by what the bar is measured against, so the two
+                    denominators are not the same picture: the accent fill
+                    means "share of the model window", the neutral fill means
+                    "share of this run's own peak". */}
+                  <span
+                    aria-hidden
+                    className={cn(
+                      "absolute inset-y-0.5 right-0 rounded-sm",
+                      hasWindow ? "bg-primary/15" : "bg-muted-foreground/15",
+                    )}
+                    style={{ width: `${fraction * 100}%` }}
+                  />
+                  <span className="relative">{turn.contextTokens.toLocaleString()}</span>
+                </TableCell>
+                {hasWindow && (
+                  <TableCell className="text-muted-foreground px-0 py-1 pr-3 text-right tabular-nums">
+                    {formatWindowPercent(fraction, i18n.language)}
+                  </TableCell>
+                )}
+                <TableCell className="px-0 py-1 pr-3 text-right tabular-nums">
+                  {turn.outputTokens.toLocaleString()}
+                </TableCell>
+                <TableCell className="text-muted-foreground px-0 py-1 text-right tabular-nums">
+                  {/* Omitted by the runner when it could not observe the turn's
+                    start — an em dash is honest, a 0 would read as instant. */}
+                  {turn.latencyMs !== undefined ? formatDuration(turn.latencyMs) : "—"}
+                </TableCell>
+              </TableRow>
+            );
+          })}
+        </TableBody>
+      </Table>
       {!hasWindow && (
         <p className="text-muted-foreground mt-2 text-xs">{t("run.turnsPeakRelativeHint")}</p>
       )}

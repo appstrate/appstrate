@@ -22,6 +22,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { runs } from "@appstrate/db/schema";
 import { invalidRequest, notFound, conflict } from "../lib/errors.ts";
+import { readJsonBody } from "../lib/request-body.ts";
 import { rateLimitByRunId, rateLimitRunDocuments } from "../middleware/rate-limit.ts";
 import {
   verifyRunSignature,
@@ -281,14 +282,11 @@ export function createRunsEventsRouter() {
     const run = c.get("run")!;
     const webhookId = c.get("webhookId")!;
 
-    const parsed = CloudEventEnvelopeSchema.safeParse(await c.req.json());
-    if (!parsed.success) {
-      throw invalidRequest(parsed.error.issues[0]?.message ?? "Invalid CloudEvent envelope");
-    }
+    const envelope = await readJsonBody(c, CloudEventEnvelopeSchema);
 
     const outcome = await ingestRunEvent({
       run,
-      envelope: parsed.data,
+      envelope,
       webhookId,
     });
 
@@ -302,15 +300,10 @@ export function createRunsEventsRouter() {
   router.post("/runs/:runId/events/finalize", verifyRunSignature, eventLimiter, async (c) => {
     const run = c.get("run")!;
 
-    const parsed = RunResultSchema.safeParse(await c.req.json());
-    if (!parsed.success) {
-      throw invalidRequest(parsed.error.issues[0]?.message ?? "Invalid RunResult");
-    }
-
     // Zod's `unknown()` fields parse to `unknown` (not `unknown | null`);
     // we project explicitly to the runtime's RunResult shape so the
     // service's type checks are enforced without a cast.
-    const d = parsed.data;
+    const d = await readJsonBody(c, RunResultSchema);
     const result: RunResult = {
       memories: d.memories,
       ...(d.pinned !== undefined ? { pinned: d.pinned } : {}),

@@ -330,8 +330,8 @@ export function createModelProviderCredentialsRouter() {
         if (result.outcome === "credential_not_found") {
           throw notFound("Model provider credential not found");
         }
-        // Re-read through the credential DTO rather than echoing
-        // `result.verifiedModelIds`: on a probe round that verified nothing
+        // Re-read through the credential DTO rather than echoing the ids
+        // discovery just verified: on a probe round that verified nothing
         // the previous list is what still stands, and the DTO is the single
         // place where a static provider's list gets derived. Both provider
         // kinds therefore answer with exactly what a subsequent GET returns.

@@ -55,15 +55,6 @@ export class IntegrationCredentialNotFoundError extends Error {
   }
 }
 
-/** Errors mapped by the route to 403 (connection revoked, re-connect needed). */
-export class IntegrationCredentialRevokedError extends Error {
-  readonly code = "CREDENTIAL_REVOKED";
-  constructor(message: string) {
-    super(message);
-    this.name = "IntegrationCredentialRevokedError";
-  }
-}
-
 export interface ResolveIntegrationProxyInput {
   /** Integration package id from `X-Integration-Id` (`@scope/name`). */
   integrationId: string;
@@ -83,8 +74,8 @@ export interface ResolvedIntegrationProxyCredentials {
 /**
  * Resolve live credentials for the credential-proxy from an
  * integration connection. Throws {@link IntegrationCredentialNotFoundError}
- * when the integration is not installed / has no accessible connection,
- * or {@link IntegrationCredentialRevokedError} on a revoked refresh token.
+ * when the integration is not installed / has no accessible connection — the
+ * only way this path fails.
  */
 export async function resolveIntegrationProxyCredentials(
   input: ResolveIntegrationProxyInput,
@@ -113,17 +104,21 @@ export async function resolveIntegrationProxyCredentials(
 
 /**
  * Force-refresh the integration connection's OAuth2 token (the proxy's
- * reactive 401-retry path) and rebuild the payload. Throws
- * {@link IntegrationCredentialRevokedError} when the refresh token was revoked
- * upstream. Returns `null` in the three not-refreshed cases, which are NOT
- * equivalent and are told apart by what they leave behind:
+ * reactive 401-retry path) and rebuild the payload. Never throws for a
+ * credential outcome — both call sites in `core.ts` sit inside `catch {}`, so
+ * a throw would be swallowed and buy nothing. Returns `null` in the four
+ * not-refreshed cases, which are NOT equivalent and are told apart by what
+ * they leave behind:
  *
  *   - transient (discovery blip, upstream 5xx) — row untouched, retry later;
  *   - not refreshable at all (no accessible connection, non-oauth2 auth) —
  *     row untouched, there is nothing this path can conclude;
  *   - TERMINAL (the minting OAuth client is gone / the manifest can never
  *     yield a token endpoint) — the connection is flagged `needsReconnection`
- *     before returning, mirroring the sidecar resolver's 410 branch.
+ *     before returning, mirroring the sidecar resolver's 410 branch;
+ *   - REVOKED (the refresh token was rejected upstream) — `refreshAndClassify`
+ *     has already flagged `needsReconnection`, so the caller relaying the
+ *     upstream 401 is not what stands between the user and a reconnect prompt.
  */
 export async function forceRefreshIntegrationProxyCredentials(
   input: ResolveIntegrationProxyInput,
@@ -198,9 +193,14 @@ export async function forceRefreshIntegrationProxyCredentials(
     refreshContext,
   );
   if (classified.status === "revoked") {
-    throw new IntegrationCredentialRevokedError(
-      `Integration '${input.integrationId}' auth '${connection.authKey}' needs re-connection (refresh token revoked)`,
-    );
+    // Terminal, and already recorded: `refreshAndClassify` flipped
+    // `needsReconnection` on the connection before returning this status.
+    logger.warn("credential-proxy: integration refresh token revoked — needs re-connection", {
+      integrationId: input.integrationId,
+      authKey: connection.authKey,
+      connectionId: connection.id,
+    });
+    return null;
   }
   if (classified.status === "transient") {
     // Transient failure — surface as not-refreshed; the route keeps the

@@ -154,7 +154,7 @@ export function useDeleteSchedule() {
   });
 }
 
-export interface ScheduleFormDeps {
+interface ScheduleFormDeps {
   /**
    * Full input wrapper (schema + ui_hints + file_constraints + property_order)
    * — the launch surfaces feed this to `<SchemaForm>` so version-pinned input

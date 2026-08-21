@@ -163,7 +163,7 @@ If unsure: "universal" means "appears on >5 different types". Otherwise snake_ca
 
 **File**: `packages/core/src/module.ts`
 
-**Interfaces**: `BeforeUsageParams`, `RunStatusChangeParams`, `OnOrgCreateParams`, `BeforeSignupContext`, `AfterSignupContext`, `RunConnectionMissingError`, `RunConnectionMissingParams`, `ModuleHooks`, `ModuleEvents`.
+**Interfaces**: `BeforeUsageParams`, `RunStatusChangeParams`, `OnOrgCreateParams`, `BeforeSignupContext`, `AfterSignupContext`, `RunConnectionMissingParams`, `ModuleHooks`, `ModuleEvents`.
 
 **Rule**: All fields camelCase TS.
 

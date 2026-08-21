@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { STD_RESPONSE_HEADERS } from "../headers.ts";
+
 /**
  * OpenAPI paths for the AFPS integration marketplace.
  *
@@ -349,11 +351,6 @@ const integrationDetailSchema = {
   },
 } as const;
 
-const baseResponseHeaders = {
-  "Request-Id": { $ref: "#/components/headers/RequestId" },
-  "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-} as const;
-
 /**
  * The `503`/`504` pair every connect-run-backed connect operation answers with
  * (the programmatic `connectIntegrationFields` and the hosted form's
@@ -421,11 +418,7 @@ export const integrationsPaths = {
           in: "query",
           schema: { type: "integer", minimum: 1, maximum: 100, default: 100 },
         },
-        {
-          name: "offset",
-          in: "query",
-          schema: { type: "integer", minimum: 0, default: 0 },
-        },
+        { $ref: "#/components/parameters/Offset" },
         {
           name: "fields",
           in: "query",
@@ -437,7 +430,7 @@ export const integrationsPaths = {
       responses: {
         "200": {
           description: "Integration list",
-          headers: baseResponseHeaders,
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
@@ -492,7 +485,7 @@ export const integrationsPaths = {
         "200": {
           description:
             "HTML page that closes the popup window. Renders either a success page or an error page (missing params, IdP error, code exchange failure, identity mismatch, or persistence failure).",
-          headers: baseResponseHeaders,
+          headers: STD_RESPONSE_HEADERS,
         },
       },
     },
@@ -510,7 +503,7 @@ export const integrationsPaths = {
       responses: {
         "200": {
           description: "Integration detail",
-          headers: baseResponseHeaders,
+          headers: STD_RESPONSE_HEADERS,
           content: { "application/json": { schema: integrationDetailSchema } },
         },
         "403": { $ref: "#/components/responses/Forbidden" },
@@ -550,7 +543,7 @@ export const integrationsPaths = {
           // activation of an already-active integration succeeds (201), it is
           // not a 409.
           description: "Activated — returns the bare integration detail resource",
-          headers: baseResponseHeaders,
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               // Bare integration resource — same serializer as
@@ -592,7 +585,7 @@ export const integrationsPaths = {
           // integration detail stays GET-able afterwards (connections, OAuth
           // clients, pins and org defaults survive) and serves `active: false`.
           description: "Deactivated — empty response. The integration detail remains GET-able.",
-          headers: baseResponseHeaders,
+          headers: STD_RESPONSE_HEADERS,
         },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
@@ -654,7 +647,7 @@ export const integrationsPaths = {
       responses: {
         "201": {
           description: "Created",
-          headers: baseResponseHeaders,
+          headers: STD_RESPONSE_HEADERS,
           content: { "application/json": { schema: oauthClientSchema } },
         },
         "400": { $ref: "#/components/responses/ValidationError" },
@@ -706,7 +699,7 @@ export const integrationsPaths = {
       responses: {
         "200": {
           description: "Rotated",
-          headers: baseResponseHeaders,
+          headers: STD_RESPONSE_HEADERS,
           content: { "application/json": { schema: oauthClientSchema } },
         },
         "400": { $ref: "#/components/responses/ValidationError" },
@@ -730,7 +723,7 @@ export const integrationsPaths = {
       responses: {
         "204": {
           description: "OAuth client deleted",
-          headers: baseResponseHeaders,
+          headers: STD_RESPONSE_HEADERS,
         },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
@@ -756,7 +749,7 @@ export const integrationsPaths = {
       responses: {
         "200": {
           description: "Available OAuth clients",
-          headers: baseResponseHeaders,
+          headers: STD_RESPONSE_HEADERS,
           content: { "application/json": { schema: integrationClientsListSchema } },
         },
         "403": { $ref: "#/components/responses/Forbidden" },
@@ -802,7 +795,7 @@ export const integrationsPaths = {
       responses: {
         "200": {
           description: "Default set; available OAuth clients (re-badged)",
-          headers: baseResponseHeaders,
+          headers: STD_RESPONSE_HEADERS,
           content: { "application/json": { schema: integrationClientsListSchema } },
         },
         "400": { $ref: "#/components/responses/ValidationError" },
@@ -850,7 +843,7 @@ export const integrationsPaths = {
       responses: {
         "200": {
           description: "Connection stored",
-          headers: baseResponseHeaders,
+          headers: STD_RESPONSE_HEADERS,
           content: { "application/json": { schema: integrationConnectionSchema } },
         },
         "400": { $ref: "#/components/responses/ValidationError" },
@@ -891,7 +884,7 @@ export const integrationsPaths = {
       responses: {
         "200": {
           description: "Authorize URL",
-          headers: baseResponseHeaders,
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
@@ -946,7 +939,7 @@ export const integrationsPaths = {
       responses: {
         "200": {
           description: "Connect URL",
-          headers: baseResponseHeaders,
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
@@ -1015,7 +1008,7 @@ export const integrationsPaths = {
       responses: {
         "200": {
           description: "Hosted connect context",
-          headers: baseResponseHeaders,
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
@@ -1071,7 +1064,7 @@ export const integrationsPaths = {
       responses: {
         "200": {
           description: "Connection stored",
-          headers: baseResponseHeaders,
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
@@ -1106,7 +1099,7 @@ export const integrationsPaths = {
       responses: {
         "200": {
           description: "Connection list",
-          headers: baseResponseHeaders,
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
@@ -1153,7 +1146,7 @@ export const integrationsPaths = {
       responses: {
         "200": {
           description: "Updated — returns the bare connection resource",
-          headers: baseResponseHeaders,
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               // Bare connection resource — same serializer as the
@@ -1168,7 +1161,7 @@ export const integrationsPaths = {
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
           description: "Connection is pinned and cannot be unshared",
-          headers: baseResponseHeaders,
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -1203,7 +1196,7 @@ export const integrationsPaths = {
       responses: {
         "200": {
           description: "Updated — returns the bare integration detail resource",
-          headers: baseResponseHeaders,
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               // Bare integration resource — same serializer as
@@ -1232,7 +1225,7 @@ export const integrationsPaths = {
       responses: {
         "200": {
           description: "Pin list",
-          headers: baseResponseHeaders,
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
@@ -1270,7 +1263,7 @@ export const integrationsPaths = {
       responses: {
         "200": {
           description: "Consuming agents",
-          headers: baseResponseHeaders,
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
@@ -1325,7 +1318,7 @@ export const integrationsPaths = {
       responses: {
         "200": {
           description: "Pinned",
-          headers: baseResponseHeaders,
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": { schema: { $ref: "#/components/schemas/IntegrationPin" } },
           },
@@ -1348,7 +1341,7 @@ export const integrationsPaths = {
       responses: {
         "204": {
           description: "Pin removed (idempotent — 204 whether the pin existed or not)",
-          headers: baseResponseHeaders,
+          headers: STD_RESPONSE_HEADERS,
         },
         "403": { $ref: "#/components/responses/Forbidden" },
       },
@@ -1371,7 +1364,7 @@ export const integrationsPaths = {
       responses: {
         "200": {
           description: "Org default (bare resource — same shape as PUT)",
-          headers: baseResponseHeaders,
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: integrationOrgDefaultSchema,
@@ -1380,7 +1373,7 @@ export const integrationsPaths = {
         },
         "204": {
           description: "No org default is set for this integration",
-          headers: baseResponseHeaders,
+          headers: STD_RESPONSE_HEADERS,
         },
         "403": { $ref: "#/components/responses/Forbidden" },
       },
@@ -1418,7 +1411,7 @@ export const integrationsPaths = {
       responses: {
         "200": {
           description: "Default set",
-          headers: baseResponseHeaders,
+          headers: STD_RESPONSE_HEADERS,
           content: { "application/json": { schema: integrationOrgDefaultSchema } },
         },
         "400": { $ref: "#/components/responses/ValidationError" },
@@ -1438,7 +1431,7 @@ export const integrationsPaths = {
       responses: {
         "204": {
           description: "Default removed (idempotent — 204 whether a default existed or not)",
-          headers: baseResponseHeaders,
+          headers: STD_RESPONSE_HEADERS,
         },
         "403": { $ref: "#/components/responses/Forbidden" },
       },

@@ -13,9 +13,9 @@ import { afterEach, describe, expect, it } from "bun:test";
 import {
   acquirePiChatSlot,
   chatCapacityResponse,
-  piChatConcurrencyIsDefault,
   piChatConcurrencyStats,
   piChatMaxConcurrency,
+  warnIfDefaultChatConcurrency,
   releaseOnClose,
   resetPiChatConcurrencyStats,
   type PiChatSlot,
@@ -192,16 +192,33 @@ describe("capacity signal for sizing the cap", () => {
     held.release();
   });
 
-  it("reports whether the cap is an operator decision or the built-in default", () => {
+  it("falls back to the default on absent or invalid input, and honours a valid cap", () => {
     delete process.env[ENV_VAR];
-    expect(piChatConcurrencyIsDefault()).toBe(true);
-    // Invalid input falls back to the default, so it is NOT a decision either —
-    // a typo'd cap must not read as deliberate.
+    expect(piChatMaxConcurrency()).toBe(6);
     process.env[ENV_VAR] = "nope";
-    expect(piChatConcurrencyIsDefault()).toBe(true);
+    expect(piChatMaxConcurrency()).toBe(6);
     process.env[ENV_VAR] = "0";
-    expect(piChatConcurrencyIsDefault()).toBe(true);
+    expect(piChatMaxConcurrency()).toBe(6);
     process.env[ENV_VAR] = "32";
-    expect(piChatConcurrencyIsDefault()).toBe(false);
+    expect(piChatMaxConcurrency()).toBe(32);
+  });
+
+  it("treats an invalid cap as NOT an operator decision, so a typo still warns", () => {
+    // Separate from the cap assertions above on purpose: `piChatMaxConcurrency`
+    // surfaces only `max`, so it cannot distinguish "fell back to 6" from
+    // "operator chose 6". `warnIfDefaultChatConcurrency` is the only thing that
+    // reads `fromEnv`, and its return is that decision. Without this, a
+    // regression treating `"nope"` as deliberate would silence the boot warning
+    // with every other test still green.
+    delete process.env[ENV_VAR];
+    expect(warnIfDefaultChatConcurrency()).toBe(true);
+    process.env[ENV_VAR] = "nope";
+    expect(warnIfDefaultChatConcurrency()).toBe(true);
+    process.env[ENV_VAR] = "0";
+    expect(warnIfDefaultChatConcurrency()).toBe(true);
+    process.env[ENV_VAR] = "6"; // the default value, but chosen — not a fallback
+    expect(warnIfDefaultChatConcurrency()).toBe(false);
+    process.env[ENV_VAR] = "32";
+    expect(warnIfDefaultChatConcurrency()).toBe(false);
   });
 });

@@ -1082,7 +1082,7 @@ export interface paths {
         put?: never;
         /**
          * Run a conversational turn (streaming)
-         * @description Receives the running thread (AI SDK UIMessages) and streams the assistant turn (UIMessage stream over SSE). Inference goes through the org's configured models via the llm-proxy; tool calls dispatch through `/api/mcp` with the caller's own permissions. Message persistence is server-owned: the user turn is persisted before inference and the assistant turn when the stream finalizes (survives client disconnect). Rate limited (20/min per caller). Not invocable over MCP (streaming).
+         * @description Receives the running thread (AI SDK UIMessages) and streams the assistant turn (UIMessage stream over SSE). Inference runs on the org's configured models: API-key models are routed through the llm-proxy (key injected server-side), OAuth-subscription models are called natively at the provider's own base URL with the access token held in memory. Either way usage is metered server-side; tool calls dispatch through `/api/mcp` with the caller's own permissions. Message persistence is server-owned: the user turn is persisted before inference and the assistant turn when the stream finalizes (survives client disconnect). Rate limited (20/min per caller). Not invocable over MCP (streaming).
          */
         post: operations["streamChat"];
         delete?: never;
@@ -2858,34 +2858,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/packages/agents/{id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get agent detail by ID
-         * @description Returns agent detail including integrations, config, state, and skills by unscoped package ID.
-         */
-        get: operations["getAgentPackageById"];
-        /**
-         * Update a user agent by ID
-         * @description Update manifest and content of a user agent with optimistic locking by unscoped package ID.
-         */
-        put: operations["updateAgentById"];
-        post?: never;
-        /**
-         * Delete a user agent by ID
-         * @description Delete a user agent by unscoped package ID. Built-in agents cannot be deleted.
-         */
-        delete: operations["deleteAgentById"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/packages/agents/{scope}/{name}": {
         parameters: {
             query?: never;
@@ -3086,34 +3058,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/packages/integrations/{id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get integration package detail by ID
-         * @description Get an integration package's full details by unscoped package ID.
-         */
-        get: operations["getIntegrationPackageById"];
-        /**
-         * Update an integration package by ID
-         * @description Update an integration package by unscoped package ID. Built-in integration packages cannot be modified.
-         */
-        put: operations["updateIntegrationPackageById"];
-        post?: never;
-        /**
-         * Delete an integration package by ID
-         * @description Delete an integration package by unscoped package ID. Built-in integration packages cannot be deleted.
-         */
-        delete: operations["deleteIntegrationPackageById"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/packages/integrations/{scope}/{name}": {
         parameters: {
             query?: never;
@@ -3254,34 +3198,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/packages/mcp-servers/{id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get MCP-server package detail by ID
-         * @description Get an MCP-server package's full details by unscoped package ID.
-         */
-        get: operations["getMcpServerPackageById"];
-        /**
-         * Update an MCP-server package by ID
-         * @description Update an MCP-server package by unscoped package ID. Built-in MCP-server packages cannot be modified.
-         */
-        put: operations["updateMcpServerPackageById"];
-        post?: never;
-        /**
-         * Delete an MCP-server package by ID
-         * @description Delete an MCP-server package by unscoped package ID. Built-in MCP-server packages cannot be deleted.
-         */
-        delete: operations["deleteMcpServerPackageById"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/packages/mcp-servers/{scope}/{name}": {
         parameters: {
             query?: never;
@@ -3417,34 +3333,6 @@ export interface paths {
          */
         post: operations["createSkill"];
         delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/packages/skills/{id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get skill detail by ID
-         * @description Get a skill's full details by unscoped package ID.
-         */
-        get: operations["getSkillById"];
-        /**
-         * Update a skill by ID
-         * @description Update a skill by unscoped package ID. Built-in skills cannot be modified.
-         */
-        put: operations["updateSkillById"];
-        post?: never;
-        /**
-         * Delete a skill by ID
-         * @description Delete a skill by unscoped package ID. Built-in skills cannot be deleted.
-         */
-        delete: operations["deleteSkillById"];
         options?: never;
         head?: never;
         patch?: never;
@@ -6007,6 +5895,8 @@ export interface components {
         };
     };
     parameters: {
+        /** @description Number of items to skip before the first returned item. */
+        Offset: number;
         /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
         XOrgId: string;
         /** @description Organization ID. Required for SSE auth (cookies cannot carry X-Org-Id header on EventSource). */
@@ -7186,7 +7076,8 @@ export interface operations {
         parameters: {
             query?: {
                 limit?: number;
-                offset?: number;
+                /** @description Number of items to skip before the first returned item. */
+                offset?: components["parameters"]["Offset"];
             };
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
@@ -10656,7 +10547,8 @@ export interface operations {
         parameters: {
             query?: {
                 limit?: number;
-                offset?: number;
+                /** @description Number of items to skip before the first returned item. */
+                offset?: components["parameters"]["Offset"];
                 /** @description Comma-separated allowlist of fields to return per item (`id` is always included). Allowed: id, manifest, orgId, source, active, block_user_connections. An unknown field is a 400. */
                 fields?: string;
             };
@@ -13093,7 +12985,8 @@ export interface operations {
         parameters: {
             query?: {
                 limit?: number;
-                offset?: number;
+                /** @description Number of items to skip before the first returned item. */
+                offset?: components["parameters"]["Offset"];
                 /** @description Comma-separated allowlist of fields to return per provider (`providerId` is always included). Allowed: providerId, displayName, iconUrl, description, docsUrl, apiShape, defaultBaseUrl, baseUrlOverridable, authMode, featured, models. An unknown field is a 400. */
                 fields?: string;
             };
@@ -15311,130 +15204,6 @@ export interface operations {
             403: components["responses"]["Forbidden"];
         };
     };
-    getAgentPackageById: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
-            };
-            path: {
-                /** @description Package ID (unscoped) */
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Agent detail */
-            200: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AgentDetail"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-        };
-    };
-    updateAgentById: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
-            };
-            path: {
-                /** @description Package ID (unscoped) */
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    manifest: components["schemas"]["AgentManifest"];
-                    content: string;
-                    /** @description Optimistic lock version */
-                    lock_version: number;
-                };
-            };
-        };
-        responses: {
-            /** @description Agent updated */
-            200: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AgentDetail"];
-                };
-            };
-            400: components["responses"]["ValidationError"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            /** @description Concurrent modification or agent in use. RFC 9457 problem+json with `code` one of `conflict`, `agent_in_use`, or `no_changes`. */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-        };
-    };
-    deleteAgentById: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
-            };
-            path: {
-                /** @description Package ID (unscoped) */
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Agent deleted */
-            204: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            /** @description Agent in use. RFC 9457 problem+json with `code` of `agent_in_use`. */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-        };
-    };
     getAgentPackage: {
         parameters: {
             query?: {
@@ -16114,124 +15883,6 @@ export interface operations {
             403: components["responses"]["Forbidden"];
         };
     };
-    getIntegrationPackageById: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
-            };
-            path: {
-                /** @description Package ID (unscoped) */
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Integration package detail */
-            200: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["OrgPackageItemDetail"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-        };
-    };
-    updateIntegrationPackageById: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
-            };
-            path: {
-                /** @description Package ID (unscoped) */
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    /** @description Package manifest */
-                    manifest: {
-                        [key: string]: unknown;
-                    };
-                    content?: string;
-                    /** @description Optimistic lock version */
-                    lock_version: number;
-                };
-            };
-        };
-        responses: {
-            /** @description Integration package updated */
-            200: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["OrgPackageItemDetail"];
-                };
-            };
-            400: components["responses"]["ValidationError"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-        };
-    };
-    deleteIntegrationPackageById: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
-            };
-            path: {
-                /** @description Package ID (unscoped) */
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Integration package deleted */
-            204: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            /** @description Integration package is referenced by agents or required by other packages. RFC 9457 problem+json with `code` of `in_use`. */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-        };
-    };
     getIntegrationPackage: {
         parameters: {
             query?: never;
@@ -16676,124 +16327,6 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             415: components["responses"]["UnsupportedMediaType"];
-        };
-    };
-    getMcpServerPackageById: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
-            };
-            path: {
-                /** @description Package ID (unscoped) */
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description MCP-server package detail */
-            200: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["OrgPackageItemDetail"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-        };
-    };
-    updateMcpServerPackageById: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
-            };
-            path: {
-                /** @description Package ID (unscoped) */
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    /** @description Package manifest */
-                    manifest: {
-                        [key: string]: unknown;
-                    };
-                    content: string;
-                    /** @description Optimistic lock version */
-                    lock_version: number;
-                };
-            };
-        };
-        responses: {
-            /** @description MCP-server package updated */
-            200: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["OrgPackageItemDetail"];
-                };
-            };
-            400: components["responses"]["ValidationError"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-        };
-    };
-    deleteMcpServerPackageById: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
-            };
-            path: {
-                /** @description Package ID (unscoped) */
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description MCP-server package deleted */
-            204: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            /** @description MCP-server package is referenced by agents or required by other packages. RFC 9457 problem+json with `code` of `in_use`. */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
         };
     };
     getMcpServerPackage: {
@@ -17260,124 +16793,6 @@ export interface operations {
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-        };
-    };
-    getSkillById: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
-            };
-            path: {
-                /** @description Package ID (unscoped) */
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Skill detail */
-            200: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["OrgPackageItemDetail"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-        };
-    };
-    updateSkillById: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
-            };
-            path: {
-                /** @description Package ID (unscoped) */
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    /** @description Package manifest */
-                    manifest: {
-                        [key: string]: unknown;
-                    };
-                    content: string;
-                    /** @description Optimistic lock version */
-                    lock_version: number;
-                };
-            };
-        };
-        responses: {
-            /** @description Skill updated */
-            200: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["OrgPackageItemDetail"];
-                };
-            };
-            400: components["responses"]["ValidationError"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-        };
-    };
-    deleteSkillById: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
-            };
-            path: {
-                /** @description Package ID (unscoped) */
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Skill deleted */
-            204: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            /** @description Skill is referenced by agents or required by other packages. RFC 9457 problem+json with `code` of `in_use`. */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
         };
     };
     getSkill: {
@@ -18589,7 +18004,8 @@ export interface operations {
                 /** @description Filter runs by user. `me` is the only accepted value and returns only the current user's runs. Omit (or send an empty value) for all org runs the caller may see. Any other value — an arbitrary user id, for instance — is rejected with `400`; it is never ignored, so a filtered response is never silently widened to the whole org. */
                 user?: "me";
                 limit?: number;
-                offset?: number;
+                /** @description Number of items to skip before the first returned item. */
+                offset?: components["parameters"]["Offset"];
                 /** @description Filter runs by kind. Omit (or send an empty value) for every kind. Any value outside the enum is rejected with `400`; it is never ignored, so a filtered response is never silently widened. */
                 kind?: "all" | "package" | "inline";
                 /** @description Filter runs by lifecycle status. Omit (or send an empty value) for every status. Any value outside the enum is rejected with `400`; it is never ignored, so a filtered response is never silently widened. */
@@ -20051,7 +19467,8 @@ export interface operations {
         parameters: {
             query?: {
                 limit?: number;
-                offset?: number;
+                /** @description Number of items to skip before the first returned item. */
+                offset?: components["parameters"]["Offset"];
             };
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */

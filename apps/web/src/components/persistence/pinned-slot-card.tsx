@@ -5,14 +5,14 @@ import { useTranslation } from "react-i18next";
 import { ChevronDown, Pin, Trash2, Copy, Check } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import type { PersistenceActorType } from "@appstrate/shared-types";
-import { formatDateField } from "../../lib/markdown";
+import { formatDateField } from "../../lib/format-date";
 import { useCopyToClipboard } from "../../hooks/use-copy-to-clipboard";
 import { ActorBadge } from "./actor-badge";
 
 const CHECKPOINT_KEY = "checkpoint";
 const STRING_PREVIEW_LIMIT = 160;
 
-export interface PinnedSlotCardProps {
+interface PinnedSlotCardProps {
   slot: {
     id: number;
     key: string;

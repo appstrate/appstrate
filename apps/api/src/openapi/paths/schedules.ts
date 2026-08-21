@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { STD_RESPONSE_HEADERS } from "../headers.ts";
+
 export const schedulesPaths = {
   "/api/schedules": {
     get: {
@@ -14,10 +16,7 @@ export const schedulesPaths = {
       responses: {
         "200": {
           description: "Schedule list",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
@@ -54,10 +53,7 @@ export const schedulesPaths = {
       responses: {
         "200": {
           description: "Schedule list",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
@@ -155,10 +151,7 @@ export const schedulesPaths = {
       responses: {
         "201": {
           description: "Schedule created",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/Schedule" },
@@ -219,10 +212,7 @@ export const schedulesPaths = {
       responses: {
         "200": {
           description: "Schedule details",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/Schedule" },
@@ -325,10 +315,7 @@ export const schedulesPaths = {
       responses: {
         "200": {
           description: "Schedule updated",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/Schedule" },
@@ -362,10 +349,7 @@ export const schedulesPaths = {
       responses: {
         "204": {
           description: "Schedule deleted",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
@@ -388,19 +372,12 @@ export const schedulesPaths = {
           in: "query",
           schema: { type: "integer", minimum: 1, maximum: 100, default: 20 },
         },
-        {
-          name: "offset",
-          in: "query",
-          schema: { type: "integer", minimum: 0, default: 0 },
-        },
+        { $ref: "#/components/parameters/Offset" },
       ],
       responses: {
         "200": {
           description: "Paginated run list",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {

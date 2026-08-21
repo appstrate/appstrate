@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { PackageType } from "@appstrate/core/validation";
 import { usePackageVersions, useRestoreVersion, useDeleteVersion } from "../hooks/use-packages";
-import { formatDateField } from "../lib/markdown";
+import { formatDateField } from "../lib/format-date";
 import { Spinner } from "./spinner";
 import { ConfirmModal } from "./confirm-modal";
 import { Badge } from "@appstrate/ui/components/badge";

@@ -4,18 +4,18 @@ OAuth2/PKCE, token refresh, credential-proxy primitives, and encrypted credentia
 
 ## Exports
 
-| Symbol                                                        | Description                                                     |
-| ------------------------------------------------------------- | --------------------------------------------------------------- |
-| `encrypt` / `decrypt`                                         | AES-256-GCM versioned-envelope string crypto                    |
-| `encryptCredentials` / `decryptCredentials`                   | Object ⇄ encrypted-string helpers                               |
-| `encryptCredentialEnvelope` / `decryptCredentialEnvelope`     | Structured `{ outputs, inputs }` credential envelope (v2)       |
-| `initiateIntegrationOAuth` / `handleIntegrationOAuthCallback` | OAuth2 + PKCE connect flow for integration auths                |
-| `performRefreshTokenExchange`                                 | OAuth2 refresh-token exchange (`RefreshError` on failure)       |
-| `parseTokenResponse` / `parseTokenErrorResponse`              | Token-response parsing + revoked/transient error classification |
-| `resolveHttpDelivery` / `buildProxyCredentialsPayload`        | Multi-auth credential resolution + `delivery.http` planning     |
-| `substituteVars` / `matchesAuthorizedUriSpec` / …             | Credential-proxy primitives (shared route ⇄ sidecar)            |
-| `planMitmAction`                                              | Pure per-integration MITM strip/inject/retry planner            |
-| `planCaBundle`                                                | CA-cert planner for the HTTPS credential proxy                  |
+| Symbol                                                        | Description                                                 |
+| ------------------------------------------------------------- | ----------------------------------------------------------- |
+| `encrypt` / `decrypt`                                         | AES-256-GCM versioned-envelope string crypto                |
+| `encryptCredentials` / `decryptCredentials`                   | Object ⇄ encrypted-string helpers                           |
+| `encryptCredentialEnvelope` / `decryptCredentialEnvelope`     | Structured `{ outputs, inputs }` credential envelope (v2)   |
+| `initiateIntegrationOAuth` / `handleIntegrationOAuthCallback` | OAuth2 + PKCE connect flow for integration auths            |
+| `performRefreshTokenExchange`                                 | OAuth2 refresh-token exchange (`RefreshError` on failure)   |
+| `parseTokenResponse`                                          | Token-response parsing (scope diffing + invariant checks)   |
+| `resolveHttpDelivery` / `buildProxyCredentialsPayload`        | Multi-auth credential resolution + `delivery.http` planning |
+| `substituteVars` / `matchesAuthorizedUriSpec` / …             | Credential-proxy primitives (shared route ⇄ sidecar)        |
+| `planMitmAction`                                              | Pure per-integration MITM strip/inject/retry planner        |
+| `planCaBundle`                                                | CA-cert planner for the HTTPS credential proxy              |
 
 See `src/index.ts` for the authoritative export surface.
 

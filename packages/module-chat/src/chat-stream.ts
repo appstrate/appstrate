@@ -13,7 +13,8 @@
  *      connection, so leaving the conversation mid-inference no longer drops
  *      messages. The client history adapter is now load-only.
  *
- * Inference goes through the llm-proxy (no key here); tool calls dispatch
+ * Inference goes through the llm-proxy for API-key models and natively at
+ * the provider for OAuth subscriptions (no key here); tool calls dispatch
  * through `/api/mcp` (auth + RBAC re-applied in-process).
  */
 

@@ -1,20 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Appstrate-backed {@link EventSink} implementation — the platform
- * write-through that persists `run_logs`, snapshots token usage onto
- * the run row, and appends cost to the unified `llm_usage` ledger.
+ * Appstrate-backed run-event write-through — persists `run_logs`, snapshots
+ * token usage onto the run row, and appends cost to the unified `llm_usage`
+ * ledger.
  *
- * {@link PersistingEventSink} is fan-out only: the ingestion hot path
- * rebuilds one sink per request, calls `handle()`, and drops it. No
- * in-memory state is kept between events, so every method is total —
- * no getter throws because of an unsupported mode.
+ * The single entry point is the free function {@link persistRunEvent}. It is a
+ * function rather than a sink object because the ingestion path must run the
+ * dispatch INSIDE its Drizzle transaction (the `runs.last_event_sequence` CAS
+ * and the `run_logs` INSERT have to commit together) — an object holding its
+ * own `db` handle structurally cannot do that.
  *
- * Canonical AFPS aggregation (`snapshot()` / `RunResult`) is NOT this
- * sink's job. A caller that needs to read an aggregate back composes a
- * runtime reducer (`createReducerSink()` from
- * `@appstrate/afps-runtime/sinks`) next to this sink and drives both;
- * no platform code path does.
+ * Canonical AFPS aggregation (`snapshot()` / `RunResult`) is NOT this module's
+ * job. A caller that needs to read an aggregate back composes a runtime reducer
+ * (`createReducerSink()` from `@appstrate/afps-runtime/sinks`); no platform
+ * code path does.
  *
  * Event routing:
  *
@@ -24,27 +24,26 @@
  *
  *   Platform-specific (`appstrate.*` namespace):
  *     appstrate.progress → run_logs (progress/progress) with message/data/level
- *     appstrate.error    → run_logs (system/adapter_error) + lastAdapterError
+ *     appstrate.error    → run_logs (system/adapter_error); the message is
+ *                          RETURNED so the caller can cache it
  *     appstrate.metric   → runs.tokenUsage snapshot (running total)
  *                         + llm_usage ledger row (source="runner")
  *                         + schedules a throttled `run_metric` broadcast
  *                           which also persists `cost_so_far` onto the
  *                           run row (monotonic-max guarded)
  *
- * This sink is the single writer of the `llm_usage` runner rows and
- * the single reader/writer of `runs.tokenUsage`. `runs.cost` is cached
- * aggregate of `llm_usage` and is refreshed on two paths: the throttled
- * broadcaster (during streaming, via {@link scheduleRunMetricBroadcast})
- * and `finalizeRun` (terminal write). Both writers use a monotonic guard
- * so the recorded value never regresses.
+ * This module is the single writer of the `llm_usage` runner rows and the
+ * single reader/writer of `runs.tokenUsage`. `runs.cost` is a cached aggregate
+ * of `llm_usage` and is refreshed on two paths: the throttled broadcaster
+ * (during streaming, via {@link scheduleRunMetricBroadcast}) and `finalizeRun`
+ * (terminal write). Both writers use a monotonic guard so the recorded value
+ * never regresses.
  */
 
-import type { EventSink } from "@appstrate/afps-runtime/interfaces";
 import type { RunEvent } from "@appstrate/afps-runtime/types";
-import type { RunResult } from "@appstrate/afps-runtime/runner";
 import { isPlainObject } from "@appstrate/core/safe-json";
 import { documentUri } from "@appstrate/core/document-uri";
-import { db, type Db } from "@appstrate/db/client";
+import type { Db } from "@appstrate/db/client";
 import { modelCostSchema, type ModelCost } from "@appstrate/core/module";
 import type { TokenPricingStatus } from "@appstrate/afps-runtime/runner";
 import { type CredentialSource } from "../llm-usage-ledger.ts";
@@ -56,83 +55,6 @@ import { logger } from "../../lib/logger.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import type { TokenUsage } from "./types.ts";
 import { scheduleRunMetricBroadcast } from "../run-metric-broadcaster.ts";
-
-export interface PersistingEventSinkOptions {
-  scope: AppScope;
-  runId: string;
-  /**
-   * When `true`, `appstrate.metric` events write a runner-source row to
-   * the `llm_usage` ledger. At most one runner row per run; concurrent
-   * writers race via ON CONFLICT DO NOTHING. The ingestion path turns
-   * this on. Defaults to `false` — fail-closed, so a caller that has
-   * not thought about billing never writes the ledger by accident.
-   */
-  writeLedger?: boolean;
-  /**
-   * Run's model source (`"system"` platform-provided, `"org"` BYOK, or null)
-   * — stamped as `llm_usage.credential_source` on the runner row so the
-   * attribution matches the proxy path. Only consulted when {@link writeLedger}.
-   */
-  modelSource?: string | null;
-  /**
-   * Run's kickoff pricing snapshot (`runs.model_cost`) — the rates the
-   * container was handed as `MODEL_COST`. The container computes the cost it
-   * reports, so this is what lets the row's `pricing_status` be derived
-   * SERVER-SIDE instead of trusted. Only consulted when {@link writeLedger}.
-   */
-  modelCost?: ModelCost | null;
-}
-
-/**
- * Persists each {@link RunEvent} to `run_logs` + (for `appstrate.metric`)
- * to `runs.tokenUsage` + the `llm_usage` ledger.
- *
- * Stateless across events: a fresh instance is built per ingested
- * envelope by the route handler. Calls to this sink are total —
- * no method ever throws because of an unsupported mode.
- */
-export class PersistingEventSink implements EventSink {
-  readonly runId: string;
-  protected readonly scope: AppScope;
-  protected lastAdapterError: string | null = null;
-  private readonly writeLedger: boolean;
-  private readonly modelSource: string | null;
-  private readonly modelCost: ModelCost | null;
-
-  constructor(opts: PersistingEventSinkOptions) {
-    this.scope = opts.scope;
-    this.runId = opts.runId;
-    this.writeLedger = opts.writeLedger ?? false;
-    this.modelSource = opts.modelSource ?? null;
-    this.modelCost = opts.modelCost ?? null;
-  }
-
-  async handle(event: RunEvent): Promise<void> {
-    await this.persist(event);
-  }
-
-  async finalize(_result: RunResult): Promise<void> {
-    // Persistence-only sink — finalize is the route handler's job.
-    // The interface contract requires the method, so we no-op.
-  }
-
-  /**
-   * Last `appstrate.error.message` observed during the lifetime of this
-   * sink instance. Per-instance — short-lived in the ingestion path.
-   */
-  get lastError(): string | null {
-    return this.lastAdapterError;
-  }
-
-  protected async persist(event: RunEvent): Promise<void> {
-    const adapterError = await persistRunEvent(db, this.scope, this.runId, event, {
-      writeLedger: this.writeLedger,
-      modelSource: this.modelSource,
-      modelCost: this.modelCost,
-    });
-    if (adapterError !== null) this.lastAdapterError = adapterError;
-  }
-}
 
 /**
  * Dispatch one {@link RunEvent} through the platform write-through table.

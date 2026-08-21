@@ -72,6 +72,7 @@ import type {
 } from "@appstrate/core/platform-types";
 import { logger } from "./runner/logger.ts";
 import { buildBaseSidecarEnv } from "../../services/orchestrator/sidecar-env.ts";
+import { SIGTERM_GRACE_SECONDS } from "../../services/orchestrator/constants.ts";
 import {
   drainStream,
   spawnCollect,
@@ -141,6 +142,7 @@ const CONSOLE_ARCHIVE_MAX_FILES = 100;
 
 /** How often the exit reaper sweeps {@link FirecrackerOrchestrator.vms} (ms). */
 const EXIT_REAPER_INTERVAL_MS = 60_000;
+
 /**
  * Attempts for transiently-failing teardown host ops (TAP delete, cgroup
  * rmdir). Kept small: the only legitimate transient is the kernel still
@@ -350,6 +352,18 @@ export interface FirecrackerOrchestratorDeps {
    * the run) without a live VMM. Production is {@link defaultMmdsPut}.
    */
   mmdsPut?: (apiSocketPath: string, payload: MmdsPayload) => Promise<void>;
+  /**
+   * SIGTERM→SIGKILL grace on stop, in seconds. Injectable for unit tests
+   * ONLY — the D-state guard tests must drive it to 0 so they assert the
+   * bounded-reap path in milliseconds instead of waiting out the real grace.
+   * Production always takes {@link SIGTERM_GRACE_SECONDS}.
+   *
+   * This replaces a `timeoutSeconds` parameter that used to sit on the public
+   * `stopWorkload`/`stopByRunId` signatures. No production caller ever passed
+   * it — only these tests did — so it was a test seam wearing the costume of
+   * an orchestrator-contract option. It now looks like what it is.
+   */
+  sigtermGraceSeconds?: number;
 }
 
 export class FirecrackerOrchestrator implements RunOrchestrator {
@@ -432,6 +446,9 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
    */
   private exitReaper?: ReturnType<typeof setInterval>;
 
+  /** See {@link FirecrackerOrchestratorDeps.sigtermGraceSeconds}. */
+  private readonly sigtermGraceSeconds: number;
+
   constructor(deps: FirecrackerOrchestratorDeps = {}) {
     this.hostExec = deps.hostExec ?? createHostExec();
     this.jailFs = deps.jailFs ?? defaultJailFs;
@@ -441,6 +458,7 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
     const parsedForward =
       deps.platformApiUrl === undefined ? undefined : parsePlatformApiUrl(deps.platformApiUrl);
     this.platformForward = parsedForward && { ip: parsedForward.ip, port: parsedForward.port };
+    this.sigtermGraceSeconds = deps.sigtermGraceSeconds ?? SIGTERM_GRACE_SECONDS;
     this.allocator = new SubnetAllocator(getFirecrackerEnv().FIRECRACKER_SUBNET_CIDR);
   }
 
@@ -1549,7 +1567,7 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
     });
   }
 
-  async stopWorkload(handle: WorkloadHandle, timeoutSeconds = 5): Promise<void> {
+  async stopWorkload(handle: WorkloadHandle): Promise<void> {
     const vm = this.vms.get(handle.runId);
     if (!vm) return;
     // Latch BEFORE the proc check (B4): a cancel landing in the boot
@@ -1558,7 +1576,7 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
     // kills the just-spawned VMM.
     vm.stopping = true;
     if (!vm.proc) return;
-    await this.killVm(vm, timeoutSeconds);
+    await this.killVm(vm, this.sigtermGraceSeconds);
   }
 
   async removeWorkload(handle: WorkloadHandle): Promise<void> {
@@ -1621,7 +1639,7 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
     yield* tailFileLines(vm.consolePath, () => exited, signal);
   }
 
-  async stopByRunId(runId: string, timeoutSeconds?: number): Promise<StopResult> {
+  async stopByRunId(runId: string): Promise<StopResult> {
     const vm = this.vms.get(runId);
     if (!vm) return "not_found";
     // Latch BEFORE the proc check (B4): a cancel in the boot window must
@@ -1633,7 +1651,7 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
     // log attributes the kill instead of mislabelling it a clean finalize.
     vm.teardownReason = "watchdog-kill";
     if (!vm.proc) return "already_stopped";
-    await this.killVm(vm, timeoutSeconds ?? 5);
+    await this.killVm(vm, this.sigtermGraceSeconds);
     return "stopped";
   }
 

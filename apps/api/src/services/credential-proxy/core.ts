@@ -39,7 +39,6 @@ import {
   resolveIntegrationProxyCredentials,
   forceRefreshIntegrationProxyCredentials,
   IntegrationCredentialNotFoundError,
-  IntegrationCredentialRevokedError,
 } from "./integration-resolver.ts";
 
 /**
@@ -116,12 +115,10 @@ export interface ProxyCallInput {
    */
   cookieJar?: CookieJarAdapter;
   /**
-   * Jar lookup key (usually `sessionId`). Combined with `sessionKey`
-   * below to scope cookies per-integration within one session.
+   * Jar lookup key (usually `sessionId`). Combined with `integrationId` to
+   * scope cookies per-integration within one session.
    */
   jarSessionId?: string;
-  /** Per-integration scope key for the jar. Defaults to `integrationId`. */
-  sessionKey?: string;
   /** TTL applied on each write. Required when `cookieJar` is provided. */
   cookieJarTtlSeconds?: number;
 
@@ -238,8 +235,6 @@ function redactCredentialValues(value: string, fields: Record<string, string>): 
  * upstream response headers + body, streamed back as-is.
  */
 export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult> {
-  const sessionKey = input.sessionKey ?? input.integrationId;
-
   let resolved;
   try {
     const result = await resolveIntegrationProxyCredentials({
@@ -251,9 +246,6 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
     resolved = result.payload;
   } catch (err) {
     if (err instanceof IntegrationCredentialNotFoundError) {
-      throw new ProxyCredentialError(err.message);
-    }
-    if (err instanceof IntegrationCredentialRevokedError) {
       throw new ProxyCredentialError(err.message);
     }
     throw err;
@@ -381,7 +373,7 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
   const jarSessionId = input.jarSessionId;
   const jarTtl = input.cookieJarTtlSeconds;
   if (jar && jarSessionId) {
-    const cookies = await jar.get(jarSessionId, sessionKey);
+    const cookies = await jar.get(jarSessionId, input.integrationId);
     if (cookies.length > 0) {
       headers.set("Cookie", cookies.join("; "));
     }
@@ -484,21 +476,23 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
         } as RequestInit);
       }
     } catch {
-      // Refresh itself failed (invalid_grant, revoked token, network
-      // hiccup, …) — surface the original 401 as-is; the caller will
+      // Refresh itself failed transiently (network hiccup, upstream 5xx, …)
+      // — surface the original 401 as-is; the caller will
       // handle re-authentication. `forceRefresh` flips `needsReconnection`
       // on BOTH terminal shapes before it gets here: a revoked refresh token
-      // (which throws into this catch) and an unrefreshable OAuth client
-      // (which returns null above, after marking the row). Transient
-      // failures deliberately leave the row untouched — nothing is marked,
-      // and the next call retries.
+      // and an unrefreshable OAuth client. Both now return `null` rather
+      // than throwing (the dedicated error class had one throw site whose
+      // only catch was unreachable), so the flag is what separates TERMINAL
+      // from transient — not the two terminal shapes from each other.
+      // Transient failures deliberately leave the row untouched — nothing is
+      // marked, and the next call retries.
     }
   }
 
   if (jar && jarSessionId && jarTtl && jarTtl > 0) {
     const setCookies = res.headers.getSetCookie?.();
     if (setCookies && setCookies.length > 0) {
-      await jar.set(jarSessionId, sessionKey, setCookies, jarTtl);
+      await jar.set(jarSessionId, input.integrationId, setCookies, jarTtl);
     }
   }
 

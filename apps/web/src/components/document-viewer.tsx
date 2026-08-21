@@ -65,7 +65,7 @@ export const PREVIEW_IFRAME_SANDBOX = "allow-scripts";
 /** Inline-render cap for sanitized markdown. */
 const INLINE_MARKDOWN_MAX_BYTES = 1_048_576; // 1 MiB
 
-export interface ViewableDocument {
+interface ViewableDocument {
   id: string;
   name: string;
   mime: string;

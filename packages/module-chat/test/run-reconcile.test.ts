@@ -271,7 +271,6 @@ describe("run_and_wait links the launched run to its session", () => {
         ...clientOpts,
         budget: {
           turnDeadlineAt: NOW + CHAT_TURN_DEADLINE_MS,
-          engine: "ai-sdk",
           chatSessionId: "chs_1",
           orgId: "org_1",
           now: () => NOW,
@@ -297,7 +296,6 @@ describe("run_and_wait links the launched run to its session", () => {
         ...clientOpts,
         budget: {
           turnDeadlineAt: NOW + CHAT_TURN_DEADLINE_MS,
-          engine: "ai-sdk",
           chatSessionId: null,
           orgId: "org_1",
           now: () => NOW,
@@ -321,7 +319,6 @@ describe("run_and_wait links the launched run to its session", () => {
         ...clientOpts,
         budget: {
           turnDeadlineAt: NOW + 1_000,
-          engine: "ai-sdk",
           chatSessionId: "chs_1",
           orgId: "org_1",
           now: () => NOW,

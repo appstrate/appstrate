@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { REQUEST_ID_ONLY_HEADERS } from "../headers.ts";
+
 const storageDeletionJobSchema = {
   type: "object",
   required: [
@@ -116,7 +118,7 @@ export const adminStorageDeletionPaths = {
       responses: {
         "200": {
           description: "Job scheduled for immediate retry.",
-          headers: { "Request-Id": { $ref: "#/components/headers/RequestId" } },
+          headers: REQUEST_ID_ONLY_HEADERS,
           content: {
             "application/json": {
               schema: {

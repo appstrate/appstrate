@@ -2,11 +2,7 @@
 // Copyright 2026 Appstrate
 
 import { describe, it, expect } from "bun:test";
-import {
-  InMemoryPackageCatalog,
-  composeCatalogs,
-  emptyPackageCatalog,
-} from "../../src/bundle/catalog.ts";
+import { InMemoryPackageCatalog, emptyPackageCatalog } from "../../src/bundle/catalog.ts";
 import {
   computeRecordEntries,
   recordIntegrity,
@@ -97,32 +93,5 @@ describe("InMemoryPackageCatalog", () => {
   it("throws on fetch of unknown identity", async () => {
     const cat = new InMemoryPackageCatalog([]);
     await expect(cat.fetch("@me/x@1.0.0" as PackageIdentity)).rejects.toThrow(BundleError);
-  });
-});
-
-describe("composeCatalogs — fallback semantics", () => {
-  it("first non-null resolve wins", async () => {
-    const a = new InMemoryPackageCatalog([makePkg("@me/a@1.0.0" as PackageIdentity, "from-a")]);
-    const b = new InMemoryPackageCatalog([makePkg("@me/a@1.0.0" as PackageIdentity, "from-b")]);
-    const composed = composeCatalogs(a, b);
-    const r = await composed.resolve("@me/a", "1.0.0");
-    expect(r?.identity).toBe("@me/a@1.0.0");
-    const fetched = await composed.fetch(r!.identity);
-    expect(new TextDecoder().decode(fetched.files.get("prompt.md")!)).toBe("from-a");
-  });
-
-  it("falls through when first catalog returns null", async () => {
-    const empty = new InMemoryPackageCatalog([]);
-    const b = new InMemoryPackageCatalog([makePkg("@me/a@1.0.0" as PackageIdentity, "from-b")]);
-    const composed = composeCatalogs(empty, b);
-    const r = await composed.resolve("@me/a", "1.0.0");
-    expect(r?.identity).toBe("@me/a@1.0.0");
-    const fetched = await composed.fetch(r!.identity);
-    expect(new TextDecoder().decode(fetched.files.get("prompt.md")!)).toBe("from-b");
-  });
-
-  it("returns null when every catalog is empty", async () => {
-    const composed = composeCatalogs(emptyPackageCatalog, new InMemoryPackageCatalog([]));
-    expect(await composed.resolve("@me/a", "1.0.0")).toBeNull();
   });
 });

@@ -57,7 +57,7 @@ interface AgentIntegrationRef {
   tools?: string[] | "*";
 }
 
-export interface RunOverridesPanelProps {
+interface RunOverridesPanelProps {
   packageId: string;
   /** Persisted model id (or null = inherit org default). */
   persistedModelId: string | null;

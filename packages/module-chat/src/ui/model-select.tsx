@@ -12,15 +12,13 @@ import { useState } from "react";
 import { CheckIcon, ChevronDownIcon, SlidersHorizontalIcon } from "lucide-react";
 import { cn } from "@appstrate/ui/cn";
 import { ModelGenerationControls } from "@appstrate/ui/components/model-generation-controls";
+import { buildGenerationLabels } from "@appstrate/ui/components/model-generation-labels";
 import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/components/popover";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
 import type { OrgModelOption } from "./models-data.ts";
 import { isModelLive } from "../model-liveness.ts";
 import { useChatHost } from "./runtime-context.ts";
-import {
-  mapModelReasoningLevels,
-  type ModelGenerationSettings,
-} from "@appstrate/core/model-generation";
+import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 
 /** Group/button label for a managed model — provider-neutral, binding not exposed. */
 const MANAGED_LABEL = "Géré";
@@ -176,20 +174,10 @@ export function ModelSelect({
                     value={generation}
                     capabilities={active.generation}
                     onChange={onGenerationChange}
-                    labels={{
-                      temperature: t("generation.temperature"),
-                      temperatureHint: t("generation.temperatureHint"),
-                      reasoning: t("generation.reasoning"),
-                      reasoningHint: t("generation.reasoningHint"),
-                      inherit: t("generation.inherit"),
-                      inheritShort: t("generation.inheritShort"),
-                      unsupported: t("generation.unsupported"),
-                      unsupportedShort: t("generation.unsupportedShort"),
-                      levels: mapModelReasoningLevels((level) => t(`generation.level.${level}`)),
-                      shortLevels: mapModelReasoningLevels((level) =>
-                        t(`generation.levelShort.${level}`),
-                      ),
-                    }}
+                    // `settings:` — the shared label family lives in the
+                    // settings bundle (a boot namespace, so already loaded);
+                    // the host binds `t` to `chat`.
+                    labels={buildGenerationLabels((key) => t(`settings:${key}`))}
                   />
                 )}
               </>

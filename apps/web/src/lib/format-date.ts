@@ -2,7 +2,7 @@
 
 import i18n from "../i18n";
 
-export type DateGranularity = "date" | "datetime";
+type DateGranularity = "date" | "datetime";
 
 /**
  * Centralized date formatter for the dashboard. Always uses the active i18n

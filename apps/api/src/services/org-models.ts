@@ -13,7 +13,7 @@ import { checkEgressUrl, egressGuardedFetch } from "../lib/egress-host-guard.ts"
 import { SsrfBlockedError } from "@appstrate/core/ssrf";
 import { dedupeLabel } from "@appstrate/core/dedupe-label";
 import type { ModelMetadata, OrgModelInfo, TestResult } from "@appstrate/shared-types";
-import { loadInferenceCredentials, loadCredentialMetadata } from "./model-providers/credentials.ts";
+import { loadInferenceCredentials, loadCredentialRow } from "./model-providers/credentials.ts";
 import type { ModelApiShape } from "@appstrate/core/sidecar-types";
 import {
   getResolvedModel,
@@ -237,9 +237,14 @@ export async function listOrgModels(orgId: string): Promise<OrgModelInfo[]> {
         });
         return;
       }
-      const meta = await loadCredentialMetadata(r.credentialId, orgId);
-      if (!meta) return;
-      credByRow.set(r.id, { ...meta, needsReconnection: true });
+      const raw = await loadCredentialRow(r.credentialId, orgId);
+      if (!raw) return;
+      credByRow.set(r.id, {
+        providerId: raw.providerId,
+        apiShape: raw.apiShape,
+        baseUrl: raw.baseUrl,
+        needsReconnection: true,
+      });
     }),
   );
   // "renderable", not "reachable": a dead-credential row is kept (flagged) —
@@ -884,7 +889,7 @@ export async function loadModel(orgId: string, modelDbId: string): Promise<Resol
  * Scope, precisely — `true` requires ALL of: an existing DB row (system models
  * and non-UUID ids answer `false`), that is `enabled`, whose credential fails
  * {@link loadInferenceCredentials} AND still resolves through
- * {@link loadCredentialMetadata}. That last conjunct is what keeps this aligned
+ * {@link loadCredentialRow}. That last conjunct is what keeps this aligned
  * with what {@link listOrgModels} actually RENDERS as dead: a row whose
  * credential row is gone, or whose `providerId` has no registry entry (its
  * provider module was dropped from `MODULES`), is not listed at all — and its
@@ -917,7 +922,7 @@ export async function modelNeedsReconnection(orgId: string, modelDbId: string): 
   // The list's two tests, in its order: dead for inference, but still
   // renderable. See the doc block for why the second one is not redundant.
   if ((await loadInferenceCredentials(orgId, row.credentialId)) !== null) return false;
-  return (await loadCredentialMetadata(row.credentialId, orgId)) !== null;
+  return (await loadCredentialRow(row.credentialId, orgId)) !== null;
 }
 
 /**

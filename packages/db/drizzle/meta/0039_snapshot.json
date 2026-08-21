@@ -1,5 +1,5 @@
 {
-  "id": "8fbd9ec6-e1f1-422b-9a0f-321e7044cb94",
+  "id": "fa3814f4-ed8d-4899-bf39-2cc87e590d52",
   "prevId": "1bc8685b-7601-4fca-814c-d5547d98fc7c",
   "version": "7",
   "dialect": "postgresql",
@@ -518,21 +518,6 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
-        },
-        "idx_api_keys_key_prefix": {
-          "name": "idx_api_keys_key_prefix",
-          "columns": [
-            {
-              "expression": "key_prefix",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
         }
       },
       "foreignKeys": {
@@ -658,21 +643,6 @@
         }
       },
       "indexes": {
-        "idx_model_provider_credentials_org_id": {
-          "name": "idx_model_provider_credentials_org_id",
-          "columns": [
-            {
-              "expression": "org_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
         "idx_model_provider_credentials_org_provider": {
           "name": "idx_model_provider_credentials_org_provider",
           "columns": [
@@ -824,22 +794,6 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
-        },
-        "idx_model_provider_pairings_expires_at": {
-          "name": "idx_model_provider_pairings_expires_at",
-          "columns": [
-            {
-              "expression": "expires_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "where": "consumed_at IS NULL",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
         }
       },
       "foreignKeys": {
@@ -959,21 +913,6 @@
         }
       },
       "indexes": {
-        "idx_org_invitations_token": {
-          "name": "idx_org_invitations_token",
-          "columns": [
-            {
-              "expression": "token",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
         "idx_org_invitations_org_id": {
           "name": "idx_org_invitations_org_id",
           "columns": [
@@ -1862,12 +1801,12 @@
           "primaryKey": false,
           "notNull": false
         },
-        "input_settings": {
-          "name": "input_settings",
+        "config": {
+          "name": "config",
           "type": "jsonb",
           "primaryKey": false,
           "notNull": true,
-          "default": "'{\"values\":{},\"locked\":[]}'::jsonb"
+          "default": "'{}'::jsonb"
         },
         "model_id": {
           "name": "model_id",
@@ -1922,21 +1861,6 @@
           "columns": [
             {
               "expression": "package_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "idx_application_packages_app_id": {
-          "name": "idx_application_packages_app_id",
-          "columns": [
-            {
-              "expression": "application_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -2125,21 +2049,6 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
-        },
-        "idx_pkg_ver_deps_version_id": {
-          "name": "idx_pkg_ver_deps_version_id",
-          "columns": [
-            {
-              "expression": "version_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
         }
       },
       "foreignKeys": {
@@ -2244,21 +2153,6 @@
             }
           ],
           "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "idx_package_versions_package_id": {
-          "name": "idx_package_versions_package_id",
-          "columns": [
-            {
-              "expression": "package_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -2387,21 +2281,6 @@
         }
       },
       "indexes": {
-        "idx_packages_org_id": {
-          "name": "idx_packages_org_id",
-          "columns": [
-            {
-              "expression": "org_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
         "idx_packages_type": {
           "name": "idx_packages_type",
           "columns": [
@@ -2569,21 +2448,6 @@
         }
       },
       "indexes": {
-        "idx_credential_proxy_usage_org_id": {
-          "name": "idx_credential_proxy_usage_org_id",
-          "columns": [
-            {
-              "expression": "org_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
         "idx_credential_proxy_usage_run_id": {
           "name": "idx_credential_proxy_usage_run_id",
           "columns": [
@@ -2862,21 +2726,6 @@
         }
       },
       "indexes": {
-        "idx_llm_usage_org_id": {
-          "name": "idx_llm_usage_org_id",
-          "columns": [
-            {
-              "expression": "org_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
         "idx_llm_usage_api_key_id": {
           "name": "idx_llm_usage_api_key_id",
           "columns": [
@@ -3397,21 +3246,6 @@
         }
       },
       "indexes": {
-        "idx_run_logs_run_id": {
-          "name": "idx_run_logs_run_id",
-          "columns": [
-            {
-              "expression": "run_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
         "idx_run_logs_lookup": {
           "name": "idx_run_logs_lookup",
           "columns": [
@@ -3692,6 +3526,18 @@
           "primaryKey": false,
           "notNull": false
         },
+        "config": {
+          "name": "config",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "config_override": {
+          "name": "config_override",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
         "dependency_overrides": {
           "name": "dependency_overrides",
           "type": "jsonb",
@@ -3782,21 +3628,6 @@
         }
       },
       "indexes": {
-        "idx_runs_package_id": {
-          "name": "idx_runs_package_id",
-          "columns": [
-            {
-              "expression": "package_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
         "idx_runs_status": {
           "name": "idx_runs_status",
           "columns": [
@@ -4261,6 +4092,12 @@
         },
         "input": {
           "name": "input",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "config_override": {
+          "name": "config_override",
           "type": "jsonb",
           "primaryKey": false,
           "notNull": false
@@ -5089,21 +4926,6 @@
           "method": "btree",
           "with": {}
         },
-        "idx_integration_oauth_clients_app": {
-          "name": "idx_integration_oauth_clients_app",
-          "columns": [
-            {
-              "expression": "application_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
         "idx_integration_oauth_clients_package": {
           "name": "idx_integration_oauth_clients_package",
           "columns": [
@@ -5278,27 +5100,6 @@
           "method": "btree",
           "with": {}
         },
-        "idx_integration_pins_app_pkg": {
-          "name": "idx_integration_pins_app_pkg",
-          "columns": [
-            {
-              "expression": "application_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "package_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
         "idx_integration_pins_connection": {
           "name": "idx_integration_pins_connection",
           "columns": [
@@ -5468,21 +5269,6 @@
             }
           ],
           "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "idx_integration_org_defaults_app": {
-          "name": "idx_integration_org_defaults_app",
-          "columns": [
-            {
-              "expression": "application_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -6585,42 +6371,6 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
-        },
-        "idx_webhook_deliveries_event_id": {
-          "name": "idx_webhook_deliveries_event_id",
-          "columns": [
-            {
-              "expression": "event_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "idx_webhook_deliveries_status": {
-          "name": "idx_webhook_deliveries_status",
-          "columns": [
-            {
-              "expression": "webhook_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "status",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
         }
       },
       "foreignKeys": {
@@ -6739,21 +6489,6 @@
           "columns": [
             {
               "expression": "org_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "idx_webhooks_application_id": {
-          "name": "idx_webhooks_application_id",
-          "columns": [
-            {
-              "expression": "application_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"

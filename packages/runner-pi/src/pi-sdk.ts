@@ -20,10 +20,16 @@
 // Used synchronously at tool-registration time to build parameter schemas,
 // so it stays a static export.
 export { Type } from "@earendil-works/pi-ai";
-// Pi 0.84 moved the legacy API-dispatch helper behind its compatibility
-// entrypoint. Appstrate still needs one generic dispatch seam for proxy-bound
-// chat models; the provider implementation itself remains the current native
-// module selected by Pi, including the native Mistral HTTP stream.
+// Test-only payload probe. Pi 0.84 moved this legacy API-dispatch helper behind
+// its compatibility entrypoint. Nothing in production dispatches through it any
+// more: #1173 unified every chat turn on `createAgentSession`, and proxy-bound
+// chat models are now bound as native Pi providers driven off `model.baseUrl`
+// (`module-chat/src/pi-chat/model-binding.ts`) — the "one generic dispatch seam"
+// this export used to justify no longer exists. It survives because
+// `test/pi-runner-generation.test.ts` captures the request payload Pi would
+// serialize, and the `no-restricted-imports` guard forbids that test from
+// reaching `@earendil-works/pi-ai/compat` directly. It is NOT re-exported from
+// `index.ts`; keep it that way.
 export { streamSimple } from "@earendil-works/pi-ai/compat";
 
 // --- types (erased at runtime) ---

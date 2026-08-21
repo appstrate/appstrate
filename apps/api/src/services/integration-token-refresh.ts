@@ -263,8 +263,8 @@ async function doRefresh(
  * `RefreshError && kind==="revoked"` classification that both integration
  * credential resolvers share, so each can map the outcome to its own
  * transport surface (the MITM resolver → 410/502 ApiError; the
- * credential-proxy resolver → IntegrationCredentialRevokedError / null)
- * without duplicating the try/catch taxonomy.
+ * credential-proxy resolver → `null`) without duplicating the try/catch
+ * taxonomy.
  *
  * - `refreshed`: the refresh succeeded; `result` carries the new fields,
  *   expiresAt, and scope-shrink signals.

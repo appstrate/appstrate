@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { modelCostSchema } from "@appstrate/core/module";
-import { tokenUsageSchema } from "@appstrate/core/token-usage";
 import type { TokenUsage } from "@appstrate/shared-types";
 import type { ResourceEntry as ToolMeta } from "@appstrate/shared-types";
 import type { JSONSchemaObject } from "@appstrate/core/form";
@@ -10,8 +8,7 @@ import type { ResolvedModel } from "../org-models.ts";
 import type { ResolvedAgentResources } from "../run-limits.ts";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 
-export type { ToolMeta, TokenUsage, ResolvedModel };
-export { modelCostSchema, tokenUsageSchema };
+export type { ToolMeta, TokenUsage };
 
 /**
  * Reference to an input document surfaced to a run — field, filename, MIME, and
@@ -75,11 +72,17 @@ export interface AppstrateRunPlan {
   // --- Platform wiring ---
   /**
    * Signed run token authorising the sidecar's `/internal/*` calls back into
-   * the platform. Optional — runners that don't expose a callback API omit
-   * it. The platform URL is resolved by the container orchestrator at spawn
-   * time, not surfaced on this plan.
+   * the platform. The platform URL is resolved by the container orchestrator
+   * at spawn time, not surfaced on this plan.
+   *
+   * REQUIRED. It was optional for "runners that don't expose a callback API",
+   * a distinction from the multi-runner era — there is one runner now and
+   * `run-context-builder` always signs a token for it. The optionality only
+   * survived as a `?? ""` at the spawn site, which would have booted a sidecar
+   * with an EMPTY `RUN_TOKEN` instead of failing. Requiring the field turns
+   * that silent-empty-credential path into a compile error.
    */
-  runToken?: string;
+  runToken: string;
   /** Outbound HTTP proxy, if any. */
   proxyUrl?: string | null;
   /** Seconds cap on the container lifetime. */

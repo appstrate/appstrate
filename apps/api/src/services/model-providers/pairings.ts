@@ -73,15 +73,12 @@ export interface ConsumedPairing {
   consumedAt: Date;
 }
 
-export interface PairingRow {
+/** What {@link getPairing}'s single caller — the dashboard poll route — reads. */
+interface PairingRow {
   id: string;
-  userId: string;
-  orgId: string;
-  providerId: string;
   expiresAt: Date;
   consumedAt: Date | null;
   credentialId: string | null;
-  createdAt: Date;
 }
 
 function generateSecret(): string {
@@ -178,13 +175,9 @@ export async function getPairing(id: string, orgId: string): Promise<PairingRow 
   const [row] = await db
     .select({
       id: modelProviderPairings.id,
-      userId: modelProviderPairings.userId,
-      orgId: modelProviderPairings.orgId,
-      providerId: modelProviderPairings.providerId,
       expiresAt: modelProviderPairings.expiresAt,
       consumedAt: modelProviderPairings.consumedAt,
       credentialId: modelProviderPairings.credentialId,
-      createdAt: modelProviderPairings.createdAt,
     })
     .from(modelProviderPairings)
     .where(and(eq(modelProviderPairings.id, id), eq(modelProviderPairings.orgId, orgId)))

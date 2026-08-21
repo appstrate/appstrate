@@ -123,9 +123,8 @@ export default defineConfig({
               test: /node_modules\/(react|react-dom|react-router|react-router-dom|scheduler)\//,
             },
             // Query, narrowed from all of `@tanstack/*`: the entry graph needs
-            // the query client, while the other `@tanstack` packages (table,
-            // virtual, …) are reached from lazy routes only and were being
-            // dragged forward by the wider test.
+            // the query client, while `@tanstack/react-virtual` is reached from
+            // lazy routes only and was being dragged forward by the wider test.
             { name: "query", test: /node_modules\/@tanstack\/(query-core|react-query)\// },
             // Icons are imported by nearly every route; one shared chunk beats
             // the same icon module being duplicated across route chunks.

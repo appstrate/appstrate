@@ -27,7 +27,7 @@ import {
 import { Button } from "@appstrate/ui/components/button";
 import { formatBytes } from "@appstrate/core/format";
 import { cn } from "@appstrate/ui/cn";
-import { formatDateField } from "../lib/markdown";
+import { formatDateField } from "../lib/format-date";
 import { isImageMime, mimeIconFor, documentRunHref, documentExpiryInfo } from "../lib/documents";
 import { useDocumentImageSrc, type DocumentDto } from "../hooks/use-documents";
 

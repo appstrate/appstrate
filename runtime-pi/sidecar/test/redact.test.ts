@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect } from "bun:test";
-import { filterSensitiveHeaders, redactLocationHeader, scrubBearerMaterial } from "../redact.ts";
+import { filterSensitiveHeaders, redactLocationHeader, scrubSecretMaterial } from "../redact.ts";
 
 describe("filterSensitiveHeaders", () => {
   it("drops set-cookie from a Headers instance", () => {
@@ -119,22 +119,114 @@ describe("redactLocationHeader", () => {
   });
 });
 
-describe("scrubBearerMaterial", () => {
+describe("scrubSecretMaterial", () => {
   it("masks an sk-ant token embedded in an error body", () => {
-    expect(scrubBearerMaterial('{"error":"bad key sk-ant-oat01-abc-def"}')).toBe(
-      '{"error":"bad key [redacted]"}',
+    expect(scrubSecretMaterial('{"error":"bad key sk-ant-oat01-abc-def"}')).toBe(
+      '{"error":"bad key [redacted-key]"}',
     );
   });
 
-  it("masks a Bearer sequence (echoed authorization material)", () => {
-    expect(scrubBearerMaterial("upstream said: Bearer eyJhbGciOi.abc_def-ghi rejected")).toBe(
-      "upstream said: [redacted] rejected",
+  it("masks a Bearer sequence, keeping the scheme so the log stays readable", () => {
+    expect(scrubSecretMaterial("upstream said: Bearer eyJhbGciOi.abc_def-ghi rejected")).toBe(
+      "upstream said: Bearer [redacted] rejected",
     );
   });
 
-  it("is case-insensitive and leaves clean text byte-identical", () => {
-    expect(scrubBearerMaterial("bearer tok123 and SK-ANT-x1")).toBe("[redacted] and [redacted]");
+  it("is case-insensitive on sk-ant and leaves clean text byte-identical", () => {
+    expect(scrubSecretMaterial("bearer tok123 and SK-ANT-x1")).toBe(
+      "bearer [redacted] and [redacted-key]",
+    );
     const clean = '{"error":{"type":"overloaded_error"}}';
-    expect(scrubBearerMaterial(clean)).toBe(clean);
+    expect(scrubSecretMaterial(clean)).toBe(clean);
+  });
+
+  // The reason this function replaced `scrubBearerMaterial`: each shape below
+  // reached an operator log unmasked on the `/llm` path while the identical
+  // shape was masked on the runner-stderr path, because two scrubbers of
+  // unequal strength lived in the same process.
+  it("masks the shapes the previous /llm scrubber let through", () => {
+    expect(scrubSecretMaterial("key ghp_ABCdef123456789")).toBe("key [redacted-key]");
+    expect(scrubSecretMaterial("aws key AKIAIOSFODNN7EXAMPLE")).toBe("aws key [redacted-key]");
+    expect(scrubSecretMaterial("got ya29.a0AfH6SMBx-abc_123")).toBe("got [redacted-key]");
+    expect(scrubSecretMaterial("used Basic aWQ6c2VjcmV0")).toBe("used Basic [redacted]");
+    expect(scrubSecretMaterial("raw eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9")).toBe(
+      "raw [redacted-jwt]",
+    );
+  });
+
+  // Regression, in two parts, because the first fix was incomplete.
+  //
+  // 1. The first version put `\b` on the `Bearer|Basic` and `sk-ant-` rules.
+  //    In percent-encoded text the `0` of `%20` sits immediately before the
+  //    literal, so the anchor never matched and the key shipped verbatim.
+  // 2. Dropping `\b` was NOT sufficient, and the commit that did it claimed
+  //    otherwise. `%20` is not `\s`, so `(Bearer|Basic)\s+` still could not
+  //    match `Bearer%20<token>` — the assertions below only passed because
+  //    every fixture token began with `sk-ant-`, which its own rule catches.
+  //    Hence the OPAQUE token cases: they fail unless the separator groups
+  //    themselves accept the percent-encoded forms.
+  it("masks credentials that are not preceded by a word boundary", () => {
+    const key = "sk-ant-api03-9fK2mQzXbT4LpR7wV";
+    expect(
+      scrubSecretMaterial(`https://api.x/v1?h=Authorization%3A%20Bearer%20${key}`),
+    ).not.toContain(key);
+    expect(scrubSecretMaterial(`/cb#Bearer%20${key}`)).not.toContain(key);
+    expect(scrubSecretMaterial(`a${key}`)).not.toContain(key);
+    expect(scrubSecretMaterial("_Bearer tokABC123xyz")).not.toContain("tokABC123xyz");
+  });
+
+  it("masks percent-encoded credentials that no key-shape rule would catch", () => {
+    // Deliberately opaque: matches no vendor prefix, no JWT header, no AWS or
+    // Google shape. Only the separator handling can redact this.
+    const opaque = "A1b2C3d4E5f6G7h8I9j0";
+    expect(
+      scrubSecretMaterial(`https://api.x/cb?h=Authorization%3A%20Bearer%20${opaque}`),
+    ).not.toContain(opaque);
+    expect(scrubSecretMaterial(`/cb#Bearer%20${opaque}`)).not.toContain(opaque);
+    expect(scrubSecretMaterial(`x?a=Basic%20${opaque}`)).not.toContain(opaque);
+    expect(scrubSecretMaterial(`/cb?access_token%3D${opaque}&next=1`)).not.toContain(opaque);
+    // The surviving text still tells the operator which header was involved.
+    expect(scrubSecretMaterial(`/cb?access_token%3D${opaque}&next=1`)).toContain("next=1");
+  });
+
+  // Third regression on the SAME defect. Round 1 put `\b` on the Bearer rule;
+  // round 2 removed it there and widened that rule's separators — and left the
+  // identical `\b` on the key-name, JWT, family, AKIA and ya29 rules, where it
+  // fails for the identical reason. Every percent-triplet ends in an
+  // alphanumeric, so `\b` cannot match a credential preceded by an encoded
+  // separator. These fixtures are DOUBLY encoded (`%3F`/`%26`/`%22` before the
+  // key name), which the `?`-prefixed fixtures above structurally cannot reach.
+  it("masks credentials preceded by a percent-encoded separator", () => {
+    const opaque = "A1b2C3d4E5f6G7h8I9j0";
+    const encoded = [
+      `redirect_uri=https%3A%2F%2Fx.io%2Fcb%3Faccess_token%3D${opaque}`,
+      `https://x/cb?a=1%26access_token%3D${opaque}`,
+      `body=%7B%22access_token%22%3A%22${opaque}%22%7D`,
+    ];
+    for (const input of encoded) expect(scrubSecretMaterial(input)).not.toContain(opaque);
+
+    // Same anchor, the other four shapes that carried it.
+    expect(scrubSecretMaterial("r=%3FeyJhbGciOiJIUzI1NiIs.abcdefghij")).not.toContain("eyJhbGci");
+    expect(scrubSecretMaterial("u=x%26ghp_A1b2C3d4E5f6G7h8")).not.toContain("ghp_A1b2");
+    expect(scrubSecretMaterial("p=1%26AKIA1234567890ABCD")).not.toContain("AKIA1234567890ABCD");
+    expect(scrubSecretMaterial("r=%2Fcb%3Fya29.aBcDeFgHiJkL")).not.toContain("ya29.aBcDeFgHiJkL");
+  });
+
+  // The token class admits `%` so an encoded base64 credential is masked whole:
+  // without it, masking stopped at the first `%2B` and shipped the rest.
+  it("masks a percent-encoded base64 bearer to its end", () => {
+    expect(scrubSecretMaterial("Bearer%20abc%2Bdef%3Dghi")).toBe("Bearer [redacted]");
+  });
+
+  it("leaves prose that merely starts with a key prefix alone", () => {
+    expect(scrubSecretMaterial("found skeletons in pkgroots directory")).toBe(
+      "found skeletons in pkgroots directory",
+    );
+    // CRED_START must stay exactly as strict as the `\b` it replaced on the
+    // left-hand side: a key shape glued to a preceding word is still prose.
+    expect(scrubSecretMaterial("risk-averse and disk-usage notes")).toBe(
+      "risk-averse and disk-usage notes",
+    );
+    expect(scrubSecretMaterial("the mytoken=abc case")).toBe("the mytoken=abc case");
   });
 });

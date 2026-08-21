@@ -99,6 +99,13 @@ export const integrationConnections = pgTable(
     // opaquely at integration boot. Reset to 0 on any successful credential
     // write (`persistCredentialBundle`).
     refreshFailureCount: integer("refresh_failure_count").notNull().default(0),
+    // WRITTEN, NEVER READ in product code — the only reads are integration
+    // tests asserting the write happened. Note the asymmetry with the sibling
+    // above: `refresh_failure_count` IS read, and drives the reconnect
+    // decision; this timestamp is not part of that predicate. It is genuine
+    // debugging telemetry ("when did refresh last fail") with no surface, so
+    // keeping the column costs less than dropping data already collected.
+    // Left deliberately, not overlooked — nothing exposes it in any DTO.
     lastRefreshFailureAt: timestamp("last_refresh_failure_at", { withTimezone: true }),
     // User-facing display name, set at creation: the extracted identity
     // (email/login) when available, else "Connexion N" (N = existing connection
@@ -291,7 +298,6 @@ export const integrationOauthClients = pgTable(
       "ioc_public_iff_no_secret",
       sql`(${table.tokenEndpointAuthMethod} = 'none' AND ${table.clientSecretEncrypted} = '') OR (${table.tokenEndpointAuthMethod} IS DISTINCT FROM 'none' AND ${table.clientSecretEncrypted} <> '')`,
     ),
-    index("idx_integration_oauth_clients_app").on(table.applicationId),
     index("idx_integration_oauth_clients_package").on(table.integrationId),
     // Hot path: the connect resolver + clients list enumerate every custom
     // client for an (app, integration, auth).

@@ -122,7 +122,7 @@ const BUNDLE_DEPENDENCY_READ_GUARDS = new Map<string, ReturnType<typeof requireP
  * (`DraftPackageCatalog.fetch` reads `downloadPackageFiles` whole,
  * `DbPackageCatalog.fetch` extracts the whole published artifact). A bundle
  * carrying a skill therefore hands out exactly the bytes
- * `GET /api/packages/skills/{id}/files[/content]` serves — and #1123/#1124
+ * `GET /api/packages/{scope}/{name}/files[/content]` serves — and #1123/#1124
  * settled that those need `skills:read`, resolved per package TYPE rather than
  * one blanket scope. Without this guard the export is a looser door to the same
  * bytes: an `agents:read`-only credential is 403'd on the file explorer and

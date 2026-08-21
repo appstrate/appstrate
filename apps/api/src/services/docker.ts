@@ -4,9 +4,22 @@ import { hostname } from "node:os";
 import { logger } from "../lib/logger.ts";
 import { getEnv } from "@appstrate/env";
 import { classifyDockerNetworkError, createContainerWithImagePull } from "./docker-errors.ts";
+import { SIGTERM_GRACE_SECONDS } from "./orchestrator/constants.ts";
 
 const DOCKER_SOCKET = getEnv().DOCKER_SOCKET;
 const DOCKER_API_TIMEOUT_MS = 30_000;
+
+/**
+ * PID ceiling for agent/sidecar containers — a fork-bomb bound, not a tunable.
+ *
+ * It was reachable as a `createContainer` option fed by
+ * `WorkloadResources.pidsLimit`, but nothing ever set that field
+ * (`run-limits.ts` resolves only memory and cpu), so this value was always the
+ * effective policy. Stated once here rather than hidden behind a `??` on a
+ * parameter with no producer. The image-pin holder containers use a much
+ * tighter literal at their own call site — they run one `sleep`.
+ */
+const AGENT_CONTAINER_PIDS_LIMIT = 256;
 
 /**
  * Naming prefix for per-run isolation networks. The orchestrator creates
@@ -279,7 +292,6 @@ export interface CreateContainerOptions {
   adapterName: string;
   memory?: number;
   nanoCpus?: number;
-  pidsLimit?: number;
   networkId?: string;
   networkAlias?: string;
   extraHosts?: string[];
@@ -334,7 +346,11 @@ export async function createContainer(
       NanoCpus: options.nanoCpus ?? 2_000_000_000,
       SecurityOpt: ["no-new-privileges"],
       CapDrop: ["ALL"],
-      PidsLimit: options.pidsLimit ?? 256,
+      // Fixed, not caller-supplied: the `WorkloadResources.pidsLimit` that
+      // could have overridden it never had a producer — `run-limits.ts` sets
+      // only memory and cpu — so this default WAS the policy. It belongs next
+      // to those two if the limits ever become per-plan; until then, one place.
+      PidsLimit: AGENT_CONTAINER_PIDS_LIMIT,
       AutoRemove: false,
       NetworkMode: options.networkId ?? "bridge",
       ExtraHosts: options.extraHosts ?? [],
@@ -522,8 +538,8 @@ export async function removeContainer(containerId: string): Promise<void> {
   await assertDockerOk(res, "remove container", [404]);
 }
 
-export async function stopContainer(containerId: string, timeout = 5): Promise<void> {
-  const res = await dockerFetch(`/containers/${containerId}/stop?t=${timeout}`, {
+export async function stopContainer(containerId: string): Promise<void> {
+  const res = await dockerFetch(`/containers/${containerId}/stop?t=${SIGTERM_GRACE_SECONDS}`, {
     method: "POST",
   });
 
@@ -534,10 +550,7 @@ export async function stopContainer(containerId: string, timeout = 5): Promise<v
  * Stop all containers belonging to a run, identified by label.
  * Returns "stopped" if any containers were found, "not_found" otherwise.
  */
-export async function stopContainersByRun(
-  runId: string,
-  timeout = 5,
-): Promise<"stopped" | "not_found"> {
+export async function stopContainersByRun(runId: string): Promise<"stopped" | "not_found"> {
   const filters = JSON.stringify({
     label: [`appstrate.run=${runId}`, "appstrate.managed=true"],
   });
@@ -545,7 +558,7 @@ export async function stopContainersByRun(
   if (!res.ok) return "not_found";
   const containers = (await res.json()) as Array<{ Id: string }>;
   if (containers.length === 0) return "not_found";
-  await Promise.allSettled(containers.map((c) => stopContainer(c.Id, timeout)));
+  await Promise.allSettled(containers.map((c) => stopContainer(c.Id)));
   return "stopped";
 }
 

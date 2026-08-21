@@ -66,7 +66,7 @@ export interface MissingIntegrationFieldError {
  * chosen connection carries its own `auth_key`; storing it twice would let
  * the two diverge.
  */
-export type ConnectionOverridesMap = Record<string, string>;
+type ConnectionOverridesMap = Record<string, string>;
 
 /** Codes that no connection pick can fix — surfaced as a plain message, no picker. */
 function isStructuralCode(code: string): boolean {

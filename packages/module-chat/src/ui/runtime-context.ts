@@ -101,7 +101,9 @@ export type UploadFile = (file: File, signal?: AbortSignal) => Promise<string>;
  * module never imports the shell's i18n framework: the shell resolves the key
  * and the chat renders whatever comes back, in the same language as the answers
  * (`X-Chat-Locale`). Keys are FLAT dotted strings, matching the locale JSONs
- * verbatim.
+ * verbatim, and may carry an explicit `<namespace>:` prefix — the host `t`
+ * must resolve those against its loaded boot namespaces (`model-select.tsx`
+ * passes `settings:models.generation.*`, shared with the web settings page).
  *
  * The migration is INCOMPLETE: roughly two dozen literal French strings remain
  * in `index.tsx`, `thread.tsx`, `thread-list.tsx`, `oauth-connect-card.tsx` and

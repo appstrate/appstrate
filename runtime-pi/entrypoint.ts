@@ -49,22 +49,18 @@ import {
 } from "@appstrate/runner-pi";
 import { getErrorMessage } from "@appstrate/core/errors";
 import type { IntegrationBootReport } from "@appstrate/core/sidecar-types";
-import {
-  BUNDLE_FORMAT_VERSION,
-  bundleIntegrity,
-  computeRecordEntries,
-  readBundleFromFile,
-  recordIntegrity,
-  serializeRecord,
-  parsePackageIdentity,
-  type Bundle,
-  type PackageIdentity,
-} from "@appstrate/afps-runtime/bundle";
+import { readBundleFromFile, parsePackageIdentity } from "@appstrate/afps-runtime/bundle";
 import { HttpSink, attachStdoutBridge } from "@appstrate/afps-runtime/sinks";
 import type { ExecutionContext, RunEvent } from "@appstrate/afps-runtime/types";
 import { emptyRunResult } from "@appstrate/afps-runtime/runner";
 import { createMcpHttpClient, type AppstrateMcpClient } from "@appstrate/mcp-transport";
-import { parseRuntimeEnv, RuntimeEnvError, scrubSinkEnv } from "./env.ts";
+import {
+  parseRuntimeEnv,
+  RuntimeEnvError,
+  scrubSinkEnv,
+  HEARTBEAT_INTERVAL_MS,
+  MCP_CONNECT_DEADLINE_MS,
+} from "./env.ts";
 import { createRuntimePiRunner } from "./pi-runner.ts";
 import { buildMcpDirectFactories } from "./mcp/direct.ts";
 import {
@@ -75,46 +71,6 @@ import {
 import { provisionWorkspace, provisionDocuments, type ProvisionDeps } from "./provision.ts";
 import { createRunDocumentUploader, sweepOutputs, summarizeArtifacts } from "./publish.ts";
 import type { SweepResult } from "./publish.ts";
-
-/**
- * Synthesise a Bundle the runner can consume when no `.afps` ships
- * with the run. The platform pre-installs files into the workspace
- * directly in that case, so the bundle's content is never re-read —
- * but PiRunner.run() still wants a Bundle to satisfy the AFPS
- * Runner contract.
- */
-function buildInContainerBundle(prompt: string): Bundle {
-  const encoder = new TextEncoder();
-  const manifestBytes = encoder.encode(
-    JSON.stringify({ name: "@appstrate/in-container", version: "0.0.0", type: "agent" }),
-  );
-  const promptBytes = encoder.encode(prompt);
-  const files = new Map<string, Uint8Array>([
-    ["manifest.json", manifestBytes],
-    ["prompt.md", promptBytes],
-  ]);
-  const recordBody = serializeRecord(computeRecordEntries(files));
-  const integrity = recordIntegrity(recordBody);
-  const identity = "@appstrate/in-container@0.0.0" as PackageIdentity;
-  return {
-    bundleFormatVersion: BUNDLE_FORMAT_VERSION,
-    root: identity,
-    packages: new Map([
-      [
-        identity,
-        {
-          identity,
-          manifest: { name: "@appstrate/in-container", version: "0.0.0", type: "agent" },
-          files,
-          integrity,
-        },
-      ],
-    ]),
-    integrity: bundleIntegrity(
-      new Map([[identity, { path: "packages/@appstrate/in-container/0.0.0/", integrity }]]),
-    ),
-  };
-}
 
 /**
  * One pino-shaped JSON line on stdout — the shape every structured diagnostic
@@ -446,77 +402,79 @@ const provisionDeps: ProvisionDeps = {
 };
 await Promise.all([provisionWorkspace(provisionDeps), provisionDocuments(provisionDeps)]);
 
+// The bundle is unconditionally present here: `provisionWorkspace` above either
+// wrote `agent-package.afps` into the workspace or called `die()` (process.exit)
+// — a 404 included. So there is no "no package shipped with this run" branch to
+// take; PR #549 replaced that delivery model (the platform used to pre-install
+// files into the workspace directly) with self-provisioning. A read failure is
+// therefore a genuine defect — a truncated or corrupt upload — and gets the same
+// fail-loud treatment as a missing one, with a breadcrumb naming the cause
+// rather than an unhandled rejection.
 const packagePath = path.join(WORKSPACE, "agent-package.afps");
-const hasPackage = await exists(packagePath);
 
 const [, bundle] = await Promise.all([
   initGitWorkspace(),
-  hasPackage ? readBundleFromFile(packagePath) : Promise.resolve(null),
+  readBundleFromFile(packagePath).catch((err: unknown) =>
+    die(`Failed to read the provisioned agent package: ${getErrorMessage(err)}`),
+  ),
 ]);
 
 phaseTimings.provisioningMs = Math.round(performance.now() - provisionStart);
-await progress(
-  hasPackage ? "workspace initialized · agent package read" : "workspace initialized",
-  { provisioningMs: phaseTimings.provisioningMs },
-);
+await progress("workspace initialized · agent package read", {
+  provisioningMs: phaseTimings.provisioningMs,
+});
 
 // --- 2b. Phase B: materialise .pi/ layout + dynamic-import tools ---
 
 const bundlePrepareStart = performance.now();
 
-if (bundle) {
-  try {
-    await prepareBundleForPi(bundle, { workspaceDir: WORKSPACE });
+try {
+  await prepareBundleForPi(bundle, { workspaceDir: WORKSPACE });
 
-    // Fail-loud safety net (issue #549): verify every skill the bundle
-    // carries actually landed under `.pi/skills/<id>`. Before agent
-    // self-provisioning, a dropped bundle degraded silently — the agent
-    // booted onto an empty workspace and only an easily-missed log line
-    // hinted at it. Now a skill that the bundle declares but that did not
-    // materialise surfaces as an `appstrate.error` breadcrumb, so the
-    // regression cannot hide again.
-    const missingSkills: string[] = [];
-    for (const [identity, pkg] of bundle.packages) {
-      if (identity === bundle.root) continue;
-      if ((pkg.manifest as { type?: unknown }).type !== "skill") continue;
-      const parsed = parsePackageIdentity(identity);
-      if (!parsed) continue;
-      if (!(await exists(path.join(WORKSPACE, ".pi", "skills", parsed.packageId)))) {
-        missingSkills.push(parsed.packageId);
-      }
+  // Fail-loud safety net (issue #549): verify every skill the bundle
+  // carries actually landed under `.pi/skills/<id>`. Before agent
+  // self-provisioning, a dropped bundle degraded silently — the agent
+  // booted onto an empty workspace and only an easily-missed log line
+  // hinted at it. Now a skill that the bundle declares but that did not
+  // materialise surfaces as an `appstrate.error` breadcrumb, so the
+  // regression cannot hide again.
+  const missingSkills: string[] = [];
+  for (const [identity, pkg] of bundle.packages) {
+    if (identity === bundle.root) continue;
+    if ((pkg.manifest as { type?: unknown }).type !== "skill") continue;
+    const parsed = parsePackageIdentity(identity);
+    if (!parsed) continue;
+    if (!(await exists(path.join(WORKSPACE, ".pi", "skills", parsed.packageId)))) {
+      missingSkills.push(parsed.packageId);
     }
-    if (missingSkills.length > 0) {
-      await emitError(
-        `Skill(s) declared by the agent did not materialise: ${missingSkills.join(", ")}`,
-        { missingSkills },
-      );
-    }
-
-    // Fire-and-forget cleanup of the original AFPS; no longer needed once the
-    // Pi SDK is up. (prepareBundleForPi is skills-only — no scratch dir.)
-    void fs.unlink(packagePath).catch(() => {});
-  } catch (err) {
-    await emitError(`Failed to prepare agent package: ${getErrorMessage(err)}`);
   }
+  if (missingSkills.length > 0) {
+    await emitError(
+      `Skill(s) declared by the agent did not materialise: ${missingSkills.join(", ")}`,
+      { missingSkills },
+    );
+  }
+
+  // Fire-and-forget cleanup of the original AFPS; no longer needed once the
+  // Pi SDK is up. (prepareBundleForPi is skills-only — no scratch dir.)
+  void fs.unlink(packagePath).catch(() => {});
+} catch (err) {
+  await emitError(`Failed to prepare agent package: ${getErrorMessage(err)}`);
 }
 
 phaseTimings.bundlePrepareMs = Math.round(performance.now() - bundlePrepareStart);
-await progress(
-  `bundle loaded (${extensionFactories.length} extension${extensionFactories.length === 1 ? "" : "s"})`,
-  {
-    bundleLoaded: bundle !== null,
-    extensions: extensionFactories.length,
-    bundlePrepareMs: phaseTimings.bundlePrepareMs,
-  },
-);
+// No extension count here: `extensionFactories` is still empty at this point —
+// nothing is pushed into it until Phase C/D, ~125 lines below — so the count
+// was structurally always 0 and the breadcrumb was reporting the declaration,
+// not the load. The honest total is emitted on `runtime ready`.
+await progress("bundle loaded", { bundlePrepareMs: phaseTimings.bundlePrepareMs });
 
 // The agent's selected runtime tools (`manifest.runtime_tools`), read once from
 // the root package manifest. Reused by the no-sidecar extension registration,
 // the `publish_document` gate, and the PiRunner's terminal-tool decision.
-const declaredRuntimeTools: string[] = bundle
-  ? ((bundle.packages.get(bundle.root)?.manifest as { runtime_tools?: string[] } | undefined)
-      ?.runtime_tools ?? [])
-  : [];
+const declaredRuntimeTools: string[] =
+  (bundle.packages.get(bundle.root)?.manifest as { runtime_tools?: string[] } | undefined)
+    ?.runtime_tools ?? [];
 
 // --- 2c. Phase C: wire sidecar-backed tools via MCP ---
 // Every sidecar-backed capability is surfaced as a typed Pi tool whose
@@ -562,10 +520,9 @@ if (sidecarUrl) {
       // may briefly answer ECONNREFUSED / ENOTFOUND while the container is
       // still wiring its listener and the Docker DNS alias is propagating.
       // AWS-style full jitter (50ms → 1s) absorbs the race without
-      // pessimising the warm-path; the default 60s deadline covers
-      // worst-case cold container pulls (#406 acceptance criteria: 20–45s
-      // boots are routine). Operators on slow registries can widen via
-      // `APPSTRATE_MCP_CONNECT_DEADLINE_MS`.
+      // pessimising the warm-path; the fixed 60s deadline covers worst-case
+      // cold container pulls (#406 acceptance criteria: 20–45s boots are
+      // routine). It is not operator-tunable — see `MCP_CONNECT_DEADLINE_MS`.
       // The sidecar's /mcp endpoint gates inbound requests by the per-run
       // Docker network + Host-header check (`validateMcpHostHeader`); it does
       // NOT verify a bearer token, so the agent connects unauthenticated. (An
@@ -578,7 +535,7 @@ if (sidecarUrl) {
         // share one budget.
         ...(env.mcpToolTimeoutMs !== undefined ? { defaultTimeoutMs: env.mcpToolTimeoutMs } : {}),
         retry: {
-          deadlineMs: env.mcpConnectDeadlineMs,
+          deadlineMs: MCP_CONNECT_DEADLINE_MS,
           baseMs: 50,
           capMs: 1_000,
           onRetry: ({ url, attempt, delayMs, errorCode, error }) => {
@@ -749,12 +706,6 @@ const context: ExecutionContext = {
   ...(env.timeoutSeconds !== undefined ? { timeoutSeconds: env.timeoutSeconds } : {}),
 };
 
-// --- 5. Resolve bundle for PiRunner (fallback to synthetic when no .afps) ---
-// PiRunner needs a Bundle; when no agent-package.afps was present, the
-// platform pre-installed files directly so we hand it a minimal stub
-// (built via the same helper used in Phase C).
-const runnerBundle: Bundle = bundle ?? buildInContainerBundle(systemPrompt);
-
 // --- 6. Signal runtime readiness ---
 //
 // Emitted *after* the bundle is loaded + providers wired, but *before*
@@ -792,7 +743,7 @@ if (piSdkWarmup && (await piSdkWarmup) === null) {
 }
 
 await emitRuntimeReady(bridgedSink, AGENT_RUN_ID, {
-  bundleLoaded: bundle !== null,
+  bundleLoaded: true,
   extensions: extensionFactories.length,
   bootDurationMs: performance.now(),
   phaseTimings,
@@ -809,7 +760,7 @@ await emitRuntimeReady(bridgedSink, AGENT_RUN_ID, {
 const heartbeat = startSinkHeartbeat({
   url: `${env.sink.url.replace(/\/$/, "")}/heartbeat`,
   runSecret: env.sink.secret,
-  intervalMs: env.heartbeatIntervalMs,
+  intervalMs: HEARTBEAT_INTERVAL_MS,
   onError: (err) => {
     // Non-fatal — stall watchdog is the backstop. Keep it on stderr so
     // container log forwarding captures it without polluting the event
@@ -949,7 +900,7 @@ try {
   const runner = buildPiRunner();
 
   await runner.run({
-    bundle: runnerBundle,
+    bundle,
     context,
     eventSink: piEventSink,
     signal: runAbort.signal,

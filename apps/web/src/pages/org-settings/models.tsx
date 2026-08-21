@@ -40,7 +40,7 @@ import { ModelFormModal } from "../../components/model-form-modal";
 import { CredentialFormModal } from "../../components/credential-form-modal";
 import { getModelIcon, getProviderIcon } from "../../components/icons";
 import { findProviderByApiShapeAndBaseUrl } from "../../lib/provider-registry-helpers";
-import { formatDateField } from "../../lib/markdown";
+import { formatDateField } from "../../lib/format-date";
 import { ConfirmModal } from "../../components/confirm-modal";
 import { LoadingState, ErrorState, EmptyState } from "../../components/page-states";
 import { Spinner } from "../../components/spinner";

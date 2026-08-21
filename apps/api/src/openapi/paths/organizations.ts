@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { STD_RESPONSE_HEADERS } from "../headers.ts";
+
 import { ASSIGNABLE_ORG_ROLES } from "@appstrate/shared-types";
 
 export const organizationsPaths = {
@@ -12,10 +14,7 @@ export const organizationsPaths = {
       responses: {
         "200": {
           description: "Organization list",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
@@ -73,10 +72,7 @@ export const organizationsPaths = {
       responses: {
         "201": {
           description: "Organization created",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
@@ -116,10 +112,7 @@ export const organizationsPaths = {
       responses: {
         "200": {
           description: "Organization detail with members and invitations",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/OrgDetail" },
@@ -176,10 +169,7 @@ export const organizationsPaths = {
       responses: {
         "200": {
           description: "Updated organization — same OrgDetail shape as GET /api/orgs/{orgId}",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/OrgDetail" },
@@ -201,10 +191,7 @@ export const organizationsPaths = {
       responses: {
         "204": {
           description: "Organization deleted",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
         },
         "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
@@ -239,10 +226,7 @@ export const organizationsPaths = {
         "201": {
           description:
             "Invitation created — bare OrgInvitationInfo (same shape as the items in the invitations list in GET /api/orgs/{orgId}).",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/OrgInvitationInfo" },
@@ -292,10 +276,7 @@ export const organizationsPaths = {
       responses: {
         "200": {
           description: "Updated member — same shape as the members list in GET /api/orgs/{orgId}",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/OrgMember" },
@@ -327,10 +308,7 @@ export const organizationsPaths = {
       responses: {
         "204": {
           description: "Member removed",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
@@ -366,10 +344,7 @@ export const organizationsPaths = {
         "200": {
           description:
             "Updated invitation — same shape as the invitations list in GET /api/orgs/{orgId}",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/OrgInvitationInfo" },
@@ -402,10 +377,7 @@ export const organizationsPaths = {
       responses: {
         "204": {
           description: "Invitation cancelled",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
@@ -423,10 +395,7 @@ export const organizationsPaths = {
       responses: {
         "200": {
           description: "Organization settings",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/OrgSettings" },
@@ -456,10 +425,7 @@ export const organizationsPaths = {
       responses: {
         "200": {
           description: "Settings updated",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/OrgSettings" },

@@ -24,7 +24,6 @@
     "@earendil-works/pi-ai": "0.84.2",
     "@readme/openapi-parser": "^7.0.1",
     "@redocly/openapi-core": "^2.43.2",
-    "@typescript/native": "npm:typescript@^7.0.2",
     "@types/bun": "latest",
     "@types/json-schema": "7.0.15",
     "@types/semver": "^7.8.0",
@@ -112,7 +111,6 @@
     "verify:type-coverage": "type-coverage --project apps/web/tsconfig.json --strict --at-least 98 --ignore-files \"src/api/schema.d.ts\"",
     "verify:compose-defaults": "bun scripts/verify-compose-defaults.ts",
     "openapi:baseline": "bun scripts/detect-breaking-changes.ts --update-baseline",
-    "openapi:diff": "bun scripts/detect-breaking-changes.ts",
     "clean": "rm -rf node_modules/.cache .turbo .eslintcache apps/*/dist apps/web/.vite packages/*/dist coverage",
     "prepare": "husky"
   },

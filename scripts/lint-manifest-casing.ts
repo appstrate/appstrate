@@ -29,7 +29,7 @@
  *     the cleanup pattern (`<key>: undefined` / `delete m.<key>`), and read
  *     fallback chains (`?? m.<key>`).
  *
- * Exits non-zero on any hit. Hook into `turbo check` via the
+ * Exits non-zero on any hit. Wired into the root `check` script via the
  * `lint:manifest-casing` script in root package.json.
  */
 

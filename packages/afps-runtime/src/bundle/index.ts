@@ -50,7 +50,7 @@ export { computeIntegrity, type IntegrityCheckResult } from "./hash.ts";
 
 // ─── Read / write / build ───────────────────────────────────────────
 export { readBundleFromBuffer, readBundleFromFile, type ReadBundleOptions } from "./read.ts";
-export { writeBundleToBuffer, writeBundleToFile } from "./write.ts";
+export { writeBundleToBuffer } from "./write.ts";
 export {
   buildBundleFromAfps,
   buildBundleFromCatalog,
@@ -59,7 +59,6 @@ export {
 } from "./build.ts";
 export {
   InMemoryPackageCatalog,
-  composeCatalogs,
   emptyPackageCatalog,
   type InMemoryCatalogOptions,
 } from "./catalog.ts";

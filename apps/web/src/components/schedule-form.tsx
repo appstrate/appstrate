@@ -58,7 +58,7 @@ const TIMEZONES = [
   "Asia/Tokyo",
 ] as const;
 
-export interface ScheduleSaveData {
+interface ScheduleSaveData {
   name?: string;
   cron_expression: string;
   timezone?: string;

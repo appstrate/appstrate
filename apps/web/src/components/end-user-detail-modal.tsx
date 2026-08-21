@@ -11,7 +11,7 @@ import { Label } from "@appstrate/ui/components/label";
 import { Badge } from "@appstrate/ui/components/badge";
 import { Spinner } from "./spinner";
 import { useDeleteEndUser, useUpdateEndUser, type EndUserInfo } from "../hooks/use-end-users";
-import { formatDateField } from "../lib/markdown";
+import { formatDateField } from "../lib/format-date";
 
 interface Props {
   open: boolean;

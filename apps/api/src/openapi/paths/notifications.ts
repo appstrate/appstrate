@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { STD_RESPONSE_HEADERS } from "../headers.ts";
+
 const notificationObject = {
   type: "object",
   required: ["id", "type", "run_id", "payload", "read_at", "created_at"],
@@ -61,8 +63,7 @@ export const notificationsPaths = {
         "200": {
           description: "Notification list",
           headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+            ...STD_RESPONSE_HEADERS,
             Link: { $ref: "#/components/headers/Link" },
           },
           content: {
@@ -122,10 +123,7 @@ export const notificationsPaths = {
       responses: {
         "200": {
           description: "Unread count",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
@@ -159,10 +157,7 @@ export const notificationsPaths = {
       responses: {
         "200": {
           description: "Unread counts keyed by package ID",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
@@ -210,10 +205,7 @@ export const notificationsPaths = {
       responses: {
         "204": {
           description: "Notification marked as read (idempotent — 204 even if it was already read)",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
         },
         "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
@@ -241,10 +233,7 @@ export const notificationsPaths = {
       responses: {
         "204": {
           description: "Notification marked as read (idempotent — 204 even if it was already read)",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
         },
         "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
@@ -267,10 +256,7 @@ export const notificationsPaths = {
       responses: {
         "200": {
           description: "Update result",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {

@@ -20,7 +20,7 @@ import { PageHeader } from "../components/page-header";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 import { EndUserCreateModal } from "../components/end-user-create-modal";
 import { EndUserDetailModal } from "../components/end-user-detail-modal";
-import { formatDateField } from "../lib/markdown";
+import { formatDateField } from "../lib/format-date";
 
 /** Deterministic color from ID hash for the avatar circle. */
 const AVATAR_COLORS = [

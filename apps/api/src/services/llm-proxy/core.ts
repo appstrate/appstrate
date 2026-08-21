@@ -304,7 +304,6 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
       cache: cacheKeyForWrite
         ? { cacheKey: cacheKeyForWrite, ttlSeconds: cacheConfig.ttlSeconds }
         : null,
-      logLabel: "llm-proxy",
     },
   );
 }

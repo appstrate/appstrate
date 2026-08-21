@@ -25,6 +25,7 @@ import { requireAgent } from "../middleware/guards.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { ApiError, invalidRequest, notFound, validationFailed } from "../lib/errors.ts";
 import { readJsonBody } from "../lib/request-body.ts";
+import { parseListPagination } from "../lib/list-query.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { getActor, actorFromIds, type Actor } from "../lib/actor.ts";
 import { getAppScope, type AppScope } from "../lib/scope.ts";
@@ -447,19 +448,7 @@ export function createSchedulesRouter() {
   router.get("/schedules/:id/runs", async (c) => {
     const scheduleId = c.req.param("id");
     const scope = getAppScope(c);
-    const limit = z.coerce
-      .number()
-      .int()
-      .min(1)
-      .max(100)
-      .catch(20)
-      .parse(c.req.query("limit") ?? 20);
-    const offset = z.coerce
-      .number()
-      .int()
-      .min(0)
-      .catch(0)
-      .parse(c.req.query("offset") ?? 0);
+    const { limit, offset } = parseListPagination(c, { defaultLimit: 20 });
     const result = await listScheduleRuns(scope, scheduleId, {
       limit,
       offset,

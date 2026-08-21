@@ -43,9 +43,18 @@ export function runWithTraceContext<T>(ctx: TraceContext, fn: () => T): T {
 }
 
 /**
- * Read the current trace context — useful when forging child spans for
- * outbound HTTP calls. Returns `undefined` outside a `runWithTraceContext`
- * scope.
+ * Read the current trace context. Returns `undefined` outside a
+ * `runWithTraceContext` scope.
+ *
+ * The read counterpart of `runWithTraceContext`, and the observation port the
+ * observability module's tests use to assert that trace context actually
+ * propagates into logger calls. Note the logger itself does NOT go through
+ * here — the pino mixin reads `traceStorage` directly — so this has no
+ * production caller today. Kept as public API rather than deleted: a writer
+ * without a reader is an odd surface, and removing it would leave trace
+ * propagation only indirectly testable. Its previous docstring claimed it was
+ * "useful when forging child spans for outbound HTTP calls" — nothing ever
+ * did that.
  */
 export function getTraceContext(): TraceContext | undefined {
   return traceStorage.getStore();

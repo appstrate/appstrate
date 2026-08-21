@@ -17,7 +17,7 @@ import {
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 import { ApiKeyCreateModal } from "../components/api-key-create-modal";
 import { getErrorMessage } from "@appstrate/core/errors";
-import { formatDateField } from "../lib/markdown";
+import { formatDateField } from "../lib/format-date";
 
 function isExpired(expiresAt: string | null | undefined): boolean {
   return expiresAt ? new Date(expiresAt) < new Date() : false;

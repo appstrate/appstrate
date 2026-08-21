@@ -11,7 +11,7 @@ import { useOrgStorage } from "../../hooks/use-org-storage";
 import { getUsageBarColor } from "../../lib/usage-severity";
 import { PlanGrid } from "../../components/plan-card";
 import { LoadingState, ErrorState, EmptyState } from "../../components/page-states";
-import { formatDateField } from "../../lib/markdown";
+import { formatDateField } from "../../lib/format-date";
 import { toast } from "sonner";
 
 const STATUS_I18N: Record<string, string> = {

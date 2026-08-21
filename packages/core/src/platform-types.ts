@@ -41,7 +41,6 @@ export interface WorkloadHandle {
 export interface WorkloadResources {
   memoryBytes: number;
   nanoCpus: number;
-  pidsLimit?: number;
 }
 
 export interface WorkloadSpec {
@@ -214,8 +213,17 @@ export interface RunOrchestrator {
   /** Start a created workload. */
   startWorkload(handle: WorkloadHandle): Promise<void>;
 
-  /** Stop a workload. Idempotent. */
-  stopWorkload(handle: WorkloadHandle, timeoutSeconds?: number): Promise<void>;
+  /**
+   * Stop a workload. Idempotent.
+   *
+   * The SIGTERM→SIGKILL grace is the ORCHESTRATOR's policy, not a caller
+   * option: every backend applies its own 5-second default. The parameter
+   * that used to let a caller override it was `undefined` at every call site
+   * the platform has, and the one bound a caller does own — how long
+   * `stopWorkloadAndWait` blocks finalize on the stop ack — is a different,
+   * strictly larger quantity and lives there.
+   */
+  stopWorkload(handle: WorkloadHandle): Promise<void>;
 
   /** Remove a workload. Idempotent. */
   removeWorkload(handle: WorkloadHandle): Promise<void>;
@@ -226,8 +234,8 @@ export interface RunOrchestrator {
   /** Stream logs from a running workload. Format-agnostic (text line by line). */
   streamLogs(handle: WorkloadHandle, signal?: AbortSignal): AsyncGenerator<string>;
 
-  /** Stop ALL workloads for a run by ID. For cancel. */
-  stopByRunId(runId: string, timeoutSeconds?: number): Promise<StopResult>;
+  /** Stop ALL workloads for a run by ID. For cancel. Grace: see {@link stopWorkload}. */
+  stopByRunId(runId: string): Promise<StopResult>;
 
   /**
    * Base URL the agent workload should use to reach the platform API.
@@ -286,6 +294,21 @@ export interface OrchestratorRegistration {
   readonly supportsSidecarOnly: boolean;
   /** Resource semantics declared explicitly; absence fails closed. */
   readonly agentResources?: OrchestratorAgentResourceCapabilities;
+  /**
+   * Whether this backend mounts the per-run workspace as a tmpfs sized by the
+   * operator's `WORKSPACE_TMPFS_SIZE_MB`. Only backends that declare it get the
+   * cap stated in the agent's system prompt — telling an agent its workspace is
+   * capped when the backend never applies the setting is misinformation, and an
+   * agent that does NOT know about a real cap dies with ENOSPC mid-install.
+   *
+   * The cap VALUE is operator env, not backend policy, so it is not declared
+   * here: the backend only answers whether it honours the setting. Absence
+   * fails closed (silent), which is what an unregistered or module-contributed
+   * backend with an opaque workspace must get. The microVM equivalent — a
+   * writable root sized as a percentage — is
+   * {@link OrchestratorAgentResourceCapabilities.writableRootTmpfsPercent}.
+   */
+  readonly appliesWorkspaceTmpfsCap?: boolean;
   /** Build a fresh orchestrator instance. Called once per process (singleton held by the registry consumer). */
   readonly create: () => RunOrchestrator;
 }

@@ -4,7 +4,7 @@
  * Verify OpenAPI spec: completeness, structural validity, best practices,
  * and Zod ↔ OpenAPI request-body schema consistency.
  *
- * 1. Endpoint coverage — compares spec vs maintained endpoint list
+ * 1. Endpoint index — enumerates the spec's "VERB /path" set for sections 5 and 5b
  * 2. Structural validation — @readme/openapi-parser (OpenAPI 3.1 schema conformance)
  * 3. Best practices lint — @redocly/openapi-core (recommended ruleset)
  * 4. Zod ↔ OpenAPI schema comparison — compares Zod-derived JSON Schemas (pre-converted
@@ -14,6 +14,9 @@
  *    plus apps/api/src/index.ts, composes the mount prefix from app.route(prefix, factory) calls,
  *    normalises Hono path syntax, and asserts every code-registered endpoint is documented in
  *    the OpenAPI spec or in the explicit allowlist.
+ * 5b. Spec subset Code — the mirror of 5: every documented endpoint must be registered by
+ *    some router, or listed in SPEC_ONLY_ALLOWLIST. Replaces the hand-typed 242-entry
+ *    `expectedEndpoints` array, whose only unique signal this was.
  * 6. Response schema presence — every 2xx JSON response (except 204) must declare a schema
  * 7. Shared-type ↔ OpenAPI response required-field comparison — for each registered
  *    (spec-schema ↔ @appstrate/shared-types interface) pair, asserts every type-required field
@@ -61,338 +64,26 @@ const zodSchemaRegistry = buildZodSchemaRegistry(moduleSchemas);
 let exitCode = 0;
 
 // ═══════════════════════════════════════════════════
-// 1. Endpoint coverage
+// 1. Endpoint index
 // ═══════════════════════════════════════════════════
-
-const expectedEndpoints = [
-  // Health
-  "GET /health",
-
-  // Auth (Better Auth)
-  "POST /api/auth/sign-up/email",
-  "POST /api/auth/sign-in/email",
-  "POST /api/auth/sign-out",
-  "GET /api/auth/get-session",
-  // Bootstrap-token redemption (#344 Layer 2b) — platform-owned, not BA
-  "POST /api/auth/bootstrap/redeem",
-
-  // Agents (runtime — agents.ts + user-agents.ts junction endpoints)
-  "GET /api/agents",
-  "PUT /api/agents/{scope}/{name}/input-settings",
-  // Unified persistence — pinned slots + memories
-  "GET /api/agents/{scope}/{name}/persistence",
-  "DELETE /api/agents/{scope}/{name}/persistence",
-  "DELETE /api/agents/{scope}/{name}/persistence/memories/{id}",
-  "DELETE /api/agents/{scope}/{name}/persistence/pinned/{id}",
-  "PUT /api/agents/{scope}/{name}/skills",
-  "GET /api/agents/{scope}/{name}/model",
-  "PUT /api/agents/{scope}/{name}/model",
-  "GET /api/agents/{scope}/{name}/bundle",
-
-  // Runs
-  "POST /api/agents/{scope}/{name}/run",
-  "GET /api/agents/{scope}/{name}/runs",
-  "DELETE /api/agents/{scope}/{name}/runs",
-  "GET /api/runs/{id}",
-  "GET /api/runs/{id}/logs",
-  "POST /api/runs/{id}/cancel",
-
-  // Realtime (SSE)
-  "GET /api/realtime/runs",
-  "GET /api/realtime/runs/{id}",
-  "GET /api/realtime/agents/{packageId}/runs",
-
-  // Schedules
-  "GET /api/schedules",
-  "GET /api/schedules/{id}",
-  "GET /api/schedules/{id}/runs",
-  "GET /api/agents/{scope}/{name}/schedules",
-  "POST /api/agents/{scope}/{name}/schedules",
-  "PUT /api/schedules/{id}",
-  "DELETE /api/schedules/{id}",
-
-  // Integrations (INTEGRATIONS_PROPOSAL Phase 1.3 — marketplace UI)
-  "GET /api/integrations",
-  "GET /api/integrations/callback",
-  "GET /api/integrations/{packageId}",
-  "POST /api/integrations/{packageId}/activate",
-  "DELETE /api/integrations/{packageId}/deactivate",
-  "POST /api/integrations/{packageId}/auths/{authKey}/oauth-clients",
-  "PUT /api/integrations/{packageId}/oauth-clients/{clientId}",
-  "DELETE /api/integrations/{packageId}/oauth-clients/{clientId}",
-  "GET /api/integrations/{packageId}/auths/{authKey}/clients",
-  "PUT /api/integrations/{packageId}/auths/{authKey}/default-client",
-  "POST /api/integrations/{packageId}/auths/{authKey}/connect/fields",
-  "POST /api/integrations/{packageId}/auths/{authKey}/connect/oauth2",
-  "POST /api/integrations/{packageId}/auths/{authKey}/connect/session",
-  "GET /api/integrations/connect/start",
-  "GET /api/integrations/connect/context",
-  "POST /api/integrations/connect/submit",
-  "GET /api/integrations/{packageId}/connections",
-  "GET /api/integrations/{packageId}/consuming-agents",
-  "PATCH /api/integrations/{packageId}/connections/{connectionId}",
-  "PATCH /api/integrations/{packageId}/settings",
-  "GET /api/integrations/{packageId}/pins",
-  "PUT /api/integrations/{packageId}/pins/{agentPackageId}",
-  "DELETE /api/integrations/{packageId}/pins/{agentPackageId}",
-  "GET /api/integrations/{packageId}/default",
-  "PUT /api/integrations/{packageId}/default",
-  "DELETE /api/integrations/{packageId}/default",
-
-  // Agent Proxy
-  "GET /api/agents/{scope}/{name}/proxy",
-  "GET /api/agents/{scope}/{name}/connection-readiness",
-  "PUT /api/agents/{scope}/{name}/proxy",
-
-  // Model Provider Credentials
-  "GET /api/model-provider-credentials/registry",
-  "GET /api/model-provider-credentials",
-  "POST /api/model-provider-credentials",
-  "POST /api/model-provider-credentials/test",
-  "PUT /api/model-provider-credentials/{id}",
-  "DELETE /api/model-provider-credentials/{id}",
-  "POST /api/model-provider-credentials/{id}/test",
-  "POST /api/model-provider-credentials/{id}/refresh-models",
-  // OAuth Model Providers (subscription billing)
-  "POST /api/model-providers-oauth/pair/redeem",
-  "POST /api/model-providers-oauth/pairing",
-  "GET /api/model-providers-oauth/pairing/{id}",
-  "DELETE /api/model-providers-oauth/pairing/{id}",
-
-  // Models
-  "GET /api/models",
-  "POST /api/models",
-  "PUT /api/models/default",
-  "GET /api/models/openrouter",
-  "POST /api/models/test",
-  "POST /api/models/seed",
-  "PUT /api/models/{id}",
-  "DELETE /api/models/{id}",
-  "POST /api/models/{id}/test",
-
-  // Proxies
-  "GET /api/proxies",
-  "POST /api/proxies",
-  "PUT /api/proxies/default",
-  "PUT /api/proxies/{id}",
-  "DELETE /api/proxies/{id}",
-  "POST /api/proxies/{id}/test",
-
-  // API Keys
-  "GET /api/api-keys/available-scopes",
-  "GET /api/api-keys",
-  "POST /api/api-keys",
-  "DELETE /api/api-keys/{id}",
-
-  // Packages — Skills
-  "GET /api/packages/skills",
-  "POST /api/packages/skills",
-  "GET /api/packages/skills/{scope}/{name}",
-  "PUT /api/packages/skills/{scope}/{name}",
-  "DELETE /api/packages/skills/{scope}/{name}",
-  "GET /api/packages/skills/{id}",
-  "PUT /api/packages/skills/{id}",
-  "DELETE /api/packages/skills/{id}",
-  "GET /api/packages/skills/{scope}/{name}/versions",
-  "GET /api/packages/skills/{scope}/{name}/versions/info",
-  "POST /api/packages/skills/{scope}/{name}/versions",
-  "POST /api/packages/skills/{scope}/{name}/versions/{version}/restore",
-  "DELETE /api/packages/skills/{scope}/{name}/versions/{version}",
-  "GET /api/packages/skills/{scope}/{name}/versions/{version}",
-
-  // Packages — Agents
-  "GET /api/packages/agents",
-  "POST /api/packages/agents",
-  "GET /api/packages/agents/{scope}/{name}",
-  "PUT /api/packages/agents/{scope}/{name}",
-  "DELETE /api/packages/agents/{scope}/{name}",
-  "GET /api/packages/agents/{id}",
-  "PUT /api/packages/agents/{id}",
-  "DELETE /api/packages/agents/{id}",
-  "GET /api/packages/agents/{scope}/{name}/versions",
-  "GET /api/packages/agents/{scope}/{name}/versions/info",
-  "POST /api/packages/agents/{scope}/{name}/versions",
-  "POST /api/packages/agents/{scope}/{name}/versions/{version}/restore",
-  "DELETE /api/packages/agents/{scope}/{name}/versions/{version}",
-  "GET /api/packages/agents/{scope}/{name}/versions/{version}",
-
-  // Packages — Integrations
-  "GET /api/packages/integrations",
-  "POST /api/packages/integrations",
-  "GET /api/packages/integrations/{scope}/{name}",
-  "PUT /api/packages/integrations/{scope}/{name}",
-  "DELETE /api/packages/integrations/{scope}/{name}",
-  "GET /api/packages/integrations/{id}",
-  "PUT /api/packages/integrations/{id}",
-  "DELETE /api/packages/integrations/{id}",
-  "GET /api/packages/integrations/{scope}/{name}/versions",
-  "GET /api/packages/integrations/{scope}/{name}/versions/info",
-  "POST /api/packages/integrations/{scope}/{name}/versions",
-  "POST /api/packages/integrations/{scope}/{name}/versions/{version}/restore",
-  "DELETE /api/packages/integrations/{scope}/{name}/versions/{version}",
-  "GET /api/packages/integrations/{scope}/{name}/versions/{version}",
-
-  // Packages — MCP Servers
-  "GET /api/packages/mcp-servers",
-  "POST /api/packages/mcp-servers",
-  "GET /api/packages/mcp-servers/{scope}/{name}",
-  "PUT /api/packages/mcp-servers/{scope}/{name}",
-  "DELETE /api/packages/mcp-servers/{scope}/{name}",
-  "GET /api/packages/mcp-servers/{id}",
-  "PUT /api/packages/mcp-servers/{id}",
-  "DELETE /api/packages/mcp-servers/{id}",
-  "GET /api/packages/mcp-servers/{scope}/{name}/versions",
-  "GET /api/packages/mcp-servers/{scope}/{name}/versions/info",
-  "POST /api/packages/mcp-servers/{scope}/{name}/versions",
-  "POST /api/packages/mcp-servers/{scope}/{name}/versions/{version}/restore",
-  "DELETE /api/packages/mcp-servers/{scope}/{name}/versions/{version}",
-  "GET /api/packages/mcp-servers/{scope}/{name}/versions/{version}",
-
-  // Organizations
-  "GET /api/orgs",
-  "POST /api/orgs",
-  "GET /api/orgs/{orgId}",
-  "PUT /api/orgs/{orgId}",
-  "DELETE /api/orgs/{orgId}",
-  "POST /api/orgs/{orgId}/members",
-  "PUT /api/orgs/{orgId}/members/{userId}",
-  "DELETE /api/orgs/{orgId}/members/{userId}",
-  "PUT /api/orgs/{orgId}/invitations/{invitationId}",
-  "DELETE /api/orgs/{orgId}/invitations/{invitationId}",
-
-  // Profile
-  "GET /api/profile",
-  "PATCH /api/profile",
-  "POST /api/profile/password",
-  "POST /api/profiles/batch",
-  "GET /api/me/orgs",
-  "GET /api/me/context",
-  "GET /api/me/connections",
-  "DELETE /api/me/connections/{connectionId}",
-  "GET /api/me/integration-pins",
-  "PUT /api/me/integration-pins",
-  "DELETE /api/me/integration-pins",
-
-  // Invitations
-  "GET /invite/{token}/info",
-  "POST /invite/{token}/accept",
-
-  // Welcome
-  "POST /api/welcome/setup",
-
-  // Internal
-  "GET /internal/run-history",
-  "GET /internal/memories",
-  "GET /internal/oauth-token/{credentialId}",
-  "POST /internal/oauth-token/{credentialId}/refresh",
-  "GET /internal/mcp-server-bundle/{scope}/{name}",
-  "GET /internal/integration-credentials/{scope}/{name}",
-  "POST /internal/integration-credentials/{scope}/{name}/refresh",
-
-  // Meta
-  "GET /api/openapi.json",
-  "GET /api/docs",
-
-  // Notifications
-  "GET /api/notifications",
-  "GET /api/notifications/unread-count",
-  "GET /api/notifications/unread-counts-by-agent",
-  "PUT /api/notifications/{id}/read",
-  "PUT /api/notifications/read/{runId}",
-  "PUT /api/notifications/read-all",
-  "GET /api/runs",
-  "POST /api/runs/inline",
-  "POST /api/runs/inline/validate",
-  "POST /api/runs/remote",
-  "POST /api/runs/{runId}/events",
-  "POST /api/runs/{runId}/events/finalize",
-  "POST /api/runs/{runId}/events/heartbeat",
-  "GET /api/runs/{runId}/workspace",
-  "GET /api/runs/{runId}/documents",
-  "POST /api/runs/{runId}/documents",
-  "GET /api/runs/{runId}/documents/{name}",
-  "PATCH /api/runs/{runId}/sink/extend",
-
-  // Packages
-  "POST /api/packages/import",
-  "POST /api/packages/import-github",
-  "POST /api/packages/import-bundle",
-  "GET /api/packages/{scope}/{name}/{version}/download",
-  "GET /api/packages/{scope}/{name}/files",
-  "GET /api/packages/{scope}/{name}/files/content",
-  "POST /api/packages/{scope}/{name}/fork",
-
-  // Organization settings
-  "GET /api/orgs/{orgId}/settings",
-  "PUT /api/orgs/{orgId}/settings",
-
-  // Applications
-  "POST /api/applications",
-  "GET /api/applications",
-  "GET /api/applications/{id}",
-  "PATCH /api/applications/{id}",
-  "DELETE /api/applications/{id}",
-
-  // Application Packages
-  "GET /api/applications/{applicationId}/packages",
-  "POST /api/applications/{applicationId}/packages",
-  "GET /api/applications/{applicationId}/packages/{scope}/{name}",
-  "PUT /api/applications/{applicationId}/packages/{scope}/{name}",
-  "DELETE /api/applications/{applicationId}/packages/{scope}/{name}",
-  "GET /api/applications/{applicationId}/packages/{scope}/{name}/run-config",
-
-  // End-Users
-  "POST /api/end-users",
-  "GET /api/end-users",
-  "GET /api/end-users/{id}",
-  "PATCH /api/end-users/{id}",
-  "DELETE /api/end-users/{id}",
-
-  // Uploads
-  "POST /api/uploads",
-  "PUT /api/uploads/_content",
-
-  // Documents (durable document store — inputs + agent outputs)
-  "GET /api/documents",
-  "GET /api/documents/{id}",
-  "DELETE /api/documents/{id}",
-  "POST /api/documents/{id}/keep",
-  "GET /api/documents/{id}/content",
-
-  // Credential proxy (AFPS BYOI) — registered as router.all() in code,
-  // every verb is documented because upstream provider semantics are method-defined.
-  "GET /api/credential-proxy/proxy",
-  "POST /api/credential-proxy/proxy",
-  "PUT /api/credential-proxy/proxy",
-  "PATCH /api/credential-proxy/proxy",
-  "DELETE /api/credential-proxy/proxy",
-
-  // LLM proxy (Remote CLI execution — Phase 3)
-  "POST /api/llm-proxy/openai-completions/v1/chat/completions",
-  "POST /api/llm-proxy/anthropic-messages/v1/messages",
-  "POST /api/llm-proxy/mistral-conversations/v1/chat/completions",
-
-  // Library (consolidated package catalog across an org's applications)
-  "GET /api/library",
-
-  // Storage-deletion outbox operator surface (platform-admin gated)
-  "GET /api/admin/storage-deletion-jobs",
-  "POST /api/admin/storage-deletion-jobs/{id}/retry",
-];
-
-// Module-contributed endpoints are sourced directly from each module's
-// `openApiPaths()` output — no hardcoded list. This keeps verify-openapi
-// in sync with whatever the module declares, so adding or removing a
-// module endpoint requires no update here.
-for (const [path, methods] of Object.entries(modulePaths)) {
-  if (!methods || typeof methods !== "object") continue;
-  for (const method of Object.keys(methods as Record<string, unknown>)) {
-    // Skip OpenAPI path-level fields that aren't HTTP methods (parameters, summary, etc.)
-    const lower = method.toLowerCase();
-    if (!["get", "post", "put", "patch", "delete", "head", "options"].includes(lower)) continue;
-    expectedEndpoints.push(`${lower.toUpperCase()} ${path}`);
-  }
-}
+//
+// Builds the "VERB /path" set the later sections compare against.
+//
+// This section used to also assert that set, bidirectionally, against a
+// hand-typed `expectedEndpoints` array of 242 string literals. That array is
+// gone: every signal it carried is now produced by something that derives the
+// answer instead of restating it.
+//   - "registered in code but undocumented" → §5 (Code ⊆ Spec).
+//   - "documented but registered by no router" → §5b (Spec ⊆ Code), which is
+//     the one signal the list held alone and the reason it survived this long.
+//   - "endpoint dropped from the published contract" → `Endpoint removed` in
+//     scripts/detect-breaking-changes.ts, against the committed baseline.
+// Module-contributed endpoints were already exempt — they were pushed into
+// `expectedEndpoints` straight from each module's `openApiPaths()` output, on
+// the stated grounds that "adding or removing a module endpoint requires no
+// update here". Core was the half that never got that treatment, so every new
+// core route cost a second edit in this file whose only failure mode was
+// forgetting to make it.
 
 const specEndpoints = new Set<string>();
 const paths = openApiSpec.paths as Record<string, Record<string, unknown>>;
@@ -402,33 +93,9 @@ for (const [path, methods] of Object.entries(paths)) {
   }
 }
 
-const missing: string[] = [];
-const obsolete: string[] = [];
-
-for (const ep of expectedEndpoints) {
-  if (!specEndpoints.has(ep)) missing.push(ep);
-}
-for (const ep of specEndpoints) {
-  if (!expectedEndpoints.includes(ep)) obsolete.push(ep);
-}
-
-console.log(`\n  1. Endpoint Coverage`);
-console.log(`  --------------------`);
-console.log(`  Spec: ${specEndpoints.size}  Expected: ${expectedEndpoints.length}`);
-
-if (missing.length === 0 && obsolete.length === 0) {
-  console.log(`  OK — all endpoints accounted for.`);
-} else {
-  exitCode = 1;
-  if (missing.length > 0) {
-    console.log(`\n  MISSING from spec (${missing.length}):`);
-    for (const ep of missing) console.log(`    - ${ep}`);
-  }
-  if (obsolete.length > 0) {
-    console.log(`\n  IN SPEC but not expected (${obsolete.length}):`);
-    for (const ep of obsolete) console.log(`    - ${ep}`);
-  }
-}
+console.log(`\n  1. Endpoint Index`);
+console.log(`  -------------------`);
+console.log(`  Spec endpoints: ${specEndpoints.size} (coverage asserted in §5 / §5b)`);
 
 // ═══════════════════════════════════════════════════
 // 2. Structural validation (@readme/openapi-parser)
@@ -1405,7 +1072,7 @@ for (const m of indexSrc.matchAll(
 const codeEndpoints = new Set<string>();
 // "VERB PATH" → error statuses the handler is statically certain to return
 // (union across every registration that maps to the same endpoint). Feeds the
-// 5b documented-error-status check.
+// 5c documented-error-status check.
 const codeRouteStatuses = new Map<string, Set<string>>();
 function recordRouteStatuses(ep: string, statuses: Set<string>): void {
   if (statuses.size === 0) return;
@@ -1429,7 +1096,9 @@ const SKIP_FILES = new Set<string>([
   // Routes registered via runtime config with a VARIABLE path
   // (`router.post(entry.urlPath, …)` — a bare identifier, not a string/template
   // literal). The path can't be captured at all, so the emitted endpoints are
-  // covered by check #1. (packages.ts is NOT skipped: its template-literal
+  // covered by SPEC_ONLY_ALLOWLIST in §5b, which pins the three shapes the spec
+  // documents. (This used to read "covered by check #1" — the hand-typed
+  // endpoint list §5b replaced.) (packages.ts is NOT skipped: its template-literal
   // `${path}` routes are now expanded by resolveTemplatedPath against the
   // in-file ROUTE_CONFIGS `path:` literals and verified against the spec like
   // any literal route; an unresolvable `${…}` fails the run.)
@@ -1631,8 +1300,8 @@ if (orphans.length === 0) {
   console.log(`\n  Endpoints registered in code but missing from the spec (${orphans.length}):`);
   for (const ep of orphans) console.log(`    - ${ep}`);
   console.log(
-    `\n  Either document the endpoint in apps/api/src/openapi/paths/ + add it to ` +
-      `expectedEndpoints, or add a justified entry to CODE_TO_SPEC_ALLOWLIST in this file.`,
+    `\n  Either document the endpoint in apps/api/src/openapi/paths/, or add a ` +
+      `justified entry to CODE_TO_SPEC_ALLOWLIST in this file.`,
   );
 }
 
@@ -1655,7 +1324,128 @@ if (unresolvedTemplatedRoutes.length > 0) {
 }
 
 // ═══════════════════════════════════════════════════
-// 5b. Documented error statuses
+// 5b. Spec ⊆ Code
+// ═══════════════════════════════════════════════════
+//
+// The mirror of §5, and the one signal the deleted hand-typed
+// `expectedEndpoints` list carried on its own: a path documented in the spec
+// that no router actually registers. §5 catches code with no doc;
+// detect-breaking-changes catches a doc that disappeared from the baseline;
+// neither catches a doc that was never wired up, or whose route was deleted
+// while the `paths/` entry stayed behind.
+//
+// Reuses `codeEndpoints` exactly as computed for §5 — same extractor, same
+// mount-prefix composition, same Hono-syntax normalisation — so this check
+// costs one set difference and stays correct by construction as routes move.
+
+// Endpoints documented on purpose that `codeEndpoints` structurally cannot see,
+// because the extractor only walks explicit `router.METHOD()` / `app.METHOD()`
+// calls under apps/api/src/routes, apps/api/src/modules and index.ts. Same
+// contract as CODE_TO_SPEC_ALLOWLIST: every entry needs a justifying comment.
+const SPEC_ONLY_ALLOWLIST = new Set<string>([
+  // Better Auth surface. `lib/auth-pipeline.ts` mounts the whole thing behind a
+  // single wildcard — `app.on(["POST", "GET"], "/api/auth/*", …)` — so there is
+  // no per-endpoint registration to find, and that file is a lib helper rather
+  // than a routes/ or modules/ file the extractor walks. The spec documents the
+  // individual operations because clients call them individually.
+  // (`POST /api/auth/bootstrap/redeem` is deliberately absent: it is a real
+  // platform router mounted ahead of the wildcard, so §5 already sees it.)
+  "POST /api/auth/sign-up/email",
+  "POST /api/auth/sign-in/email",
+  "POST /api/auth/sign-out",
+  "GET /api/auth/get-session",
+  "GET /api/auth/jwks",
+  "GET /api/auth/oauth2/authorize",
+  "POST /api/auth/oauth2/token",
+  "GET /api/auth/oauth2/userinfo",
+  "POST /api/auth/oauth2/introspect",
+  "POST /api/auth/oauth2/revoke",
+  "POST /api/auth/device/code",
+  "POST /api/auth/cli/token",
+  "GET /api/auth/cli/sessions",
+  "POST /api/auth/cli/sessions/revoke",
+  "POST /api/auth/cli/sessions/revoke-all",
+  "POST /api/auth/cli/revoke",
+
+  // Registered, but through a mount shape the `app.route()` parser above does
+  // not resolve — an extractor blind spot, not an undocumented design decision:
+  //   - `GET /health`: `import healthRouter, { bootGate, … } from …` is a mixed
+  //     default+named import, which the `import (\w+) from` pattern skips, so
+  //     the default-export router never enters `importToFile`.
+  //   - `GET /api/openapi.json`: mounted as
+  //     `app.route("/", createOpenApiSpecRouter(getOpenApiSpec))`; the mount
+  //     regex accepts `ident` or `ident()`, not a factory call with arguments.
+  // Widening either pattern would let these two drop out of the allowlist.
+  "GET /health",
+  "GET /api/openapi.json",
+
+  // LLM proxy shapes. `routes/llm-proxy.ts` registers them from a config array
+  // (`router.post(entry.urlPath, …)` — a bare identifier), which is why the
+  // whole file sits in SKIP_FILES. The spec is the only place these three paths
+  // appear as literals, so this allowlist is what keeps that skip honest:
+  // documenting a fourth shape without listing it here fails the run.
+  "POST /api/llm-proxy/anthropic-messages/v1/messages",
+  "POST /api/llm-proxy/openai-completions/v1/chat/completions",
+  "POST /api/llm-proxy/mistral-conversations/v1/chat/completions",
+]);
+
+const undocumentedInCode = [...specEndpoints]
+  .filter((ep) => !codeEndpoints.has(ep) && !SPEC_ONLY_ALLOWLIST.has(ep))
+  .sort();
+
+console.log(`\n  5b. Spec ⊆ Code`);
+console.log(`  -----------------`);
+console.log(
+  `  Documented endpoints: ${specEndpoints.size}  (allowlist: ${SPEC_ONLY_ALLOWLIST.size})`,
+);
+
+if (undocumentedInCode.length === 0) {
+  console.log(`  OK — every documented endpoint is registered in code.`);
+} else {
+  exitCode = 1;
+  console.log(
+    `\n  Endpoints documented in the spec but registered by no router (${undocumentedInCode.length}):`,
+  );
+  for (const ep of undocumentedInCode) console.log(`    - ${ep}`);
+  console.log(
+    `\n  Either delete the path entry from apps/api/src/openapi/paths/ (or the ` +
+      `module's openApiPaths()), or add a justified entry to SPEC_ONLY_ALLOWLIST ` +
+      `in this file.`,
+  );
+}
+
+// Both allowlists are hand-maintained sets of exemptions, and an exemption that
+// no longer applies is the failure mode the deleted `expectedEndpoints` array
+// used to cover from the other direction: SPEC_ONLY_ALLOWLIST names endpoints
+// §5b must not flag, so a documented endpoint that gets deleted from the spec
+// stops being enumerated by ANY check here — the only remaining signal is
+// `detect:breaking` against the committed baseline, which a legitimate
+// `openapi:baseline` regeneration wipes. Assert both sets stay live. This is
+// the same contract §5's ALLOWED_SKIP_FILES and §7's staleExempt already
+// enforce for their own exemption lists.
+const staleSpecOnly = [...SPEC_ONLY_ALLOWLIST].filter((ep) => !specEndpoints.has(ep)).sort();
+const staleCodeToSpec = [...CODE_TO_SPEC_ALLOWLIST].filter((ep) => !codeEndpoints.has(ep)).sort();
+
+if (staleSpecOnly.length === 0 && staleCodeToSpec.length === 0) {
+  console.log(`  OK — both endpoint allowlists are free of stale entries.`);
+} else {
+  exitCode = 1;
+  for (const [label, stale, source] of [
+    ["SPEC_ONLY_ALLOWLIST", staleSpecOnly, "the spec"],
+    ["CODE_TO_SPEC_ALLOWLIST", staleCodeToSpec, "code"],
+  ] as const) {
+    if (stale.length === 0) continue;
+    console.log(`\n  Stale ${label} entries — no longer present in ${source} (${stale.length}):`);
+    for (const ep of stale) console.log(`    - ${ep}`);
+  }
+  console.log(
+    `\n  Delete the stale entries. An exemption that outlives its endpoint hides ` +
+      `the endpoint's later removal from every check in this script.`,
+  );
+}
+
+// ═══════════════════════════════════════════════════
+// 5c. Documented error statuses
 // ═══════════════════════════════════════════════════
 //
 // For every code-registered endpoint that IS documented, assert the spec
@@ -1668,7 +1458,7 @@ if (unresolvedTemplatedRoutes.length > 0) {
 // route returns 403/400 but the spec omits it" drift that the runtime response
 // validator only catches when a test happens to exercise that exact error path.
 
-console.log(`\n  5b. Documented Error Statuses`);
+console.log(`\n  5c. Documented Error Statuses`);
 console.log(`  -------------------------------`);
 
 // "VERB /path STATUS" pairs where the handler can return the status but the

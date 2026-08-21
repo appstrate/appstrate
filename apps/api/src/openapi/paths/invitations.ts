@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { STD_RESPONSE_HEADERS } from "../headers.ts";
+
 export const invitationsPaths = {
   "/invite/{token}/info": {
     get: {
@@ -12,10 +14,7 @@ export const invitationsPaths = {
       responses: {
         "200": {
           description: "Invitation metadata",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
@@ -89,10 +88,7 @@ export const invitationsPaths = {
         "200": {
           description:
             "Invitation accepted — returns the joined organization (same shape as the items in GET /api/orgs, with `role` set to the invitation role).",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/Organization" },
