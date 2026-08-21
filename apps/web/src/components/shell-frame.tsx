@@ -16,7 +16,7 @@ import { PanelLeft, Search } from "lucide-react";
 import { NavUser } from "@/components/nav-user";
 import { OrgSwitcher } from "@/components/org-switcher";
 import { NotificationBell } from "@/components/notification-bell";
-import { ProductSwitcher } from "@/components/product-switcher";
+import { ProductTabs } from "@/components/product-tabs";
 import { ShellBreadcrumb } from "@/components/shell-breadcrumb";
 import { cn } from "@appstrate/ui/cn";
 import {
@@ -26,7 +26,6 @@ import {
   SidebarHeader,
   SidebarTrigger,
 } from "@appstrate/ui/components/sidebar";
-import { useSidebar } from "@appstrate/ui/components/sidebar-context";
 
 export function ShellSidebar({
   children,
@@ -36,9 +35,6 @@ export function ShellSidebar({
   children: ReactNode;
   contentClassName?: string;
 }) {
-  const { state } = useSidebar();
-  const collapsed = state === "collapsed";
-
   return (
     <Sidebar collapsible="icon">
       {/* Head: the brand cell alone, at the header's height and closed by the
@@ -48,29 +44,11 @@ export function ShellSidebar({
       <SidebarHeader className="border-sidebar-border h-header justify-center border-b px-2 py-0">
         <OrgSwitcher variant="brand" />
       </SidebarHeader>
-      {/* Below the rule, the tool and the two controls that act on it: search
-          and the bell. The context that scopes all three is one line up, and a
-          second rule closes this band before the navigation starts — three
-          bands, three rules, no frames. */}
-      <div className="border-sidebar-border flex items-center gap-1 border-b px-2 py-2 group-data-[collapsible=icon]:flex-col group-data-[collapsible=icon]:px-0">
-        <ProductSwitcher variant="row" />
-        {!collapsed && (
-          /* Not wired to anything yet: there is no global search in the app.
-             Present so the arrangement can be judged; disabled rather than
-             inert so nobody wonders why nothing happens. */
-          <button
-            type="button"
-            disabled
-            title="Recherche globale (à brancher)"
-            aria-label="Rechercher"
-            className="text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground shrink-0 rounded-md p-1.5 disabled:opacity-40"
-          >
-            <Search className="size-4" />
-          </button>
-        )}
-        {/* Stays in the rail, stacked under the product tile: the unread count
-            is the one thing in this column that changes on its own. */}
-        <NotificationBell />
+      {/* Below the rule, the products — and a second rule closes the band
+          before the navigation starts. Three bands: whose data, which tool,
+          what you do in it. */}
+      <div className="border-sidebar-border border-b px-2 py-2 group-data-[collapsible=icon]:px-0">
+        <ProductTabs />
       </div>
       <SidebarContent className={cn("gap-0", contentClassName)}>{children}</SidebarContent>
       {/* Foot: who you are, and nothing else. Usage and Settings left it — both
@@ -119,7 +97,27 @@ export function ShellHeader({
         {/* Mobile-only trigger — desktop collapse lives in the sidebar */}
         <SidebarTrigger className="md:hidden" />
         <ShellBreadcrumb />
-        {actions ? <div className="flex shrink-0 items-center gap-1">{actions}</div> : null}
+        {/* The page's own actions, then the two utilities that are global but
+            not personal: search and notifications. They sit here rather than in
+            the sidebar because the sidebar answers "where am I" and these two
+            answer "what is new" and "find me something" — and because a header
+            holding only a trail is a header holding nothing. */}
+        <div className="flex shrink-0 items-center gap-1">
+          {actions}
+          {/* Not wired to anything yet: there is no global search in the app.
+              Present so the arrangement can be judged; disabled rather than
+              inert so nobody wonders why nothing happens. */}
+          <button
+            type="button"
+            disabled
+            title="Recherche globale (à brancher)"
+            aria-label="Rechercher"
+            className="text-muted-foreground hover:bg-accent hover:text-foreground inline-flex size-8 shrink-0 items-center justify-center rounded-md disabled:opacity-40"
+          >
+            <Search className="size-4" />
+          </button>
+          <NotificationBell />
+        </div>
       </div>
     </header>
   );

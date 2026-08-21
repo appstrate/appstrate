@@ -27,7 +27,6 @@ import { $api } from "../api/client";
 import { useApplications } from "../hooks/use-applications";
 import { useCurrentApplicationId, useAppSwitcher } from "../hooks/use-current-application";
 import { usePermissions } from "../hooks/use-permissions";
-import { AppstrateMark } from "@/components/appstrate-mark";
 import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/components/popover";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { cn } from "@appstrate/ui/cn";
@@ -147,17 +146,21 @@ export function OrgSwitcher({ variant = "chip" }: { variant?: "chip" | "row" | "
             This one replaces the whole context. The coloured avatar and the
             up/down chevron (never a right chevron) are what say so. */}
         {variant === "brand" ? (
-          /* The head of the column: the context, flat. The Appstrate mark
-             stands where the org's initial would have gone — one identity at
-             the top, not two. No frame: the rules under it are what separate
-             the three bands (context, tool, navigation). */
+          /* The head of the column: whose data you are in, wearing its own
+             avatar — the workspace you are looking at names itself, the way
+             Notion puts the workspace logo where a product logo would go. Flat:
+             the rules under it separate the three bands (context, tool,
+             navigation). */
           <button
             type="button"
             data-testid="org-switcher-button"
             aria-label={t("switcher.orgAriaLabel")}
             className="hover:bg-sidebar-accent data-[state=open]:bg-sidebar-accent flex h-9 w-full items-center gap-2 rounded-md px-1.5 text-sm transition-colors group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0!"
           >
-            <AppstrateMark className="h-6 w-auto shrink-0" />
+            <OrgAvatar
+              name={currentOrg.name}
+              className="size-6 shrink-0 rounded-md text-[0.7rem]"
+            />
             <span className="min-w-0 flex-1 truncate text-left group-data-[collapsible=icon]:hidden">
               <span className="font-semibold">{currentOrg.name}</span>
               {/* The workspace stays visible even when there is only one: a
