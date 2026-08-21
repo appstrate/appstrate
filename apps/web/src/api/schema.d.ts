@@ -3887,7 +3887,7 @@ export interface paths {
         };
         /**
          * List runs across the application (global view)
-         * @description Org + application scoped paginated list. Supports filtering by `user=me` (self-owned, also implicit for end-user impersonation), `kind` (all, package, inline), `status`, a date range, and the chat session that launched the run. Inline runs surface via `package_ephemeral: true` on each row. Note: global filters are ignored when `user=me` (self-view uses a simpler path).
+         * @description Org + application scoped paginated list. Supports filtering by `user=me` (self-owned, also implicit for end-user impersonation), `kind` (all, package, inline), `status`, a date range, and the chat session that launched the run. Inline runs surface via `package_ephemeral: true` on each row. Every filter COMBINES: `user=me` narrows to the caller's own runs (plus the unattributed schedule/system ones for a member) and still honours `kind`, `status` and the date range — it used to take a separate path that dropped them silently.
          */
         get: operations["listRuns"];
         put?: never;
@@ -18622,7 +18622,7 @@ export interface operations {
     listRuns: {
         parameters: {
             query?: {
-                /** @description Filter runs by user. `me` is the only accepted value and returns only the current user's runs. Omit (or send an empty value) for all org runs the caller may see. Any other value — an arbitrary user id, for instance — is rejected with `400`; it is never ignored, so a filtered response is never silently widened to the whole org. */
+                /** @description Filter runs by user. `me` is the only accepted value and returns only the current user's runs, combined with any other filter given. Omit (or send an empty value) for all org runs the caller may see. Any other value — an arbitrary user id, for instance — is rejected with `400`; it is never ignored, so a filtered response is never silently widened to the whole org. */
                 user?: "me";
                 limit?: number;
                 offset?: number;

@@ -4,8 +4,7 @@ import { and, eq, inArray, isNull, count, desc, sql, type SQL } from "drizzle-or
 import { db } from "@appstrate/db/client";
 import { runs, notifications, organizationMembers, packages } from "@appstrate/db/schema";
 import { scopedWhere } from "../../lib/db-helpers.ts";
-import { actorMatch, actorScopeFilter, type Actor } from "../../lib/actor.ts";
-import { listRunsWithFilter } from "./runs.ts";
+import { actorMatch, type Actor } from "../../lib/actor.ts";
 import type { AppScope } from "../../lib/scope.ts";
 
 // --- Notifications ---
@@ -321,30 +320,4 @@ export async function listNotifications(
     })),
     has_more: hasMore,
   };
-}
-
-// --- Run list (GET /api/runs?user=me) ---
-//
-// Unrelated to notifications, but the handler shares this module. The
-// "my runs" view keeps the original actor-or-org-visible semantics.
-
-export async function listUserRuns(
-  scope: AppScope,
-  actor: Actor,
-  options: { limit?: number; offset?: number } = {},
-) {
-  const { limit = 20, offset = 0 } = options;
-  return listRunsWithFilter(
-    scopedWhere(runs, {
-      orgId: scope.orgId,
-      applicationId: scope.applicationId,
-      // Dashboard members see own + org-visible (schedule/system) runs;
-      // end-users see ONLY their own — see actorScopeFilter. Previously an
-      // unconditional isNull(userId) branch leaked every end-user's runs.
-      extra: [actorScopeFilter(actor, { userId: runs.userId, endUserId: runs.endUserId })],
-    })!,
-    limit,
-    offset,
-    actor,
-  );
 }

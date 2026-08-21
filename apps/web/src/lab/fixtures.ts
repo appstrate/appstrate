@@ -214,6 +214,10 @@ export const runs: Run[] = [
     agent_name: "wiki-brain",
     schedule_name: "Tous les matins à 7 h",
     scheduleId: "sch_01",
+    // A scheduled run belongs to nobody: `user_name` was already null while
+    // `userId` still pointed at the signed-in member, which is the one shape
+    // the "Mes runs" filter reads (own runs OR unattributed ones).
+    userId: null,
     user_name: null,
     duration: 312_000,
     cost: 1.17,
@@ -231,6 +235,37 @@ export const runs: Run[] = [
     runNumber: 12,
     started_at: ago(1_440),
     completed_at: ago(1_439),
+  }),
+  // Someone else's run: without one, "Mes runs" filters nothing and proves
+  // nothing.
+  makeRun({
+    id: "run_06",
+    status: "success",
+    packageId: "@default/wiki-brain",
+    agent_scope: "@default",
+    agent_name: "wiki-brain",
+    userId: "user_lab_2",
+    user_name: "Camille Roy",
+    duration: 74_000,
+    cost: 0.21,
+    runNumber: 95,
+    started_at: ago(520),
+    completed_at: ago(519),
+  }),
+  // An inline run: the shadow package the chat creates for a one-off agent.
+  // Same reason — the Type filter needs something to separate.
+  makeRun({
+    id: "run_07",
+    status: "success",
+    packageId: "@inline/r-8f2c41",
+    agent_scope: "@inline",
+    agent_name: "Relecture d'un contrat",
+    package_ephemeral: true,
+    duration: 21_000,
+    cost: 0.05,
+    runNumber: 94,
+    started_at: ago(610),
+    completed_at: ago(609),
   }),
 ];
 

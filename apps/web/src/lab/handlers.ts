@@ -89,8 +89,19 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
     pattern: /^\/api\/runs$/,
     handler: (url, s) => {
       const all = list(f.runs, s, f.heavyRuns);
+      // The three filters the toolbar sets, applied the way the API applies
+      // them — together. `user=me` is "mine OR nobody's" for a member, which
+      // is what `actorScopeFilter` means server-side.
       const status = url.searchParams.get("status");
-      const filtered = status ? all.filter((r) => r.status === status) : all;
+      const kind = url.searchParams.get("kind");
+      const mine = url.searchParams.get("user") === "me";
+      const filtered = all.filter((r) => {
+        if (status && r.status !== status) return false;
+        if (kind === "inline" && r.package_ephemeral !== true) return false;
+        if (kind === "package" && r.package_ephemeral === true) return false;
+        if (mine && r.userId != null && r.userId !== f.USER_ID) return false;
+        return true;
+      });
       const offset = Number(url.searchParams.get("offset") ?? 0);
       const limit = Number(url.searchParams.get("limit") ?? 15);
       const page = filtered.slice(offset, offset + limit);

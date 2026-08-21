@@ -751,6 +751,46 @@ describe("Runs API", () => {
       expect(body.data[0]!.userId).toBe(ctx.user.id);
     });
 
+    it("combines ?user=me with the other filters instead of dropping them", async () => {
+      // `?user=me` used to take a separate query that ignored `kind`, `status`
+      // and the date range — so "my failed runs" answered "my runs", and a UI
+      // showing both filters as active was showing a filter the server never
+      // applied.
+      const otherUser = await createTestUser();
+      await addOrgMember(ctx.orgId, otherUser.id);
+      await seedAgent({ id: "@runorg/combined-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
+      const mineFailed = await seedRun({
+        packageId: "@runorg/combined-agent",
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        userId: ctx.user.id,
+        status: "failed",
+      });
+      await seedRun({
+        packageId: "@runorg/combined-agent",
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        userId: ctx.user.id,
+        status: "success",
+      });
+      await seedRun({
+        packageId: "@runorg/combined-agent",
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        userId: otherUser.id,
+        status: "failed",
+      });
+
+      const res = await app.request("/api/runs?user=me&status=failed", {
+        headers: authHeaders(ctx),
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { data: { id: string }[]; total: number };
+      expect(body.total).toBe(1);
+      expect(body.data[0]!.id).toBe(mineFailed.id);
+    });
+
     it("lists all org runs when no ?user param is given", async () => {
       await seedTwoMembersRuns();
 

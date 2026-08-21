@@ -16,7 +16,7 @@ import { Button } from "@appstrate/ui/components/button";
 import { usePaginatedRuns, type RunKindFilter } from "../hooks/use-paginated-runs";
 import { useRunAgentName } from "../hooks/use-run-agent-name";
 import { RunsTable } from "./runs-table";
-import type { EnrichedRun } from "@appstrate/shared-types";
+import type { EnrichedRun, RunStatus } from "@appstrate/shared-types";
 
 interface RunListProps {
   packageId?: string;
@@ -37,6 +37,8 @@ interface RunListProps {
   user?: "me";
   /** Filter runs by kind -- "all" | "package" | "inline" */
   kind?: RunKindFilter;
+  /** Filter runs by lifecycle status. */
+  status?: RunStatus;
 }
 
 export function RunList({
@@ -50,6 +52,7 @@ export function RunList({
   firstPageBanner,
   user,
   kind,
+  status,
 }: RunListProps) {
   const { t } = useTranslation(["agents"]);
   const [page, setPage] = useState(0);
@@ -60,6 +63,7 @@ export function RunList({
     scheduleId,
     user,
     kind,
+    status,
     limit: pageSize,
     offset: page * pageSize,
   });

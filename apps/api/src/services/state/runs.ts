@@ -45,7 +45,7 @@ import { logger } from "../../lib/logger.ts";
 import { listResponse } from "../../lib/list-response.ts";
 import { scopedWhere } from "../../lib/db-helpers.ts";
 import { orgOrSystemFilter } from "../../lib/package-helpers.ts";
-import { type Actor, actorFilter } from "../../lib/actor.ts";
+import { type Actor, actorFilter, actorScopeFilter } from "../../lib/actor.ts";
 import {
   runMetadataSchema,
   runConfigSchema,
@@ -1484,6 +1484,17 @@ export interface ListGlobalRunsOptions {
   endDate?: Date;
   endUserId?: string | null;
   chatSessionId?: string;
+  /**
+   * Narrow to what the caller may call their own: their own runs plus the
+   * unattributed ones (schedule- and system-triggered) for a member, strictly
+   * their own for an end-user — {@link actorScopeFilter} owns that semantic.
+   *
+   * It is an option here rather than its own function because it has to COMPOSE
+   * with the filters below. `GET /api/runs?user=me` used to take a separate
+   * code path that dropped `kind`, `status` and the date range on the floor:
+   * the UI showed "my runs" and "failed" both selected and served neither.
+   */
+  mine?: boolean;
   actor?: Actor | null;
 }
 
@@ -1500,10 +1511,14 @@ export async function listGlobalRuns(
     endDate,
     endUserId,
     chatSessionId,
+    mine = false,
     actor = null,
   } = options;
 
   const conditions = [eq(runs.orgId, scope.orgId), eq(runs.applicationId, scope.applicationId)];
+  if (mine && actor) {
+    conditions.push(actorScopeFilter(actor, { userId: runs.userId, endUserId: runs.endUserId }));
+  }
   if (status) conditions.push(eq(runs.status, status));
   if (startDate) conditions.push(gte(runs.startedAt, startDate));
   if (endDate) conditions.push(lte(runs.startedAt, endDate));

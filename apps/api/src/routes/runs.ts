@@ -15,7 +15,6 @@ import {
   RUN_LOG_LEVELS,
   GLOBAL_RUN_KINDS,
 } from "../services/state/runs.ts";
-import { listUserRuns } from "../services/state/notifications.ts";
 import { resolveAgentRunVersion } from "../services/agent-version-resolver.ts";
 import { parseRequestInput } from "../services/input-parser.ts";
 import { deleteRunWorkspace } from "../services/run-workspace-storage.ts";
@@ -382,13 +381,12 @@ export function createRunsRouter() {
     // session.
     const userFilter = closedSetQuery(c, "user", USER_FILTERS);
     const endUser = c.get("endUser");
-
-    // End-users always see only their own runs — same semantic as before.
-    if (userFilter === "me" || endUser) {
-      const result = await listUserRuns(scope, actor, { limit, offset });
-      setOffsetLinkHeader({ c, limit, offset, total: result.total });
-      return c.json(result);
-    }
+    // End-users always see only their own runs; a member asks for it with
+    // `?user=me`. It is one more condition on the SAME query rather than a
+    // branch to a separate one, because it has to COMPOSE: the branch it
+    // replaces dropped `kind`, `status` and the date range without a word, so
+    // "my failed runs" quietly answered "my runs".
+    const mine = userFilter === "me" || !!endUser;
 
     const kind = closedSetQuery(c, "kind", GLOBAL_RUN_KINDS);
     const status = closedSetQuery(c, "status", runStatusValues);
@@ -412,6 +410,7 @@ export function createRunsRouter() {
       startDate,
       endDate,
       chatSessionId,
+      mine,
       actor,
     });
     setOffsetLinkHeader({ c, limit, offset, total: result.total });
