@@ -31,6 +31,7 @@ import { fileTypeStream, fileTypeFromBuffer } from "file-type";
 import type { FileReference } from "./run-launcher/types.ts";
 import { isFileField, type JSONSchemaObject, type JSONSchema7 } from "@appstrate/core/form";
 import { validateInput } from "./schema.ts";
+import { resolveEffectiveInput, withoutLockedFields } from "./input-resolution.ts";
 import {
   invalidRequest,
   notFound,
@@ -89,20 +90,6 @@ export interface ParsedInput {
   /** Per-run proxy override (wire field `proxyId` on the request body). */
   proxyIdOverride?: string;
   /**
-   * Per-run config override (wire field `config` on the request body).
-   * Deep-merged with `application_packages.config` before the run is
-   * executed (see `deepMergeConfig` in `@appstrate/core/schema-validation`).
-   * Mirrors the OpenAI Assistants `runs.create { instructions, model, tools }`
-   * and Argo Workflows `submitOptions.parameters` SOTA: the merge happens
-   * server-side so UI / CLI / SDK clients all reach the same resolved config
-   * for the same `(persisted, override)` pair.
-   *
-   * Internal output names use the `*Override` suffix to match the schedule
-   * wire (`configOverride / modelIdOverride / proxyIdOverride / versionOverride`)
-   * and the run-record column (`runs.config_override`).
-   */
-  configOverride?: Record<string, unknown>;
-  /**
    * Per-integration connection picks for THIS run (#199).
    * Wire field `connectionOverrides` on the request body; flows into the
    * resolver's mechanism #2 and is persisted on `runs.connection_overrides`.
@@ -144,14 +131,13 @@ interface RunRequestBody {
    * `rerun_from`, mutually exclusive with `input`). Consumed staged uploads
    * are persisted as durable `document://` URIs, so a cancelled (or completed)
    * run can be re-triggered with the same documents and different overrides
-   * (`modelId`, `config`, `?version`) in one call, no re-upload and no
+   * (`modelId`, `?version`) in one call, no re-upload and no
    * dependency on upload retention.
    */
   rerun_from?: string;
   modelId?: string;
   generation?: ModelGenerationSettings;
   proxyId?: string;
-  config?: Record<string, unknown>;
   connection_overrides?: Record<string, string>;
   dependency_overrides?: Record<string, string>;
 }
@@ -570,6 +556,19 @@ export async function parseRequestInput(
      * `inputSchema` passed here, or it is inert.
      */
     injectedInput?: Record<string, unknown>;
+    /**
+     * Values the editor stored once on `application_packages.input_settings`
+     * (`values`) — layer 2 of the input resolution (see
+     * `input-resolution.ts`). Omitted by origins that have no per-application
+     * row (inline runs on a shadow package).
+     */
+    editorDefaults?: Record<string, unknown>;
+    /**
+     * `application_packages.input_settings` (`locked`) — input fields the
+     * caller may not set. A request naming one is refused with 400
+     * `locked_input_field`.
+     */
+    lockedFields?: readonly string[];
   },
 ): Promise<ParsedInput> {
   let body: RunRequestBody = {};
@@ -589,7 +588,14 @@ export async function parseRequestInput(
         "rerun_from",
       );
     }
-    input = await resolveRerunInput(c, body.rerun_from, opts?.agentPackageId);
+    // A replay carries the prior run's RESOLVED input, which includes whatever
+    // the locked fields resolved to back then. The caller sent a run id, not
+    // values, so those keys are dropped rather than refused — they resolve
+    // again from the current editor value just below.
+    input = withoutLockedFields(
+      await resolveRerunInput(c, body.rerun_from, opts?.agentPackageId),
+      opts?.lockedFields,
+    );
   }
   // Server-synthesized fields last: they are platform-owned reserved names the
   // caller cannot legitimately hold (the route 400s on a collision before we
@@ -597,6 +603,17 @@ export async function parseRequestInput(
   if (opts?.injectedInput && Object.keys(opts.injectedInput).length > 0) {
     input = { ...input, ...opts.injectedInput };
   }
+
+  // Collapse the resolution layers BEFORE any file ref is collected, so an
+  // author or editor default that names a document travels the same ACL /
+  // cap / streaming path as a caller-supplied one, and the AJV pass below
+  // validates what the run will actually execute with.
+  input = resolveEffectiveInput({
+    schema: inputSchema,
+    editorDefaults: opts?.editorDefaults,
+    lockedFields: opts?.lockedFields,
+    callerInput: input,
+  });
   let uploadedFiles: FileReference[] = [];
   let pendingDocuments: PendingUploadMaterialization[] = [];
   let consumedDocumentIds: string[] = [];
@@ -958,27 +975,6 @@ export async function parseRequestInput(
     }
   }
 
-  // `config` in the body is a partial override that is *deep-merged* with
-  // `application_packages.config` by the run route. We pass it through as
-  // an opaque object — validation against the manifest schema runs after
-  // the merge so a client can omit keys the persisted state already
-  // satisfies.
-  //
-  // Reject `null` explicitly: at top-level the merge short-circuits on a
-  // falsy override (`null` would silently inherit defaults) which conflicts
-  // with the schedule-update semantics where `null` clears the override.
-  // Force callers to pick: omit `config` to inherit defaults, send `{}` for
-  // an explicit empty override, send a populated object for a real override.
-  if (
-    body.config !== undefined &&
-    (body.config === null || typeof body.config !== "object" || Array.isArray(body.config))
-  ) {
-    throw invalidRequest(
-      "`config` must be a JSON object — omit the field to inherit persisted defaults",
-      "config",
-    );
-  }
-
   // `connection_overrides` shape guard. Flat map: integrationId → connectionId.
   // Invalid bodies produce a 400 with a precise param so the picker UI can
   // highlight the offender.
@@ -1062,7 +1058,6 @@ export async function parseRequestInput(
     modelIdOverride: body.modelId,
     generationConfigOverride,
     proxyIdOverride: body.proxyId,
-    configOverride: body.config,
     connectionOverrides: body.connection_overrides,
     dependencyOverrides,
   };

@@ -242,7 +242,7 @@ export const applicationsPaths = {
       tags: ["Application Packages"],
       summary: "List installed packages",
       description:
-        "List all packages installed in this application, with their config and version.",
+        "List all packages installed in this application, with their model/proxy/version overrides.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "applicationId", in: "path", required: true, schema: { type: "string" } },
@@ -304,7 +304,6 @@ export const applicationsPaths = {
                   minLength: 1,
                   description: "Package ID from org catalog",
                 },
-                config: { type: "object", description: "Initial configuration" },
               },
             },
           },
@@ -340,7 +339,7 @@ export const applicationsPaths = {
       operationId: "getInstalledPackage",
       tags: ["Application Packages"],
       summary: "Get installed package",
-      description: "Get an installed package detail with its config.",
+      description: "Get an installed package detail with its model/proxy/version overrides.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "applicationId", in: "path", required: true, schema: { type: "string" } },
@@ -364,9 +363,9 @@ export const applicationsPaths = {
     put: {
       operationId: "updateInstalledPackage",
       tags: ["Application Packages"],
-      summary: "Update installed package config",
+      summary: "Update installed package overrides",
       description:
-        "Update configuration, model/proxy overrides, or version pinning for an installed package.",
+        "Update the model/proxy overrides, generation settings, enabled flag, or version pinning for an installed package. The agent's stored input values are NOT settable here — use `PUT /api/agents/{scope}/{name}/input-settings`, which validates them against the manifest input schema.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "applicationId", in: "path", required: true, schema: { type: "string" } },
@@ -379,7 +378,6 @@ export const applicationsPaths = {
             schema: {
               type: "object",
               properties: {
-                config: { type: "object" },
                 generationConfig: {
                   oneOf: [
                     { $ref: "#/components/schemas/ModelGenerationSettings" },
@@ -397,7 +395,7 @@ export const applicationsPaths = {
       },
       responses: {
         "200": {
-          description: "Updated package config",
+          description: "Updated installed package",
           headers: REQUEST_ID_ONLY_HEADERS,
           content: {
             "application/json": {
@@ -436,7 +434,7 @@ export const applicationsPaths = {
       tags: ["Application Packages"],
       summary: "Get the resolved per-app run configuration",
       description:
-        "Returns the configuration applied when this application runs the given package: agent config, model override, proxy override, and pinned version label. Used by the CLI to reproduce a UI run without stitching together three separate calls; the UI uses the same source for its run-from-app flow.",
+        "Returns the configuration applied when this application runs the given package: model override, generation settings, proxy override, pinned version label, and the stored input layer (editor values plus locked fields). Used by the CLI to reproduce a UI run without stitching together three separate calls; the UI uses the same source for its run-from-app flow.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "applicationId", in: "path", required: true, schema: { type: "string" } },
@@ -451,9 +449,8 @@ export const applicationsPaths = {
             "application/json": {
               schema: {
                 type: "object",
-                required: ["config", "generation", "modelId", "proxyId", "version_pin"],
+                required: ["generation", "modelId", "proxyId", "version_pin", "input"],
                 properties: {
-                  config: { type: "object" },
                   generation: {
                     oneOf: [
                       { $ref: "#/components/schemas/ModelGenerationSettings" },
@@ -463,14 +460,24 @@ export const applicationsPaths = {
                   modelId: { type: ["string", "null"] },
                   proxyId: { type: ["string", "null"] },
                   version_pin: { type: ["string", "null"] },
+                  input: {
+                    type: "object",
+                    description:
+                      "Stored input layer for this application — the editor's values and the fields it locked. A locally executed run applies `values` under the caller's input and refuses a caller value naming a locked field.",
+                    required: ["values", "locked_fields"],
+                    properties: {
+                      values: { type: "object", additionalProperties: true },
+                      locked_fields: { type: "array", items: { type: "string" } },
+                    },
+                  },
                 },
               },
               example: {
-                config: { dryRun: true },
                 generation: { temperature: 0.2, reasoningLevel: "high" },
                 modelId: "claude-sonnet-4-6",
                 proxyId: null,
                 version_pin: "1.2.3",
+                input: { values: { dry_run: true }, locked_fields: ["dry_run"] },
               },
             },
           },

@@ -908,7 +908,6 @@ program
   .option("--api-key <key>", "Appstrate API key (ask_...) for --integrations=remote")
   .option("--input <json>", "Input JSON object passed to the agent")
   .option("--input-file <path>", "Read input JSON from file")
-  .option("--config <json>", "Config JSON object passed to the agent")
   .option(
     "--snapshot <path>",
     "JSON file { memories?, history?, checkpoint? } seeded onto the ExecutionContext before the run",
@@ -972,7 +971,6 @@ program
       apiKey: typeof opts.apiKey === "string" ? opts.apiKey : undefined,
       input: typeof opts.input === "string" ? opts.input : undefined,
       inputFile: typeof opts.inputFile === "string" ? opts.inputFile : undefined,
-      config: typeof opts.config === "string" ? opts.config : undefined,
       snapshot: typeof opts.snapshot === "string" ? opts.snapshot : undefined,
       model: typeof opts.model === "string" ? opts.model : undefined,
       modelApi: typeof opts.modelApi === "string" ? opts.modelApi : undefined,

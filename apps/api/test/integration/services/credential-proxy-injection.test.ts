@@ -51,7 +51,6 @@ async function installAndConnect(
   await db.insert(applicationPackages).values({
     applicationId: ctx.defaultAppId,
     packageId,
-    config: {},
   });
   await db.insert(integrationConnections).values({
     integrationId: packageId,

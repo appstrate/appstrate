@@ -90,7 +90,6 @@ async function seedIntegrationWithConnection(ctx: TestContext): Promise<void> {
   await db.insert(applicationPackages).values({
     applicationId: ctx.defaultAppId,
     packageId: INTEGRATION_ID,
-    config: {},
   });
   // A live connection owned by the API key's owner (the resolved actor).
   await db.insert(integrationConnections).values({
@@ -320,7 +319,6 @@ describe("POST /api/credential-proxy/proxy — error→status mapping", () => {
     await db.insert(applicationPackages).values({
       applicationId: ctx.defaultAppId,
       packageId: INTEGRATION_ID,
-      config: {},
     });
 
     let upstreamCalls = 0;

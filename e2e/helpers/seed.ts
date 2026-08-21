@@ -158,15 +158,16 @@ export async function createAgent(
 }
 
 /**
- * Create an agent with a config schema — needed to test per-app config isolation.
- * `mergeWithDefaults` strips keys not present in the schema, so agents without
- * a config schema cannot store arbitrary config values.
+ * Create an agent declaring an `input` schema — needed to test per-app
+ * isolation of the editor's stored input values. The values a `PUT
+ * /agents/{scope}/{name}/input-settings` stores are validated against this
+ * schema, so an agent with no input schema cannot store arbitrary values.
  */
-export async function createAgentWithConfig(
+export async function createAgentWithInputSchema(
   client: ApiClient,
   scope: string,
   name: string,
-  configProperties: Record<string, unknown>,
+  inputProperties: Record<string, unknown>,
 ): Promise<{ id: string }> {
   const manifest = {
     schema_version: "0.1",
@@ -175,10 +176,10 @@ export async function createAgentWithConfig(
     version: "0.1.0",
     type: "agent",
     description: `E2E test agent ${name}`,
-    config: {
+    input: {
       schema: {
         type: "object",
-        properties: configProperties,
+        properties: inputProperties,
       },
     },
   };

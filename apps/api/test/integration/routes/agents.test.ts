@@ -18,13 +18,16 @@ import {
   initSystemModelProviderKeys,
 } from "../../../src/services/model-registry.ts";
 import {
+  getInstalledPackageSettings,
   installPackage,
   updateInstalledPackage,
 } from "../../../src/services/application-packages.ts";
 import { createVersionFromDraft } from "../../../src/services/package-versions.ts";
 import { assertDbCount } from "../../helpers/assertions.ts";
-import { packages, runs } from "@appstrate/db/schema";
+import { packages, runs, schedules } from "@appstrate/db/schema";
 import { addMemories, upsertPinned } from "../../../src/services/state/package-persistence.ts";
+import { resolveEffectiveInput } from "../../../src/services/input-resolution.ts";
+import { asJSONSchemaObject } from "@appstrate/core/form";
 
 const app = getTestApp();
 
@@ -307,43 +310,352 @@ describe("Agents API", () => {
     });
   });
 
-  describe("PUT /api/agents/:scope/:name/config", () => {
-    it("updates agent configuration", async () => {
+  describe("PUT /api/agents/:scope/:name/input-settings", () => {
+    it("stores input values and field locks", async () => {
       await seedAgent({
-        id: "@myorg/config-agent",
+        id: "@myorg/input-settings-agent",
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
         draftManifest: {
-          name: "@myorg/config-agent",
+          name: "@myorg/input-settings-agent",
           version: "0.1.0",
           type: "agent",
           description: "Test",
-          config: {
+          input: {
             schema: { type: "object", properties: { key: { type: "string" } } },
           },
         },
       });
       await installPackage(
         { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
-        "@myorg/config-agent",
+        "@myorg/input-settings-agent",
       );
 
-      const res = await app.request("/api/agents/@myorg/config-agent/config", {
+      const res = await app.request("/api/agents/@myorg/input-settings-agent/input-settings", {
         method: "PUT",
         headers: {
           ...authHeaders(ctx),
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ key: "value" }),
+        body: JSON.stringify({ values: { key: "value" }, locked_fields: ["key"] }),
       });
 
       expect(res.status).toBe(200);
-      // 200 + the bare persisted configuration document (#657) — no
-      // `{config, validation}` envelope; validation failures are 400s.
+      // 200 + the bare persisted resource (#657) — no `validation` envelope;
+      // validation failures are 400s.
       const body = (await res.json()) as Record<string, unknown>;
-      expect(body.key).toBe("value");
-      expect("config" in body).toBe(false);
+      expect(body.values).toEqual({ key: "value" });
+      expect(body.locked_fields).toEqual(["key"]);
       expect("validation" in body).toBe(false);
+    });
+
+    it("rejects a body missing locked_fields with 400 and leaves the stored row intact", async () => {
+      await seedAgent({
+        id: "@myorg/partial-agent",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        draftManifest: {
+          name: "@myorg/partial-agent",
+          version: "0.1.0",
+          type: "agent",
+          description: "Test",
+          input: {
+            schema: { type: "object", properties: { folder: { type: "string" } } },
+          },
+        },
+      });
+      await installPackage(
+        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        "@myorg/partial-agent",
+      );
+      await updateInstalledPackage(
+        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        "@myorg/partial-agent",
+        {
+          inputSettings: { values: { folder: "archive" }, locked: ["folder"] },
+        },
+      );
+
+      const res = await app.request("/api/agents/@myorg/partial-agent/input-settings", {
+        method: "PUT",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ values: { folder: "sent" } }),
+      });
+
+      expect(res.status).toBe(400);
+      const stored = await getInstalledPackageSettings(ctx.defaultAppId, "@myorg/partial-agent");
+      expect(stored.values).toEqual({ folder: "archive" });
+      expect(stored.locked).toEqual(["folder"]);
+    });
+
+    it("rejects a body carrying an unknown key with 400 and leaves the stored row intact", async () => {
+      await seedAgent({
+        id: "@myorg/unknown-key-agent",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        draftManifest: {
+          name: "@myorg/unknown-key-agent",
+          version: "0.1.0",
+          type: "agent",
+          description: "Test",
+          input: {
+            schema: { type: "object", properties: { folder: { type: "string" } } },
+          },
+        },
+      });
+      await installPackage(
+        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        "@myorg/unknown-key-agent",
+      );
+      await updateInstalledPackage(
+        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        "@myorg/unknown-key-agent",
+        { inputSettings: { values: { folder: "archive" }, locked: ["folder"] } },
+      );
+
+      // The pre-refactor body shape: bare field names at the top level.
+      const res = await app.request("/api/agents/@myorg/unknown-key-agent/input-settings", {
+        method: "PUT",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ values: {}, locked_fields: [], folder: "sent" }),
+      });
+
+      expect(res.status).toBe(400);
+      const stored = await getInstalledPackageSettings(
+        ctx.defaultAppId,
+        "@myorg/unknown-key-agent",
+      );
+      expect(stored.values).toEqual({ folder: "archive" });
+      expect(stored.locked).toEqual(["folder"]);
+    });
+
+    it("rejects a wrong-typed stored value with 400", async () => {
+      await seedAgent({
+        id: "@myorg/typed-agent",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        draftManifest: {
+          name: "@myorg/typed-agent",
+          version: "0.1.0",
+          type: "agent",
+          description: "Test",
+          input: {
+            schema: { type: "object", properties: { count: { type: "integer" } } },
+          },
+        },
+      });
+      await installPackage(
+        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        "@myorg/typed-agent",
+      );
+
+      const res = await app.request("/api/agents/@myorg/typed-agent/input-settings", {
+        method: "PUT",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ values: { count: "not-a-number" }, locked_fields: [] }),
+      });
+
+      expect(res.status).toBe(400);
+    });
+
+    // ── Pruning undeclared keys (regression of `mergeWithDefaults`) ────────
+    //
+    // `values` is round-tripped by key, but every form only RENDERS the
+    // properties `input.schema` declares. An orphan key — a property a later
+    // manifest edit dropped — is therefore invisible in the UI, un-removable
+    // (the settings form re-submits it), and seeded as caller input by the
+    // launch form on every run. The route prunes it on write, which is the
+    // key-dropping half of the `mergeWithDefaults` this branch deleted.
+
+    it("prunes a value key that names no declared property and still returns 200", async () => {
+      await seedAgent({
+        id: "@myorg/orphan-key-agent",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        draftManifest: {
+          name: "@myorg/orphan-key-agent",
+          version: "0.1.0",
+          type: "agent",
+          description: "Test",
+          input: {
+            schema: { type: "object", properties: { folder: { type: "string" } } },
+          },
+        },
+      });
+      await installPackage(
+        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        "@myorg/orphan-key-agent",
+      );
+
+      const res = await app.request("/api/agents/@myorg/orphan-key-agent/input-settings", {
+        method: "PUT",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        // `legacy_field` was dropped from the schema by a later manifest edit.
+        body: JSON.stringify({
+          values: { folder: "inbox", legacy_field: "stale" },
+          locked_fields: [],
+        }),
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as Record<string, unknown>;
+      expect(body.values).toEqual({ folder: "inbox" });
+
+      const stored = await getInstalledPackageSettings(ctx.defaultAppId, "@myorg/orphan-key-agent");
+      expect(stored.values).toEqual({ folder: "inbox" });
+      // Pruning is not the same as materialising: a declared property the
+      // editor left empty stays ABSENT — `values` is a partial layer.
+      expect(Object.keys(stored.values)).toEqual(["folder"]);
+    });
+
+    it("stays saveable when the schema declares additionalProperties: false", async () => {
+      await seedAgent({
+        id: "@myorg/closed-schema-agent",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        draftManifest: {
+          name: "@myorg/closed-schema-agent",
+          version: "0.1.0",
+          type: "agent",
+          description: "Test",
+          input: {
+            schema: {
+              type: "object",
+              properties: { folder: { type: "string" } },
+              additionalProperties: false,
+            },
+          },
+        },
+      });
+      await installPackage(
+        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        "@myorg/closed-schema-agent",
+      );
+
+      const res = await app.request("/api/agents/@myorg/closed-schema-agent/input-settings", {
+        method: "PUT",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({
+          values: { folder: "inbox", legacy_field: "stale" },
+          locked_fields: [],
+        }),
+      });
+
+      // Pruning happens BEFORE validation, so the orphan key never reaches
+      // AJV — otherwise the row would be permanently unsaveable (400 forever).
+      expect(res.status).toBe(200);
+      const stored = await getInstalledPackageSettings(
+        ctx.defaultAppId,
+        "@myorg/closed-schema-agent",
+      );
+      expect(stored.values).toEqual({ folder: "inbox" });
+    });
+
+    // ── Locking reconciles existing schedules ─────────────────────────────
+    //
+    // A schedule that froze a value for a field locked AFTER it was written
+    // would fail `locked_input_field` at `resolveEffectiveInput` on every
+    // tick — and a failed fire does NOT disable the schedule, so it repeats
+    // forever. The lock write drops the frozen key so the field re-resolves
+    // from the editor value, exactly as a fresh launch does.
+
+    /** Seed + install an agent with a two-property input schema. */
+    async function seedTwoFieldAgent(id: string) {
+      await seedAgent({
+        id,
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        draftManifest: {
+          name: id,
+          version: "0.1.0",
+          type: "agent",
+          description: "Test",
+          input: {
+            schema: {
+              type: "object",
+              properties: { folder: { type: "string" }, label: { type: "string" } },
+            },
+          },
+        },
+      });
+      await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, id);
+    }
+
+    /** Create a schedule on `id` through the public route. */
+    async function createSchedule(id: string, input: Record<string, unknown>) {
+      const res = await app.request(`/api/agents/${id}/schedules`, {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ cron_expression: "0 * * * *", input, version_override: "draft" }),
+      });
+      expect(res.status).toBe(201);
+      return (await res.json()) as { id: string };
+    }
+
+    const readScheduleRow = async (id: string) =>
+      (await db.select().from(schedules).where(eq(schedules.id, id)))[0]!;
+
+    it("drops a newly-locked field from the schedules that froze it, leaving others untouched", async () => {
+      const agentId = "@myorg/lock-reconcile-agent";
+      await seedTwoFieldAgent(agentId);
+
+      const affected = await createSchedule(agentId, { folder: "inbox", label: "daily" });
+      const untouched = await createSchedule(agentId, { label: "weekly" });
+      const untouchedBefore = await readScheduleRow(untouched.id);
+
+      const res = await app.request(`/api/agents/${agentId}/input-settings`, {
+        method: "PUT",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ values: { folder: "archive" }, locked_fields: ["folder"] }),
+      });
+      expect(res.status).toBe(200);
+
+      // The schedule that froze `folder` keeps everything else it froze.
+      const affectedRow = await readScheduleRow(affected.id);
+      expect(affectedRow.input).toEqual({ label: "daily" });
+      // …and is still enabled: the lock is reconciled, not punished.
+      expect(affectedRow.enabled).toBe(true);
+
+      // A schedule naming no locked field is not rewritten at all.
+      const untouchedRow = await readScheduleRow(untouched.id);
+      expect(untouchedRow.input).toEqual({ label: "weekly" });
+      expect(untouchedRow.updatedAt).toEqual(untouchedBefore.updatedAt);
+    });
+
+    it("leaves the reconciled schedule firing successfully instead of failing every tick", async () => {
+      const agentId = "@myorg/lock-fire-agent";
+      await seedTwoFieldAgent(agentId);
+      const schedule = await createSchedule(agentId, { folder: "inbox" });
+
+      const res = await app.request(`/api/agents/${agentId}/input-settings`, {
+        method: "PUT",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ values: { folder: "archive" }, locked_fields: ["folder"] }),
+      });
+      expect(res.status).toBe(200);
+
+      // Replay the exact predicate the BullMQ worker evaluates at fire time
+      // (`triggerScheduledRun` → `resolveEffectiveInput`): stored settings
+      // plus the schedule's frozen values. Before the fix this threw
+      // `locked_input_field` on every tick, forever.
+      const stored = await getInstalledPackageSettings(ctx.defaultAppId, agentId);
+      const row = await readScheduleRow(schedule.id);
+      const effective = resolveEffectiveInput({
+        schema: asJSONSchemaObject({
+          type: "object",
+          properties: { folder: { type: "string" }, label: { type: "string" } },
+        }),
+        editorDefaults: stored.values,
+        lockedFields: stored.locked,
+        scheduleValues: row.input as Record<string, unknown>,
+      });
+      // The locked field resolves from the CURRENT editor value.
+      expect(effective).toEqual({ folder: "archive" });
+
+      // The schedule is also still enabled and still frozen-input-free, so the
+      // next tick has nothing left to trip over.
+      expect(row.enabled).toBe(true);
+      expect(row.input).toEqual({});
     });
   });
 

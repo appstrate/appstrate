@@ -353,7 +353,7 @@ export function normalizeContextDocumentUris(value: unknown): string[] {
 /**
  * Trigger an inline agent run end-to-end: insert the shadow package and fire
  * the pipeline. The route owns the earlier stages — `runInlinePreflight`
- * (manifest shape, config, readiness) then `parseRequestInput` (file fields
+ * (manifest shape, input, readiness) then `parseRequestInput` (file fields
  * resolved through the SAME parser as `POST /agents/:scope/:name/run`:
  * `upload://` / `document://` / inline `data:` URIs are ACL-checked, capped,
  * and streamed into the pre-minted `runId`'s workspace) — so inline and
@@ -378,14 +378,7 @@ export async function triggerInlineRun(params: {
   traceparent?: string;
 }): Promise<{ runId: string; packageId: string }> {
   const { orgId, applicationId, actor, runId, preflight, parsed, apiKeyId, traceparent } = params;
-  const {
-    manifest,
-    prompt,
-    effectiveConfig,
-    modelIdOverride,
-    proxyIdOverride,
-    connectionOverrides,
-  } = preflight;
+  const { manifest, prompt, modelIdOverride, proxyIdOverride, connectionOverrides } = preflight;
 
   // `parseRequestInput` already collapses an effectively-empty input to
   // `undefined`; map that to NULL so an input-less inline run persists
@@ -427,7 +420,6 @@ export async function triggerInlineRun(params: {
       pendingDocuments: parsed.pendingDocuments,
       // `document://` inputs to protect via `document_links` (chaining).
       consumedDocumentIds: parsed.consumedDocumentIds,
-      config: effectiveConfig,
       modelId: modelIdOverride,
       generationConfigOverride: parsed.generationConfigOverride ?? null,
       proxyId: proxyIdOverride,

@@ -91,7 +91,6 @@ describe("run_and_wait client", () => {
         tokenUsage: { input: 1200, output: 300 },
         startedAt: "2026-07-01T09:00:00.000Z",
         completedAt: "2026-07-01T09:01:30.000Z",
-        config: { secret: "echo" },
         result: { summary: "partial" },
       }),
     ];
@@ -413,7 +412,7 @@ describe("launchRunAndWait launch body", () => {
     return { fetchImpl, captured: () => seen };
   }
 
-  it("kind:inline materializes a minimal manifest and forwards prompt, input, and config", async () => {
+  it("kind:inline materializes a minimal manifest and forwards prompt and input", async () => {
     const { fetchImpl, captured } = captureLaunch();
 
     const result = await launchRunAndWait(
@@ -422,7 +421,6 @@ describe("launchRunAndWait launch body", () => {
         manifest: { display_name: "Analyse café" },
         prompt: "do it",
         input: { screenshot: "document://doc_abc12345" },
-        config: { model: "x" },
       },
       { origin: "https://test.local", headers: {}, fetch: fetchImpl },
     );
@@ -438,7 +436,6 @@ describe("launchRunAndWait launch body", () => {
         }),
         prompt: expect.stringContaining("do it"),
         input: { screenshot: "document://doc_abc12345" },
-        config: { model: "x" },
       },
     });
     const body = captured()?.body as { manifest?: unknown } | undefined;
@@ -729,10 +726,10 @@ describe("launchRunAndWait launch body", () => {
     expect(captured()).toBeUndefined();
   });
 
-  // The name inside `config` belongs to the AGENT, not to us: an agent whose own
-  // config schema declares a `connection_overrides` property must stay launchable
+  // The name inside `input` belongs to the AGENT, not to us: an agent whose own
+  // input schema declares a `connection_overrides` property must stay launchable
   // and get that property through untouched, whatever the top-level argument says.
-  it("forwards the top-level connection_overrides and leaves config's own property alone", async () => {
+  it("forwards the top-level connection_overrides and leaves input's own property alone", async () => {
     const { fetchImpl, captured } = captureLaunch();
 
     const result = await launchRunAndWait(
@@ -741,7 +738,9 @@ describe("launchRunAndWait launch body", () => {
         manifest: { name: "tmp" },
         prompt: "do it",
         connection_overrides: { "@appstrate/gmail": "conn_top" },
-        config: { connection_overrides: { "@appstrate/gmail": "conn_nested" } },
+        // An agent whose input schema happens to declare a property with this
+        // name: it is data for the run, never a source for the top-level field.
+        input: { connection_overrides: { "@appstrate/gmail": "conn_nested" } },
       },
       { origin: "https://test.local", headers: {}, fetch: fetchImpl },
     );
@@ -749,11 +748,11 @@ describe("launchRunAndWait launch body", () => {
     expect(result.ok).toBe(true);
     expect(captured()?.body).toMatchObject({
       connection_overrides: { "@appstrate/gmail": "conn_top" },
-      config: { connection_overrides: { "@appstrate/gmail": "conn_nested" } },
+      input: { connection_overrides: { "@appstrate/gmail": "conn_nested" } },
     });
   });
 
-  it("launches an agent whose config declares its own connection_overrides property", async () => {
+  it("launches an agent whose input declares its own connection_overrides property", async () => {
     const { fetchImpl, captured } = captureLaunch();
 
     const result = await launchRunAndWait(
@@ -761,7 +760,7 @@ describe("launchRunAndWait launch body", () => {
         kind: "agent",
         scope: "@acme",
         name: "writer",
-        config: { connection_overrides: { "@appstrate/gmail": "conn_abc" } },
+        input: { connection_overrides: { "@appstrate/gmail": "conn_abc" } },
       },
       { origin: "https://test.local", headers: {}, fetch: fetchImpl },
     );
@@ -769,7 +768,7 @@ describe("launchRunAndWait launch body", () => {
     expect(result.ok).toBe(true);
     // Verbatim, and nothing synthesised at top level from it.
     expect(captured()?.body).toMatchObject({
-      config: { connection_overrides: { "@appstrate/gmail": "conn_abc" } },
+      input: { connection_overrides: { "@appstrate/gmail": "conn_abc" } },
     });
     expect(Object.keys(captured()?.body as Record<string, unknown>)).not.toContain(
       "connection_overrides",

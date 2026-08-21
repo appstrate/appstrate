@@ -1,13 +1,10 @@
 import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import type RjsfForm from "@rjsf/core";
 import { Modal } from "./modal";
 import { Button } from "@appstrate/ui/components/button";
 import { Spinner } from "./spinner";
-import { LazySchemaForm as SchemaForm } from "./lazy-schema-form";
-import type { SchemaWrapper, JSONSchemaObject } from "@appstrate/core/form";
-import { useSchemaFormLabels } from "../hooks/use-schema-form-labels";
-import { useUploadClient } from "../hooks/use-upload";
+import { AgentInputForm, type AgentInputFormHandle } from "./agent-input-form";
+import { initialInputValues } from "../lib/agent-input";
 import { useModels, useAgentModel } from "../hooks/use-models";
 import { isModelSelectable } from "../lib/model-selectability";
 import type { AgentDetail } from "@appstrate/shared-types";
@@ -20,8 +17,6 @@ interface RunModalProps {
   isPending?: boolean;
   initialInput?: Record<string, unknown>;
 }
-
-const EMPTY_SCHEMA: JSONSchemaObject = { type: "object", properties: {} };
 
 export function RunModal({
   open,
@@ -71,44 +66,30 @@ function RunModalForm({
   initialInput?: Record<string, unknown>;
 }) {
   const { t } = useTranslation(["agents", "common"]);
-  const inputWrapper: SchemaWrapper = agent.input ?? { schema: EMPTY_SCHEMA };
-  const hasInputFields =
-    !!inputWrapper.schema?.properties && Object.keys(inputWrapper.schema.properties).length > 0;
-  const [inputData, setInputData] = useState<Record<string, unknown>>(initialInput ?? {});
-  const inputFormRef = useRef<RjsfForm>(null);
-  const labels = useSchemaFormLabels();
-  const upload = useUploadClient();
-
-  const handleSubmit = () => {
-    if (hasInputFields && inputFormRef.current) {
-      inputFormRef.current.submit();
-      return;
-    }
-    onSubmit(inputData);
-  };
+  // `agent.input` carries both halves: the AFPS wrapper and this application's
+  // stored values + locks.
+  const [inputData, setInputData] = useState<Record<string, unknown>>(() =>
+    initialInputValues(agent.input, agent.input, initialInput),
+  );
+  const inputFormRef = useRef<AgentInputFormHandle>(null);
 
   return (
     <div className="space-y-5">
       <ResolvedModelHint packageId={agent.id} />
-      {hasInputFields && (
-        <div className="space-y-2">
-          <SchemaForm
-            ref={inputFormRef}
-            wrapper={inputWrapper}
-            formData={inputData}
-            upload={upload}
-            labels={labels}
-            onChange={(e) => setInputData(e.formData as Record<string, unknown>)}
-            onSubmit={(e) => onSubmit(e.formData as Record<string, unknown>)}
-          />
-        </div>
-      )}
+      <AgentInputForm
+        ref={inputFormRef}
+        wrapper={agent.input}
+        settings={agent.input}
+        value={inputData}
+        onChange={setInputData}
+        onSubmit={onSubmit}
+      />
 
       <div className="flex justify-end gap-2 pt-1">
         <Button variant="outline" onClick={onClose} disabled={isPending}>
           {t("btn.cancel")}
         </Button>
-        <Button onClick={handleSubmit} disabled={isPending}>
+        <Button onClick={() => inputFormRef.current?.submit()} disabled={isPending}>
           {isPending ? <Spinner /> : t("input.run")}
         </Button>
       </div>

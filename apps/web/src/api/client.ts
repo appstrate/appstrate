@@ -99,6 +99,7 @@ const problemDetailErrors: Middleware = {
         // bridges the spec's array type to that open shape.
         body.errors as unknown as Record<string, unknown> | undefined,
         body.requestId,
+        body.param,
       );
     }
     throw new Error(body.detail || `API Error: ${response.status}`);

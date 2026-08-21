@@ -1,11 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import {
-  schemaHasFileFields,
-  type JSONSchemaObject,
-  type SchemaWrapper,
-} from "@appstrate/core/form";
+import { schemaHasFileFields } from "@appstrate/core/form";
 import { client, type paths } from "../api/client";
 import { splitPackageRef } from "../lib/package-paths";
 import { useCurrentOrgId } from "./use-org";
@@ -16,7 +12,7 @@ import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 import { useAgentProxy } from "./use-proxies";
 import { onMutationError } from "./use-mutations";
 import { scheduleKeys } from "../lib/query-keys";
-import type { ScheduleWireDto, EnrichedSchedule } from "@appstrate/shared-types";
+import type { AgentDetail, ScheduleWireDto, EnrichedSchedule } from "@appstrate/shared-types";
 
 // `useScheduleRuns` used to live here: the schedule CARD fetched a schedule's
 // runs purely to count active/unread/last-number, once per card. Those three
@@ -95,7 +91,6 @@ export function useCreateSchedule(packageId: string) {
       cron_expression: string;
       timezone?: string;
       input?: Record<string, unknown>;
-      config_override?: Record<string, unknown> | null;
       model_id_override?: string | null;
       generation_config_override?: ModelGenerationSettings | null;
       proxy_id_override?: string | null;
@@ -106,7 +101,7 @@ export function useCreateSchedule(packageId: string) {
       const { scope, name } = splitPackageRef(packageId);
       const { data: created } = await client.POST("/api/agents/{scope}/{name}/schedules", {
         params: { path: { scope, name } },
-        // Spec body types `input`/`config_override` as bare objects.
+        // Spec body types `input` as a bare object.
         body: data as CreateScheduleBody,
       });
       return created!;
@@ -129,7 +124,6 @@ export function useUpdateSchedule() {
       timezone?: string;
       input?: Record<string, unknown>;
       enabled?: boolean;
-      config_override?: Record<string, unknown> | null;
       model_id_override?: string | null;
       generation_config_override?: ModelGenerationSettings | null;
       proxy_id_override?: string | null;
@@ -139,7 +133,7 @@ export function useUpdateSchedule() {
     }): Promise<ScheduleWireDto> => {
       const { data: updated } = await client.PUT("/api/schedules/{id}", {
         params: { path: { id } },
-        // Spec body types `input`/`config_override` as bare objects.
+        // Spec body types `input` as a bare object.
         body: data as UpdateScheduleBody,
       });
       return updated!;
@@ -161,15 +155,15 @@ export function useDeleteSchedule() {
 }
 
 interface ScheduleFormDeps {
-  inputSchema: JSONSchemaObject | undefined;
   /**
    * Full input wrapper (schema + ui_hints + file_constraints + property_order)
-   * — the run-options modal feeds this to `<SchemaForm>` so version-pinned
-   * input renders with full fidelity, not just the bare schema (#770).
+   * — the launch surfaces feed this to `<SchemaForm>` so version-pinned input
+   * renders with full fidelity, not just the bare schema (#770). It also
+   * carries the per-application layers (`values` + `locked_fields`), so a
+   * consumer needing those reads them off this same object rather than a
+   * second prop that could drift from it.
    */
-  inputWrapper: SchemaWrapper | undefined;
-  configSchema: JSONSchemaObject | undefined;
-  persistedConfig: Record<string, unknown>;
+  inputWrapper: AgentDetail["input"];
   persistedModelId: string | null;
   persistedGenerationConfig: ModelGenerationSettings | null;
   persistedProxyId: string | null;
@@ -189,13 +183,29 @@ interface ScheduleFormDeps {
 }
 
 /**
+ * The agent-detail query's failure, for a page that renders a loading state
+ * until {@link useScheduleFormDeps} resolves. A deleted agent or a revoked
+ * permission never lets the detail land, so without this the page spins
+ * forever. Same query key as that hook — React Query serves it from the cache,
+ * no second request.
+ */
+export function useScheduleFormDepsError(
+  packageId: string | undefined,
+  version?: string,
+): Error | null {
+  return usePackageDetail("agent", packageId, { version }).error;
+}
+
+/**
  * Aggregates the agent-detail / model / proxy lookups that both
  * `ScheduleCreatePage` and `ScheduleEditPage` feed into `<ScheduleForm>`.
- * Returns `null` while inputs aren't ready or no agent is selected.
+ * Returns `null` until the agent detail has landed — or when no agent is
+ * selected — so a consumer can never mount a form on settings it does not
+ * have yet.
  *
  * `version` (#770) pins the agent-detail projection to a published version so
- * the config / input / integrations / skills the form renders match the version
- * the run will execute. Omitted → `draft` (the editor working copy).
+ * the input / integrations / skills the form renders match the version the run
+ * will execute. Omitted → `draft` (the editor working copy).
  */
 export function useScheduleFormDeps(
   packageId: string | undefined,
@@ -205,28 +215,32 @@ export function useScheduleFormDeps(
   const { data: agentModel } = useAgentModel(packageId);
   const { data: agentProxy } = useAgentProxy(packageId);
 
-  if (!packageId) return null;
+  // Null until the AGENT DETAIL itself lands, not merely until an agent is
+  // picked: `ScheduleForm` seeds its input state once, in a `useState`
+  // initialiser, and a form mounted on empty settings would seed a field that
+  // has since been locked — unremovable through the UI and refused on save
+  // (400 `locked_input_field`). `key={schedule.id}` means no remount when the
+  // detail arrives, so the only safe answer while it is in flight is "not yet".
+  if (!packageId || !agentDetail) return null;
 
-  const inputSchema = agentDetail?.input?.schema ?? undefined;
-  const integrationDeps = (agentDetail?.dependencies?.integrations ?? []).map((d) => ({
+  const integrationDeps = (agentDetail.dependencies?.integrations ?? []).map((d) => ({
     id: d.id,
     ...(d.tools ? { tools: d.tools } : {}),
   }));
-  const skillDeps = (agentDetail?.dependencies?.skills ?? []).map((s) => ({
+  const skillDeps = (agentDetail.dependencies?.skills ?? []).map((s) => ({
     id: s.id,
     ...(s.version ? { version: s.version } : {}),
     ...(s.name ? { name: s.name } : {}),
   }));
   return {
-    inputSchema,
-    inputWrapper: agentDetail?.input ?? undefined,
-    configSchema: agentDetail?.config?.schema ?? undefined,
-    persistedConfig: agentDetail?.config?.current ?? {},
+    // The detail's own object — a fresh literal here would change identity on
+    // every render and defeat the launch form's memoized partition.
+    inputWrapper: agentDetail.input,
     persistedModelId: agentModel?.modelId ?? null,
     persistedGenerationConfig: agentModel?.generation ?? null,
     persistedProxyId: agentProxy?.proxyId ?? null,
-    persistedVersion: agentDetail?.version ?? null,
-    hasFileInputs: schemaHasFileFields(inputSchema),
+    persistedVersion: agentDetail.version ?? null,
+    hasFileInputs: schemaHasFileFields(agentDetail.input.schema),
     agentIntegrations: integrationDeps,
     skills: skillDeps,
   };

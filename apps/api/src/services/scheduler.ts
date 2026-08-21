@@ -23,6 +23,8 @@ import {
   resolveRunPreflight,
   extractRunAgentDenorm,
 } from "./run-pipeline.ts";
+import { getInstalledPackageSettings } from "./application-packages.ts";
+import { resolveEffectiveInput, withoutLockedFields } from "./input-resolution.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { asRecordOrNull } from "@appstrate/core/safe-json";
 import { getPackage, packageExists } from "./package-catalog.ts";
@@ -31,7 +33,6 @@ import type { LoadedPackage } from "../types/index.ts";
 import { ApiError, internalError } from "../lib/errors.ts";
 import { scopedWhere } from "../lib/db-helpers.ts";
 import { validateInput } from "./schema.ts";
-import { mergeAndValidateConfigOverride } from "./agent-readiness.ts";
 import { asJSONSchemaObject } from "@appstrate/core/form";
 import { computeNextRun } from "../lib/cron.ts";
 import { actorMatch, type Actor } from "../lib/actor.ts";
@@ -51,11 +52,6 @@ interface ScheduleJobData {
   orgId: string;
   applicationId: string;
   input?: Record<string, unknown>;
-  // Per-schedule override layer — frozen at schedule create/update and
-  // deep-merged with `application_packages.config` every time the
-  // schedule fires. Mirrors the per-run override pipeline (POST /run
-  // body) so a schedule is "a recurring run with frozen overrides".
-  configOverride?: Record<string, unknown>;
   modelIdOverride?: string;
   generationConfigOverride?: ModelGenerationSettings;
   proxyIdOverride?: string;
@@ -98,7 +94,6 @@ function toSchedule(row: typeof schedules.$inferSelect): ScheduleWireDto {
     cron_expression: row.cronExpression,
     timezone: row.timezone,
     input: asRecordOrNull(row.input),
-    config_override: asRecordOrNull(row.configOverride),
     generation_config_override: row.generationConfigOverride ?? null,
     model_id_override: row.modelIdOverride,
     proxy_id_override: row.proxyIdOverride,
@@ -145,7 +140,6 @@ async function upsertScheduleJob(row: typeof schedules.$inferSelect): Promise<vo
     orgId: row.orgId,
     applicationId: row.applicationId,
     input: asRecordOrNull(row.input) ?? undefined,
-    configOverride: asRecordOrNull(row.configOverride) ?? undefined,
     modelIdOverride: row.modelIdOverride ?? undefined,
     generationConfigOverride: row.generationConfigOverride ?? undefined,
     proxyIdOverride: row.proxyIdOverride ?? undefined,
@@ -285,7 +279,6 @@ async function handleScheduleJob(job: QueueJob<ScheduleJobData>): Promise<void> 
     orgId,
     applicationId,
     input,
-    configOverride,
     modelIdOverride,
     generationConfigOverride,
     proxyIdOverride,
@@ -322,7 +315,6 @@ async function handleScheduleJob(job: QueueJob<ScheduleJobData>): Promise<void> 
     }
 
     await triggerScheduledRun(scheduleId, packageId, actor, orgId, applicationId, input, {
-      configOverride,
       modelIdOverride,
       generationConfigOverride,
       proxyIdOverride,
@@ -445,7 +437,6 @@ export async function triggerScheduledRun(
   applicationId: string,
   input: Record<string, unknown> | undefined,
   overrides: {
-    configOverride?: Record<string, unknown>;
     modelIdOverride?: string;
     generationConfigOverride?: ModelGenerationSettings;
     proxyIdOverride?: string;
@@ -552,8 +543,11 @@ export async function triggerScheduledRun(
       throw err;
     }
 
-    // Shared preflight: resolve config, validate readiness
-    let config: Record<string, unknown>;
+    // Per-application settings: editor defaults + locked fields for the input
+    // resolution below, and the model/proxy the preflight projects back.
+    const packageSettings = await getInstalledPackageSettings(applicationId, packageId);
+
+    // Shared preflight: validate readiness
     let preflightModelId: string | null;
     let preflightGenerationConfig: ModelGenerationSettings | null;
     let preflightProxyId: string | null;
@@ -563,6 +557,7 @@ export async function triggerScheduledRun(
         applicationId,
         orgId,
         actor,
+        packageSettings,
         // Schedule freezes per-integration picks at create time; forward
         // them so readiness honours the same disambiguation the run
         // pipeline will use a few lines down (matches the "single source
@@ -570,7 +565,6 @@ export async function triggerScheduledRun(
         scheduleConnectionOverrides: overrides.connectionOverrides ?? null,
       });
 
-      config = preflight.config;
       preflightModelId = preflight.modelId;
       preflightGenerationConfig = preflight.generationConfig;
       preflightProxyId = preflight.proxyId;
@@ -594,10 +588,39 @@ export async function triggerScheduledRun(
       return;
     }
 
-    // Validate input against agent's input schema (schema may have changed since schedule creation)
+    // Resolve this fire's input through the same four layers as a request
+    // run — author defaults < editor defaults < the schedule's frozen values.
+    // Wrapped because both the layers and the schema can drift after the
+    // schedule was written (a field locked since, a tightened schema): the
+    // scheduler must `failSchedule` with a visible record instead of throwing
+    // into the worker.
     const inputSchema = agent.manifest.input?.schema;
+    let resolvedInput: Record<string, unknown>;
+    try {
+      resolvedInput = resolveEffectiveInput({
+        ...(inputSchema ? { schema: asJSONSchemaObject(inputSchema) } : {}),
+        editorDefaults: packageSettings.values,
+        lockedFields: packageSettings.locked,
+        scheduleValues: input,
+      });
+    } catch (err) {
+      if (err instanceof ApiError) {
+        logger.warn("Schedule input no longer resolvable", {
+          scheduleId,
+          packageId,
+          code: err.code,
+          detail: err.message,
+        });
+        await failSchedule(err.message);
+        return;
+      }
+      throw err;
+    }
+
+    // Validate the resolved input (the schema may have changed since the
+    // schedule was created).
     if (inputSchema) {
-      const inputValidation = validateInput(input, asJSONSchemaObject(inputSchema));
+      const inputValidation = validateInput(resolvedInput, asJSONSchemaObject(inputSchema));
       if (!inputValidation.valid) {
         logger.warn("Scheduled input validation failed, skipping run", {
           scheduleId,
@@ -613,28 +636,6 @@ export async function triggerScheduledRun(
 
     const runId = `run_${crypto.randomUUID()}`;
 
-    // Apply per-schedule overrides (deep-merge + re-validate) via the same
-    // helper used by `POST /run` so both paths converge to an identical
-    // resolved config. Wrapped in try/catch because a frozen schedule
-    // override can fall out of schema after a manifest update tightens it
-    // — the scheduler must `failSchedule` instead of throwing.
-    let mergedConfig: Record<string, unknown>;
-    try {
-      mergedConfig = mergeAndValidateConfigOverride(agent, config, overrides.configOverride);
-    } catch (err) {
-      if (err instanceof ApiError) {
-        logger.warn("Schedule config override no longer satisfies manifest schema", {
-          scheduleId,
-          packageId,
-          code: err.code,
-          detail: err.message,
-        });
-        await failSchedule(err.message);
-        return;
-      }
-      throw err;
-    }
-
     const finalModelId = overrides.modelIdOverride ?? preflightModelId;
     const finalProxyId = overrides.proxyIdOverride ?? preflightProxyId;
 
@@ -644,9 +645,7 @@ export async function triggerScheduledRun(
         agent,
         orgId,
         actor,
-        input,
-        config: mergedConfig,
-        configOverride: overrides.configOverride,
+        input: resolvedInput,
         modelId: finalModelId,
         generationConfig: preflightGenerationConfig,
         generationConfigOverride: overrides.generationConfigOverride ?? null,
@@ -910,7 +909,6 @@ export async function createSchedule(
     cronExpression: string;
     timezone?: string;
     input?: Record<string, unknown>;
-    configOverride?: Record<string, unknown> | null;
     modelIdOverride?: string | null;
     generationConfigOverride?: ModelGenerationSettings | null;
     proxyIdOverride?: string | null;
@@ -939,7 +937,6 @@ export async function createSchedule(
       cronExpression: data.cronExpression,
       timezone: tz,
       input: data.input ?? null,
-      configOverride: data.configOverride ?? null,
       modelIdOverride: data.modelIdOverride ?? null,
       generationConfigOverride: data.generationConfigOverride ?? null,
       proxyIdOverride: data.proxyIdOverride ?? null,
@@ -974,7 +971,6 @@ export async function updateSchedule(
     timezone?: string;
     input?: Record<string, unknown>;
     enabled?: boolean;
-    configOverride?: Record<string, unknown> | null;
     modelIdOverride?: string | null;
     generationConfigOverride?: ModelGenerationSettings | null;
     proxyIdOverride?: string | null;
@@ -1010,7 +1006,6 @@ export async function updateSchedule(
   if (data.name !== undefined) payload.name = data.name;
   if (data.input !== undefined) payload.input = data.input;
   // Explicit `null` clears the override; `undefined` leaves it untouched.
-  if (data.configOverride !== undefined) payload.configOverride = data.configOverride;
   if (data.modelIdOverride !== undefined) payload.modelIdOverride = data.modelIdOverride;
   if (data.generationConfigOverride !== undefined)
     payload.generationConfigOverride = data.generationConfigOverride;
@@ -1052,6 +1047,65 @@ export async function updateSchedule(
   // update response matches the GET detail shape (actor/run counters).
   const [enriched] = await enrichSchedules([schedule], scope.orgId, viewer);
   return enriched ?? { ...schedule, ...UNENRICHED_SCHEDULE_FIELDS };
+}
+
+/**
+ * Drop the locked input fields from every schedule of one agent in one
+ * application.
+ *
+ * Called when the agent's lock set is written. A schedule froze its `input`
+ * before the lock existed, and the fire path refuses a schedule that answers a
+ * locked field (`resolveEffectiveInput` -> `locked_input_field`). Since a
+ * failed fire only records a failed run and never disables the schedule, an
+ * un-reconciled schedule would fail on EVERY tick, forever, until a human
+ * happened to reopen and re-save it.
+ *
+ * Dropping the key is the same rule the `rerun_from` replay applies (see
+ * {@link withoutLockedFields}): a schedule did not "set" the value the way a
+ * caller does, it froze a resolved one — so removing it lets the field
+ * re-resolve from the current editor value, exactly what a fresh launch does.
+ * Refusing the lock write instead would block a legitimate admin action.
+ *
+ * The whole lock set is applied, not just the keys added by this write: it is
+ * idempotent on a consistent row (`PUT /api/schedules/:id` already refuses a
+ * locked field, so a compliant schedule names none) and it repairs any drift.
+ *
+ * Rewrites go through {@link updateSchedule} rather than a raw UPDATE so the
+ * row and its repeatable BullMQ job — whose payload freezes `input` — stay in
+ * step; a raw UPDATE would leave the queue firing the stale frozen values.
+ *
+ * @returns the ids of the schedules that were rewritten.
+ */
+export async function dropLockedFieldsFromSchedules(
+  scope: AppScope,
+  packageId: string,
+  lockedFields: readonly string[],
+): Promise<string[]> {
+  if (lockedFields.length === 0) return [];
+
+  const rows = await db
+    .select({ id: schedules.id, input: schedules.input })
+    .from(schedules)
+    .where(
+      scopedWhere(schedules, {
+        orgId: scope.orgId,
+        applicationId: scope.applicationId,
+        extra: [eq(schedules.packageId, packageId)],
+      }),
+    );
+
+  const rewritten: string[] = [];
+  for (const row of rows) {
+    const input = asRecordOrNull(row.input);
+    if (!input) continue;
+    const stripped = withoutLockedFields(input, lockedFields);
+    // Only touch a schedule that actually answers a locked field — every other
+    // schedule keeps its row, its `updatedAt` and its queue job untouched.
+    if (Object.keys(stripped).length === Object.keys(input).length) continue;
+    await updateSchedule(scope, row.id, { input: stripped });
+    rewritten.push(row.id);
+  }
+  return rewritten;
 }
 
 export async function deleteSchedule(scope: AppScope, id: string): Promise<boolean> {

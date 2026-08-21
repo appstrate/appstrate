@@ -23,7 +23,7 @@ describe("GET /api/applications/:applicationId/packages/:scope/:name/run-config"
     ctx = await createTestContext({ orgSlug: "testorg" });
   });
 
-  it("returns the resolved config for an installed package", async () => {
+  it("returns the resolved run configuration for an installed package", async () => {
     await seedPackage({
       orgId: ctx.orgId,
       id: "@testorg/agent",
@@ -43,8 +43,8 @@ describe("GET /api/applications/:applicationId/packages/:scope/:name/run-config"
     await db.insert(applicationPackages).values({
       applicationId: ctx.defaultAppId,
       packageId: "@testorg/agent",
-      config: { dryRun: true, retries: 3 },
       modelId: "claude-sonnet",
+      generationConfig: { temperature: 0.2, reasoningLevel: "high" },
       proxyId: null,
       versionId: version.id,
     });
@@ -55,12 +55,42 @@ describe("GET /api/applications/:applicationId/packages/:scope/:name/run-config"
     );
     expect(res.status).toBe(200);
     const body = (await res.json()) as Record<string, unknown>;
-    expect(body).toMatchObject({
-      config: { dryRun: true, retries: 3 },
+    expect(body).toEqual({
+      generation: { temperature: 0.2, reasoningLevel: "high" },
+      input: { values: {}, locked_fields: [] },
       modelId: "claude-sonnet",
       proxyId: null,
       version_pin: "1.2.3",
     });
+    // `input` carries the per-application layer, and it is NOT a second source
+    // of truth. This endpoint feeds `appstrate run @scope/agent`, which fetches
+    // the bundle and executes it LOCALLY — that path never reaches the server's
+    // resolver, so without these values it applies author defaults only and
+    // runs the agent with parameters the dashboard would not have used. Layers
+    // 3-4 stay server-owned; `resolveEffectiveInput` keeps one implementation.
+    expect(body).not.toHaveProperty("config");
+  });
+
+  it("carries the stored values and locks the editor set", async () => {
+    await seedPackage({
+      orgId: ctx.orgId,
+      id: "@testorg/agent",
+      type: "agent",
+      draftManifest: { name: "@testorg/agent", version: "1.0.0", type: "agent" },
+    });
+    await db.insert(applicationPackages).values({
+      applicationId: ctx.defaultAppId,
+      packageId: "@testorg/agent",
+      inputSettings: { values: { folder: "archive" }, locked: ["folder"] },
+    });
+
+    const res = await app.request(
+      `/api/applications/${ctx.defaultAppId}/packages/@testorg/agent/run-config`,
+      { headers: authHeaders(ctx) },
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body.input).toEqual({ values: { folder: "archive" }, locked_fields: ["folder"] });
   });
 
   it("returns 404 when the package is not installed in the app", async () => {
@@ -87,7 +117,6 @@ describe("GET /api/applications/:applicationId/packages/:scope/:name/run-config"
     await db.insert(applicationPackages).values({
       applicationId: ctx.defaultAppId,
       packageId: "@testorg/agent",
-      config: {},
     });
     const res = await app.request(
       `/api/applications/${ctx.defaultAppId}/packages/@testorg/agent/run-config`,
@@ -98,6 +127,7 @@ describe("GET /api/applications/:applicationId/packages/:scope/:name/run-config"
     expect(body.version_pin).toBeNull();
     expect(body.modelId).toBeNull();
     expect(body.proxyId).toBeNull();
+    expect(body.generation).toBeNull();
   });
 
   it("returns 401 without authentication", async () => {
@@ -107,15 +137,21 @@ describe("GET /api/applications/:applicationId/packages/:scope/:name/run-config"
     expect(res.status).toBe(401);
   });
 
+  // Tenancy isolation: one package installed in two applications of the SAME
+  // org must resolve to the row of the application named in the path, never
+  // the other one. Discriminated on `modelId` (a scalar) and `generation` (a
+  // JSONB object) so a leak is caught on both kinds of column the resolver
+  // projects — the same coverage the retired per-app `config` object gave.
   it("scopes to the requested application — no cross-app leakage", async () => {
     await seedPackage({ orgId: ctx.orgId, id: "@testorg/agent", type: "agent" });
     await db.insert(applicationPackages).values({
       applicationId: ctx.defaultAppId,
       packageId: "@testorg/agent",
-      config: { from: "default-app" },
+      modelId: "model-of-default-app",
+      generationConfig: { temperature: 0.1 },
     });
 
-    // Create a second app and install with a different config
+    // Create a second app and install with different overrides
     const otherAppRes = await app.request("/api/applications", {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
@@ -125,7 +161,8 @@ describe("GET /api/applications/:applicationId/packages/:scope/:name/run-config"
     await db.insert(applicationPackages).values({
       applicationId: otherAppId,
       packageId: "@testorg/agent",
-      config: { from: "other-app" },
+      modelId: "model-of-other-app",
+      generationConfig: { temperature: 0.9 },
     });
 
     // The route uses the path's applicationId, not the X-Application-Id header — we
@@ -138,8 +175,15 @@ describe("GET /api/applications/:applicationId/packages/:scope/:name/run-config"
       },
     );
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { config: Record<string, unknown> };
-    expect(body.config).toEqual({ from: "other-app" });
+    const body = (await res.json()) as {
+      modelId: string | null;
+      generation: Record<string, unknown> | null;
+    };
+    expect(body.modelId).toBe("model-of-other-app");
+    expect(body.generation).toEqual({ temperature: 0.9 });
+    // The leak this guards against, stated negatively.
+    expect(body.modelId).not.toBe("model-of-default-app");
+    expect(body.generation).not.toEqual({ temperature: 0.1 });
 
     // Cleanup so subsequent tests don't see the second row
     await db

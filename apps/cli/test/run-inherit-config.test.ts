@@ -10,7 +10,6 @@ import { describe, it, expect } from "bun:test";
 import {
   fetchRunConfigPayload,
   mergeRunConfig,
-  deepMergeConfig,
   RunConfigFetchError,
 } from "../src/commands/run/inherit-config.ts";
 
@@ -35,7 +34,6 @@ describe("fetchRunConfigPayload", () => {
   it("returns the parsed payload on 200", async () => {
     const fetchImpl = stubFetch({
       body: {
-        config: { dryRun: true },
         modelId: "claude-sonnet",
         proxyId: null,
         version_pin: "1.0.0",
@@ -104,23 +102,8 @@ describe("fetchRunConfigPayload", () => {
 });
 
 describe("mergeRunConfig — priority order", () => {
-  it("flag config shallow-merges over inherited config", () => {
-    const merged = mergeRunConfig({
-      inherited: {
-        config: { dryRun: true, retries: 3 },
-        modelId: null,
-        proxyId: null,
-        version_pin: null,
-      },
-      flagConfig: { retries: 5 },
-      hasExplicitSpec: false,
-    });
-    expect(merged.config).toEqual({ dryRun: true, retries: 5 });
-  });
-
   it("flag model wins over env model wins over inherited model", () => {
     const inherited = {
-      config: {},
       modelId: "inherited-model",
       proxyId: null,
       version_pin: null,
@@ -141,7 +124,6 @@ describe("mergeRunConfig — priority order", () => {
 
   it("explicit spec disables versionPin inheritance", () => {
     const inherited = {
-      config: {},
       modelId: null,
       proxyId: null,
       version_pin: "1.2.3",
@@ -153,73 +135,14 @@ describe("mergeRunConfig — priority order", () => {
   it("inherited=null produces a no-op merge", () => {
     const merged = mergeRunConfig({ inherited: null, hasExplicitSpec: false });
     expect(merged.inherited).toBe(false);
-    expect(merged.config).toEqual({});
     expect(merged.modelId).toBeNull();
     expect(merged.proxyId).toBeNull();
     expect(merged.versionPin).toBeNull();
   });
 });
 
-describe("deepMergeConfig", () => {
-  it("preserves siblings at every level (no silent nested-key loss)", () => {
-    const merged = deepMergeConfig(
-      { providers: { gmail: { scopes: ["read"] } } },
-      { providers: { slack: { token: "xyz" } } },
-    );
-    expect(merged).toEqual({
-      providers: {
-        gmail: { scopes: ["read"] },
-        slack: { token: "xyz" },
-      },
-    });
-  });
-
-  it("override wins at the leaf for plain values", () => {
-    expect(deepMergeConfig({ a: 1, b: 2 }, { b: 99 })).toEqual({ a: 1, b: 99 });
-  });
-
-  it("arrays are replaced, not concatenated", () => {
-    expect(deepMergeConfig({ tags: ["a", "b"] }, { tags: ["c"] })).toEqual({ tags: ["c"] });
-  });
-
-  it("explicit null clears an inherited leaf", () => {
-    expect(deepMergeConfig({ flag: true }, { flag: null })).toEqual({ flag: null });
-  });
-
-  it("undefined values are skipped (not propagated)", () => {
-    expect(deepMergeConfig({ flag: true }, { flag: undefined })).toEqual({ flag: true });
-  });
-
-  it("undefined override returns a copy of base", () => {
-    const base = { a: 1 };
-    const merged = deepMergeConfig(base, undefined);
-    expect(merged).toEqual({ a: 1 });
-    expect(merged).not.toBe(base);
-  });
-
-  it("mergeRunConfig delegates the config field to deepMergeConfig", () => {
-    const merged = mergeRunConfig({
-      inherited: {
-        config: { providers: { gmail: { scopes: ["read"] }, slack: { token: "old" } } },
-        modelId: null,
-        proxyId: null,
-        version_pin: null,
-      },
-      flagConfig: { providers: { slack: { token: "new" } } },
-      hasExplicitSpec: false,
-    });
-    expect(merged.config).toEqual({
-      providers: {
-        gmail: { scopes: ["read"] },
-        slack: { token: "new" },
-      },
-    });
-  });
-});
-
 function stubPayload() {
   return {
-    config: {},
     modelId: null,
     proxyId: null,
     versionPin: null,

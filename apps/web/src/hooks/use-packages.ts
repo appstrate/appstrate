@@ -69,12 +69,7 @@ function normalizeAgentDetail(d: components["schemas"]["AgentDetail"]): AgentDet
     effective_timeout_seconds: d.effective_timeout_seconds,
     forked_from: d.forked_from,
     dependencies: d.dependencies,
-    config: {
-      ...d.config,
-      schema: asJSONSchemaObject(d.config.schema),
-      current: d.config.current,
-    },
-    input: d.input ? { ...d.input, schema: asJSONSchemaObject(d.input.schema ?? {}) } : undefined,
+    input: { ...d.input, schema: asJSONSchemaObject(d.input.schema) },
     output: d.output
       ? { ...d.output, schema: asJSONSchemaObject(d.output.schema ?? {}) }
       : undefined,
@@ -120,8 +115,8 @@ async function fetchPackageDetail(
   const path = splitPackageRef(packageId);
   if (type === "agent") {
     // `version` is only meaningful for agents (issue #770): a non-`draft`
-    // selector projects that published manifest's config/input/integrations/
-    // skills, matching what the run will execute. Omitted/`draft` → draft.
+    // selector projects that published manifest's input/integrations/skills,
+    // matching what the run will execute. Omitted/`draft` → draft.
     const { data } = await client.GET("/api/packages/agents/{scope}/{name}", {
       params: { path, ...(isVersioned(version) ? { query: { version } } : {}) },
     });

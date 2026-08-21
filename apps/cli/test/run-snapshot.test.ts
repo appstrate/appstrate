@@ -114,7 +114,6 @@ describe("mergeSnapshotIntoContext", () => {
     runId: "run-abc",
     input: { topic: "weekly" },
     memories: [],
-    config: { mode: "daily" },
   };
 
   it("is a no-op when the snapshot is empty", () => {
@@ -144,7 +143,6 @@ describe("mergeSnapshotIntoContext", () => {
     expect(out.checkpoint).toBe("2026-04-13");
     expect(out.runId).toBe(baseContext.runId);
     expect(out.input).toEqual(baseContext.input);
-    expect(out.config).toEqual(baseContext.config);
   });
 
   it("lets a present snapshot key override an existing context value", () => {

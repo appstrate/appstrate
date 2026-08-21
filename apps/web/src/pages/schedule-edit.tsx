@@ -8,6 +8,7 @@ import {
   useUpdateSchedule,
   useDeleteSchedule,
   useScheduleFormDeps,
+  useScheduleFormDepsError,
 } from "../hooks/use-schedules";
 import { ScheduleForm } from "../components/schedule-form";
 import { PageHeader } from "../components/page-header";
@@ -21,12 +22,21 @@ export function ScheduleEditPage() {
 
   const { data: schedule, isLoading, error } = useScheduleById(id);
   const deps = useScheduleFormDeps(schedule?.packageId);
+  const depsError = useScheduleFormDepsError(schedule?.packageId);
   const updateSchedule = useUpdateSchedule();
   const deleteSchedule = useDeleteSchedule();
 
   if (!isAdmin) return null;
   if (isLoading) return <LoadingState />;
   if (error || !schedule) return <ErrorState message={error?.message} />;
+  // The agent detail is a SEPARATE query from the schedule: mounting the form
+  // before it lands would seed the input state from empty settings, keeping a
+  // since-locked field the user can no longer remove (400 `locked_input_field`
+  // on every save). `key={schedule.id}` gives no remount to repair it. When
+  // that query FAILS (deleted agent, revoked permission) the detail never
+  // lands, so waiting is waiting forever — say so instead.
+  if (depsError) return <ErrorState message={depsError.message} />;
+  if (!deps) return <LoadingState />;
 
   const scheduleName = schedule.name || t("schedule.unnamed");
 
@@ -52,7 +62,6 @@ export function ScheduleEditPage() {
           timezone: schedule.timezone ?? "UTC",
           enabled: schedule.enabled ?? true,
           input: schedule.input ?? {},
-          config_override: schedule.config_override ?? null,
           model_id_override: schedule.model_id_override ?? null,
           generation_config_override: schedule.generation_config_override ?? null,
           proxy_id_override: schedule.proxy_id_override ?? null,
@@ -70,16 +79,14 @@ export function ScheduleEditPage() {
           user_id: schedule.userId ?? undefined,
           end_user_id: schedule.endUserId ?? undefined,
         }}
-        inputSchema={deps?.inputSchema}
-        configSchema={deps?.configSchema}
-        persistedConfig={deps?.persistedConfig ?? {}}
-        persistedModelId={deps?.persistedModelId ?? null}
-        persistedGenerationConfig={deps?.persistedGenerationConfig ?? null}
-        persistedProxyId={deps?.persistedProxyId ?? null}
-        persistedVersion={deps?.persistedVersion ?? null}
+        inputWrapper={deps.inputWrapper}
+        persistedModelId={deps.persistedModelId}
+        persistedGenerationConfig={deps.persistedGenerationConfig}
+        persistedProxyId={deps.persistedProxyId}
+        persistedVersion={deps.persistedVersion}
         packageId={schedule.packageId}
-        agentIntegrations={deps?.agentIntegrations ?? []}
-        blockedMessage={deps?.hasFileInputs ? t("schedule.fileInputBlocked") : undefined}
+        agentIntegrations={deps.agentIntegrations}
+        blockedMessage={deps.hasFileInputs ? t("schedule.fileInputBlocked") : undefined}
         isPending={updateSchedule.isPending}
         onSubmit={(data) => {
           updateSchedule.mutate(

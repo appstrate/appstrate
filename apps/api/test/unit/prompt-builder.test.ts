@@ -14,7 +14,6 @@ import { defaultTestAgentResources } from "../helpers/run-resources.ts";
 
 interface TestSchemas {
   input?: import("@appstrate/core/form").JSONSchemaObject;
-  config?: import("@appstrate/core/form").JSONSchemaObject;
   output?: import("@appstrate/core/form").JSONSchemaObject;
 }
 
@@ -43,7 +42,6 @@ function makeTestBundle(opts: {
     ...(opts.schemaVersion ? { schema_version: opts.schemaVersion } : {}),
     ...(opts.timeout !== undefined ? { timeout: opts.timeout } : {}),
     ...(opts.schemas?.input ? { input: { schema: opts.schemas.input } } : {}),
-    ...(opts.schemas?.config ? { config: { schema: opts.schemas.config } } : {}),
     ...(opts.schemas?.output ? { output: { schema: opts.schemas.output } } : {}),
   };
   const rootFiles = new Map<string, Uint8Array>();
@@ -92,7 +90,6 @@ interface PromptContext {
   rawPrompt: string;
   schemaVersion?: string;
   runId?: string;
-  config: Record<string, unknown>;
   previousCheckpoint: Record<string, unknown> | null;
   runToken?: string;
   input: Record<string, unknown>;
@@ -130,7 +127,6 @@ function splitLegacy(ctx: PromptContext): {
       createdAt: m.createdAt ? new Date(m.createdAt).getTime() : 0,
     })),
     ...(ctx.previousCheckpoint !== null ? { checkpoint: ctx.previousCheckpoint } : {}),
-    config: ctx.config,
   };
   const bundle = makeTestBundle({
     rawPrompt: ctx.rawPrompt,
@@ -165,7 +161,6 @@ function buildEnrichedPrompt(ctx: PromptContext): Promise<string> {
 function baseContext(overrides?: Partial<PromptContext>): PromptContext {
   return {
     rawPrompt: "Do the task.",
-    config: {},
     previousCheckpoint: null,
     input: {},
     schemas: {},
@@ -479,37 +474,8 @@ describe("buildEnrichedPrompt — user input", () => {
 // ─── Configuration ──────────────────────────────────────────
 
 describe("buildEnrichedPrompt — configuration", () => {
-  it("includes config values", async () => {
-    const ctx = baseContext({
-      config: { language: "fr", maxResults: 10 },
-    });
-    const prompt = await buildEnrichedPrompt(ctx);
-    expect(prompt).toContain("## Configuration");
-    expect(prompt).toContain("language");
-    expect(prompt).toContain("fr");
-    expect(prompt).toContain("maxResults");
-  });
-
-  it("includes schema descriptions for config fields", async () => {
-    const ctx = baseContext({
-      config: { language: "fr" },
-      schemas: {
-        config: {
-          type: "object",
-          properties: {
-            language: { type: "string", description: "Output language" },
-          },
-          required: ["language"],
-        },
-      },
-    });
-    const prompt = await buildEnrichedPrompt(ctx);
-    expect(prompt).toContain("Output language");
-    expect(prompt).toContain("required");
-  });
-
-  it("omits configuration section when no config", async () => {
-    const ctx = baseContext({ config: {} });
+  it("never renders a Configuration section (config folded into input)", async () => {
+    const ctx = baseContext({ input: { language: "fr", maxResults: 10 } });
     const prompt = await buildEnrichedPrompt(ctx);
     expect(prompt).not.toContain("## Configuration");
   });

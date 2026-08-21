@@ -174,7 +174,6 @@ function formatTimestamp(value: string | Date | null | undefined): string | null
 export function RunInfoTab({ run, turns }: RunInfoTabProps) {
   const { t } = useTranslation(["agents", "settings"]);
   const input = run.input as Record<string, unknown> | null;
-  const config = run.config as Record<string, unknown> | null;
   const usage = run.token_usage as TokenUsage | null;
   const metadata = run.metadata as Record<string, unknown> | null;
   const connectionsUsed = run.connections_used ?? null;
@@ -220,12 +219,6 @@ export function RunInfoTab({ run, turns }: RunInfoTabProps) {
       {input && Object.keys(input).length > 0 && (
         <SectionCard title={t("run.infoInput")}>
           <JsonView data={input} />
-        </SectionCard>
-      )}
-
-      {config && Object.keys(config).length > 0 && (
-        <SectionCard title={t("run.infoConfig")}>
-          <JsonView data={config} />
         </SectionCard>
       )}
 

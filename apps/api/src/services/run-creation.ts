@@ -49,7 +49,6 @@ interface CreateRunInput {
   actor: Actor | null;
   agent: LoadedPackage;
   input?: Record<string, unknown> | null;
-  config: Record<string, unknown>;
   apiKeyId?: string;
   overrideVersionLabel?: string;
   /**
@@ -95,7 +94,6 @@ export async function createRun(input: CreateRunInput): Promise<CreateRunResult>
     applicationId,
     actor,
     input: runInput,
-    config,
     apiKeyId,
     contextSnapshot,
     overrideVersionLabel,
@@ -103,7 +101,7 @@ export async function createRun(input: CreateRunInput): Promise<CreateRunResult>
 
   // Readiness (`validateAgentReadiness`) is NOT re-run here. The single
   // caller — `POST /api/runs/remote` — already validates the
-  // (agent, config, applicationId, actor) tuple before it gets here: the
+  // (agent, input, applicationId, actor) tuple before it gets here: the
   // `registry` branch calls `validateAgentReadiness` directly, the `inline`
   // branch runs it inside `runInlinePreflight`. Neither passes
   // `runOverrides`, and neither can: `CreateRemoteRunBodySchema` is
@@ -248,7 +246,6 @@ export async function createRun(input: CreateRunInput): Promise<CreateRunResult>
       apiKeyId,
       agentScope: agentDenorm.scope,
       agentName: agentDenorm.name,
-      config,
       runOrigin: "remote",
       sinkSecretEncrypted: encrypt(credentials.secret),
       sinkExpiresAt: new Date(credentials.expiresAt),

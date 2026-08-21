@@ -4,9 +4,9 @@
 /**
  * Execution Context — the runtime state passed to an AFPS runner at boot.
  *
- * Contains everything that varies between runs (input, resolved config,
- * prior memories, pinned slots, previous checkpoint, run history). MUST
- * NOT contain authentication material or infrastructure wiring: the HMAC
+ * Contains everything that varies between runs (input, prior memories,
+ * pinned slots, previous checkpoint, run history). MUST NOT contain
+ * authentication material or infrastructure wiring: the HMAC
  * secret used to sign events, sink URLs, API keys, and OAuth tokens all
  * travel through separate channels (env variables, secret files) so that
  * exporting a `context.json` for debug or replay never leaks a usable
@@ -51,12 +51,6 @@ export const executionContextSchema = z.object({
    */
   pinnedSlots: z.record(z.string(), z.unknown()).optional(),
   history: z.array(historyEntrySchema).optional(),
-
-  /**
-   * Agent-config values resolved for this run. Surfaced to 1.1+ templates
-   * as `{{config.*}}`. Absent when the agent declares no config schema.
-   */
-  config: z.record(z.string(), z.unknown()).optional(),
 
   traceparent: z.string().optional(), // W3C Trace Context
 

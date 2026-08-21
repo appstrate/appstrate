@@ -92,8 +92,7 @@ import {
 } from "./run/mode.ts";
 import { runRemote } from "./run/remote-runner.ts";
 import { resolveSignalPolicy, readStdinIsTty } from "./run/signal-policy.ts";
-import { validateConfig } from "@appstrate/core/schema-validation";
-import type { JSONSchemaObject } from "@appstrate/core/form";
+import { authorDefaults, type JSONSchemaObject } from "@appstrate/core/form";
 import { onShutdown, shutdownSignal, shutdownExitCode } from "../lib/shutdown.ts";
 
 export interface RunCommandOptions {
@@ -101,7 +100,6 @@ export interface RunCommandOptions {
   bundle: string;
   input?: string;
   inputFile?: string;
-  config?: string;
   snapshot?: string;
   integrations?: string;
   credsFile?: string;
@@ -134,8 +132,8 @@ export interface RunCommandOptions {
    */
   proxy?: string;
   /**
-   * When true, ignore the per-app `run-config` (config / model / proxy
-   * / versionPin) and rely only on flags + env vars + defaults. Useful
+   * When true, ignore the per-app `run-config` (model / proxy /
+   * versionPin) and rely only on flags + env vars + defaults. Useful
    * for deterministic CI runs where the application's persisted state
    * must not drift the run.
    */
@@ -280,29 +278,22 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
   const integrationResolver = buildIntegrationResolver(mode, effectiveResolverInputs);
 
   // ─── 5. Parse input ────────────────────────────────────────────────
-  // The merged config (deep-merge of `--config` over the inherited
-  // per-app value) is already on `inheritedConfig.config` — see
-  // `mergeRunConfig` in inherit-config.ts for the cascade rules.
-  const input = await resolveInput(opts);
-  const config = inheritedConfig.config;
-
-  // Validate the merged config against the bundle's manifest schema
-  // BEFORE launching PiRunner. The platform performs the same gate
-  // server-side via @appstrate/core/schema-validation; running the
-  // check here keeps a CLI run from succeeding where the dashboard
-  // would have rejected the same `(config, schema)` pair.
-  const configSchema = readBundleConfigSchema(bundle);
-  if (configSchema) {
-    const result = validateConfig(config, configSchema);
-    if (!result.valid) {
-      const summary = result.errors.map((e) => `  - ${e.field}: ${e.message}`).join("\n");
-      exitWithError(
-        `Resolved config does not match the agent's manifest schema:\n${summary}\n\n` +
-          `Fix the persisted per-app config in the dashboard, or pass a\n` +
-          `corrected --config <json> override.`,
-      );
-    }
-  }
+  // Layers 1-2 of the platform's input resolution, applied here because a
+  // locally executed bundle never reaches the server's resolver: author
+  // defaults (`default` in the manifest's `input` schema) always, plus the
+  // per-application stored values and locks when the target is a REMOTE
+  // package — that is what keeps `appstrate run @scope/agent` executing the
+  // same agent with the same parameters the dashboard would. A bundle read
+  // off disk has no application row behind it, so it stays
+  // author-defaults-only; there is no inheritance to invent for it.
+  //
+  // Layers 3-4 stay server-owned: the remote execution path sends the
+  // caller's input verbatim and lets the server run the whole chain, so
+  // `resolveEffectiveInput` has exactly one implementation.
+  const storedInput: StoredInputLayer | undefined = inheritedConfig.inherited
+    ? { values: inheritedConfig.inputValues, lockedFields: inheritedConfig.lockedInputFields }
+    : undefined;
+  const input = resolveLocalInput(bundle, await resolveInput(opts), storedInput);
 
   // ─── 6. ExecutionContext + prompt inputs ──────────────────────────
   // Derive the full platform prompt (tools / skills / schemas / output)
@@ -318,7 +309,6 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
     runId,
     input,
     memories: [],
-    config,
   };
   const snapshot = opts.snapshot ? await loadSnapshotFile(path.resolve(opts.snapshot)) : {};
   const context = mergeSnapshotIntoContext(baseContext, snapshot);
@@ -655,13 +645,10 @@ async function runCommandRemote(
   // branches are reserved for `mode === "local"` / `"none"`.
   const resolverInputs = (await buildResolverInputs("remote", opts)) as RemoteResolverInputs;
 
-  // Parse `--input` / `--input-file` and `--config` flag overrides. The
-  // platform performs the same validation server-side, so we send the
-  // flag values verbatim — no client-side schema check. (Local mode
-  // validates client-side because PiRunner runs in-process; here, the
-  // server has the authoritative manifest.)
+  // Parse `--input` / `--input-file`. The platform validates the input
+  // against the agent's manifest schema server-side, so we send the
+  // flag values verbatim — no client-side schema check.
   const input = await resolveInput(opts);
-  const config = opts.config ? safeParseJson(opts.config, "--config") : {};
 
   // Idempotency: a stable per-invocation key so trigger retries don't
   // create duplicate runs. `--run-id` is honoured so the user can safely
@@ -690,7 +677,6 @@ async function runCommandRemote(
       name: target.name,
       spec: target.spec,
       input,
-      config,
       ...(opts.model != null ? { modelId: opts.model } : {}),
       ...(opts.proxy != null ? { proxyId: opts.proxy } : {}),
       idempotencyKey,
@@ -1091,17 +1077,11 @@ async function maybeFetchRunConfig(
   resolverInputs: RemoteResolverInputs | LocalResolverInputs | null,
   opts: RunCommandOptions,
 ): Promise<InheritedRunConfig> {
-  // Parse `--config <json>` once so the flag override participates in
-  // the same cascade as inherited / env values. Path-mode and
-  // --no-inherit still benefit from the parsed flag — they just see a
-  // null `inherited`, so the merge collapses to "flagConfig or {}".
-  const flagConfig = opts.config ? safeParseJson(opts.config, "--config") : undefined;
   const noInherit =
     opts.noInherit || target.kind !== "id" || !resolverInputs || !("bearerToken" in resolverInputs);
   if (noInherit) {
     return mergeRunConfig({
       inherited: null,
-      flagConfig,
       flagModel: opts.model,
       flagProxy: opts.proxy,
       hasExplicitSpec: target.kind === "id" ? target.spec !== undefined : false,
@@ -1125,7 +1105,6 @@ async function maybeFetchRunConfig(
   });
   return mergeRunConfig({
     inherited: payload,
-    flagConfig,
     flagModel: opts.model,
     flagProxy: opts.proxy,
     hasExplicitSpec: idTarget.spec !== undefined,
@@ -1200,7 +1179,8 @@ async function resolveBundleSource(
   };
 }
 
-// Re-export error types for the CLI's formatError pipeline.
+// Re-exported for `apps/cli/test/run-resolver.test.ts`, which asserts against
+// the error class the resolver builders throw.
 export { ResolverConfigError };
 
 /**
@@ -1217,18 +1197,87 @@ export async function _buildResolverInputsForTesting(
 }
 
 /**
-/**
- * Pull the AFPS `config.schema` JSON Schema out of the bundle's
- * root package manifest. Returns `undefined` when the agent declares
- * no config schema (so validation is a no-op). Mirrors the unexported
- * helper in `@appstrate/afps-runtime/bundle/platform-prompt-inputs`.
+ * The per-application input layer a REMOTE package carries with it — what
+ * `application_packages.input_settings` stores, as delivered by the
+ * `run-config` endpoint. Absent for a bundle read off disk: that target has
+ * no application row behind it, so there is nothing to inherit.
  */
-function readBundleConfigSchema(
+interface StoredInputLayer {
+  /** Editor-set values — layer 2 of the platform's input resolution. */
+  values: Record<string, unknown>;
+  /** Input fields the editor froze. */
+  lockedFields: readonly string[];
+}
+
+/**
+ * Raised when the caller's `--input` / `--input-file` names a field the
+ * editor locked. Mirrors the server's `400 locked_input_field`.
+ */
+export class LockedInputFieldError extends Error {
+  constructor(public readonly field: string) {
+    super(
+      `Field '${field}' is locked on this agent and cannot be set at launch — remove it from the input.`,
+    );
+    this.name = "LockedInputFieldError";
+  }
+}
+
+/**
+ * Layer the agent's stored input underneath a local run's caller input.
+ *
+ * Precedence, lowest first — the same order and the same shallow
+ * per-property overlay the server applies in `resolveEffectiveInput`
+ * (`apps/api/src/services/input-resolution.ts`):
+ *
+ *   1. author defaults — `manifest.input.schema` `default` keywords, read
+ *      through the platform's own `authorDefaults` (`@appstrate/core/form`)
+ *   2. editor values — `stored.values`, present only for a package fetched
+ *      from a platform
+ *   3-4. schedule values / caller input — the server owns layer 3 entirely;
+ *      the CLI caller IS layer 4, and their value wins even when it is
+ *      `null` or `""`. Only an ABSENT key falls through.
+ *
+ * A property with no value at any layer stays absent, so the bundle's own
+ * `required` check sees the truth.
+ *
+ * A caller value naming a locked field is REFUSED, not dropped: silently
+ * ignoring it would run the agent with parameters other than the ones
+ * asked for. Be honest about what that buys — a developer running the CLI
+ * already holds the bundle and executes it in their own shell, so nothing
+ * here stops them from editing the manifest or the input afterwards. This
+ * is NOT a security boundary against the caller. It is parity: the same
+ * agent launched the same way yields the same parameters whether it runs
+ * on the platform or locally, and a lock the editor set is never silently
+ * ignored.
+ */
+export function resolveLocalInput(
+  bundle: import("@appstrate/afps-runtime/bundle").Bundle,
+  callerInput: Record<string, unknown>,
+  stored?: StoredInputLayer | undefined,
+): Record<string, unknown> {
+  const locked = new Set(stored?.lockedFields ?? []);
+  for (const key of Object.keys(callerInput)) {
+    if (locked.has(key)) throw new LockedInputFieldError(key);
+  }
+  const schema = readBundleInputSchema(bundle);
+  return {
+    ...(schema ? authorDefaults(schema) : {}),
+    ...(stored?.values ?? {}),
+    ...callerInput,
+  };
+}
+
+/**
+ * Pull the AFPS `input.schema` JSON Schema out of the bundle's root
+ * package manifest. Returns `undefined` when the agent declares no input
+ * schema (so default resolution is a no-op).
+ */
+function readBundleInputSchema(
   bundle: import("@appstrate/afps-runtime/bundle").Bundle,
 ): JSONSchemaObject | undefined {
   const rootPkg = bundle.packages.get(bundle.root);
   const manifest = rootPkg?.manifest as Record<string, unknown> | undefined;
-  const section = manifest?.config;
+  const section = manifest?.input;
   if (!section || typeof section !== "object" || Array.isArray(section)) return undefined;
   const schema = (section as Record<string, unknown>).schema;
   if (!schema || typeof schema !== "object" || Array.isArray(schema)) return undefined;

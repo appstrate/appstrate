@@ -547,7 +547,9 @@ appstrate run @scope/triage@beta
 appstrate run ./out/triage-1.2.0.afps-bundle --integrations local --creds-file ./creds.json
 ```
 
-Run-config inheritance (model, proxy, agent config, version pin) is fetched from `/api/applications/{applicationId}/packages/{scope}/{name}/run-config` and merged with flag/env overrides. Use `--no-inherit` to opt out (deterministic CI).
+Run-config inheritance (model, proxy, version pin) is fetched from `/api/applications/{applicationId}/packages/{scope}/{name}/run-config` and merged with flag/env overrides. Use `--no-inherit` to opt out (deterministic CI).
+
+Agent parameters are supplied with `--input <json>` / `--input-file <path>`. On a **local** run the agent's own `input` schema `default`s are resolved underneath whatever you pass, so a local run gets the same parameters the platform would; a value you supply always wins, including an explicit `null`. Remote runs send your input verbatim — the instance resolves defaults and per-application settings server-side.
 
 **Remote runs and process lifetime**
 

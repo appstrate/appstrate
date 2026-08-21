@@ -699,7 +699,6 @@ const context: ExecutionContext = {
   runId: AGENT_RUN_ID,
   input: env.agentInput,
   memories: [],
-  config: {},
   // When the platform forwarded a budget, the runner enforces it itself
   // (watchdog from the run-loop start, boot excluded) and finalizes a
   // first-class `timeout` terminal — instead of waiting for the platform's

@@ -3,7 +3,7 @@
 import { describe, it, expect } from "bun:test";
 import type { JSONSchemaObject } from "@appstrate/core/form";
 import { validateManifest } from "@appstrate/core/validation";
-import { validateConfig, validateInput, validateOutput } from "../../src/services/schema.ts";
+import { validateAgainstSchema, validateInput, validateOutput } from "../../src/services/schema.ts";
 
 // --- Fixtures ---
 
@@ -23,16 +23,6 @@ const VALID_MANIFEST = {
   // Declares an output schema below, so the `output` runtime tool must be
   // enabled (enforced by agentManifestSchema's superRefine).
   runtime_tools: ["output"],
-  config: {
-    schema: {
-      type: "object",
-      properties: {
-        max_emails: { type: "number", default: 20, description: "Max emails" },
-        language: { type: "string", default: "fr", enum: ["fr", "en"], description: "Language" },
-      },
-      required: [],
-    },
-  },
   input: {
     schema: {
       type: "object",
@@ -64,7 +54,7 @@ const VALID_MANIFEST = {
   timeout: 300,
 };
 
-const CONFIG_SCHEMA: JSONSchemaObject = {
+const VALUES_SCHEMA: JSONSchemaObject = {
   type: "object",
   properties: {
     max_emails: { type: "number", default: 20, description: "Max emails" },
@@ -121,10 +111,10 @@ describe("validateManifest", () => {
     expect(result.errors).toHaveLength(0);
   });
 
-  it("accepts manifest with empty config schema", () => {
+  it("accepts manifest with an empty input schema", () => {
     const manifest = {
       ...VALID_MANIFEST,
-      config: { schema: { type: "object", properties: {} } },
+      input: { schema: { type: "object", properties: {} } },
     };
     const result = validateManifest(manifest);
     expect(result.valid).toBe(true);
@@ -157,7 +147,7 @@ describe("validateManifest", () => {
   it("rejects old-format schema (flat record without type: object)", () => {
     const oldFormat = {
       ...VALID_MANIFEST,
-      config: {
+      input: {
         schema: {
           max_emails: { type: "number", default: 20, required: false },
           clickup_list_id: { type: "string", required: true },
@@ -172,7 +162,7 @@ describe("validateManifest", () => {
   it("rejects invalid field type in schema properties", () => {
     const bad = {
       ...VALID_MANIFEST,
-      config: {
+      input: {
         schema: {
           type: "object",
           properties: {
@@ -208,7 +198,7 @@ describe("validateManifest", () => {
   it("accepts required as an array of strings on schema level", () => {
     const manifest = {
       ...VALID_MANIFEST,
-      config: {
+      input: {
         schema: {
           type: "object",
           properties: {
@@ -225,20 +215,20 @@ describe("validateManifest", () => {
 });
 
 // =====================================================
-// validateConfig
+// validateAgainstSchema
 // =====================================================
 
-describe("validateConfig", () => {
-  it("valid config passes", () => {
+describe("validateAgainstSchema", () => {
+  it("valid values pass", () => {
     const data = { max_emails: 20, clickup_list_id: "abc123", language: "fr" };
-    const result = validateConfig(data, CONFIG_SCHEMA);
+    const result = validateAgainstSchema(data, VALUES_SCHEMA);
     expect(result.valid).toBe(true);
     expect(result.errors).toHaveLength(0);
   });
 
   it("missing required field fails", () => {
     const data = { max_emails: 20, language: "fr" }; // missing clickup_list_id
-    const result = validateConfig(data, CONFIG_SCHEMA);
+    const result = validateAgainstSchema(data, VALUES_SCHEMA);
     expect(result.valid).toBe(false);
     expect(result.errors.length).toBeGreaterThan(0);
     expect(result.errors.some((e) => e.field === "clickup_list_id")).toBe(true);
@@ -246,39 +236,39 @@ describe("validateConfig", () => {
 
   it("type coercion: string to number", () => {
     const data = { max_emails: "50", clickup_list_id: "abc123", language: "fr" };
-    const result = validateConfig(data, CONFIG_SCHEMA);
+    const result = validateAgainstSchema(data, VALUES_SCHEMA);
     expect(result.valid).toBe(true);
   });
 
   it("enum violation fails", () => {
     const data = { clickup_list_id: "abc", language: "de" }; // "de" not in enum
-    const result = validateConfig(data, CONFIG_SCHEMA);
+    const result = validateAgainstSchema(data, VALUES_SCHEMA);
     expect(result.valid).toBe(false);
     expect(result.errors.some((e) => e.field === "language")).toBe(true);
   });
 
   it("empty schema always passes", () => {
     const emptySchema: JSONSchemaObject = { type: "object", properties: {} };
-    const result = validateConfig({ anything: "goes" }, emptySchema);
+    const result = validateAgainstSchema({ anything: "goes" }, emptySchema);
     expect(result.valid).toBe(true);
   });
 
   it("extra fields are accepted (no additionalProperties restriction by default)", () => {
     const data = { clickup_list_id: "abc123", extra_field: "hello" };
-    const result = validateConfig(data, CONFIG_SCHEMA);
+    const result = validateAgainstSchema(data, VALUES_SCHEMA);
     expect(result.valid).toBe(true);
   });
 
   it("wrong type without coercion possibility fails", () => {
     const data = { clickup_list_id: "abc", max_emails: "not-a-number" };
-    const result = validateConfig(data, CONFIG_SCHEMA);
+    const result = validateAgainstSchema(data, VALUES_SCHEMA);
     expect(result.valid).toBe(false);
     expect(result.errors.some((e) => e.field === "max_emails")).toBe(true);
   });
 
   it("empty string on required field fails (aligned with frontend)", () => {
     const data = { clickup_list_id: "", max_emails: 20 };
-    const result = validateConfig(data, CONFIG_SCHEMA);
+    const result = validateAgainstSchema(data, VALUES_SCHEMA);
     expect(result.valid).toBe(false);
     expect(result.errors.some((e) => e.field === "clickup_list_id")).toBe(true);
   });
@@ -293,7 +283,7 @@ describe("validateConfig", () => {
       required: ["name"],
     };
     const data = { name: "test", notes: "" };
-    const result = validateConfig(data, schema);
+    const result = validateAgainstSchema(data, schema);
     // notes is not in required, so "" is kept and valid
     expect(result.valid).toBe(true);
   });
@@ -306,7 +296,7 @@ describe("validateConfig", () => {
         age: { type: "number" },
       },
     };
-    const result = validateConfig({}, schema);
+    const result = validateAgainstSchema({}, schema);
     expect(result.valid).toBe(true);
   });
 });
@@ -370,10 +360,10 @@ describe("validateInput", () => {
 });
 
 // =====================================================
-// validateConfig (with custom keywords)
+// validateAgainstSchema (with custom keywords)
 // =====================================================
 
-describe("validateConfig with unknown keywords", () => {
+describe("validateAgainstSchema with unknown keywords", () => {
   it("schema with unknown keyword does not throw", () => {
     const schema = {
       type: "object",
@@ -382,8 +372,8 @@ describe("validateConfig with unknown keywords", () => {
       },
       required: ["api_key"],
     } as unknown as JSONSchemaObject;
-    expect(() => validateConfig({ api_key: "sk-123" }, schema)).not.toThrow();
-    const result = validateConfig({ api_key: "sk-123" }, schema);
+    expect(() => validateAgainstSchema({ api_key: "sk-123" }, schema)).not.toThrow();
+    const result = validateAgainstSchema({ api_key: "sk-123" }, schema);
     expect(result.valid).toBe(true);
   });
 });

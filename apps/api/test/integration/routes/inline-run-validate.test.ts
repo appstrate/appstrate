@@ -111,25 +111,6 @@ describe("POST /api/runs/inline/validate", () => {
     expect((body.errors ?? []).some((e) => e.code === "invalid_inline_manifest")).toBe(true);
   });
 
-  it("returns 400 when config fails the manifest's config schema", async () => {
-    const manifest = validManifest() as Record<string, unknown>;
-    manifest.config = {
-      schema: {
-        type: "object",
-        properties: { maxBullets: { type: "integer", minimum: 1 } },
-        required: ["maxBullets"],
-      },
-    };
-    const res = await post({
-      manifest,
-      prompt: "hi",
-      config: {},
-    });
-    expect(res.status).toBe(400);
-    const body = (await res.json()) as { detail?: string };
-    expect(body.detail ?? "").toMatch(/config/i);
-  });
-
   it("returns 400 when input fails the manifest's input schema", async () => {
     const manifest = validManifest() as Record<string, unknown>;
     manifest.input = {
@@ -150,17 +131,10 @@ describe("POST /api/runs/inline/validate", () => {
   });
 
   it("accumulates errors from multiple stages in one response", async () => {
-    // Empty prompt + bad config + bad input — three independent stages must
-    // all contribute to the errors[] array. This is the entire purpose of
-    // accumulate mode: one round-trip, every problem listed.
+    // Empty prompt + bad input — two independent stages must both contribute
+    // to the errors[] array. This is the entire purpose of accumulate mode:
+    // one round-trip, every problem listed.
     const manifest = validManifest() as Record<string, unknown>;
-    manifest.config = {
-      schema: {
-        type: "object",
-        properties: { maxBullets: { type: "integer", minimum: 1 } },
-        required: ["maxBullets"],
-      },
-    };
     manifest.input = {
       schema: {
         type: "object",
@@ -172,7 +146,6 @@ describe("POST /api/runs/inline/validate", () => {
     const res = await post({
       manifest,
       prompt: "",
-      config: {},
       input: { text: "no" },
     });
     expect(res.status).toBe(400);
@@ -185,9 +158,8 @@ describe("POST /api/runs/inline/validate", () => {
     expect(Array.isArray(body.errors)).toBe(true);
 
     const fields = (body.errors ?? []).map((e) => e.field);
-    // One entry per stage at minimum: prompt, config, input.
+    // One entry per stage at minimum: prompt, input.
     expect(fields.some((f) => f.startsWith("prompt"))).toBe(true);
-    expect(fields.some((f) => f.startsWith("config"))).toBe(true);
     expect(fields.some((f) => f.startsWith("input"))).toBe(true);
   });
 
@@ -222,14 +194,12 @@ describe("POST /api/runs/inline/validate", () => {
     expect(messages).toMatch(/skills.*too many|dependencies\.skills/i);
   });
 
-  it("does not duplicate config errors across preflight stages", async () => {
-    // Regression guard: stage 3 (AJV against manifest.config.schema) and
-    // stage 4 (agent-readiness) used to both validate config in accumulate
-    // mode, producing two entries for the same field under different codes.
-    // Readiness now receives { skip: { config: true } }, so a single config
-    // violation must appear exactly once in errors[].
+  it("does not duplicate input errors across preflight stages", async () => {
+    // Regression guard: input is validated by exactly ONE stage (AJV against
+    // `manifest.input.schema`). Readiness has no notion of run input, so a
+    // single violation must appear exactly once in errors[].
     const manifest = validManifest() as Record<string, unknown>;
-    manifest.config = {
+    manifest.input = {
       schema: {
         type: "object",
         properties: { maxBullets: { type: "integer", minimum: 1 } },
@@ -237,16 +207,15 @@ describe("POST /api/runs/inline/validate", () => {
       },
     };
 
-    const res = await post({ manifest, prompt: "hi", config: {} });
+    const res = await post({ manifest, prompt: "hi", input: {} });
     expect(res.status).toBe(400);
 
     const body = (await res.json()) as {
       errors?: { field: string; code: string; message: string }[];
     };
-    const configEntries = (body.errors ?? []).filter((e) => e.field.startsWith("config"));
-    expect(configEntries.length).toBe(1);
-    // And the remaining code must be the stage-3 one (`invalid_config`).
-    expect(configEntries[0]!.code).toBe("invalid_config");
+    const inputEntries = (body.errors ?? []).filter((e) => e.field.startsWith("input"));
+    expect(inputEntries.length).toBe(1);
+    expect(inputEntries[0]!.code).toBe("invalid_input");
   });
 
   it("does not duplicate prompt errors across preflight stages", async () => {

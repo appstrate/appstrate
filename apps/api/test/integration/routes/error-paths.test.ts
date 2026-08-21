@@ -94,8 +94,8 @@ describe("404 — non-existent resources", () => {
     ctx = await createTestContext({ orgSlug: "testorg" });
   });
 
-  it("GET /api/agents/@testorg/nonexistent/config returns 404", async () => {
-    const res = await app.request("/api/agents/@testorg/nonexistent/config", {
+  it("GET /api/agents/@testorg/nonexistent/input-settings returns 404", async () => {
+    const res = await app.request("/api/agents/@testorg/nonexistent/input-settings", {
       headers: authHeaders(ctx),
     });
     expect(res.status).toBe(404);
@@ -208,8 +208,8 @@ describe("403 — cross-org access prevention", () => {
   it("user cannot modify another org's packages", async () => {
     await seedPackage({ id: "@orgb/their-agent", orgId: ctxB.orgId });
 
-    // User A tries to update org B's agent config
-    const res = await app.request("/api/agents/@orgb/their-agent/config", {
+    // User A tries to update org B's agent input settings
+    const res = await app.request("/api/agents/@orgb/their-agent/input-settings", {
       method: "PUT",
       headers: {
         ...authHeaders(ctxA),

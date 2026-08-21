@@ -15,11 +15,13 @@ import {
   scopeFromActor,
   type PersistenceScope,
 } from "../services/state/package-persistence.ts";
-import { validateConfig } from "../services/schema.ts";
+import { validateAgainstSchema } from "../services/schema.ts";
+import { assertLockedFieldsSatisfiable } from "../services/input-resolution.ts";
+import { dropLockedFieldsFromSchedules } from "../services/scheduler.ts";
 import {
   listAccessiblePackages,
   updateInstalledPackage,
-  getPackageConfig,
+  getInstalledPackageSettings,
   hasPackageAccess,
 } from "../services/application-packages.ts";
 import { getPackage } from "../services/package-catalog.ts";
@@ -31,9 +33,9 @@ import { getActor } from "../lib/actor.ts";
 import { parseScopedName } from "@appstrate/core/naming";
 import { computeIntegrity } from "@appstrate/core/integrity";
 import { z } from "zod";
-import { ApiError, forbidden, invalidRequest, notFound } from "../lib/errors.ts";
+import { ApiError, forbidden, invalidRequest, notFound, validationFailed } from "../lib/errors.ts";
 import { readJsonBody } from "../lib/request-body.ts";
-import { asJSONSchemaObject, mergeWithDefaults } from "@appstrate/core/form";
+import { asJSONSchemaObject } from "@appstrate/core/form";
 import { getAppScope } from "../lib/scope.ts";
 import { resolveAgentConnectionReadiness } from "../services/integration-pins-service.ts";
 import { assertExplicitModelExists, resolveModel } from "../services/org-models.ts";
@@ -58,6 +60,26 @@ export const modelIdSchema = z.object({
   modelId: z.string().nullable(),
   generation: modelGenerationSettingsSchema.nullable().optional(),
 });
+
+/**
+ * Body of `PUT /api/agents/{scope}/{name}/input-settings` — the agent's stored
+ * input settings for this application.
+ *
+ * `values` are layer 2 of the input resolution (editor defaults, partial by
+ * design); `locked_fields` names the input fields no caller may set at
+ * launch. Both are full replacements, not patches: the editor form owns the
+ * whole document, so an omitted key means "cleared", never "unchanged".
+ *
+ * Both members are therefore MANDATORY and the object is `.strict()`: a body
+ * that omits one, or that carries an unknown key, is a 400 rather than a
+ * silent erasure of the stored values and locks.
+ */
+export const agentInputSettingsSchema = z
+  .object({
+    values: z.record(z.string(), z.unknown()),
+    locked_fields: z.array(z.string().min(1)),
+  })
+  .strict();
 
 /**
  * Parse the `actor_type` / `actor_id` query-param pair shared by the
@@ -185,38 +207,82 @@ export function createAgentsRouter() {
     return c.json(listResponse(agentList));
   });
 
-  // PUT /api/agents/:scope/:name/config — save agent configuration (admin-only)
+  // PUT /api/agents/:scope/:name/input-settings — save the agent's stored
+  // input defaults + field locks (admin-only).
   router.put(
-    `/${SCOPED_PACKAGE_ROUTE}/config`,
+    `/${SCOPED_PACKAGE_ROUTE}/input-settings`,
     requireAgent(),
     requirePermission("agents", "configure"),
     async (c) => {
       const agent = c.get("package");
 
-      const body = await readJsonBody(c, z.record(z.string(), z.unknown()));
-      const schema = agent.manifest.config?.schema ?? { type: "object" as const, properties: {} };
+      const body = await readJsonBody(c, agentInputSettingsSchema);
+      const schema = asJSONSchemaObject(
+        agent.manifest.input?.schema ?? { type: "object" as const, properties: {} },
+      );
 
-      // Validate config with AJV
-      const validation = validateConfig(body, asJSONSchemaObject(schema));
+      // `values` is the WHOLE stored document, and the editor form that owns it
+      // only ever renders the properties `input.schema` declares. A key naming
+      // no declared property is therefore invisible in the UI and un-removable:
+      // the settings form re-submits what it was handed, and the launch form
+      // seeds it as caller input on every run. Prune it to the declared keys.
+      //
+      // This is NOT the "silent drop of a caller value" `assertFieldsUnlocked`
+      // refuses: that rule protects a value a CALLER sent for a field that
+      // exists. Here the editor is replacing the entire stored document, and a
+      // key that matches no declared property has nothing to resolve into —
+      // keeping it only poisons every launch.
+      //
+      // Pruning BEFORE validation is also what keeps an
+      // `additionalProperties: false` schema saveable: an orphan key left in
+      // place would 400 here forever, locking the editor out of its own row.
+      const declaredProperties = new Set(Object.keys(schema.properties ?? {}));
+      const values = Object.fromEntries(
+        Object.entries(body.values).filter(([key]) => declaredProperties.has(key)),
+      );
+
+      // Stored values are a partial layer: a required field the editor leaves
+      // empty is legitimately asked at launch. Validate types/formats against
+      // the input schema with `required` dropped, so a wrong-typed default is
+      // still rejected here rather than at every run.
+      const validation = validateAgainstSchema(values, { ...schema, required: [] });
       if (!validation.valid) {
-        throw invalidRequest("Invalid configuration");
+        throw validationFailed(
+          validation.errors.map((e) => ({
+            field: e.field ? `values.${e.field}` : "values",
+            code: "invalid_input",
+            title: "Invalid Input",
+            message: e.message,
+          })),
+        );
       }
 
-      const config = mergeWithDefaults(asJSONSchemaObject(schema), body);
+      // A required field locked with no value behind it is invisible at launch
+      // AND unsatisfiable — every run would fail and nobody could see why.
+      assertLockedFieldsSatisfiable(schema, body.locked_fields, values);
 
       const scope = getAppScope(c);
-      await updateInstalledPackage(scope, agent.id, { config });
-
-      await recordAuditFromContext(c, {
-        action: "agent.config_updated",
-        resourceType: "agent",
-        resourceId: agent.id,
+      await updateInstalledPackage(scope, agent.id, {
+        inputSettings: { values, locked: body.locked_fields },
       });
 
-      // 200 + the bare persisted configuration document (merged with schema
-      // defaults) — the resource itself, no `validation` echo (#657):
-      // validation failures are 400s, a 200 needs no valid:true scrap.
-      return c.json(config);
+      // Reconcile the schedules the new lock set just invalidated. A schedule
+      // that froze a now-locked field would otherwise fail `locked_input_field`
+      // on every tick forever — the schedule is not disabled by a failed fire.
+      // Its frozen value is dropped so the field re-resolves from the editor
+      // value, which is what a fresh launch does.
+      await dropLockedFieldsFromSchedules(scope, agent.id, body.locked_fields);
+
+      await recordAuditFromContext(c, {
+        action: "agent.input_settings_updated",
+        resourceType: "agent",
+        resourceId: agent.id,
+        after: { locked: body.locked_fields },
+      });
+
+      // 200 + the bare persisted resource (#657): validation failures are
+      // 400s, so a 200 needs no valid:true scrap.
+      return c.json({ values, locked_fields: body.locked_fields });
     },
   );
 
@@ -224,7 +290,7 @@ export function createAgentsRouter() {
   router.get(`/${SCOPED_PACKAGE_ROUTE}/proxy`, requireAgent(), async (c) => {
     const agent = c.get("package");
     const applicationId = c.get("applicationId");
-    const { proxyId } = await getPackageConfig(applicationId, agent.id);
+    const { proxyId } = await getInstalledPackageSettings(applicationId, agent.id);
 
     return c.json({ proxyId, resolved: proxyId !== "none" });
   });
@@ -271,8 +337,8 @@ export function createAgentsRouter() {
       });
 
       // Return the bare proxy-setting resource — same shape and read path
-      // (`getPackageConfig`) as GET /agents/:scope/:name/proxy (#657).
-      const { proxyId } = await getPackageConfig(scope.applicationId, agent.id);
+      // (`getInstalledPackageSettings`) as GET /agents/:scope/:name/proxy (#657).
+      const { proxyId } = await getInstalledPackageSettings(scope.applicationId, agent.id);
       return c.json({ proxyId, resolved: proxyId !== "none" });
     },
   );
@@ -281,7 +347,10 @@ export function createAgentsRouter() {
   router.get(`/${SCOPED_PACKAGE_ROUTE}/model`, requireAgent(), async (c) => {
     const agent = c.get("package");
     const applicationId = c.get("applicationId");
-    const { modelId, generationConfig } = await getPackageConfig(applicationId, agent.id);
+    const { modelId, generationConfig } = await getInstalledPackageSettings(
+      applicationId,
+      agent.id,
+    );
 
     return c.json({ modelId, generation: generationConfig });
   });
@@ -297,7 +366,7 @@ export function createAgentsRouter() {
       const data = await readJsonBody(c, modelIdSchema);
 
       // Reject unknown/cross-org ids like run and schedule overrides do (#960); null clears.
-      const current = await getPackageConfig(scope.applicationId, agent.id);
+      const current = await getInstalledPackageSettings(scope.applicationId, agent.id);
       const explicitModel = await assertExplicitModelExists(scope.orgId, data.modelId);
       const selectedModel =
         explicitModel ?? (await resolveModel(scope.orgId, agent.id, data.modelId));
@@ -339,8 +408,11 @@ export function createAgentsRouter() {
       });
 
       // Return the bare model-setting resource — same shape and read path
-      // (`getPackageConfig`) as GET /agents/:scope/:name/model (#657).
-      const { modelId, generationConfig } = await getPackageConfig(scope.applicationId, agent.id);
+      // (`getInstalledPackageSettings`) as GET /agents/:scope/:name/model (#657).
+      const { modelId, generationConfig } = await getInstalledPackageSettings(
+        scope.applicationId,
+        agent.id,
+      );
       return c.json({ modelId, generation: generationConfig });
     },
   );

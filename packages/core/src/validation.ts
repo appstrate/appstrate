@@ -263,7 +263,7 @@ function refineAgentResourceHints(metaValue: unknown, ctx: z.RefinementCtx): voi
  */
 const agentManifestObjectSchema = afpsAgentManifestObjectSchema.extend({
   // All standard fields (name, version, schema_version, dependencies,
-  // display_name, input/output/config, timeout) inherited from the AFPS
+  // display_name, input/output, timeout) inherited from the AFPS
   // schema.
   // AFPS requires author (MUST, non-empty) for publication; core relaxes it
   // for local drafts (the agent-editor stores `author: ""` until the user

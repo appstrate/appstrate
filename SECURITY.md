@@ -550,15 +550,15 @@ const rows = await db
 
 All external inputs are validated using Zod schemas before processing:
 
-| Input               | Validation                                               | Location                         |
-| ------------------- | -------------------------------------------------------- | -------------------------------- |
-| Agent manifests     | Zod schema with slug regex, typed enums, required fields | `schema.ts:validateManifest()`   |
-| Agent configuration | AJV against manifest config schema                       | `schema.ts:validateConfig()`     |
-| Run input           | AJV against manifest input schema                        | `schema.ts:validateInput()`      |
-| File uploads        | Extension allowlist, size limit, count limit             | `schema.ts:validateFileInputs()` |
-| Agent output        | Schema-typed `output` tool + AJV validation at ingestion | `schema.ts:validateOutput()`     |
-| Package imports     | Size limit, manifest validation, content validation      | `bundle-import.ts`               |
-| Agent IDs           | Slug regex at DB level and Zod level                     | `schema.ts`, `001_initial.sql`   |
+| Input                | Validation                                               | Location                            |
+| -------------------- | -------------------------------------------------------- | ----------------------------------- |
+| Agent manifests      | Zod schema with slug regex, typed enums, required fields | `schema.ts:validateManifest()`      |
+| Agent input settings | AJV against manifest input schema                        | `schema.ts:validateAgainstSchema()` |
+| Run input            | AJV against manifest input schema                        | `schema.ts:validateInput()`         |
+| File uploads         | Extension allowlist, size limit, count limit             | `schema.ts:validateFileInputs()`    |
+| Agent output         | Schema-typed `output` tool + AJV validation at ingestion | `schema.ts:validateOutput()`        |
+| Package imports      | Size limit, manifest validation, content validation      | `bundle-import.ts`                  |
+| Agent IDs            | Slug regex at DB level and Zod level                     | `schema.ts`, `001_initial.sql`      |
 
 **Output validation:** When an agent defines `output.schema`, the schema becomes the input schema of the `output` runtime tool (`packages/core/src/runtime-tool-defs.ts`) — the model sees the exact JSON Schema in the tool definition and the tool call is AJV-validated in-container. At ingestion, the platform re-validates the result against the schema (`run-event-ingestion.ts`); on mismatch — or when the agent never called `output` despite required fields — the run is marked **failed**. This dual-layer approach (tool-level + platform-level) prevents malformed output from being persisted as a successful run.
 

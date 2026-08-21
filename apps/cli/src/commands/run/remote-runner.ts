@@ -182,8 +182,6 @@ export interface RunRemoteOptions {
 
   /** Run input — forwarded to the trigger body. */
   input: Record<string, unknown>;
-  /** Run config override — forwarded to the trigger body (deep-merged server-side). */
-  config: Record<string, unknown>;
   /** Model id override (or `null` to clear). */
   modelId?: string | null;
   /** Proxy id override (or `"none"` to disable). */
@@ -557,7 +555,6 @@ async function triggerRun(opts: RunRemoteOptions, deps: HttpDeps): Promise<strin
 
   const body: Record<string, unknown> = {
     input: opts.input,
-    config: opts.config,
   };
   if (opts.modelId != null) body.modelId = opts.modelId;
   if (opts.proxyId != null) body.proxyId = opts.proxyId;

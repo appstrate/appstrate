@@ -12,6 +12,13 @@ export class ApiError extends Error {
     public status: number,
     public details?: Record<string, unknown>,
     public requestId?: string,
+    /**
+     * RFC 9457 `param` — the request member the error is about, dotted from the
+     * request root (`input.folder`, `locked_fields.folder`). Populated by the
+     * error factories in `@appstrate/core/api-errors`; the surfacing layer uses
+     * it to name the offending field in a translated message.
+     */
+    public param?: string,
   ) {
     super(message);
     this.name = "ApiError";

@@ -70,6 +70,10 @@ const config: KnipConfig = {
         // Dev utility that mints a CONFORMANCE_TOKENS bearer, documented in
         // its own header.
         "scripts/conformance/grab-token.ts",
+        // One-shot data migration for the manifest `config` -> `input` collapse,
+        // run by hand per deployment (CHANGELOG.md and the header of
+        // packages/db/drizzle/0040_config_into_input.sql both point at it).
+        "scripts/migrate-config-to-input.ts",
         // System-package sources: `build:system-packages` reads them off disk
         // and bundles them, so nothing imports them.
         "scripts/system-packages/**/server/index.ts",

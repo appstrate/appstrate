@@ -43,6 +43,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   published, and it never imported `ajv`, so installs get one fewer transitive
   package.
 
+- **Every `config` wire field, with no alias and no deprecation window.**
+  `config` on the run / inline-run / remote-run bodies; `config` and
+  `config_override` on the Run resource; `config_override` on schedules;
+  `config` on the installed-package listing and on `GET .../run-config`;
+  `--config` on the CLI; and the error code `invalid_config`, replaced by
+  `invalid_input` and joined by `locked_input_field` and
+  `locked_required_field_empty`. `PUT /api/agents/{scope}/{name}/config` is now
+  `PUT /api/agents/{scope}/{name}/input-settings`.
+
+  `detect:breaking` reports "no changes" for all of it because the OpenAPI
+  baseline was regenerated in the same commit. CI will not flag any of the
+  above — this list is the record.
+
 - **Twelve unscoped package endpoints are gone.** `GET`, `PUT` and `DELETE` on
   each of `/api/packages/agents/{id}`, `/api/packages/skills/{id}`,
   `/api/packages/integrations/{id}` and `/api/packages/mcp-servers/{id}`. Use
@@ -63,6 +76,46 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   form.
 
 ### Changed
+
+- **An agent declares ONE parameter schema, `input`. `config` is gone.** An
+  AFPS manifest used to carry two — `input`, asked on every run, and `config`,
+  set once at setup. Whether a value is asked every time or stored once is a
+  deployment policy, not a property of the package, so it moved out of the
+  portable format and into the platform: stored values plus per-field locks on
+  `application_packages.input_settings`. AFPS 0.3 removes the field
+  (afps-spec#16); `schema_version` still accepts any `0.x`, so a manifest that
+  still carries `config` keeps validating — the platform simply ignores it.
+
+  Input now resolves in four layers, last wins: author `default` keywords ->
+  the application's stored values -> a schedule's frozen values -> the caller's
+  input. A LOCKED field is refused from the last two with 400
+  `locked_input_field` rather than silently dropped.
+
+  This closes a real gap. `POST /runs` is gated by
+  `requirePermission("agents", "run")` and nothing else, and the body accepted
+  `config_override` with NO per-key check — so anyone who could run an agent
+  could overwrite any stored value. Delegating an agent with fixed parameters,
+  an admin pinning `days = 30` before handing it to their team, was not
+  actually possible.
+
+- **The platform prompt loses its `## Configuration` section.** Those values now
+  render under `## User Input`. This changes the prompt sent to every agent.
+
+- **The "configuration required" badge is gone.** With a single schema, an
+  unfilled required field is simply asked at launch.
+
+- **Migration `0040` folds every dropped column into its `input` counterpart
+  before dropping it**, so no row loses a parameter: `application_packages.config`
+  becomes `input_settings.values`, and `package_schedules.config_override` and
+  `runs.config` merge into the respective `input`. On a key collision `input`
+  wins, the same rule the manifest merge applies.
+
+  **Ordering matters and is not enforced.** The DDL runs automatically at boot,
+  while `scripts/migrate-config-to-input.ts --apply` — which rewrites manifests
+  and `{{config.x}}` prompt references — can only run afterwards, since it reads
+  the renamed column. In between, published agents still carry `{{config.x}}`,
+  which the renderer resolves to the empty string with no error. Run the script
+  immediately after deploying.
 
 - **Three endpoints now report malformed JSON as `validation_failed` instead of
   `invalid_request`.** Two on `runs-events.ts` and one on `runs.ts`, as a side

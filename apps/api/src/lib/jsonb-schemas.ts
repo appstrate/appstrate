@@ -44,22 +44,6 @@ export const runMetadataSchema = z
   .record(z.string(), jsonValueSchema)
   .superRefine(withByteCap(8 * KB));
 
-/** `runs.config` — snapshot of the effective agent config at run creation. */
-export const runConfigSchema = z
-  .record(z.string(), jsonValueSchema)
-  .superRefine(withByteCap(16 * KB));
-
-/**
- * `runs.config_override` and `package_schedules.config_override` — raw
- * per-run / per-schedule config delta merged into the effective config.
- * Same shape and ceiling as the snapshot column above; sharing one schema
- * keeps the run + schedule write paths in lockstep so a value accepted by
- * one cannot blow up the other on materialisation.
- */
-export const runConfigOverrideSchema = z
-  .record(z.string(), jsonValueSchema)
-  .superRefine(withByteCap(16 * KB));
-
 /** `package_schedules.input` — JSON input replayed into every triggered run. */
 export const scheduleInputSchema = z
   .record(z.string(), jsonValueSchema)

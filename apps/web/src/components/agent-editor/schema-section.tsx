@@ -68,7 +68,7 @@ export interface SchemaField {
   arrayEnumItems?: string;
 }
 
-type SchemaMode = "input" | "output" | "config" | "credentials";
+type SchemaMode = "input" | "output" | "credentials";
 
 interface SchemaSectionProps {
   title: string;
@@ -98,13 +98,8 @@ function emptyField(mode: SchemaMode): SchemaField {
     type: "string",
     description: "",
     required: false,
-    ...(mode === "input" ? { placeholder: "", default: "" } : {}),
-    ...(mode === "config" ? { default: "", enumValues: "" } : {}),
+    ...(mode === "input" ? { placeholder: "", default: "", enumValues: "" } : {}),
   };
-}
-
-function hasDetailsRow(mode: SchemaMode): boolean {
-  return mode === "input" || mode === "config";
 }
 
 function SortableFieldCard({
@@ -130,13 +125,13 @@ function SortableFieldCard({
   const style = { transform: CSS.Transform.toString(transform), transition };
 
   const isFile = mode === "input" && !!field.isFile;
-  const showDetails = hasDetailsRow(mode);
+  const showDetails = mode === "input";
   const isNumeric = field.type === "number" || field.type === "integer";
   const isString = field.type === "string" && !isFile;
   const isArray = field.type === "array";
 
   // Credential keys must match the sidecar substitution contract (underscore-based,
-  // no hyphens) — agent/tool input/config keys stay slug-based (hyphen-based,
+  // no hyphens) — agent/tool input keys stay slug-based (hyphen-based,
   // URL-safe). See @appstrate/core/naming#CREDENTIAL_KEY_RE.
   const keyTransform =
     mode === "credentials"
@@ -288,36 +283,30 @@ function SortableFieldCard({
             </>
           ) : (
             <>
-              {(mode === "input" || mode === "config") && (
-                <Input
-                  type="text"
-                  placeholder={t("editor.fieldDefault")}
-                  value={field.default ?? ""}
-                  onChange={(e) => onUpdate(index, { default: e.target.value })}
-                  className="h-7 min-w-[100px] flex-1 text-xs"
-                  disabled={readOnly}
-                />
-              )}
-              {mode === "input" && (
-                <Input
-                  type="text"
-                  placeholder={t("editor.fieldPlaceholder")}
-                  value={field.placeholder ?? ""}
-                  onChange={(e) => onUpdate(index, { placeholder: e.target.value })}
-                  className="h-7 min-w-[100px] flex-1 text-xs"
-                  disabled={readOnly}
-                />
-              )}
-              {mode === "config" && (
-                <Input
-                  type="text"
-                  placeholder={t("editor.fieldEnum")}
-                  value={field.enumValues ?? ""}
-                  onChange={(e) => onUpdate(index, { enumValues: e.target.value })}
-                  className="h-7 min-w-[100px] flex-1 text-xs"
-                  disabled={readOnly}
-                />
-              )}
+              <Input
+                type="text"
+                placeholder={t("editor.fieldDefault")}
+                value={field.default ?? ""}
+                onChange={(e) => onUpdate(index, { default: e.target.value })}
+                className="h-7 min-w-[100px] flex-1 text-xs"
+                disabled={readOnly}
+              />
+              <Input
+                type="text"
+                placeholder={t("editor.fieldPlaceholder")}
+                value={field.placeholder ?? ""}
+                onChange={(e) => onUpdate(index, { placeholder: e.target.value })}
+                className="h-7 min-w-[100px] flex-1 text-xs"
+                disabled={readOnly}
+              />
+              <Input
+                type="text"
+                placeholder={t("editor.fieldEnum")}
+                value={field.enumValues ?? ""}
+                onChange={(e) => onUpdate(index, { enumValues: e.target.value })}
+                className="h-7 min-w-[100px] flex-1 text-xs"
+                disabled={readOnly}
+              />
               {/* String format dropdown */}
               {isString && (
                 <Select

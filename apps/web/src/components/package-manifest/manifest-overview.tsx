@@ -5,7 +5,7 @@
  *
  * One generic component for all four package types: they share ~21 metadata
  * fields, and only `integration` and `mcp-server` carry a tail worth
- * rendering (a skill's schema has none; an agent's `input`/`output`/`config`
+ * rendering (a skill's schema has none; an agent's `input`/`output`
  * already have their own tabs). Before this existed the manifest was readable
  * only as raw JSON, and the structured integration view lived behind an Edit
  * affordance gated on admin + owned + non-system + non-historical — i.e. every
