@@ -712,6 +712,37 @@ describe("POST /api/runs/remote — kind: registry", () => {
     expect(ephemerals).toHaveLength(0);
   });
 
+  it("carries an author default into the run the inline shape creates", async () => {
+    // Regression: the inline preflight used to validate the RESOLVED input
+    // and return the RAW body, so a required field satisfied only by a schema
+    // `default` passed the gate and reached the runner absent. Assert on what
+    // the run actually stores, not on the validation verdict — the whole
+    // defect is that the two disagreed.
+    const res = await post({
+      source: {
+        kind: "inline",
+        manifest: {
+          ...publishedManifest("0.0.1"),
+          input: {
+            schema: {
+              type: "object",
+              required: ["tone"],
+              properties: { tone: { type: "string", default: "formal" } },
+            },
+          },
+        },
+        prompt: PROMPT,
+      },
+      applicationId: ctx.defaultAppId,
+      input: {},
+    });
+
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { id: string };
+    const [run] = await db.select().from(runs).where(eq(runs.id, body.id)).limit(1);
+    expect(run!.input).toEqual({ tone: "formal" });
+  });
+
   it("accepts an integrity hint without rejecting on drift", async () => {
     await seedPublishedAgent(ctx, "1.2.3");
     const res = await post({

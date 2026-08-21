@@ -70,7 +70,6 @@ export function ScheduleEditPage() {
           end_user_id: schedule.endUserId ?? undefined,
         }}
         inputWrapper={deps?.inputWrapper}
-        inputSettings={deps?.inputSettings}
         persistedModelId={deps?.persistedModelId ?? null}
         persistedGenerationConfig={deps?.persistedGenerationConfig ?? null}
         persistedProxyId={deps?.persistedProxyId ?? null}

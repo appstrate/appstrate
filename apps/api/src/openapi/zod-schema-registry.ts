@@ -55,7 +55,7 @@ import {
 } from "../routes/proxies.ts";
 
 // --- Agent schemas (routes/agents.ts) ---
-import { proxyIdSchema, modelIdSchema } from "../routes/agents.ts";
+import { proxyIdSchema, modelIdSchema, agentInputSettingsSchema } from "../routes/agents.ts";
 
 // --- Model Provider Credential schemas (routes/model-provider-credentials.ts) ---
 import {
@@ -245,6 +245,12 @@ const coreSchemas: OpenApiSchemaEntry[] = [
     path: "/api/agents/{scope}/{name}/model",
     jsonSchema: toJsonSchema(modelIdSchema),
     description: "Set agent model",
+  },
+  {
+    method: "PUT",
+    path: "/api/agents/{scope}/{name}/config",
+    jsonSchema: toJsonSchema(agentInputSettingsSchema),
+    description: "Set agent input settings",
   },
 
   // ─── Model Provider Credentials ────────────────────────────────────────

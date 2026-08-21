@@ -4,11 +4,11 @@
 /**
  * Shared JSON Schema validation for agent parameter values.
  *
- * Centralised so the API run pipeline (server-side execution path) and
- * the CLI's `appstrate run` (local PiRunner path) reach the same
- * verdict on the same `(values, schema)` pair. Without this, an agent
- * that the dashboard rejects on save could still launch from the CLI
- * with garbage values — and vice versa.
+ * A published export of `@appstrate/core`, so out-of-tree consumers (modules,
+ * external tooling) reach the same verdict as the platform on the same
+ * `(values, schema)` pair. In this workspace its sole importer is
+ * `apps/api/src/services/schema.ts`, which re-exports it as the server's
+ * `validateConfig`.
  *
  * Reuses the shared Ajv2020 factory in `./ajv.ts` so the dialect
  * (formats, strict-mode, coercion) matches between callers.

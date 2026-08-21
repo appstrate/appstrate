@@ -403,7 +403,6 @@ describe("renderAssertion", () => {
   const clean: AssertionInput = {
     draftsChecked: 12,
     draftManifestsWithConfig: [],
-    draftPromptsChecked: 12,
     draftPromptsWithConfigRef: [],
     republishedChecked: 3,
     republishedManifestsWithConfig: [],

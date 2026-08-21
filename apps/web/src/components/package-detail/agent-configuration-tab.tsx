@@ -29,7 +29,7 @@ import { useProxies, useAgentProxy, useSetAgentProxy } from "../../hooks/use-pro
 import { usePackageDetail } from "../../hooks/use-packages";
 import { useSaveConfig } from "../../hooks/use-mutations";
 import { authorDefaults, getOrderedKeys, type SchemaWrapper } from "@appstrate/core/form";
-import { formatInputValue, subsetWrapper } from "../../lib/agent-input";
+import { formatInputValue, hasInputFields, subsetWrapper } from "../../lib/agent-input";
 import {
   reconcileModelGenerationSettings,
   type ModelGenerationSettings,
@@ -364,9 +364,7 @@ export function AgentConfigurationTab({
   const { data: detail } = usePackageDetail("agent", packageId);
 
   const wrapper = inputWrapperOverride ?? detail?.input;
-  const hasInputFields = !!(
-    wrapper?.schema?.properties && Object.keys(wrapper.schema.properties).length > 0
-  );
+  const showInputSettings = hasInputFields(wrapper);
 
   return (
     <div className="space-y-4">
@@ -375,7 +373,7 @@ export function AgentConfigurationTab({
         <ModelSection packageId={packageId} />
         <ProxySection packageId={packageId} />
       </div>
-      {hasInputFields && wrapper && detail && (
+      {showInputSettings && wrapper && detail && (
         <InputSettingsSection
           // Remounted when the saved settings change, so the editor's local
           // state restarts from what the server now holds rather than from a

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { schemaHasFileFields, type SchemaWrapper } from "@appstrate/core/form";
+import { schemaHasFileFields } from "@appstrate/core/form";
 import { client, type paths } from "../api/client";
 import { splitPackageRef } from "../lib/package-paths";
 import { useCurrentOrgId } from "./use-org";
@@ -12,8 +12,7 @@ import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 import { useAgentProxy } from "./use-proxies";
 import { onMutationError } from "./use-mutations";
 import { scheduleKeys } from "../lib/query-keys";
-import type { ScheduleWireDto, EnrichedSchedule } from "@appstrate/shared-types";
-import type { AgentInputSettings } from "../lib/agent-input";
+import type { AgentDetail, ScheduleWireDto, EnrichedSchedule } from "@appstrate/shared-types";
 
 // `useScheduleRuns` used to live here: the schedule CARD fetched a schedule's
 // runs purely to count active/unread/last-number, once per card. Those three
@@ -73,9 +72,6 @@ export function useSchedules(packageId: string | undefined) {
     enabled: !!packageId && !!applicationId,
   });
 }
-
-/** Stable "no agent loaded yet" settings — see `useScheduleFormDeps`. */
-const EMPTY_INPUT_SETTINGS: AgentInputSettings = { values: {}, locked_fields: [] };
 
 function invalidateSchedules(qc: ReturnType<typeof useQueryClient>) {
   qc.invalidateQueries({ queryKey: scheduleKeys.listAll });
@@ -162,11 +158,12 @@ export interface ScheduleFormDeps {
   /**
    * Full input wrapper (schema + ui_hints + file_constraints + property_order)
    * — the launch surfaces feed this to `<SchemaForm>` so version-pinned input
-   * renders with full fidelity, not just the bare schema (#770).
+   * renders with full fidelity, not just the bare schema (#770). It also
+   * carries the per-application layers (`values` + `locked_fields`), so a
+   * consumer needing those reads them off this same object rather than a
+   * second prop that could drift from it.
    */
-  inputWrapper: SchemaWrapper | undefined;
-  /** Stored values + field locks for this application — layer 2 of resolution. */
-  inputSettings: AgentInputSettings;
+  inputWrapper: AgentDetail["input"] | undefined;
   persistedModelId: string | null;
   persistedGenerationConfig: ModelGenerationSettings | null;
   persistedProxyId: string | null;
@@ -214,10 +211,9 @@ export function useScheduleFormDeps(
     ...(s.name ? { name: s.name } : {}),
   }));
   return {
-    inputWrapper: agentDetail?.input,
     // The detail's own object — a fresh literal here would change identity on
     // every render and defeat the launch form's memoized partition.
-    inputSettings: agentDetail?.input ?? EMPTY_INPUT_SETTINGS,
+    inputWrapper: agentDetail?.input,
     persistedModelId: agentModel?.modelId ?? null,
     persistedGenerationConfig: agentModel?.generation ?? null,
     persistedProxyId: agentProxy?.proxyId ?? null,

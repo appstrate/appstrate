@@ -715,7 +715,6 @@ async function assertClean(republishedIds: string[]): Promise<boolean> {
     draftManifestsWithConfig: packageRows
       .filter((p) => hasConfigSection(p.draftManifest))
       .map((p) => p.id),
-    draftPromptsChecked: packageRows.length,
     draftPromptsWithConfigRef: packageRows
       .filter((p) => hasConfigReference(p.draftContent))
       .map((p) => p.id),

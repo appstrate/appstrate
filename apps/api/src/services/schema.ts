@@ -13,10 +13,10 @@ import {
 // Shared Ajv2020 + ajv-formats factory — mirrors the frontend RJSF validator so
 // client- and server-side validation agree. See packages/core/src/ajv.ts.
 //
-// `validateConfig` itself lives in `@appstrate/core/schema-validation` so the
-// CLI's local-run path applies the same gate as the platform server before
-// launching PiRunner. `validateInput` and `validateOutput` stay here — they
-// rely on server-only concerns (file-field stripping, output overload).
+// `validateConfig` itself lives in `@appstrate/core/schema-validation`, a
+// published core export so out-of-tree consumers can apply the same gate.
+// `validateInput` and `validateOutput` stay here — they rely on server-only
+// concerns (file-field stripping, output overload).
 const ajv = createAjv({ coerceTypes: true });
 
 // Compiled-validator cache. `validateInput`/`validateOutput`/
@@ -51,8 +51,8 @@ export type ValidationResult = ConfigValidationResult;
  * - "output":  relaxes `additionalProperties: true` (extra fields like state/tokenUsage allowed),
  *              skips normalization, returns errors as pre-formatted strings.
  *
- * Config validation lives in `@appstrate/core/schema-validation` so the
- * CLI uses the same logic; this server path delegates via the
+ * Config validation lives in `@appstrate/core/schema-validation`, published
+ * for out-of-tree consumers; this server path delegates via the
  * `validateConfig` re-export below.
  */
 function runValidate(

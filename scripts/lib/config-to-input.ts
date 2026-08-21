@@ -256,11 +256,12 @@ export function hasConfigReference(template: string | null | undefined): boolean
 // ─────────────────────────────────────────────
 
 export interface AssertionInput {
-  /** Package ids whose `draft_manifest` was read. */
+  /**
+   * Package rows read — the denominator for BOTH draft residue categories,
+   * since `draft_manifest` and `draft_content` come from the same rows.
+   */
   draftsChecked: number;
   draftManifestsWithConfig: string[];
-  /** Package ids whose `draft_content` was read (same population as drafts). */
-  draftPromptsChecked: number;
   draftPromptsWithConfigRef: string[];
   /** `@scope/name@version` of every version this migration published. */
   republishedChecked: number;
@@ -306,53 +307,52 @@ function residueLine(label: string, checked: number, offenders: string[]): strin
  * no schedule pins one.
  */
 export function renderAssertion(input: AssertionInput): AssertionResult {
-  const offenders: [string, string[]][] = [
-    ["`config` key in packages.draft_manifest", input.draftManifestsWithConfig],
-    ["`{{config.` in packages.draft_content", input.draftPromptsWithConfigRef],
-    ["`config` key in republished manifest", input.republishedManifestsWithConfig],
-    ["`{{config.` in republished prompt.md", input.republishedPromptsWithConfigRef],
-    ["schedule pinned to an affected version", input.schedulesPinnedToAffected],
-    ["application_packages.locked_fields not empty", input.installsWithLockedFields],
-    ["legacy affected version still tagged `latest`", input.legacyAffectedStillLatest],
+  // One row per residue category — rendered AND failure-checked from the same
+  // literal, so a label can never drift between the report and the verdict.
+  const rows: { label: string; checked: number; offenders: string[] }[] = [
+    {
+      label: "`config` key in packages.draft_manifest",
+      checked: input.draftsChecked,
+      offenders: input.draftManifestsWithConfig,
+    },
+    {
+      // Same population as the drafts above — one read per package row.
+      label: "`{{config.` in packages.draft_content",
+      checked: input.draftsChecked,
+      offenders: input.draftPromptsWithConfigRef,
+    },
+    {
+      label: "`config` key in republished manifest",
+      checked: input.republishedChecked,
+      offenders: input.republishedManifestsWithConfig,
+    },
+    {
+      label: "`{{config.` in republished prompt.md",
+      checked: input.republishedChecked,
+      offenders: input.republishedPromptsWithConfigRef,
+    },
+    {
+      label: "schedule pinned to an affected version",
+      checked: input.schedulesChecked,
+      offenders: input.schedulesPinnedToAffected,
+    },
+    {
+      label: "application_packages.locked_fields not empty",
+      checked: input.installsChecked,
+      offenders: input.installsWithLockedFields,
+    },
+    {
+      // The legacy population is its own denominator — there is no separate
+      // counter for it.
+      label: "legacy affected version still tagged `latest`",
+      checked: input.legacyAffectedVersions.length,
+      offenders: input.legacyAffectedStillLatest,
+    },
   ];
 
   const lines = [
     "── Final assertion ───────────────────────────────────────────",
-    residueLine(
-      "`config` key in packages.draft_manifest",
-      input.draftsChecked,
-      input.draftManifestsWithConfig,
-    ),
-    residueLine(
-      "`{{config.` in packages.draft_content",
-      input.draftPromptsChecked,
-      input.draftPromptsWithConfigRef,
-    ),
-    residueLine(
-      "`config` key in republished manifest",
-      input.republishedChecked,
-      input.republishedManifestsWithConfig,
-    ),
-    residueLine(
-      "`{{config.` in republished prompt.md",
-      input.republishedChecked,
-      input.republishedPromptsWithConfigRef,
-    ),
-    residueLine(
-      "schedule pinned to an affected version",
-      input.schedulesChecked,
-      input.schedulesPinnedToAffected,
-    ),
-    residueLine(
-      "application_packages.locked_fields not empty",
-      input.installsChecked,
-      input.installsWithLockedFields,
-    ),
-    residueLine(
-      "legacy affected version still tagged `latest`",
-      input.legacyAffectedVersions.length,
-      input.legacyAffectedStillLatest,
-    ),
+    ...rows.map((r) => residueLine(r.label, r.checked, r.offenders)),
   ];
 
   lines.push(
@@ -360,7 +360,7 @@ export function renderAssertion(input: AssertionInput): AssertionResult {
       " (immutable — kept, but no longer selected by default)",
   );
 
-  const failed = offenders.filter(([, list]) => list.length > 0);
+  const failed = rows.filter((r) => r.offenders.length > 0);
   if (failed.length === 0) {
     lines.push("PASS — no reachable `config` residue.");
     return { ok: true, lines };
@@ -368,9 +368,9 @@ export function renderAssertion(input: AssertionInput): AssertionResult {
 
   lines.push("");
   lines.push("FAIL — residue survived:");
-  for (const [label, list] of failed) {
+  for (const { label, offenders } of failed) {
     lines.push(`  ${label}:`);
-    for (const id of list) lines.push(`    ${id}`);
+    for (const id of offenders) lines.push(`    ${id}`);
   }
   return { ok: false, lines };
 }

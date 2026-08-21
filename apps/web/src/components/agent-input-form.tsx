@@ -85,12 +85,6 @@ export function AgentInputForm({
   );
   const lockedValues = useMemo(() => resolvedInputDefaults(wrapper, settings), [wrapper, settings]);
 
-  const replaceSubset = (keys: string[], formData: Record<string, unknown>) => {
-    const next = { ...value };
-    for (const key of keys) delete next[key];
-    onChange({ ...next, ...formData });
-  };
-
   const mergedWith = (keys: string[], formData: Record<string, unknown>) => {
     const next = { ...value };
     for (const key of keys) delete next[key];
@@ -157,7 +151,7 @@ export function AgentInputForm({
             upload={upload}
             labels={labels}
             onChange={(e) =>
-              replaceSubset(partition.prompted, e.formData as Record<string, unknown>)
+              onChange(mergedWith(partition.prompted, e.formData as Record<string, unknown>))
             }
             onSubmit={(e) =>
               onSubmit?.(mergedWith(partition.prompted, e.formData as Record<string, unknown>))
@@ -192,7 +186,7 @@ export function AgentInputForm({
               upload={upload}
               labels={labels}
               onChange={(e) =>
-                replaceSubset(partition.prefilled, e.formData as Record<string, unknown>)
+                onChange(mergedWith(partition.prefilled, e.formData as Record<string, unknown>))
               }
             />
           </CollapsibleContent>

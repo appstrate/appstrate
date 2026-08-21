@@ -302,11 +302,15 @@ export function createSchedulesRouter() {
       throw invalidRequest("Invalid cron expression", "cron_expression");
     }
 
+    // The agent's per-application settings — read once and shared by the
+    // locked-field refusal and the generation-config reconciliation below,
+    // which can both run on the same request.
+    const packageConfig = await getPackageConfig(scope.applicationId, existing.packageId);
+
     // A schedule may not answer a locked field — same refusal the create route
     // and the fire path apply, so the three cannot disagree.
     if (data.input !== undefined) {
-      const { lockedFields } = await getPackageConfig(scope.applicationId, existing.packageId);
-      assertFieldsUnlocked(data.input, lockedFields, "schedule input");
+      assertFieldsUnlocked(data.input, packageConfig.lockedFields, "schedule input");
     }
 
     // Reject a `model_id_override` that references no real model (no-op when
@@ -319,7 +323,6 @@ export function createSchedulesRouter() {
         data.model_id_override !== undefined &&
         existing.generation_config_override)
     ) {
-      const config = await getPackageConfig(scope.applicationId, existing.packageId);
       const effectiveModelOverride =
         data.model_id_override !== undefined ? data.model_id_override : existing.model_id_override;
       const selectedModel =
@@ -327,7 +330,7 @@ export function createSchedulesRouter() {
         (await resolveModel(
           scope.orgId,
           existing.packageId,
-          effectiveModelOverride ?? config.modelId,
+          effectiveModelOverride ?? packageConfig.modelId,
         ));
 
       if (generationConfigOverride && Object.keys(generationConfigOverride).length > 0) {

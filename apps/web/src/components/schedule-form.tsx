@@ -22,7 +22,7 @@ import {
   CollapsibleContent,
 } from "@appstrate/ui/components/collapsible";
 import { ChevronDown } from "lucide-react";
-import type { SchemaWrapper } from "@appstrate/core/form";
+import type { AgentDetail } from "@appstrate/shared-types";
 import { AgentInputForm } from "./agent-input-form";
 import { hasInputFields, initialInputValues, type AgentInputSettings } from "../lib/agent-input";
 import { RunOverridesPanel, type RunOverridesValue } from "./run-overrides-panel";
@@ -33,6 +33,10 @@ import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 // Sentinel for the schedule's "inherit" version choice — no pin stored; the
 // agent's version resolution applies at fire time.
 const VERSION_INHERIT = "__inherit__";
+
+/** Stable "no agent loaded yet" layers — a per-render literal would change
+ * identity and defeat the launch form's memoized partition. */
+const EMPTY_INPUT_SETTINGS: AgentInputSettings = { values: {}, locked_fields: [] };
 
 function getCronPresets(t: (key: string) => string) {
   return [
@@ -97,10 +101,11 @@ interface ScheduleFormProps {
   };
   /** The schedule's current actor (edit mode) — used to detect a real change. */
   currentActor?: ActorValue;
-  /** The agent's input wrapper (schema + hints + order). */
-  inputWrapper?: SchemaWrapper;
-  /** Stored values + field locks — the platform layers behind the input form. */
-  inputSettings?: AgentInputSettings;
+  /**
+   * The agent's input wrapper (schema + hints + order) plus the
+   * per-application layers behind it (`values` + `locked_fields`).
+   */
+  inputWrapper?: AgentDetail["input"];
   /** Persisted defaults — passed straight through to RunOverridesPanel. */
   persistedModelId?: string | null;
   persistedGenerationConfig?: ModelGenerationSettings | null;
@@ -136,7 +141,6 @@ export function ScheduleForm({
   defaultValues,
   currentActor,
   inputWrapper,
-  inputSettings,
   agentIntegrations,
   persistedModelId,
   persistedGenerationConfig,
@@ -158,7 +162,9 @@ export function ScheduleForm({
 
   const [confirmDelete, setConfirmDelete] = useState(false);
 
-  const settings: AgentInputSettings = inputSettings ?? { values: {}, locked_fields: [] };
+  // The wrapper carries the stored values and locks; the constant stands in
+  // only while the agent detail is still loading.
+  const settings: AgentInputSettings = inputWrapper ?? EMPTY_INPUT_SETTINGS;
   const hasInput = hasInputFields(inputWrapper);
 
   // Seeded from the schedule's frozen values on top of the agent's resolved

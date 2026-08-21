@@ -127,21 +127,28 @@ export async function runInlinePreflight(params: {
   // input. An inline agent runs on an ephemeral shadow package with no
   // `application_packages` row, so the only layer below the caller's input
   // is the manifest's own author defaults.
-  const effectiveInput =
+  const callerInput =
     body.input && typeof body.input === "object" && !Array.isArray(body.input)
       ? (body.input as Record<string, unknown>)
       : null;
 
+  // With no schema there is nothing to resolve, and an input-less inline run
+  // stays `null` so the runner records "no input" rather than an empty map.
+  let effectiveInput = callerInput;
+
   if (manifest) {
     const inputSchema = manifest.input?.schema;
     if (inputSchema) {
-      const iv = validateInput(
-        resolveEffectiveInput({
-          schema: asJSONSchemaObject(inputSchema),
-          callerInput: effectiveInput ?? undefined,
-        }),
-        asJSONSchemaObject(inputSchema),
-      );
+      const schema = asJSONSchemaObject(inputSchema);
+      // Resolve ONCE and validate that same value: validating the resolved
+      // input while returning the raw one is how a required field satisfied
+      // only by an author `default` passes the gate and reaches the runner
+      // absent.
+      effectiveInput = resolveEffectiveInput({
+        schema,
+        callerInput: callerInput ?? undefined,
+      });
+      const iv = validateInput(effectiveInput, schema);
       if (!iv.valid) {
         const entries: ValidationFieldError[] = iv.errors.map((e) => ({
           field: e.field ? `input.${e.field}` : "input",

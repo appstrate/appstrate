@@ -102,10 +102,6 @@ function emptyField(mode: SchemaMode): SchemaField {
   };
 }
 
-function hasDetailsRow(mode: SchemaMode): boolean {
-  return mode === "input";
-}
-
 function SortableFieldCard({
   field,
   index,
@@ -129,7 +125,7 @@ function SortableFieldCard({
   const style = { transform: CSS.Transform.toString(transform), transition };
 
   const isFile = mode === "input" && !!field.isFile;
-  const showDetails = hasDetailsRow(mode);
+  const showDetails = mode === "input";
   const isNumeric = field.type === "number" || field.type === "integer";
   const isString = field.type === "string" && !isFile;
   const isArray = field.type === "array";
@@ -287,36 +283,30 @@ function SortableFieldCard({
             </>
           ) : (
             <>
-              {mode === "input" && (
-                <Input
-                  type="text"
-                  placeholder={t("editor.fieldDefault")}
-                  value={field.default ?? ""}
-                  onChange={(e) => onUpdate(index, { default: e.target.value })}
-                  className="h-7 min-w-[100px] flex-1 text-xs"
-                  disabled={readOnly}
-                />
-              )}
-              {mode === "input" && (
-                <Input
-                  type="text"
-                  placeholder={t("editor.fieldPlaceholder")}
-                  value={field.placeholder ?? ""}
-                  onChange={(e) => onUpdate(index, { placeholder: e.target.value })}
-                  className="h-7 min-w-[100px] flex-1 text-xs"
-                  disabled={readOnly}
-                />
-              )}
-              {mode === "input" && (
-                <Input
-                  type="text"
-                  placeholder={t("editor.fieldEnum")}
-                  value={field.enumValues ?? ""}
-                  onChange={(e) => onUpdate(index, { enumValues: e.target.value })}
-                  className="h-7 min-w-[100px] flex-1 text-xs"
-                  disabled={readOnly}
-                />
-              )}
+              <Input
+                type="text"
+                placeholder={t("editor.fieldDefault")}
+                value={field.default ?? ""}
+                onChange={(e) => onUpdate(index, { default: e.target.value })}
+                className="h-7 min-w-[100px] flex-1 text-xs"
+                disabled={readOnly}
+              />
+              <Input
+                type="text"
+                placeholder={t("editor.fieldPlaceholder")}
+                value={field.placeholder ?? ""}
+                onChange={(e) => onUpdate(index, { placeholder: e.target.value })}
+                className="h-7 min-w-[100px] flex-1 text-xs"
+                disabled={readOnly}
+              />
+              <Input
+                type="text"
+                placeholder={t("editor.fieldEnum")}
+                value={field.enumValues ?? ""}
+                onChange={(e) => onUpdate(index, { enumValues: e.target.value })}
+                className="h-7 min-w-[100px] flex-1 text-xs"
+                disabled={readOnly}
+              />
               {/* String format dropdown */}
               {isString && (
                 <Select

@@ -23,6 +23,7 @@ import { LoadingState } from "../components/page-states";
 import { getVersionRedirect, hasActualChanges } from "../lib/version-helpers";
 import { packageDetailPath } from "../lib/package-paths";
 import { isModelSelectable } from "../lib/model-selectability";
+import { hasInputFields } from "../lib/agent-input";
 import { AlertTriangle } from "lucide-react";
 
 // Shared components
@@ -273,10 +274,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   const effectiveInputWrapper = isHistoricalVersion
     ? ((versionDetail?.manifest?.input as SchemaWrapper | undefined) ?? EMPTY_INPUT_WRAPPER)
     : agentDetail?.input;
-  const hasEffectiveInputFields = !!(
-    effectiveInputWrapper?.schema?.properties &&
-    Object.keys(effectiveInputWrapper.schema.properties).length > 0
-  );
+  const hasEffectiveInputFields = hasInputFields(effectiveInputWrapper);
   const effectiveShowConfigTab =
     isAdmin &&
     type === "agent" &&
