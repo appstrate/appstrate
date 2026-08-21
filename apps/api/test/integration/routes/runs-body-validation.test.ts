@@ -90,6 +90,26 @@ describe("POST /api/agents/:scope/:name/run — body validation", () => {
     expect(res.status).toBe(400);
   });
 
+  it("reads the body behind an Idempotency-Key — the CLI's path", async () => {
+    // The idempotency middleware consumes the body with `c.req.text()` and
+    // re-injects a fresh Request. The schema now reads the body the same way
+    // (`readJsonBody` + `allowEmpty` needs the raw text to tell an empty body
+    // from a malformed one), where the parser used to call `c.req.json()`. A
+    // body invisible behind that re-injection would read as empty and launch an
+    // input-less run — silently, which is the whole failure this closes. The
+    // CLI always sends a key, so this is the production path, not an edge.
+    const res = await app.request(`/api/agents/${AGENT}/run`, {
+      method: "POST",
+      headers: {
+        ...authHeaders(ctx),
+        "Content-Type": "application/json",
+        "Idempotency-Key": `cli_${crypto.randomUUID()}`,
+      },
+      body: JSON.stringify({ input: {}, config: { days: 30 } }),
+    });
+    expect(res.status).toBe(400);
+  });
+
   it("accepts every declared field", async () => {
     // Same control as the empty body: a fully-populated legal body reaches
     // version resolution (404) rather than being refused by the schema.
