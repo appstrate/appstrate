@@ -120,7 +120,7 @@ export function SettingsLayout({ sections, title, scope }: SettingsLayoutProps) 
       <div className="flex-1 px-2 py-1">
         {visibleSections.map((section, idx) => (
           <div key={idx} className="py-1">
-            {section.label && (
+            {section.label && visibleSections.length > 1 && (
               <div className="text-muted-foreground px-2 py-1.5 text-xs font-medium">
                 {section.label}
               </div>
@@ -158,7 +158,9 @@ export function SettingsLayout({ sections, title, scope }: SettingsLayoutProps) 
       <SelectContent>
         {visibleSections.map((section, idx) => (
           <SelectGroup key={idx}>
-            {section.label && <SelectLabel>{section.label}</SelectLabel>}
+            {section.label && visibleSections.length > 1 && (
+              <SelectLabel>{section.label}</SelectLabel>
+            )}
             {section.items.map((item) => (
               <SelectItem key={item.to} value={item.to}>
                 <span className="inline-flex items-center gap-2">
