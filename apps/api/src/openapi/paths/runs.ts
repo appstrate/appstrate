@@ -82,12 +82,6 @@ export const runsPaths = {
                   description:
                     'Proxy ID override for this run, or "none" to disable proxying. Takes priority over agent and org defaults.',
                 },
-                config: {
-                  type: "object",
-                  additionalProperties: true,
-                  description:
-                    "Per-run config override. Deep-merged with the per-application persisted config (`application_packages.config`): override leaves replace, plain-object children merge recursively, arrays are replaced wholesale, `null` at a leaf sets the value to null (validated as missing for required string fields), missing keys fall through. Re-validated against the manifest config schema after the merge — a 400 `invalid_config` is returned if the merged result violates the schema. Top-level `null` is rejected (returns 400) — omit the field to inherit persisted defaults, send `{}` for an explicit empty override. Mirrors the OpenAPI Assistants `runs.create { instructions, model, tools }` and Argo Workflows `submitOptions.parameters` SOTA — every client (UI, CLI, SDK) reaches the same resolved config for the same `(persisted, override)` pair.",
-                },
                 connection_overrides: {
                   type: "object",
                   description:
@@ -104,7 +98,6 @@ export const runsPaths = {
             },
             example: {
               input: { message: "Summarize my latest emails" },
-              config: { dryRun: true },
               dependency_overrides: { "@test/test-skill": "draft" },
             },
           },
@@ -140,8 +133,6 @@ export const runsPaths = {
                 checkpoint: {},
                 error: null,
                 metadata: null,
-                config: { dryRun: true },
-                config_override: { dryRun: true },
                 generation: { temperature: 0.2, reasoningLevel: "high" },
                 generation_override: { temperature: 0.2, reasoningLevel: "high" },
                 started_at: "2026-01-15T10:30:00Z",
@@ -180,7 +171,7 @@ export const runsPaths = {
         },
         "400": {
           description:
-            "Agent readiness validation failed (empty prompt, missing skill, or incomplete config)",
+            "Agent readiness validation failed (empty prompt, missing skill, or inactive integration)",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -429,11 +420,6 @@ export const runsPaths = {
                     "references, or inline `data:<mime>;name=<filename>;base64,<payload>` URIs " +
                     "(≤4 MiB decoded) — same contract as `POST /agents/{scope}/{name}/run`.",
                 },
-                config: {
-                  type: "object",
-                  description:
-                    "Per-run config overrides validated against manifest.config.schema (AJV).",
-                },
                 context_documents: {
                   type: "array",
                   items: { type: "string" },
@@ -506,8 +492,6 @@ export const runsPaths = {
                 checkpoint: {},
                 error: null,
                 metadata: null,
-                config: null,
-                config_override: null,
                 generation: null,
                 generation_override: null,
                 started_at: "2026-01-15T10:30:00Z",
@@ -632,7 +616,7 @@ export const runsPaths = {
       tags: ["Runs"],
       summary: "Validate an inline manifest without firing a run",
       description:
-        "Dry-run validator. Runs the same preflight as `POST /api/runs/inline` — manifest shape, config + input against manifest schemas, and integration readiness — but never inserts a shadow package, never fires the pipeline, and never consumes run credits. Returns `200 { valid: true }` on success, `400` problem+json (with the accumulated validation errors) otherwise. Lets developers iterate on a manifest without leaving run history behind.\n\n**Rate limit:** shares the same per-user bucket as `POST /api/runs/inline` (`INLINE_RUN_LIMITS.rate_per_min`). Iterative validation calls count against the same quota as actual runs — tight loops can trigger `429`.",
+        "Dry-run validator. Runs the same preflight as `POST /api/runs/inline` — manifest shape, input against the manifest schema, and integration readiness — but never inserts a shadow package, never fires the pipeline, and never consumes run credits. Returns `200 { valid: true }` on success, `400` problem+json (with the accumulated validation errors) otherwise. Lets developers iterate on a manifest without leaving run history behind.\n\n**Rate limit:** shares the same per-user bucket as `POST /api/runs/inline` (`INLINE_RUN_LIMITS.rate_per_min`). Iterative validation calls count against the same quota as actual runs — tight loops can trigger `429`.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
@@ -656,7 +640,6 @@ export const runsPaths = {
                 },
                 prompt: { type: "string" },
                 input: { type: "object" },
-                config: { type: "object" },
                 context_documents: {
                   type: "array",
                   items: { type: "string" },
@@ -867,8 +850,6 @@ export const runsPaths = {
                 checkpoint: { lastProcessedId: "msg_99f2a" },
                 error: null,
                 metadata: null,
-                config: { folder: "inbox" },
-                config_override: null,
                 generation: { reasoningLevel: "medium" },
                 generation_override: null,
                 started_at: "2026-01-15T10:30:00Z",
@@ -1044,8 +1025,6 @@ export const runsPaths = {
                 checkpoint: {},
                 error: "Cancelled by user",
                 metadata: null,
-                config: null,
-                config_override: null,
                 generation: null,
                 generation_override: null,
                 started_at: "2026-01-15T10:30:00Z",
@@ -1149,7 +1128,6 @@ export const runsPaths = {
                             "Full AFPS manifest (agent type). All referenced skills/integrations must already exist in the org or system catalog.",
                         },
                         prompt: { type: "string", minLength: 1 },
-                        config: { type: "object" },
                       },
                     },
                     {
@@ -1181,7 +1159,6 @@ export const runsPaths = {
                           description:
                             "Optional SRI digest (`sha256-…`) the runner received with the bundle download. Triggers a structured warn-log when the resolved version's stored artifact integrity diverges (dist-tag drift, mid-flight draft edit). Never a rejection signal.",
                         },
-                        config: { type: "object" },
                       },
                     },
                   ],

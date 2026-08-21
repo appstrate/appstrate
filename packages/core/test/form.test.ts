@@ -7,7 +7,7 @@ import {
   isFileField,
   isMultipleFileField,
   mapAfpsToRjsf,
-  mergeWithDefaults,
+  authorDefaults,
   type JSONSchemaObject,
   type SchemaWrapper,
 } from "../src/form.ts";
@@ -46,18 +46,50 @@ describe("getOrderedKeys", () => {
   });
 });
 
-describe("mergeWithDefaults", () => {
+describe("authorDefaults", () => {
   const schema: JSONSchemaObject = {
     type: "object",
     properties: {
       name: { type: "string", default: "anon" },
       count: { type: "integer" },
+      enabled: { type: "boolean", default: false },
+      tags: { type: "array", default: [] },
+      note: { type: "string", default: "" },
+      explicit_null: { type: "string", default: null },
     },
+    required: ["count"],
   };
 
-  it("fills missing keys with defaults, null otherwise", () => {
-    expect(mergeWithDefaults(schema, { count: 3 })).toEqual({ name: "anon", count: 3 });
-    expect(mergeWithDefaults(schema, null)).toEqual({ name: "anon", count: null });
+  it("returns only the properties that declare a `default`", () => {
+    expect(authorDefaults(schema)).toEqual({
+      name: "anon",
+      enabled: false,
+      tags: [],
+      note: "",
+      explicit_null: null,
+    });
+  });
+
+  it("leaves a property without a `default` absent rather than null", () => {
+    expect("count" in authorDefaults(schema)).toBe(false);
+  });
+
+  it("returns an empty object for an absent schema", () => {
+    expect(authorDefaults(undefined)).toEqual({});
+  });
+
+  it("returns an empty object for a schema with no properties", () => {
+    expect(authorDefaults({ type: "object", properties: {} })).toEqual({});
+  });
+
+  it("does not read `default` from anything but a top-level property", () => {
+    const nested: JSONSchemaObject = {
+      type: "object",
+      properties: {
+        outer: { type: "object", properties: { inner: { type: "string", default: "deep" } } },
+      },
+    };
+    expect(authorDefaults(nested)).toEqual({});
   });
 });
 

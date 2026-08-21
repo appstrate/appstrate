@@ -93,8 +93,6 @@ export interface RunWireDto {
   checkpoint: unknown;
   error: string | null;
   metadata: unknown;
-  config: unknown;
-  config_override: unknown;
   started_at: string | null;
   completed_at: string | null;
   duration: number | null;
@@ -336,7 +334,6 @@ export interface ScheduleWireDto {
   cron_expression: string;
   timezone: string | null;
   input: Record<string, unknown> | null;
-  config_override: Record<string, unknown> | null;
   generation_config_override: ModelGenerationSettings | null;
   model_id_override: string | null;
   proxy_id_override: string | null;
@@ -512,11 +509,17 @@ export interface AgentDetail {
      */
     integrations: AgentIntegrationEntry[];
   };
-  input?: SchemaWrapper;
-  output?: SchemaWrapper;
-  config: SchemaWrapper & {
-    current: Record<string, unknown>;
+  /**
+   * The agent's single parameter schema plus the per-application layers the
+   * launch form needs: `values` are the editor's stored defaults (layer 2 of
+   * the input resolution) and `locked_fields` the fields it froze — not asked
+   * at launch, and refused if a caller sets them.
+   */
+  input: SchemaWrapper & {
+    values: Record<string, unknown>;
+    locked_fields: string[];
   };
+  output?: SchemaWrapper;
   running_runs: number;
   last_run: {
     id: string;
@@ -903,7 +906,6 @@ export interface ApplicationInfo {
 
 export interface InstalledPackage {
   packageId: string;
-  config: Record<string, unknown>;
   generationConfig: ModelGenerationSettings | null;
   modelId: string | null;
   proxyId: string | null;
@@ -922,9 +924,13 @@ export interface InstalledPackage {
  * Single source of truth for both the dashboard's per-app agent run and
  * the CLI's `appstrate run @scope/agent` invocation — keeping them in
  * lockstep prevents UI ↔ CLI drift on model / proxy / version pin.
+ *
+ * Input values are deliberately NOT here. This endpoint is CLI-facing, and a
+ * CLI-triggered platform run has the server resolve the whole author →
+ * editor → schedule → caller chain; exposing the stored values would be a
+ * second source of truth for them.
  */
 export interface ResolvedRunConfig {
-  config: Record<string, unknown>;
   /** Optional for compatibility with older servers; current API always emits it. */
   generation?: ModelGenerationSettings | null;
   modelId: string | null;

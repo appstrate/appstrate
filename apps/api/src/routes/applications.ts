@@ -64,13 +64,15 @@ export const updateApplicationSchema = z.object({
   settings: appSettingsSchema.optional(),
 });
 
+// Neither body carries the agent's stored input values: `PUT
+// /api/agents/{scope}/{name}/config` is their single write path, because it
+// is the only one that validates them against `manifest.input.schema` and
+// enforces `assertLockedFieldsSatisfiable`.
 export const installPackageSchema = z.object({
   packageId: z.string().min(1),
-  config: z.record(z.string(), z.unknown()).optional(),
 });
 
 export const updatePackageSchema = z.object({
-  config: z.record(z.string(), z.unknown()).optional(),
   generationConfig: modelGenerationSettingsSchema.nullable().optional(),
   modelId: z.string().nullable().optional(),
   proxyId: z.string().nullable().optional(),
@@ -227,7 +229,7 @@ export function createApplicationsRouter() {
 
     const data = await readJsonBody(c, installPackageSchema);
 
-    await installPackage({ orgId, applicationId: applicationId }, data.packageId, data.config);
+    await installPackage({ orgId, applicationId: applicationId }, data.packageId);
     const row = await getInstalledPackage({ orgId, applicationId: applicationId }, data.packageId);
     return c.json({ object: "application_package", ...row }, 201);
   });

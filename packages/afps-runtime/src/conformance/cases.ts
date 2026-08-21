@@ -161,6 +161,57 @@ const L1_STRIP_WRAPPER: ConformanceCase = {
   },
 };
 
+// L1.20 — the agent's single parameter schema is `input` (§3.4), and a
+// property's JSON Schema `default` is part of it. The loader MUST hand the
+// manifest back verbatim so the caller can resolve unsupplied values from
+// those defaults before it builds the ExecutionContext — resolution is the
+// caller's job, preservation is the loader's.
+const L1_INPUT_SCHEMA_DEFAULTS: ConformanceCase = {
+  id: "L1.20",
+  level: "L1",
+  title: "preserves `input.schema` property defaults (§3.4)",
+  run: (adapter) => {
+    const manifest = {
+      ...REFERENCE_MANIFEST,
+      input: {
+        schema: {
+          type: "object",
+          properties: {
+            topic: { type: "string" },
+            tone: { type: "string", default: "neutral" },
+          },
+          required: ["topic"],
+        },
+      },
+    };
+    const parsed = agentManifestSchema.safeParse(manifest);
+    if (!parsed.success) {
+      return fail(
+        `manifest with input defaults rejected: ${parsed.error.issues
+          .map((i) => `${i.path.join(".")}: ${i.message}`)
+          .join("; ")}`,
+      );
+    }
+    const bundle = adapter.loadBundle(
+      zipSync({
+        "manifest.json": enc(JSON.stringify(manifest)),
+        "prompt.md": enc("Tone: {{input.tone}}"),
+      }),
+    );
+    const loaded = rootManifestOf(bundle) as {
+      input?: { schema?: { properties?: Record<string, { default?: unknown }> } };
+      config?: unknown;
+    };
+    if (loaded.config !== undefined) {
+      return fail("loader surfaced a `config` section: the agent declares `input` only");
+    }
+    if (loaded.input?.schema?.properties?.["tone"]?.default !== "neutral") {
+      return fail(`input.schema default dropped: ${JSON.stringify(loaded.input)}`);
+    }
+    return pass();
+  },
+};
+
 // ─── L2 — Render ─────────────────────────────────────────────────
 
 const L2_INTERPOLATION: ConformanceCase = {
@@ -242,6 +293,26 @@ const L2_RUN_ID: ConformanceCase = {
   run: async (adapter) => {
     const out = await adapter.renderPrompt("run={{runId}}", { runId: "run_abc", input: {} }, {});
     if (!out.includes("run=run_abc")) return fail(`runId not interpolated: ${out}`);
+    return pass();
+  },
+};
+
+// L2.7 — the agent has a single parameter namespace. A value the caller
+// resolved from an `input.schema` default reaches the template through
+// `{{input.*}}`; `{{config.*}}` addresses nothing and, per the logic-less
+// Mustache contract, renders as the empty string.
+const L2_NO_CONFIG_NAMESPACE: ConformanceCase = {
+  id: "L2.7",
+  level: "L2",
+  title: "`{{input.*}}` carries resolved values; `{{config.*}}` renders empty",
+  run: async (adapter) => {
+    const out = await adapter.renderPrompt(
+      "input=[{{input.tone}}] config=[{{config.tone}}]",
+      { runId: "r", input: { tone: "neutral" } },
+      {},
+    );
+    if (!out.includes("input=[neutral]")) return fail(`resolved input not rendered: ${out}`);
+    if (!out.includes("config=[]")) return fail(`config namespace still resolves: ${out}`);
     return pass();
   },
 };
@@ -1162,11 +1233,13 @@ export const BUILT_IN_CASES: readonly ConformanceCase[] = Object.freeze([
   L1_REJECT_NULL_BYTE,
   L1_FILTER_MACOSX,
   L1_REJECT_DEEP_PATH,
+  L1_INPUT_SCHEMA_DEFAULTS,
   L2_INTERPOLATION,
   L2_SECTIONS,
   L2_INVERTED,
   L2_FUNCTION_SANITIZE,
   L2_RUN_ID,
+  L2_NO_CONFIG_NAMESPACE,
   L2_META_REVERSE_DNS,
   L3_VERIFY_DIRECT,
   L3_DETECT_TAMPER,

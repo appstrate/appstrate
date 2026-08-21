@@ -93,8 +93,7 @@ import {
 } from "./run/mode.ts";
 import { runRemote, RemoteRunError } from "./run/remote-runner.ts";
 import { resolveSignalPolicy, readStdinIsTty } from "./run/signal-policy.ts";
-import { validateConfig } from "@appstrate/core/schema-validation";
-import type { JSONSchemaObject } from "@appstrate/core/form";
+import { authorDefaults, type JSONSchemaObject } from "@appstrate/core/form";
 import { onShutdown, shutdownSignal, shutdownExitCode } from "../lib/shutdown.ts";
 
 export interface RunCommandOptions {
@@ -102,7 +101,6 @@ export interface RunCommandOptions {
   bundle: string;
   input?: string;
   inputFile?: string;
-  config?: string;
   snapshot?: string;
   integrations?: string;
   credsFile?: string;
@@ -135,8 +133,8 @@ export interface RunCommandOptions {
    */
   proxy?: string;
   /**
-   * When true, ignore the per-app `run-config` (config / model / proxy
-   * / versionPin) and rely only on flags + env vars + defaults. Useful
+   * When true, ignore the per-app `run-config` (model / proxy /
+   * versionPin) and rely only on flags + env vars + defaults. Useful
    * for deterministic CI runs where the application's persisted state
    * must not drift the run.
    */
@@ -281,29 +279,14 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
   const integrationResolver = buildIntegrationResolver(mode, effectiveResolverInputs);
 
   // ─── 5. Parse input ────────────────────────────────────────────────
-  // The merged config (deep-merge of `--config` over the inherited
-  // per-app value) is already on `inheritedConfig.config` — see
-  // `mergeRunConfig` in inherit-config.ts for the cascade rules.
-  const input = await resolveInput(opts);
-  const config = inheritedConfig.config;
-
-  // Validate the merged config against the bundle's manifest schema
-  // BEFORE launching PiRunner. The platform performs the same gate
-  // server-side via @appstrate/core/schema-validation; running the
-  // check here keeps a CLI run from succeeding where the dashboard
-  // would have rejected the same `(config, schema)` pair.
-  const configSchema = readBundleConfigSchema(bundle);
-  if (configSchema) {
-    const result = validateConfig(config, configSchema);
-    if (!result.valid) {
-      const summary = result.errors.map((e) => `  - ${e.field}: ${e.message}`).join("\n");
-      exitWithError(
-        `Resolved config does not match the agent's manifest schema:\n${summary}\n\n` +
-          `Fix the persisted per-app config in the dashboard, or pass a\n` +
-          `corrected --config <json> override.`,
-      );
-    }
-  }
+  // Author defaults (`default` in the manifest's `input` schema) are the
+  // first layer of the platform's input resolution and it applies them on
+  // every run. Applying them here too is what keeps `appstrate run
+  // ./bundle` executing the same bundle with the same parameters the
+  // platform would. LOCAL ONLY — the remote path sends the caller's input
+  // verbatim and lets the server own the whole precedence chain, so there
+  // is exactly one implementation of layers 2-4.
+  const input = resolveLocalInput(bundle, await resolveInput(opts));
 
   // ─── 6. ExecutionContext + prompt inputs ──────────────────────────
   // Derive the full platform prompt (tools / skills / schemas / output)
@@ -319,7 +302,6 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
     runId,
     input,
     memories: [],
-    config,
   };
   const snapshot = opts.snapshot ? await loadSnapshotFile(path.resolve(opts.snapshot)) : {};
   const context = mergeSnapshotIntoContext(baseContext, snapshot);
@@ -656,13 +638,10 @@ async function runCommandRemote(
   // branches are reserved for `mode === "local"` / `"none"`.
   const resolverInputs = (await buildResolverInputs("remote", opts)) as RemoteResolverInputs;
 
-  // Parse `--input` / `--input-file` and `--config` flag overrides. The
-  // platform performs the same validation server-side, so we send the
-  // flag values verbatim — no client-side schema check. (Local mode
-  // validates client-side because PiRunner runs in-process; here, the
-  // server has the authoritative manifest.)
+  // Parse `--input` / `--input-file`. The platform validates the input
+  // against the agent's manifest schema server-side, so we send the
+  // flag values verbatim — no client-side schema check.
   const input = await resolveInput(opts);
-  const config = opts.config ? safeParseJson(opts.config, "--config") : {};
 
   // Idempotency: a stable per-invocation key so trigger retries don't
   // create duplicate runs. `--run-id` is honoured so the user can safely
@@ -691,7 +670,6 @@ async function runCommandRemote(
       name: target.name,
       spec: target.spec,
       input,
-      config,
       ...(opts.model != null ? { modelId: opts.model } : {}),
       ...(opts.proxy != null ? { proxyId: opts.proxy } : {}),
       idempotencyKey,
@@ -1092,17 +1070,11 @@ async function maybeFetchRunConfig(
   resolverInputs: RemoteResolverInputs | LocalResolverInputs | null,
   opts: RunCommandOptions,
 ): Promise<InheritedRunConfig> {
-  // Parse `--config <json>` once so the flag override participates in
-  // the same cascade as inherited / env values. Path-mode and
-  // --no-inherit still benefit from the parsed flag — they just see a
-  // null `inherited`, so the merge collapses to "flagConfig or {}".
-  const flagConfig = opts.config ? safeParseJson(opts.config, "--config") : undefined;
   const noInherit =
     opts.noInherit || target.kind !== "id" || !resolverInputs || !("bearerToken" in resolverInputs);
   if (noInherit) {
     return mergeRunConfig({
       inherited: null,
-      flagConfig,
       flagModel: opts.model,
       flagProxy: opts.proxy,
       hasExplicitSpec: target.kind === "id" ? target.spec !== undefined : false,
@@ -1126,7 +1098,6 @@ async function maybeFetchRunConfig(
   });
   return mergeRunConfig({
     inherited: payload,
-    flagConfig,
     flagModel: opts.model,
     flagProxy: opts.proxy,
     hasExplicitSpec: idTarget.spec !== undefined,
@@ -1229,18 +1200,41 @@ export async function _buildResolverInputsForTesting(
 }
 
 /**
-/**
- * Pull the AFPS `config.schema` JSON Schema out of the bundle's
- * root package manifest. Returns `undefined` when the agent declares
- * no config schema (so validation is a no-op). Mirrors the unexported
- * helper in `@appstrate/afps-runtime/bundle/platform-prompt-inputs`.
+ * Layer the agent's author defaults underneath a local run's caller input.
+ *
+ * Precedence: `manifest.input.schema` `default` keywords lose to anything
+ * the caller supplied. The caller wins even when the value they wrote is
+ * `null` or `""` — only an ABSENT key falls through to the default.
+ *
+ * This is the platform's own author layer (`@appstrate/core/form`
+ * `authorDefaults`), applied by the same rules the server applies in
+ * `resolveEffectiveInput`, so the same bundle yields the same parameters
+ * locally and on a platform. A property with no `default` stays absent
+ * here too, and the bundle's `required` check sees the truth.
+ *
+ * Returns the caller input unchanged when the agent declares no input
+ * schema.
  */
-export function readBundleConfigSchema(
+export function resolveLocalInput(
+  bundle: import("@appstrate/afps-runtime/bundle").Bundle,
+  callerInput: Record<string, unknown>,
+): Record<string, unknown> {
+  const schema = readBundleInputSchema(bundle);
+  if (!schema) return callerInput;
+  return { ...authorDefaults(schema), ...callerInput };
+}
+
+/**
+ * Pull the AFPS `input.schema` JSON Schema out of the bundle's root
+ * package manifest. Returns `undefined` when the agent declares no input
+ * schema (so default resolution is a no-op).
+ */
+function readBundleInputSchema(
   bundle: import("@appstrate/afps-runtime/bundle").Bundle,
 ): JSONSchemaObject | undefined {
   const rootPkg = bundle.packages.get(bundle.root);
   const manifest = rootPkg?.manifest as Record<string, unknown> | undefined;
-  const section = manifest?.config;
+  const section = manifest?.input;
   if (!section || typeof section !== "object" || Array.isArray(section)) return undefined;
   const schema = (section as Record<string, unknown>).schema;
   if (!schema || typeof schema !== "object" || Array.isArray(schema)) return undefined;

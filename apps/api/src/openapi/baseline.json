@@ -661,8 +661,8 @@
       "put": {
         "operationId": "saveAgentConfig",
         "tags": ["Agents"],
-        "summary": "Save agent configuration",
-        "description": "Save agent configuration values. Validated against manifest config schema.",
+        "summary": "Save agent input settings",
+        "description": "Save the agent's stored input values and field locks for this application. `values` are validated against the manifest `input.schema` with `required` dropped (a required field left empty is asked at launch). Locking a required field that has no value — no author `default` and no entry in `values` — is refused with 400 `locked_required_field_empty`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -682,15 +682,14 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "additionalProperties": true
+                "$ref": "#/components/schemas/AgentInputSettings"
               }
             }
           }
         },
         "responses": {
           "200": {
-            "description": "Configuration saved — returns the bare persisted configuration document",
+            "description": "Saved — returns the bare persisted input-settings resource",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -702,8 +701,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "additionalProperties": true
+                  "$ref": "#/components/schemas/AgentInputSettings"
                 }
               }
             }
@@ -1708,11 +1706,6 @@
                     "type": "string",
                     "description": "Proxy ID override for this run, or \"none\" to disable proxying. Takes priority over agent and org defaults."
                   },
-                  "config": {
-                    "type": "object",
-                    "additionalProperties": true,
-                    "description": "Per-run config override. Deep-merged with the per-application persisted config (`application_packages.config`): override leaves replace, plain-object children merge recursively, arrays are replaced wholesale, `null` at a leaf sets the value to null (validated as missing for required string fields), missing keys fall through. Re-validated against the manifest config schema after the merge — a 400 `invalid_config` is returned if the merged result violates the schema. Top-level `null` is rejected (returns 400) — omit the field to inherit persisted defaults, send `{}` for an explicit empty override. Mirrors the OpenAPI Assistants `runs.create { instructions, model, tools }` and Argo Workflows `submitOptions.parameters` SOTA — every client (UI, CLI, SDK) reaches the same resolved config for the same `(persisted, override)` pair."
-                  },
                   "connection_overrides": {
                     "type": "object",
                     "description": "Per-integration connection picks for THIS run (flat-connections mechanism #2). Flat map: `{ \"@scope/integration\": \"<connection_id>\" }` — one connection per integration; the chosen connection carries its own authKey. Loses to admin pins (mechanism #1), beats the schedule-frozen layer (#3) and the actor-fallback (#4). Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same pick. Returns 412 `missing_integration_connection` if the chosen id is not accessible to the actor.",
@@ -1732,9 +1725,6 @@
               "example": {
                 "input": {
                   "message": "Summarize my latest emails"
-                },
-                "config": {
-                  "dryRun": true
                 },
                 "dependency_overrides": {
                   "@test/test-skill": "draft"
@@ -1786,12 +1776,6 @@
                   "checkpoint": {},
                   "error": null,
                   "metadata": null,
-                  "config": {
-                    "dryRun": true
-                  },
-                  "config_override": {
-                    "dryRun": true
-                  },
                   "generation": {
                     "temperature": 0.2,
                     "reasoningLevel": "high"
@@ -1838,7 +1822,7 @@
             }
           },
           "400": {
-            "description": "Agent readiness validation failed (empty prompt, missing skill, or incomplete config)",
+            "description": "Agent readiness validation failed (empty prompt, missing skill, or inactive integration)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2156,10 +2140,6 @@
                     "type": "object",
                     "description": "Run input validated against manifest.input.schema (AJV). File fields take `upload://upl_xxx` references (from `createUpload`), `document://doc_xxx` references, or inline `data:<mime>;name=<filename>;base64,<payload>` URIs (≤4 MiB decoded) — same contract as `POST /agents/{scope}/{name}/run`."
                   },
-                  "config": {
-                    "type": "object",
-                    "description": "Per-run config overrides validated against manifest.config.schema (AJV)."
-                  },
                   "context_documents": {
                     "type": "array",
                     "items": {
@@ -2244,8 +2224,6 @@
                   "checkpoint": {},
                   "error": null,
                   "metadata": null,
-                  "config": null,
-                  "config_override": null,
                   "generation": null,
                   "generation_override": null,
                   "started_at": "2026-01-15T10:30:00Z",
@@ -2385,7 +2363,7 @@
         "operationId": "validateInlineRun",
         "tags": ["Runs"],
         "summary": "Validate an inline manifest without firing a run",
-        "description": "Dry-run validator. Runs the same preflight as `POST /api/runs/inline` — manifest shape, config + input against manifest schemas, and integration readiness — but never inserts a shadow package, never fires the pipeline, and never consumes run credits. Returns `200 { valid: true }` on success, `400` problem+json (with the accumulated validation errors) otherwise. Lets developers iterate on a manifest without leaving run history behind.\n\n**Rate limit:** shares the same per-user bucket as `POST /api/runs/inline` (`INLINE_RUN_LIMITS.rate_per_min`). Iterative validation calls count against the same quota as actual runs — tight loops can trigger `429`.",
+        "description": "Dry-run validator. Runs the same preflight as `POST /api/runs/inline` — manifest shape, input against the manifest schema, and integration readiness — but never inserts a shadow package, never fires the pipeline, and never consumes run credits. Returns `200 { valid: true }` on success, `400` problem+json (with the accumulated validation errors) otherwise. Lets developers iterate on a manifest without leaving run history behind.\n\n**Rate limit:** shares the same per-user bucket as `POST /api/runs/inline` (`INLINE_RUN_LIMITS.rate_per_min`). Iterative validation calls count against the same quota as actual runs — tight loops can trigger `429`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -2416,9 +2394,6 @@
                     "type": "string"
                   },
                   "input": {
-                    "type": "object"
-                  },
-                  "config": {
                     "type": "object"
                   },
                   "context_documents": {
@@ -2739,10 +2714,6 @@
                   },
                   "error": null,
                   "metadata": null,
-                  "config": {
-                    "folder": "inbox"
-                  },
-                  "config_override": null,
                   "generation": {
                     "reasoningLevel": "medium"
                   },
@@ -2985,8 +2956,6 @@
                   "checkpoint": {},
                   "error": "Cancelled by user",
                   "metadata": null,
-                  "config": null,
-                  "config_override": null,
                   "generation": null,
                   "generation_override": null,
                   "started_at": "2026-01-15T10:30:00Z",
@@ -3100,9 +3069,6 @@
                           "prompt": {
                             "type": "string",
                             "minLength": 1
-                          },
-                          "config": {
-                            "type": "object"
                           }
                         }
                       },
@@ -3132,9 +3098,6 @@
                           "integrity": {
                             "type": "string",
                             "description": "Optional SRI digest (`sha256-…`) the runner received with the bundle download. Triggers a structured warn-log when the resolved version's stored artifact integrity diverges (dist-tag drift, mid-flight draft edit). Never a rejection signal."
-                          },
-                          "config": {
-                            "type": "object"
                           }
                         }
                       }
@@ -4470,10 +4433,6 @@
                   "input": {
                     "type": "object"
                   },
-                  "config_override": {
-                    "type": "object",
-                    "description": "Per-schedule config delta. Deep-merged with the application's persisted `config` every time the schedule fires."
-                  },
                   "generation_config_override": {
                     "$ref": "#/components/schemas/ModelGenerationSettings",
                     "description": "Temperature/reasoning overrides applied to every run fired by this schedule."
@@ -4560,7 +4519,6 @@
                     "folder": "inbox",
                     "maxEmails": 50
                   },
-                  "config_override": null,
                   "generation_config_override": null,
                   "model_id_override": null,
                   "proxy_id_override": null,
@@ -4652,7 +4610,6 @@
                     "folder": "inbox",
                     "maxEmails": 50
                   },
-                  "config_override": null,
                   "generation_config_override": null,
                   "model_id_override": null,
                   "proxy_id_override": null,
@@ -4719,10 +4676,6 @@
                   },
                   "input": {
                     "type": "object"
-                  },
-                  "config_override": {
-                    "type": ["object", "null"],
-                    "description": "Per-schedule config delta. Pass `null` to clear the override."
                   },
                   "generation_config_override": {
                     "oneOf": [
@@ -18430,7 +18383,7 @@
         "operationId": "listInstalledPackages",
         "tags": ["Application Packages"],
         "summary": "List installed packages",
-        "description": "List all packages installed in this application, with their config and version.",
+        "description": "List all packages installed in this application, with their model/proxy/version overrides.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -18525,10 +18478,6 @@
                     "type": "string",
                     "minLength": 1,
                     "description": "Package ID from org catalog"
-                  },
-                  "config": {
-                    "type": "object",
-                    "description": "Initial configuration"
                   }
                 }
               }
@@ -18581,7 +18530,7 @@
         "operationId": "getInstalledPackage",
         "tags": ["Application Packages"],
         "summary": "Get installed package",
-        "description": "Get an installed package detail with its config.",
+        "description": "Get an installed package detail with its model/proxy/version overrides.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -18628,8 +18577,8 @@
       "put": {
         "operationId": "updateInstalledPackage",
         "tags": ["Application Packages"],
-        "summary": "Update installed package config",
-        "description": "Update configuration, model/proxy overrides, or version pinning for an installed package.",
+        "summary": "Update installed package overrides",
+        "description": "Update the model/proxy overrides, generation settings, enabled flag, or version pinning for an installed package. The agent's stored input values are NOT settable here — use `PUT /api/agents/{scope}/{name}/config`, which validates them against the manifest input schema.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -18655,9 +18604,6 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "config": {
-                    "type": "object"
-                  },
                   "generationConfig": {
                     "oneOf": [
                       {
@@ -18687,7 +18633,7 @@
         },
         "responses": {
           "200": {
-            "description": "Updated package config",
+            "description": "Updated installed package",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -18760,7 +18706,7 @@
         "operationId": "getApplicationPackageRunConfig",
         "tags": ["Application Packages"],
         "summary": "Get the resolved per-app run configuration",
-        "description": "Returns the configuration applied when this application runs the given package: agent config, model override, proxy override, and pinned version label. Used by the CLI to reproduce a UI run without stitching together three separate calls; the UI uses the same source for its run-from-app flow.",
+        "description": "Returns the configuration applied when this application runs the given package: model override, generation settings, proxy override, and pinned version label. Used by the CLI to reproduce a UI run without stitching together three separate calls; the UI uses the same source for its run-from-app flow.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -18792,11 +18738,8 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["config", "generation", "modelId", "proxyId", "version_pin"],
+                  "required": ["generation", "modelId", "proxyId", "version_pin"],
                   "properties": {
-                    "config": {
-                      "type": "object"
-                    },
                     "generation": {
                       "oneOf": [
                         {
@@ -18819,9 +18762,6 @@
                   }
                 },
                 "example": {
-                  "config": {
-                    "dryRun": true
-                  },
                   "generation": {
                     "temperature": 0.2,
                     "reasoningLevel": "high"
@@ -22414,10 +22354,9 @@
       },
       "ApplicationPackage": {
         "type": "object",
-        "description": "A package installed in an application with its config and overrides.",
+        "description": "A package installed in an application with its model/proxy/version overrides.",
         "required": [
           "packageId",
-          "config",
           "generationConfig",
           "modelId",
           "proxyId",
@@ -22437,10 +22376,6 @@
           "packageId": {
             "type": "string",
             "description": "Package ID from org catalog"
-          },
-          "config": {
-            "type": "object",
-            "description": "Application-specific configuration"
           },
           "generationConfig": {
             "oneOf": [
@@ -22759,6 +22694,25 @@
           }
         }
       },
+      "AgentInputSettings": {
+        "type": "object",
+        "required": ["values", "locked_fields"],
+        "description": "The agent's stored input settings for one application: the values the editor set once (layer 2 of the input resolution) and the fields it froze. Both are full replacements — an omitted key means cleared, never unchanged.",
+        "properties": {
+          "values": {
+            "type": "object",
+            "description": "Values stored for this application. Validated against the manifest `input.schema` with `required` dropped: leaving a required field empty here means it is asked at launch.",
+            "additionalProperties": true
+          },
+          "locked_fields": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Input fields no caller may set at launch. A run or schedule that sets one is refused with 400 `locked_input_field`. A required field may not be locked unless it has a value (author `default` or an entry in `values`) — otherwise the write is refused with 400 `locked_required_field_empty`."
+          }
+        }
+      },
       "AgentDetail": {
         "type": "object",
         "required": [
@@ -22767,7 +22721,7 @@
           "scope",
           "version",
           "dependencies",
-          "config",
+          "input",
           "running_runs",
           "last_run",
           "forked_from",
@@ -22816,41 +22770,26 @@
             "type": "integer",
             "description": "Optimistic lock version (user agents only)"
           },
-          "config": {
+          "input": {
             "type": "object",
-            "required": ["schema", "current"],
-            "description": "AFPS schema wrapper for agent configuration (set once, reused across runs).",
+            "required": ["schema", "values", "locked_fields"],
+            "description": "AFPS schema wrapper for the agent's parameters, plus the per-application stored values and field locks. Resolution order at launch: author default (JSON Schema `default`) < stored value (`values`) < schedule value < caller input. A field named in `locked_fields` is not asked at launch and a caller that sets it is refused with 400 `locked_input_field`.",
             "properties": {
               "schema": {
                 "type": "object",
                 "description": "Pure JSON Schema 2020-12 object"
               },
-              "current": {
+              "values": {
                 "type": "object",
-                "description": "Current configuration values"
+                "description": "Values stored once for this application (editor defaults).",
+                "additionalProperties": true
               },
-              "file_constraints": {
-                "$ref": "#/components/schemas/FileConstraintsMap"
-              },
-              "ui_hints": {
-                "$ref": "#/components/schemas/UIHintsMap"
-              },
-              "property_order": {
+              "locked_fields": {
                 "type": "array",
                 "items": {
                   "type": "string"
                 },
-                "description": "Presentation order for schema properties"
-              }
-            }
-          },
-          "input": {
-            "type": "object",
-            "description": "AFPS schema wrapper for per-run input.",
-            "properties": {
-              "schema": {
-                "type": "object",
-                "description": "Pure JSON Schema 2020-12 object"
+                "description": "Input fields no caller may set at launch."
               },
               "file_constraints": {
                 "$ref": "#/components/schemas/FileConstraintsMap"
@@ -23145,8 +23084,6 @@
           "checkpoint",
           "error",
           "metadata",
-          "config",
-          "config_override",
           "generation",
           "generation_override",
           "started_at",
@@ -23347,16 +23284,6 @@
             "description": "Additional module-supplied metadata (e.g. usage-metering fields written by an optional module). Free-form; core does not define billing-specific keys.",
             "additionalProperties": true
           },
-          "config": {
-            "type": ["object", "null"],
-            "description": "Snapshot of the effective agent config (merged overrides) at run creation",
-            "additionalProperties": true
-          },
-          "config_override": {
-            "type": ["object", "null"],
-            "description": "Per-run config delta — the raw object the caller sent in the request body. `config` is the resolved (deep-merged) snapshot; `config_override` is the raw delta that the dashboard uses to badge 'default vs override'. Null when the run used persisted defaults verbatim.",
-            "additionalProperties": true
-          },
           "generation": {
             "oneOf": [
               {
@@ -23555,7 +23482,6 @@
           "cron_expression",
           "timezone",
           "input",
-          "config_override",
           "generation_config_override",
           "model_id_override",
           "proxy_id_override",
@@ -23607,10 +23533,6 @@
             "type": ["string", "null"]
           },
           "input": {
-            "type": ["object", "null"],
-            "additionalProperties": true
-          },
-          "config_override": {
             "type": ["object", "null"],
             "additionalProperties": true
           },

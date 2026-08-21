@@ -1,92 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Unit tests for the core `validateConfig` + `deepMergeConfig` helpers.
+ * Unit tests for the core `validateConfig` helper.
  *
- * Both run-config code paths (the platform run pipeline and the CLI's
- * local PiRunner path) consume these helpers, so the merge + validate
- * semantics live here as the contract every caller relies on.
+ * Both validation call sites (the platform run pipeline and the CLI's
+ * local PiRunner path) consume it, so the validate semantics live here as
+ * the contract every caller relies on.
  */
 
 import { describe, it, expect } from "bun:test";
-import { deepMergeConfig, validateConfig } from "../src/schema-validation.ts";
+import { validateConfig } from "../src/schema-validation.ts";
 import type { JSONSchemaObject } from "../src/form.ts";
-
-describe("deepMergeConfig", () => {
-  it("preserves siblings at every level — no silent nested-key loss", () => {
-    const merged = deepMergeConfig(
-      { providers: { gmail: { scopes: ["read"] } } },
-      { providers: { slack: { token: "xyz" } } },
-    );
-    expect(merged).toEqual({
-      providers: {
-        gmail: { scopes: ["read"] },
-        slack: { token: "xyz" },
-      },
-    });
-  });
-
-  it("override wins at the leaf for primitive values", () => {
-    expect(deepMergeConfig({ a: 1, b: 2 }, { b: 99 })).toEqual({ a: 1, b: 99 });
-  });
-
-  it("arrays are replaced, not concatenated", () => {
-    expect(deepMergeConfig({ tags: ["a", "b"] }, { tags: ["c"] })).toEqual({ tags: ["c"] });
-  });
-
-  it("explicit null clears an inherited leaf", () => {
-    expect(deepMergeConfig({ flag: true }, { flag: null })).toEqual({ flag: null });
-  });
-
-  it("undefined values are skipped — to clear, pass null", () => {
-    expect(deepMergeConfig({ flag: true }, { flag: undefined })).toEqual({ flag: true });
-  });
-
-  it("undefined override returns a fresh shallow copy of base", () => {
-    const base = { a: 1 };
-    const merged = deepMergeConfig(base, undefined);
-    expect(merged).toEqual({ a: 1 });
-    expect(merged).not.toBe(base);
-  });
-
-  it("override that mixes object → primitive replaces the whole subtree", () => {
-    expect(deepMergeConfig({ provider: { kind: "gmail" } }, { provider: "slack" })).toEqual({
-      provider: "slack",
-    });
-  });
-
-  it("does not mutate either argument", () => {
-    const base = { a: { b: 1 } };
-    const override = { a: { c: 2 } };
-    const merged = deepMergeConfig(base, override);
-    expect(merged).toEqual({ a: { b: 1, c: 2 } });
-    expect(base).toEqual({ a: { b: 1 } });
-    expect(override).toEqual({ a: { c: 2 } });
-  });
-
-  it("ignores prototype-pollution keys from a JSON.parse'd override", () => {
-    // `JSON.parse` makes `__proto__` an OWN enumerable property, so
-    // Object.entries iterates it — the merge must skip it (and the other
-    // dangerous keys) rather than write through to the prototype.
-    const malicious = JSON.parse('{"__proto__": {"polluted": true}, "safe": 1}') as Record<
-      string,
-      unknown
-    >;
-    const merged = deepMergeConfig({}, malicious);
-    expect(merged.safe).toBe(1);
-    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
-    expect((Object.prototype as Record<string, unknown>).polluted).toBeUndefined();
-  });
-
-  it("ignores constructor / prototype keys in the override", () => {
-    const merged = deepMergeConfig(
-      { keep: 1 },
-      { constructor: { evil: 1 }, prototype: { evil: 1 }, keep: 2 },
-    );
-    expect(merged).toEqual({ keep: 2 });
-    expect((Object.prototype as Record<string, unknown>).evil).toBeUndefined();
-  });
-});
 
 describe("validateConfig", () => {
   const schema: JSONSchemaObject = {

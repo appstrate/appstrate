@@ -46,12 +46,7 @@ import { listResponse } from "../../lib/list-response.ts";
 import { scopedWhere } from "../../lib/db-helpers.ts";
 import { orgOrSystemFilter } from "../../lib/package-helpers.ts";
 import { type Actor, actorFilter } from "../../lib/actor.ts";
-import {
-  runMetadataSchema,
-  runConfigSchema,
-  runConfigOverrideSchema,
-  runLogDataSchema,
-} from "../../lib/jsonb-schemas.ts";
+import { runMetadataSchema, runLogDataSchema } from "../../lib/jsonb-schemas.ts";
 import { ApiError, conflict, invalidRequest } from "../../lib/errors.ts";
 import { getPlatformRunLimits } from "../run-limits.ts";
 import { detachOrDeleteContainedDocuments } from "../documents.ts";
@@ -93,28 +88,6 @@ export function runAgentIdentity(row: {
     row.packageId ??
     (row.agentScope && row.agentName ? `@${row.agentScope}/${row.agentName}` : "@deleted/unknown")
   );
-}
-
-function parseRunConfig(value: Record<string, unknown> | null | undefined) {
-  if (value == null) return null;
-  const result = runConfigSchema.safeParse(value);
-  if (!result.success) {
-    throw invalidRequest(
-      `Invalid run config: ${result.error.issues[0]?.message ?? "validation failed"}`,
-    );
-  }
-  return result.data;
-}
-
-function parseRunConfigOverride(value: Record<string, unknown> | null | undefined) {
-  if (value == null) return null;
-  const result = runConfigOverrideSchema.safeParse(value);
-  if (!result.success) {
-    throw invalidRequest(
-      `Invalid run config override: ${result.error.issues[0]?.message ?? "validation failed"}`,
-    );
-  }
-  return result.data;
 }
 
 function parseRunMetadata(value: Record<string, unknown>) {
@@ -187,8 +160,6 @@ const enrichedRunColumns = {
   checkpoint: runs.checkpoint,
   error: runs.error,
   metadata: runs.metadata,
-  config: runs.config,
-  configOverride: runs.configOverride,
   startedAt: runs.startedAt,
   completedAt: runs.completedAt,
   duration: runs.duration,
@@ -337,8 +308,6 @@ function runRowToWireDto(row: RunProjection): RunWireDto {
     checkpoint: row.checkpoint,
     error: row.error,
     metadata: row.metadata,
-    config: row.config,
-    config_override: row.configOverride,
     started_at: row.startedAt?.toISOString() ?? null,
     completed_at: row.completedAt?.toISOString() ?? null,
     duration: row.duration,
@@ -532,16 +501,6 @@ interface CreateRunParams {
   agentScope?: string | null;
   /** Snapshot of the agent's display name (manifest.display_name ?? name). */
   agentName?: string | null;
-  /** Snapshot of the effective agent config (merged overrides) at run creation. */
-  config?: Record<string, unknown> | null;
-  /**
-   * Per-run override delta — the raw object the caller sent in the
-   * request body (or `null` if the run used persisted defaults verbatim).
-   * Persisted alongside the resolved `config` snapshot so the dashboard
-   * can badge "default vs override" and the "Re-run with these settings"
-   * button can replay the exact same delta.
-   */
-  configOverride?: Record<string, unknown> | null;
   /**
    * Per-run dependency version overrides (#666) — the `{ "@scope/name":
    * "draft" | "<spec>" }` map the caller passed on the run trigger (or a
@@ -672,8 +631,6 @@ export async function createRun(scope: AppScope, params: CreateRunParams): Promi
       runNumber,
       agentScope: params.agentScope ?? null,
       agentName: params.agentName ?? null,
-      config: parseRunConfig(params.config),
-      configOverride: parseRunConfigOverride(params.configOverride),
       ...(params.dependencyOverrides !== undefined
         ? { dependencyOverrides: params.dependencyOverrides }
         : {}),

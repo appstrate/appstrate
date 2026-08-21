@@ -308,7 +308,7 @@ describe("Agents API", () => {
   });
 
   describe("PUT /api/agents/:scope/:name/config", () => {
-    it("updates agent configuration", async () => {
+    it("stores input values and field locks", async () => {
       await seedAgent({
         id: "@myorg/config-agent",
         orgId: ctx.orgId,
@@ -318,7 +318,7 @@ describe("Agents API", () => {
           version: "0.1.0",
           type: "agent",
           description: "Test",
-          config: {
+          input: {
             schema: { type: "object", properties: { key: { type: "string" } } },
           },
         },
@@ -334,16 +334,45 @@ describe("Agents API", () => {
           ...authHeaders(ctx),
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ key: "value" }),
+        body: JSON.stringify({ values: { key: "value" }, locked_fields: ["key"] }),
       });
 
       expect(res.status).toBe(200);
-      // 200 + the bare persisted configuration document (#657) — no
-      // `{config, validation}` envelope; validation failures are 400s.
+      // 200 + the bare persisted resource (#657) — no `validation` envelope;
+      // validation failures are 400s.
       const body = (await res.json()) as Record<string, unknown>;
-      expect(body.key).toBe("value");
-      expect("config" in body).toBe(false);
+      expect(body.values).toEqual({ key: "value" });
+      expect(body.locked_fields).toEqual(["key"]);
       expect("validation" in body).toBe(false);
+    });
+
+    it("rejects a wrong-typed stored value with 400", async () => {
+      await seedAgent({
+        id: "@myorg/typed-agent",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        draftManifest: {
+          name: "@myorg/typed-agent",
+          version: "0.1.0",
+          type: "agent",
+          description: "Test",
+          input: {
+            schema: { type: "object", properties: { count: { type: "integer" } } },
+          },
+        },
+      });
+      await installPackage(
+        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        "@myorg/typed-agent",
+      );
+
+      const res = await app.request("/api/agents/@myorg/typed-agent/config", {
+        method: "PUT",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ values: { count: "not-a-number" }, locked_fields: [] }),
+      });
+
+      expect(res.status).toBe(400);
     });
   });
 

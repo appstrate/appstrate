@@ -38,7 +38,9 @@ import { insertShadowPackage, buildShadowLoadedPackage } from "../services/inlin
 import { createRun } from "../services/run-creation.ts";
 import { resolveRunnerContext } from "../lib/runner-context.ts";
 import { resolveRegistryAgent } from "../services/registry-run-resolver.ts";
-import { validateConfig, validateInput } from "../services/schema.ts";
+import { validateInput } from "../services/schema.ts";
+import { getPackageConfig } from "../services/application-packages.ts";
+import { resolveEffectiveInput } from "../services/input-resolution.ts";
 import { validateAgentReadiness } from "../services/agent-readiness.ts";
 import { assertApplicationInScope } from "../services/applications.ts";
 import { asJSONSchemaObject, type JSONSchemaObject } from "@appstrate/core/form";
@@ -81,7 +83,6 @@ const CreateRemoteRunBodySchema = z
           kind: z.literal("inline"),
           manifest: z.record(z.string(), z.unknown()),
           prompt: z.string().min(1),
-          config: z.record(z.string(), z.unknown()).optional(),
         })
         .strict(),
       z
@@ -103,7 +104,6 @@ const CreateRemoteRunBodySchema = z
            * for no security gain (no untrusted bytes are loaded server-side).
            */
           integrity: z.string().optional(),
-          config: z.record(z.string(), z.unknown()).optional(),
         })
         .strict(),
     ]),
@@ -211,7 +211,6 @@ export function createRunsRemoteRouter() {
       let agentForRun: LoadedPackage;
       let overrideVersionLabel: string | undefined;
       let effectiveInput: Record<string, unknown> | null;
-      let effectiveConfig: Record<string, unknown>;
       // Attribution path counter — emitted once per request so we can
       // track the inline-vs-registry split over time.
       let attributionPath: "registry" | "inline_shadow";
@@ -232,34 +231,27 @@ export function createRunsRemoteRouter() {
         overrideVersionLabel = resolved.versionLabel;
         attributionPath = "registry";
 
-        effectiveConfig =
-          src.config && typeof src.config === "object" && !Array.isArray(src.config)
-            ? (src.config as Record<string, unknown>)
-            : {};
-        effectiveInput =
-          body.input && typeof body.input === "object" && !Array.isArray(body.input)
-            ? (body.input as Record<string, unknown>)
-            : null;
-
-        // Validate config + input against the resolved manifest's schemas.
-        // The manifest is server-authored (came from our own catalog), so
-        // structural validation is unnecessary — only AJV schema checks.
-        const configSchema = agentForRun.manifest.config?.schema;
-        if (configSchema) {
-          const cv = validateConfig(effectiveConfig, asJSONSchemaObject(configSchema));
-          if (!cv.valid) {
-            const first = cv.errors[0]!;
-            throw new ApiError({
-              status: 400,
-              code: "invalid_config",
-              title: "Invalid Config",
-              detail: first.field ? `${first.field}: ${first.message}` : first.message,
-            });
-          }
-        }
+        // A cataloged agent has per-application settings, so the run's input
+        // resolves through the same four layers as a platform run: author
+        // defaults < editor defaults < caller input, with locked fields
+        // refused (400 `locked_input_field`). There is no schedule layer here.
+        const packageConfig = await getPackageConfig(applicationId, agentForRun.id);
         const inputSchema = agentForRun.manifest.input?.schema;
+        effectiveInput = resolveEffectiveInput({
+          ...(inputSchema ? { schema: asJSONSchemaObject(inputSchema) } : {}),
+          editorDefaults: packageConfig.config,
+          lockedFields: packageConfig.lockedFields,
+          callerInput:
+            body.input && typeof body.input === "object" && !Array.isArray(body.input)
+              ? (body.input as Record<string, unknown>)
+              : undefined,
+        });
+
+        // Validate the resolved input against the manifest schema. The
+        // manifest is server-authored (came from our own catalog), so
+        // structural validation is unnecessary — only the AJV schema check.
         if (inputSchema) {
-          const iv = validateInput(effectiveInput ?? undefined, asJSONSchemaObject(inputSchema));
+          const iv = validateInput(effectiveInput, asJSONSchemaObject(inputSchema));
           if (!iv.valid) {
             const first = iv.errors[0]!;
             throw new ApiError({
@@ -275,7 +267,6 @@ export function createRunsRemoteRouter() {
         await validateAgentReadiness({
           agent: agentForRun,
           orgId,
-          config: effectiveConfig,
           applicationId,
           actor,
         });
@@ -292,7 +283,6 @@ export function createRunsRemoteRouter() {
             manifest: src.manifest,
             prompt: src.prompt,
             input: body.input,
-            config: src.config,
           },
         });
 
@@ -300,7 +290,6 @@ export function createRunsRemoteRouter() {
         attributionPath = "inline_shadow";
 
         effectiveInput = preflight.effectiveInput;
-        effectiveConfig = preflight.effectiveConfig;
       }
 
       async function createShadowAgent(
@@ -334,7 +323,6 @@ export function createRunsRemoteRouter() {
         agent: agentForRun,
         ...(overrideVersionLabel ? { overrideVersionLabel } : {}),
         input: effectiveInput,
-        config: effectiveConfig,
         // Normalize an empty map to null (mirrors the platform run route): a
         // non-null map on the row means the run carried explicit overrides.
         dependencyOverrides:

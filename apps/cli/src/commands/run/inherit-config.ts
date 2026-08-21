@@ -1,14 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Fetch the per-application run-config for `<applicationId, packageId>` and
- * merge it with the user's CLI flags + env vars. Source of truth lives
- * server-side at `GET /api/applications/{applicationId}/packages/{scope}/{name}/run-config`
+ * Fetch the per-application run-config (model / generation / proxy /
+ * version pin) for `<applicationId, packageId>` and merge it with the
+ * user's CLI flags + env vars. Source of truth lives server-side at
+ * `GET /api/applications/{applicationId}/packages/{scope}/{name}/run-config`
  * — the UI consumes the same payload, so a CLI run with no overrides
- * reproduces the UI run byte-for-byte.
+ * targets the same model and version the dashboard would.
  *
  * Merge order (highest priority first):
- *   1. Explicit CLI flags (--config / --model / --proxy / @spec)
+ *   1. Explicit CLI flags (--model / --proxy / @spec)
  *   2. Environment variables (APPSTRATE_MODEL / APPSTRATE_PROXY)
  *   3. `run-config` payload returned by the API
  *   4. Built-in defaults (none for these fields)
@@ -22,9 +23,6 @@ import { CLI_USER_AGENT } from "../../lib/version.ts";
 import { normalizeInstance } from "../../lib/instance-url.ts";
 import type { ResolvedRunConfig } from "@appstrate/shared-types";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
-import { deepMergeConfig } from "@appstrate/core/schema-validation";
-
-export { deepMergeConfig };
 
 /**
  * Wire shape returned by the run-config endpoint. The canonical type
@@ -34,8 +32,6 @@ export { deepMergeConfig };
 export type ResolvedRunConfigPayload = ResolvedRunConfig;
 
 export interface InheritedRunConfig {
-  /** Resolved agent config (merge of inherited + flag overrides). */
-  config: Record<string, unknown>;
   /** Model id to pass to the run pipeline, or null when nothing is set. */
   modelId: string | null;
   /** Persisted generation defaults for local parity with platform runs. */
@@ -101,8 +97,6 @@ export async function fetchRunConfigPayload(
 export interface MergeRunConfigInputs {
   /** Inherited payload (null = no inheritance — flags + defaults only). */
   inherited: ResolvedRunConfigPayload | null;
-  /** `--config <json>` value already parsed into an object, or undefined. */
-  flagConfig?: Record<string, unknown>;
   /** `--model <id>` flag value. */
   flagModel?: string;
   /** `--proxy <id>` flag value. */
@@ -128,33 +122,13 @@ export interface MergeRunConfigInputs {
  * `versionPin`: an explicit `@spec` in the package id always wins;
  * otherwise the per-app pin feeds into the bundle URL. Identical to
  * the platform's `?version=` query param semantics.
- *
- * `config`: deep-merged. `flagConfig` overrides `inherited.config` at
- * the leaf — siblings at every level are preserved.
- *
- *     inherited:  { integrations: { gmail: { scopes: ["read"] } } }
- *     flagConfig: { integrations: { slack: { token: "xyz" } } }
- *     result:     { integrations: { gmail: { … }, slack: { … } } }
- *
- * A previous shallow merge silently dropped the `gmail` key in that
- * scenario, which had no UI-side equivalent — the dashboard's
- * settings form never partial-merges, it edits the persisted record
- * via a full replace. Deep-merge is the closest fit to the user's
- * mental model of "override just this leaf" for a one-off CLI run.
- *
- * Arrays are replaced wholesale (treated as atomic values). Explicit
- * `null` clears the inherited leaf; `undefined` is ignored. Pass the
- * full config (`{}` for empty) when the run-config endpoint is
- * unreachable — the helper is called for both cases.
  */
 export function mergeRunConfig(inputs: MergeRunConfigInputs): InheritedRunConfig {
   const inherited = inputs.inherited;
-  const config = deepMergeConfig(inherited?.config ?? {}, inputs.flagConfig);
   const modelId = inputs.flagModel ?? inputs.envModel ?? inherited?.modelId ?? null;
   const proxyId = inputs.flagProxy ?? inputs.envProxy ?? inherited?.proxyId ?? null;
   const versionPin = inputs.hasExplicitSpec ? null : (inherited?.version_pin ?? null);
   return {
-    config,
     modelId,
     generation: inherited?.generation ?? null,
     proxyId,

@@ -190,11 +190,11 @@ If unsure: "universal" means "appears on >5 different types". Otherwise snake_ca
 
 #### Carve-out 4g — JSONB internal contracts
 
-| JSONB column                                                                                                                                                                                                | Interior casing                                                                                        | Why                                               |
-| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ | ------------------------------------------------- |
-| `runs.token_usage`                                                                                                                                                                                          | snake_case (`input_tokens`, `output_tokens`, `cache_read_input_tokens`, `cache_creation_input_tokens`) | Anthropic/OpenAI SDK wire convention              |
-| `runs.metadata` (platform-written, e.g. `{ degraded_integrations }`)                                                                                                                                        | snake_case                                                                                             | Returned verbatim on the run DTO — a wire payload |
-| `runs.checkpoint`, `runs.config`, `runs.config_override`, `runs.input`, `runs.result`, `runs.connection_overrides`, `runs.inline_manifest`, `runs.context_snapshot`, `pinned`, `memory`, `webhooks.payload` | Opaque (varies by producer)                                                                            | Each producer documents its own shape             |
+| JSONB column                                                                                                                                                         | Interior casing                                                                                        | Why                                               |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ | ------------------------------------------------- |
+| `runs.token_usage`                                                                                                                                                   | snake_case (`input_tokens`, `output_tokens`, `cache_read_input_tokens`, `cache_creation_input_tokens`) | Anthropic/OpenAI SDK wire convention              |
+| `runs.metadata` (platform-written, e.g. `{ degraded_integrations }`)                                                                                                 | snake_case                                                                                             | Returned verbatim on the run DTO — a wire payload |
+| `runs.checkpoint`, `runs.input`, `runs.result`, `runs.connection_overrides`, `runs.inline_manifest`, `runs.context_snapshot`, `pinned`, `memory`, `webhooks.payload` | Opaque (varies by producer)                                                                            | Each producer documents its own shape             |
 
 **⚠️ Boundary — this carve-out covers JSONB that NEVER crosses the wire verbatim.** A JSONB column that is serialized back to a client as-is (no per-key projection) is a **wire payload**, not an internal contract, and its interior keys follow Zone 1 (**snake_case**, with the universal DB carve-out). The interior is the API contract.
 
@@ -256,7 +256,7 @@ await recordAuditFromContext({
   action: "schedule.updated",
   after: {
     cronExpression: data.cron_expression,
-    configOverride: data.config_override,
+    modelIdOverride: data.model_id_override,
     // ... explicit camelCase keys, not the raw body
   },
 });
@@ -384,7 +384,7 @@ This is the single canonical contract for frontend, SDK, github-action, and MCP 
 
 **Agent resource extension**: `_meta["dev.appstrate/resources"].{memory_mb, cpu}`
 
-**Wrapper (input/output/config)**: `schema`, `file_constraints`, `ui_hints`, `property_order`
+**Wrapper (input/output)**: `schema`, `file_constraints`, `ui_hints`, `property_order`
 
 - `file_constraints.{key}`: `accept`, `max_size`
 - `ui_hints.{key}`: `placeholder`
@@ -414,7 +414,7 @@ This is the single canonical contract for frontend, SDK, github-action, and MCP 
 **Mirror manifest** (snake_case on wire, projection from snake_case manifest):
 `display_name`, `schema_version`
 
-**Domain fields** (snake_case): `running_runs`, `used_by_agents`, `reused_by_agents`, `has_unarchived_changes`, `version_count`, `created_by_name`, `last_run`, `user_name`, `end_user_name`, `api_key_name`, `schedule_name`, `actor_name`, `actor_type`, `actor_id`, `manifest_name`, `latest_published_version`, `active_version`, `restored_version`, `total_connections`, `lock_version`, `auto_installed`, `agent_scope`, `agent_name`, `package_ephemeral`, `inline_manifest`, `inline_prompt`, `runner_name`, `runner_kind`, `config_override`, `model_label`, `proxy_label`, `version_label`, `model_source`, `version_dirty`, `token_usage`, `cron_expression`, `connection_overrides`, `last_run_at`, `next_run_at`, `model_id_override`, `proxy_id_override`, `version_override`, `artifact_size`, `yanked_reason`, `dist_tags`, `version_pin`, `draft_manifest`, `callback_url`, `started_at`, `completed_at`, `forked_from`
+**Domain fields** (snake_case): `running_runs`, `used_by_agents`, `reused_by_agents`, `has_unarchived_changes`, `version_count`, `created_by_name`, `last_run`, `user_name`, `end_user_name`, `api_key_name`, `schedule_name`, `actor_name`, `actor_type`, `actor_id`, `manifest_name`, `latest_published_version`, `active_version`, `restored_version`, `total_connections`, `lock_version`, `auto_installed`, `agent_scope`, `agent_name`, `package_ephemeral`, `inline_manifest`, `inline_prompt`, `runner_name`, `runner_kind`, `model_label`, `proxy_label`, `version_label`, `model_source`, `version_dirty`, `token_usage`, `cron_expression`, `connection_overrides`, `last_run_at`, `next_run_at`, `model_id_override`, `proxy_id_override`, `version_override`, `artifact_size`, `yanked_reason`, `dist_tags`, `version_pin`, `draft_manifest`, `callback_url`, `started_at`, `completed_at`, `forked_from`
 
 **Application-package DTO domain fields** (snake_case — `application_package` object on `/api/applications/{id}/packages*`): `version_id`, `installed_at`, `package_type`, `package_source` (also the PUT request body's `version_id`). Note `modelId`/`proxyId` on the same object stay camelCase per asymmetry 5c. `activated_at` (integration activate 201 response) follows the same domain-timestamp rule.
 
@@ -531,7 +531,7 @@ The only "compromise" non-SOTA-strict (universal DB fields stay camelCase on wir
 cd /Users/pierrecabriere/Dev/appstrate/appstrate
 
 # Domain fields that should be snake_case but appear as camelCase
-rg "(\.|:\s+)(displayName|schemaVersion|forkedFrom|runningRuns|usedByAgents|reusedByAgents|hasUnarchivedChanges|versionCount|createdByName|lastRun|userName|endUserName|apiKeyName|scheduleName|actorName|actorType|actorId|manifestName|latestPublishedVersion|activeVersion|restoredVersion|totalConnections|lockVersion|autoInstalled|agentScope|agentName|packageEphemeral|inlineManifest|inlinePrompt|runnerName|runnerKind|configOverride|modelLabel|proxyLabel|versionLabel|modelSource|versionDirty|tokenUsage|cronExpression|connectionOverrides|lastRunAt|nextRunAt|modelIdOverride|proxyIdOverride|versionOverride|artifactSize|yankedReason|distTags|versionPin|draftManifest|callbackUrl)\b" -t ts -t tsx
+rg "(\.|:\s+)(displayName|schemaVersion|forkedFrom|runningRuns|usedByAgents|reusedByAgents|hasUnarchivedChanges|versionCount|createdByName|lastRun|userName|endUserName|apiKeyName|scheduleName|actorName|actorType|actorId|manifestName|latestPublishedVersion|activeVersion|restoredVersion|totalConnections|lockVersion|autoInstalled|agentScope|agentName|packageEphemeral|inlineManifest|inlinePrompt|runnerName|runnerKind|modelLabel|proxyLabel|versionLabel|modelSource|versionDirty|tokenUsage|cronExpression|connectionOverrides|lastRunAt|nextRunAt|modelIdOverride|proxyIdOverride|versionOverride|artifactSize|yankedReason|distTags|versionPin|draftManifest|callbackUrl)\b" -t ts -t tsx
 ```
 
 ### Find snake_case in places that should be camelCase

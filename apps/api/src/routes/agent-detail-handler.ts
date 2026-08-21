@@ -23,7 +23,6 @@ import { getPackageConfig } from "../services/application-packages.ts";
 import { resolveRunTimeout } from "../services/run-limits.ts";
 import { isToolsWildcard, parseManifestIntegrations } from "@appstrate/core/dependencies";
 import { parseScopedName } from "@appstrate/core/naming";
-import { mergeWithDefaults, asJSONSchemaObject } from "@appstrate/core/form";
 import { getItemId } from "./packages.ts";
 import { notFound } from "../lib/errors.ts";
 import { getAppScope } from "../lib/scope.ts";
@@ -104,10 +103,6 @@ export async function buildAgentDetailDto(
     getRunningRunsForPackage(scope, agent.id),
   ]);
 
-  const configWithDefaults = m.config?.schema
-    ? mergeWithDefaults(asJSONSchemaObject(m.config.schema), packageConfig.config)
-    : {};
-
   const parsed = parseScopedName(m.name);
 
   const hasUnarchivedChanges = computeHasUnpublishedChanges(
@@ -147,12 +142,17 @@ export async function buildAgentDetailDto(
         ...(e.scopes !== undefined ? { scopes: [...e.scopes] } : {}),
       })),
     },
-    ...(m.input ? { input: m.input } : {}),
-    ...(m.output ? { output: m.output } : {}),
-    config: {
-      ...(m.config ?? { schema: { type: "object", properties: {} } }),
-      current: configWithDefaults,
+    // The agent's ONE parameter schema, plus the per-application layers the
+    // launch form needs: `values` are the editor's stored defaults and
+    // `locked_fields` the fields it froze (not asked at launch, not
+    // overridable). Emitted unconditionally — a manifest with no `input`
+    // section can still carry stored values from an earlier manifest.
+    input: {
+      ...(m.input ?? { schema: { type: "object", properties: {} } }),
+      values: packageConfig.config,
+      locked_fields: packageConfig.lockedFields,
     },
+    ...(m.output ? { output: m.output } : {}),
     running_runs: runningCount,
     last_run: lastRun
       ? {

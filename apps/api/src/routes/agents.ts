@@ -16,6 +16,7 @@ import {
   type PersistenceScope,
 } from "../services/state/package-persistence.ts";
 import { validateConfig } from "../services/schema.ts";
+import { assertLockedFieldsSatisfiable } from "../services/input-resolution.ts";
 import {
   listAccessiblePackages,
   updateInstalledPackage,
@@ -31,9 +32,9 @@ import { getActor } from "../lib/actor.ts";
 import { parseScopedName } from "@appstrate/core/naming";
 import { computeIntegrity } from "@appstrate/core/integrity";
 import { z } from "zod";
-import { ApiError, forbidden, invalidRequest, notFound } from "../lib/errors.ts";
+import { ApiError, forbidden, invalidRequest, notFound, validationFailed } from "../lib/errors.ts";
 import { readJsonBody } from "../lib/request-body.ts";
-import { asJSONSchemaObject, mergeWithDefaults } from "@appstrate/core/form";
+import { asJSONSchemaObject } from "@appstrate/core/form";
 import { getAppScope } from "../lib/scope.ts";
 import { resolveAgentConnectionReadiness } from "../services/integration-pins-service.ts";
 import { assertExplicitModelExists, resolveModel } from "../services/org-models.ts";
@@ -57,6 +58,20 @@ export const proxyIdSchema = z.object({ proxyId: z.string().nullable() });
 export const modelIdSchema = z.object({
   modelId: z.string().nullable(),
   generation: modelGenerationSettingsSchema.nullable().optional(),
+});
+
+/**
+ * Body of `PUT /api/agents/{scope}/{name}/config` — the agent's stored input
+ * settings for this application.
+ *
+ * `values` are layer 2 of the input resolution (editor defaults, partial by
+ * design); `locked_fields` names the input fields no caller may set at
+ * launch. Both are full replacements, not patches: the editor form owns the
+ * whole document, so an omitted key means "cleared", never "unchanged".
+ */
+export const agentInputSettingsSchema = z.object({
+  values: z.record(z.string(), z.unknown()).default({}),
+  locked_fields: z.array(z.string().min(1)).default([]),
 });
 
 /**
@@ -185,7 +200,8 @@ export function createAgentsRouter() {
     return c.json(listResponse(agentList));
   });
 
-  // PUT /api/agents/:scope/:name/config — save agent configuration (admin-only)
+  // PUT /api/agents/:scope/:name/config — save the agent's stored input
+  // defaults + field locks (admin-only).
   router.put(
     `/${SCOPED_PACKAGE_ROUTE}/config`,
     requireAgent(),
@@ -193,30 +209,47 @@ export function createAgentsRouter() {
     async (c) => {
       const agent = c.get("package");
 
-      const body = await readJsonBody(c, z.record(z.string(), z.unknown()));
-      const schema = agent.manifest.config?.schema ?? { type: "object" as const, properties: {} };
+      const body = await readJsonBody(c, agentInputSettingsSchema);
+      const schema = asJSONSchemaObject(
+        agent.manifest.input?.schema ?? { type: "object" as const, properties: {} },
+      );
 
-      // Validate config with AJV
-      const validation = validateConfig(body, asJSONSchemaObject(schema));
+      // Stored values are a partial layer: a required field the editor leaves
+      // empty is legitimately asked at launch. Validate types/formats against
+      // the input schema with `required` dropped, so a wrong-typed default is
+      // still rejected here rather than at every run.
+      const validation = validateConfig(body.values, { ...schema, required: [] });
       if (!validation.valid) {
-        throw invalidRequest("Invalid configuration");
+        throw validationFailed(
+          validation.errors.map((e) => ({
+            field: e.field ? `values.${e.field}` : "values",
+            code: "invalid_input",
+            title: "Invalid Input",
+            message: e.message,
+          })),
+        );
       }
 
-      const config = mergeWithDefaults(asJSONSchemaObject(schema), body);
+      // A required field locked with no value behind it is invisible at launch
+      // AND unsatisfiable — every run would fail and nobody could see why.
+      assertLockedFieldsSatisfiable(schema, body.locked_fields, body.values);
 
       const scope = getAppScope(c);
-      await updateInstalledPackage(scope, agent.id, { config });
+      await updateInstalledPackage(scope, agent.id, {
+        config: body.values,
+        lockedFields: body.locked_fields,
+      });
 
       await recordAuditFromContext(c, {
         action: "agent.config_updated",
         resourceType: "agent",
         resourceId: agent.id,
+        after: { lockedFields: body.locked_fields },
       });
 
-      // 200 + the bare persisted configuration document (merged with schema
-      // defaults) — the resource itself, no `validation` echo (#657):
-      // validation failures are 400s, a 200 needs no valid:true scrap.
-      return c.json(config);
+      // 200 + the bare persisted resource (#657): validation failures are
+      // 400s, so a 200 needs no valid:true scrap.
+      return c.json({ values: body.values, locked_fields: body.locked_fields });
     },
   );
 

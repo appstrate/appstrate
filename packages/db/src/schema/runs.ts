@@ -227,14 +227,6 @@ export const runs = pgTable(
      */
     chatSessionId: text("chat_session_id"),
     metadata: jsonb("metadata").$type<Record<string, unknown>>(),
-    config: jsonb("config").$type<Record<string, unknown>>(),
-    // Per-run override layer — the delta the caller sent on top of
-    // `application_packages.config`. `config` above is the resolved
-    // (deep-merged) snapshot; `configOverride` is the raw delta so the
-    // UI can badge "default vs override" and "Re-run with these settings"
-    // can replay the exact same delta. Null when the run used persisted
-    // defaults verbatim.
-    configOverride: jsonb("config_override").$type<Record<string, unknown>>(),
     // Per-run dependency version overrides (#666). Shape:
     // { "@scope/skill": "draft" | "<semver|dist-tag>" }. Run-scoped escape
     // hatch out of the published-only resolution: `"draft"` pulls that
@@ -828,12 +820,6 @@ export const schedules = pgTable(
     cronExpression: text("cron_expression").notNull(),
     timezone: text("timezone").default("UTC"),
     input: jsonb("input").$type<Record<string, unknown>>(),
-    // Per-schedule override layer — frozen at schedule creation/edit and
-    // deep-merged with the application's persisted config every time the
-    // schedule fires. Mirrors the per-run override pipeline (POST /run
-    // body) so a schedule is "a recurring run with frozen overrides".
-    // Argo CronWorkflow inherit-with-override semantics.
-    configOverride: jsonb("config_override").$type<Record<string, unknown>>(),
     modelIdOverride: text("model_id_override"),
     generationConfigOverride: jsonb("generation_config_override").$type<ModelGenerationSettings>(),
     proxyIdOverride: text("proxy_id_override"),
@@ -842,7 +828,7 @@ export const schedules = pgTable(
     // route resolves `?version=`.
     versionOverride: text("version_override"),
     // Per-schedule integration connection overrides — frozen at schedule
-    // creation/edit (mirrors `configOverride`). Same shape as
+    // creation/edit (mirrors `dependencyOverrides` on runs). Same shape as
     // `runs.connectionOverrides`. Loses to admin pin at fire time.
     connectionOverrides: jsonb("connection_overrides").$type<Record<string, string>>(),
     // Per-schedule dependency version overrides — frozen at schedule

@@ -299,7 +299,6 @@ export interface InlineRunBody {
   manifest?: unknown;
   prompt?: unknown;
   input?: Record<string, unknown>;
-  config?: Record<string, unknown>;
   modelId?: string | null;
   generation?: ModelGenerationSettings;
   proxyId?: string | null;

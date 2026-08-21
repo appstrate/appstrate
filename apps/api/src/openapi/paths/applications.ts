@@ -254,7 +254,7 @@ export const applicationsPaths = {
       tags: ["Application Packages"],
       summary: "List installed packages",
       description:
-        "List all packages installed in this application, with their config and version.",
+        "List all packages installed in this application, with their model/proxy/version overrides.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "applicationId", in: "path", required: true, schema: { type: "string" } },
@@ -318,7 +318,6 @@ export const applicationsPaths = {
                   minLength: 1,
                   description: "Package ID from org catalog",
                 },
-                config: { type: "object", description: "Initial configuration" },
               },
             },
           },
@@ -356,7 +355,7 @@ export const applicationsPaths = {
       operationId: "getInstalledPackage",
       tags: ["Application Packages"],
       summary: "Get installed package",
-      description: "Get an installed package detail with its config.",
+      description: "Get an installed package detail with its model/proxy/version overrides.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "applicationId", in: "path", required: true, schema: { type: "string" } },
@@ -380,9 +379,9 @@ export const applicationsPaths = {
     put: {
       operationId: "updateInstalledPackage",
       tags: ["Application Packages"],
-      summary: "Update installed package config",
+      summary: "Update installed package overrides",
       description:
-        "Update configuration, model/proxy overrides, or version pinning for an installed package.",
+        "Update the model/proxy overrides, generation settings, enabled flag, or version pinning for an installed package. The agent's stored input values are NOT settable here — use `PUT /api/agents/{scope}/{name}/config`, which validates them against the manifest input schema.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "applicationId", in: "path", required: true, schema: { type: "string" } },
@@ -395,7 +394,6 @@ export const applicationsPaths = {
             schema: {
               type: "object",
               properties: {
-                config: { type: "object" },
                 generationConfig: {
                   oneOf: [
                     { $ref: "#/components/schemas/ModelGenerationSettings" },
@@ -413,7 +411,7 @@ export const applicationsPaths = {
       },
       responses: {
         "200": {
-          description: "Updated package config",
+          description: "Updated installed package",
           headers: { "Request-Id": { $ref: "#/components/headers/RequestId" } },
           content: {
             "application/json": {
@@ -452,7 +450,7 @@ export const applicationsPaths = {
       tags: ["Application Packages"],
       summary: "Get the resolved per-app run configuration",
       description:
-        "Returns the configuration applied when this application runs the given package: agent config, model override, proxy override, and pinned version label. Used by the CLI to reproduce a UI run without stitching together three separate calls; the UI uses the same source for its run-from-app flow.",
+        "Returns the configuration applied when this application runs the given package: model override, generation settings, proxy override, and pinned version label. Used by the CLI to reproduce a UI run without stitching together three separate calls; the UI uses the same source for its run-from-app flow.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "applicationId", in: "path", required: true, schema: { type: "string" } },
@@ -467,9 +465,8 @@ export const applicationsPaths = {
             "application/json": {
               schema: {
                 type: "object",
-                required: ["config", "generation", "modelId", "proxyId", "version_pin"],
+                required: ["generation", "modelId", "proxyId", "version_pin"],
                 properties: {
-                  config: { type: "object" },
                   generation: {
                     oneOf: [
                       { $ref: "#/components/schemas/ModelGenerationSettings" },
@@ -482,7 +479,6 @@ export const applicationsPaths = {
                 },
               },
               example: {
-                config: { dryRun: true },
                 generation: { temperature: 0.2, reasoningLevel: "high" },
                 modelId: "claude-sonnet-4-6",
                 proxyId: null,

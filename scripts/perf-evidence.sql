@@ -47,8 +47,6 @@ WITH sample AS (
     pg_column_size(result)           AS result_bytes,
     pg_column_size(checkpoint)       AS checkpoint_bytes,
     pg_column_size(context_snapshot) AS context_bytes,
-    pg_column_size(config)           AS config_bytes,
-    pg_column_size(config_override)  AS config_override_bytes,
     pg_column_size(metadata)         AS metadata_bytes,
     pg_column_size(token_usage)      AS token_usage_bytes,
     pg_column_size(runs.*)           AS row_bytes
@@ -70,8 +68,6 @@ LATERAL (
     ('result', result_bytes),
     ('checkpoint', checkpoint_bytes),
     ('context_snapshot', context_bytes),
-    ('config', config_bytes),
-    ('config_override', config_override_bytes),
     ('metadata', metadata_bytes),
     ('token_usage', token_usage_bytes),
     ('__whole_row__', row_bytes)

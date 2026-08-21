@@ -18,9 +18,9 @@ import {
 import { listUserRuns } from "../services/state/notifications.ts";
 import { resolveAgentRunVersion } from "../services/agent-version-resolver.ts";
 import { parseRequestInput } from "../services/input-parser.ts";
+import { getPackageConfig } from "../services/application-packages.ts";
 import { deleteRunWorkspace } from "../services/run-workspace-storage.ts";
 import { asJSONSchemaObject } from "@appstrate/core/form";
-import { mergeAndValidateConfigOverride } from "../services/agent-readiness.ts";
 import { abortRun } from "../services/run-tracker.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { idempotency } from "../middleware/idempotency.ts";
@@ -57,7 +57,7 @@ import { modelGenerationSettingsSchema } from "@appstrate/core/model-generation"
 /**
  * Wire-shape guard for the inline-run body (`POST /runs/inline` +
  * `/inline/validate`). Mirrors the `InlineRunBody` TS type: every field
- * is optional and the semantic validation (manifest/config/input/AJV) happens
+ * is optional and the semantic validation (manifest/input/AJV) happens
  * downstream in the preflight — this schema only rejects a malformed body or a
  * grossly wrong-typed field (e.g. `input: "foo"`) with a 400 instead of letting
  * it cast through and surface later as a 500.
@@ -66,7 +66,6 @@ const inlineRunBodySchema = z.object({
   manifest: z.unknown().optional(),
   prompt: z.unknown().optional(),
   input: z.record(z.string(), z.unknown()).optional(),
-  config: z.record(z.string(), z.unknown()).optional(),
   modelId: z.string().nullable().optional(),
   generation: modelGenerationSettingsSchema.optional(),
   proxyId: z.string().nullable().optional(),
@@ -181,15 +180,24 @@ export function createRunsRouter() {
       // (e.g. the read-back below) must NOT delete a live run's input documents.
       let launched = false;
       try {
+        // Per-application settings first: they carry the editor defaults and
+        // the locked-field list the input resolution needs, and the readiness
+        // preflight below reuses this same row (one read per trigger).
+        const packageConfig = await getPackageConfig(c.get("applicationId"), agent.id);
+
         const inputResult = await parseRequestInput(
           c,
           runId,
           effectiveAgent.manifest.input?.schema
             ? asJSONSchemaObject(effectiveAgent.manifest.input.schema)
             : undefined,
-          // Same-agent gate for `rerun_from` — replaying another agent's run
-          // input is rejected with 409 `rerun_agent_mismatch`.
-          { agentPackageId: agent.id },
+          {
+            // Same-agent gate for `rerun_from` — replaying another agent's run
+            // input is rejected with 409 `rerun_agent_mismatch`.
+            agentPackageId: agent.id,
+            editorDefaults: packageConfig.config,
+            lockedFields: packageConfig.lockedFields,
+          },
         );
 
         const {
@@ -200,7 +208,6 @@ export function createRunsRouter() {
           modelIdOverride,
           generationConfigOverride,
           proxyIdOverride,
-          configOverride,
           connectionOverrides,
           dependencyOverrides,
         } = inputResult;
@@ -211,7 +218,7 @@ export function createRunsRouter() {
         // default downstream (or crash the uuid cast — see loadModel).
         await assertExplicitModelExists(orgId, modelIdOverride);
 
-        // Shared preflight: resolve config, validate readiness. Threading
+        // Shared preflight: validate readiness. Threading
         // `connectionOverrides` here is what makes the
         // MissingConnectionsModal retry actually work — readiness sees the
         // caller's pick and skips the must_choose error on >1 candidates.
@@ -225,7 +232,6 @@ export function createRunsRouter() {
         const manifestCache: IntegrationManifestCache = new Map();
 
         const {
-          config,
           modelId: preflightModelId,
           generationConfig: preflightGenerationConfig,
           proxyId: preflightProxyId,
@@ -234,15 +240,10 @@ export function createRunsRouter() {
           applicationId: c.get("applicationId"),
           orgId,
           actor,
+          packageConfig,
           connectionOverrides: connectionOverrides ?? null,
           manifestCache,
         });
-
-        // Deep-merge any per-run `config` override on top of the persisted
-        // application config and re-validate against the manifest schema.
-        // Single helper shared with the scheduler so both paths converge to
-        // an identical resolved config for the same `(persisted, override)`.
-        const mergedConfig = mergeAndValidateConfigOverride(effectiveAgent, config, configOverride);
 
         const runner = await resolveRunnerContext(c);
         await prepareAndExecuteRun({
@@ -262,8 +263,6 @@ export function createRunsRouter() {
           pendingDocuments,
           // `document://` inputs to protect via `document_links` (chaining).
           consumedDocumentIds,
-          config: mergedConfig,
-          configOverride: configOverride ?? null,
           modelId: modelIdOverride ?? preflightModelId,
           generationConfig: preflightGenerationConfig,
           generationConfigOverride: generationConfigOverride ?? null,
@@ -654,8 +653,8 @@ export function createRunsRouter() {
         );
       }
 
-      // Preflight BEFORE any input document streams — a bad manifest / config
-      // / readiness problem 4xxes without touching storage.
+      // Preflight BEFORE any input document streams — a bad manifest or
+      // readiness problem 4xxes without touching storage.
       const preflight = await runInlinePreflight({ orgId, applicationId, actor, body });
 
       // ----- Context documents (fan-in by reference) -----
@@ -747,7 +746,7 @@ export function createRunsRouter() {
   );
 
   // POST /api/runs/inline/validate — dry-run validator for inline manifests.
-  // Runs the full preflight (manifest + config + input + agent readiness)
+  // Runs the full preflight (manifest + input + agent readiness)
   // WITHOUT inserting a shadow package or firing a pipeline. Lets developers
   // iterate on a manifest without creating phantom runs or burning credits.
   // Shares 100% of its validation with POST /api/runs/inline via

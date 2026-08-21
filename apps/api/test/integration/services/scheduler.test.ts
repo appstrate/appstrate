@@ -148,7 +148,6 @@ describeRequiresRedis("scheduler service", () => {
         actor,
         {
           cronExpression: "0 9 * * *",
-          configOverride: { integrations: { gmail: { scopes: ["read"] } } },
           generationConfigOverride: { temperature: 0, reasoningLevel: "high" },
           modelIdOverride: "model_abc",
           proxyIdOverride: "prx_xyz",
@@ -156,9 +155,6 @@ describeRequiresRedis("scheduler service", () => {
         },
       );
 
-      expect(schedule.config_override).toEqual({
-        integrations: { gmail: { scopes: ["read"] } },
-      });
       expect(schedule.generation_config_override).toEqual({
         temperature: 0,
         reasoningLevel: "high",
@@ -178,7 +174,6 @@ describeRequiresRedis("scheduler service", () => {
         },
       );
 
-      expect(schedule.config_override).toBeNull();
       expect(schedule.generation_config_override).toBeNull();
       expect(schedule.model_id_override).toBeNull();
       expect(schedule.proxy_id_override).toBeNull();
@@ -396,7 +391,6 @@ describeRequiresRedis("scheduler service", () => {
         actor,
         {
           cronExpression: "0 9 * * *",
-          configOverride: { foo: "bar" },
           generationConfigOverride: { reasoningLevel: "low" },
           modelIdOverride: "model_init",
           proxyIdOverride: "prx_init",
@@ -410,7 +404,6 @@ describeRequiresRedis("scheduler service", () => {
         created.id,
         { cronExpression: "*/15 * * * *" },
       );
-      expect(partialUpdate!.config_override).toEqual({ foo: "bar" });
       expect(partialUpdate!.generation_config_override).toEqual({ reasoningLevel: "low" });
       expect(partialUpdate!.model_id_override).toBe("model_init");
       expect(partialUpdate!.proxy_id_override).toBe("prx_init");
@@ -421,14 +414,12 @@ describeRequiresRedis("scheduler service", () => {
         { orgId: orgId, applicationId: defaultAppId },
         created.id,
         {
-          configOverride: null,
           generationConfigOverride: null,
           modelIdOverride: null,
           proxyIdOverride: null,
           versionOverride: null,
         },
       );
-      expect(cleared!.config_override).toBeNull();
       expect(cleared!.generation_config_override).toBeNull();
       expect(cleared!.model_id_override).toBeNull();
       expect(cleared!.proxy_id_override).toBeNull();

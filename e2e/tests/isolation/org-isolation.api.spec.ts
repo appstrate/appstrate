@@ -44,12 +44,15 @@ test.describe("Cross-org agent isolation", () => {
     expect(res.status()).toBe(404);
   });
 
-  test("OrgB cannot update OrgA agent config", async ({ clientA, clientB, ctxA }) => {
+  test("OrgB cannot update OrgA agent input settings", async ({ clientA, clientB, ctxA }) => {
     const scope = `@${ctxA.org.orgSlug}`;
     const name = `agent-cfg-${Date.now()}`;
     await createAgent(clientA, scope, name);
 
-    const res = await clientB.put(`/agents/${scope}/${name}/config`, { config: { key: "val" } });
+    const res = await clientB.put(`/agents/${scope}/${name}/config`, {
+      values: { key: "val" },
+      locked_fields: [],
+    });
     expect(res.status()).toBe(404);
   });
 });

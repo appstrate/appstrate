@@ -16,12 +16,9 @@ import {
   type IntegrationManifestCache,
   type IntegrationManifestLoadFailure,
 } from "./integration-service.ts";
-import { validateConfig } from "./schema.ts";
 import { resolveDeclaredSkills } from "./package-catalog.ts";
-import { extractManifestSchemas } from "../lib/manifest-utils.ts";
 import { isPromptEmpty } from "@appstrate/core/validation";
 import { parseManifestIntegrations } from "@appstrate/core/dependencies";
-import { deepMergeConfig } from "@appstrate/core/schema-validation";
 import type { ConnectionOverrides } from "@appstrate/core/integration";
 import { ApiError, type ValidationFieldError } from "../lib/errors.ts";
 import type { Actor } from "../lib/actor.ts";
@@ -30,7 +27,6 @@ import { emitEvent } from "../lib/modules/module-loader.ts";
 export interface AgentReadinessParams {
   agent: LoadedPackage;
   orgId: string;
-  config?: Record<string, unknown>;
   applicationId: string;
   /**
    * Actor whose integration connections we validate. Run kickoff paths
@@ -66,7 +62,7 @@ export interface AgentReadinessParams {
  *
  * Single source of truth for readiness checks — the throwing wrapper
  * `validateAgentReadiness` delegates to this. Fail-fast sequence:
- * prompt → skills → integration install/enable → integration connections → config.
+ * prompt → skills → integration install/enable → integration connections.
  */
 /**
  * Map an {@link IntegrationManifestLoadFailure} to a structured readiness
@@ -113,7 +109,7 @@ function manifestFailureError(
 export async function collectAgentReadinessErrors(
   params: AgentReadinessParams,
 ): Promise<ValidationFieldError[]> {
-  const { agent, orgId, config, applicationId, actor, runOverrides, scheduleOverrides } = params;
+  const { agent, orgId, applicationId, actor, runOverrides, scheduleOverrides } = params;
   const { manifest } = agent;
   const errors: ValidationFieldError[] = [];
 
@@ -234,22 +230,6 @@ export async function collectAgentReadinessErrors(
     }
   }
 
-  if (config) {
-    const { config: configSchema } = extractManifestSchemas(manifest);
-    const effectiveSchema = configSchema ?? { type: "object" as const, properties: {} };
-    const configValidation = validateConfig(config, effectiveSchema);
-    if (!configValidation.valid) {
-      for (const e of configValidation.errors) {
-        errors.push({
-          field: e.field ? `config.${e.field}` : "config",
-          code: "invalid_config",
-          title: "Invalid Config",
-          message: e.message,
-        });
-      }
-    }
-  }
-
   return errors;
 }
 
@@ -302,52 +282,4 @@ export async function validateAgentReadiness(params: AgentReadinessParams): Prom
     title: first.title ?? first.code,
     detail: first.message,
   });
-}
-
-/**
- * Re-validate a deep-merged config against the manifest schema.
- *
- * `resolveRunPreflight` validates the *persisted* `application_packages.config`
- * once at preflight time. When a caller supplies a per-run `config` override
- * on `POST /run` (or freezes one on a schedule), the merged result has not
- * been vetted — the override could push the config out of schema. This
- * function closes that gap on every merge.
- *
- * Throws `ApiError(400, "invalid_config")` on the first violation, mirroring
- * the contract of `validateAgentReadiness` so existing error mapping handles
- * it without special cases. No-op when the manifest declares no config schema.
- */
-function validateMergedConfigOrThrow(agent: LoadedPackage, config: Record<string, unknown>): void {
-  const { config: configSchema } = extractManifestSchemas(agent.manifest);
-  if (!configSchema) return;
-  const result = validateConfig(config, configSchema);
-  if (result.valid) return;
-  const first = result.errors[0]!;
-  throw new ApiError({
-    status: 400,
-    code: "invalid_config",
-    title: "Invalid Config",
-    detail: first.field ? `config.${first.field}: ${first.message}` : first.message,
-  });
-}
-
-/**
- * Apply a per-run config override on top of the persisted config and re-validate
- * against the manifest schema. No-op when `override` is null/undefined — returns
- * `persisted` verbatim. Throws `ApiError(400, "invalid_config")` if the merged
- * result violates the manifest schema (via `validateMergedConfigOrThrow`).
- *
- * Single source of truth for the merge+validate sequence shared by `POST /run`
- * and the scheduler — every per-run invocation reaches an identical resolved
- * config for the same `(persisted, override)` pair.
- */
-export function mergeAndValidateConfigOverride(
-  agent: LoadedPackage,
-  persisted: Record<string, unknown>,
-  override: Record<string, unknown> | null | undefined,
-): Record<string, unknown> {
-  if (!override) return persisted;
-  const merged = deepMergeConfig(persisted, override);
-  validateMergedConfigOrThrow(agent, merged);
-  return merged;
 }

@@ -90,7 +90,6 @@ export async function buildRunContext(params: {
   actor: Actor | null;
   input?: Record<string, unknown>;
   files?: FileReference[];
-  config?: Record<string, unknown>;
   modelId?: string | null;
   /** Persisted agent defaults; undefined asks this service to load them. */
   generationConfig?: ModelGenerationSettings | null;
@@ -147,7 +146,6 @@ export async function buildRunContext(params: {
 
   // Skip getPackageConfig when all values are already provided by the caller (from preflight)
   const skipConfigFetch =
-    params.config !== undefined &&
     params.modelId !== undefined &&
     params.proxyId !== undefined &&
     params.generationConfig !== undefined;
@@ -199,7 +197,6 @@ export async function buildRunContext(params: {
       listPinnedSlots(agent.id, applicationId, persistenceScope),
     ]);
 
-  const config = params.config ?? configFull?.config ?? {};
   const agentPackage = agentPackageResult.zip;
   const { bundle } = agentPackageResult;
 
@@ -278,7 +275,6 @@ export async function buildRunContext(params: {
     memories: [],
     ...(previousCheckpoint !== null ? { checkpoint: previousCheckpoint } : {}),
     ...(Object.keys(pinnedSlots).length > 0 ? { pinnedSlots } : {}),
-    config,
     ...(params.traceparent ? { traceparent: params.traceparent } : {}),
   };
 

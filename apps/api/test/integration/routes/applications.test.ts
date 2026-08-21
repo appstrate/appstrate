@@ -243,7 +243,7 @@ describe("Applications API", () => {
   // install bypassing the POST install path). The public route now passes
   // `requireInstalled: true`: no pre-existing row → 404, no row created.
   describe("PUT /api/applications/:id/packages/:packageId requires a prior install (CRIT-05)", () => {
-    function putPackage(packageId: string, body: Record<string, unknown> = { config: { k: "v" } }) {
+    function putPackage(packageId: string, body: Record<string, unknown> = { enabled: false }) {
       return app.request(`/api/applications/${ctx.defaultAppId}/packages/${packageId}`, {
         method: "PUT",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
@@ -273,16 +273,34 @@ describe("Applications API", () => {
       await seedPackage({ id: "@testorg/installed-pkg", orgId: ctx.orgId });
       await seedInstalledPackage(ctx.defaultAppId, "@testorg/installed-pkg");
 
-      const res = await putPackage("@testorg/installed-pkg", { config: { hello: "world" } });
+      const res = await putPackage("@testorg/installed-pkg", { enabled: false });
 
       expect(res.status).toBe(200);
-      const body = (await res.json()) as { object: string; config?: Record<string, unknown> };
+      const body = (await res.json()) as { object: string };
       expect(body.object).toBe("application_package");
+      const [row] = await db
+        .select({ enabled: applicationPackages.enabled })
+        .from(applicationPackages)
+        .where(installedRowWhere("@testorg/installed-pkg"));
+      expect(row?.enabled).toBe(false);
+    });
+
+    // The agent's stored input values have ONE write path
+    // (`PUT /api/agents/{scope}/{name}/config`, which validates them against
+    // the manifest input schema and refuses an unsatisfiable locked required
+    // field). This generic route must not be a second, unvalidated one.
+    it("ignores a `config` key in the body — it is not a write path for stored input values", async () => {
+      await seedPackage({ id: "@testorg/no-config-write", orgId: ctx.orgId });
+      await seedInstalledPackage(ctx.defaultAppId, "@testorg/no-config-write");
+
+      const res = await putPackage("@testorg/no-config-write", { config: { hello: "world" } });
+
+      expect(res.status).toBe(200);
       const [row] = await db
         .select({ config: applicationPackages.config })
         .from(applicationPackages)
-        .where(installedRowWhere("@testorg/installed-pkg"));
-      expect(row?.config).toEqual({ hello: "world" });
+        .where(installedRowWhere("@testorg/no-config-write"));
+      expect(row?.config).toEqual({});
     });
 
     it("rejects unsupported generation settings instead of persisting them", async () => {

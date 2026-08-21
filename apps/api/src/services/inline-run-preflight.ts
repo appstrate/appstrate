@@ -6,7 +6,7 @@
  * Runs every validation that has no durable side effect:
  *   1. Manifest shape (AFPS + inline caps)
  *   2. input against the manifest's own AJV schema
- *   3. Agent readiness (prompt, skills, tools, config)
+ *   3. Agent readiness (prompt, skills, tools, integrations)
  *
  * Two modes:
  *   - "fail-fast" (default) — throws on the first failing stage. Used by
@@ -36,6 +36,7 @@ import { parsePathMessage } from "../lib/field-errors.ts";
 import { asJSONSchemaObject } from "@appstrate/core/form";
 import { logger } from "../lib/logger.ts";
 import { validateInput } from "./schema.ts";
+import { resolveEffectiveInput } from "./input-resolution.ts";
 import { validateInlineManifest } from "./inline-manifest-validation.ts";
 import { buildShadowLoadedPackage, generateShadowPackageId } from "./inline-run.ts";
 import { getInlineRunLimits } from "./run-limits.ts";
@@ -48,7 +49,6 @@ export type { InlineRunBody };
 export interface InlineRunPreflightResult {
   manifest: AgentManifest;
   prompt: string;
-  effectiveConfig: Record<string, unknown>;
   effectiveInput: Record<string, unknown> | null;
   modelIdOverride: string | null;
   proxyIdOverride: string | null;
@@ -112,7 +112,7 @@ export async function runInlinePreflight(params: {
   }
 
   // A parsed manifest is only available when structural validation passed.
-  // Later stages that strictly need it (AJV config/input schemas, readiness)
+  // Later stages that strictly need it (AJV input schema, readiness)
   // are gated on this in accumulate mode; fail-fast has already thrown.
   const manifest = validated.valid ? (validated.manifest as AgentManifest) : undefined;
   const prompt = typeof body.prompt === "string" ? body.prompt : "";
@@ -122,13 +122,11 @@ export async function runInlinePreflight(params: {
   const runOverrides = body.connection_overrides ?? null;
 
   // ----- 2. input against manifest schema (AJV) -----
-  // config + prompt validation are delegated entirely to agent readiness
-  // (stage 3) — the single source of truth for those two fields. Only
-  // `input` is validated here, since readiness has no notion of run input.
-  const effectiveConfig =
-    body.config && typeof body.config === "object" && !Array.isArray(body.config)
-      ? (body.config as Record<string, unknown>)
-      : {};
+  // Prompt validation is delegated entirely to agent readiness (stage 3).
+  // Only `input` is validated here, since readiness has no notion of run
+  // input. An inline agent runs on an ephemeral shadow package with no
+  // `application_packages` row, so the only layer below the caller's input
+  // is the manifest's own author defaults.
   const effectiveInput =
     body.input && typeof body.input === "object" && !Array.isArray(body.input)
       ? (body.input as Record<string, unknown>)
@@ -137,7 +135,13 @@ export async function runInlinePreflight(params: {
   if (manifest) {
     const inputSchema = manifest.input?.schema;
     if (inputSchema) {
-      const iv = validateInput(effectiveInput ?? undefined, asJSONSchemaObject(inputSchema));
+      const iv = validateInput(
+        resolveEffectiveInput({
+          schema: asJSONSchemaObject(inputSchema),
+          callerInput: effectiveInput ?? undefined,
+        }),
+        asJSONSchemaObject(inputSchema),
+      );
       if (!iv.valid) {
         const entries: ValidationFieldError[] = iv.errors.map((e) => ({
           field: e.field ? `input.${e.field}` : "input",
@@ -158,16 +162,14 @@ export async function runInlinePreflight(params: {
   if (manifest) {
     const probeAgent = buildShadowLoadedPackage(generateShadowPackageId(), manifest, prompt);
 
-    // Readiness is the single source of truth for both config (AJV against
-    // the manifest schema) and prompt emptiness — stage 1's structural check
-    // only covers prompt type and byte size, not emptiness, and stage 2 no
-    // longer touches config. Fail-fast throws the first readiness error;
-    // accumulate folds every readiness entry into the shared accumulator.
+    // Readiness is the single source of truth for prompt emptiness — stage 1's
+    // structural check only covers prompt type and byte size, not emptiness.
+    // Fail-fast throws the first readiness error; accumulate folds every
+    // readiness entry into the shared accumulator.
     if (mode === "fail-fast") {
       await validateAgentReadiness({
         agent: probeAgent,
         orgId,
-        config: effectiveConfig,
         applicationId,
         actor,
         ...(runOverrides ? { runOverrides } : {}),
@@ -177,7 +179,6 @@ export async function runInlinePreflight(params: {
         await collectAgentReadinessErrors({
           agent: probeAgent,
           orgId,
-          config: effectiveConfig,
           applicationId,
           actor,
           ...(runOverrides ? { runOverrides } : {}),
@@ -208,7 +209,6 @@ export async function runInlinePreflight(params: {
   return {
     manifest,
     prompt,
-    effectiveConfig,
     effectiveInput,
     modelIdOverride,
     proxyIdOverride,

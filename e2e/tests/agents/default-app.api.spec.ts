@@ -11,7 +11,7 @@
 import { test, expect } from "../../fixtures/api.fixture.ts";
 import {
   createAgent,
-  createAgentWithConfig,
+  createAgentWithInputSchema,
   createApplication,
   installPackageInApp,
   uninstallPackageFromApp,
@@ -171,7 +171,7 @@ test.describe("Default app vs custom app access", () => {
     expect(res.status()).toBe(404);
   });
 
-  test("Config is per-app (independent between default and custom app)", async ({
+  test("Stored input values are per-app (independent between default and custom app)", async ({
     request,
     apiClient,
     orgContext,
@@ -179,8 +179,8 @@ test.describe("Default app vs custom app access", () => {
   }) => {
     const scope = `@${orgContext.org.orgSlug}`;
     const agentName = `agent-cfg-iso-${Date.now()}`;
-    // Agent must have a config schema — mergeWithDefaults strips keys not in schema
-    await createAgentWithConfig(apiClient, scope, agentName, {
+    // Agent must declare an input schema — stored values are validated against it
+    await createAgentWithInputSchema(apiClient, scope, agentName, {
       mode: { type: "string" },
     });
 
@@ -193,19 +193,21 @@ test.describe("Default app vs custom app access", () => {
       applicationId: customApp.id,
     });
 
-    // Set config in default app (body IS the config object, not wrapped)
+    // Store input values in the default app
     const resSetA = await apiClient.put(`/agents/${scope}/${agentName}/config`, {
-      mode: "default-app-value",
+      values: { mode: "default-app-value" },
+      locked_fields: [],
     });
     expect(resSetA.status()).toBe(200);
 
-    // Set different config in custom app
+    // Store different values in the custom app
     const resSetB = await customClient.put(`/agents/${scope}/${agentName}/config`, {
-      mode: "custom-app-value",
+      values: { mode: "custom-app-value" },
+      locked_fields: [],
     });
     expect(resSetB.status()).toBe(200);
 
-    // Read back via agent detail — each app should see its own config
+    // Read back via agent detail — each app should see its own values
     const resDetailA = await apiClient.get(`/packages/agents/${scope}/${agentName}`);
     const resDetailB = await customClient.get(`/packages/agents/${scope}/${agentName}`);
     expect(resDetailA.status()).toBe(200);
@@ -213,8 +215,8 @@ test.describe("Default app vs custom app access", () => {
 
     const detailA = await resDetailA.json();
     const detailB = await resDetailB.json();
-    expect(detailA.config?.current?.mode).toBe("default-app-value");
-    expect(detailB.config?.current?.mode).toBe("custom-app-value");
+    expect(detailA.input?.values?.mode).toBe("default-app-value");
+    expect(detailB.input?.values?.mode).toBe("custom-app-value");
   });
 
   test("Installed packages list is per-app", async ({

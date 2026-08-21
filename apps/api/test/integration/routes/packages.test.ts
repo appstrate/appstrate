@@ -2530,7 +2530,7 @@ describe("Packages API", () => {
       expect(body.id).toBe("@pkgorg/res-agent");
       expect(body.display_name).toBe("Resource Agent");
       expect(body.dependencies).toBeDefined();
-      expect(body.config).toBeDefined();
+      expect(body.input).toBeDefined();
       expect(body.version_count).toBeNumber();
       // `lock_version` is resource state (draft optimistic-lock token).
       expect(body.lock_version).toBeNumber();
@@ -2622,7 +2622,7 @@ describe("Packages API", () => {
       expect(body.id).toBe("@pkgorg/upd-res-agent");
       expect(body.lock_version).toBeGreaterThan(created.lock_version);
       expect(body.dependencies).toBeDefined();
-      expect(body.config).toBeDefined();
+      expect(body.input).toBeDefined();
       // No operation envelope.
       expect(body.packageId).toBeUndefined();
       expect(body.warnings).toBeUndefined();

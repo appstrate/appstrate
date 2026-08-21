@@ -90,8 +90,9 @@ export const agentsPaths = {
     put: {
       operationId: "saveAgentConfig",
       tags: ["Agents"],
-      summary: "Save agent configuration",
-      description: "Save agent configuration values. Validated against manifest config schema.",
+      summary: "Save agent input settings",
+      description:
+        "Save the agent's stored input values and field locks for this application. `values` are validated against the manifest `input.schema` with `required` dropped (a required field left empty is asked at launch). Locking a required field that has no value — no author `default` and no entry in `values` — is refused with 400 `locked_required_field_empty`.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
@@ -102,23 +103,22 @@ export const agentsPaths = {
         required: true,
         content: {
           "application/json": {
-            schema: { type: "object", additionalProperties: true },
+            schema: { $ref: "#/components/schemas/AgentInputSettings" },
           },
         },
       },
       responses: {
         "200": {
-          description: "Configuration saved — returns the bare persisted configuration document",
+          description: "Saved — returns the bare persisted input-settings resource",
           headers: {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
             "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
           },
           content: {
             "application/json": {
-              // Bare persisted configuration document (request body merged
-              // with schema defaults) — no `validation` echo (#657):
+              // Bare persisted resource — no `validation` echo (#657):
               // validation failures are 400s.
-              schema: { type: "object", additionalProperties: true },
+              schema: { $ref: "#/components/schemas/AgentInputSettings" },
             },
           },
         },

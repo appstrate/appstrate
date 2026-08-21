@@ -16,7 +16,7 @@ import type { DroppedIntegration } from "./integration-spawn-resolver.ts";
 import { toBundleApiError } from "./run-launcher/bundle-error-mapping.ts";
 import { createRun, appendRunLog } from "./state/runs.ts";
 import { materializeRunUploads, type PendingUploadMaterialization } from "./documents.ts";
-import { getPackageConfig } from "./application-packages.ts";
+import type { PackageConfig } from "./application-packages.ts";
 import { resolveModel } from "./org-models.ts";
 import { executeAgentInBackground } from "./run-launcher/execute-background.ts";
 import { validateAgentReadiness } from "./agent-readiness.ts";
@@ -94,15 +94,6 @@ export interface RunPipelineParams {
    * Set by the run routes; unset for scheduler runs (no user input refs).
    */
   consumedDocumentIds?: string[];
-  config: Record<string, unknown>;
-  /**
-   * Per-run override delta — the raw object the caller sent in the request
-   * body. `config` above is the resolved (deep-merged) snapshot. Persisted
-   * separately on `runs.config_override` so the dashboard can badge
-   * "default vs override" and a "Re-run with these settings" button can
-   * replay the exact same delta. Null when the run used persisted defaults.
-   */
-  configOverride?: Record<string, unknown> | null;
   modelId?: string | null;
   /** Persisted agent defaults resolved by preflight. */
   generationConfig?: ModelGenerationSettings | null;
@@ -174,15 +165,20 @@ export interface RunPipelineSuccess {
 // ---------------------------------------------------------------------------
 
 export interface PreflightResult {
-  config: Record<string, unknown>;
   modelId: string | null;
   generationConfig: ModelGenerationSettings | null;
   proxyId: string | null;
 }
 
 /**
- * Resolve package config and validate agent readiness.
+ * Validate agent readiness and project the per-application run settings.
  * Shared by the POST /run route and the scheduler's triggerScheduledRun.
+ *
+ * `packageConfig` is supplied by the caller rather than loaded here: both
+ * origins already need it BEFORE this point, to resolve the input layers
+ * (editor defaults + locked fields) the launch is validated against. One
+ * read per trigger, and readiness cannot disagree with input resolution
+ * about which row it saw.
  *
  * Connection overrides are forwarded to readiness so a caller that
  * disambiguates a must_choose situation via `connection_overrides` on
@@ -195,6 +191,8 @@ export async function resolveRunPreflight(params: {
   applicationId: string;
   orgId: string;
   actor: Actor | null;
+  /** Per-application settings row, already loaded by the caller. */
+  packageConfig: PackageConfig;
   connectionOverrides?: ConnectionOverrides | null;
   scheduleConnectionOverrides?: ConnectionOverrides | null;
   /**
@@ -204,14 +202,11 @@ export async function resolveRunPreflight(params: {
    */
   manifestCache?: IntegrationManifestCache;
 }): Promise<PreflightResult> {
-  const { agent, applicationId, orgId, actor } = params;
-
-  const packageConfig = await getPackageConfig(applicationId, agent.id);
+  const { agent, applicationId, orgId, actor, packageConfig } = params;
 
   await validateAgentReadiness({
     agent,
     orgId,
-    config: packageConfig.config,
     applicationId,
     actor,
     ...(params.connectionOverrides ? { runOverrides: params.connectionOverrides } : {}),
@@ -222,7 +217,6 @@ export async function resolveRunPreflight(params: {
   });
 
   return {
-    config: packageConfig.config,
     modelId: packageConfig.modelId,
     generationConfig: packageConfig.generationConfig,
     proxyId: packageConfig.proxyId,
@@ -318,7 +312,6 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
     actor,
     input,
     files,
-    config,
     modelId,
     proxyId,
     overrideVersionLabel,
@@ -493,7 +486,6 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
         actor,
         input: input ?? undefined,
         files,
-        config,
         modelId,
         generationConfig: params.generationConfig,
         generationConfigOverride: params.generationConfigOverride,
@@ -587,8 +579,6 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
         apiKeyId,
         agentScope: agentDenorm.scope,
         agentName: agentDenorm.name,
-        config,
-        configOverride: params.configOverride ?? null,
         dependencyOverrides: params.dependencyOverrides ?? null,
         runOrigin: "platform",
         sinkSecretEncrypted: encrypt(sinkCredentials.secret),

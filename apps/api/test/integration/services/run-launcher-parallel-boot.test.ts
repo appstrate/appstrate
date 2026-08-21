@@ -178,7 +178,7 @@ function buildRunPlan(): AppstrateRunPlan {
 }
 
 function buildContext(runId: string): ExecutionContext {
-  return { runId, input: {}, memories: [], config: {} };
+  return { runId, input: {}, memories: [] };
 }
 
 // ---------------------------------------------------------------------------
