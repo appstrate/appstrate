@@ -23,31 +23,38 @@ import { readConfig, resolveProfileName } from "../lib/config.ts";
 import { loadTokens } from "../lib/keyring.ts";
 import { decodeJwtPayload } from "../lib/jwt-identity.ts";
 import { formatError } from "../lib/ui.ts";
+import { DEFAULT_IO, type CommandIO } from "../lib/io.ts";
 
 interface TokenOptions {
   profile?: string;
 }
 
-export async function tokenCommand(opts: TokenOptions): Promise<void> {
+/**
+ * `io` is injected rather than written through the global streams: a test
+ * that swapped `process.stdout` captured every other suite's writes too, so
+ * "the plaintext never reaches stdout" was an assertion about a shared
+ * buffer (issue #1180). `cli.ts` passes nothing and gets `DEFAULT_IO`.
+ */
+export async function tokenCommand(opts: TokenOptions, io: CommandIO = DEFAULT_IO): Promise<void> {
   const config = await readConfig();
   const profileName = resolveProfileName(opts.profile, config);
   const profile = config.profiles[profileName];
 
   if (!profile) {
-    process.stderr.write(
+    io.stderr.write(
       `Profile "${profileName}" not configured. Run: appstrate login --profile ${profileName}\n`,
     );
-    process.exit(1);
+    io.exit(1);
     return;
   }
 
   try {
     const stored = await loadTokens(profileName);
     if (!stored) {
-      process.stderr.write(
+      io.stderr.write(
         `No tokens stored for profile "${profileName}". Run: appstrate login --profile ${profileName}\n`,
       );
-      process.exit(1);
+      io.exit(1);
       return;
     }
 
@@ -103,10 +110,10 @@ export async function tokenCommand(opts: TokenOptions): Promise<void> {
       lines.push("", `JWT claims:        unavailable (token is not a JWT)`);
     }
 
-    process.stdout.write(lines.join("\n") + "\n");
+    io.stdout.write(lines.join("\n") + "\n");
   } catch (err) {
-    process.stderr.write(formatError(err) + "\n");
-    process.exit(1);
+    io.stderr.write(formatError(err) + "\n");
+    io.exit(1);
   }
 }
 
