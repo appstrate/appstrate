@@ -245,7 +245,7 @@ export const runs: Run[] = [
     agent_scope: "@default",
     agent_name: "wiki-brain",
     userId: "user_lab_2",
-    user_name: "Camille Roy",
+    user_name: "Pierre",
     duration: 74_000,
     cost: 0.21,
     runNumber: 95,
@@ -291,6 +291,11 @@ const FAILURE_MESSAGES: Partial<Record<Run["status"], string>> = {
 /** 200 rows: pagination, virtualisation and scroll behaviour under real volume. */
 export const heavyRuns: Run[] = Array.from({ length: 200 }, (_, i) => {
   const status = STATUS_CYCLE[i % STATUS_CYCLE.length] ?? "success";
+  // Every third row belongs to someone else and every fifth is inline, so the
+  // Scope and Kind filters have something to separate at volume too — with 200
+  // identical rows they narrowed nothing and looked broken.
+  const someoneElse = i % 3 === 1;
+  const inline = i % 5 === 2;
   return makeRun({
     id: `run_h_${i}`,
     status,
@@ -298,6 +303,15 @@ export const heavyRuns: Run[] = Array.from({ length: 200 }, (_, i) => {
     runNumber: 200 - i,
     started_at: ago(i * 17),
     completed_at: ago(i * 17 - 2),
+    ...(someoneElse ? { userId: "user_lab_2", user_name: "Pierre" } : {}),
+    ...(inline
+      ? {
+          packageId: `@inline/r-h${i}`,
+          agent_scope: "@inline",
+          agent_name: `Demande ponctuelle ${i}`,
+          package_ephemeral: true,
+        }
+      : {}),
   });
 });
 
@@ -358,39 +372,83 @@ export const agents: Json200<"/api/agents", "get"> = {
 /* Secondary reads the shell issues on every screen                            */
 /* -------------------------------------------------------------------------- */
 
+type Schedule = Json200<"/api/schedules", "get">["data"][number];
+
+function makeSchedule(over: Partial<Schedule> & Pick<Schedule, "id" | "packageId">): Schedule {
+  return {
+    userId: USER_ID,
+    endUserId: null,
+    orgId: ORG_ID,
+    applicationId: APP_ID,
+    name: null,
+    enabled: true,
+    cron_expression: "0 7 * * *",
+    timezone: "America/Toronto",
+    input: null,
+    config_override: null,
+    generation_config_override: null,
+    model_id_override: null,
+    proxy_id_override: null,
+    version_override: null,
+    connection_overrides: null,
+    dependency_overrides: null,
+    last_run_at: ago(430),
+    next_run_at: ago(-1_000),
+    createdAt: ago(20_000),
+    updatedAt: ago(430),
+    actor_name: "Olivier Tarbès",
+    actor_type: "user",
+    running_runs: 0,
+    unread_count: 0,
+    last_run_number: 0,
+    ...over,
+  };
+}
+
 export const schedules: Json200<"/api/schedules", "get"> = {
   object: "list",
   hasMore: false,
   data: [
-    {
+    makeSchedule({
       id: "sch_01",
       packageId: "@default/wiki-brain",
-      userId: USER_ID,
-      endUserId: null,
-      orgId: ORG_ID,
-      applicationId: APP_ID,
       name: "Tous les matins à 7 h",
-      enabled: true,
-      cron_expression: "0 7 * * *",
-      timezone: "America/Toronto",
-      input: null,
-      config_override: null,
-      generation_config_override: null,
-      model_id_override: null,
-      proxy_id_override: null,
-      version_override: null,
-      connection_overrides: null,
-      dependency_overrides: null,
-      last_run_at: ago(430),
-      next_run_at: ago(-1_000),
-      createdAt: ago(20_000),
-      updatedAt: ago(430),
-      actor_name: "Olivier Tarbès",
-      actor_type: "user",
-      running_runs: 0,
-      unread_count: 0,
       last_run_number: 96,
-    },
+    }),
+    makeSchedule({
+      id: "sch_02",
+      packageId: "@tractr/compta-trimestrielle",
+      name: "Récap de fin de trimestre",
+      cron_expression: "0 9 1 */3 *",
+      last_run_at: ago(4_300),
+      next_run_at: ago(-40_000),
+      last_run_number: 128,
+      unread_count: 3,
+      running_runs: 1,
+    }),
+    // Paused: the database still holds a `next_run_at`, which is exactly the
+    // row that catches a table promising a run that is not coming.
+    makeSchedule({
+      id: "sch_03",
+      packageId: "@tractr/analyse-recurrence-articles-tastet",
+      name: "Veille hebdomadaire",
+      cron_expression: "30 6 * * 1",
+      enabled: false,
+      last_run_at: ago(11_000),
+      next_run_at: ago(-3_000),
+      last_run_number: 11,
+    }),
+    // Never fired, and run by someone else.
+    makeSchedule({
+      id: "sch_04",
+      packageId: "@default/wiki-brain",
+      name: "Rappel du vendredi",
+      cron_expression: "0 16 * * 5",
+      userId: "user_lab_2",
+      actor_name: "Pierre",
+      last_run_at: null,
+      next_run_at: ago(-20_000),
+    }),
   ],
 };
 

@@ -791,6 +791,32 @@ describe("Runs API", () => {
       expect(body.data[0]!.id).toBe(mineFailed.id);
     });
 
+    it("keeps the unattributed runs a member is meant to see under ?user=me", async () => {
+      // "Mine" is not "runs carrying my id": a schedule- or system-triggered
+      // run has no user at all, and a member has always seen those in their own
+      // view (`actorScopeFilter`). It is the half of that condition a refactor
+      // is most likely to drop, and dropping it empties the view for anyone
+      // whose agents run on a schedule.
+      await seedAgent({
+        id: "@runorg/unattributed-agent",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+      });
+      const scheduled = await seedRun({
+        packageId: "@runorg/unattributed-agent",
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        userId: null,
+        status: "success",
+      });
+
+      const res = await app.request("/api/runs?user=me", { headers: authHeaders(ctx) });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { data: { id: string }[] };
+      expect(body.data.map((r) => r.id)).toContain(scheduled.id);
+    });
+
     it("lists all org runs when no ?user param is given", async () => {
       await seedTwoMembersRuns();
 

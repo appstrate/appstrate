@@ -8,21 +8,23 @@ import { Button } from "@appstrate/ui/components/button";
 import { useAgents } from "../hooks/use-packages";
 import { useAllSchedules } from "../hooks/use-schedules";
 import { PageHeader } from "../components/page-header";
-import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
-import { ScheduleCard } from "../components/schedule-card";
+import { EmptyState } from "../components/page-states";
+import { SchedulesTable } from "../components/schedules-table";
 
 export function SchedulesListPage() {
   const { t } = useTranslation(["settings", "common"]);
   const { isAdmin } = usePermissions();
   const navigate = useNavigate();
-  const { data: schedules, isLoading, error } = useAllSchedules();
+  const { data: schedules, isLoading, isError } = useAllSchedules();
   const { data: agents } = useAgents();
 
-  if (isLoading) return <LoadingState />;
-  if (error) return <ErrorState message={error.message} />;
+  const create = (
+    <Button onClick={() => navigate("/schedules/new")}>{t("schedules.create")}</Button>
+  );
 
-  const getAgentName = (packageId: string) =>
-    agents?.find((f) => f.id === packageId)?.display_name ?? packageId;
+  // The same cached agents query every other surface holds, keyed by package id.
+  const agentName = (packageId: string) =>
+    agents?.find((a) => a.id === packageId)?.display_name ?? packageId;
 
   return (
     <div>
@@ -30,30 +32,24 @@ export function SchedulesListPage() {
         title={t("schedules.title")}
         emoji="📅"
         breadcrumbs={[{ label: t("schedules.title") }]}
-        actions={
-          isAdmin ? (
-            <Button onClick={() => navigate("/schedules/new")}>{t("schedules.create")}</Button>
-          ) : undefined
-        }
+        actions={isAdmin ? create : undefined}
       />
 
-      {!schedules || schedules.length === 0 ? (
-        <EmptyState message={t("schedules.empty")} hint={t("schedules.emptyHint")} icon={Calendar}>
-          {isAdmin && (
-            <Button onClick={() => navigate("/schedules/new")}>{t("schedules.create")}</Button>
-          )}
-        </EmptyState>
-      ) : (
-        <div className="space-y-2">
-          {schedules.map((sched) => (
-            <ScheduleCard
-              key={sched.id}
-              schedule={sched}
-              agentName={getAgentName(sched.packageId)}
-            />
-          ))}
-        </div>
-      )}
+      <SchedulesTable
+        schedules={schedules ?? []}
+        agentName={(schedule) => agentName(schedule.packageId)}
+        isLoading={isLoading}
+        isError={isError}
+        empty={
+          <EmptyState
+            message={t("schedules.empty")}
+            hint={t("schedules.emptyHint")}
+            icon={Calendar}
+          >
+            {isAdmin && create}
+          </EmptyState>
+        }
+      />
     </div>
   );
 }

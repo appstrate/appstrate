@@ -1516,7 +1516,12 @@ export async function listGlobalRuns(
   } = options;
 
   const conditions = [eq(runs.orgId, scope.orgId), eq(runs.applicationId, scope.applicationId)];
-  if (mine && actor) {
+  if (mine) {
+    // Fail CLOSED. `actor` is optional on this options object, so a caller
+    // asking for "mine" without saying whose would otherwise get the whole
+    // org — a filter that widens instead of narrowing, which is the one
+    // failure mode this endpoint spends 400s to avoid elsewhere.
+    if (!actor) throw new Error("listGlobalRuns: `mine` requires an actor");
     conditions.push(actorScopeFilter(actor, { userId: runs.userId, endUserId: runs.endUserId }));
   }
   if (status) conditions.push(eq(runs.status, status));

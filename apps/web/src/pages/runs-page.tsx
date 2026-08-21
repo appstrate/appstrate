@@ -30,16 +30,15 @@ export function RunsPage() {
   const kind = KINDS.find((k) => k === params.get("kind"));
   const status = runStatusValues.find((s) => s === params.get("status"));
 
-  const set = (key: string) => (value?: string) => {
-    setParams(
-      (prev) => {
-        const next = new URLSearchParams(prev);
-        if (value === undefined) next.delete(key);
-        else next.set(key, value);
-        return next;
-      },
-      { replace: true },
-    );
+  // Pushed, not replaced: a filter is a place you went, and Back has to undo
+  // it — the same obligation the URL brings everywhere else in this app.
+  const setParam = (key: string) => (value?: string) => {
+    setParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (value === undefined) next.delete(key);
+      else next.set(key, value);
+      return next;
+    });
   };
 
   const filters: FilterSpec[] = [
@@ -48,7 +47,7 @@ export function RunsPage() {
       label: t("runs.filterScope"),
       value: scope,
       options: [{ value: "me", label: t("runs.filterMine") }],
-      onChange: set("user"),
+      onChange: setParam("user"),
     },
     {
       id: "kind",
@@ -58,7 +57,7 @@ export function RunsPage() {
         { value: "package", label: t("runs.filterKindPackage") },
         { value: "inline", label: t("runs.filterKindInline") },
       ],
-      onChange: set("kind"),
+      onChange: setParam("kind"),
     },
     {
       id: "status",
@@ -68,20 +67,21 @@ export function RunsPage() {
         value,
         label: t(`status.${value}`, { ns: "common" }),
       })),
-      onChange: set("status"),
+      onChange: setParam("status"),
     },
   ];
 
   return (
     <div>
-      <PageHeader title={t("runs.title")} emoji="▶️" breadcrumbs={[{ label: t("runs.title") }]} />
-
-      <ListToolbar
-        filters={filters}
+      {/* The page's action stays at title height, where every other screen
+          keeps its own — the toolbar below is about the list, not the page. */}
+      <PageHeader
+        title={t("runs.title")}
+        emoji="▶️"
+        breadcrumbs={[{ label: t("runs.title") }]}
         actions={
           <Button
             variant="outline"
-            size="sm"
             onClick={() => markAllRead.mutate({})}
             disabled={markAllRead.isPending || !unreadCount}
           >
@@ -98,12 +98,19 @@ export function RunsPage() {
         user={scope}
         kind={kind}
         status={status}
+        toolbar={(total) => <ListToolbar filters={filters} count={total} />}
         // A filtered list that finds nothing has NOT run out of runs — it has
         // run out of matches, and the way out is the filter, not the agent.
         emptyState={
           filters.some((f) => f.value !== undefined) ? (
             <EmptyState message={t("runs.emptyFiltered")} icon={SearchX} compact>
-              <Button variant="outline" size="sm" onClick={() => setParams({}, { replace: true })}>
+              {/* The same clear the chips use: wiping the whole query string
+                  would take any other parameter the page grows with it. */}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => filters.forEach((f) => f.onChange(undefined))}
+              >
                 {t("toolbar.clearAll", { ns: "common" })}
               </Button>
             </EmptyState>

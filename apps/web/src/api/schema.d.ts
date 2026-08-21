@@ -3887,7 +3887,7 @@ export interface paths {
         };
         /**
          * List runs across the application (global view)
-         * @description Org + application scoped paginated list. Supports filtering by `user=me` (self-owned, also implicit for end-user impersonation), `kind` (all, package, inline), `status`, a date range, and the chat session that launched the run. Inline runs surface via `package_ephemeral: true` on each row. Every filter COMBINES: `user=me` narrows to the caller's own runs (plus the unattributed schedule/system ones for a member) and still honours `kind`, `status` and the date range — it used to take a separate path that dropped them silently.
+         * @description Org + application scoped paginated list. Supports filtering by `user=me` (self-owned, also implicit for end-user impersonation), `kind` (all, package, inline), `status`, a date range, and the chat session that launched the run. Inline runs surface via `package_ephemeral: true` on each row. Every filter combines: `user=me` narrows to the caller's own runs (plus the unattributed schedule and system ones, for a member) and still honours `kind`, `status`, the date range and `chat_session_id`.
          */
         get: operations["listRuns"];
         put?: never;

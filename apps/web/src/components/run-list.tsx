@@ -39,6 +39,15 @@ interface RunListProps {
   kind?: RunKindFilter;
   /** Filter runs by lifecycle status. */
   status?: RunStatus;
+  /**
+   * The bar above the table, given the number of rows the filters left.
+   *
+   * A render prop rather than a `count` the page reads for itself: the query
+   * lives here, and a page asking for the same rows a second time to count
+   * them is the duplicate `GET /api/runs` the dashboard already had to be
+   * cured of. The page still owns WHAT the bar says.
+   */
+  toolbar?: (total: number) => React.ReactNode;
 }
 
 export function RunList({
@@ -53,6 +62,7 @@ export function RunList({
   user,
   kind,
   status,
+  toolbar,
 }: RunListProps) {
   const { t } = useTranslation(["agents"]);
   const [page, setPage] = useState(0);
@@ -77,6 +87,8 @@ export function RunList({
 
   return (
     <div className="space-y-2">
+      {toolbar?.(total)}
+
       <RunsTable
         runs={runs}
         agentName={agentName}

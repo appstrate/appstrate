@@ -217,14 +217,84 @@ Still open on the table, deliberately:
 - **Sortable heads.** The reference has them (`.th-sort`, `.th-sort.active svg`
   in `--accent`). `GET /api/runs` takes no sort parameter, so the head would
   either lie or sort one page of fifteen. It waits for the endpoint.
-- **The list toolbar** (`lt-*`: search, filter chips, clear, actions) and the
-  **reference empty state** (`empty-state`, concentric rings behind a badge)
-  are their own patterns, next in the order. The run screen still wears its two
-  shadcn tab strips as filters.
+- **A second column set per screen.** Runs and schedules have theirs; agents
+  and integrations are still card grids, and the reference keeps cards for
+  them too (`ac-*`, `rcard-*`) behind a `view-toggle`. That toggle, and the
+  preference behind it, is the next piece.
 - The heavy scenario pages at fifteen rows like the real screen does, so what
   it proves is pagination and the widest content, not volume in one viewport.
   The 200 rows are still the right fixture: they are what makes "Page 1 sur 14"
   and a long error in a narrow column visible at all.
+
+## The toolbar, and the empty state
+
+`components/list-toolbar.tsx` (`lt-*`) and the `EmptyState` in
+`components/page-states.tsx` (`empty-state`). Both are shared, both are meant to
+sit above and inside every list.
+
+The toolbar replaced two stacked `Tabs` strips on the run screen. Tabs read as
+navigation, cost a row each, and had nowhere to put a third dimension — which
+is why `status`, a filter `GET /api/runs` has always accepted, was not offered
+at all.
+
+- **A filter that is on says so twice**: on its own button, and as a chip
+  underneath. The chip is the only affordance that removes ONE filter without
+  reopening the menu that set it.
+- **The state is in the URL, pushed, not replaced.** A filtered list is what
+  people paste to each other; and the same rule that gave modals real URLs
+  brings the same obligation — Back has to undo a filter.
+- **"Tous" is an item in the menu**, not the absence of one. A menu whose only
+  way back is the chip hides the way back inside another control.
+- **The page's action is NOT in the toolbar.** It goes in `PageHeader`'s
+  `actions` slot at title height, like every other screen's — the recorded call
+  the reference's own `lt-actions` would have contradicted. What the end of the
+  toolbar row carries instead is the reference's `result-count`: how many rows
+  the filters left.
+- The count comes to the toolbar through a render prop on `RunList`
+  (`toolbar={(total) => …}`), because the query lives in the list. A page
+  asking for the same rows again to count them is the duplicate
+  `GET /api/runs` the dashboard already had to be cured of.
+
+Deviations from the reference, on purpose:
+
+- **No search field** (`lt-search`). `GET /api/runs` takes no text query, so
+  the box would either do nothing or filter one page of fifteen client-side and
+  call it a search. It waits for the endpoint, like the sortable heads and the
+  header's own search icon.
+- **No count badge on the trigger** (`lt-btn .lt-badge`). A count tells you
+  something when a dimension takes several values at once; these take one, so
+  the trigger shows the VALUE — "Statut · échoué" says more than "Statut 1".
+- **One empty state, not two.** The reference keeps `empty-list` (a bare icon
+  and a line, inside a list frame) beside `empty-state` (the rings). We keep
+  the rings for both, at two sizes: consistency between screens beats saving a
+  treatment inside one, and a second variant is a second thing to keep in step.
+
+The empty state itself is the reference's: the icon in a raised badge at the
+centre of three rings. A 40px glyph at 40% opacity on an empty card read as a
+rendering failure rather than as a state someone designed. Same props, so every
+screen that had one got it.
+
+**An empty list and a filtered list that finds nothing are different
+sentences.** The run screen says "no run matches these filters" and hands the
+filters back; only a genuinely empty list says there are no runs.
+
+## Schedules
+
+`components/schedules-table.tsx` — the second column set (`dt-sched`): the
+schedule and the agent it fires, the cron, whether it is on, next, last, and
+who it runs as.
+
+The card it replaced was a row wearing a card's border, plus a dashed strip
+underneath previewing the next run. Stacked, no two rows agreed on where
+anything was, and the one question the screen answers — when does this fire
+next — moved left and right depending on which badges came before it.
+
+Two things the columns fixed rather than moved:
+
+- **The agent is on every row.** The card only showed it inside the next-run
+  strip, so a disabled schedule never said which agent it fires.
+- **A paused schedule shows no next run.** The database keeps `next_run_at`
+  when a schedule is disabled; printing it promises a run that is not coming.
 
 ## Tokens
 
@@ -413,13 +483,14 @@ So the strategy the reference itself suggests:
    list, `empty` found the onboarding bounce, `error` finds the banner
    placements. A pattern applied to six screens from its nominal state alone is
    six screens to fix.
-5. **Order**: the table pattern (Runs first, most looked at) — DONE, see
-   "The table" — then the list toolbar (`lt-*`) and the reference empty state,
-   which the table screen is still missing, then the other three column sets
-   (agents, schedules, integrations), then run detail (`rd-*`, the biggest
-   single screen), then the command palette (it gives the header's search icon
-   its reason to exist), then Usage — the only screen with no reference at all,
-   which is exactly why it is not first.
+5. **Order**: the table pattern (Runs first, most looked at) — DONE — then the
+   list toolbar and the reference empty state — DONE — then the remaining
+   column sets: schedules DONE, agents and integrations left, and those two
+   need the `view-toggle` first because the reference keeps cards for them.
+   Then run detail (`rd-*`, the biggest single screen), then the command
+   palette (it gives the header's search icon its reason to exist), then Usage
+   — the only screen with no reference at all, which is exactly why it is not
+   first.
 6. **Where the reference is silent, derive rather than invent**: grey canvas +
    white cards, the control IS the setting, excursion → modal / destination →
    page. Those four decide most cases on their own.
@@ -432,6 +503,14 @@ So the strategy the reference itself suggests:
 
 ## Open
 
+- **`?user=me` combines now** (`listGlobalRuns({ mine })`). It used to take a
+  separate query that dropped `kind`, `status` and the date range on the floor,
+  so the screen showed two filters as active and the server applied one — the
+  toolbar could not have been drawn honestly on top of it. One behaviour change
+  came with it: an END-USER passing `chat_session_id` now gets nothing rather
+  than their own runs, because chat sessions belong to members and the filter
+  is no longer ignored for them. That is the correct answer to the question
+  asked, but it is a change.
 - **Usage page**, scoped by user: observability, not billing — who spends what,
   on which agent, with which model, for the agents a user can reach.
   `/api/runs` already accepts `start_date` / `end_date` / `user=me`, and each

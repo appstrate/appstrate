@@ -67,6 +67,8 @@
   "status.timeout": "timeout",
   "status.cancelled": "cancelled",
   "toolbar.any": "All",
+  "toolbar.count_one": "{{count}} run",
+  "toolbar.count_other": "{{count}} runs",
   "toolbar.clearAll": "Clear all",
   "toolbar.removeFilter": "Remove the {{filter}} filter: {{value}}",
   "validation.required": "This field is required",

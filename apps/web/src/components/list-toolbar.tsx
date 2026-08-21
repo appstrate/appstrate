@@ -19,10 +19,17 @@
  *   list you did not filter yourself readable at a glance.
  * - **The state belongs in the URL**, not in the component. A filtered list is
  *   the thing people paste to each other ("look at the failed ones") — the
- *   same argument that put settings behind real URLs.
+ *   same argument that put settings behind real URLs, and it comes with the
+ *   same obligation: Back has to undo a filter, so the caller pushes, never
+ *   replaces.
+ *
+ * What is NOT here: the page's own actions. They have a home — `PageHeader`'s
+ * `actions` slot, at title height — and moving one down here would make Runs
+ * the only screen whose primary button is not where every other screen's is.
+ * The end of the row belongs to what describes the list itself: how many rows
+ * the filters left.
  */
 
-import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Check, ChevronDown, X } from "lucide-react";
 import { cn } from "@appstrate/ui/cn";
@@ -55,12 +62,15 @@ function activeLabel(filter: FilterSpec): string | undefined {
 }
 
 function FilterMenu({ filter }: { filter: FilterSpec }) {
-  const { t } = useTranslation(["common"]);
+  const { t } = useTranslation("common");
   const active = activeLabel(filter);
 
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
+        // Whether a filter is on is state, not styling: it rides on an
+        // attribute so it can be read without inferring it from a class name.
+        data-filtered={active ? "" : undefined}
         className={cn(
           "bg-card inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border px-2.5 text-sm font-medium shadow-sm transition-colors",
           "hover:bg-accent data-[state=open]:bg-accent",
@@ -78,7 +88,7 @@ function FilterMenu({ filter }: { filter: FilterSpec }) {
             back is the chip hides the way back inside another control. */}
         <DropdownMenuItem onSelect={() => filter.onChange(undefined)}>
           <Check className={cn("size-4", filter.value && "invisible")} />
-          {t("toolbar.any", { ns: "common" })}
+          {t("toolbar.any")}
         </DropdownMenuItem>
         {filter.options.map((option) => (
           <DropdownMenuItem key={option.value} onSelect={() => filter.onChange(option.value)}>
@@ -93,13 +103,13 @@ function FilterMenu({ filter }: { filter: FilterSpec }) {
 
 export function ListToolbar({
   filters,
-  actions,
+  count,
 }: {
   filters: FilterSpec[];
-  /** What acts on the whole list, at the far end of the row. */
-  actions?: ReactNode;
+  /** How many rows the filters left, at the far end of the row. */
+  count?: number;
 }) {
-  const { t } = useTranslation(["common"]);
+  const { t } = useTranslation("common");
   const active = filters.filter((f) => f.value !== undefined);
 
   return (
@@ -108,7 +118,11 @@ export function ListToolbar({
         {filters.map((filter) => (
           <FilterMenu key={filter.id} filter={filter} />
         ))}
-        {actions && <div className="ml-auto flex shrink-0 items-center gap-2">{actions}</div>}
+        {count !== undefined && (
+          <span className="text-muted-foreground ml-auto shrink-0 text-sm">
+            {t("toolbar.count", { count })}
+          </span>
+        )}
       </div>
 
       {active.length > 0 && (
@@ -120,7 +134,6 @@ export function ListToolbar({
               onClick={() => filter.onChange(undefined)}
               className="border-primary bg-primary-soft text-primary inline-flex items-center gap-1 rounded-full border py-0.5 pr-1.5 pl-2.5 text-xs font-medium"
               aria-label={t("toolbar.removeFilter", {
-                ns: "common",
                 filter: filter.label,
                 value: activeLabel(filter),
               })}
@@ -137,7 +150,7 @@ export function ListToolbar({
               onClick={() => active.forEach((f) => f.onChange(undefined))}
               className="text-muted-foreground hover:text-foreground px-1.5 text-xs underline-offset-2 hover:underline"
             >
-              {t("toolbar.clearAll", { ns: "common" })}
+              {t("toolbar.clearAll")}
             </button>
           )}
         </div>

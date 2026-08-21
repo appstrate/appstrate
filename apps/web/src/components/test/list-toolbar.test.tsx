@@ -46,8 +46,10 @@ describe("with nothing filtered", () => {
     expect(html).not.toContain("Tout effacer");
   });
 
-  it("leaves every trigger neutral", () => {
-    expect(html).not.toContain("border-primary");
+  it("leaves every trigger unmarked", () => {
+    // State, not styling: `data-filtered` is what says a dimension is on, so
+    // the assertion survives a restyle and fails on a behaviour change.
+    expect(html).not.toContain("data-filtered");
   });
 });
 
@@ -56,9 +58,10 @@ describe("with one filter on", () => {
 
   it("says so on the trigger, in the chosen value's own words", () => {
     // Not "1 filtre": the value is what you need to read to know what you are
-    // looking at.
+    // looking at. The reference puts a count badge there, which only tells you
+    // something when a dimension takes several values at once; these take one.
     expect(html).toContain("échoué");
-    expect(html).toContain("border-primary");
+    expect(html).toContain("data-filtered");
   });
 
   it("repeats it as a removable chip", () => {
@@ -81,12 +84,19 @@ describe("with two filters on", () => {
   });
 });
 
-describe("actions", () => {
-  it("keeps what acts on the whole list at the end of the row", () => {
-    const html = render(
-      <ListToolbar filters={filters()} actions={<button>Tout marquer comme lu</button>} />,
-    );
-    expect(html).toContain("Tout marquer comme lu");
-    expect(html).toContain("ml-auto");
+describe("the result count", () => {
+  it("says how many rows the filters left, after the last filter", () => {
+    const html = render(<ListToolbar filters={filters({ status: "failed" })} count={3} />);
+    expect(html).toContain("3 runs");
+    // At the END of the row: it describes what the filters before it produced.
+    expect(html.indexOf("3 runs")).toBeGreaterThan(html.lastIndexOf("Type"));
+  });
+
+  it("says nothing when the caller has no count to give", () => {
+    expect(render(<ListToolbar filters={filters()} />)).not.toContain("runs");
+  });
+
+  it("counts in the singular when there is one", () => {
+    expect(render(<ListToolbar filters={filters()} count={1} />)).toContain("1 run");
   });
 });

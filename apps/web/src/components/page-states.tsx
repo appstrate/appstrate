@@ -52,9 +52,10 @@ export function EmptyState({
 }) {
   return (
     <div className={cn("flex flex-col items-center px-8 text-center", compact ? "py-10" : "py-14")}>
-      {/* The rings overflow this box on purpose — they are wider than they are
-          tall, like the reference's — so the box has to stay narrower than the
-          padding around it or the outermost one meets the card's edge. */}
+      {/* The outermost ring is larger than this box in BOTH directions and
+          overflows it on purpose. What keeps it off the card's edge is the
+          box's height plus the padding above: shrink either and the ring gets
+          clipped by whatever frame the empty state sits in. */}
       <div
         className={cn(
           "relative grid place-items-center",
@@ -62,9 +63,9 @@ export function EmptyState({
         )}
       >
         {/* Decorative: the rings carry no information the text does not. */}
-        <Ring size={compact ? "size-24" : "size-28"} opacity="opacity-100" />
-        <Ring size={compact ? "size-34" : "size-40"} opacity="opacity-60" />
-        <Ring size={compact ? "size-44" : "size-52"} opacity="opacity-35" />
+        <Ring className={compact ? "size-24" : "size-28"} />
+        <Ring className={compact ? "size-34 opacity-60" : "size-40 opacity-60"} />
+        <Ring className={compact ? "size-44 opacity-35" : "size-52 opacity-35"} />
         <div
           className={cn(
             "bg-card border-border relative grid place-items-center rounded-2xl border shadow-md",
@@ -85,15 +86,14 @@ export function EmptyState({
   );
 }
 
-/** One ring, centred on its parent and clipped by it. */
-function Ring({ size, opacity }: { size: string; opacity: string }) {
+/** One ring, centred on its parent. */
+function Ring({ className }: { className: string }) {
   return (
     <span
       aria-hidden
       className={cn(
         "border-border/60 absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full border",
-        size,
-        opacity,
+        className,
       )}
     />
   );
