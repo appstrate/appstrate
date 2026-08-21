@@ -36,6 +36,7 @@ import type {
 } from "@appstrate/core/platform-types";
 import { buildBaseSidecarEnv } from "./sidecar-env.ts";
 import { drainStream, tailFileLines } from "./subprocess-util.ts";
+import { SIGTERM_GRACE_SECONDS } from "./constants.ts";
 
 const DATA_DIR = resolve("./data/runs");
 const SIDECAR_ENTRY = join(import.meta.dir, "../../../../../runtime-pi/sidecar/server.ts");
@@ -407,12 +408,22 @@ export class ProcessOrchestrator implements RunOrchestrator {
     // The agent's workspace is the per-run shared directory created by
     // createIsolationBoundary so spawned mcp-server runner subprocesses
     // (which receive WORKSPACE_DIR via the sidecar) read and write the
-    // exact same filesystem surface as the agent. Non-agent roles keep
-    // the legacy per-boundary subdirectory.
-    const workDir =
-      spec.role === "agent" && boundary.workspace.kind === "directory"
-        ? boundary.workspace.path
-        : join(boundary.id, "workspace");
+    // exact same filesystem surface as the agent.
+    //
+    // This used to fall back to a "legacy per-boundary subdirectory" for
+    // non-agent roles. No non-agent role reaches this method: sidecars come
+    // from `createSidecar` (which hardcodes `role: "sidecar"`), and the sole
+    // production caller passes the literal `"agent"`. The fallback only ever
+    // meant "agent and runners disagree about where the workspace is", so it
+    // is gone — a non-directory workspace now fails loudly instead. (`kind`
+    // is a discriminant of the shape this backend itself created, so a
+    // mismatch means the boundary came from a different orchestrator.)
+    if (boundary.workspace.kind !== "directory") {
+      throw new Error(
+        `ProcessOrchestrator requires a directory workspace, got "${boundary.workspace.kind}"`,
+      );
+    }
+    const workDir = boundary.workspace.path;
     await mkdir(workDir, { recursive: true });
 
     const id = `workload-${spec.runId}-${spec.role}`;
@@ -478,14 +489,14 @@ export class ProcessOrchestrator implements RunOrchestrator {
     });
   }
 
-  async stopWorkload(handle: WorkloadHandle, timeoutSeconds = 5): Promise<void> {
+  async stopWorkload(handle: WorkloadHandle): Promise<void> {
     const ph = this.processes.get(handle.id);
     if (!ph?.proc) return;
 
     ph.proc.kill("SIGTERM");
     const killed = await Promise.race([
       ph.proc.exited.then(() => true),
-      new Promise<false>((r) => setTimeout(() => r(false), timeoutSeconds * 1000)),
+      new Promise<false>((r) => setTimeout(() => r(false), SIGTERM_GRACE_SECONDS * 1000)),
     ]);
     if (!killed) ph.proc.kill("SIGKILL");
   }
@@ -521,12 +532,12 @@ export class ProcessOrchestrator implements RunOrchestrator {
     yield* tailFileLines(ph.stdoutPath, () => exited, signal);
   }
 
-  async stopByRunId(runId: string, timeoutSeconds?: number): Promise<StopResult> {
+  async stopByRunId(runId: string): Promise<StopResult> {
     let found = false;
     for (const [id, ph] of this.processes) {
       if (ph.runId === runId) {
         found = true;
-        await this.stopWorkload({ id, runId, role: ph.role }, timeoutSeconds);
+        await this.stopWorkload({ id, runId, role: ph.role });
       }
     }
     return found ? "stopped" : "not_found";

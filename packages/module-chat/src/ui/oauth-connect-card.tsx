@@ -33,7 +33,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useAui } from "@assistant-ui/react";
 import { AlertTriangleIcon, CheckIcon, Loader2Icon } from "lucide-react";
 import { encodePackageIdPath } from "@appstrate/core/naming";
-import { Button } from "./button.tsx";
+import { Button } from "@appstrate/ui/components/button";
 import { useChatHeaders } from "./runtime-context.ts";
 import {
   claimResume,
@@ -285,7 +285,12 @@ export function OAuthConnectCard({
           </span>
         ) : (
           <>
-            <Button onClick={start} disabled={preparing || phase === "pending"} className="gap-2">
+            <Button
+              type="button"
+              onClick={start}
+              disabled={preparing || phase === "pending"}
+              className="gap-2"
+            >
               {preparing || phase === "pending" ? (
                 <Loader2Icon className="size-4 animate-spin" />
               ) : null}

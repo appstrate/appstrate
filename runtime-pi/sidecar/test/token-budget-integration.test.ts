@@ -111,7 +111,8 @@ async function buildTestApp(opts: {
   blobStore?: BlobStore;
 }): Promise<Hono> {
   const app = new Hono();
-  const blobStore = opts.blobStore ?? new BlobStore("run-test");
+  const blobStore =
+    opts.blobStore ?? new BlobStore("run-test", { maxTotalBytes: 256 * 1024 * 1024 });
   const proxyDeps = {
     config: opts.deps.config,
     cookieJar: opts.deps.cookieJar,

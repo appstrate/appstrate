@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { STD_RESPONSE_HEADERS, REQUEST_ID_ONLY_HEADERS } from "../headers.ts";
+
 export const applicationsPaths = {
   "/api/applications": {
     post: {
@@ -44,10 +46,7 @@ export const applicationsPaths = {
       responses: {
         "201": {
           description: "Application created",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/ApplicationObject" },
@@ -81,10 +80,7 @@ export const applicationsPaths = {
       responses: {
         "200": {
           description: "Application list",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
@@ -151,10 +147,7 @@ export const applicationsPaths = {
       responses: {
         "200": {
           description: "Application detail",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/ApplicationObject" },
@@ -208,10 +201,7 @@ export const applicationsPaths = {
       responses: {
         "200": {
           description: "Application updated",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/ApplicationObject" },
@@ -237,9 +227,7 @@ export const applicationsPaths = {
       responses: {
         "204": {
           description: "Application deleted",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-          },
+          headers: REQUEST_ID_ONLY_HEADERS,
         },
         "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
@@ -269,9 +257,7 @@ export const applicationsPaths = {
       responses: {
         "200": {
           description: "Installed packages list",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-          },
+          headers: REQUEST_ID_ONLY_HEADERS,
           content: {
             "application/json": {
               schema: {
@@ -327,9 +313,7 @@ export const applicationsPaths = {
       responses: {
         "201": {
           description: "Package installed",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-          },
+          headers: REQUEST_ID_ONLY_HEADERS,
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/ApplicationPackage" },
@@ -366,7 +350,7 @@ export const applicationsPaths = {
       responses: {
         "200": {
           description: "Installed package detail",
-          headers: { "Request-Id": { $ref: "#/components/headers/RequestId" } },
+          headers: REQUEST_ID_ONLY_HEADERS,
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/ApplicationPackage" },
@@ -414,7 +398,7 @@ export const applicationsPaths = {
       responses: {
         "200": {
           description: "Updated package config",
-          headers: { "Request-Id": { $ref: "#/components/headers/RequestId" } },
+          headers: REQUEST_ID_ONLY_HEADERS,
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/ApplicationPackage" },
@@ -462,7 +446,7 @@ export const applicationsPaths = {
       responses: {
         "200": {
           description: "Resolved run configuration",
-          headers: { "Request-Id": { $ref: "#/components/headers/RequestId" } },
+          headers: REQUEST_ID_ONLY_HEADERS,
           content: {
             "application/json": {
               schema: {

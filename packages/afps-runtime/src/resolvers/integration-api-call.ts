@@ -235,7 +235,14 @@ function toApiCallMeta(meta: ApiCallIntegrationMeta): ApiCallMeta {
   };
 }
 
-/** Tool name surfaced to the LLM, matching the platform's `{ns}__{toolName}`. */
+/**
+ * Tool name surfaced to the LLM, matching the platform's `{ns}__{toolName}`.
+ *
+ * Package-internal: dropped from the `resolvers` barrel because nothing outside
+ * this package ever consumed it. The `export` keyword survives only so
+ * `test/resolvers/integration-api-call.test.ts` can pin the 56-character tool
+ * name cap directly.
+ */
 export function apiCallToolName(meta: ApiCallIntegrationMeta): string {
   return `${meta.namespace}__${meta.toolName}`;
 }

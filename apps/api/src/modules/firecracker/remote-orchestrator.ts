@@ -342,8 +342,8 @@ export class RemoteFirecrackerOrchestrator implements RunOrchestrator {
     await this.call(RUNNER_ROUTES.startWorkload, { body: { handle } });
   }
 
-  async stopWorkload(handle: WorkloadHandle, timeoutSeconds?: number): Promise<void> {
-    await this.call(RUNNER_ROUTES.stopWorkload, { body: { handle, timeoutSeconds } });
+  async stopWorkload(handle: WorkloadHandle): Promise<void> {
+    await this.call(RUNNER_ROUTES.stopWorkload, { body: { handle } });
   }
 
   async removeWorkload(handle: WorkloadHandle): Promise<void> {
@@ -543,8 +543,8 @@ export class RemoteFirecrackerOrchestrator implements RunOrchestrator {
     }
   }
 
-  async stopByRunId(runId: string, timeoutSeconds?: number): Promise<StopResult> {
-    const res = await this.call(RUNNER_ROUTES.stopRun, { body: { runId, timeoutSeconds } });
+  async stopByRunId(runId: string): Promise<StopResult> {
+    const res = await this.call(RUNNER_ROUTES.stopRun, { body: { runId } });
     return stopResultResponseSchema.parse(await res.json()).result;
   }
 

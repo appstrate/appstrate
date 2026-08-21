@@ -18,7 +18,7 @@ import {
 } from "../hooks/use-notifications";
 import { useAgents } from "../hooks/use-packages";
 import { useIsMobile } from "@appstrate/ui/use-mobile";
-import { formatDateField } from "../lib/markdown";
+import { formatDateField } from "../lib/format-date";
 
 /** One notification as returned by `GET /api/notifications`. */
 type NotificationItem = {

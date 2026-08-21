@@ -7,39 +7,72 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added — published JSON Schemas for canonical CloudEvent payloads
+### Removed — unused surface
+
+- `composeCatalogs(...)` (`@appstrate/afps-runtime/bundle`). No production caller
+  ever appeared: it was written for inline runs, but the platform's
+  `RunPackageCatalog` needs owner tracking and a loud throw on a missed draft
+  override, semantics a silent first-non-null fallback chain cannot express.
+  `InMemoryPackageCatalog` stays — it is the reference `PackageCatalog`
+  implementation, though its doc no longer claims to back inline runs.
+- `writeBundleToFile(bundle, path)` (`@appstrate/afps-runtime/bundle`). Two
+  lines over `writeBundleToBuffer`, with no caller outside a test; the platform
+  writes bundle bytes to object storage, not to disk. Callers that want a file
+  own the `writeFile`.
+- `src/types/manifest.ts`, a pass-through re-export of `@afps-spec/schema` that
+  existed so consumers would not need a direct dependency on the spec package.
+  No consumer ever took it — every one, including this package, imports
+  `@afps-spec/schema` directly.
+- `apiCallToolName` left the `resolvers` barrel and `slugifyIntegrationId` is
+  now module-private; neither had a consumer outside this package.
+
+### Changed — the text/binary media-type set is no longer mirrored
+
+- `http-call-core.ts` classified response bodies against a hand-copy of the
+  media-type set in `@appstrate/core/mime`, guarded by a parity test. The set
+  moved to `@appstrate/afps-shared/mime` (a `workspace:*` dependency here, and
+  the dependency core itself re-exports verbatim), so both layers now read one
+  definition and the parity test is gone with the copy. `isTextLikeMimeType`
+  keeps its one documented deviation — an explicit `charset` parameter counts
+  as a declaration of textness — and behaves identically otherwise.
+
+### Added — `dataschema` URIs for canonical CloudEvent payloads
 
 - New `@appstrate/afps-runtime/events` exports (`CANONICAL_EVENT_SCHEMAS`,
-  `canonicalEventSchemaUri`, `buildCanonicalEventJsonSchemas`, …). The seven
+  `CANONICAL_EVENT_SCHEMA_VERSION`, `canonicalEventSchemaUri`): the seven
   canonical event `data` payloads (`memory.added`, `pinned.set`,
   `output.emitted`, `log.written`, `appstrate.progress`, `appstrate.error`,
-  `appstrate.metric`) now have Zod definitions that generate committed JSON
-  Schema 2020-12 documents under `schemas/v0/events/` (regenerate with
-  `bun run schemas:generate`, drift-guarded by the test suite).
+  `appstrate.metric`) each have a stable, versioned schema URI.
 - `buildCloudEventEnvelope` stamps the OPTIONAL CloudEvents `dataschema`
-  attribute with the matching versioned schema URI. Additive and
-  non-breaking: no existing attribute changes, and the attribute is omitted
-  for third-party (`@scope/tool.verb`) events and for canonical types whose
-  payload does not actually satisfy the shape.
-- The URIs are not served yet — the documents still have to be published to
-  `schemas.afps.dev/v0/events/` (AFPS-namespaced events) and
-  `schemas.appstrate.dev/v0/events/` (`appstrate.*` vendor events).
+  attribute with the matching URI. Additive and non-breaking: no existing
+  attribute changes, and the attribute is omitted for third-party
+  (`@scope/tool.verb`) events and for canonical types whose payload does not
+  actually satisfy the shape (`isCanonicalRunEvent` gates it).
+- The URIs are identifiers, not documents — nothing serves them.
+  `schemas.afps.dev/v0/events/*` 404s (the afps-spec Pages job publishes
+  `packages/schema/v0/*.schema.json` flat, with no `events/` directory) and
+  `schemas.appstrate.dev` was never stood up. This is conformant: CloudEvents
+  1.0 §3.1 does not require `dataschema` to dereference.
+- A Zod payload table, a JSON Schema 2020-12 generator
+  (`buildCanonicalEventJsonSchema(s)`, `serializeCanonicalEventJsonSchema`),
+  seven committed artifacts under `schemas/v0/events/` and a `schemas:generate`
+  script existed here and were removed before release: they produced documents
+  for the unserved URIs above, `schemas:generate` ran in no workflow, and the
+  drift tests guarded a shape nobody could fetch. `isCanonicalRunEvent`
+  (`src/types/canonical-events.ts`) is the payload contract. Rebuild the
+  generator only together with the publication step.
 
-### Fixed — RFC 9457 `type` URIs moved to the canonical docs host
+### Removed — RFC 9457 problem+json layer
 
-- `toProblem()` emitted `https://errors.appstrate.dev/{code}` while the
-  platform emitted `https://docs.appstrate.dev/errors/{code-with-dashes}` for
-  the same concept — two hosts (both unresolvable) and two code spellings.
-  Runtime errors now resolve under the canonical docs host, in their own
-  namespace: `https://docs.appstrate.dev/errors/afps/{code-with-dashes}`.
-- The `afps/` segment is load-bearing. The two catalogues overlap on names
-  that mean different things — `INTEGRITY_MISMATCH` here is an SRI mismatch
-  over stored bytes, the platform's `integrity_mismatch` is a 409 "version
-  already exists with different content" — and renaming a code on either
-  side would be a wire-breaking change. The namespace makes the collision
-  structurally impossible instead of merely documented.
-- New exports on `@appstrate/afps-runtime/errors`: `afpsErrorTypeUri(code)`
-  and `AFPS_ERROR_CODES` (exhaustive over `AfpsErrorCode` at compile time).
+- `toProblem()`, `ProblemDetails`, `afpsErrorTypeUri()`, `AFPS_ERROR_CODES` and
+  the `https://docs.appstrate.dev/errors/afps/{code}` URI namespace are gone
+  from `@appstrate/afps-runtime/errors`. They were added and removed within the
+  same unreleased cycle: no wire ever carried them. The platform serialises
+  errors through `@appstrate/core/api-errors` plus
+  `run-launcher/bundle-error-mapping.ts`, which translates this taxonomy into
+  the platform's own catalogue. `ResolverError`, `AuthorizedUrisError`,
+  `WorkloadExitError` and `isAfpsError` are unaffected — build an HTTP envelope
+  from `isAfpsError` + `code` + `message`.
 
 ### Added — shared tool-result truncation
 

@@ -322,24 +322,3 @@ export function isValidToolName(name: string): boolean {
   if (name.length === 0 || name.length > TOOL_NAME_MAX_LEN) return false;
   return TOOL_NAME_PATTERN.test(name);
 }
-
-/**
- * Normalise a raw tool name into the canonical snake_case `__`-joined
- * form. Returns the input unchanged when it's already valid.
- *
- * Mapping rules:
- * - Hyphens \u2192 underscores.
- * - Single-underscore separator \u2192 double-underscore boundary (only when
- *   no `__` is already present).
- * - Mixed-case \u2192 lower-case.
- */
-export function normalizeToolName(raw: string): string {
-  if (typeof raw !== "string" || raw.length === 0) return raw;
-  let out = raw.toLowerCase();
-  out = out.replace(/[-]+/g, "_");
-  // If there's no `__` boundary yet, promote the first single underscore.
-  if (!out.includes("__")) {
-    out = out.replace(/_/, "__");
-  }
-  return out.slice(0, TOOL_NAME_MAX_LEN);
-}

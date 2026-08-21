@@ -165,10 +165,6 @@ export function mergeTurnMetadata(
   };
 }
 
-export function isFinalChatStep(stepNumber: number): boolean {
-  return stepNumber >= CHAT_MAX_STEPS - 1;
-}
-
 export function turnMetadataFromMessage(message: unknown): AppstrateTurnMetadata | null {
   if (!isRecord(message)) return null;
   const metadata = isRecord(message.metadata) ? message.metadata : null;

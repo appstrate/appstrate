@@ -12,8 +12,16 @@
  *   - import every typed error from a single subpath
  *     (`@appstrate/afps-runtime/errors`),
  *   - match against the shared {@link AfpsError} marker interface to
- *     decide between domain-known and unexpected errors,
- *   - serialise errors to RFC 9457 problem+json via {@link toProblem}.
+ *     decide between domain-known and unexpected errors.
+ *
+ * This module used to also mint RFC 9457 problem+json bodies (`toProblem`,
+ * `ProblemDetails`, `afpsErrorTypeUri`, `AFPS_ERROR_CODES`) under a
+ * `docs.appstrate.dev/errors/afps/` URI namespace. Removed: no wire ever
+ * carried it. The platform serialises errors through
+ * `@appstrate/core/api-errors` plus `run-launcher/bundle-error-mapping.ts`,
+ * which translates this taxonomy into the platform's own error catalogue, and
+ * the only other callers were the tests asserting the URI shape. Consumers
+ * that need an HTTP envelope build it from `isAfpsError` + `code` + `message`.
  *
  * Existing classes are re-exported here. New classes added in this
  * module fill the gaps in the previous taxonomy: provider URI
@@ -181,152 +189,6 @@ export function isAfpsError(value: unknown): value is AfpsError {
     typeof (value as AfpsError).code === "string" &&
     (value as AfpsError).code.length > 0
   );
-}
-
-/**
- * Serialise an error to RFC 9457 problem+json shape. Falls back to a
- * generic 500 envelope for unknown errors so API handlers never leak
- * stack traces or library internals.
- *
- * Callers own the HTTP status — this helper only owns the body shape.
- */
-export interface ProblemDetails {
-  type: string;
-  title: string;
-  status: number;
-  detail: string;
-  code?: string;
-  errors?: Record<string, unknown>;
-}
-
-/**
- * Canonical documentation root for RFC 9457 `type` URIs — the same host
- * and `/errors` root `codeToType()` in `@appstrate/core/api-errors` uses,
- * so there is ONE documentation host rather than two dead subdomains.
- */
-const DOCS_ERRORS_ROOT = "https://docs.appstrate.dev/errors";
-
-/**
- * Path segment separating the runtime taxonomy from the platform's API
- * error catalogue.
- *
- * The two catalogues are independent and **do** overlap: `INTEGRITY_MISMATCH`
- * here means "stored bytes no longer hash to their recorded SRI", while the
- * platform's `integrity_mismatch` means "this version already exists with
- * different content" (409). `run-launcher/bundle-error-mapping.ts` maps the
- * former to `bundle_integrity_mismatch`, precisely because they are not the
- * same thing. Sharing a flat `/errors/{code}` namespace would point both at
- * one document.
- *
- * Renaming a code on either side is a wire-breaking change, so the namespace
- * is separated by path instead. That makes the collision structurally
- * impossible rather than merely documented, and keeps the single-host
- * consolidation.
- */
-const AFPS_NAMESPACE = "afps";
-
-/**
- * Slug transform, kept identical to core's: underscores become dashes,
- * with no case folding (so `RUN_TIMEOUT` yields `RUN-TIMEOUT`). The
- * duplication is deliberate — `@appstrate/core` is a devDependency here,
- * not a runtime one. This package is published, powers the standalone
- * `afps` CLI, and is kept to a small portable dependency set; importing
- * core's helper would either break every npm consumer (the module is not
- * installed for them) or drag core — ajv, pino, and the rest — into the
- * runtime closure of a portable AFPS runtime, inverting the layering.
- *
- * `test/errors.test.ts` asserts both implementations share the host and
- * `/errors` root, apply the same slug transform, and differ by exactly the
- * `afps/` segment. That segment is what makes a collision impossible rather
- * than merely absent: a platform URI has exactly one path segment after
- * `/errors/` (no code contains a slash, and the transform never introduces
- * one), while every URI minted here has two.
- */
-function codeToSlug(code: string): string {
-  return code.replace(/_/g, "-");
-}
-
-/** RFC 9457 `type` URI for a runtime error code. */
-export function afpsErrorTypeUri(code: string): string {
-  return `${DOCS_ERRORS_ROOT}/${AFPS_NAMESPACE}/${codeToSlug(code)}`;
-}
-
-/**
- * Every member of {@link AfpsErrorCode}.
- *
- * `satisfies Record<AfpsErrorCode, true>` makes this exhaustive in both
- * directions at compile time: a code added to the union without an entry
- * here fails to build, and an entry that is not a member fails too. The
- * URI-disjointness test enumerates this list, so an un-enumerated code
- * would otherwise slip past it unchecked.
- */
-const AFPS_ERROR_CODE_TABLE = {
-  ARCHIVE_INVALID: true,
-  BUNDLE_JSON_MISSING: true,
-  BUNDLE_JSON_INVALID: true,
-  RECORD_MISSING: true,
-  RECORD_MALFORMED: true,
-  RECORD_MISMATCH: true,
-  INTEGRITY_MISMATCH: true,
-  VERSION_UNSUPPORTED: true,
-  LIMITS_EXCEEDED: true,
-  MANIFEST_SCHEMA: true,
-  DEPENDENCY_UNRESOLVED: true,
-  TOOL_BUNDLE_FAILED: true,
-  signature_invalid: true,
-  alg_unsupported: true,
-  chain_untrusted: true,
-  chain_invalid: true,
-  chain_missing: true,
-  malformed: true,
-  unsigned: true,
-  unsigned_required: true,
-  RUN_TIMEOUT: true,
-  RUN_CANCELLED: true,
-  WORKLOAD_EXIT_NONZERO: true,
-  AUTHORIZED_URIS_EMPTY: true,
-  AUTHORIZED_URIS_MISMATCH: true,
-  RESOLVER_MISSING_REQUIRED: true,
-  RESOLVER_BODY_REFERENCE_FORBIDDEN: true,
-  RESOLVER_BODY_TOO_LARGE: true,
-  RESOLVER_BODY_INVALID: true,
-  RESOLVER_PATH_OUTSIDE_ALLOWED_ROOTS: true,
-  RESOLVER_PATH_SYMLINK_REFUSED: true,
-  RESOLVER_PATH_INVALID: true,
-  RESOLVER_URL_BLOCKED: true,
-  RESOLVER_REDIRECT_BLOCKED: true,
-  RESOLVER_CREDENTIAL_EXFIL_BLOCKED: true,
-  RUN_HISTORY_FETCH_FAILED: true,
-  RUN_HISTORY_BAD_RESPONSE: true,
-  CREDENTIAL_RESOLUTION: true,
-} as const satisfies Record<AfpsErrorCode, true>;
-
-/** Every {@link AfpsErrorCode}, enumerable at runtime. */
-export const AFPS_ERROR_CODES: readonly AfpsErrorCode[] = Object.keys(
-  AFPS_ERROR_CODE_TABLE,
-) as AfpsErrorCode[];
-
-export function toProblem(
-  err: unknown,
-  fallback: { type?: string; title?: string; status?: number } = {},
-): ProblemDetails {
-  if (isAfpsError(err)) {
-    const out: ProblemDetails = {
-      type: fallback.type ?? afpsErrorTypeUri(err.code),
-      title: fallback.title ?? err.name,
-      status: fallback.status ?? 422,
-      detail: err.message,
-      code: err.code,
-    };
-    if (err.details) out.errors = err.details;
-    return out;
-  }
-  return {
-    type: fallback.type ?? "about:blank",
-    title: fallback.title ?? "Internal Server Error",
-    status: fallback.status ?? 500,
-    detail: err instanceof Error ? err.message : String(err),
-  };
 }
 
 // Re-export every typed error so consumers have a single barrel.

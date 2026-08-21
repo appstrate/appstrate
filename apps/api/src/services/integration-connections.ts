@@ -1155,8 +1155,12 @@ export async function resolveIntegrationClientById(
 
   // The row's declaration wins; the manifest stands in when it has none.
   const method = row.tokenEndpointAuthMethod ?? manifestAuthMethod;
-  // A public client stores no ciphertext, so there is nothing to decrypt.
-  if (method === "none" || row.clientSecretEncrypted === "") {
+  // A public client stores no ciphertext, so there is nothing to decrypt. The
+  // converse needs no test: `ioc_public_iff_no_secret` (migration 0038, added
+  // VALIDATING after backfilling the legacy rows) makes an empty ciphertext
+  // with any other declared method unrepresentable, so emptiness here always
+  // arrives as `"none"`.
+  if (method === "none") {
     return { clientId: row.clientId, clientSecret: "", tokenEndpointAuthMethod: "none" };
   }
 

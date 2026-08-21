@@ -12,7 +12,7 @@ import {
   useDisconnectIntegrationConnection,
   useUpdateMeIntegrationConnection,
 } from "../../hooks/use-me-connections";
-import { formatDateField } from "../../lib/markdown";
+import { formatDateField } from "../../lib/format-date";
 import { LoadingState, EmptyState } from "../../components/page-states";
 import { ConfirmModal } from "../../components/confirm-modal";
 import { ConnectionStatusBadge } from "../../components/integration-connect/connection-status-badge";

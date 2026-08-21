@@ -34,10 +34,13 @@ import { Hono } from "hono";
 import type { Context } from "hono";
 import { getErrorMessage } from "@appstrate/core/errors";
 
-// Streaming cap — mirrored from runtime-pi/sidecar constants.
-// The streaming/buffered decision is header-driven (X-Stream-Request),
-// not threshold-driven, so only the hard cap is needed here.
-const MAX_STREAMED_BODY_SIZE = 100 * 1024 * 1024; // 100 MB
+// Streaming cap — single-sourced from the shared outbound-HTTP engine, the
+// same module the in-container resolvers enforce it from. It used to be a
+// third private copy of the literal here, so a change to the shared value
+// silently desynchronised this route from every runner. The streaming/buffered
+// decision is header-driven (X-Stream-Request), not threshold-driven, so only
+// the hard cap is needed here.
+import { MAX_STREAMED_BODY_SIZE } from "@appstrate/afps-runtime/resolvers";
 
 /** Wall-clock timeout for piping an upstream streaming response to the client. */
 export const STREAMING_PIPE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
@@ -263,7 +266,6 @@ export function createCredentialProxyRouter() {
           cookieJar: jar,
           jarSessionId: sessionId,
           cookieJarTtlSeconds: limits.session_ttl_seconds,
-          sessionKey: integrationId,
           // When the client wants a streamed response, skip the platform
           // response-size cap — the capping transform stream in this
           // route enforces MAX_STREAMED_BODY_SIZE instead.

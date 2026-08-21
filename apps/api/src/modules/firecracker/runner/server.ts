@@ -257,7 +257,7 @@ export function createRunnerApp(deps: RunnerAppDeps): Hono {
   app.post(RUNNER_ROUTES.stopWorkload, async (c) => {
     const body = await readBody(c, stopWorkloadBodySchema);
     if (!body.ok) return body.res;
-    await orchestrator.stopWorkload(body.data.handle, body.data.timeoutSeconds);
+    await orchestrator.stopWorkload(body.data.handle);
     return c.body(null, 204);
   });
 
@@ -324,7 +324,7 @@ export function createRunnerApp(deps: RunnerAppDeps): Hono {
   app.post(RUNNER_ROUTES.stopRun, async (c) => {
     const body = await readBody(c, stopRunBodySchema);
     if (!body.ok) return body.res;
-    const result = await orchestrator.stopByRunId(body.data.runId, body.data.timeoutSeconds);
+    const result = await orchestrator.stopByRunId(body.data.runId);
     return c.json({ result });
   });
 

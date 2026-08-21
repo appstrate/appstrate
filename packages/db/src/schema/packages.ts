@@ -55,7 +55,6 @@ export const applicationPackages = pgTable(
   (table) => [
     primaryKey({ columns: [table.applicationId, table.packageId] }),
     index("idx_application_packages_package_id").on(table.packageId),
-    index("idx_application_packages_app_id").on(table.applicationId),
   ],
 );
 
@@ -82,7 +81,6 @@ export const packages = pgTable(
     forkedFrom: text("forked_from"),
   },
   (table) => [
-    index("idx_packages_org_id").on(table.orgId),
     index("idx_packages_type").on(table.type),
     index("idx_packages_org_type").on(table.orgId, table.type),
     // Partial index sized for the compaction sweep (`ephemeral = true AND
@@ -120,7 +118,6 @@ export const packageVersions = pgTable(
   },
   (table) => [
     uniqueIndex("package_versions_pkg_version_unique").on(table.packageId, table.version),
-    index("idx_package_versions_package_id").on(table.packageId),
     // AFPS 0.1 shape gate: published version snapshots MUST carry a 0.x
     // `schema_version` when present. Mirrors the draft-side gate on `packages`
     // so the wire and the persisted snapshot never disagree.
@@ -183,6 +180,5 @@ export const packageVersionDependencies = pgTable(
       table.depName,
       table.depType,
     ),
-    index("idx_pkg_ver_deps_version_id").on(table.versionId),
   ],
 );

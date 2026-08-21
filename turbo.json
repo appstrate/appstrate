@@ -23,16 +23,6 @@
       "dependsOn": ["^typecheck"],
       "inputs": ["src/**", "tsconfig.json", "tsconfig.*.json", "package.json"]
     },
-    "check": {
-      "dependsOn": ["typecheck"]
-    },
-    "test": {
-      "cache": false,
-      "inputs": ["src/**", "test/**", "package.json", "bunfig.toml"]
-    },
-    "lint": {
-      "inputs": ["src/**", "eslint.config.*"]
-    },
     "//#lint": {
       "inputs": [
         "apps/*/src/**",

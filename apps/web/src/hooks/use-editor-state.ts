@@ -21,7 +21,7 @@ export interface EditorStateBase {
   lock_version?: number;
 }
 
-export interface UseEditorStateOptions<S extends EditorStateBase> {
+interface UseEditorStateOptions<S extends EditorStateBase> {
   initialState: S;
   packageType: Exclude<PackageType, "mcp-server">;
   packageId: string | undefined;
@@ -41,7 +41,7 @@ export interface UseEditorStateOptions<S extends EditorStateBase> {
   validate?: (state: S) => { error: string; tab?: string } | null;
 }
 
-export interface UseEditorStateReturn<S extends EditorStateBase> {
+interface UseEditorStateReturn<S extends EditorStateBase> {
   state: S;
   setState: React.Dispatch<React.SetStateAction<S>>;
   /** Shallow-merge a patch into `state.manifest`. */

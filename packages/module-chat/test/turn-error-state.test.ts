@@ -21,7 +21,7 @@ const message = (m: Record<string, unknown>) => m as never;
 const turn = (fields: Record<string, unknown>) => ({
   metadata: {
     appstrate: {
-      turn: { engine: "ai-sdk", stepCount: 1, maxSteps: 30, maxStepsReached: false, ...fields },
+      turn: { stepCount: 1, maxSteps: 30, maxStepsReached: false, ...fields },
     },
   },
 });

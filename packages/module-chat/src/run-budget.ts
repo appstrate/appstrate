@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Turn-budget propagation for `run_and_wait` — ONE implementation shared by both
- * chat engines (`pi-chat/mcp-tools.ts` and `platform-mcp.ts`).
+ * Turn-budget propagation for `run_and_wait`, consumed by
+ * `pi-chat/mcp-tools.ts`.
  *
  * The defect this closes: `RUN_AND_WAIT_MAX_MS` is 30 minutes and the chat
- * ever passed `maxMs`, so a tool call was allowed to wait THREE TIMES longer
+ * never passed `maxMs`, so a tool call was allowed to wait THREE TIMES longer
  * than the 10-minute turn hosting it. Measured consequence: a run launched at
  * T+9:38 of a 10-minute turn, the turn died 22 s later, the run succeeded 2
  * minutes after that and its output was orphaned — 4.68 USD for nothing.

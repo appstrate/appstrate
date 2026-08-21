@@ -363,7 +363,10 @@ describeRequiresDocker("stopContainer", () => {
       let data = (await res.json()) as any;
       expect(data.State.Running).toBe(true);
 
-      await stopContainer(id, 1);
+      // No grace argument: `t` is Docker's MAXIMUM wait before SIGKILL, not a
+      // fixed delay, and `sleep` dies on SIGTERM at once — so the shared
+      // SIGTERM_GRACE_SECONDS costs this test nothing.
+      await stopContainer(id);
 
       res = await fetch(`${DOCKER_URL}/containers/${id}/json`);
       data = (await res.json()) as any;

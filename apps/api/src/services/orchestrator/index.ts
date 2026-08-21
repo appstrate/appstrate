@@ -8,6 +8,7 @@ export {
   orchestratorIsolatesWorkloads,
   orchestratorAgentResources,
   orchestratorSupportsSidecarOnly,
+  orchestratorAppliesWorkspaceTmpfsCap,
   isolatingOrchestratorIds,
 } from "./registry.ts";
 

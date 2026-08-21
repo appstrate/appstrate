@@ -6,6 +6,43 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Removed
+
+- **Twelve unscoped package endpoints are gone.** `GET`, `PUT` and `DELETE` on
+  each of `/api/packages/agents/{id}`, `/api/packages/skills/{id}`,
+  `/api/packages/integrations/{id}` and `/api/packages/mcp-servers/{id}`. Use
+  the scoped forms instead — `/api/packages/agents/{scope}/{name}`, and so on
+  for the other three types.
+
+  Every package identifier Appstrate produces is `@scope/name`
+  (`buildPackageId()` returns that unconditionally, and `0000_init.sql` is
+  squashed), so no unscoped id has ever existed to address. But "unreachable"
+  is too strong and is why this is a release note rather than only a source
+  comment: the routes took a single-segment path parameter, so a client that
+  percent-encoded a scoped id — `encodeURIComponent("@scope/name")` →
+  `%40scope%2Fname` — got a working request. No in-repo or first-party consumer
+  did this (`apps/cli`, `apps/web`, `e2e`, `runtime-pi`, `docs`, the GitHub
+  Action, `cloud` and `connect-helper` all return zero hits), so the exposure is
+  third-party integrations only. These are API-key-authenticated public routes
+  removed without a deprecation window; if you call them, switch to the scoped
+  form.
+
+### Changed
+
+- **Three endpoints now report malformed JSON as `validation_failed` instead of
+  `invalid_request`.** Two on `runs-events.ts` and one on `runs.ts`, as a side
+  effect of routing their bodies through `readJsonBody`. The HTTP status is
+  unchanged and no first-party client branches on the code, but `runs-events` is
+  runtime-facing wire surface, so a third party matching on the string will see
+  the new value.
+- **`LOG_LEVEL` now reaches sidecar containers.** It was missing from
+  `SIDECAR_OPERATOR_ENV_KEYS`, which made every `logger.debug` in the sidecar
+  permanently unreachable under `RUN_ADAPTER=docker` and `firecracker`. Turning
+  those diagnostics on is the point of the fix, so note the flip side: a host
+  already running `LOG_LEVEL=debug` will now get debug output from sidecar
+  containers where it previously got none. The default is `info` in both
+  `.env.example` and `docker-compose.yml`.
+
 ### Security
 
 - **The agent bundle export now requires each dependency type's read scope** —

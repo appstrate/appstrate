@@ -27,7 +27,7 @@ function asStringArray(v: unknown): string[] {
 
 export type SourceKind = "remote" | "local" | "none";
 
-export interface SourceState {
+interface SourceState {
   kind: SourceKind;
   remoteUrl: string;
   remoteTransport: string;

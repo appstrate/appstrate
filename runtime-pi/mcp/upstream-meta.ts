@@ -31,15 +31,6 @@ import {
 } from "@appstrate/mcp-transport";
 import type { CallToolResult } from "@appstrate/mcp-transport";
 
-// Re-export shared symbols so in-tree consumers (the sidecar MCP host
-// and parity tests) can keep importing from `./upstream-meta` without
-// churn.
-export {
-  UPSTREAM_HEADER_ALLOWLIST,
-  UPSTREAM_META_KEY,
-  type UpstreamMeta,
-} from "@appstrate/mcp-transport";
-
 /**
  * Read upstream `{ status, headers }` from a CallToolResult's `_meta`
  * field, applying the allowlist defensively. Throws on malformed or

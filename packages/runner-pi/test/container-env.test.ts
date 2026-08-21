@@ -353,9 +353,20 @@ describe("buildRuntimePiEnv", () => {
 
 describe("pickOperatorSidecarEnv", () => {
   // Snapshot/restore helper so each test sees a known starting env.
+  //
+  // It CLEARS every listed key before applying the caller's overrides, rather
+  // than only the keys the caller names. The tests below assert an exact shape,
+  // so any listed key that happens to be set in the ambient environment would
+  // otherwise leak into the result — which is exactly what happened when
+  // `LOG_LEVEL` joined `SIDECAR_OPERATOR_ENV_KEYS` (it is set by nearly every
+  // shell and by `.env`). Clearing the whole list keeps the isolation correct
+  // for whatever key is added next, instead of loosening the assertions.
   function withEnv(values: Record<string, string | undefined>, fn: () => void): void {
     const originals: Record<string, string | undefined> = {};
-    for (const key of SIDECAR_OPERATOR_ENV_KEYS) originals[key] = process.env[key];
+    for (const key of SIDECAR_OPERATOR_ENV_KEYS) {
+      originals[key] = process.env[key];
+      delete process.env[key];
+    }
     try {
       for (const [k, v] of Object.entries(values)) {
         if (v === undefined) delete process.env[k];
@@ -400,6 +411,58 @@ describe("pickOperatorSidecarEnv", () => {
         expect(out.SIDECAR_MAX_MCP_ENVELOPE_BYTES).toBe("33554432");
       },
     );
+  });
+
+  // Regression: three of these keys (LOG_LEVEL aside) were added to
+  // SIDECAR_OPERATOR_ENV_KEYS in this sweep. Before that they were never
+  // forwarded in container mode, and `.env.example` told operators outright
+  // that setting them "has NO effect". The sidecar parses them with
+  // `readPositiveIntEnv`, which THROWS at module scope on the boot path — so
+  // forwarding a stale `=0` or `=100_000` someone set while it was documented
+  // as inert would have killed the sidecar and failed every run.
+  it("omits malformed numeric values instead of crashing the sidecar at boot", () => {
+    for (const bad of ["0", "-1", "100_000", "200k", "8000.5", "NaN", "1e3x"]) {
+      withEnv({ SIDECAR_RUN_TOOL_OUTPUT_BUDGET_TOKENS: bad }, () => {
+        expect(pickOperatorSidecarEnv().SIDECAR_RUN_TOOL_OUTPUT_BUDGET_TOKENS).toBeUndefined();
+      });
+    }
+  });
+
+  it("still forwards well-formed numeric values", () => {
+    withEnv(
+      {
+        SIDECAR_RUN_TOOL_OUTPUT_BUDGET_TOKENS: "100000",
+        SIDECAR_INLINE_TOOL_OUTPUT_TOKENS: "8000",
+        SIDECAR_API_CALL_CONCURRENCY: "4",
+      },
+      () => {
+        expect(pickOperatorSidecarEnv()).toEqual({
+          SIDECAR_RUN_TOOL_OUTPUT_BUDGET_TOKENS: "100000",
+          SIDECAR_INLINE_TOOL_OUTPUT_TOKENS: "8000",
+          SIDECAR_API_CALL_CONCURRENCY: "4",
+        });
+      },
+    );
+  });
+
+  // The gate must be no stricter than the sidecar's own parse, or it would
+  // silently drop values the sidecar would have honoured. `Number` trims, so
+  // padded input is valid on BOTH sides — asserted here because the two live
+  // in different processes and nothing else pins them together.
+  it("forwards padded numerics, matching the sidecar's own Number() parse", () => {
+    withEnv({ SIDECAR_API_CALL_CONCURRENCY: " 4 " }, () => {
+      expect(pickOperatorSidecarEnv().SIDECAR_API_CALL_CONCURRENCY).toBe(" 4 ");
+    });
+  });
+
+  // Non-numeric keys are untouched: the sidecar either uses them verbatim or
+  // already degrades safely, so filtering them would only lose information.
+  it("leaves non-numeric keys alone, however odd their value", () => {
+    withEnv({ LOG_LEVEL: "not-a-level", RUNNER_IMAGE_NODE: "ghcr.io/x/node:1.2.3" }, () => {
+      const out = pickOperatorSidecarEnv();
+      expect(out.LOG_LEVEL).toBe("not-a-level");
+      expect(out.RUNNER_IMAGE_NODE).toBe("ghcr.io/x/node:1.2.3");
+    });
   });
 
   it("respects the keys argument to filter what is returned", () => {

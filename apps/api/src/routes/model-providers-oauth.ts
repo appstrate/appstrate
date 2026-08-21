@@ -99,8 +99,7 @@ async function handlePairRedeem(c: Context<AppEnv>) {
   const fromIp = getClientIp(c);
   const consumed = await consumePairing(token, fromIp === "unknown" ? undefined : fromIp);
 
-  const body = await c.req.json();
-  const input = parseBody(importBody, body);
+  const input = await readJsonBody(c, importBody);
 
   // Body's providerId MUST match what the pairing was minted for —
   // otherwise the helper could divert the redeem to a different

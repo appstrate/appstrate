@@ -25,7 +25,6 @@ import { SchemaForm } from "@appstrate/ui/schema-form";
 <SchemaForm
   wrapper={manifest.input}
   formData={values}
-  uploadPath="/api/uploads"
   labels={labels}
   onChange={(e) => setValues(e.formData)}
   onSubmit={(e) => submit(e.formData)}

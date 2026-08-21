@@ -49,8 +49,6 @@ export interface DraftPackageCatalogOptions {
   orgId: string;
 }
 
-type DraftStorageFolder = "skills";
-
 interface DraftPackageRow {
   draftManifest: unknown;
   /** `null` → system package (global `_system/` storage namespace). */
@@ -99,8 +97,10 @@ export class DraftPackageCatalog implements PackageCatalog {
     }
 
     const manifest = asRecord(row.draftManifest);
-    const folder = typeToFolder(manifest.type);
-    if (!folder) {
+    // Skills are the only draft type this catalog resolves — see the class
+    // header. The storage folder is therefore the literal `"skills"`, not a
+    // lookup: a type→folder mapper with one arm only obscured that.
+    if (manifest.type !== "skill") {
       throw new BundleError(
         "BUNDLE_JSON_INVALID",
         `DraftPackageCatalog: ${parsed.packageId} has unsupported type ${String(manifest.type)}`,
@@ -114,7 +114,7 @@ export class DraftPackageCatalog implements PackageCatalog {
     // packages on the run hot path.
     const ownership = row.orgId === null ? "system" : "org";
     const files = await downloadPackageFiles(
-      folder,
+      "skills",
       this.opts.orgId,
       parsed.packageId,
       undefined,
@@ -169,9 +169,4 @@ export class DraftPackageCatalog implements PackageCatalog {
     this.rowCache.set(packageId, promise);
     return promise;
   }
-}
-
-function typeToFolder(type: unknown): DraftStorageFolder | null {
-  if (type === "skill") return "skills";
-  return null;
 }

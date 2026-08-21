@@ -36,7 +36,7 @@ import {
 } from "./token-budget.ts";
 import { OAuthTokenCache, NeedsReconnectionError, type CachedToken } from "./oauth-token-cache.ts";
 import { logger } from "./logger.ts";
-import { filterSensitiveHeaders, scrubBearerMaterial } from "./redact.ts";
+import { filterSensitiveHeaders, scrubSecretMaterial } from "./redact.ts";
 
 export type { SidecarConfig } from "./helpers.ts";
 
@@ -191,7 +191,7 @@ async function passUpstream(
     // bearer-swap, so an upstream/proxy error that echoes request material
     // could carry the real subscription bearer. Same no-leak posture as
     // `logOauthLlmResponse`.
-    const scrubbedSample = scrubBearerMaterial(bodySample);
+    const scrubbedSample = scrubSecretMaterial(bodySample);
     logger.warn("llm alias: upstream error body replaced by synthetic envelope", {
       targetUrl: observe?.targetUrl,
       status: upstream.status,
@@ -312,7 +312,7 @@ async function logOauthLlmResponse(
   // we still scrub bearer/api-key patterns from the sample so the no-leak
   // guarantee holds independent of upstream behavior.
   const responseHeaders = filterSensitiveHeaders(upstream.headers);
-  const scrubbed = scrubBearerMaterial(bodySample);
+  const scrubbed = scrubSecretMaterial(bodySample);
   const truncated = scrubbed.length > 200 ? scrubbed.slice(0, 200) + "…" : scrubbed;
   logger.warn("oauth llm: upstream response non-2xx", {
     credentialId,
@@ -482,11 +482,12 @@ export interface SidecarRuntimeDeps {
 /**
  * Blob-store cap for production sidecars. MUST stay well below the
  * sidecar container's cgroup memory limit (SIDECAR_MEMORY_BYTES =
- * 256 MiB, `apps/api/src/services/orchestrator/constants.ts`): at the
- * store's 256 MiB class default the kernel OOM-killer fires before the
+ * 256 MiB, `apps/api/src/services/orchestrator/constants.ts`): a cap at
+ * or near the cgroup limit means the kernel OOM-killer fires before the
  * store's own guard, killing every integration mid-run. 128 MiB leaves
  * headroom for the Bun runtime, spawned-runner bookkeeping, and
- * in-flight request buffers.
+ * in-flight request buffers. `BlobStore` takes no default for this
+ * reason — the value is always a deliberate choice by the caller.
  */
 const RUN_BLOB_STORE_MAX_BYTES = 128 * 1024 * 1024;
 

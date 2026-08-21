@@ -4,6 +4,13 @@
  * Reusable OpenAPI parameter definitions.
  */
 export const parameters = {
+  Offset: {
+    name: "offset",
+    in: "query" as const,
+    required: false,
+    description: "Number of items to skip before the first returned item.",
+    schema: { type: "integer", minimum: 0, default: 0 },
+  },
   XOrgId: {
     name: "X-Org-Id",
     in: "header" as const,

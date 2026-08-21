@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { STD_RESPONSE_HEADERS, REQUEST_ID_ONLY_HEADERS } from "../headers.ts";
+
 export const modelsPaths = {
   "/api/models": {
     get: {
@@ -11,10 +13,7 @@ export const modelsPaths = {
       responses: {
         "200": {
           description: "Model list",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
@@ -131,10 +130,7 @@ export const modelsPaths = {
         "201": {
           description:
             "Model created — the bare created model resource (same shape as `GET`/`list`).",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/OrgModel" },
@@ -176,10 +172,7 @@ export const modelsPaths = {
         "200": {
           description:
             "Default model updated — the bare *effective* default model resource (same shape as `GET`/`list`). When no DB row is flagged, the system-default fallback (if any) is surfaced.",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/OrgModel" },
@@ -189,9 +182,7 @@ export const modelsPaths = {
         "204": {
           description:
             "Default cleared and no model remains in effect (no system default configured) — no resource to return.",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-          },
+          headers: REQUEST_ID_ONLY_HEADERS,
         },
         "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
@@ -243,10 +234,7 @@ export const modelsPaths = {
       responses: {
         "201": {
           description: "Models seeded",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
@@ -288,10 +276,7 @@ export const modelsPaths = {
       responses: {
         "200": {
           description: "Model search results",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
@@ -436,10 +421,7 @@ export const modelsPaths = {
       responses: {
         "200": {
           description: "Test result",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/TestResult" },
@@ -506,10 +488,7 @@ export const modelsPaths = {
         "200": {
           description:
             "Model updated — the bare updated model resource (same shape as `GET`/`list`).",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/OrgModel" },
@@ -534,9 +513,7 @@ export const modelsPaths = {
       responses: {
         "204": {
           description: "Model deleted",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-          },
+          headers: REQUEST_ID_ONLY_HEADERS,
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
@@ -557,10 +534,7 @@ export const modelsPaths = {
       responses: {
         "200": {
           description: "Test result",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/TestResult" },

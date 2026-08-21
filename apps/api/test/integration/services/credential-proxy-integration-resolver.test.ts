@@ -30,7 +30,6 @@ import {
   resolveIntegrationProxyCredentials,
   forceRefreshIntegrationProxyCredentials,
   IntegrationCredentialNotFoundError,
-  IntegrationCredentialRevokedError,
 } from "../../../src/services/credential-proxy/integration-resolver.ts";
 
 const INTEGRATION_ID = "@official/gmail";
@@ -224,13 +223,19 @@ describe("credential-proxy integration-resolver", () => {
     ).rejects.toBeInstanceOf(IntegrationCredentialNotFoundError);
   });
 
-  it("throws IntegrationCredentialRevokedError on a revoked refresh token (force-refresh path)", async () => {
-    await seedConnection({ userId: ctx.user.id });
+  it("returns null and flags needsReconnection on a revoked refresh token (force-refresh path)", async () => {
+    const connId = await seedConnection({ userId: ctx.user.id });
     token.setResponse({ error: "invalid_grant", error_description: "revoked" }, 400);
 
-    await expect(forceRefreshIntegrationProxyCredentials(input())).rejects.toBeInstanceOf(
-      IntegrationCredentialRevokedError,
-    );
+    // Not-refreshed, like the other terminal shape: the caller (inside
+    // `catch {}` either way) relays the upstream 401, and the persisted flag
+    // is what makes the failure legible.
+    expect(await forceRefreshIntegrationProxyCredentials(input())).toBeNull();
+    const [row] = await db
+      .select({ needsReconnection: integrationConnections.needsReconnection })
+      .from(integrationConnections)
+      .where(eq(integrationConnections.id, connId));
+    expect(row!.needsReconnection).toBe(true);
   });
 
   it("returns null (keeps the original 401) on a transient token-endpoint discovery failure", async () => {
@@ -259,10 +264,21 @@ describe("credential-proxy integration-resolver", () => {
       .update(packages)
       .set({ draftManifest: issuerOnly })
       .where(eq(packages.id, INTEGRATION_ID));
-    await seedConnection({ userId: ctx.user.id });
+    const connId = await seedConnection({ userId: ctx.user.id });
     token.setResponse({ not: "a discovery doc" }); // well-known probes → no issuer match
 
     expect(await forceRefreshIntegrationProxyCredentials(input())).toBeNull();
+    // `null` alone no longer discriminates transient from terminal: both
+    // shapes return it since `IntegrationCredentialRevokedError` was removed,
+    // so the PERSISTED flag is the only thing left that tells them apart. The
+    // comment above claims "the connection row is untouched" — assert it, or a
+    // regression that flags a healthy connection on a transient discovery
+    // outage (forcing a needless user reconnect) passes silently.
+    const [row] = await db
+      .select({ needsReconnection: integrationConnections.needsReconnection })
+      .from(integrationConnections)
+      .where(eq(integrationConnections.id, connId));
+    expect(row!.needsReconnection).toBe(false);
   });
 
   it("flags needsReconnection when the minting OAuth client is gone (terminal, not transient)", async () => {

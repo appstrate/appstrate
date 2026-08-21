@@ -97,7 +97,6 @@ describe("extractAssistantMessages", () => {
         messageMetadata: {
           appstrate: {
             turn: {
-              engine: "ai-sdk",
               stepCount: 16,
               maxSteps: 16,
               maxStepsReached: true,
@@ -111,7 +110,6 @@ describe("extractAssistantMessages", () => {
     expect((message as { metadata?: unknown } | undefined)?.metadata).toEqual({
       appstrate: {
         turn: {
-          engine: "ai-sdk",
           stepCount: 16,
           maxSteps: 16,
           maxStepsReached: true,

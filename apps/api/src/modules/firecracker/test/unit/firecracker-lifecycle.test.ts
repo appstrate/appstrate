@@ -99,7 +99,14 @@ async function liveVm(
 describe("stopByRunId on a live VM", () => {
   it("SIGKILLs the VMM when the graceful shutdown cannot reach it, and waitForExit reports 137", async () => {
     const { exec } = fakeExec();
-    const orch = readyOrchestrator(exec);
+    // Non-zero grace ON PURPOSE — this is the ONE test that must enter
+    // `killVm`'s `graceSeconds > 0` block, so the SendCtrlAltDel PUT is
+    // actually issued against a socket with no listener and the SIGKILL
+    // fallback the test name describes is what we observe. The fixture
+    // defaults to 0 so the D-state tests below stay fast; overriding here
+    // costs ~1s and is the only way to cover the production path, whose
+    // real value is SIGTERM_GRACE_SECONDS = 5.
+    const orch = readyOrchestrator(exec, { sigtermGraceSeconds: 1 });
     const vm = await liveVm(orch, "run_live");
     const proc = vm.proc!;
 
@@ -108,7 +115,7 @@ describe("stopByRunId on a live VM", () => {
     const handle = { id: "fc-run_live-agent", runId: "run_live", role: "agent" as const };
     const exitPromise = orch.waitForExit(handle);
 
-    const result = await orch.stopByRunId("run_live", 1);
+    const result = await orch.stopByRunId("run_live");
 
     expect(result).toBe("stopped");
     expect(vm.stopping).toBe(true);
@@ -479,7 +486,7 @@ describe("bounded VMM reap after SIGKILL (D-state guard)", () => {
       exited: new Promise<number>(() => {}),
     } as unknown as BunProcess;
 
-    const result = await orch.stopByRunId("run_dstate", 0);
+    const result = await orch.stopByRunId("run_dstate");
     expect(result).toBe("stopped");
     expect(vm.stopping).toBe(true);
   });
@@ -508,7 +515,7 @@ describe("bounded VMM reap after SIGKILL (D-state guard)", () => {
       role: "agent" as const,
     };
     const exitPromise = orch.waitForExit(handle);
-    await orch.stopByRunId("run_dstate_wait", 0);
+    await orch.stopByRunId("run_dstate_wait");
     // Must resolve (bounded), with the killed code — not hang.
     expect(await exitPromise).toBe(137);
   });

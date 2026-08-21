@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Registry-driven replacements for the legacy `model-presets.ts` helpers.
+ * Registry-driven provider/model lookup helpers.
  *
  * Every lookup is a function over `ProviderRegistryEntry[]` (what the
  * `useProvidersRegistry()` hook resolves to). No constants live in the

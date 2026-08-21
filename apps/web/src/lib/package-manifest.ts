@@ -19,7 +19,7 @@ import { normalizeHttpUrl } from "@appstrate/core/url";
 import { getMcpServerRuntime, type McpServerManifest } from "@appstrate/core/mcp-server-meta";
 
 /** Any jsonb object. The manifest and every nested object share this shape. */
-export type ManifestObject = Record<string, unknown>;
+type ManifestObject = Record<string, unknown>;
 
 // ─── Narrowing primitives ───────────────────────────────────────────
 
@@ -82,7 +82,7 @@ export interface ManifestLink extends ManifestFact {
   href?: string;
 }
 
-export interface ManifestDependencyGroup {
+interface ManifestDependencyGroup {
   labelKey: string;
   entries: Array<{ id: string; range: string }>;
 }
@@ -215,12 +215,12 @@ export function readManifestOverview(manifest: unknown): ManifestOverview {
 
 // ─── Integration tail ───────────────────────────────────────────────
 
-export type IntegrationSourceView =
+type IntegrationSourceView =
   | { kind: "local"; serverName: string; serverVersion: string; vendored: boolean }
   | { kind: "remote"; url: string; transport: string }
   | { kind: "none" };
 
-export interface IntegrationAuthView {
+interface IntegrationAuthView {
   id: string;
   /** AFPS auth type verbatim (oauth2 | api_key | basic | mtls | custom). */
   type?: string;
@@ -284,7 +284,7 @@ export function readIntegrationDetails(manifest: unknown): IntegrationManifestDe
 
 // ─── MCP server tail ────────────────────────────────────────────────
 
-export interface McpServerView {
+interface McpServerView {
   /**
    * The runtime the PLATFORM would run this server on — `_meta` override first,
    * MCPB `server.type` second. See {@link readMcpServer}.
@@ -295,12 +295,12 @@ export interface McpServerView {
   args: string[];
 }
 
-export interface McpToolView {
+interface McpToolView {
   name: string;
   description?: string;
 }
 
-export interface McpUserConfigView {
+interface McpUserConfigView {
   key: string;
   title?: string;
   description?: string;

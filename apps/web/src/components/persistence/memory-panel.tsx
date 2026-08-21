@@ -21,7 +21,7 @@ import {
 } from "../../hooks/use-persistence";
 import { useDeleteMemory } from "../../hooks/use-mutations";
 
-export interface MemoryPanelProps {
+interface MemoryPanelProps {
   packageId: string;
   /** Run-scoped view: filter all rows by `runId`, hide scope filter, hide delete buttons. */
   runId?: string;

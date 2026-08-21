@@ -21,7 +21,6 @@ import {
   validateAgentIntegrationScopes,
   apiUploadToolNameFor,
   isApiCallToolName,
-  isApiUploadToolName,
   API_CALL_TOOL_NAME,
   API_UPLOAD_TOOL_NAME,
   type IntegrationManifest,
@@ -437,13 +436,11 @@ describe("api_call / api_upload tool-name helpers", () => {
     }
   });
 
-  it("classifies both families without overlap", () => {
+  it("classifies the api_call family and excludes the api_upload one", () => {
     for (const name of [API_CALL_TOOL_NAME, "api_call__k"]) {
       expect(isApiCallToolName(name)).toBe(true);
-      expect(isApiUploadToolName(name)).toBe(false);
     }
     for (const name of [API_UPLOAD_TOOL_NAME, "api_upload__k"]) {
-      expect(isApiUploadToolName(name)).toBe(true);
       expect(isApiCallToolName(name)).toBe(false);
     }
   });
@@ -451,7 +448,6 @@ describe("api_call / api_upload tool-name helpers", () => {
   it("does not classify unrelated tools that merely share a prefix", () => {
     for (const name of ["api_calls", "api_call_extra", "api_uploader", "kv_set"]) {
       expect(isApiCallToolName(name)).toBe(false);
-      expect(isApiUploadToolName(name)).toBe(false);
     }
   });
 });

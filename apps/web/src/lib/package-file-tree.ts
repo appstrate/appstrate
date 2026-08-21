@@ -33,7 +33,7 @@ interface NodeIdentity {
   name: string;
 }
 
-export interface DirNode extends NodeIdentity {
+interface DirNode extends NodeIdentity {
   kind: "dir";
   children: TreeNode[];
 }
@@ -52,7 +52,7 @@ export type TreeNode = DirNode | FileNode;
  * through `node`, never copied onto the row — a copy is a second source of
  * truth that can silently disagree with the node it came from.
  */
-export interface TreeRow {
+interface TreeRow {
   node: TreeNode;
   /** 0-based nesting depth. `aria-level` is `depth + 1`. */
   depth: number;
@@ -183,7 +183,7 @@ export function flattenVisibleRows(
 }
 
 /** What a key press asks the tree to do. `null` = the key changes nothing. */
-export type TreeFocusAction = { type: "focus" | "expand" | "collapse"; id: string };
+type TreeFocusAction = { type: "focus" | "expand" | "collapse"; id: string };
 
 /**
  * The keyboard model, as a reducer over the visible rows (WAI-ARIA tree
@@ -284,7 +284,7 @@ export function pickActiveEntry(
 }
 
 /** Why a file cannot be previewed, or `null` when it can. */
-export type PreviewBlockReason = "binary" | "too_large";
+type PreviewBlockReason = "binary" | "too_large";
 
 /**
  * The preview verdict AND its reason, in one place — the panel has to tell the

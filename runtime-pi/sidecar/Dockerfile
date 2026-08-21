@@ -82,7 +82,21 @@ COPY packages/runner-pi/src      packages/runner-pi/src
 COPY runtime-pi/sidecar/*.ts runtime-pi/sidecar/
 
 WORKDIR /build/runtime-pi/sidecar
-RUN bun build --compile --minify server.ts --outfile sidecar
+# `--define` is REQUIRED, not decoration. `bun build --compile` substitutes
+# `process.env.NODE_ENV` as a literal at BUNDLE time, so an `ENV NODE_ENV=` in
+# the runtime stage below is read by nothing — the value is already welded into
+# the binary. `token-budget.record()` guards its input validation with
+# `NODE_ENV !== "production"` precisely so a runtime misuse fails loudly in dev
+# and degrades to a silent no-op in production, where crashing a live run costs
+# more than a swallowed bad number. Without this flag the builder's ambient
+# (absent) NODE_ENV bakes in `"development"`, the guard is permanently true, and the
+# shipped sidecar THROWS on exactly the path documented as defensive.
+# Verified empirically: `bun build --compile` ignores runtime env (a binary
+# built with NODE_ENV unset prints "development", not `undefined`, and setting
+# NODE_ENV=production at run time does not change it); `--define` fixes it.
+RUN bun build --compile --minify server.ts \
+      --define 'process.env.NODE_ENV="production"' \
+      --outfile sidecar
 
 # ── Stage 2 — minimal runtime ─────────────────────────────────────
 FROM ${RUNTIME_IMAGE} AS runtime
@@ -118,6 +132,17 @@ LABEL org.opencontainers.image.title="Appstrate Sidecar" \
 RUN apk add --no-cache libstdc++ libgcc ca-certificates docker-cli openssl
 
 COPY --from=builder --chmod=0555 /build/runtime-pi/sidecar/sidecar /usr/local/bin/sidecar
+
+# Belt-and-braces for any bundled dependency that reads NODE_ENV *dynamically*
+# (`process.env["NODE_ENV"]`, a destructure, an indirect lookup) — `--define`
+# rewrites the literal `process.env.NODE_ENV` textually and cannot reach those.
+# The sidecar's OWN reads are all static and were already substituted at bundle
+# time by the `--define` above, so this line does not serve them. It does not
+# serve subprocesses either: `docker` is a Go binary that ignores NODE_ENV and
+# passes its containers an explicit env map, and the process adapter spawns with
+# an explicit `env:` rather than inheriting. Cheap, and the only remaining hole
+# `--define` leaves open.
+ENV NODE_ENV=production
 
 USER nobody:nobody
 

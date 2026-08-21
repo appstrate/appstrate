@@ -3,7 +3,7 @@
 import { useTranslation } from "react-i18next";
 import { Badge as UIBadge } from "@appstrate/ui/components/badge";
 import { Calendar, Clock } from "lucide-react";
-import { formatDateField } from "../lib/markdown";
+import { formatDateField } from "../lib/format-date";
 
 interface NextRunPreviewProps {
   runNumber: number;

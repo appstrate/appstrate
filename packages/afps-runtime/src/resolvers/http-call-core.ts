@@ -33,6 +33,7 @@ import * as fsPromises from "node:fs/promises";
 import * as nodePath from "node:path";
 
 import { z } from "zod";
+import { isTextShapedMime, normalizeMime } from "@appstrate/afps-shared/mime";
 import type { JSONSchema, Tool, ToolContext, ToolResult } from "./types.ts";
 import { AuthorizedUrisError, ResolverError } from "../errors.ts";
 
@@ -607,12 +608,12 @@ export function makeApiCallTool(
  * so scoped package ids like `@appstrate/gmail` become safe tool
  * identifiers.
  *
- * Internal: used by {@link makeApiCallTool} to derive a default tool
- * name when the caller does not pass an explicit `toolName`. The
- * integration resolvers always pass `{ns}__api_call`, so this fallback
- * mostly serves tests.
+ * Module-private: its only caller is {@link defaultApiCallToolName} just
+ * below, which {@link makeApiCallTool} uses to derive a tool name when the
+ * caller passes no explicit `toolName`. The integration resolvers always pass
+ * `{ns}__api_call`, so that fallback mostly serves tests.
  */
-export function slugifyIntegrationId(integrationId: string): string {
+function slugifyIntegrationId(integrationId: string): string {
   return integrationId.replace(/^@/, "").replace(/[^a-zA-Z0-9_]/g, "_");
 }
 
@@ -1237,66 +1238,31 @@ function toArrayBufferUint8(source: Uint8Array): Uint8Array<ArrayBuffer> {
  * with a body that happens to be ASCII MUST come back as inline bytes,
  * not text.
  *
- * CANONICAL LIST: `@appstrate/core/mime` (`isTextShapedMime`), which the
- * platform MIME policy and the sidecar's `api_call` classifier both delegate
- * to. This copy is NOT free-form — it is the same policy, kept local only
- * because `afps-runtime` deliberately carries no dependency on core (it is a
- * portable bundle runner and a standalone `afps` CLI; core sits beside it, not
- * below it, so importing it would pull the whole platform surface into the
- * runtime's install). `test/resolvers/http-call-core-mime-parity.test.ts`
- * asserts the two agree, so a format added to core cannot silently skip this
- * path. Add formats in core FIRST, then mirror them here.
+ * The media-type policy itself lives in `@appstrate/afps-shared/mime`
+ * ({@link isTextShapedMime}), which the platform MIME policy, the sidecar's
+ * `api_call` classifier and `@appstrate/core/mime` all delegate to. It used to
+ * be hand-copied into this file, because `afps-runtime` deliberately carries no
+ * dependency on core — but afps-shared IS a dependency here, so the copy no
+ * longer buys anything. It drifted three times while a parity test guarded it,
+ * once classifying XLSX as XML and corrupting every OOXML download; that test
+ * is gone with the copy, since a parity test over a single source asserts
+ * nothing. Add formats in `@appstrate/afps-shared/mime`.
  *
- * Every rule below matches an exact media type or an RFC 6839 structured
- * suffix — never a substring. `contentType.includes("xml")` classifies
- * `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet` (an XLSX,
- * i.e. a ZIP binary) as text and corrupts it on decode; that is the bug this
- * predicate exists to prevent.
+ * This wrapper adds exactly ONE rule on top of the shared predicate, and that
+ * rule is specific to `http_call`: an explicit `charset` parameter is treated
+ * as a declaration of textness whatever the base type, because an upstream that
+ * bothers to declare a charset is telling us the body is text. The shared
+ * predicate is media-type-only on purpose — its other consumer (upload sniff
+ * enforcement) must not let a caller talk a binary past the magic-byte check by
+ * appending `; charset=utf-8`. An OOXML container carries no charset, so the
+ * asymmetry cannot rescue one.
  */
 export function isTextLikeMimeType(contentType: string | null | undefined): boolean {
   if (!contentType) return false;
   const ct = contentType.toLowerCase();
-  if (ct.startsWith("text/")) return true;
-  // Charset parameter is a strong signal regardless of base type — the one
-  // rule specific to this path (an upstream that bothers to declare a charset
-  // is telling us the body is text).
   if (/;\s*charset=/.test(ct)) return true;
-  const mediaType = ct.split(";", 1)[0]!.trim();
-  // Structured-syntax suffixes (RFC 6839) — `+json`, `+xml`, `+yaml`.
-  if (mediaType.endsWith("+json") || mediaType.endsWith("+xml") || mediaType.endsWith("+yaml")) {
-    return true;
-  }
-  return TEXT_LIKE_MEDIA_TYPES.has(mediaType);
+  return isTextShapedMime(normalizeMime(ct));
 }
-
-/**
- * Mirror of the media-type set in `@appstrate/core/mime`. Kept in sync by
- * `http-call-core-mime-parity.test.ts` — do not edit one without the other.
- */
-export const TEXT_LIKE_MEDIA_TYPES: ReadonlySet<string> = new Set([
-  // JSON family
-  "application/json",
-  "application/ld+json",
-  "application/x-ndjson",
-  "application/jsonl",
-  "application/json-seq",
-  // XML family
-  "application/xml",
-  "application/xml-dtd",
-  "application/xml-external-parsed-entity", // RFC 7303
-  "image/svg+xml",
-  // YAML family
-  "application/yaml",
-  "application/x-yaml",
-  // Scripting / tabular / form encodings with no magic signature
-  "application/javascript",
-  "application/x-javascript",
-  "application/ecmascript",
-  "application/csv",
-  "application/x-sh",
-  "application/x-httpd-php",
-  "application/x-www-form-urlencoded",
-]);
 
 function parseMimeType(contentType: string | null | undefined): string {
   if (!contentType) return "application/octet-stream";

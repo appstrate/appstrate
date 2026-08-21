@@ -347,6 +347,13 @@ services:
       # ── Sidecar capacity caps (optional, hard ceiling 100 MB) ──
       - SIDECAR_MAX_REQUEST_BODY_BYTES=${SIDECAR_MAX_REQUEST_BODY_BYTES:-10485760}
       - SIDECAR_MAX_MCP_ENVELOPE_BYTES=${SIDECAR_MAX_MCP_ENVELOPE_BYTES:-16777216}
+      # Sidecar token/concurrency knobs. Bare passthrough, no default: the
+      # sidecar owns the compiled defaults and re-stating them here is the
+      # drift class `verify:compose-defaults` exists to catch. Forwarded only
+      # when the operator actually sets them.
+      - SIDECAR_INLINE_TOOL_OUTPUT_TOKENS
+      - SIDECAR_RUN_TOOL_OUTPUT_BUDGET_TOKENS
+      - SIDECAR_API_CALL_CONCURRENCY
       # ── Remote runner protocol (optional) ──
       - REMOTE_RUN_SINK_DEFAULT_TTL_SECONDS=${REMOTE_RUN_SINK_DEFAULT_TTL_SECONDS:-7200}
       - REMOTE_RUN_SINK_MAX_TTL_SECONDS=${REMOTE_RUN_SINK_MAX_TTL_SECONDS:-86400}

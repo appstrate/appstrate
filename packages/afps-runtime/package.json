@@ -1,6 +1,6 @@
 {
   "name": "@appstrate/afps-runtime",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Portable, open-source runtime for executing AFPS agent bundles. Powers Appstrate and any compatible machine.",
   "license": "Apache-2.0",
   "type": "module",
@@ -39,7 +39,6 @@
     "src",
     "bin",
     "fixtures",
-    "schemas",
     "LICENSE",
     "NOTICE",
     "README.md",
@@ -58,15 +57,12 @@
     "./bundle": "./src/bundle/index.ts",
     "./runner": "./src/runner/index.ts",
     "./resolvers": "./src/resolvers/index.ts",
-    "./conformance": "./src/conformance/index.ts",
-    "./schemas/*": "./schemas/*"
+    "./conformance": "./src/conformance/index.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "check": "tsc --noEmit",
     "test": "bun test",
-    "fixtures:build": "bun run scripts/build-fixtures.ts",
-    "schemas:generate": "bun run scripts/generate-event-schemas.ts"
+    "fixtures:build": "bun run scripts/build-fixtures.ts"
   },
   "dependencies": {
     "@afps-spec/schema": "^0.6.1",

@@ -327,7 +327,6 @@ export const runs = pgTable(
     }),
   },
   (table) => [
-    index("idx_runs_package_id").on(table.packageId),
     index("idx_runs_status").on(table.status),
     index("idx_runs_user_id").on(table.userId),
     index("idx_runs_end_user_id").on(table.endUserId),
@@ -445,7 +444,6 @@ export const runLogs = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
-    index("idx_run_logs_run_id").on(table.runId),
     index("idx_run_logs_lookup").on(table.runId, table.id),
     index("idx_run_logs_org_id").on(table.orgId),
     // `level` has a fixed domain in the app (appendRunLog) but `type` is
@@ -650,7 +648,6 @@ export const llmUsage = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
-    index("idx_llm_usage_org_id").on(table.orgId),
     index("idx_llm_usage_api_key_id").on(table.apiKeyId),
     index("idx_llm_usage_user_id").on(table.userId),
     index("idx_llm_usage_run_id").on(table.runId),
@@ -791,7 +788,6 @@ export const credentialProxyUsage = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
-    index("idx_credential_proxy_usage_org_id").on(table.orgId),
     index("idx_credential_proxy_usage_run_id").on(table.runId),
     index("idx_credential_proxy_usage_org_created").on(table.orgId, table.createdAt),
     // FK cascade targets: api_keys / user / applications deletes SET NULL

@@ -5,9 +5,11 @@
  *
  * The chat owns no LLM key. It lists the org's configured models
  * (`GET /api/models`) and picks the row the turn binds to; the binding itself
- * is built by `pi-chat/model-binding.ts`, which points the engine at the
- * platform **llm-proxy** (real provider key injected server-side, call metered
- * there). The only change from the satellite: instead of an OAuth inference
+ * is built by `pi-chat/model-binding.ts`. For an API-key model that binding
+ * points the engine at the platform **llm-proxy** (real provider key injected
+ * server-side); for an OAuth subscription it points at the provider's own base
+ * URL with the access token held in memory. Usage is metered server-side on
+ * both paths. The only change from the satellite: instead of an OAuth inference
  * token against a remote instance, we forward the caller's own headers on a
  * loopback request (see self.ts).
  */

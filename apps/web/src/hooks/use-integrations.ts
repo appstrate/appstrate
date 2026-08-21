@@ -42,7 +42,7 @@ export type IntegrationSummaryWire = Omit<RawIntegrationSummary, "manifest"> &
   };
 type RawIntegrationDetail =
   paths["/api/integrations/{packageId}"]["get"]["responses"]["200"]["content"]["application/json"];
-export type IntegrationDetailWire = Omit<RawIntegrationDetail, "manifest"> & {
+type IntegrationDetailWire = Omit<RawIntegrationDetail, "manifest"> & {
   manifest: IntegrationManifestView;
 };
 /**

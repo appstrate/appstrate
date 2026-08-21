@@ -41,13 +41,19 @@ RUN --mount=type=cache,target=/root/.bun/install/cache,sharing=locked \
 # stage copies: measured 1.0 GB → 642 MB.
 #
 # NOT `--production`: several packages value-import at runtime a dependency
-# that is declared as a `devDependency` — most importantly
+# that reaches the install only as a `devDependency` — most importantly
 # `packages/core/src/storage-s3.ts` imports `@aws-sdk/client-s3`, which core
-# does not declare and apps/api declares as a devDependency. `--production`
-# therefore deletes the S3 storage backend from the image, and because the
-# backend is source-only (Bun executes `.ts` directly, no build step) the
-# build stays GREEN and the failure only appears at runtime. Fix the manifests
-# first if `--production` is ever wanted; it is worth only ~26 MB more.
+# declares only as a PEER dependency (so it does not pull it in itself) and
+# apps/api satisfies as a devDependency. `--production` therefore deletes the
+# S3 storage backend from the image, and because the backend is source-only
+# (Bun executes `.ts` directly, no build step) the build stays GREEN and the
+# failure only appears at runtime. Fix the manifests first if `--production`
+# is ever wanted; it is worth only ~26 MB more.
+#
+# This paragraph is the repo's canonical description of that hazard — a value
+# import invisible to tsc, satisfied by a manifest that `--production` prunes.
+# Keep it accurate: it is what stops the next reader from "cleaning up" a
+# dependency that has no static importer.
 #
 # `--filter` is safe against that class of bug: it selects whole workspace
 # members and keeps each selected member's devDependencies intact.

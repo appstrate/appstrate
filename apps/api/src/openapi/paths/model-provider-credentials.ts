@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { STD_RESPONSE_HEADERS, REQUEST_ID_ONLY_HEADERS } from "../headers.ts";
+
 export const modelProviderCredentialsPaths = {
   "/api/model-provider-credentials/registry": {
     get: {
@@ -15,11 +17,7 @@ export const modelProviderCredentialsPaths = {
           in: "query",
           schema: { type: "integer", minimum: 1, maximum: 100, default: 100 },
         },
-        {
-          name: "offset",
-          in: "query",
-          schema: { type: "integer", minimum: 0, default: 0 },
-        },
+        { $ref: "#/components/parameters/Offset" },
         {
           name: "fields",
           in: "query",
@@ -31,10 +29,7 @@ export const modelProviderCredentialsPaths = {
       responses: {
         "200": {
           description: "Model provider registry list",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
@@ -157,10 +152,7 @@ export const modelProviderCredentialsPaths = {
       responses: {
         "200": {
           description: "Model provider credentials list",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
@@ -242,10 +234,7 @@ export const modelProviderCredentialsPaths = {
         "201": {
           description:
             "Model provider credential created — the bare created credential resource (same non-secret shape as `GET`/`list`). The api key / OAuth token is never echoed back.",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/ModelProviderCredential" },
@@ -316,10 +305,7 @@ export const modelProviderCredentialsPaths = {
       responses: {
         "200": {
           description: "Test result",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/TestResult" },
@@ -363,10 +349,7 @@ export const modelProviderCredentialsPaths = {
         "200": {
           description:
             "Model provider credential updated — the bare updated credential resource (same non-secret shape as `GET`/`list`). The api key / OAuth token is never echoed back.",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/ModelProviderCredential" },
@@ -401,9 +384,7 @@ export const modelProviderCredentialsPaths = {
       responses: {
         "204": {
           description: "Model provider credential deleted",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-          },
+          headers: REQUEST_ID_ONLY_HEADERS,
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": {
@@ -440,10 +421,7 @@ export const modelProviderCredentialsPaths = {
       responses: {
         "200": {
           description: "Test result",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/TestResult" },
@@ -472,10 +450,7 @@ export const modelProviderCredentialsPaths = {
       responses: {
         "200": {
           description: "Discovery outcome + the credential's current verified list",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {

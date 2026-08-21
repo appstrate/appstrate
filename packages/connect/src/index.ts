@@ -24,15 +24,10 @@ export { oauthEgressFetch, isAllowedInternalIdpHost, SsrfBlockedError } from "./
 export { RefreshError, performRefreshTokenExchange } from "./token-refresh.ts";
 export type { RefreshExchangeResult } from "./token-refresh.ts";
 
-// Token error classification + low-level OAuth token endpoint helpers
-// (shared by callback + refresh + custom OAuth flows like model providers).
-export {
-  parseTokenErrorResponse,
-  parseTokenResponse,
-  buildTokenHeaders,
-  buildTokenBody,
-  ClientAuthInvariantError,
-} from "./token-utils.ts";
+// Token-endpoint helpers that cross the package boundary. The request builders
+// and the error classifier stay internal — `token-exchange.ts` / `token-refresh.ts`
+// are the only callers and they import the concrete module.
+export { parseTokenResponse, ClientAuthInvariantError } from "./token-utils.ts";
 
 // Credential-proxy primitives (shared between the /api/credential-proxy/proxy
 // route and the in-container sidecar to prevent silent drift).
@@ -119,11 +114,9 @@ export type { IntegrationOAuthCallbackResult } from "./integration-oauth.ts";
 // dynamic client registration). The apps/api orchestrator chains these to
 // self-register an OAuth client when an integration opts into dynamic
 // registration and no client is pre-registered.
-export {
-  discoverProtectedResourceMetadata,
-  buildProtectedResourceProbes,
-  parseResourceMetadataChallenge,
-} from "./mcp-oauth-discovery.ts";
+// Only the orchestrating entry point crosses the boundary; the probe builder
+// and the WWW-Authenticate parser are its internals.
+export { discoverProtectedResourceMetadata } from "./mcp-oauth-discovery.ts";
 export type {
   ProtectedResourceMetadata,
   DiscoverProtectedResourceInput,

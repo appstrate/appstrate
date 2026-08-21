@@ -15,7 +15,8 @@
  *
  * The conversational loop (`POST /api/chat`) is the transplant of the
  * appstrate-chat satellite: one in-process Pi engine over the org's configured
- * models (via the llm-proxy — no key held here) + the `/api/mcp` meta-tools
+ * models (llm-proxy for API-key models, native provider call for OAuth
+ * subscriptions — no long-lived key held here either way) + the `/api/mcp` meta-tools
  * so the assistant pilots the platform with the caller's own permissions.
  */
 

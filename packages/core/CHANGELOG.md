@@ -7,6 +7,73 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.0.0] — 2026-08-21
+
+Breaking release. Adds two names, and removes six with zero consumers anywhere — verified
+across this repo and both out-of-tree consumers (`cloud`, `connect-helper`),
+which import only `module`, `logger`, `api-errors`, `telemetry`, `permissions`
+and `pairing-token`. Neither needs a code change; the lockstep is a version
+bump on each side.
+
+### Added
+
+- `MODEL_API_SHAPES` (`./sidecar-types`) — the runtime array `ModelApiShape` is
+  now derived from. See the `Changed` note below for why the type-only union
+  was not enough.
+- `OrchestratorRegistration.appliesWorkspaceTmpfsCap?: boolean`
+  (`./platform-types`) — lets a backend declare that it enforces the workspace
+  tmpfs size cap itself, so the prompt builder can tell the agent whether the
+  cap is real. Optional, so existing out-of-tree registrations stay assignable.
+
+### Removed
+
+- `isFinalChatStep` (`./chat-turn-metadata`) — its only caller was the AI-SDK
+  step loop deleted in #1173.
+- `normalizeToolName` (`./naming`) — superseded by the
+  `normaliseMcpToolNamespace` / `normaliseMcpToolBody` pair this same module
+  already re-exports from `@appstrate/afps-shared`; the single-function
+  normalizer was a strictly weaker version of the split.
+- `isApiUploadToolName` (`./integration`) — the twin `isApiCallToolName` is
+  live; this one never had a caller.
+- `IntegrationUploadProtocol` (`./integration`) — an alias for a bare `string`,
+  referenced once. Use `string[]`.
+- `RunConnectionMissingError` (`./module`) — an alias of `ValidationFieldError`
+  used once, in its own file. Use `ValidationFieldError`.
+- `WorkloadResources.pidsLimit` (`./platform-types`) — no producer ever set it,
+  so the Docker backend's own 256 default was always the effective policy.
+
+### Changed
+
+- `RunOrchestrator.stopWorkload(handle, timeoutSeconds?)` →
+  `stopWorkload(handle)`, and `stopByRunId(runId, timeoutSeconds?)` →
+  `stopByRunId(runId)`. The parameter was `undefined` at every production entry
+  point, so every backend fell back to its own 5-second SIGTERM grace — now
+  stated once, as a single `SIGTERM_GRACE_SECONDS` the docker, process and
+  firecracker backends all read. Out-of-tree implementers stay
+  assignable: an implementation that still declares the optional parameter
+  satisfies the narrowed signature.
+- `ModelApiShape` (`./sidecar-types`) is now derived from a new exported
+  runtime array, `MODEL_API_SHAPES`. It was a type-only union, which forced
+  consumers needing a runtime list to hand-mirror it —
+  `runtime-pi/env.ts` did, guarded by `satisfies readonly ModelApiShape[]`.
+  That guard proves membership, never completeness, so adding a shape here and
+  emitting it from the platform typechecked green everywhere and then threw
+  `MODEL_API: unknown api` at every container boot.
+
+### Fixed
+
+- `getTraceContext` (`./logger`) kept, but its docstring no longer claims it is
+  "useful when forging child spans for outbound HTTP calls" — nothing ever did
+  that. It is the read counterpart of `runWithTraceContext` and the observation
+  port the observability module's tests use.
+
+### Release order
+
+`@appstrate/afps-shared@0.4.0` MUST be published before this release: core's
+`./mime` is now a verbatim re-export of the new `@appstrate/afps-shared/mime`
+subpath, which does not exist in the published 0.3.1. The dependency range here
+moved to `^0.4.0` accordingly.
+
 ## [6.2.0] — 2026-08-07
 
 Additive release. Four export subpaths landed in `packages/core/src` after

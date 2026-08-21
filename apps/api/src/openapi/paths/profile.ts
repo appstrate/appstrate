@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { STD_RESPONSE_HEADERS } from "../headers.ts";
+
 export const profilePaths = {
   "/api/profile": {
     get: {
@@ -10,10 +12,7 @@ export const profilePaths = {
       responses: {
         "200": {
           description: "User profile",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/UserProfile" },
@@ -54,10 +53,7 @@ export const profilePaths = {
       responses: {
         "200": {
           description: "Updated profile — same serializer as GET /api/profile",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/UserProfile" },
@@ -106,10 +102,7 @@ export const profilePaths = {
       responses: {
         "200": {
           description: "Password set — the credential account was created",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
@@ -170,10 +163,7 @@ export const profilePaths = {
       responses: {
         "200": {
           description: "Profiles",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {

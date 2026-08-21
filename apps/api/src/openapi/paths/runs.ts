@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { STD_RESPONSE_HEADERS, REQUEST_ID_ONLY_HEADERS } from "../headers.ts";
+
 export const runsPaths = {
   "/api/agents/{scope}/{name}/run": {
     post: {
@@ -115,8 +117,7 @@ export const runsPaths = {
           description:
             "Run created (fire-and-forget — execution continues asynchronously). The body is the created run resource, same shape as `GET /runs/{id}`: resolved `model_label` / `model_source` (detect org-default drift at trigger time per #635), `status`, `version_ref`, `agent_scope`, etc., so no follow-up GET is needed.",
           headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+            ...STD_RESPONSE_HEADERS,
             "Idempotent-Replayed": { $ref: "#/components/headers/IdempotentReplayed" },
             RateLimit: { $ref: "#/components/headers/RateLimit" },
             "RateLimit-Policy": { $ref: "#/components/headers/RateLimitPolicy" },
@@ -202,9 +203,7 @@ export const runsPaths = {
         "409": {
           description:
             "Concurrent request with the same Idempotency-Key still in flight, the `rerun_from` run belongs to a different agent (`rerun_agent_mismatch`), or the `rerun_from` run's input carried an inline `data:` file whose bytes were materialized and are not replayable (`rerun_inline_input_unavailable` — re-send the file in `input`, preferably as an `upload://` reference)",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-          },
+          headers: REQUEST_ID_ONLY_HEADERS,
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -229,9 +228,7 @@ export const runsPaths = {
             "Both are refused before the run launches, so nothing is charged and no workspace is " +
             'provisioned; distinct codes so a client can tell "one file too big" from "too ' +
             'many files".',
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-          },
+          headers: REQUEST_ID_ONLY_HEADERS,
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -249,9 +246,7 @@ export const runsPaths = {
         "422": {
           description:
             "Same Idempotency-Key used with a different request body (`idempotency_conflict`), or the versioned bundle cannot be assembled from stored artifacts: a dependency pin resolves to no published version (`dependency_unresolved`), the stored archive or manifest is malformed or exceeds limits (`bundle_invalid`), or the bundle fails the signature policy (`bundle_signature_invalid`)",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-          },
+          headers: REQUEST_ID_ONLY_HEADERS,
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -287,18 +282,13 @@ export const runsPaths = {
           in: "query",
           schema: { type: "integer", minimum: 1, maximum: 100, default: 50 },
         },
-        {
-          name: "offset",
-          in: "query",
-          schema: { type: "integer", minimum: 0, default: 0 },
-        },
+        { $ref: "#/components/parameters/Offset" },
       ],
       responses: {
         "200": {
           description: "Paginated run list",
           headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+            ...STD_RESPONSE_HEADERS,
             Link: { $ref: "#/components/headers/Link" },
           },
           content: {
@@ -343,10 +333,7 @@ export const runsPaths = {
       responses: {
         "200": {
           description: "Runs deleted",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
@@ -477,8 +464,7 @@ export const runsPaths = {
           description:
             "Inline run created — stream via SSE. The body is the created run resource (same shape as `GET /runs/{id}`).",
           headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+            ...STD_RESPONSE_HEADERS,
             "Idempotent-Replayed": { $ref: "#/components/headers/IdempotentReplayed" },
             RateLimit: { $ref: "#/components/headers/RateLimit" },
             "RateLimit-Policy": { $ref: "#/components/headers/RateLimitPolicy" },
@@ -584,9 +570,7 @@ export const runsPaths = {
             "Both are refused before the run launches, so nothing is charged and no workspace is " +
             'provisioned; distinct codes so a client can tell "one file too big" from "too ' +
             'many files".',
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-          },
+          headers: REQUEST_ID_ONLY_HEADERS,
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -604,9 +588,7 @@ export const runsPaths = {
         "422": {
           description:
             "Same Idempotency-Key used with a different request body (`idempotency_conflict`), or a pinned dependency's bundle cannot be assembled from stored artifacts: a dependency pin resolves to no published version (`dependency_unresolved`), the stored archive or manifest is malformed or exceeds limits (`bundle_invalid`), or the bundle fails the signature policy (`bundle_signature_invalid`)",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-          },
+          headers: REQUEST_ID_ONLY_HEADERS,
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -683,8 +665,7 @@ export const runsPaths = {
         "200": {
           description: "Manifest + inputs + integration readiness all pass",
           headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+            ...STD_RESPONSE_HEADERS,
             RateLimit: { $ref: "#/components/headers/RateLimit" },
             "RateLimit-Policy": { $ref: "#/components/headers/RateLimitPolicy" },
           },
@@ -744,7 +725,7 @@ export const runsPaths = {
           in: "query",
           schema: { type: "integer", minimum: 1, maximum: 100, default: 20 },
         },
-        { name: "offset", in: "query", schema: { type: "integer", minimum: 0, default: 0 } },
+        { $ref: "#/components/parameters/Offset" },
         {
           name: "kind",
           in: "query",
@@ -775,8 +756,7 @@ export const runsPaths = {
         "200": {
           description: "Paginated run list",
           headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+            ...STD_RESPONSE_HEADERS,
             Link: { $ref: "#/components/headers/Link" },
           },
           content: {
@@ -841,10 +821,7 @@ export const runsPaths = {
       responses: {
         "200": {
           description: "Run detail",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/Run" },
@@ -973,8 +950,7 @@ export const runsPaths = {
         "200": {
           description: "Log entries (list envelope)",
           headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+            ...STD_RESPONSE_HEADERS,
             Link: { $ref: "#/components/headers/Link" },
             RateLimit: { $ref: "#/components/headers/RateLimit" },
             "RateLimit-Policy": { $ref: "#/components/headers/RateLimitPolicy" },
@@ -1021,10 +997,7 @@ export const runsPaths = {
       responses: {
         "200": {
           description: "Run cancelled — the body is the updated run resource (`status: cancelled`)",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/Run" },
@@ -1224,8 +1197,7 @@ export const runsPaths = {
         "201": {
           description: "Run created — use the returned credentials to stream events",
           headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+            ...STD_RESPONSE_HEADERS,
             "Idempotent-Replayed": { $ref: "#/components/headers/IdempotentReplayed" },
             RateLimit: { $ref: "#/components/headers/RateLimit" },
             "RateLimit-Policy": { $ref: "#/components/headers/RateLimitPolicy" },

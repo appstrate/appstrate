@@ -7,7 +7,7 @@ import type { PackageType } from "@appstrate/core/validation";
  * A file surfaced in the package UI: the editor's content tab label, the diff
  * sub-tab, and the file the explorer pre-selects for a package type.
  */
-export interface DisplayFile {
+interface DisplayFile {
   /** File name, shown verbatim as a tab label (filenames are not translated). */
   name: string;
   /**

@@ -2,7 +2,7 @@
 
 import type { InferSelectModel } from "drizzle-orm";
 import type { profiles } from "./profiles.ts";
-import type { packages, packageVersions, applicationPackages } from "./packages.ts";
+import type { packages, applicationPackages } from "./packages.ts";
 import type { runs, runLogs, schedules, packagePersistence } from "./runs.ts";
 import type { applications, endUsers } from "./applications.ts";
 import type { integrationConnections } from "./integrations.ts";
@@ -13,8 +13,6 @@ import type { organizations, modelProviderCredentials, orgModels } from "./organ
 export type UserProfile = InferSelectModel<typeof profiles>;
 
 export type Package = InferSelectModel<typeof packages>;
-
-export type PackageVersion = InferSelectModel<typeof packageVersions>;
 
 export type Schedule = InferSelectModel<typeof schedules>;
 

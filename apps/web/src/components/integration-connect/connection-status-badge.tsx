@@ -7,7 +7,7 @@ import type { ReactNode } from "react";
  * RECOVERABLE warning (the owner can renew) — it must read as amber, never
  * red/destructive, on every surface.
  */
-export type ConnectionStatusTone = "connected" | "needsReconnection" | "missingScopes";
+type ConnectionStatusTone = "connected" | "needsReconnection" | "missingScopes";
 
 const TONE_CLASSES: Record<ConnectionStatusTone, string> = {
   connected: "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",

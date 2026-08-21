@@ -389,20 +389,32 @@ export class DockerOrchestrator implements RunOrchestrator {
     // /workspace (already exists as the agent's CWD, chowned to `pi`
     // at image build time). The boundary's init step set the volume's
     // top-level ownership to UID 1001 so the agent can write
-    // immediately. Only the `agent` role gets the mount — the sidecar
-    // never reads workspace bytes, and other potential roles
-    // (debug-shell, etc.) opt in explicitly when introduced.
-    const workspaceBinds =
-      spec.role === "agent" && boundary.workspace.kind === "volume"
-        ? [`${boundary.workspace.name}:/workspace`]
-        : [];
+    // immediately.
+    //
+    // The mount used to be gated on `spec.role === "agent"` as well, to hold
+    // the door open for "other potential roles (debug-shell, etc.)". No such
+    // role ever arrived: sidecars come from `createSidecar` (which hardcodes
+    // `role: "sidecar"` and never reaches here), and the sole production
+    // caller of this method passes the literal `"agent"`. The conjunct was
+    // therefore constant-true, and its else-arm silently produced an agent
+    // with NO workspace — the one failure mode worth being loud about.
+    //
+    // `kind` is a discriminant, not a policy: this backend builds the
+    // boundary it is handed here, so a non-volume workspace means the
+    // boundary came from a different orchestrator. Fail rather than mount
+    // nothing.
+    if (boundary.workspace.kind !== "volume") {
+      throw new Error(
+        `DockerOrchestrator requires a volume workspace, got "${boundary.workspace.kind}"`,
+      );
+    }
+    const workspaceBinds = [`${boundary.workspace.name}:/workspace`];
 
     const containerId = await docker.createContainer(spec.runId, spec.env, {
       image: spec.image,
       adapterName: spec.role,
       memory: spec.resources.memoryBytes,
       nanoCpus: spec.resources.nanoCpus,
-      pidsLimit: spec.resources.pidsLimit,
       networkId: egressNetworkId ?? boundary.id,
       networkAlias: spec.role,
       ...(workspaceBinds.length > 0 ? { binds: workspaceBinds } : {}),
@@ -422,14 +434,14 @@ export class DockerOrchestrator implements RunOrchestrator {
     await docker.startContainer(handle.id);
   }
 
-  async stopWorkload(handle: WorkloadHandle, timeoutSeconds?: number): Promise<void> {
+  async stopWorkload(handle: WorkloadHandle): Promise<void> {
     if (handle.role === "sidecar") {
       await this.sidecarExitWatcher.expectExitDuring(handle.id, () =>
-        docker.stopContainer(handle.id, timeoutSeconds),
+        docker.stopContainer(handle.id),
       );
       return;
     }
-    await docker.stopContainer(handle.id, timeoutSeconds);
+    await docker.stopContainer(handle.id);
   }
 
   async removeWorkload(handle: WorkloadHandle): Promise<void> {
@@ -450,9 +462,9 @@ export class DockerOrchestrator implements RunOrchestrator {
     yield* docker.streamLogs(handle.id, signal);
   }
 
-  async stopByRunId(runId: string, timeoutSeconds?: number): Promise<StopResult> {
+  async stopByRunId(runId: string): Promise<StopResult> {
     return this.sidecarExitWatcher.expectRunExitDuring(runId, () =>
-      docker.stopContainersByRun(runId, timeoutSeconds),
+      docker.stopContainersByRun(runId),
     );
   }
 

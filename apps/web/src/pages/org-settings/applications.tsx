@@ -11,7 +11,7 @@ import { useApplications } from "../../hooks/use-applications";
 import { useAppSwitcher } from "../../hooks/use-current-application";
 import { LoadingState, ErrorState, EmptyState } from "../../components/page-states";
 import { ApplicationCreateModal } from "../../components/application-create-modal";
-import { formatDateField } from "../../lib/markdown";
+import { formatDateField } from "../../lib/format-date";
 import { getErrorMessage } from "@appstrate/core/errors";
 
 export function OrgSettingsApplicationsPage() {

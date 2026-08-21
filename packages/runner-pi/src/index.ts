@@ -19,23 +19,19 @@ export { deriveProviderFromApi, PROVIDER_BY_API } from "./provider-map.ts";
 // entrypoint can overlap its ~200ms eval with network-bound provisioning
 // instead of paying it on the pre-session boot path. `Type` (pi-ai, cheap) is a
 // static value export for building tool parameter schemas; the SDK type surface
-// (Model/Api/Transport/ExtensionFactory/ExtensionAPI/ModelRuntime) rides through here so
+// (Model/Api/Message/ExtensionFactory/ExtensionAPI) rides through here so
 // consumers (e.g. the chat module's Pi engine) never import the vendor SDK
 // directly — the single-import-surface guard is the barrel.
-export { Type, streamSimple, loadPiCodingAgentSdk, type PiCodingAgentSdk } from "./pi-sdk.ts";
-export type {
-  Api,
-  KnownApi,
-  Model,
-  Transport,
-  Context,
-  Message,
-  SimpleStreamOptions,
-  AssistantMessageEventStream,
-  ModelRuntime,
-  ExtensionAPI,
-  ExtensionFactory,
-} from "./pi-sdk.ts";
+//
+// This list is deliberately the *consumed* surface, not everything `pi-sdk.ts`
+// holds. `streamSimple`/`SimpleStreamOptions`/`AssistantMessageEventStream`,
+// `Transport`, `KnownApi`, `Context` and `ModelRuntime` were re-exported here
+// for the AI-SDK chat loop and its generic dispatch seam; #1173 folded every
+// chat turn onto `runPiChat`, and no consumer has imported them from this
+// barrel since. They remain in `pi-sdk.ts` for in-package use — re-add a line
+// here only when something outside the package actually imports it.
+export { Type, loadPiCodingAgentSdk, type PiCodingAgentSdk } from "./pi-sdk.ts";
+export type { Api, Model, Message, ExtensionAPI, ExtensionFactory } from "./pi-sdk.ts";
 
 export { prepareBundleForPi, type PrepareBundleOptions } from "./bundle-extensions.ts";
 

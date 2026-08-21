@@ -1,29 +1,31 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="fr">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Appstrate</title>
-  <script>
-    // Key must match THEME_STORAGE_KEY in components/theme-provider.tsx
-    (function() {
-      var t = localStorage.getItem('appstrate-theme') || 'system';
-      if (t === 'system') t = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-      document.documentElement.classList.add(t);
-    })();
-  </script>
-  <!-- Raster only, on purpose: public/favicon.svg is a 358 kB wrapper around two
-       base64 PNGs (light/dark variants), and every browser that supports SVG icons
-       preferred it over the 2 kB PNG — it was the single largest asset the page
-       requested. Do not re-add it without shrinking it to real vector art. -->
-  <link rel="icon" type="image/png" href="/favicon-96x96.png" sizes="96x96" />
-  <link rel="shortcut icon" href="/favicon.ico" />
-  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
-  <meta name="apple-mobile-web-app-title" content="Appstrate" />
-  <link rel="manifest" href="/site.webmanifest" />
-</head>
-<body>
-  <div id="root"></div>
-  <script type="module" src="/src/main.tsx"></script>
-</body>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Appstrate</title>
+    <script>
+      // Key must match STORAGE_KEY in stores/theme-store.ts
+      (function () {
+        var t = localStorage.getItem("appstrate-theme") || "system";
+        if (t === "system")
+          t = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+        document.documentElement.classList.add(t);
+      })();
+    </script>
+    <!-- Raster only, on purpose. The SVG favicon we used to ship was a 358 kB
+       wrapper around two base64 PNGs (light/dark variants); browsers that support
+       SVG icons preferred it over the 2 kB PNG, making it the single largest asset
+       the page requested. It has been deleted. Do not add an SVG icon back unless
+       it is real vector art of comparable size to the PNG. -->
+    <link rel="icon" type="image/png" href="/favicon-96x96.png" sizes="96x96" />
+    <link rel="shortcut icon" href="/favicon.ico" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+    <meta name="apple-mobile-web-app-title" content="Appstrate" />
+    <link rel="manifest" href="/site.webmanifest" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
 </html>

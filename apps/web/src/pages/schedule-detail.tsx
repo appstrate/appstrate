@@ -26,7 +26,7 @@ import { ActorLabel } from "../components/actor-label";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
 import { useScheduleById, useUpdateSchedule, useDeleteSchedule } from "../hooks/use-schedules";
 import { useAgents } from "../hooks/use-packages";
-import { formatDateField } from "../lib/markdown";
+import { formatDateField } from "../lib/format-date";
 import { MoreHorizontal, Pencil, Trash2, Play, Pause, Clock } from "lucide-react";
 
 export function ScheduleDetailPage() {

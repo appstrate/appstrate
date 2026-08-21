@@ -76,7 +76,8 @@ export interface ChatPlatformDeps {
    */
   cleanupSessionDocuments(chatSessionId: string, tx?: ChatDbTx): Promise<void>;
   /**
-   * Admission gate for a turn — EVERY turn, whichever engine serves it. The
+   * Admission gate for a turn — EVERY turn, on either binding (llm-proxy or
+   * native OAuth subscription). The
    * platform resolves whether the chosen preset is system-provided and reports
    * it as a fact to the `beforeUsage` hook, which it dispatches unconditionally
    * — a metering module decides what an org-credential turn costs, the platform

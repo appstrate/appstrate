@@ -64,7 +64,7 @@ interface AgentIntegrationRef {
   tools?: string[] | "*";
 }
 
-export interface RunOverridesPanelProps {
+interface RunOverridesPanelProps {
   packageId: string;
   /** Agent's config schema; absent when the agent has no configurable fields. */
   configSchema?: JSONSchemaObject;

@@ -6,9 +6,15 @@
  * adding a value updates the DB enum, the Zod validator, and the
  * inferred TS union in lockstep.
  *
- * Route handlers should import the `z*Enum` siblings from
- * `@appstrate/db/schema` (e.g. `zRunStatusEnum`) instead of
- * redeclaring literal arrays inline.
+ * Only `zDocumentPurposeEnum` still exists as a Zod validator, because
+ * `routes/documents.ts` actually parses with it. Eight sibling `z*Enum`
+ * validators used to live here under a header telling route handlers to import
+ * them instead of redeclaring literal arrays inline — in the years since, not
+ * one route ever did, and they had zero consumers across all four repos. The
+ * `*Values` tuples below are the real shared surface; a type union derives from
+ * a tuple directly (`(typeof xValues)[number]`) without a Zod object in
+ * between. Add a `z*Enum` here when a route genuinely needs to parse the value,
+ * not pre-emptively.
  */
 
 import { z } from "zod";
@@ -17,8 +23,7 @@ import { runStatusValues } from "../run-status.ts";
 
 export const orgRoleValues = ["owner", "admin", "member", "viewer"] as const;
 export const orgRoleEnum = pgEnum("org_role", orgRoleValues);
-export const zOrgRoleEnum = z.enum(orgRoleValues);
-export type OrgRole = z.infer<typeof zOrgRoleEnum>;
+export type OrgRole = (typeof orgRoleValues)[number];
 
 /**
  * Run statuses are the one enum whose literals live OUTSIDE this file, in the
@@ -38,11 +43,9 @@ export {
 export type { RunStatus, TerminalRunStatus } from "../run-status.ts";
 
 export const runStatusEnum = pgEnum("run_status", runStatusValues);
-export const zRunStatusEnum = z.enum(runStatusValues);
 
 export const invitationStatusValues = ["pending", "accepted", "expired", "cancelled"] as const;
 export const invitationStatusEnum = pgEnum("invitation_status", invitationStatusValues);
-export const zInvitationStatusEnum = z.enum(invitationStatusValues);
 
 export const packageTypeValues = [
   "agent",
@@ -55,12 +58,10 @@ export const packageTypeValues = [
   "mcp-server",
 ] as const;
 export const packageTypeEnum = pgEnum("package_type", packageTypeValues);
-export const zPackageTypeEnum = z.enum(packageTypeValues);
-export type PackageType = z.infer<typeof zPackageTypeEnum>;
+export type PackageType = (typeof packageTypeValues)[number];
 
 export const packageSourceValues = ["local", "system"] as const;
 export const packageSourceEnum = pgEnum("package_source", packageSourceValues);
-export const zPackageSourceEnum = z.enum(packageSourceValues);
 
 /**
  * Source discriminator for `llm_usage` rows. Each source has its own
@@ -69,7 +70,6 @@ export const zPackageSourceEnum = z.enum(packageSourceValues);
  */
 export const llmUsageSourceValues = ["proxy", "runner"] as const;
 export const llmUsageSourceEnum = pgEnum("llm_usage_source", llmUsageSourceValues);
-export const zLlmUsageSourceEnum = z.enum(llmUsageSourceValues);
 
 /**
  * Which credential set reached the upstream provider for an `llm_usage`
@@ -81,8 +81,7 @@ export const zLlmUsageSourceEnum = z.enum(llmUsageSourceValues);
  */
 export const credentialSourceValues = ["system", "org"] as const;
 export const credentialSourceEnum = pgEnum("credential_source", credentialSourceValues);
-export const zCredentialSourceEnum = z.enum(credentialSourceValues);
-export type CredentialSource = z.infer<typeof zCredentialSourceEnum>;
+export type CredentialSource = (typeof credentialSourceValues)[number];
 
 /**
  * Distinguishes WHO controls the runner process — `platform` for
@@ -92,7 +91,6 @@ export type CredentialSource = z.infer<typeof zCredentialSourceEnum>;
  */
 export const runOriginValues = ["platform", "remote"] as const;
 export const runOriginEnum = pgEnum("run_origin", runOriginValues);
-export const zRunOriginEnum = z.enum(runOriginValues);
 
 /**
  * What a `documents` row is: `user_upload` (a staged upload materialized into

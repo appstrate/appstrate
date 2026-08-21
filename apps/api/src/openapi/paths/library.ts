@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { STD_RESPONSE_HEADERS } from "../headers.ts";
+
 /**
  * Library — consolidated package list across the org's applications.
  *
@@ -29,10 +31,7 @@ export const libraryPaths = {
       responses: {
         "200": {
           description: "Library snapshot.",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {

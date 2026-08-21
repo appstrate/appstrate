@@ -62,7 +62,14 @@ export const integrationOrgDefaults = pgTable(
       .references(() => integrationConnections.id, { onDelete: "cascade" }),
     /** true = org-wide force (locks members); false = soft default (members can deviate). */
     enforce: boolean("enforce").notNull().default(false),
-    /** Admin who set the default. */
+    /**
+     * Admin who set the default.
+     *
+     * WRITTEN, NEVER READ — same shape as `integration_pins.created_by`:
+     * written by `integration-org-defaults-service.ts`, never read back into
+     * any response. Kept for the same reason (attribution an admin UI would
+     * plausibly want) rather than dropped.
+     */
     createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
@@ -71,7 +78,6 @@ export const integrationOrgDefaults = pgTable(
     // One default per (application, integration).
     uniqueIndex("idx_integration_org_defaults_unique").on(table.applicationId, table.integrationId),
     // Resolver hot path: load all defaults for an application in one query.
-    index("idx_integration_org_defaults_app").on(table.applicationId),
     // Reverse lookup for the unshare / destructive-delete impact guard.
     index("idx_integration_org_defaults_connection").on(table.connectionId),
   ],

@@ -148,7 +148,7 @@ function splitLegacy(ctx: PromptContext): {
     rawPrompt: ctx.rawPrompt,
     ...(ctx.schemas.output ? { outputSchema: ctx.schemas.output } : {}),
     llmConfig: ctx.llmConfig,
-    ...(ctx.runToken !== undefined ? { runToken: ctx.runToken } : {}),
+    runToken: ctx.runToken ?? "test-run-token",
     proxyUrl: ctx.proxyUrl,
     timeout: ctx.timeout ?? 0,
     resources: ctx.resources ?? defaultTestAgentResources(),

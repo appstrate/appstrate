@@ -15,6 +15,10 @@
 import { describe, it, expect } from "bun:test";
 import { BlobStore, blobUri, generateUlid, parseBlobUri } from "../blob-store.ts";
 
+// `maxTotalBytes` is required on the store; cases that are not exercising the
+// cap pass one large enough that no eviction can be triggered incidentally.
+const NO_EVICTION = { maxTotalBytes: 256 * 1024 * 1024 };
+
 describe("generateUlid", () => {
   it("returns a 26-char Crockford base32 string", () => {
     const id = generateUlid();
@@ -74,7 +78,7 @@ describe("parseBlobUri", () => {
 
 describe("BlobStore", () => {
   it("stores bytes and returns the URI in the expected shape", () => {
-    const store = new BlobStore("run-1");
+    const store = new BlobStore("run-1", NO_EVICTION);
     const record = store.put(new TextEncoder().encode("hello"));
     expect(record.uri).toMatch(/^appstrate:\/\/api-response\/run-1\/[A-Z0-9]{26}$/);
     expect(record.mimeType).toBe("application/octet-stream");
@@ -82,7 +86,7 @@ describe("BlobStore", () => {
   });
 
   it("retrieves stored blobs by URI", () => {
-    const store = new BlobStore("run-1");
+    const store = new BlobStore("run-1", NO_EVICTION);
     const record = store.put(new TextEncoder().encode("hi"), { mimeType: "text/plain" });
     const out = store.read(record.uri);
     expect(out).not.toBeNull();
@@ -91,20 +95,20 @@ describe("BlobStore", () => {
   });
 
   it("returns null for cross-run reads (security invariant)", () => {
-    const a = new BlobStore("run-a");
-    const b = new BlobStore("run-b");
+    const a = new BlobStore("run-a", NO_EVICTION);
+    const b = new BlobStore("run-b", NO_EVICTION);
     const record = a.put(new Uint8Array([1, 2, 3]));
     expect(b.read(record.uri)).toBeNull();
   });
 
   it("returns null for malformed URIs", () => {
-    const store = new BlobStore("run-1");
+    const store = new BlobStore("run-1", NO_EVICTION);
     expect(store.read("file:///etc/passwd")).toBeNull();
     expect(store.read("appstrate://api-response/run-1/../foo")).toBeNull();
   });
 
   it("returns null for unknown ids in this run", () => {
-    const store = new BlobStore("run-1");
+    const store = new BlobStore("run-1", NO_EVICTION);
     expect(store.read("appstrate://api-response/run-1/01HZX0Q3ABCDEFGHJKMNPQRSTV")).toBeNull();
   });
 
@@ -149,7 +153,7 @@ describe("BlobStore", () => {
   });
 
   it("tracks bytesUsed accurately", () => {
-    const store = new BlobStore("run-1");
+    const store = new BlobStore("run-1", NO_EVICTION);
     expect(store.bytesUsed()).toBe(0);
     store.put(new Uint8Array(10));
     store.put(new Uint8Array(20));
@@ -157,7 +161,7 @@ describe("BlobStore", () => {
   });
 
   it("enumerates URIs via list()", () => {
-    const store = new BlobStore("run-1");
+    const store = new BlobStore("run-1", NO_EVICTION);
     const r1 = store.put(new Uint8Array(1), { source: "provider:gmail", mimeType: "text/plain" });
     const r2 = store.put(new Uint8Array(2), { source: "provider:notion" });
     const list = store.list();
@@ -168,7 +172,7 @@ describe("BlobStore", () => {
   });
 
   it("clear() drops everything", () => {
-    const store = new BlobStore("run-1");
+    const store = new BlobStore("run-1", NO_EVICTION);
     store.put(new Uint8Array(1));
     store.put(new Uint8Array(2));
     expect(store.size()).toBe(2);

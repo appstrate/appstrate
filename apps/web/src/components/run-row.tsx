@@ -10,7 +10,7 @@ import { RunTokensReadout } from "./run-tokens-readout";
 import { Button } from "@appstrate/ui/components/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/components/popover";
 import { cn } from "@appstrate/ui/cn";
-import { formatDateField } from "../lib/markdown";
+import { formatDateField } from "../lib/format-date";
 import type { TokenUsage } from "@appstrate/core/token-usage";
 import { ACTIVE_RUN_STATUSES, type EnrichedRun } from "@appstrate/shared-types";
 

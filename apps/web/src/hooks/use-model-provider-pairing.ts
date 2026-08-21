@@ -12,15 +12,7 @@
  * in-flight connections); abandoned tokens are reaped by their TTL (5 min).
  */
 
-import { $api, type paths } from "../api/client";
-
-/** Wire shape of `POST /api/model-providers-oauth/pairing` (200). */
-export type PairingCreateResponse =
-  paths["/api/model-providers-oauth/pairing"]["post"]["responses"][200]["content"]["application/json"];
-
-/** Wire shape of `GET /api/model-providers-oauth/pairing/{id}` (200). */
-export type PairingStatus =
-  paths["/api/model-providers-oauth/pairing/{id}"]["get"]["responses"][200]["content"]["application/json"];
+import { $api } from "../api/client";
 
 export function useCreateModelProviderPairing() {
   return $api.useMutation("post", "/api/model-providers-oauth/pairing");

@@ -9,10 +9,9 @@
  * token refresh, hence its own worker decoupled from
  * `OAUTH_REFRESH_WORKER_ENABLED`.
  *
- * Queue/scheduler names are preserved from the legacy refresh-worker
- * implementation so operators who previously had the refresh worker
- * enabled don't end up with orphaned BullMQ schedulers in Redis after
- * the split.
+ * The queue/scheduler names below are frozen: every install since #397 (which
+ * introduced this worker) has registered a BullMQ repeatable under them, and
+ * renaming would strand those schedulers in Redis with nothing to remove them.
  */
 
 import { createQueue, type JobQueue, type QueueJob } from "../../infra/queue/index.ts";

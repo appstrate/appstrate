@@ -44,15 +44,16 @@ import type { AgentSessionEvent } from "./pi-events.ts";
 import { buildPlatformMcpTools } from "./mcp-tools.ts";
 import { releaseOnClose, type PiChatSlot } from "./concurrency.ts";
 import { createStepCapController, type PiChatSession } from "./turn-control.ts";
+import { classifyClientTurnError, clientTurnErrorMarker } from "../turn-error.ts";
+import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 import {
+  buildPiTurnMetadata,
+  piFailureChunks,
   ChatTurnDeadlineError,
   resolveTurnClosure,
   turnDeadlineNoticeText,
   turnNoticeChunks,
-} from "../turn-closure.ts";
-import { classifyClientTurnError, clientTurnErrorMarker } from "../turn-error.ts";
-import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
-import { buildPiTurnMetadata, piFailureChunks } from "./pi-turn-closure.ts";
+} from "./pi-turn-closure.ts";
 import {
   PI_CHAT_MODEL_RUNTIME_CREATE_OPTIONS,
   type ResolvedPiChatModelBinding,

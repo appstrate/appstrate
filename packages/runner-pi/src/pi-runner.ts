@@ -182,10 +182,7 @@ export async function setPiRuntimeCredential(
 export interface PiRunnerOptions {
   /** LLM model configuration passed to the Pi SDK. Required. */
   model: PiModelConfig;
-  /**
-   * LLM API key. Registered on a {@link ModelRuntime} under `model.provider`.
-   * Callers can also pass a pre-built `modelRuntime` to wire multi-provider auth.
-   */
+  /** LLM API key. Registered on the runner's {@link ModelRuntime} under `model.provider`. */
   apiKey?: string;
   /**
    * Agent's system prompt. This is the static instruction Pi SDK stores
@@ -214,13 +211,7 @@ export interface PiRunnerOptions {
    * constructing the Runner. Default: empty (no extensions).
    */
   extensionFactories?: ExtensionFactory[];
-  /**
-   * Custom {@link ModelRuntime}. When provided, the runner will not
-   * register `apiKey` under a derived provider — callers control all
-   * auth state.
-   */
-  modelRuntime?: ModelRuntime;
-  /** Path where the default credential store persists. Ignored if `modelRuntime` is set. */
+  /** Path where the credential store persists. Defaults to `/tmp/pi-auth/auth.json`. */
   authStoragePath?: string;
   /** Pi SDK thinking level. Defaults to `"medium"`. */
   thinkingLevel?: ModelReasoningLevel;
@@ -538,22 +529,20 @@ export class PiRunner implements Runner {
       SettingsManager,
     } = await loadPiCodingAgentSdk();
 
-    const modelRuntime =
-      this.opts.modelRuntime ??
-      (await ModelRuntime.create({
-        authPath: this.opts.authStoragePath ?? "/tmp/pi-auth/auth.json",
-        modelsPath: null,
-        allowModelNetwork: false,
-      }));
-    if (!this.opts.modelRuntime && apiKey) {
+    const modelRuntime = await ModelRuntime.create({
+      authPath: this.opts.authStoragePath ?? "/tmp/pi-auth/auth.json",
+      modelsPath: null,
+      allowModelNetwork: false,
+    });
+    if (apiKey) {
       // `model.provider` is the Pi SDK's credential key the SDK resolves
       // credentials against; register the key under the same value.
       await setPiRuntimeCredential(modelRuntime, model.provider, apiKey);
-    } else if (!this.opts.modelRuntime && !apiKey) {
-      // No injected ModelRuntime AND no runtime key — the SDK will call the
-      // provider unauthenticated and 401/retry silently (the platform's
-      // kickoff fail-fast should prevent this, so reaching here means a
-      // run bypassed that guard). Surface a line on the surprising path.
+    } else {
+      // No runtime key — the SDK will call the provider unauthenticated and
+      // 401/retry silently (the platform's kickoff fail-fast should prevent
+      // this, so reaching here means a run bypassed that guard). Surface a
+      // line on the surprising path.
       // runner-pi intentionally avoids a logger dep — same console.error
       // JSON convention as the compaction-wait + sink-heartbeat paths.
       console.error(

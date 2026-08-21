@@ -12,7 +12,7 @@ interface ExecutionEntryBase {
   createdAt?: Date | string | null;
 }
 
-export interface AgentExecutionEntry extends ExecutionEntryBase {
+interface AgentExecutionEntry extends ExecutionEntryBase {
   kind: "agent";
   message: string;
   level: "debug";
@@ -47,12 +47,12 @@ export interface ToolExecutionEntry extends ExecutionEntryBase {
   completedAt?: Date | string | null;
 }
 
-export interface ExplicitLogExecutionEntry extends ExecutionEntryBase {
+interface ExplicitLogExecutionEntry extends ExecutionEntryBase {
   kind: "log";
   message: string;
 }
 
-export interface RuntimeExecutionEntry extends ExecutionEntryBase {
+interface RuntimeExecutionEntry extends ExecutionEntryBase {
   kind: "runtime";
   message: string;
   sourceType: string;
@@ -228,7 +228,7 @@ function isAgentText(log: RawLog): boolean {
   return !log.data && log.level === "debug";
 }
 
-export interface BuildLogEntriesOptions {
+interface BuildLogEntriesOptions {
   /** Marks correlated starts with no result as interrupted instead of spinning forever. */
   isRunTerminal?: boolean;
 }
