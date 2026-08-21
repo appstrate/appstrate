@@ -101,11 +101,6 @@ export const schedulesPaths = {
                 },
                 timezone: { type: "string", default: "UTC" },
                 input: { type: "object" },
-                config_override: {
-                  type: "object",
-                  description:
-                    "Per-schedule config delta. Deep-merged with the application's persisted `config` every time the schedule fires.",
-                },
                 generation_config_override: {
                   $ref: "#/components/schemas/ModelGenerationSettings",
                   description:
@@ -172,7 +167,6 @@ export const schedulesPaths = {
                 cron_expression: "0 9 * * 1-5",
                 timezone: "Europe/Paris",
                 input: { folder: "inbox", maxEmails: 50 },
-                config_override: null,
                 generation_config_override: null,
                 model_id_override: null,
                 proxy_id_override: null,
@@ -234,7 +228,6 @@ export const schedulesPaths = {
                 cron_expression: "0 9 * * 1-5",
                 timezone: "Europe/Paris",
                 input: { folder: "inbox", maxEmails: 50 },
-                config_override: null,
                 generation_config_override: null,
                 model_id_override: null,
                 proxy_id_override: null,
@@ -277,10 +270,6 @@ export const schedulesPaths = {
                 timezone: { type: "string" },
                 enabled: { type: "boolean" },
                 input: { type: "object" },
-                config_override: {
-                  type: ["object", "null"],
-                  description: "Per-schedule config delta. Pass `null` to clear the override.",
-                },
                 generation_config_override: {
                   oneOf: [
                     { $ref: "#/components/schemas/ModelGenerationSettings" },

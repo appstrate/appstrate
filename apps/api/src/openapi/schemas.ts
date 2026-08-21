@@ -173,10 +173,12 @@ export const schemas = {
   },
   ApplicationPackage: {
     type: "object",
-    description: "A package installed in an application with its config and overrides.",
+    description: "A package installed in an application with its model/proxy/version overrides.",
     // The installedPackageSelect projection emits every field unconditionally
-    // (config is the raw JSONB column; package_type/package_source come from
-    // the join). `object` is spec-only (not on the InstalledPackage type).
+    // (package_type/package_source come from the join). `object` is spec-only
+    // (not on the InstalledPackage type). Stored input values and their locks
+    // are not here — they are read via `GET /api/agents/{scope}/{name}`
+    // (`AgentDetail.input`), where the schema and the locks travel with them.
     //
     // CASING: this object deliberately mixes cases and the spec matches the
     // runtime serializer (`services/application-packages.ts:installedPackageSelect`)
@@ -193,7 +195,6 @@ export const schemas = {
     //     intentional here, not an accident.
     required: [
       "packageId",
-      "config",
       "generationConfig",
       "modelId",
       "proxyId",
@@ -208,7 +209,6 @@ export const schemas = {
     properties: {
       object: { type: "string", enum: ["application_package"] },
       packageId: { type: "string", description: "Package ID from org catalog" },
-      config: { type: "object", description: "Application-specific configuration" },
       generationConfig: {
         oneOf: [{ $ref: "#/components/schemas/ModelGenerationSettings" }, { type: "null" }],
       },
@@ -394,6 +394,26 @@ export const schemas = {
       },
     },
   },
+  AgentInputSettings: {
+    type: "object",
+    required: ["values", "locked_fields"],
+    description:
+      "The agent's stored input settings for one application: the values the editor set once (layer 2 of the input resolution) and the fields it froze. Both are full replacements — an omitted key means cleared, never unchanged.",
+    properties: {
+      values: {
+        type: "object",
+        description:
+          "Values stored for this application. Validated against the manifest `input.schema` with `required` dropped: leaving a required field empty here means it is asked at launch.",
+        additionalProperties: true,
+      },
+      locked_fields: {
+        type: "array",
+        items: { type: "string" },
+        description:
+          "Input fields no caller may set at launch. A run or schedule that sets one is refused with 400 `locked_input_field`. A required field may not be locked unless it has a value (author `default` or an entry in `values`) — otherwise the write is refused with 400 `locked_required_field_empty`.",
+      },
+    },
+  },
   AgentDetail: {
     type: "object",
     // Always emitted by buildAgentDetailDto. `display_name`/`description`/
@@ -406,7 +426,7 @@ export const schemas = {
       "scope",
       "version",
       "dependencies",
-      "config",
+      "input",
       "running_runs",
       "last_run",
       "forked_from",
@@ -437,29 +457,26 @@ export const schemas = {
         type: "integer",
         description: "Optimistic lock version (user agents only)",
       },
-      config: {
-        type: "object",
-        // The detail serializer always emits `schema` (falls back to an empty
-        // object schema when the manifest has no config wrapper).
-        required: ["schema", "current"],
-        description: "AFPS schema wrapper for agent configuration (set once, reused across runs).",
-        properties: {
-          schema: { type: "object", description: "Pure JSON Schema 2020-12 object" },
-          current: { type: "object", description: "Current configuration values" },
-          file_constraints: { $ref: "#/components/schemas/FileConstraintsMap" },
-          ui_hints: { $ref: "#/components/schemas/UIHintsMap" },
-          property_order: {
-            type: "array",
-            items: { type: "string" },
-            description: "Presentation order for schema properties",
-          },
-        },
-      },
       input: {
         type: "object",
-        description: "AFPS schema wrapper for per-run input.",
+        // The detail serializer always emits `schema` (falls back to an empty
+        // object schema when the manifest declares no input wrapper), plus the
+        // two per-application layers the launch form needs.
+        required: ["schema", "values", "locked_fields"],
+        description:
+          "AFPS schema wrapper for the agent's parameters, plus the per-application stored values and field locks. Resolution order at launch: author default (JSON Schema `default`) < stored value (`values`) < schedule value < caller input. A field named in `locked_fields` is not asked at launch and a caller that sets it is refused with 400 `locked_input_field`.",
         properties: {
           schema: { type: "object", description: "Pure JSON Schema 2020-12 object" },
+          values: {
+            type: "object",
+            description: "Values stored once for this application (editor defaults).",
+            additionalProperties: true,
+          },
+          locked_fields: {
+            type: "array",
+            items: { type: "string" },
+            description: "Input fields no caller may set at launch.",
+          },
           file_constraints: { $ref: "#/components/schemas/FileConstraintsMap" },
           ui_hints: { $ref: "#/components/schemas/UIHintsMap" },
           property_order: {
@@ -667,8 +684,6 @@ export const schemas = {
       "checkpoint",
       "error",
       "metadata",
-      "config",
-      "config_override",
       "generation",
       "generation_override",
       "started_at",
@@ -840,17 +855,6 @@ export const schemas = {
         type: ["object", "null"],
         description:
           "Additional module-supplied metadata (e.g. usage-metering fields written by an optional module). Free-form; core does not define billing-specific keys.",
-        additionalProperties: true,
-      },
-      config: {
-        type: ["object", "null"],
-        description: "Snapshot of the effective agent config (merged overrides) at run creation",
-        additionalProperties: true,
-      },
-      config_override: {
-        type: ["object", "null"],
-        description:
-          "Per-run config delta — the raw object the caller sent in the request body. `config` is the resolved (deep-merged) snapshot; `config_override` is the raw delta that the dashboard uses to badge 'default vs override'. Null when the run used persisted defaults verbatim.",
         additionalProperties: true,
       },
       generation: {
@@ -1040,7 +1044,6 @@ export const schemas = {
       "cron_expression",
       "timezone",
       "input",
-      "config_override",
       "generation_config_override",
       "model_id_override",
       "proxy_id_override",
@@ -1072,7 +1075,6 @@ export const schemas = {
       cron_expression: { type: "string" },
       timezone: { type: ["string", "null"] },
       input: { type: ["object", "null"], additionalProperties: true },
-      config_override: { type: ["object", "null"], additionalProperties: true },
       generation_config_override: {
         oneOf: [{ $ref: "#/components/schemas/ModelGenerationSettings" }, { type: "null" }],
       },

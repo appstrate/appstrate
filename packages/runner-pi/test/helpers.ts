@@ -162,7 +162,6 @@ export function makeContext(overrides: Partial<ExecutionContext> = {}): Executio
     runId: "run_test",
     input: {},
     memories: [],
-    config: {},
     ...overrides,
   };
 }

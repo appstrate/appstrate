@@ -8,8 +8,8 @@
  * This is NOT an AFPS contract — callers choose whether to prepend it.
  * External runners happy with the raw template alone (`renderPrompt`)
  * can skip this helper. The sections it builds (System / Environment /
- * Tools / Skills / User Input / Documents / Configuration / Checkpoint /
- * Memory / Run History) represent one reasonable convention for an
+ * Tools / Skills / User Input / Documents / Checkpoint / Memory /
+ * Run History) represent one reasonable convention for an
  * AFPS-style agent; platforms and CLIs may compose it as-is or override
  * specific option fields.
  */
@@ -107,8 +107,6 @@ export interface PlatformPromptOptions {
 
   /** Input schema — drives the `## User Input` section. */
   inputSchema?: PlatformPromptSchema;
-  /** Config schema — drives the `## Configuration` section. */
-  configSchema?: PlatformPromptSchema;
   /**
    * Output schema — drives the `## Output Format` section. The full JSON
    * Schema (as it appears under `manifest.output.schema`) is surfaced in
@@ -136,7 +134,6 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
   const sections: string[] = [];
   const { context } = opts;
   const input = (context.input as Record<string, unknown>) ?? {};
-  const config = context.config ?? {};
   const platformName = opts.platformName ?? "Appstrate";
 
   // ─── Section model (#368) ─────────────────────────────────────────
@@ -359,33 +356,6 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
     sections.push(
       "\nRead the documents directly from the filesystem (paths are relative to cwd).\n",
     );
-  }
-
-  // --- Configuration ---
-  const configProps = opts.configSchema?.properties;
-  const configRequired = opts.configSchema?.required ?? [];
-  const configEntries = Object.entries(config);
-
-  if (configEntries.length > 0 || (configProps && Object.keys(configProps).length > 0)) {
-    sections.push("## Configuration\n");
-    if (configProps) {
-      for (const [key, prop] of Object.entries(configProps)) {
-        const req = configRequired.includes(key) ? "required" : "optional";
-        const value = config[key];
-        const valueStr = value !== undefined ? ` — \`${String(value)}\`` : "";
-        const propRec = (prop as Record<string, unknown>) ?? {};
-        const type = propRec.type;
-        const description = typeof propRec.description === "string" ? propRec.description : "";
-        sections.push(
-          `- **${key}** (${String(type ?? "unknown")}, ${req}): ${description}${valueStr}`,
-        );
-      }
-    } else {
-      for (const [key, value] of configEntries) {
-        sections.push(`- **${key}**: ${String(value)}`);
-      }
-    }
-    sections.push("");
   }
 
   // --- Checkpoint ---

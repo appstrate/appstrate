@@ -51,7 +51,6 @@ async function seedIntegrationWithConnection(ctx: TestContext): Promise<void> {
   await db.insert(applicationPackages).values({
     applicationId: ctx.defaultAppId,
     packageId: PACKAGE_ID,
-    config: {},
   });
   await db.insert(integrationConnections).values({
     integrationId: PACKAGE_ID,

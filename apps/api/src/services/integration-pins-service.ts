@@ -110,7 +110,6 @@ export async function setBlockUserConnections(
     .values({
       applicationId: scope.applicationId,
       packageId: integrationId,
-      config: {},
       blockUserConnections: blocked,
     })
     .onConflictDoUpdate({

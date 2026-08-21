@@ -218,7 +218,7 @@ export function isRunAndWaitTerminalStatus(status: unknown): boolean {
  * Project a run record onto the documented run_and_wait payload —
  * `{ id, packageId, status, done, result?, error? }` (the exact shape the tool
  * description promises). The full run resource also carries operational fields
- * (cost, token usage, timestamps, config echo) the model has no use for: the
+ * (cost, token usage, timestamps) the model has no use for: the
  * chat UI already renders live progress and metrics from the run's SSE stream,
  * and a model that sees a cost or a duration tends to quote it back at the
  * user. A caller that genuinely needs the full resource reads `getRun`.
@@ -449,7 +449,6 @@ export async function launchRunAndWait(
     launchPath = `/api/agents/${encodedId}/run` + (qs.size > 0 ? `?${qs.toString()}` : "");
     launchBody = {};
     if (asRecord(args.input)) launchBody.input = args.input;
-    if (asRecord(args.config)) launchBody.config = args.config;
     if (Object.keys(launchBody).length === 0) launchBody = undefined;
   } else if (kind === "inline") {
     const manifest = asRecord(args.manifest);
@@ -500,7 +499,6 @@ export async function launchRunAndWait(
     launchPath = "/api/runs/inline";
     launchBody = { manifest: materialized.manifest, prompt };
     if (asRecord(args.input)) launchBody.input = args.input;
-    if (asRecord(args.config)) launchBody.config = args.config;
     // Fan-in by reference: forwarded verbatim; the route resolves each URI
     // through the document ACL and declares the reserved input field itself.
     if (contextDocuments) launchBody.context_documents = contextDocuments;

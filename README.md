@@ -359,7 +359,7 @@ Test infrastructure (PostgreSQL, Redis, MinIO, DinD) is started automatically by
 - **i18n**: i18next (fr default, en)
 - **Docker**: fetch() + unix socket (not dockerode)
 - **Scheduling**: BullMQ (Redis-backed distributed cron) + cron-parser
-- **Validation**: AJV (config/input/output), Zod (env), `@appstrate/core` (manifests)
+- **Validation**: AJV (input/output), Zod (env), `@appstrate/core` (manifests)
 - **Build**: Turborepo + Bun workspaces
 - **Code quality**: ESLint + Prettier + OpenAPI lint (`@redocly/openapi-core`)
 

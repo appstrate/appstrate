@@ -73,16 +73,14 @@ export function extractSkillIdsFromManifest(manifest: Partial<Manifest>): string
   return Object.keys(skillsMap).filter(Boolean);
 }
 
-/** Extract input/config/output JSON schemas from a manifest, with safe narrowing. */
+/** Extract input/output JSON schemas from a manifest, with safe narrowing. */
 export function extractManifestSchemas(manifest: Partial<Manifest>): {
   input?: JSONSchemaObject;
-  config?: JSONSchemaObject;
   output?: JSONSchemaObject;
 } {
   const m = manifest as Record<string, { schema?: unknown } | undefined>;
   return {
     input: m.input?.schema ? asJSONSchemaObject(m.input.schema) : undefined,
-    config: m.config?.schema ? asJSONSchemaObject(m.config.schema) : undefined,
     output: m.output?.schema ? asJSONSchemaObject(m.output.schema) : undefined,
   };
 }

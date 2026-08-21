@@ -46,7 +46,7 @@ bun run dev                   # migrations are applied automatically at boot
 - **French UI text** via i18next (`fr` default, `en`), English code/comments
 - **Conventional Commits**: `feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `chore:`
 - **Zod 4** for all request body/query validation (NOT Zod 3). Use `z.url()` not `z.string().url()`
-- **AJV** only for dynamic manifest schemas (agent config/input/output from user-defined manifests)
+- **AJV** only for dynamic manifest schemas (agent input/output from user-defined manifests)
 - **bun:test** with `it()` -- NOT `test()`, NOT vitest/jest
 - **File naming**: `*.test.ts` -- NOT `*.spec.ts`
 

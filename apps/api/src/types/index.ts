@@ -6,7 +6,7 @@ export type { OrgRole } from "@appstrate/shared-types";
 
 // --- Agent Manifest Types ---
 // Re-exported from @appstrate/validation. The AgentManifest type is Zod-inferred
-// and covers all agent manifest fields (name, version, type, dependencies, input/output/config, timeout).
+// and covers all agent manifest fields (name, version, type, dependencies, input/output, timeout).
 
 import type { AgentManifest } from "@appstrate/core/validation";
 export type { AgentManifest };

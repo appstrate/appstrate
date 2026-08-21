@@ -48,13 +48,11 @@ function makeFixtureBundle(): Bundle {
       timeout: 120,
       input: {
         schema: {
-          properties: { query: { type: "string", description: "The question" } },
+          properties: {
+            query: { type: "string", description: "The question" },
+            verbose: { type: "boolean" },
+          },
           required: ["query"],
-        },
-      },
-      config: {
-        schema: {
-          properties: { verbose: { type: "boolean" } },
         },
       },
       output: {
@@ -101,8 +99,7 @@ function makeFixtureBundle(): Bundle {
 function makeContext(): ExecutionContext {
   return {
     runId: "run_parity",
-    input: { query: "what is the answer" },
-    config: { verbose: true },
+    input: { query: "what is the answer", verbose: true },
     memories: [{ content: "Last run found something useful.", createdAt: 0 }],
     checkpoint: { turn: 3 },
   };
@@ -166,7 +163,8 @@ describe("cross-path prompt parity", () => {
       expect(prompt).toContain("**writing**: Write clear prose");
       expect(prompt).toContain("## User Input");
       expect(prompt).toContain("**query**");
-      expect(prompt).toContain("## Configuration");
+      expect(prompt).toContain("**verbose**");
+      expect(prompt).not.toContain("## Configuration");
       expect(prompt).toContain("## Checkpoint");
       expect(prompt).toContain("## Memory");
       expect(prompt).toContain("## Output Format");

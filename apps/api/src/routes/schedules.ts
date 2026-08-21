@@ -32,13 +32,14 @@ import { getAppScope, type AppScope } from "../lib/scope.ts";
 import { getOrgMember } from "../services/organizations.ts";
 import { getEndUser } from "../services/end-users.ts";
 import { assertExplicitModelExists, resolveModel } from "../services/org-models.ts";
-import { getPackageConfig } from "../services/application-packages.ts";
+import { getInstalledPackageSettings } from "../services/application-packages.ts";
+import { assertFieldsUnlocked, resolveEffectiveInput } from "../services/input-resolution.ts";
 import { asJSONSchemaObject, schemaHasFileFields } from "@appstrate/core/form";
 import { listScheduleRuns } from "../services/state/runs.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 import { setOffsetLinkHeader } from "../lib/pagination-link.ts";
 import { listResponse } from "../lib/list-response.ts";
-import { runConfigOverrideSchema, scheduleInputSchema } from "../lib/jsonb-schemas.ts";
+import { scheduleInputSchema } from "../lib/jsonb-schemas.ts";
 import { SCOPED_PACKAGE_ROUTE } from "./scoped-package-route.ts";
 
 // Per-integration connection picks frozen on the schedule row (cascade
@@ -110,11 +111,6 @@ const createScheduleSchema = z.object({
   cron_expression: z.string().min(1, "cron_expression is required"),
   timezone: z.string().default("UTC"),
   input: scheduleInputSchema.default({}),
-  // Per-schedule override layer — frozen at create/update and deep-merged
-  // with the application's persisted config every time the schedule
-  // fires. Mirrors the per-run override pipeline (POST /run body) so a
-  // schedule is "a recurring run with frozen overrides".
-  config_override: runConfigOverrideSchema.optional(),
   model_id_override: z.string().optional(),
   generation_config_override: modelGenerationSettingsSchema.optional(),
   proxy_id_override: z.string().optional(),
@@ -131,7 +127,6 @@ const updateScheduleSchema = z.object({
   input: scheduleInputSchema.optional(),
   enabled: z.boolean().optional(),
   // `null` clears the override; omitted leaves it untouched.
-  config_override: runConfigOverrideSchema.nullable().optional(),
   model_id_override: z.string().nullable().optional(),
   generation_config_override: modelGenerationSettingsSchema.nullable().optional(),
   proxy_id_override: z.string().nullable().optional(),
@@ -198,9 +193,23 @@ export function createSchedulesRouter() {
         throw invalidRequest("Invalid cron expression", "cron_expression");
       }
 
-      // Validate input against agent's input schema (catches missing required fields even when input is undefined)
+      const scope = getAppScope(c);
+
+      // Validate what the schedule will actually fire with: the author
+      // defaults and the editor's stored values sit UNDER the schedule's own
+      // frozen values, so a required field the editor already answers must not
+      // be demanded again here. A schedule value naming a locked field is
+      // refused (400 `locked_input_field`) at this write rather than silently
+      // each tick.
+      const packageSettings = await getInstalledPackageSettings(scope.applicationId, agent.id);
+      const resolvedInput = resolveEffectiveInput({
+        ...(inputSchema ? { schema: asJSONSchemaObject(inputSchema) } : {}),
+        editorDefaults: packageSettings.values,
+        lockedFields: packageSettings.locked,
+        scheduleValues: data.input,
+      });
       if (inputSchema) {
-        const inputValidation = validateInput(data.input, asJSONSchemaObject(inputSchema));
+        const inputValidation = validateInput(resolvedInput, asJSONSchemaObject(inputSchema));
         if (!inputValidation.valid) {
           throw validationFailed(
             inputValidation.errors.map((e) => ({
@@ -213,8 +222,6 @@ export function createSchedulesRouter() {
         }
       }
 
-      const scope = getAppScope(c);
-
       // #738: actor defaults to the caller; an admin may override it from the
       // form (validated against this org/app scope).
       const actor = await resolveScheduleActor(scope, data.actor, getActor(c));
@@ -224,10 +231,13 @@ export function createSchedulesRouter() {
       const explicitModel = await assertExplicitModelExists(scope.orgId, data.model_id_override);
       let generationConfigOverride = data.generation_config_override;
       if (generationConfigOverride && Object.keys(generationConfigOverride).length > 0) {
-        const config = await getPackageConfig(scope.applicationId, agent.id);
         const selectedModel =
           explicitModel ??
-          (await resolveModel(scope.orgId, agent.id, data.model_id_override ?? config.modelId));
+          (await resolveModel(
+            scope.orgId,
+            agent.id,
+            data.model_id_override ?? packageSettings.modelId,
+          ));
         if (!selectedModel) {
           throw invalidRequest(
             "A model must be configured before generation settings can be saved",
@@ -244,7 +254,6 @@ export function createSchedulesRouter() {
         cronExpression: data.cron_expression,
         timezone: data.timezone,
         input: data.input,
-        configOverride: data.config_override ?? null,
         modelIdOverride: data.model_id_override ?? null,
         generationConfigOverride: generationConfigOverride ?? null,
         proxyIdOverride: data.proxy_id_override ?? null,
@@ -294,6 +303,20 @@ export function createSchedulesRouter() {
       throw invalidRequest("Invalid cron expression", "cron_expression");
     }
 
+    // The agent's per-application settings — read once and shared by the
+    // locked-field refusal and the generation-config reconciliation below,
+    // which can both run on the same request.
+    const packageSettings = await getInstalledPackageSettings(
+      scope.applicationId,
+      existing.packageId,
+    );
+
+    // A schedule may not answer a locked field — same refusal the create route
+    // and the fire path apply, so the three cannot disagree.
+    if (data.input !== undefined) {
+      assertFieldsUnlocked(data.input, packageSettings.locked, "schedule input");
+    }
+
     // Reject a `model_id_override` that references no real model (no-op when
     // the field isn't part of this patch).
     const explicitModel = await assertExplicitModelExists(scope.orgId, data.model_id_override);
@@ -304,7 +327,6 @@ export function createSchedulesRouter() {
         data.model_id_override !== undefined &&
         existing.generation_config_override)
     ) {
-      const config = await getPackageConfig(scope.applicationId, existing.packageId);
       const effectiveModelOverride =
         data.model_id_override !== undefined ? data.model_id_override : existing.model_id_override;
       const selectedModel =
@@ -312,7 +334,7 @@ export function createSchedulesRouter() {
         (await resolveModel(
           scope.orgId,
           existing.packageId,
-          effectiveModelOverride ?? config.modelId,
+          effectiveModelOverride ?? packageSettings.modelId,
         ));
 
       if (generationConfigOverride && Object.keys(generationConfigOverride).length > 0) {
@@ -360,7 +382,6 @@ export function createSchedulesRouter() {
         timezone: data.timezone,
         input: data.input,
         enabled: data.enabled,
-        configOverride: data.config_override,
         modelIdOverride: data.model_id_override,
         generationConfigOverride,
         proxyIdOverride: data.proxy_id_override,
@@ -384,7 +405,6 @@ export function createSchedulesRouter() {
     if (data.timezone !== undefined) auditAfter.timezone = data.timezone;
     if (data.input !== undefined) auditAfter.input = data.input;
     if (data.enabled !== undefined) auditAfter.enabled = data.enabled;
-    if (data.config_override !== undefined) auditAfter.configOverride = data.config_override;
     if (data.model_id_override !== undefined) auditAfter.modelIdOverride = data.model_id_override;
     if (generationConfigOverride !== undefined)
       auditAfter.generationConfigOverride = generationConfigOverride;

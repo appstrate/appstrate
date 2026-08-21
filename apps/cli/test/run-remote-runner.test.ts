@@ -124,7 +124,6 @@ function buildBaseOpts(over: Partial<RunRemoteOptions> = {}): RunRemoteOptions {
     scope: "@system",
     name: "hello-world",
     input: { greeting: "hi" },
-    config: {},
     json: false,
     bundleLabel: "@system/hello-world",
     pollIntervalMs: 1,
@@ -308,7 +307,7 @@ describe("runRemote — happy path", () => {
     expect(trigger.headers["authorization"]).toBe("Bearer ask_test_key");
     expect(trigger.headers["x-application-id"]).toBe("app_1");
     expect(trigger.headers["x-org-id"]).toBe("org_1");
-    expect(JSON.parse(trigger.body!)).toEqual({ input: { greeting: "hi" }, config: {} });
+    expect(JSON.parse(trigger.body!)).toEqual({ input: { greeting: "hi" } });
 
     // Stderr carries the "→ running" preamble (parity with local mode).
     expect(writers.stderr.join("")).toContain("→ running @system/hello-world (reporting to");

@@ -7,8 +7,9 @@
 // AFPS agent manifests carry a wrapper around a pure JSON Schema 2020-12
 // document plus three pieces of UI metadata (file constraints, UI hints,
 // property order). This module owns the wrapper types, a handful of
-// narrow detection helpers, and the single transformation that bridges
-// the AFPS wrapper to a React JSON Schema Form `<Form>` input shape
+// narrow detection helpers, the author-default reader every input
+// resolver builds on, and the single transformation that bridges the
+// AFPS wrapper to a React JSON Schema Form `<Form>` input shape
 // (`schema` + `uiSchema`).
 //
 // Client-side form rendering is fully delegated to RJSF — this file no
@@ -22,7 +23,7 @@ import type { JSONSchema7, JSONSchema7Type, JSONSchema7TypeName } from "json-sch
 import { isFileField as isFileFieldShared } from "@appstrate/afps-shared/file-field";
 export type { JSONSchema7, JSONSchema7Type, JSONSchema7TypeName };
 
-/** A JSON Schema object with typed properties — the root of input/config/output schemas. */
+/** A JSON Schema object with typed properties — the root of input/output schemas. */
 export interface JSONSchemaObject {
   type: "object";
   properties: Record<string, JSONSchema7>;
@@ -118,19 +119,26 @@ export function getOrderedKeys(schema: JSONSchemaObject, property_order?: string
   return rest.length ? [...ordered, ...rest] : ordered;
 }
 
-// ─── Backend-side default merging ────────────────────────────────────────────
+// ─── Author defaults ─────────────────────────────────────────────────────────
 
-/** Merge current config with schema defaults. For backend use (no JSON serialization). */
-export function mergeWithDefaults(
-  schema: JSONSchemaObject,
-  current?: Record<string, unknown> | null,
-): Record<string, unknown> {
-  const merged: Record<string, unknown> = {};
-  if (!schema?.properties) return merged;
-  for (const [key, prop] of Object.entries(schema.properties)) {
-    merged[key] = current?.[key] ?? prop.default ?? null;
+/**
+ * Top-level properties of a JSON Schema that declare a `default` keyword,
+ * as a plain value map. Properties without a `default` are absent (NOT set to
+ * `null`) — an absent property must stay absent so a lower layer, or the
+ * schema's own `required` check, sees the truth.
+ *
+ * This is the author layer of input resolution, and it lives here so the
+ * platform and the CLI compute it identically: the same bundle must yield the
+ * same parameters whether the run is launched locally or on a platform.
+ */
+export function authorDefaults(schema: JSONSchemaObject | undefined): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [key, prop] of Object.entries(schema?.properties ?? {})) {
+    if (prop && typeof prop === "object" && prop.default !== undefined) {
+      out[key] = prop.default;
+    }
   }
-  return merged;
+  return out;
 }
 
 // ─── AFPS → RJSF adapter ─────────────────────────────────────────────────────

@@ -3,7 +3,6 @@
 import { useMemo } from "react";
 import type { AgentDetail } from "@appstrate/shared-types";
 import type { OrgModelInfo } from "./use-models";
-import type { JSONSchemaObject } from "@appstrate/core/form";
 import { isPromptEmpty, findMissingDependencies } from "@appstrate/core/validation";
 import { isModelSelectable } from "../lib/model-selectability";
 
@@ -28,24 +27,23 @@ export function resolvesToUsableModel(
   return orgModels.some((m) => m.is_default && isModelSelectable(m));
 }
 
+/**
+ * What still blocks a run of this agent.
+ *
+ * Unfilled parameters are deliberately NOT a gate: an agent declares one
+ * `input` schema and every field it does not already decide (author `default`
+ * or an editor value) is asked at launch. The only configuration that could
+ * make a required field unsatisfiable — locking it with nothing behind it —
+ * is refused at write time (400 `locked_required_field_empty`), so it cannot
+ * reach a launch surface.
+ */
 export function useAgentReadiness(
   detail: AgentDetail | undefined,
   agentModelId?: string | null,
   orgModels?: OrgModelInfo[],
-  configSchemaOverride?: JSONSchemaObject,
 ) {
-  return useMemo(() => {
-    const configSchema = configSchemaOverride ?? detail?.config?.schema;
-    return {
-      hasRequiredConfig: detail
-        ? (configSchema?.required || []).every((key) => {
-            const val = (detail.config?.current || {})[key];
-            return val !== undefined && val !== null && val !== "";
-          })
-        : false,
-      hasConfigSchema: !!(
-        configSchema?.properties && Object.keys(configSchema.properties).length > 0
-      ),
+  return useMemo(
+    () => ({
       // Unknown catalog (still loading) is optimistic — don't flash "no model".
       hasModel: orgModels !== undefined ? resolvesToUsableModel(orgModels, agentModelId) : true,
       hasPrompt: detail ? !isPromptEmpty(detail.prompt ?? "") : false,
@@ -56,6 +54,7 @@ export function useAgentReadiness(
             detail.dependencies.skills.map((s: { id: string }) => s.id),
           ).length === 0
         : true,
-    };
-  }, [detail, agentModelId, orgModels, configSchemaOverride]);
+    }),
+    [detail, agentModelId, orgModels],
+  );
 }
