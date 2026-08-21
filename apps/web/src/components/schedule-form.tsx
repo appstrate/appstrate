@@ -24,7 +24,12 @@ import {
 import { ChevronDown } from "lucide-react";
 import type { AgentDetail } from "@appstrate/shared-types";
 import { AgentInputForm } from "./agent-input-form";
-import { hasInputFields, initialInputValues, type AgentInputSettings } from "../lib/agent-input";
+import {
+  changedInputValues,
+  hasInputFields,
+  initialInputValues,
+  type AgentInputSettings,
+} from "../lib/agent-input";
 import { RunOverridesPanel, type RunOverridesValue } from "./run-overrides-panel";
 import { AgentVersionField } from "./package-version-select";
 import { ActorSelect, type ActorValue } from "./actor-select";
@@ -252,7 +257,21 @@ export function ScheduleForm({
   });
 
   const onFormSubmit = handleSubmit((data) => {
-    const input = hasInput ? inputValues : undefined;
+    // The form state is SEEDED with the agent's resolved values so the admin
+    // sees what a fire will use — but `package_schedules.input` outranks both
+    // layers behind it, so submitting that seed back would freeze the author
+    // default and the editor's stored value onto this row: later edits to the
+    // stored value would never reach a single fire again. Send only what this
+    // schedule itself decides. Dropping an unchanged key loses nothing — the
+    // editor layer supplies exactly that key at fire time, and it supplies the
+    // value it holds THEN, which is the whole point.
+    //
+    // Always sent, even empty: on edit an absent `input` means "leave the row
+    // untouched" (`updateSchedule` only assigns when `!== undefined`), so an
+    // empty object is how a schedule that no longer decides anything releases
+    // the values it used to freeze. On create the route defaults it to `{}`
+    // anyway, so the two paths agree.
+    const input = changedInputValues(inputWrapper, settings, inputValues);
 
     // On create: omit empty overrides entirely (server stores null).
     // On edit: send `null` for cleared overrides so the row resets to

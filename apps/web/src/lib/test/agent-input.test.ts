@@ -18,6 +18,7 @@ import {
   hasInputFields,
   initialInputValues,
   partitionInputFields,
+  changedInputValues,
   resolvedInputDefaults,
   storedInputValues,
   subsetWrapper,
@@ -204,5 +205,108 @@ describe("formatInputValue", () => {
 
   it("marks the absence of a value rather than printing `undefined`", () => {
     expect(formatInputValue(undefined)).toBe("—");
+  });
+});
+
+describe("changedInputValues", () => {
+  /**
+   * A launch form is seeded with what the layers below it resolve to; this is
+   * the guard that stops that seed from being claimed — and therefore frozen —
+   * by the layer that submits it. The schedule form is the caller that matters:
+   * `package_schedules.input` outranks the editor's stored values forever.
+   */
+  it("drops a field the user never touched", () => {
+    const s = settings({ values: { query: "invoices" } });
+    // Exactly the seed the form starts from — nothing edited.
+    const seed = initialInputValues(WRAPPER, s);
+    expect(seed).toEqual({ folder: "inbox", query: "invoices" });
+    expect(changedInputValues(WRAPPER, s, seed)).toEqual({});
+  });
+
+  it("keeps a field the user set to something else", () => {
+    const s = settings({ values: { query: "invoices" } });
+    expect(
+      changedInputValues(WRAPPER, s, { ...initialInputValues(WRAPPER, s), query: "receipts" }),
+    ).toEqual({ query: "receipts" });
+  });
+
+  it("keeps a field no layer decided yet, which the user filled in", () => {
+    const s = settings();
+    expect(changedInputValues(WRAPPER, s, { folder: "inbox", limit: 25 })).toEqual({ limit: 25 });
+  });
+
+  it("keeps a field the user set back to the author default over a stored value", () => {
+    // Stored value says "archive"; the user re-picks the author's "inbox".
+    // That IS a decision of this layer — layers 1+2 resolve to "archive".
+    const s = settings({ values: { folder: "archive" } });
+    expect(changedInputValues(WRAPPER, s, { folder: "inbox" })).toEqual({ folder: "inbox" });
+  });
+
+  it("lets a later change to the stored value reach a schedule that never set it", () => {
+    // Save the schedule against today's stored value…
+    const atSave = settings({ values: { query: "invoices" } });
+    const frozen = changedInputValues(WRAPPER, atSave, initialInputValues(WRAPPER, atSave));
+    expect(frozen).toEqual({});
+    // …then the editor changes it. The server's layer merge (author → stored →
+    // schedule) now yields the NEW value, because the schedule froze nothing.
+    const atFire = settings({ values: { query: "receipts" } });
+    expect({ ...resolvedInputDefaults(WRAPPER, atFire), ...frozen }).toEqual({
+      folder: "inbox",
+      query: "receipts",
+    });
+  });
+
+  it("drops a locked field even when its value differs", () => {
+    const s = settings({ values: { folder: "archive" }, locked_fields: ["folder"] });
+    expect(changedInputValues(WRAPPER, s, { folder: "trash", limit: 5 })).toEqual({ limit: 5 });
+  });
+
+  describe("with non-primitive values", () => {
+    const JSON_WRAPPER: SchemaWrapper = {
+      schema: {
+        type: "object",
+        properties: {
+          filters: { type: "object" },
+          tags: { type: "array", items: { type: "string" } },
+        },
+      },
+    };
+
+    it("treats a structurally identical object as unchanged", () => {
+      const s = settings({ values: { filters: { status: "open", labels: ["a", "b"] } } });
+      // A fresh object with the same shape — the form re-creates it on render.
+      expect(
+        changedInputValues(JSON_WRAPPER, s, { filters: { status: "open", labels: ["a", "b"] } }),
+      ).toEqual({});
+    });
+
+    it("keeps an object whose nested value differs", () => {
+      const s = settings({ values: { filters: { status: "open", labels: ["a", "b"] } } });
+      expect(
+        changedInputValues(JSON_WRAPPER, s, { filters: { status: "open", labels: ["a", "c"] } }),
+      ).toEqual({ filters: { status: "open", labels: ["a", "c"] } });
+    });
+
+    it("keeps an object that gained or lost a key", () => {
+      const s = settings({ values: { filters: { status: "open" } } });
+      expect(
+        changedInputValues(JSON_WRAPPER, s, { filters: { status: "open", assignee: "me" } }),
+      ).toEqual({ filters: { status: "open", assignee: "me" } });
+      expect(changedInputValues(JSON_WRAPPER, s, { filters: {} })).toEqual({ filters: {} });
+    });
+
+    it("compares arrays by order and length, not by identity", () => {
+      const s = settings({ values: { tags: ["a", "b"] } });
+      expect(changedInputValues(JSON_WRAPPER, s, { tags: ["a", "b"] })).toEqual({});
+      expect(changedInputValues(JSON_WRAPPER, s, { tags: ["b", "a"] })).toEqual({
+        tags: ["b", "a"],
+      });
+      expect(changedInputValues(JSON_WRAPPER, s, { tags: ["a"] })).toEqual({ tags: ["a"] });
+    });
+
+    it("never confuses an array with an object", () => {
+      const s = settings({ values: { tags: [] } });
+      expect(changedInputValues(JSON_WRAPPER, s, { tags: {} })).toEqual({ tags: {} });
+    });
   });
 });

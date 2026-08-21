@@ -191,3 +191,56 @@ export function formatInputValue(value: unknown): string {
   if (value === undefined) return "—";
   return typeof value === "string" ? value : JSON.stringify(value);
 }
+
+/**
+ * Structural equality for two resolved input values.
+ *
+ * Input values are arbitrary JSON — objects, arrays, file-reference strings —
+ * so `===` would report two structurally identical values as different and
+ * freeze them onto the caller's layer. Small enough to keep local; a
+ * dependency for it would cost more than it carries.
+ */
+function sameInputValue(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) return false;
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+    return a.every((item, index) => sameInputValue(item, b[index]));
+  }
+  const left = a as Record<string, unknown>;
+  const right = b as Record<string, unknown>;
+  const leftKeys = Object.keys(left);
+  if (leftKeys.length !== Object.keys(right).length) return false;
+  return leftKeys.every((key) => key in right && sameInputValue(left[key], right[key]));
+}
+
+/**
+ * The subset of a launch form's values that THIS layer actually decides.
+ *
+ * A launch form is seeded with the value every field resolves to (author
+ * `default` overlaid by the editor's stored value) so the user sees what a
+ * launch will use. Submitting that seed back verbatim would claim every one of
+ * those values as the caller's own — and on a layer that outranks the ones it
+ * was copied from, that turns a display into a permanent freeze: the editor's
+ * value could then change forever without the launch following it.
+ *
+ * So: keep only the keys whose value differs from what layers 1+2 already
+ * resolve to. Dropping an unchanged key loses nothing — the same two layers
+ * supply it at launch time, and they supply the CURRENT value rather than the
+ * one that happened to be resolved when this form was saved. Locked keys are
+ * dropped as everywhere else: the launch routes refuse them (400
+ * `locked_input_field`).
+ */
+export function changedInputValues(
+  wrapper: SchemaWrapper | undefined,
+  settings: AgentInputSettings,
+  values: Record<string, unknown>,
+): Record<string, unknown> {
+  const resolved = resolvedInputDefaults(wrapper, settings);
+  return withoutLockedFields(
+    Object.fromEntries(
+      Object.entries(values).filter(([key, value]) => !sameInputValue(value, resolved[key])),
+    ),
+    settings.locked_fields,
+  );
+}
