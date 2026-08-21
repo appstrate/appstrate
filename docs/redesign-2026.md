@@ -8,6 +8,11 @@ stylesheet exported out of Claude Design and kept outside the repo at
 says where things stand, why the non-obvious calls were made, and what is still
 open — so the work can be picked up cold.
 
+**Picking it up cold, read in this order:** "Open" first (it opens on the one
+piece of debt that blocks everything), then "The grammar", which is what the
+next stretch of work IS. The sections in between describe what is already
+built, and are reference rather than reading.
+
 ## Running it
 
 ```bash
@@ -595,6 +600,121 @@ On how the work goes:
   later in the session as missing requirements, and called the lab harness scope
   creep. It also found a failing test nobody had run.
 
+## The grammar — component types, not pages
+
+**Decided 21 August 2026, and it re-frames everything below it.** The work
+stops being "redesign the runs page, then the schedules page". It becomes:
+name the KINDS of surface this application has to know how to draw, give each
+one a component, then sweep every place that should be using it. Pages become
+assemblies of a small vocabulary rather than sixty individual designs.
+
+The trigger was noticing that the settings modal and the "integrations
+Appstrate offers" catalogue want the same thing: a collection, inside a modal.
+Nothing in a page-shaped plan makes that visible.
+
+### What is there today, counted
+
+Re-run this rather than trusting the numbers below, which will age:
+
+```bash
+cd apps/web/src
+grep -rln "grid-cols-" pages components modules | wc -l      # hand-rolled card grids
+grep -rln "ui/components/table" pages components | wc -l     # raw shadcn tables
+grep -rl "<Spinner" pages components modules | wc -l         # loose spinners
+grep -rl "Skeleton" pages components modules | wc -l
+ls components/ | grep -icE "modal|dialog|panel"              # bespoke modals
+```
+
+At the time of writing:
+
+- **Collections.** 3 screens go through our `DataTable` (runs, schedules,
+  packages). **4 use the raw shadcn `Table`**: library, models, proxies,
+  integration detail. **16 files draw a card grid by hand** with `grid-cols-`.
+  Plus the lists-inside-a-panel (documents, connections, memory), each its own
+  way.
+- **States.** `EmptyState` is shared across 31 files — the one thing already
+  harmonised. Loading is the opposite: `LoadingState` in 35 files, **`Spinner`
+  dropped in directly in 45**, and `Skeleton` in **3**. Three treatments
+  coexist, and the best one — the table's skeleton rows, which hold the layout
+  — is almost nowhere.
+- **Modals. 21 files under `components/` define one.** There is `modal.tsx`,
+  `panel-dialog.tsx`, `confirm-modal.tsx`, and eighteen bespoke ones. By far
+  the largest duplication in the app.
+
+### The four families
+
+1. **Collection** — a table, a grid of cards, a compact list inside a panel,
+   and later the alternative views (an agenda). The table is done; the rest is
+   not a component yet.
+2. **The apparatus around a collection** — the bar (`ListToolbar`), the footer
+   (`ListFooter`), the states. Done, except loading.
+3. **Modal surfaces** — and this is where the families cross. There are almost
+   certainly FOUR types hiding in those 21 files: confirm, form, **browse and
+   pick**, and settings panel. The Appstrate integration catalogue is a browse
+   and pick, exactly like the skills library: _a collection inside a modal_.
+   Which is only possible once "collection" is a component.
+4. **Row and card atoms** — status badge, origin badge, actor label, mono chip
+   (cron, version), icon tile, unread count. They exist; they are applied
+   unevenly.
+
+### The order, and why
+
+**A. Finish the Collection family.** The card grid becomes a component (it is
+drawn sixteen times), the four raw tables move onto `DataTable`, the
+list-in-a-panel becomes a type. It goes first because family 3 depends on it:
+a collection cannot live in a modal until a collection is a thing.
+
+**B. Loading, in one pass.** One rule — a skeleton for a collection, because we
+know the shape of what is coming and the layout should not jump; a spinner for
+an action in flight. Forty-five files, one line each.
+
+**C. Type the modals, then converge.** Read the twenty-one and establish that
+there are four. Then the integration catalogue falls out on its own, as
+"collection inside browse-and-pick".
+
+**D. The atoms**, as A and C touch them, not as a block of their own.
+
+The alternative views live INSIDE A, as a third view, once a collection is a
+component that already holds two.
+
+### Scope, for now
+
+**No detail pages.** Overview, list, card and alternative-view surfaces only.
+Run detail (`rd-*` + `ria-*` + `log-*` + `term-*`, about 130 classes and the
+most-drawn screen in the reference) and the command palette (`cmdk-*`) are out
+of scope until the grammar is in place.
+
+### What the reference does and does not give us
+
+**There is no calendar in the reference.** Zero occurrences — an agenda view is
+ours to design, which our own rule allows when the reference is silent, but it
+means nobody has drawn it for us.
+
+**shadcn's `Calendar` is a date PICKER, not an agenda.** Verified against their
+docs: thirty-odd variants (single, range, presets, with time, booked dates) and
+not one of them renders content inside a day cell. That splits the calendar
+question cleanly:
+
+- **Runs want a date RANGE, not a month.** Forty runs a day would make a cell
+  an illegible pile; the real question is "which week did this break", which is
+  `start_date` / `end_date` — parameters `GET /api/runs` already accepts, and
+  shadcn's range picker plugs straight in. Half a day, and it belongs in the
+  filter bar.
+- **Schedules want a real agenda**, and that is a build: cells holding items, a
+  month/week switch, a "+3" when a day overflows. Either on top of the
+  `Calendar` day grid or with a dependency (FullCalendar and its kind), which
+  would be the app's first heavy UI dependency. Note that `packages/ui` has no
+  `calendar` component and `react-day-picker` is not a dependency yet, so even
+  the picker adds one.
+
+**The agent icon is NOT a data-model gap**, unlike the org logo. The AFPS
+manifest already carries `icon` (a string) and `icons[]` (`src`/`size`/`theme`)
+— see `packages/core/src/validation.ts`. So agent identity is reading a field
+that exists plus a derived fallback (a stable colour from the id and an
+initial, like the org avatars). The reference places it at three sizes:
+`ar-icon` 34px in a row, `ad-icon` 52px on an agent's page, `rd-agent-ico` 20px
+in a run detail header.
+
 ## Strategy — what the reference actually covers, and the order to take it
 
 Read the reference by its class families, not by scrolling it
@@ -629,15 +749,13 @@ So the strategy the reference itself suggests:
    list, `empty` found the onboarding bounce, `error` finds the banner
    placements. A pattern applied to six screens from its nominal state alone is
    six screens to fix.
-5. **Order.** DONE: the table pattern (`dt-*`), the list bar (`lt-*`), the
+5. **Order — SUPERSEDED by "The grammar" above.** What it says still holds for
+   what is DONE: the table pattern (`dt-*`), the list bar (`lt-*`), the
    reference empty state (`empty-*`), and three column sets — runs, schedules,
-   packages (agents + skills + MCP servers, behind the `view-toggle`). LEFT, in
-   order: **integrations** (its own page, its own tabs, and its catalogue is
-   already whole in the browser, which is why a client-side search lands there
-   next), then **run detail** (`rd-*`, the biggest single screen and untouched),
-   then the **command palette** (`cmdk-*`, which gives the header's search icon
-   its reason to exist), then **Usage** — the only screen with no reference at
-   all, which is exactly why it is not first.
+   packages (agents + skills + MCP servers, behind the `view-toggle`). What
+   comes next is no longer a list of pages but the A/B/C/D of the grammar
+   section, and run detail and the command palette are out of scope until it is
+   in place.
 6. **Where the reference is silent, derive rather than invent**: grey canvas +
    white cards, the control IS the setting, excursion → modal / destination →
    page. Those four decide most cases on their own.
@@ -659,7 +777,14 @@ So the strategy the reference itself suggests:
   `/runs`, `/schedules`, `/agents` in the lab, on all four scenarios, and at a
   narrow width.** Specifically to check: the container-query thresholds on the
   bar (`@xl/bar` for the utility labels, `@lg/bar` for the action labels) were
-  chosen on paper.
+  chosen on paper; whether the filter row pushing the table down reads well;
+  whether the view toggle's grey track shows enough on the grey canvas; and the
+  table footer, which has never been on screen at all.
+
+  This is the step before A of "The grammar": everything the next stretch
+  harmonises TOWARDS is what was built in these last commits, so it had better
+  be right first.
+
 - **The API gained three things** for the toolbar, all tested: `GET /api/runs`
   takes several statuses at once (`?status=failed,timeout` → `IN (…)`), a free
   text `?q=` (agent scope and name, the error, and the run number when the query
