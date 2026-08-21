@@ -27,6 +27,7 @@ import { $api } from "../api/client";
 import { useApplications } from "../hooks/use-applications";
 import { useCurrentApplicationId, useAppSwitcher } from "../hooks/use-current-application";
 import { usePermissions } from "../hooks/use-permissions";
+import { AppstrateMark } from "@/components/appstrate-mark";
 import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/components/popover";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { cn } from "@appstrate/ui/cn";
@@ -68,7 +69,7 @@ function ColumnHeader({
   );
 }
 
-export function OrgSwitcher({ variant = "chip" }: { variant?: "chip" | "row" }) {
+export function OrgSwitcher({ variant = "chip" }: { variant?: "chip" | "row" | "brand" }) {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const location = useLocation();
@@ -145,7 +146,34 @@ export function OrgSwitcher({ variant = "chip" }: { variant?: "chip" | "row" }) 
             breadcrumb segment means "go up a level" — cheap and reversible.
             This one replaces the whole context. The coloured avatar and the
             up/down chevron (never a right chevron) are what say so. */}
-        {variant === "row" ? (
+        {variant === "brand" ? (
+          /* The head of the column: the context, flat. The Appstrate mark
+             stands where the org's initial would have gone — one identity at
+             the top, not two. No frame: the rules under it are what separate
+             the three bands (context, tool, navigation). */
+          <button
+            type="button"
+            data-testid="org-switcher-button"
+            aria-label={t("switcher.orgAriaLabel")}
+            className="hover:bg-sidebar-accent data-[state=open]:bg-sidebar-accent flex h-9 w-full items-center gap-2 rounded-md px-1.5 text-sm transition-colors group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0!"
+          >
+            <AppstrateMark className="h-6 w-auto shrink-0" />
+            <span className="min-w-0 flex-1 truncate text-left group-data-[collapsible=icon]:hidden">
+              <span className="font-semibold">{currentOrg.name}</span>
+              {/* The workspace stays visible even when there is only one: a
+                  level nobody ever sees is a level nobody learns. */}
+              {currentApp && (
+                <>
+                  <span className="text-border mx-1.5" aria-hidden>
+                    |
+                  </span>
+                  <span className="text-muted-foreground">{currentApp.name}</span>
+                </>
+              )}
+            </span>
+            <ChevronsUpDown className="text-muted-foreground size-3.5 shrink-0 group-data-[collapsible=icon]:hidden" />
+          </button>
+        ) : variant === "row" ? (
           /* A white card on the sidebar's grey, not a nav row: it is the
              context the navigation applies to, not a place the navigation can
              take you. One line, org then workspace, the same reading order as
@@ -200,7 +228,7 @@ export function OrgSwitcher({ variant = "chip" }: { variant?: "chip" | "row" }) 
       </PopoverTrigger>
       <PopoverContent
         align="start"
-        side={variant === "row" ? "right" : "bottom"}
+        side={variant === "chip" ? "bottom" : "right"}
         sideOffset={6}
         className="w-[540px] max-w-[calc(100vw-2rem)] overflow-hidden rounded-xl p-0"
       >

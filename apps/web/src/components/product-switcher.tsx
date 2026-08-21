@@ -45,7 +45,7 @@ interface Product {
   enabled: boolean;
 }
 
-export function ProductSwitcher() {
+export function ProductSwitcher({ variant = "brand" }: { variant?: "brand" | "row" }) {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const { pathname } = useLocation();
@@ -91,18 +91,42 @@ export function ProductSwitcher() {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <button
-          type="button"
-          data-testid="product-switcher-button"
-          aria-label={t("products.ariaLabel")}
-          className="hover:bg-sidebar-accent data-[state=open]:bg-sidebar-accent flex w-full items-center justify-start gap-2 rounded-md py-1 pl-2 transition-colors group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0"
-        >
-          <AppstrateMark className="h-7 w-auto shrink-0" />
-          <span className="truncate text-[1.02rem] font-semibold tracking-tight group-data-[collapsible=icon]:hidden">
-            {current?.label ?? t("products.studio")}
-          </span>
-          <ChevronsUpDown className="text-muted-foreground size-3.5 shrink-0 group-data-[collapsible=icon]:hidden" />
-        </button>
+        {variant === "row" ? (
+          /* Under the rule, flat on the sidebar: the tool you are in, wearing
+             the same coloured tile it wears in the menu below — so the thing
+             you clicked and the thing you got look alike. Flat, not framed:
+             the frame above belongs to the context, and two stacked cards
+             would say the two lines are the same kind of thing. */
+          <button
+            type="button"
+            data-testid="product-switcher-button"
+            aria-label={t("products.ariaLabel")}
+            className="hover:bg-sidebar-accent data-[state=open]:bg-sidebar-accent flex h-8 min-w-0 flex-1 items-center gap-2 rounded-md px-1.5 text-sm transition-colors group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0!"
+          >
+            <span
+              className={`${current?.tint ?? "bg-primary"} flex size-6 shrink-0 items-center justify-center rounded-md text-white [&>svg]:size-[15px]`}
+            >
+              {current?.icon ?? <Blocks className="size-[15px]" />}
+            </span>
+            <span className="min-w-0 flex-1 truncate text-left font-semibold group-data-[collapsible=icon]:hidden">
+              {current?.label ?? t("products.studio")}
+            </span>
+            <ChevronsUpDown className="text-muted-foreground size-3.5 shrink-0 group-data-[collapsible=icon]:hidden" />
+          </button>
+        ) : (
+          <button
+            type="button"
+            data-testid="product-switcher-button"
+            aria-label={t("products.ariaLabel")}
+            className="hover:bg-sidebar-accent data-[state=open]:bg-sidebar-accent flex w-full items-center justify-start gap-2 rounded-md py-1 pl-2 transition-colors group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0"
+          >
+            <AppstrateMark className="h-7 w-auto shrink-0" />
+            <span className="truncate text-[1.02rem] font-semibold tracking-tight group-data-[collapsible=icon]:hidden">
+              {current?.label ?? t("products.studio")}
+            </span>
+            <ChevronsUpDown className="text-muted-foreground size-3.5 shrink-0 group-data-[collapsible=icon]:hidden" />
+          </button>
+        )}
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" sideOffset={6} className="w-[330px] rounded-xl p-1.5">
         {products.map((p) => (

@@ -46,35 +46,31 @@ export function ShellSidebar({
           nearly meeting. Beside the product name, the two controls that act on
           the whole shell: search and collapse. */}
       <SidebarHeader className="border-sidebar-border h-header justify-center border-b px-2 py-0">
-        <div className="flex items-center gap-1">
-          <ProductSwitcher />
-          {!collapsed && (
-            <>
-              {/* Not wired to anything yet: there is no global search in the
-                  app. Present so the arrangement can be judged; it is disabled
-                  rather than inert so nobody wonders why nothing happens. */}
-              <button
-                type="button"
-                disabled
-                title="Recherche globale (à brancher)"
-                aria-label="Rechercher"
-                className="text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground shrink-0 rounded-md p-1.5 disabled:opacity-40"
-              >
-                <Search className="size-4" />
-              </button>
-              <NotificationBell />
-            </>
-          )}
-        </div>
+        <OrgSwitcher variant="brand" />
       </SidebarHeader>
-      {/* Below the rule, the context the navigation applies to. */}
-      <div className="flex flex-col gap-1 px-2 pt-2 group-data-[collapsible=icon]:px-0">
-        <OrgSwitcher variant="row" />
-        {/* The bell rides in the brand cell, beside the search — except in the
-            rail, where that cell holds the mark alone and it drops here, under
-            the org avatar. It never disappears: the unread count is the one
-            thing in this column that changes on its own. */}
-        {collapsed && <NotificationBell />}
+      {/* Below the rule, the tool and the two controls that act on it: search
+          and the bell. The context that scopes all three is one line up, and a
+          second rule closes this band before the navigation starts — three
+          bands, three rules, no frames. */}
+      <div className="border-sidebar-border flex items-center gap-1 border-b px-2 py-2 group-data-[collapsible=icon]:flex-col group-data-[collapsible=icon]:px-0">
+        <ProductSwitcher variant="row" />
+        {!collapsed && (
+          /* Not wired to anything yet: there is no global search in the app.
+             Present so the arrangement can be judged; disabled rather than
+             inert so nobody wonders why nothing happens. */
+          <button
+            type="button"
+            disabled
+            title="Recherche globale (à brancher)"
+            aria-label="Rechercher"
+            className="text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground shrink-0 rounded-md p-1.5 disabled:opacity-40"
+          >
+            <Search className="size-4" />
+          </button>
+        )}
+        {/* Stays in the rail, stacked under the product tile: the unread count
+            is the one thing in this column that changes on its own. */}
+        <NotificationBell />
       </div>
       <SidebarContent className={cn("gap-0", contentClassName)}>{children}</SidebarContent>
       {/* Foot: who you are, and nothing else. Usage and Settings left it — both
