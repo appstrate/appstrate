@@ -507,10 +507,10 @@ export async function mapWithConcurrency<T, R>(
  */
 async function resolveRerunInput(
   c: Context,
-  rerunFrom: unknown,
+  rerunFrom: string,
   agentPackageId: string | undefined,
 ): Promise<Record<string, unknown>> {
-  if (typeof rerunFrom !== "string" || rerunFrom.length === 0) {
+  if (rerunFrom.length === 0) {
     throw invalidRequest("`rerun_from` must be a run id", "rerun_from");
   }
   const prior = await getRun(
