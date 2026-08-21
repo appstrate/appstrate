@@ -62,26 +62,19 @@ export function ShellSidebar({
               >
                 <Search className="size-4" />
               </button>
-              <SidebarTrigger className="text-muted-foreground size-7 shrink-0">
-                <PanelLeft className="size-4" />
-              </SidebarTrigger>
+              <NotificationBell />
             </>
           )}
         </div>
       </SidebarHeader>
-      {/* Below the rule, the context the navigation applies to — and the bell
-          beside it, because notifications are scoped BY it: the server filters
-          them on `org_id` AND `application_id`, so they are this workspace's
-          news, not the user's. Parked next to the profile it would have read as
-          "my notifications" and been wrong. */}
-      <div className="flex items-center gap-1 px-2 pt-2 group-data-[collapsible=icon]:flex-col group-data-[collapsible=icon]:px-0">
-        <div className="min-w-0 flex-1 group-data-[collapsible=icon]:flex-none">
-          <OrgSwitcher variant="row" />
-        </div>
-        {/* Stays in the rail, stacked under the org avatar: the unread count is
-            the one thing here that changes on its own, and hiding it on collapse
-            would make the rail quieter than the state it reports. */}
-        <NotificationBell />
+      {/* Below the rule, the context the navigation applies to. */}
+      <div className="flex flex-col gap-1 px-2 pt-2 group-data-[collapsible=icon]:px-0">
+        <OrgSwitcher variant="row" />
+        {/* The bell rides in the brand cell, beside the search — except in the
+            rail, where that cell holds the mark alone and it drops here, under
+            the org avatar. It never disappears: the unread count is the one
+            thing in this column that changes on its own. */}
+        {collapsed && <NotificationBell />}
       </div>
       <SidebarContent className={cn("gap-0", contentClassName)}>{children}</SidebarContent>
       {/* Foot: who you are, and nothing else. Usage and Settings left it — both
@@ -90,9 +83,16 @@ export function ShellSidebar({
           A row that repeats what the control above it offers is a row that
           teaches the control is not enough. */}
       <SidebarFooter className="gap-0 p-0">
-        <div className="border-sidebar-border border-t p-2">
-          {collapsed ? <SidebarTrigger className="mb-1" /> : null}
-          <NavUser variant="row" />
+        {/* Who you are, and the collapse beside it — the control that changes
+            the column's width sits at the end of the column, not in the head
+            where it competed with the product name. */}
+        <div className="border-sidebar-border flex items-center gap-1 border-t p-2 group-data-[collapsible=icon]:flex-col">
+          <div className="min-w-0 flex-1 group-data-[collapsible=icon]:flex-none">
+            <NavUser variant="row" />
+          </div>
+          <SidebarTrigger className="text-muted-foreground size-7 shrink-0">
+            <PanelLeft className="size-4" />
+          </SidebarTrigger>
         </div>
       </SidebarFooter>
     </Sidebar>
