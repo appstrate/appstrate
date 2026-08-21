@@ -69,6 +69,7 @@
   "toolbar.viewCards": "Vue cartes",
   "toolbar.viewTable": "Vue tableau",
   "toolbar.clearAll": "Tout effacer",
+  "toolbar.filters": "Filtres",
   "toolbar.searchEntity": "Rechercher des {{entity}}…",
   "toolbar.columns": "Colonnes",
   "toolbar.columnsLabel": "Afficher les colonnes",

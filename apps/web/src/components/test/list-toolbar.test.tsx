@@ -14,7 +14,21 @@
 import { describe, it, expect } from "bun:test";
 import { ListToolbar, type FilterSpec } from "../list-toolbar.tsx";
 import { toggleValue } from "../../lib/toggle-value.ts";
-import { render } from "./run-fixture.tsx";
+import { render as renderNode } from "./run-fixture.tsx";
+
+/**
+ * The bar as the reader sees it.
+ *
+ * The toolbar keeps an invisible copy of its left end at the END of its markup,
+ * laid out only to be measured — it is what decides whether the filters fold
+ * into one button. Everything before it is the real bar, so the suite cuts
+ * there rather than counting every control twice.
+ */
+function render(node: Parameters<typeof renderNode>[0]): string {
+  const html = renderNode(node);
+  const ghost = html.indexOf("data-measure");
+  return ghost === -1 ? html : html.slice(0, ghost);
+}
 
 function filters(over: Partial<Record<"status" | "kind", string[]>> = {}): FilterSpec[] {
   return [

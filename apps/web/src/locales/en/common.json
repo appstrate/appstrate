@@ -69,6 +69,7 @@
   "toolbar.viewCards": "Card view",
   "toolbar.viewTable": "Table view",
   "toolbar.clearAll": "Clear all",
+  "toolbar.filters": "Filters",
   "toolbar.searchEntity": "Search {{entity}}…",
   "toolbar.columns": "Columns",
   "toolbar.columnsLabel": "Toggle columns",

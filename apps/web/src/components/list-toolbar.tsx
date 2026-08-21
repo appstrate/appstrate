@@ -60,9 +60,9 @@
  * count would describe the page rather than the list.
  */
 
-import { Fragment, type ReactNode } from "react";
+import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { Check, LayoutGrid, PlusCircle, Rows3, SlidersHorizontal, X } from "lucide-react";
+import { Check, LayoutGrid, PlusCircle, Rows3, Search, SlidersHorizontal, X } from "lucide-react";
 import { cn } from "@appstrate/ui/cn";
 import type { ListView } from "@/stores/list-view-store";
 import { toggleValue } from "../lib/toggle-value";
@@ -119,6 +119,9 @@ export interface FilterSpec {
 
 /** Beyond this many, the button counts instead of naming. */
 const NAMED_VALUES = 2;
+
+/** The `gap-2` between the two ends, in pixels — the measurement has to allow for it. */
+const GAP = 8;
 
 function FacetedFilter({ filter }: { filter: FilterSpec }) {
   const { t } = useTranslation("common");
@@ -369,62 +372,172 @@ export function ListToolbar({
   const { t } = useTranslation("common");
   const isFiltered = filters.some((filter) => filter.values.length > 0);
 
+  const barRef = useRef<HTMLDivElement>(null);
+  const ghostRef = useRef<HTMLDivElement>(null);
+  const endRef = useRef<HTMLDivElement>(null);
+  const [collapsed, setCollapsed] = useState(false);
+  const [open, setOpen] = useState(false);
+
+  /**
+   * Does the left end still fit on the line?
+   *
+   * MEASURED, not guessed at a breakpoint, because the answer depends on things
+   * no breakpoint knows: how many filters this screen has (three on runs, none
+   * on schedules), how long their labels are once translated, and how wide the
+   * page's own actions turned out. A threshold tuned for the densest bar would
+   * collapse a two-control bar with 400px of empty space beside it.
+   *
+   * The measurement is taken on a GHOST — the same controls, laid out and
+   * invisible — so it reports the width the expanded row WOULD take even while
+   * the collapsed one is on screen. Measuring the real row instead would read
+   * "it fits" the moment it collapsed, expand, overflow, collapse, forever.
+   */
+  useEffect(() => {
+    const bar = barRef.current;
+    const ghost = ghostRef.current;
+    const end = endRef.current;
+    if (!bar || !ghost || !end) return;
+
+    const observer = new ResizeObserver(() => {
+      // `ResizeObserver` fires once on observe, so the first measurement lands
+      // here rather than in this effect's body — where setting state is what
+      // the Rules-of-React gate rejects.
+      const available = bar.clientWidth - end.offsetWidth - GAP;
+      setCollapsed(ghost.scrollWidth > available);
+    });
+    observer.observe(bar);
+    observer.observe(ghost);
+    return () => observer.disconnect();
+  }, []);
+
+  const searchField = search && (
+    <Input
+      value={search.value}
+      onChange={(event) => search.onChange(event.target.value)}
+      placeholder={search.placeholder}
+      // WHITE, unlike the filters beside it, and the difference is the point: a
+      // field is a surface you type into, so it takes the app's component
+      // surface like every other input. The filters are see-through because a
+      // dashed outline over the canvas is what says "empty slot". Our `Input`
+      // is `bg-transparent` by default, which on the grey canvas made the box
+      // grey inside.
+      className="bg-background h-8 w-[150px] @4xl/bar:w-[250px]"
+    />
+  );
+
+  const filterButtons = filters.map((filter) => (
+    <Fragment key={filter.id}>
+      <FacetedFilter filter={filter} />
+    </Fragment>
+  ));
+
+  const resetButton = isFiltered && onReset && (
+    <Button variant="ghost" size="sm" className="h-8 gap-1.5 px-2.5" onClick={onReset}>
+      <X />
+      <span className="hidden @xl/bar:inline">{t("toolbar.reset")}</span>
+    </Button>
+  );
+
+  const activeCount = filters.reduce((total, filter) => total + filter.values.length, 0);
+
   return (
-    // TWO groups, and only the left one may wrap. With `flex-wrap` on the whole
-    // row it was the RIGHT group that went to the next line as soon as a filter
-    // grew a badge — the count, the columns, the view and the action all
-    // dropping below, which is the one thing that must not move. The left group
-    // takes what is left (`flex-1 min-w-0`) and wraps inside its own share;
-    // `items-start` keeps the right group on the first line when it does.
-    <div className="@container/bar mb-4 flex items-start gap-2">
-      {/* Two containers, because the two ends answer different questions: the
-          filters shorten against the room THEY have, the right end against the
-          room the whole bar has. Named, or the nested one would silently win
-          for both. */}
-      <div className="@container/filters flex min-w-0 flex-1 flex-wrap items-center gap-2">
-        {search && (
-          <Input
-            value={search.value}
-            onChange={(event) => search.onChange(event.target.value)}
-            placeholder={search.placeholder}
-            // WHITE, unlike the filters beside it, and the difference is the
-            // point: a field is a surface you type into, so it takes the app's
-            // component surface like every other input. The filters are
-            // see-through because a dashed outline over the canvas is what says
-            // "empty slot". Our `Input` is `bg-transparent` by default, which on
-            // the grey canvas made the box grey inside.
-            className="bg-background h-8 w-[150px] lg:w-[250px]"
-          />
+    // NEVER wraps. Not the row, not either end. Everything that would have gone
+    // to a second line is handled by shedding (the container queries below) and
+    // then by folding the left end into one button that opens a row of its own
+    // — a second line the reader ASKED for, which is a different thing from one
+    // that appeared because the window moved.
+    <div ref={barRef} className="@container/bar relative mb-4 space-y-2">
+      <div className="flex items-center gap-2">
+        {collapsed ? (
+          <div className="flex min-w-0 flex-1 items-center gap-2">
+            {search && (
+              <Button
+                variant="outline"
+                size="sm"
+                aria-label={search.placeholder}
+                aria-expanded={open}
+                className="h-8 bg-transparent px-2.5"
+                onClick={() => setOpen((wasOpen) => !wasOpen)}
+              >
+                <Search />
+              </Button>
+            )}
+            {filters.length > 0 && (
+              <Button
+                variant="outline"
+                size="sm"
+                aria-expanded={open}
+                className={cn(
+                  "h-8 gap-1.5 bg-transparent px-2.5",
+                  activeCount === 0 && "border-dashed",
+                )}
+                onClick={() => setOpen((wasOpen) => !wasOpen)}
+              >
+                {activeCount === 0 && <PlusCircle />}
+                {t("toolbar.filters")}
+                {activeCount > 0 && (
+                  <>
+                    <Separator orientation="vertical" className="mx-1.5 h-4" />
+                    <Badge variant="secondary" className="rounded-sm px-1 font-normal">
+                      {activeCount}
+                    </Badge>
+                  </>
+                )}
+              </Button>
+            )}
+          </div>
+        ) : (
+          // `@container/filters`: the filters shorten themselves against the
+          // room THIS end has, not the window's.
+          <div className="@container/filters flex min-w-0 flex-1 items-center gap-2">
+            {searchField}
+            {filterButtons}
+            {resetButton}
+          </div>
         )}
-        {filters.map((filter) => (
-          <Fragment key={filter.id}>
-            <FacetedFilter filter={filter} />
-          </Fragment>
-        ))}
-        {isFiltered && onReset && (
-          <Button variant="ghost" size="sm" className="h-8" onClick={onReset}>
-            {t("toolbar.reset")}
-            <X />
-          </Button>
-        )}
+
+        {/* Never folds, never wraps. What it CAN do as the bar narrows is shed
+            what is informative before what is operative, in that order: the
+            count goes first, then the words on the column menu, then the words
+            on the page's own action — which the CALLER writes, using `@…/bar`
+            on its label, so the whole row degrades together.
+            What does NOT happen is an overflow menu. shadcn hides its View
+            button and keeps "Add task" whole: the control a screen exists to
+            offer is the last thing that should need a second click to find. Once
+            everything here is an icon it is about 150px, which fits a phone. */}
+        <div ref={endRef} className="flex shrink-0 items-center gap-2">
+          {count !== undefined && (
+            <span className="text-muted-foreground hidden text-sm @2xl/bar:inline">{count}</span>
+          )}
+          {columns && <ColumnsMenu columns={columns} />}
+          {view && onViewChange && <ViewToggle view={view} onChange={onViewChange} />}
+          {actions}
+        </div>
       </div>
 
-      {/* Never wraps. What it CAN do as the bar narrows is shed what is
-          informative before what is operative, in that order: the count goes
-          first, then the words on the column menu, then the words on the page's
-          own action — which the CALLER writes, using `@…/bar` on its label, so
-          the whole row degrades together.
-          What does NOT happen here is an overflow menu. shadcn hides its View
-          button and keeps "Add task" whole, and that is the right instinct: the
-          control a screen exists to offer is the last thing that should need a
-          second click to find. */}
-      <div className="flex shrink-0 items-center gap-2">
-        {count !== undefined && (
-          <span className="text-muted-foreground hidden text-sm @2xl/bar:inline">{count}</span>
-        )}
-        {columns && <ColumnsMenu columns={columns} />}
-        {view && onViewChange && <ViewToggle view={view} onChange={onViewChange} />}
-        {actions}
+      {/* The row the reader asked for. */}
+      {collapsed && open && (
+        <div className="@container/filters flex flex-wrap items-center gap-2">
+          {searchField}
+          {filterButtons}
+          {resetButton}
+        </div>
+      )}
+
+      {/* The ghost: what the expanded left end WOULD measure, laid out and
+          invisible, so the decision to fold does not depend on its own outcome.
+          Last in the DOM and out of flow, so it costs nothing to anything above
+          — including a test, which can cut the markup here and read the bar the
+          reader sees. */}
+      <div
+        ref={ghostRef}
+        aria-hidden
+        data-measure=""
+        className="pointer-events-none invisible absolute top-0 left-0 flex w-max items-center gap-2"
+      >
+        {searchField}
+        {filterButtons}
+        {resetButton}
       </div>
     </div>
   );
