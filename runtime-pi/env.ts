@@ -16,7 +16,7 @@
  */
 
 import { getErrorMessage } from "@appstrate/core/errors";
-import type { ModelApiShape } from "@appstrate/core/sidecar-types";
+import { MODEL_API_SHAPES } from "@appstrate/core/sidecar-types";
 import {
   modelNativeReasoningLevelSchema,
   modelReasoningLevelSchema,
@@ -111,18 +111,11 @@ const DEFAULT_HEARTBEAT_INTERVAL_MS = 30_000;
 const DEFAULT_CONTEXT_WINDOW = 128_000;
 const DEFAULT_MAX_TOKENS = 16_384;
 const DEFAULT_MCP_CONNECT_DEADLINE_MS = 60_000;
-const MODEL_API_SLUGS = [
-  "anthropic-messages",
-  "openai-completions",
-  "openai-responses",
-  "openai-codex-responses",
-  "mistral-conversations",
-  "google-generative-ai",
-  "google-vertex",
-  "azure-openai-responses",
-  "bedrock-converse-stream",
-] as const satisfies readonly ModelApiShape[];
-const KNOWN_MODEL_APIS = new Set<string>(MODEL_API_SLUGS);
+// Read from core rather than mirrored here. The mirror was guarded by
+// `satisfies readonly ModelApiShape[]`, which cannot prove COMPLETENESS — a
+// shape added to core and emitted by the platform typechecked green and then
+// threw `MODEL_API: unknown api` at every container boot.
+const KNOWN_MODEL_APIS = new Set<string>(MODEL_API_SHAPES);
 
 export class RuntimeEnvError extends Error {
   override readonly name = "RuntimeEnvError";

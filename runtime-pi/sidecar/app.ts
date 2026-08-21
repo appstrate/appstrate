@@ -36,7 +36,7 @@ import {
 } from "./token-budget.ts";
 import { OAuthTokenCache, NeedsReconnectionError, type CachedToken } from "./oauth-token-cache.ts";
 import { logger } from "./logger.ts";
-import { filterSensitiveHeaders, scrubBearerMaterial } from "./redact.ts";
+import { filterSensitiveHeaders, scrubSecretMaterial } from "./redact.ts";
 
 export type { SidecarConfig } from "./helpers.ts";
 
@@ -191,7 +191,7 @@ async function passUpstream(
     // bearer-swap, so an upstream/proxy error that echoes request material
     // could carry the real subscription bearer. Same no-leak posture as
     // `logOauthLlmResponse`.
-    const scrubbedSample = scrubBearerMaterial(bodySample);
+    const scrubbedSample = scrubSecretMaterial(bodySample);
     logger.warn("llm alias: upstream error body replaced by synthetic envelope", {
       targetUrl: observe?.targetUrl,
       status: upstream.status,
@@ -312,7 +312,7 @@ async function logOauthLlmResponse(
   // we still scrub bearer/api-key patterns from the sample so the no-leak
   // guarantee holds independent of upstream behavior.
   const responseHeaders = filterSensitiveHeaders(upstream.headers);
-  const scrubbed = scrubBearerMaterial(bodySample);
+  const scrubbed = scrubSecretMaterial(bodySample);
   const truncated = scrubbed.length > 200 ? scrubbed.slice(0, 200) + "…" : scrubbed;
   logger.warn("oauth llm: upstream response non-2xx", {
     credentialId,

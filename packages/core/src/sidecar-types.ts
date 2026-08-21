@@ -519,16 +519,30 @@ export type LlmProxyConfig = LlmProxyApiKeyConfig | LlmProxyOauthConfig;
  * a single source of truth — drift between the three previously caused 401s
  * to surface as "unknown apiShape" rather than a real auth failure.
  */
-export type ModelApiShape =
-  | "anthropic-messages"
-  | "openai-completions"
-  | "openai-responses"
-  | "openai-codex-responses"
-  | "mistral-conversations"
-  | "google-generative-ai"
-  | "google-vertex"
-  | "azure-openai-responses"
-  | "bedrock-converse-stream";
+export const MODEL_API_SHAPES = [
+  "anthropic-messages",
+  "openai-completions",
+  "openai-responses",
+  "openai-codex-responses",
+  "mistral-conversations",
+  "google-generative-ai",
+  "google-vertex",
+  "azure-openai-responses",
+  "bedrock-converse-stream",
+] as const;
+
+/**
+ * The runtime array above is the single source; the type is derived from it.
+ *
+ * This used to be a bare type union, which left consumers needing a runtime
+ * list to hand-mirror it. `runtime-pi/env.ts` did, guarded by
+ * `satisfies readonly ModelApiShape[]` — but `satisfies` only proves each
+ * listed member is valid, never that the list is COMPLETE. Adding a shape here
+ * and wiring the platform to emit it therefore typechecked green everywhere
+ * and then failed every run at container boot with `MODEL_API: unknown api`.
+ * Deriving the type from the array removes the mirror instead of policing it.
+ */
+export type ModelApiShape = (typeof MODEL_API_SHAPES)[number];
 
 /**
  * Model-alias swap (LLM-gateway alias pattern). Present only for model aliases.

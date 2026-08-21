@@ -109,11 +109,36 @@ export function filterSensitiveHeaders(
 }
 
 /**
- * Scrub bearer/api-key material from a free-form text sample before it lands
- * in an operator log. Upstream JSON error payloads don't normally echo
+ * Scrub credential material from a free-form text sample before it lands in an
+ * operator log or a run failure report. Upstream payloads don't normally echo
  * credentials, but the no-leak guarantee must hold independent of upstream
- * behavior — so any `sk-ant-…` token or `Bearer …` sequence is masked.
+ * behavior.
+ *
+ * THE single scrubber for the sidecar. There were two: this one covered only
+ * `sk-ant-…` and `Bearer …`, while `integrations-boot.scrubStderrLine` covered
+ * a strict superset — and the two lived in the same process with no trust
+ * boundary between them, so the weaker one simply leaked more. A `ghp_…`, a
+ * JWT or an `AKIA…` in an upstream error body survived into the operator log
+ * on the `/llm` path and was masked on the runner-stderr path. The superset
+ * won; callers that also need a length cap apply it themselves.
+ *
+ * Separator-prefixed families (`sk-…`, `ghp_…`, `xoxb-…`) keep the mandatory
+ * `-`/`_` so prose words starting with `sk`/`pk` survive; AWS access-key ids
+ * (`AKIA` + upper-alnum, no separator) and Google OAuth tokens (`ya29.` + dot)
+ * get their own literal shapes. `sk-ant-` is matched case-insensitively ahead
+ * of the generic family rule because Anthropic keys appear upper-cased in some
+ * upstream error text, and the generic rule is deliberately case-sensitive.
  */
-export function scrubBearerMaterial(text: string): string {
-  return text.replace(/(sk-ant-[a-z0-9-]+|Bearer\s+[\w.~+/=-]+)/gi, "[redacted]");
+export function scrubSecretMaterial(text: string): string {
+  return text
+    .replace(/\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]+/gi, "$1 [redacted]")
+    .replace(/\beyJ[A-Za-z0-9._-]{10,}/g, "[redacted-jwt]")
+    .replace(/\bsk-ant-[A-Za-z0-9._-]+/gi, "[redacted-key]")
+    .replace(/\b(sk|pk|ghp|gho|ghs|xox[baprs])[-_][A-Za-z0-9._-]{6,}/g, "[redacted-key]")
+    .replace(/\bAKIA[A-Z0-9]{12,}/g, "[redacted-key]")
+    .replace(/\bya29\.[A-Za-z0-9._-]{6,}/g, "[redacted-key]")
+    .replace(
+      /\b(token|secret|password|api[_-]?key|authorization|access[_-]?token|refresh[_-]?token)(["'\s:=]+)[^\s"',&]+/gi,
+      "$1$2[redacted]",
+    );
 }

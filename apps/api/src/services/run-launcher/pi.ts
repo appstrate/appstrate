@@ -313,7 +313,7 @@ async function runPlatformContainerImpl(
     }
 
     const sidecarSpec: SidecarLaunchSpec = {
-      runToken: plan.runToken ?? "",
+      runToken: plan.runToken,
       proxyUrl: plan.proxyUrl ?? undefined,
       llm: sidecarLlm,
       // Propagate the resolved model's context window so the sidecar's

@@ -5,7 +5,7 @@
  * genuinely Pi-specific.
  *
  * **Step cap ("early-stopping generate").** `CHAT_MAX_STEPS` used to be reported
- * by this engine and never enforced. {@link createStepCapController} enforces it
+ * by this engine and never enforced. {@link createStepCapController} enforces it:
  * stop the tool loop at
  * `CHAT_TOOL_STEP_BUDGET`, then issue exactly ONE more model call WITHOUT tools
  * carrying `CHAT_FINAL_STEP_SYSTEM_PROMPT`, so the user gets a synthesis of the

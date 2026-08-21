@@ -83,6 +83,7 @@ import {
   type RuntimeAdapterRunContext,
   type RuntimeEgressContext,
 } from "./integration-runtime-adapter.ts";
+import { scrubSecretMaterial } from "./redact.ts";
 // Side-effect imports — each adapter module registers itself on load.
 // New adapters (firecracker, podman, …) plug in with one more import here.
 import "./integration-runtime-adapter-docker.ts";
@@ -738,23 +739,7 @@ const STDERR_LINE_MAX_CHARS = 500;
  * credentials.
  */
 export function scrubStderrLine(line: string): string {
-  return (
-    line
-      .slice(0, STDERR_LINE_MAX_CHARS)
-      .replace(/\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]+/gi, "$1 [redacted]")
-      .replace(/\beyJ[A-Za-z0-9._-]{10,}/g, "[redacted-jwt]")
-      // Separator-prefixed families (`sk-…`, `ghp_…`, `xoxb-…`) keep the
-      // mandatory `-`/`_` so prose words starting with `sk`/`pk` survive;
-      // AWS access-key ids (`AKIA` + 16 upper-alnum, no separator) and Google
-      // OAuth tokens (`ya29.` + dot) get their own literal shapes.
-      .replace(/\b(sk|pk|ghp|gho|ghs|xox[baprs])[-_][A-Za-z0-9._-]{6,}/g, "[redacted-key]")
-      .replace(/\bAKIA[A-Z0-9]{12,}/g, "[redacted-key]")
-      .replace(/\bya29\.[A-Za-z0-9._-]{6,}/g, "[redacted-key]")
-      .replace(
-        /\b(token|secret|password|api[_-]?key|authorization|access[_-]?token|refresh[_-]?token)(["'\s:=]+)[^\s"',&]+/gi,
-        "$1$2[redacted]",
-      )
-  );
+  return scrubSecretMaterial(line.slice(0, STDERR_LINE_MAX_CHARS));
 }
 
 /**

@@ -13,7 +13,6 @@ import { afterEach, describe, expect, it } from "bun:test";
 import {
   acquirePiChatSlot,
   chatCapacityResponse,
-  piChatConcurrencyIsDefault,
   piChatConcurrencyStats,
   piChatMaxConcurrency,
   releaseOnClose,
@@ -192,16 +191,19 @@ describe("capacity signal for sizing the cap", () => {
     held.release();
   });
 
-  it("reports whether the cap is an operator decision or the built-in default", () => {
+  it("falls back to the default on absent or invalid input, and honours a valid cap", () => {
+    // Asserted through `piChatMaxConcurrency` — the surface production reads.
+    // A predicate that only answered "is this the default?" existed here too,
+    // with no caller outside this file; `warnIfDefaultChatConcurrency` resolves
+    // the parse itself, so the predicate was pure test scaffolding.
     delete process.env[ENV_VAR];
-    expect(piChatConcurrencyIsDefault()).toBe(true);
-    // Invalid input falls back to the default, so it is NOT a decision either —
-    // a typo'd cap must not read as deliberate.
+    expect(piChatMaxConcurrency()).toBe(6);
+    // A typo'd cap must fall back rather than read as a deliberate value.
     process.env[ENV_VAR] = "nope";
-    expect(piChatConcurrencyIsDefault()).toBe(true);
+    expect(piChatMaxConcurrency()).toBe(6);
     process.env[ENV_VAR] = "0";
-    expect(piChatConcurrencyIsDefault()).toBe(true);
+    expect(piChatMaxConcurrency()).toBe(6);
     process.env[ENV_VAR] = "32";
-    expect(piChatConcurrencyIsDefault()).toBe(false);
+    expect(piChatMaxConcurrency()).toBe(32);
   });
 });

@@ -327,6 +327,18 @@ export const SIDECAR_OPERATOR_ENV_KEYS = [
   // single operator knob widens BOTH legs of a tool call. Absent → the
   // MCP SDK default applies on each leg.
   "APPSTRATE_MCP_TOOL_TIMEOUT_MS",
+  // The four below are read INSIDE the sidecar process but were never
+  // forwarded, so under RUN_ADAPTER=docker/firecracker — where the sidecar env
+  // is built from `pickOperatorSidecarEnv()` alone rather than inherited —
+  // setting them had no effect and the sidecar silently used its compiled
+  // default. `.env.example` documented that gap for the two token knobs and
+  // named this list as the fix; `LOG_LEVEL` made every `logger.debug` in the
+  // sidecar permanently unreachable in container mode, including diagnostics
+  // whose own comments say they are "emitted at LOG_LEVEL=debug".
+  "LOG_LEVEL",
+  "SIDECAR_API_CALL_CONCURRENCY",
+  "SIDECAR_INLINE_TOOL_OUTPUT_TOKENS",
+  "SIDECAR_RUN_TOOL_OUTPUT_BUDGET_TOKENS",
 ] as const;
 
 export type SidecarOperatorEnvKey = (typeof SIDECAR_OPERATOR_ENV_KEYS)[number];

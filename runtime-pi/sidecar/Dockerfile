@@ -119,6 +119,16 @@ RUN apk add --no-cache libstdc++ libgcc ca-certificates docker-cli openssl
 
 COPY --from=builder --chmod=0555 /build/runtime-pi/sidecar/sidecar /usr/local/bin/sidecar
 
+# Load-bearing, not cosmetic: `token-budget.ts` guards its input validation with
+# `if (process.env.NODE_ENV !== "production") throw` so a runtime misuse fails
+# loudly in dev but degrades to a silent no-op in production, where crashing an
+# active run costs more than a swallowed bad number. This image never set the
+# variable (only the AGENT image did), so that condition was permanently true
+# and the shipped sidecar threw on exactly the path documented as defensive.
+# The platform builds the sidecar env from `pickOperatorSidecarEnv()`, which
+# does not forward NODE_ENV — so it has to be baked here.
+ENV NODE_ENV=production
+
 USER nobody:nobody
 
 EXPOSE 8080 8081

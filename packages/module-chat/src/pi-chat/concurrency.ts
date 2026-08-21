@@ -55,9 +55,6 @@ function resolveChatConcurrency(): { max: number; fromEnv: boolean } {
 /** Resolve the configured cap, falling back to the default on absent/invalid input. */
 export const piChatMaxConcurrency = (): number => resolveChatConcurrency().max;
 
-/** Whether the cap is the built-in default rather than an operator decision. */
-export const piChatConcurrencyIsDefault = (): boolean => !resolveChatConcurrency().fromEnv;
-
 /**
  * Saturation snapshot for capacity sizing.
  *

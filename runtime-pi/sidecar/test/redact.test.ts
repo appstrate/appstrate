@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect } from "bun:test";
-import { filterSensitiveHeaders, redactLocationHeader, scrubBearerMaterial } from "../redact.ts";
+import { filterSensitiveHeaders, redactLocationHeader, scrubSecretMaterial } from "../redact.ts";
 
 describe("filterSensitiveHeaders", () => {
   it("drops set-cookie from a Headers instance", () => {
@@ -119,22 +119,44 @@ describe("redactLocationHeader", () => {
   });
 });
 
-describe("scrubBearerMaterial", () => {
+describe("scrubSecretMaterial", () => {
   it("masks an sk-ant token embedded in an error body", () => {
-    expect(scrubBearerMaterial('{"error":"bad key sk-ant-oat01-abc-def"}')).toBe(
-      '{"error":"bad key [redacted]"}',
+    expect(scrubSecretMaterial('{"error":"bad key sk-ant-oat01-abc-def"}')).toBe(
+      '{"error":"bad key [redacted-key]"}',
     );
   });
 
-  it("masks a Bearer sequence (echoed authorization material)", () => {
-    expect(scrubBearerMaterial("upstream said: Bearer eyJhbGciOi.abc_def-ghi rejected")).toBe(
-      "upstream said: [redacted] rejected",
+  it("masks a Bearer sequence, keeping the scheme so the log stays readable", () => {
+    expect(scrubSecretMaterial("upstream said: Bearer eyJhbGciOi.abc_def-ghi rejected")).toBe(
+      "upstream said: Bearer [redacted] rejected",
     );
   });
 
-  it("is case-insensitive and leaves clean text byte-identical", () => {
-    expect(scrubBearerMaterial("bearer tok123 and SK-ANT-x1")).toBe("[redacted] and [redacted]");
+  it("is case-insensitive on sk-ant and leaves clean text byte-identical", () => {
+    expect(scrubSecretMaterial("bearer tok123 and SK-ANT-x1")).toBe(
+      "bearer [redacted] and [redacted-key]",
+    );
     const clean = '{"error":{"type":"overloaded_error"}}';
-    expect(scrubBearerMaterial(clean)).toBe(clean);
+    expect(scrubSecretMaterial(clean)).toBe(clean);
+  });
+
+  // The reason this function replaced `scrubBearerMaterial`: each shape below
+  // reached an operator log unmasked on the `/llm` path while the identical
+  // shape was masked on the runner-stderr path, because two scrubbers of
+  // unequal strength lived in the same process.
+  it("masks the shapes the previous /llm scrubber let through", () => {
+    expect(scrubSecretMaterial("key ghp_ABCdef123456789")).toBe("key [redacted-key]");
+    expect(scrubSecretMaterial("aws key AKIAIOSFODNN7EXAMPLE")).toBe("aws key [redacted-key]");
+    expect(scrubSecretMaterial("got ya29.a0AfH6SMBx-abc_123")).toBe("got [redacted-key]");
+    expect(scrubSecretMaterial("used Basic aWQ6c2VjcmV0")).toBe("used Basic [redacted]");
+    expect(scrubSecretMaterial("raw eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9")).toBe(
+      "raw [redacted-jwt]",
+    );
+  });
+
+  it("leaves prose that merely starts with a key prefix alone", () => {
+    expect(scrubSecretMaterial("found skeletons in pkgroots directory")).toBe(
+      "found skeletons in pkgroots directory",
+    );
   });
 });

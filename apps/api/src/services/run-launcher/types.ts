@@ -75,11 +75,17 @@ export interface AppstrateRunPlan {
   // --- Platform wiring ---
   /**
    * Signed run token authorising the sidecar's `/internal/*` calls back into
-   * the platform. Optional — runners that don't expose a callback API omit
-   * it. The platform URL is resolved by the container orchestrator at spawn
-   * time, not surfaced on this plan.
+   * the platform. The platform URL is resolved by the container orchestrator
+   * at spawn time, not surfaced on this plan.
+   *
+   * REQUIRED. It was optional for "runners that don't expose a callback API",
+   * a distinction from the multi-runner era — there is one runner now and
+   * `run-context-builder` always signs a token for it. The optionality only
+   * survived as a `?? ""` at the spawn site, which would have booted a sidecar
+   * with an EMPTY `RUN_TOKEN` instead of failing. Requiring the field turns
+   * that silent-empty-credential path into a compile error.
    */
-  runToken?: string;
+  runToken: string;
   /** Outbound HTTP proxy, if any. */
   proxyUrl?: string | null;
   /** Seconds cap on the container lifetime. */

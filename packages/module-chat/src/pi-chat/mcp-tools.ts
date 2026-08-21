@@ -48,8 +48,8 @@ interface PiToolResult {
 }
 
 /**
- * Wrap an arbitrary payload as a Pi tool result. Channel split mirrors the
- * The model-visible channel: `content` is what pi-ai serializes to
+ * Wrap an arbitrary payload as a Pi tool result. The channel split is the
+ * point. The model-visible channel: `content` is what pi-ai serializes to
  * the MODEL, so connect links are redacted there; the connect URL surfaces
  * ONLY through the typed `connectOffer` field the connect card reads. `details`
  * (UI JSON view) carries the redacted payload — the live URL lives in exactly
