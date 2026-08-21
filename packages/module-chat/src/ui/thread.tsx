@@ -58,7 +58,11 @@ import {
 export function Thread({ composerSlot }: { composerSlot?: React.ReactNode }) {
   return (
     <ThreadPrimitive.Root
-      className="bg-background flex h-full flex-col"
+      // `canvas`, not `background`: a full-page thread is a PAGE, and pages in
+      // this shell are grey with white cards on top (the composer, the tool
+      // cards). `background` is shadcn's component surface — using it here made
+      // the chat the one screen in the product that was flat white.
+      className="bg-canvas flex h-full flex-col"
       style={{ ["--thread-max-width" as string]: "42rem" }}
     >
       {/* Register the rich tool cards (these render nothing themselves). */}
@@ -83,7 +87,7 @@ export function Thread({ composerSlot }: { composerSlot?: React.ReactNode }) {
 
           <div className="min-h-6 flex-grow" />
 
-          <ThreadPrimitive.ViewportFooter className="bg-background sticky bottom-0 mt-2 flex w-full max-w-(--thread-max-width) flex-col items-center gap-2 pb-4">
+          <ThreadPrimitive.ViewportFooter className="bg-canvas sticky bottom-0 mt-2 flex w-full max-w-(--thread-max-width) flex-col items-center gap-2 pb-4">
             <ScrollToBottom />
             <Composer slot={composerSlot} />
             <Disclaimer />
@@ -119,7 +123,7 @@ function ThreadWelcome({ composerSlot }: { composerSlot?: React.ReactNode }) {
             <ThreadPrimitive.Suggestion key={s} prompt={s} method="replace" autoSend asChild>
               <button
                 type="button"
-                className="hover:bg-accent rounded-lg border px-3 py-2 text-left text-sm transition-colors"
+                className="bg-card hover:bg-accent rounded-lg border px-3 py-2 text-left text-sm transition-colors"
               >
                 {s}
               </button>
@@ -346,7 +350,10 @@ function UserMessage() {
       {/* The text bubble. Guarded on content so an attachment-only message (no
           text part) doesn't paint an empty grey pill. */}
       <MessagePrimitive.If hasContent>
-        <div className="bg-muted text-foreground max-w-[80%] rounded-2xl px-4 py-2 text-sm whitespace-pre-wrap">
+        {/* A white card on the canvas, like every other surface in the thread
+            (the composer, the tool cards). `bg-muted` was a hollow on white and
+            reads as a smudge on grey — 3 points of luminance from the page. */}
+        <div className="bg-card text-foreground max-w-[80%] rounded-2xl border px-4 py-2 text-sm whitespace-pre-wrap shadow-sm">
           <MessagePrimitive.Parts components={{ File: FileAttachmentPart }} />
         </div>
       </MessagePrimitive.If>

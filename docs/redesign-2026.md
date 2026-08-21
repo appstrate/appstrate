@@ -62,6 +62,12 @@ on — without it the chat, billing and webhooks surfaces are invisible in the l
 A missing fixture logs `[lab] no fixture for GET /api/… → 404`. That is the
 console telling you about a hole, not a bug.
 
+The chat's own endpoints are fixtured too: a conversation with real turns
+(`chatHistory`) and the resume probe (`/sessions/:id/stream` → 204, the real
+server's "nothing is generating"). Without those two the lab only ever showed an
+EMPTY thread opening on a generation error — the screen the chat is actually
+about could not be looked at.
+
 Handlers receive the request's headers, so an org-scoped list can answer for the
 org that was ASKED for rather than the one the app is in — `applicationsByOrg`
 gives Tractr three workspaces and Appstrate one, which is what makes the
@@ -317,6 +323,13 @@ they already had, by one font weight, when the chat kept its own copy.
   drawer covers the very screen it just navigated to. Studio had that bug too,
   so both products got the fix. The in-row rename and delete buttons are not
   menu rows, so they still work with the drawer open.
+- **The thread sits on the canvas, not on white.** It was the one screen in the
+  product that was flat white: `bg-background` is shadcn's COMPONENT surface,
+  and a full-page thread is a page. Everything that was a surface became a white
+  card on the grey — the composer and the tool cards already were, the user
+  bubble and the welcome suggestions were not (`bg-muted` is a hollow on white
+  and reads as a smudge three points of luminance from the canvas). The context
+  panel stays white: it is a panel laid ON the canvas, like a dialog.
 - **The list speaks the bundle**, not hard-coded French: `list.*` in
   `chat.json`, plural families for the relative-time column. It sits beside an
   i18n'd Studio nav; half a translated sidebar is worse than none.

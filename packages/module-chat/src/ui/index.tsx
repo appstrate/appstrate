@@ -235,7 +235,7 @@ export function ChatPage({
               `ChatConversationTitle`. What is left is the thread itself. */}
           {/* A plain div, not a `main`: the host shell's inset already IS the
               page's `main` landmark, and two nested ones name two pages. */}
-          <div className="bg-background flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden">
+          <div className="bg-canvas flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden">
             <Conversation
               key={activeId}
               id={activeId}

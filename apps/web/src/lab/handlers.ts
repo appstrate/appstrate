@@ -127,6 +127,24 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
     }),
   },
 
+  {
+    // The resume probe every conversation fires on mount. 204 is the real
+    // server's "nothing is generating" — without it the probe 404s and a
+    // brand-new conversation opens on a generation error instead of its
+    // welcome screen.
+    method: "GET",
+    pattern: /^\/api\/chat\/sessions\/[^/]+\/stream$/,
+    handler: () => ({ status: 204, body: null }),
+  },
+  {
+    method: "GET",
+    pattern: /^\/api\/chat\/sessions\/[^/]+$/,
+    handler: (_u, s) => ({
+      status: 200,
+      body: { messages: list(f.chatHistory.messages, s) },
+    }),
+  },
+
   /* Notification badges — small, but they drive visible chrome (the bell, the
      per-agent dots), so a 404 here changes what the design looks like. */
   {

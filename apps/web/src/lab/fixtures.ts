@@ -384,6 +384,58 @@ export const heavyChatSessions: ChatSession[] = Array.from({ length: 200 }, (_, 
   updatedAt: ago(i * 90),
 }));
 
+/**
+ * One conversation with actual turns. `GET /api/chat/sessions/:id` is outside
+ * the OpenAPI surface (the chat module serves it), so this mirrors what
+ * `loadHistory` reads by hand: rows of `{ id, content }` where `content` is an
+ * ai-sdk UIMessage minus its id.
+ *
+ * Without it the lab only ever shows an EMPTY thread — the one screen the chat
+ * is actually about could not be looked at.
+ */
+export const chatHistory = {
+  messages: [
+    {
+      id: "msg_01",
+      content: {
+        role: "user",
+        parts: [{ type: "text", text: "Où en est la refonte de la page Runs ?" }],
+      },
+    },
+    {
+      id: "msg_02",
+      content: {
+        role: "assistant",
+        parts: [
+          {
+            type: "text",
+            text: "La page Runs est passée au nouveau cadre gris : les lignes sont des cartes blanches, le filtre reste collé en haut.\n\nIl reste deux choses :\n\n1. la colonne de coût, qui déborde sous 1200 px ;\n2. le badge « en cours », encore sur l’ancienne teinte.",
+          },
+        ],
+      },
+    },
+    {
+      id: "msg_03",
+      content: {
+        role: "user",
+        parts: [{ type: "text", text: "Montre-moi le dernier run échoué." }],
+      },
+    },
+    {
+      id: "msg_04",
+      content: {
+        role: "assistant",
+        parts: [
+          {
+            type: "text",
+            text: "Le run #199 (Compta trimestrielle) a échoué hier à 21:43 après 124 s : le relevé de mars manquait dans le dossier Drive du trimestre.",
+          },
+        ],
+      },
+    },
+  ],
+};
+
 export const notifications: Json200<"/api/notifications", "get"> = {
   has_more: false,
   data: [
