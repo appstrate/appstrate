@@ -191,11 +191,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   reopens it for every index, constraint and default it introduces.
 
   **New operator check.** `DATABASE_URL=… bun scripts/check-index-drift.ts`
-  diffs the indexes declared by the latest Drizzle snapshot against
-  `pg_indexes` on a live database and exits non-zero on anything missing
-  (indexes present but undeclared are reported as informational — Postgres
-  backs every primary key and unique constraint with one). Run it against
-  production after a squash. `apps/api/test/unit/migration-index-parity.test.ts`
+  reports every index the schema declares that a live database lacks and exits
+  non-zero; `DATABASE_URL` is its only input, so it runs from a jump host with
+  nothing but a production connection string. It diffs against the snapshot
+  matching that database's OWN migration watermark, not the newest on disk (a
+  database with migrations pending legitimately lacks the indexes they add),
+  and refuses rather than guess when the watermark matches no journal entry.
+  NAMES only — an index present under the expected name with lost uniqueness
+  or a lost partial predicate reads as present. Run it against production
+  after a squash. `apps/api/test/unit/migration-index-parity.test.ts`
   pins the rest in CI: it replays the journal into a throwaway PGlite and fails
   if the latest snapshot declares an index no SQL in the journal creates, then
   drops these two to model the production population and re-runs 0041 against

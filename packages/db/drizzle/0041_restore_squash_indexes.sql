@@ -1,12 +1,12 @@
 -- Re-create two indexes that the schema declares but production does not have.
 --
 -- `idx_runs_package_started` and `idx_runs_schedule_id` are declared in
--- src/schema/runs.ts (lines 337 and 341) and created in 0000_init.sql
--- (lines 633-634). When production was audited they were the only two of the
--- 132 indexes declared at that point (`meta/0038_snapshot.json`) absent from
--- the production database; 0039 has since dropped 18, so the schema declares
--- 114 today. The DDL below is those two lines verbatim, with `IF NOT EXISTS`
--- added and nothing else changed.
+-- src/schema/runs.ts and created in 0000_init.sql (lines 633-634). When
+-- production was audited they were the only two of the 132 indexes declared at
+-- that point (`meta/0038_snapshot.json`) absent from the production database;
+-- 0039 has since dropped 18, so the schema declares 114 today. The DDL below is
+-- those two lines verbatim, with `IF NOT EXISTS` added and nothing else
+-- changed.
 --
 -- WHY THEY ARE MISSING. 0000_init.sql is a SQUASH, and production predates it.
 -- Drizzle replays only the journal entries past a database's watermark, so for
@@ -40,27 +40,22 @@
 -- pending batch runs inside one transaction (see above). A CONCURRENTLY
 -- statement in a drizzle migration fails at runtime, every time.
 --
--- LOCK NOTE. A plain CREATE INDEX takes ACCESS EXCLUSIVE on `runs` and holds it
--- until the build finishes. That is two separate costs, and only one of them is
--- small here.
+-- LOCK NOTE. A plain CREATE INDEX takes SHARE on `runs` — not ACCESS EXCLUSIVE;
+-- that is DROP INDEX. SHARE does not conflict with a reader's ACCESS SHARE, so
+-- readers neither block this migration nor are blocked by it. It does conflict
+-- with ROW EXCLUSIVE: these statements block WRITES to `runs`, and only a
+-- long-lived writing transaction can make them wait. Locks are held to COMMIT
+-- and drizzle commits the whole batch at once, so that write block lasts the
+-- rest of the batch, not just the two builds (trivial at 4345 rows).
 --
---   BUILD TIME is negligible and row-count dependent: `runs` holds 4345 rows in
---   production today, so both indexes build effectively instantaneously. On a
---   large `runs` this alone would be a stall, and the statements would have to
---   leave the drizzle batch entirely in order to use CONCURRENTLY.
---
---   ACQUISITION WAIT is the real hazard and is NOT row-count dependent. If any
---   long-running query already holds a lock on `runs` when the migration
---   starts, the pending ACCESS EXCLUSIVE request queues AHEAD of every
---   subsequent query on the table — so a migration that takes milliseconds to
---   run still stalls the hot write path for as long as that one reader lives.
---   Failing fast and letting the deploy retry beats heading that queue.
---
--- The two statements below are therefore fenced with `SET LOCAL lock_timeout =
--- '3s'` and reset to DEFAULT after — the same fence 0039 established for this
--- exact table two migrations ago, for this exact reason; `SET LOCAL` rather
--- than `SET`, and the explicit reset, for the pooled-connection and
--- same-transaction-bleed reasons 0039's header spells out.
+-- Hence the `SET LOCAL lock_timeout = '3s'` fence below, reset to DEFAULT after
+-- — same instrument as 0039, different conflict (its DROP INDEX statements take
+-- ACCESS EXCLUSIVE, so they block readers too); see its header for `SET LOCAL`
+-- rather than `SET`, and for the reset. The cost, written down rather than
+-- discovered: on expiry the statement errors and aborts the single transaction
+-- wrapping the batch — `migrate` throws, boot fails, the deploy fails its
+-- health gate. That is the right trade for an index restore that is not urgent
+-- (fail fast, retry), but it is a failed deploy, not a silent skip.
 --
 -- SIDE EFFECT WORTH NAMING. 0039 dropped `idx_runs_package_id` on the grounds
 -- that `idx_runs_package_started` is a leading-prefix cover, and its own header

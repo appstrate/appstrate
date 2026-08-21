@@ -62,7 +62,6 @@ const RESTORED = ["idx_runs_package_started", "idx_runs_schedule_id"] as const;
 const pg = new PGlite();
 
 let journal: DrizzleJournal;
-let snapshotName: string;
 let declared: Set<string>;
 let actual: Set<string>;
 
@@ -91,7 +90,7 @@ async function execMigrationFile(path: string): Promise<void> {
 // this file outright. A softer ceiling of our own could never fire.
 beforeAll(async () => {
   journal = await Bun.file(`${META_DIR}/_journal.json`).json();
-  snapshotName = latestSnapshotName(journal);
+  const snapshotName = latestSnapshotName(journal);
   const snapshot: DrizzleSnapshot = await Bun.file(`${META_DIR}/${snapshotName}`).json();
   declared = declaredIndexes(snapshot);
 
@@ -165,11 +164,16 @@ describe("migration replay index parity", () => {
     expect(RESTORED.filter((name) => !after.has(name))).toEqual([]);
   });
 
-  it("has a .sql file for every journal entry and a file for the latest snapshot", async () => {
+  it("has a .sql file for every journal entry", async () => {
     // Cheap, and it catches the one thing the replay cannot report: a
     // hand-authored journal entry pointing at nothing. The migration runner
     // logs a warning and SKIPS a missing file, so a typo'd tag would leave the
     // parity assertion above passing against an incomplete database.
+    //
+    // The SNAPSHOT file is deliberately not asserted here: `beforeAll` already
+    // reads it with `.json()`, which throws if it is absent, so the suite dies
+    // in the hook and an assertion on this line could only ever run in a world
+    // where it is already true.
     const missingFiles: string[] = [];
     for (const entry of journal.entries) {
       if (!(await Bun.file(`${MIGRATIONS_DIR}/${entry.tag}.sql`).exists())) {
@@ -177,6 +181,5 @@ describe("migration replay index parity", () => {
       }
     }
     expect(missingFiles).toEqual([]);
-    expect(await Bun.file(`${META_DIR}/${snapshotName}`).exists()).toBe(true);
   });
 });
