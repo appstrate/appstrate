@@ -279,14 +279,22 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
   const integrationResolver = buildIntegrationResolver(mode, effectiveResolverInputs);
 
   // ─── 5. Parse input ────────────────────────────────────────────────
-  // Author defaults (`default` in the manifest's `input` schema) are the
-  // first layer of the platform's input resolution and it applies them on
-  // every run. Applying them here too is what keeps `appstrate run
-  // ./bundle` executing the same bundle with the same parameters the
-  // platform would. LOCAL ONLY — the remote path sends the caller's input
-  // verbatim and lets the server own the whole precedence chain, so there
-  // is exactly one implementation of layers 2-4.
-  const input = resolveLocalInput(bundle, await resolveInput(opts));
+  // Layers 1-2 of the platform's input resolution, applied here because a
+  // locally executed bundle never reaches the server's resolver: author
+  // defaults (`default` in the manifest's `input` schema) always, plus the
+  // per-application stored values and locks when the target is a REMOTE
+  // package — that is what keeps `appstrate run @scope/agent` executing the
+  // same agent with the same parameters the dashboard would. A bundle read
+  // off disk has no application row behind it, so it stays
+  // author-defaults-only; there is no inheritance to invent for it.
+  //
+  // Layers 3-4 stay server-owned: the remote execution path sends the
+  // caller's input verbatim and lets the server run the whole chain, so
+  // `resolveEffectiveInput` has exactly one implementation.
+  const storedInput: StoredInputLayer | undefined = inheritedConfig.inherited
+    ? { values: inheritedConfig.inputValues, lockedFields: inheritedConfig.lockedInputFields }
+    : undefined;
+  const input = resolveLocalInput(bundle, await resolveInput(opts), storedInput);
 
   // ─── 6. ExecutionContext + prompt inputs ──────────────────────────
   // Derive the full platform prompt (tools / skills / schemas / output)
@@ -1200,28 +1208,74 @@ export async function _buildResolverInputsForTesting(
 }
 
 /**
- * Layer the agent's author defaults underneath a local run's caller input.
+ * The per-application input layer a REMOTE package carries with it — what
+ * `application_packages.input_settings` stores, as delivered by the
+ * `run-config` endpoint. Absent for a bundle read off disk: that target has
+ * no application row behind it, so there is nothing to inherit.
+ */
+export interface StoredInputLayer {
+  /** Editor-set values — layer 2 of the platform's input resolution. */
+  values: Record<string, unknown>;
+  /** Input fields the editor froze. */
+  lockedFields: readonly string[];
+}
+
+/**
+ * Raised when the caller's `--input` / `--input-file` names a field the
+ * editor locked. Mirrors the server's `400 locked_input_field`.
+ */
+export class LockedInputFieldError extends Error {
+  constructor(public readonly field: string) {
+    super(
+      `Field '${field}' is locked on this agent and cannot be set at launch — remove it from the input.`,
+    );
+    this.name = "LockedInputFieldError";
+  }
+}
+
+/**
+ * Layer the agent's stored input underneath a local run's caller input.
  *
- * Precedence: `manifest.input.schema` `default` keywords lose to anything
- * the caller supplied. The caller wins even when the value they wrote is
- * `null` or `""` — only an ABSENT key falls through to the default.
+ * Precedence, lowest first — the same order and the same shallow
+ * per-property overlay the server applies in `resolveEffectiveInput`
+ * (`apps/api/src/services/input-resolution.ts`):
  *
- * This is the platform's own author layer (`@appstrate/core/form`
- * `authorDefaults`), applied by the same rules the server applies in
- * `resolveEffectiveInput`, so the same bundle yields the same parameters
- * locally and on a platform. A property with no `default` stays absent
- * here too, and the bundle's `required` check sees the truth.
+ *   1. author defaults — `manifest.input.schema` `default` keywords, read
+ *      through the platform's own `authorDefaults` (`@appstrate/core/form`)
+ *   2. editor values — `stored.values`, present only for a package fetched
+ *      from a platform
+ *   3-4. schedule values / caller input — the server owns layer 3 entirely;
+ *      the CLI caller IS layer 4, and their value wins even when it is
+ *      `null` or `""`. Only an ABSENT key falls through.
  *
- * Returns the caller input unchanged when the agent declares no input
- * schema.
+ * A property with no value at any layer stays absent, so the bundle's own
+ * `required` check sees the truth.
+ *
+ * A caller value naming a locked field is REFUSED, not dropped: silently
+ * ignoring it would run the agent with parameters other than the ones
+ * asked for. Be honest about what that buys — a developer running the CLI
+ * already holds the bundle and executes it in their own shell, so nothing
+ * here stops them from editing the manifest or the input afterwards. This
+ * is NOT a security boundary against the caller. It is parity: the same
+ * agent launched the same way yields the same parameters whether it runs
+ * on the platform or locally, and a lock the editor set is never silently
+ * ignored.
  */
 export function resolveLocalInput(
   bundle: import("@appstrate/afps-runtime/bundle").Bundle,
   callerInput: Record<string, unknown>,
+  stored?: StoredInputLayer | undefined,
 ): Record<string, unknown> {
+  const locked = new Set(stored?.lockedFields ?? []);
+  for (const key of Object.keys(callerInput)) {
+    if (locked.has(key)) throw new LockedInputFieldError(key);
+  }
   const schema = readBundleInputSchema(bundle);
-  if (!schema) return callerInput;
-  return { ...authorDefaults(schema), ...callerInput };
+  return {
+    ...(schema ? authorDefaults(schema) : {}),
+    ...(stored?.values ?? {}),
+    ...callerInput,
+  };
 }
 
 /**

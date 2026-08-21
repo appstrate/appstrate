@@ -628,7 +628,7 @@ export interface paths {
         };
         /**
          * Get the resolved per-app run configuration
-         * @description Returns the configuration applied when this application runs the given package: model override, generation settings, proxy override, and pinned version label. Used by the CLI to reproduce a UI run without stitching together three separate calls; the UI uses the same source for its run-from-app flow.
+         * @description Returns the configuration applied when this application runs the given package: model override, generation settings, proxy override, pinned version label, and the stored input layer (editor values plus locked fields). Used by the CLI to reproduce a UI run without stitching together three separate calls; the UI uses the same source for its run-from-app flow.
          */
         get: operations["getApplicationPackageRunConfig"];
         put?: never;
@@ -7918,7 +7918,15 @@ export interface operations {
                      *       },
                      *       "modelId": "claude-sonnet-4-6",
                      *       "proxyId": null,
-                     *       "version_pin": "1.2.3"
+                     *       "version_pin": "1.2.3",
+                     *       "input": {
+                     *         "values": {
+                     *           "dry_run": true
+                     *         },
+                     *         "locked_fields": [
+                     *           "dry_run"
+                     *         ]
+                     *       }
                      *     }
                      */
                     "application/json": {
@@ -7926,6 +7934,13 @@ export interface operations {
                         modelId: string | null;
                         proxyId: string | null;
                         version_pin: string | null;
+                        /** @description Stored input layer for this application — the editor's values and the fields it locked. A locally executed run applies `values` under the caller's input and refuses a caller value naming a locked field. */
+                        input: {
+                            values: {
+                                [key: string]: unknown;
+                            };
+                            locked_fields: string[];
+                        };
                     };
                 };
             };

@@ -1,18 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Unit tests for `resolveLocalInput` — the author-default layer a LOCAL
- * `appstrate run` applies underneath the caller's `--input` / `--input-file`.
+ * Unit tests for `resolveLocalInput` — layers 1-2 a LOCAL `appstrate run`
+ * applies underneath the caller's `--input` / `--input-file`.
  *
- * The platform resolves `manifest.input.schema` defaults on every run, so a
- * local run of the same bundle must resolve them too or it executes with
- * different parameters than the dashboard would. The remote path
- * deliberately has no equivalent: the server owns that chain.
+ * The platform resolves `manifest.input.schema` defaults and the
+ * per-application stored values on every run, so a local run of the same
+ * agent must resolve them too or it executes with different parameters than
+ * the dashboard would. Layers 3-4 (schedule values, caller input on a
+ * platform run) deliberately have no equivalent: the server owns that chain.
  */
 
 import { describe, it, expect } from "bun:test";
 import type { Bundle } from "@appstrate/afps-runtime/bundle";
-import { resolveLocalInput } from "../src/commands/run.ts";
+import { resolveLocalInput, LockedInputFieldError } from "../src/commands/run.ts";
 
 /**
  * Minimal Bundle fixture — `resolveLocalInput` only reads the root
@@ -81,5 +82,81 @@ describe("resolveLocalInput", () => {
       },
     });
     expect(resolveLocalInput(bundle, {})).toEqual({ tone: "neutral" });
+  });
+});
+
+/**
+ * Layer 2 — `application_packages.input_settings`, delivered by the
+ * `run-config` endpoint. Present only for `appstrate run @scope/agent`
+ * (a REMOTE package installed in an application); a bundle read off disk
+ * has no application row behind it and passes `undefined`.
+ */
+describe("resolveLocalInput — stored input layer (remote package)", () => {
+  const STORED = { values: { tone: "brisk" }, lockedFields: [] as string[] };
+
+  it("inherits the editor's stored value over the author default", () => {
+    expect(resolveLocalInput(TONE_BUNDLE, {}, STORED)).toEqual({ tone: "brisk" });
+  });
+
+  it("lets the caller's input beat the stored value", () => {
+    expect(resolveLocalInput(TONE_BUNDLE, { tone: "formal" }, STORED)).toEqual({ tone: "formal" });
+  });
+
+  it("keeps the author default for a property the editor did not store", () => {
+    const bundle = makeBundle({
+      schema: {
+        type: "object",
+        properties: {
+          tone: { type: "string", default: "neutral" },
+          dry_run: { type: "boolean", default: false },
+        },
+      },
+    });
+    expect(resolveLocalInput(bundle, {}, STORED)).toEqual({ tone: "brisk", dry_run: false });
+  });
+
+  it("applies stored values even when the agent declares no input schema", () => {
+    expect(resolveLocalInput(makeBundle(undefined), {}, STORED)).toEqual({ tone: "brisk" });
+  });
+
+  it("refuses a caller value naming a locked field, naming the field", () => {
+    const stored = { values: { dry_run: true }, lockedFields: ["dry_run"] };
+    const bundle = makeBundle({
+      schema: { type: "object", properties: { dry_run: { type: "boolean" } } },
+    });
+    expect(() => resolveLocalInput(bundle, { dry_run: false }, stored)).toThrow(
+      LockedInputFieldError,
+    );
+    try {
+      resolveLocalInput(bundle, { dry_run: false }, stored);
+      throw new Error("expected a LockedInputFieldError");
+    } catch (err) {
+      expect(err).toBeInstanceOf(LockedInputFieldError);
+      expect((err as LockedInputFieldError).field).toBe("dry_run");
+      expect((err as Error).message).toContain("dry_run");
+    }
+  });
+
+  it("applies the locked field's stored value when the caller leaves it alone", () => {
+    const stored = { values: { dry_run: true }, lockedFields: ["dry_run"] };
+    const bundle = makeBundle({
+      schema: {
+        type: "object",
+        properties: { dry_run: { type: "boolean", default: false }, tone: { type: "string" } },
+      },
+    });
+    expect(resolveLocalInput(bundle, { tone: "formal" }, stored)).toEqual({
+      dry_run: true,
+      tone: "formal",
+    });
+  });
+
+  it("leaves a local bundle path (no stored layer) on author defaults only", () => {
+    // `appstrate run ./dir` has no application row — nothing is inherited and
+    // no lock can apply, so the pre-existing behaviour is unchanged.
+    expect(resolveLocalInput(TONE_BUNDLE, { extra: 1 }, undefined)).toEqual({
+      tone: "neutral",
+      extra: 1,
+    });
   });
 });

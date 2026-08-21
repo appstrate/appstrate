@@ -434,7 +434,7 @@ export const applicationsPaths = {
       tags: ["Application Packages"],
       summary: "Get the resolved per-app run configuration",
       description:
-        "Returns the configuration applied when this application runs the given package: model override, generation settings, proxy override, and pinned version label. Used by the CLI to reproduce a UI run without stitching together three separate calls; the UI uses the same source for its run-from-app flow.",
+        "Returns the configuration applied when this application runs the given package: model override, generation settings, proxy override, pinned version label, and the stored input layer (editor values plus locked fields). Used by the CLI to reproduce a UI run without stitching together three separate calls; the UI uses the same source for its run-from-app flow.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "applicationId", in: "path", required: true, schema: { type: "string" } },
@@ -449,7 +449,7 @@ export const applicationsPaths = {
             "application/json": {
               schema: {
                 type: "object",
-                required: ["generation", "modelId", "proxyId", "version_pin"],
+                required: ["generation", "modelId", "proxyId", "version_pin", "input"],
                 properties: {
                   generation: {
                     oneOf: [
@@ -460,6 +460,16 @@ export const applicationsPaths = {
                   modelId: { type: ["string", "null"] },
                   proxyId: { type: ["string", "null"] },
                   version_pin: { type: ["string", "null"] },
+                  input: {
+                    type: "object",
+                    description:
+                      "Stored input layer for this application — the editor's values and the fields it locked. A locally executed run applies `values` under the caller's input and refuses a caller value naming a locked field.",
+                    required: ["values", "locked_fields"],
+                    properties: {
+                      values: { type: "object", additionalProperties: true },
+                      locked_fields: { type: "array", items: { type: "string" } },
+                    },
+                  },
                 },
               },
               example: {
@@ -467,6 +477,7 @@ export const applicationsPaths = {
                 modelId: "claude-sonnet-4-6",
                 proxyId: null,
                 version_pin: "1.2.3",
+                input: { values: { dry_run: true }, locked_fields: ["dry_run"] },
               },
             },
           },

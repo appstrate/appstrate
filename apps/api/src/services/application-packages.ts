@@ -511,6 +511,11 @@ export async function getInstalledPackageSettings(
  * The org filter lands in the SQL WHERE (`orgOrSystemFilter`) so a stray
  * association row pointing at another org's package id resolves to `null`
  * instead of leaking its model/proxy/version pin.
+ *
+ * `input` republishes the row's stored input values and locks — layer 2 of
+ * `services/input-resolution.ts`. The CLI needs them because `appstrate run
+ * @scope/agent --local` executes the bundle on the caller's machine, where no
+ * server-side resolution runs.
  */
 export async function getResolvedRunConfig(
   scope: AppScope,
@@ -518,6 +523,7 @@ export async function getResolvedRunConfig(
 ): Promise<ResolvedRunConfig | null> {
   const [row] = await db
     .select({
+      inputSettings: applicationPackages.inputSettings,
       generationConfig: applicationPackages.generationConfig,
       modelId: applicationPackages.modelId,
       proxyId: applicationPackages.proxyId,
@@ -550,11 +556,19 @@ export async function getResolvedRunConfig(
     versionPin = versionRow?.version ?? null;
   }
 
+  // JSONB read: narrow both members rather than trusting the column's
+  // declared `$type` (same narrowing as `getInstalledPackageSettings`).
+  const stored = row.inputSettings;
+
   return {
     generation: row.generationConfig ?? null,
     modelId: row.modelId ?? null,
     proxyId: row.proxyId ?? null,
     version_pin: versionPin,
+    input: {
+      values: asRecord(stored?.values),
+      locked_fields: Array.isArray(stored?.locked) ? stored.locked : [],
+    },
   };
 }
 

@@ -925,10 +925,13 @@ export interface InstalledPackage {
  * the CLI's `appstrate run @scope/agent` invocation — keeping them in
  * lockstep prevents UI ↔ CLI drift on model / proxy / version pin.
  *
- * Input values are deliberately NOT here. This endpoint is CLI-facing, and a
- * CLI-triggered platform run has the server resolve the whole author →
- * editor → schedule → caller chain; exposing the stored values would be a
- * second source of truth for them.
+ * `input` carries the per-application stored input layer, because
+ * `appstrate run @scope/agent --local` fetches the bundle and executes it on
+ * the caller's machine: there is no server-side resolution on that path, so
+ * without these members the local run would apply author defaults only and
+ * silently ignore both the editor's values and its locks. Layers 3-4
+ * (schedule values, caller input) stay server-owned — only what
+ * `application_packages` stores is published here.
  */
 export interface ResolvedRunConfig {
   /** Optional for compatibility with older servers; current API always emits it. */
@@ -937,6 +940,20 @@ export interface ResolvedRunConfig {
   proxyId: string | null;
   /** Pinned semver label (`1.2.3`), or null when the app uses the floating dist-tag. */
   version_pin: string | null;
+  /**
+   * `application_packages.input_settings` — layer 2 of the input resolution
+   * (`apps/api/src/services/input-resolution.ts`), on the wire under the same
+   * `{ values, locked_fields }` pair `PUT /api/agents/{scope}/{name}/input-settings`
+   * reads and writes.
+   *
+   * Optional for compatibility with older servers; current API always emits it.
+   */
+  input?: {
+    /** Editor-set values, partial by design. */
+    values: Record<string, unknown>;
+    /** Fields the editor froze — a launch may not set them. */
+    locked_fields: string[];
+  };
 }
 
 // --- End-User Types ---

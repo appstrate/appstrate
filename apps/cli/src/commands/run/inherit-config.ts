@@ -2,8 +2,8 @@
 
 /**
  * Fetch the per-application run-config (model / generation / proxy /
- * version pin) for `<applicationId, packageId>` and merge it with the
- * user's CLI flags + env vars. Source of truth lives server-side at
+ * version pin / stored input layer) for `<applicationId, packageId>` and
+ * merge it with the user's CLI flags + env vars. Source of truth lives server-side at
  * `GET /api/applications/{applicationId}/packages/{scope}/{name}/run-config`
  * — the UI consumes the same payload, so a CLI run with no overrides
  * targets the same model and version the dashboard would.
@@ -40,6 +40,16 @@ export interface InheritedRunConfig {
   proxyId: string | null;
   /** Pinned version label, when the user did not provide an explicit @spec. */
   versionPin: string | null;
+  /**
+   * `application_packages.input_settings.values` — layer 2 of the platform's
+   * input resolution. Empty when nothing was inherited.
+   */
+  inputValues: Record<string, unknown>;
+  /**
+   * `application_packages.input_settings.locked` — input fields the editor
+   * froze. Empty when nothing was inherited.
+   */
+  lockedInputFields: string[];
   /** True when the API call returned 200; false when it 404'd or was skipped. */
   inherited: boolean;
 }
@@ -122,6 +132,10 @@ export interface MergeRunConfigInputs {
  * `versionPin`: an explicit `@spec` in the package id always wins;
  * otherwise the per-app pin feeds into the bundle URL. Identical to
  * the platform's `?version=` query param semantics.
+ *
+ * `inputValues` / `lockedInputFields`: passed through untouched — they are
+ * not a CLI flag's business. `run.ts` layers them between the author
+ * defaults and the caller's `--input`, exactly where the server puts them.
  */
 export function mergeRunConfig(inputs: MergeRunConfigInputs): InheritedRunConfig {
   const inherited = inputs.inherited;
@@ -133,6 +147,8 @@ export function mergeRunConfig(inputs: MergeRunConfigInputs): InheritedRunConfig
     generation: inherited?.generation ?? null,
     proxyId,
     versionPin,
+    inputValues: inherited?.input?.values ?? {},
+    lockedInputFields: inherited?.input?.locked_fields ?? [],
     inherited: inherited !== null,
   };
 }
