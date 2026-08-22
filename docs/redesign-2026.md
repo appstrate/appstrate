@@ -8,10 +8,47 @@ stylesheet exported out of Claude Design and kept outside the repo at
 says where things stand, why the non-obvious calls were made, and what is still
 open — so the work can be picked up cold.
 
-**Picking it up cold, read in this order:** "Open" first (it opens on what the
-browser pass found and what it left to arbitrate), then "The grammar", which is
-what the next stretch of work IS. The sections in between describe what is already
-built, and are reference rather than reading.
+**Picking it up cold, read in this order:** "How the work goes" just below,
+then "Open" (it opens on what the browser pass found and what it left to
+arbitrate), then "The grammar", which is what the next stretch of work IS. The
+sections in between describe what is already built, and are reference rather
+than reading.
+
+## How the work goes
+
+The rules that are not about the design but about doing the work. They live
+here rather than in whatever message starts a session, because a rule that has
+to be re-typed to survive is a rule that will be forgotten once.
+
+- **Run the lab yourself, detached, and leave it up.** Olivier does not manage
+  dev servers. `(nohup bun run dev:lab > log 2>&1 &)` from `apps/web` — see
+  "Running it" and "The lab".
+- **If the MCP browser's lock is held by another session, do not kill
+  anything.** There is a door beside it, described in "The lab": Playwright
+  drives Chrome STABLE with a throwaway profile, which shares nothing with the
+  locked one. Waiting for that lock is what left half this branch unlooked at.
+- **Measure the DOM, do not only look at screenshots.** A capture at 1440 shows
+  nothing; `getBoundingClientRect` per cell across a sweep of widths is what
+  found a column crushed to 6px. Read a rendered hex off a canvas pixel rather
+  than converting oklch by hand — that was several points wrong both times.
+- **A screen with no fixture is a screen nobody looks at.** Six holes were
+  filled in two days, and each one had been hiding a screen that could only
+  ever be seen failing. If the screen you are working on errors in the lab,
+  write its fixture before concluding anything about how it renders.
+- **The gate is `bun test` + `bun run check`**, not typecheck and build. The
+  guards catch what the eye does not: orphan i18n keys, the hooks rule, and the
+  column-tier arithmetic.
+- **Run `/code-review <fixed-point>` after each block, and CHECK its findings
+  rather than applying them.** On this branch it found a real design defect and
+  proposed two fixes that were wrong.
+- **Before drawing a control, read the shadcn source for it.** `packages/ui` is
+  shadcn. Twice a control was invented whose answer already existed there —
+  see "The toolbar", which is the most expensive lesson in this file.
+- **Update this file in the SAME commit as the change it describes**, decisions
+  and mistakes alike. Two of the counts in "The grammar" were wrong for a day
+  because the doc was written from what was intended rather than from what was
+  measured.
+- **Answer Olivier in French.** The doc and the commits stay in English.
 
 ## Running it
 
