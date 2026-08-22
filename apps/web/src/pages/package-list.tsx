@@ -9,6 +9,7 @@ import { Button } from "@appstrate/ui/components/button";
 import { useAgents } from "../hooks/use-packages";
 import { useUnreadCountsByAgent } from "../hooks/use-notifications";
 import { PackageCard } from "../components/package-card";
+import { CardGrid } from "../components/card-grid";
 import { PackagesTable, usePackageColumns } from "../components/packages-table";
 import { columnMenu, visibleColumns } from "../components/data-table";
 import { useColumnVisibility } from "../stores/column-visibility-store";
@@ -18,7 +19,7 @@ import { useSearchPlaceholder } from "../lib/search-placeholder";
 import { TOOLBAR_ACTION, TOOLBAR_UTILITY } from "../lib/toolbar-button";
 import { PageHeader, type BreadcrumbEntry } from "../components/page-header";
 import { ImportModal } from "../components/import-modal";
-import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
+import { ErrorState, EmptyState } from "../components/page-states";
 import { usePermissions } from "../hooks/use-permissions";
 
 export interface CardItem {
@@ -48,7 +49,6 @@ interface PackageTabProps {
   /** What the list holds, plural, for the search box: "Agents", "Skills". */
   entity: string;
   extraActions?: ReactNode;
-  emptyExtraActions?: ReactNode;
   headerContent?: ReactNode;
 }
 
@@ -75,7 +75,6 @@ export function PackageTab({
   emptyIcon,
   entity,
   extraActions,
-  emptyExtraActions,
   headerContent,
 }: PackageTabProps) {
   const { t } = useTranslation(["agents", "common"]);
@@ -89,29 +88,32 @@ export function PackageTab({
   const searchPlaceholder = useSearchPlaceholder(entity);
   const visibility = useColumnVisibility("packages");
 
-  if (isLoading) return <LoadingState />;
-  if (error) return <ErrorState message={error.message} />;
-
   const header = title ? (
     <PageHeader title={title} emoji={emoji} breadcrumbs={breadcrumbs}>
       {headerContent}
     </PageHeader>
   ) : null;
 
-  const emptyActions = emptyExtraActions !== undefined ? emptyExtraActions : extraActions;
+  const shown = (items ?? []).filter((item) => matches(item, query));
 
-  if (!items || items.length === 0) {
-    return (
-      <>
-        {header}
-        <EmptyState message={emptyMessage} hint={emptyHint} icon={emptyIcon}>
-          {emptyActions}
-        </EmptyState>
-      </>
-    );
-  }
-
-  const shown = items.filter((item) => matches(item, query));
+  // An empty list, a search that matched nothing, and a request that failed are
+  // three different sentences, and the body says whichever applies IN PLACE —
+  // the bar and the count above and below it never move. This used to be three
+  // early returns above the toolbar, which is how an empty list lost its bar
+  // and had to re-offer the page's own actions as unlabelled icons.
+  const emptyBody = query ? (
+    <EmptyState message={t("list.noMatch")} icon={SearchX} compact>
+      <Button variant="outline" size="sm" onClick={() => setQuery("")}>
+        {t("toolbar.clearAll", { ns: "common" })}
+      </Button>
+    </EmptyState>
+  ) : (
+    // No actions of its own any more: the bar above is always there now, with
+    // the same two, written out. The empty state used to carry them because it
+    // REPLACED the bar, and it carried them as unlabelled icons — in the one
+    // state where the reader least knows what to do.
+    <EmptyState message={emptyMessage} hint={emptyHint} icon={emptyIcon} compact />
+  );
 
   return (
     <>
@@ -129,23 +131,31 @@ export function PackageTab({
         onViewChange={setView}
         actions={extraActions}
       />
-      {shown.length > 0 && query && <ListFooter count={t("list.count", { count: shown.length })} />}
-      {shown.length === 0 ? (
-        // Nothing MATCHED, which is not the same sentence as nothing exists.
-        <EmptyState message={t("list.noMatch")} icon={SearchX} compact>
-          <Button variant="outline" size="sm" onClick={() => setQuery("")}>
-            {t("toolbar.clearAll", { ns: "common" })}
-          </Button>
-        </EmptyState>
-      ) : view === "table" ? (
-        <PackagesTable items={shown} columns={visibleColumns(allColumns, visibility.hidden)} />
+      {view === "table" ? (
+        <PackagesTable
+          items={shown}
+          columns={visibleColumns(allColumns, visibility.hidden)}
+          isLoading={isLoading}
+          isError={Boolean(error)}
+          empty={emptyBody}
+          error={<ErrorState message={error?.message} compact />}
+        />
       ) : (
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-          {shown.map((item) => (
-            <PackageCard key={item.id} {...item} />
-          ))}
-        </div>
+        <CardGrid
+          items={shown}
+          itemKey={(item) => item.id}
+          renderCard={(item) => <PackageCard {...item} />}
+          isLoading={isLoading}
+          isError={Boolean(error)}
+          empty={emptyBody}
+          error={<ErrorState message={error?.message} compact />}
+        />
       )}
+      {/* Under the body, like the runs page: what the collection amounts to,
+          whatever it happens to hold and whether or not anyone searched. */}
+      <ListFooter
+        count={isLoading || error ? undefined : t("list.count", { count: shown.length })}
+      />
     </>
   );
 }

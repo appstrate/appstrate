@@ -46,6 +46,15 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
     }),
   },
   {
+    // The catalogue the integrations page holds whole and filters client-side.
+    method: "GET",
+    pattern: /^\/api\/integrations$/,
+    handler: (_u, s) => ({
+      status: 200,
+      body: { ...f.integrations, data: list(f.integrations.data, s, f.heavyIntegrations) },
+    }),
+  },
+  {
     method: "GET",
     pattern: /^\/api\/orgs\/[^/]+\/settings$/,
     handler: () => ({ status: 200, body: f.orgSettings }),
@@ -131,7 +140,10 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
   {
     method: "GET",
     pattern: /^\/api\/agents$/,
-    handler: (_u, s) => ({ status: 200, body: { ...f.agents, data: list(f.agents.data, s) } }),
+    handler: (_u, s) => ({
+      status: 200,
+      body: { ...f.agents, data: list(f.agents.data, s, f.heavyAgents) },
+    }),
   },
   {
     method: "GET",

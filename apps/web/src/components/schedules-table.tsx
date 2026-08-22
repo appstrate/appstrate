@@ -20,7 +20,7 @@ import type { EnrichedSchedule } from "@appstrate/shared-types";
 import { DataTable, type DataColumn } from "./data-table";
 import { ScheduleStatusBadge } from "./schedule-status-badge";
 import { ActorLabel } from "./actor-label";
-import { EmptyState, ErrorState } from "./page-states";
+import { EmptyState } from "./page-states";
 import { formatDateField } from "../lib/markdown";
 
 /** The column set, as a value the caller holds — see `useRunColumns` on why. */
@@ -155,13 +155,8 @@ export function SchedulesTable({
       columns={columns}
       rows={schedules}
       isLoading={isLoading}
-      empty={
-        isError ? (
-          <ErrorState compact />
-        ) : (
-          (empty ?? <EmptyState message={t("schedules.empty")} icon={Calendar} compact />)
-        )
-      }
+      isError={isError}
+      empty={empty ?? <EmptyState message={t("schedules.empty")} icon={Calendar} compact />}
       rowKey={(schedule) => schedule.id}
       rowHref={(schedule) => `/schedules/${schedule.id}`}
       rowLabel={(schedule) => schedule.name || schedule.id}

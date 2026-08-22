@@ -17,6 +17,7 @@
 
 import { useTranslation } from "react-i18next";
 import { ShieldCheck } from "lucide-react";
+import type { CollectionState } from "./collection";
 import { DataTable, type DataColumn } from "./data-table";
 import { Badge, MetaBadge } from "./status-badge";
 import { RunAgentButton } from "./run-agent-button";
@@ -127,13 +128,17 @@ export function usePackageColumns(): DataColumn<CardItem>[] {
 export function PackagesTable({
   items,
   columns,
+  ...state
 }: {
   items: CardItem[];
   /** From {@link usePackageColumns}, minus whatever the reader hid. */
   columns: DataColumn<CardItem>[];
-}) {
+} & CollectionState) {
   const { t } = useTranslation(["agents", "common"]);
 
+  // The same state `CardGrid` takes, forwarded whole: the two bodies answer it
+  // through the same `collectionVerdict`, so a caller can hand either one the
+  // same props and branch on nothing.
   return (
     <DataTable
       label={t("list.tableLabel")}
@@ -142,6 +147,7 @@ export function PackagesTable({
       rowKey={(item) => item.id}
       rowHref={(item) => packageDetailPath(item.type, item.id)}
       rowLabel={(item) => item.displayName}
+      {...state}
     />
   );
 }

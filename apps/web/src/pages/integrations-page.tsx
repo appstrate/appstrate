@@ -21,7 +21,8 @@ import { Input } from "@appstrate/ui/components/input";
 import { Button } from "@appstrate/ui/components/button";
 import { Tabs, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
 import { PageHeader } from "../components/page-header";
-import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
+import { CardGrid } from "../components/card-grid";
+import { ErrorState, EmptyState } from "../components/page-states";
 import { useIntegrations, type IntegrationSummaryWire } from "../hooks/use-integrations";
 import { usePermissions } from "../hooks/use-permissions";
 import { IntegrationIcon } from "../components/integration-icon";
@@ -134,25 +135,24 @@ export function IntegrationsPage() {
         </div>
       </div>
 
-      {isLoading ? (
-        <LoadingState />
-      ) : error ? (
-        <ErrorState message={String(error)} />
-      ) : filtered.length === 0 ? (
-        <EmptyState
-          icon={Boxes}
-          message={tab === "active" ? t("integrations.empty.active") : t("integrations.empty.all")}
-        />
-      ) : (
-        <div
-          className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3"
-          data-testid="integration-grid"
-        >
-          {filtered.map((integration) => (
-            <IntegrationCard key={integration.id} integration={integration} />
-          ))}
-        </div>
-      )}
+      <CardGrid
+        items={filtered}
+        itemKey={(integration) => integration.id}
+        renderCard={(integration) => <IntegrationCard integration={integration} />}
+        isLoading={isLoading}
+        isError={Boolean(error)}
+        // RFC 9457, not an `Error`: `detail` is the sentence, `title` the class.
+        error={<ErrorState message={error?.detail ?? error?.title} compact />}
+        empty={
+          <EmptyState
+            icon={Boxes}
+            compact
+            message={
+              tab === "active" ? t("integrations.empty.active") : t("integrations.empty.all")
+            }
+          />
+        }
+      />
     </div>
   );
 }

@@ -405,6 +405,24 @@ function makeSchedule(over: Partial<Schedule> & Pick<Schedule, "id" | "packageId
   };
 }
 
+/**
+ * 200 agents, the same volume as `heavyRuns`, because a card grid is the one
+ * collection nobody has ever seen carry a real catalogue: it is not
+ * virtualised, and how many columns it takes is its whole question. Built off
+ * the real three so the cards keep believable names, descriptions of different
+ * lengths and a mix of states — a grid of 200 identical cards proves the
+ * scroll and nothing else.
+ */
+export const heavyAgents: (typeof agents)["data"] = Array.from({ length: 200 }, (_, i) => {
+  const base = agents.data[i % agents.data.length]!;
+  return {
+    ...base,
+    id: `${base.id}-${i + 1}`,
+    display_name: `${base.display_name} ${i + 1}`,
+    running_runs: i % 7 === 0 ? 1 : 0,
+  };
+});
+
 export const schedules: Json200<"/api/schedules", "get"> = {
   object: "list",
   hasMore: false,
@@ -618,3 +636,91 @@ export const orgSettings: Json200<"/api/orgs/{orgId}/settings", "get"> = {
   api_version: "2026-08-01",
   dashboard_sso_enabled: false,
 };
+
+/**
+ * The integration catalogue, so the one list that is still cards-only can be
+ * looked at at all. Six of them because the grid's whole question is how many
+ * columns it takes and what happens on the last row; two inactive, since the
+ * page opens on the "Activées" tab and a tab that filters nothing proves
+ * nothing.
+ */
+export const integrations: Json200<"/api/integrations", "get"> = {
+  object: "list",
+  total: 6,
+  hasMore: false,
+  data: [
+    {
+      id: "@appstrate/google-drive",
+      orgId: "org_tractr",
+      source: "system",
+      active: true,
+      manifest: {
+        display_name: "Google Drive",
+        description:
+          "Lire, écrire et organiser les fichiers d'un Drive : documents, tableurs, dossiers partagés.",
+        version: "2.1.0",
+      },
+    },
+    {
+      id: "@appstrate/gmail",
+      orgId: "org_tractr",
+      source: "system",
+      active: true,
+      manifest: {
+        display_name: "Gmail",
+        description: "Chercher, lire et envoyer des courriels au nom de l'employé connecté.",
+        version: "1.8.2",
+      },
+    },
+    {
+      id: "@appstrate/clickup",
+      orgId: "org_tractr",
+      source: "local",
+      active: true,
+      manifest: {
+        display_name: "ClickUp",
+        description: "Tâches, listes et suivi du temps.",
+        version: "0.9.0",
+      },
+    },
+    {
+      id: "@tractr/qbo-mcp",
+      orgId: "org_tractr",
+      source: "local",
+      active: true,
+      manifest: {
+        display_name: "QuickBooks Online",
+        description:
+          "Comptabilité : factures, dépenses, comptes à recevoir. Lecture seule, 69 outils.",
+        version: "1.0.0",
+      },
+    },
+    {
+      id: "@appstrate/slack",
+      orgId: "org_tractr",
+      source: "system",
+      active: false,
+      manifest: {
+        display_name: "Slack",
+        description: "Messages et canaux.",
+        version: "1.2.0",
+      },
+    },
+    {
+      id: "@appstrate/notion",
+      orgId: "org_tractr",
+      source: "system",
+      active: false,
+      manifest: { display_name: "Notion", description: "Pages et bases.", version: "3.0.1" },
+    },
+  ],
+};
+
+/** The same catalogue at the size a real org reaches. */
+export const heavyIntegrations: (typeof integrations)["data"] = Array.from(
+  { length: 60 },
+  (_, i) => {
+    const base = integrations.data[i % integrations.data.length]!;
+    return { ...base, id: `${base.id}-${i + 1}`, active: true };
+  },
+);

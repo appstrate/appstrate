@@ -31,7 +31,7 @@ import { DataTable, type DataColumn } from "./data-table";
 import { Badge, MetaBadge } from "./status-badge";
 import { RunTrigger } from "./run-trigger";
 import { RunDuration } from "./run-duration";
-import { EmptyState, ErrorState } from "./page-states";
+import { EmptyState } from "./page-states";
 import { formatDateField } from "../lib/markdown";
 
 function DocumentCounts({ run }: { run: EnrichedRun }) {
@@ -221,23 +221,18 @@ export function RunsTable({
 }) {
   const { t } = useTranslation(["agents"]);
 
-  // A failed request is NOT an empty list. The lab's `error` scenario is what
-  // showed it: with `GET /api/runs` answering 500, the page said "Aucun run" —
-  // telling a user their history is empty when the truth is that it could not
-  // be read.
-  const fallback = isError ? (
-    <ErrorState compact />
-  ) : (
-    (empty ?? <EmptyState message={t("detail.emptyRuns")} icon={PlayCircle} compact />)
-  );
-
   return (
     <DataTable
       label={t("runs.tableLabel")}
       columns={columns}
       rows={runs}
       isLoading={isLoading}
-      empty={fallback}
+      // A failed request is NOT an empty list — the lab's `error` scenario is
+      // what showed it, with `GET /api/runs` answering 500 and the page saying
+      // "Aucun run". The two travel as separate props now, so no caller can
+      // fold one into the other again.
+      isError={isError}
+      empty={empty ?? <EmptyState message={t("detail.emptyRuns")} icon={PlayCircle} compact />}
       banner={banner}
       rowKey={(run) => run.id}
       // A deleted agent has no agent page, so `/agents/:packageId/runs/:id`

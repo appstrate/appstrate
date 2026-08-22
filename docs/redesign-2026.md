@@ -444,8 +444,13 @@ are system, which are running, at what version, down one column.
   link to a list should open on the reader's habit rather than impose the
   sender's. One store for the whole family — someone who wants the table for
   agents wants it for skills.
-- **No result count on that toolbar.** The count answers "how many did the
-  filters leave"; with nothing filtering it only repeats what is on screen.
+- **The count is unconditional now, and it is under the body, not on the bar.**
+  It used to render only while a search was running, on the reasoning that with
+  nothing filtering it repeats what is on screen. That reasoning does not
+  survive the family: `/runs` counted at every moment, the card grids counted
+  only while searching, and `/schedules` never counted at all — three answers
+  to one question, which is what step A exists to end. A footer is what the
+  collection came to, whether or not anyone narrowed it.
 - The count, when there is one, is passed as the CALLER'S OWN WORDS. A toolbar
   that formats "3 runs" for everyone is a toolbar that will one day say it
   about agents — it did, for about ten minutes.
@@ -703,8 +708,23 @@ At the time of writing:
 ### The four families
 
 1. **Collection** — a table, a grid of cards, a compact list inside a panel,
-   and later the alternative views (an agenda). The table is done; the rest is
+   and later the alternative views (an agenda). The table is done; the CARD
+   GRID is done (`components/card-grid.tsx`, 21 August); the list-in-a-panel is
    not a component yet.
+
+   **What makes the two bodies one family is `components/collection.ts`**, and
+   it is the part worth keeping: a `CollectionState` (`isLoading`, `isError`,
+   `empty`, `error`) plus the ORDER they are answered in — **failure, then
+   loading, then emptiness**. A failed request outranks rows still in the
+   cache, because drawing them tells someone data is current when nobody knows
+   that; "we are fetching" beats "there is nothing"; and emptiness is last,
+   being the only one of the three that is an ANSWER rather than a state of the
+   request. The verdict is a WORD, not a node, so `isError` cannot be swallowed:
+   a body that gets `"error"` must draw something, and owes a default when the
+   caller wrote no message. Both mistakes were made on the way — the two bodies
+   ordered the states differently for a day, and an `isError` with no `error`
+   fell through to "there is nothing here" on a 500.
+
 2. **The apparatus around a collection** — the bar (`ListToolbar`), the footer
    (`ListFooter`), the states. Done, except loading.
 3. **Modal surfaces** — and this is where the families cross. There are almost
@@ -718,7 +738,9 @@ At the time of writing:
 
 ### The order, and why
 
-**A. Finish the Collection family.** The card grid becomes a component (it is
+**A. Finish the Collection family.** _(in progress — the card grid and the two
+package screens are done; `unified-package-detail`, `plan-card`, the four raw
+tables, the list-in-a-panel and `/schedules` are not.)_ The card grid becomes a component (it is
 drawn sixteen times), the four raw tables move onto `DataTable`, the
 list-in-a-panel becomes a type. It goes first because family 3 depends on it:
 a collection cannot live in a modal until a collection is a thing.
@@ -726,18 +748,22 @@ a collection cannot live in a modal until a collection is a thing.
 The browser pass handed A four inconsistencies to settle, all of them the same
 shape — the apparatus is the TABLE's, not the collection's:
 
-- **The count is table-only.** `/runs` has a footer at every moment; `/schedules`
-  never has one; the card grids only get one while a search is running. Three
-  answers to "how many of these are there".
-- **The bar vanishes when the list is empty**, and the empty state re-creates
-  the same two actions as icon-only buttons with no label — in the one state
-  where the reader least knows what to do. Compare `/agents` full ("Importer",
-  "Nouvel agent" in the bar) with `/skills` empty (two unlabelled squares).
+- **The count is table-only.** ~~Fixed for the package screens~~ (the footer
+  renders whatever the body holds, in both views); `/schedules` still never
+  counts, so two of the three answers remain.
+- ~~**The bar vanishes when the list is empty.**~~ Fixed: the three early
+  returns above the toolbar are gone, the states are drawn IN the body, and the
+  empty state no longer re-offers the page's actions as unlabelled squares —
+  the bar above carries them, written out. The `emptyExtraActions` prop that
+  fed them was passed by nobody and is deleted.
 - **`/schedules` has no search and no filters**, so its bar is nine-tenths empty
   space with two buttons at the right end, while it does have an Actif /
   Désactivé state that is a filter dimension waiting to be declared.
-- **The card grid is two columns at any width**, so at 1440 a card holds a
-  40-character description across 700px.
+- ~~**The card grid is two columns at any width.**~~ Settled with the grid
+  component: `repeat(auto-fill, minmax(min(20rem,100%),1fr))` takes as many
+  columns as fit against the CONTAINER, so 1440 gives three and a narrow window
+  gives one, with nothing declared. Still true on `unified-package-detail`,
+  which has not moved yet.
 
 **B. Loading, in one pass.** One rule — a skeleton for a collection, because we
 know the shape of what is coming and the layout should not jump; a spinner for

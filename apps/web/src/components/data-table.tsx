@@ -46,6 +46,8 @@ import type { CSSProperties, ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { cn } from "@appstrate/ui/cn";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
+import { collectionVerdict, type CollectionState } from "./collection";
+import { ErrorState } from "./page-states";
 
 export interface DataColumn<T> {
   /** Stable handle, independent of the label — a column set is a list of these. */
@@ -66,7 +68,7 @@ export interface DataColumn<T> {
   cell: (row: T) => ReactNode;
 }
 
-interface DataTableProps<T> {
+interface DataTableProps<T> extends CollectionState {
   columns: DataColumn<T>[];
   rows: T[];
   rowKey: (row: T) => string;
@@ -79,9 +81,6 @@ interface DataTableProps<T> {
   rowLabel?: (row: T) => string;
   /** Router state to carry, e.g. a run number the destination can show before it loads. */
   rowState?: (row: T) => unknown;
-  isLoading?: boolean;
-  /** Shown instead of the rows — and instead of the head, which labels nothing. */
-  empty?: ReactNode;
   /** Pinned above the first row, inside the frame (e.g. a scheduled next run). */
   banner?: ReactNode;
   /** Names the table for screen readers; never drawn. */
@@ -135,11 +134,14 @@ export function DataTable<T>({
   rowHref,
   rowLabel,
   rowState,
-  isLoading = false,
-  empty,
   banner,
   label,
+  ...state
 }: DataTableProps<T>) {
+  // The order lives in `collection.ts`, shared with the card grid: a caller
+  // hands either body the same props and gets the same answer.
+  const verdict = collectionVerdict(state, rows.length);
+  const isLoading = verdict === "loading";
   // Three templates, one per tier: narrow keeps only the columns that carry the
   // row's identity, and each step up adds the ones the width can now hold.
   const tracks = {
@@ -156,10 +158,13 @@ export function DataTable<T>({
   const rowGrid =
     "grid items-center gap-3 px-3 [grid-template-columns:var(--dt-cols)] @xl/table:gap-4 @xl/table:px-4 @xl/table:[grid-template-columns:var(--dt-cols-2)] @4xl/table:[grid-template-columns:var(--dt-cols-3)]";
 
-  if (!isLoading && rows.length === 0 && empty) {
+  // A failure always draws something, whether or not the caller wrote the
+  // sentence — it used to be folded into `empty` at every call site, which is
+  // how a 500 could read as "no runs".
+  if (verdict === "error" || verdict === "empty") {
     return (
       <div className="bg-card @container/table overflow-hidden rounded-lg border shadow-sm">
-        {empty}
+        {verdict === "error" ? (state.error ?? <ErrorState compact />) : state.empty}
       </div>
     );
   }
