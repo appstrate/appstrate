@@ -48,6 +48,10 @@ export type { Api, KnownApi, Model, Transport, Message } from "@earendil-works/p
 // those views can be PINNED against the vendor at compile time. Type-only, so
 // they are erased and drag nothing into the runtime graph.
 export type { AgentSessionEvent as PiSdkAgentSessionEvent } from "@earendil-works/pi-coding-agent";
+export type {
+  AssistantMessageEvent as PiSdkAssistantMessageEvent,
+  Usage as PiSdkUsage,
+} from "@earendil-works/pi-ai";
 
 // --- heavy value surface (pi-coding-agent, ~200ms) behind a dynamic import ---
 // `@earendil-works/pi-coding-agent` is the single most expensive module to

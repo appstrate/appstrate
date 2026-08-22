@@ -37,6 +37,7 @@ export {
 // here only when something outside the package actually imports it.
 export { Type, loadPiCodingAgentSdk, type PiCodingAgentSdk } from "./pi-sdk.ts";
 export type { Api, Model, Message, ExtensionAPI, ExtensionFactory } from "./pi-sdk.ts";
+export type { PiSdkAgentSessionEvent, PiSdkAssistantMessageEvent, PiSdkUsage } from "./pi-sdk.ts";
 
 export { prepareBundleForPi, type PrepareBundleOptions } from "./bundle-extensions.ts";
 

@@ -41,7 +41,6 @@ import { scheduleDeadlineNudges } from "./deadline-nudges.ts";
 import type { ModelApiShape } from "@appstrate/core/sidecar-types";
 import {
   anthropicReasoningBudgetTokens,
-  type ModelNativeReasoningLevel,
   type ModelReasoningLevel,
 } from "@appstrate/core/model-generation";
 import { deriveResponseReserveTokens } from "@appstrate/core/token-budget";
@@ -74,27 +73,52 @@ import {
 export type PiModelConfig = Model<Api>;
 
 /**
- * Pi treats `xhigh` as unsupported unless a model-level mapping exists and
- * silently clamps it to `high`. Appstrate's catalog deliberately permits
- * unknown capabilities so the provider can remain the final authority; add a
- * pass-through mapping when no explicit model mapping exists so an attempted
- * xhigh request reaches the provider instead of being silently weakened.
+ * The two levels Pi refuses to consider supported without an explicit
+ * per-model mapping: `getSupportedThinkingLevels` (`pi-ai/models.js`) admits
+ * `off`…`high` for any reasoning model but requires
+ * `thinkingLevelMap[level] !== undefined` for these two, and
+ * `AgentSession` clamps an unsupported request DOWN (`agent-session.js` →
+ * `clampThinkingLevel`).
+ */
+const LEVELS_NEEDING_EXPLICIT_MAP = ["xhigh", "max"] as const;
+
+function needsExplicitMap(
+  level: ModelReasoningLevel,
+): level is (typeof LEVELS_NEEDING_EXPLICIT_MAP)[number] {
+  return (LEVELS_NEEDING_EXPLICIT_MAP as readonly string[]).includes(level);
+}
+
+/**
+ * Keep a top-end thinking request intact instead of letting Pi silently
+ * weaken it.
+ *
+ * Appstrate's catalog deliberately permits unknown capabilities so the
+ * provider stays the final authority. Pi's default is the opposite for
+ * {@link LEVELS_NEEDING_EXPLICIT_MAP}: absent a mapping it clamps down. A
+ * pass-through entry (`xhigh → "xhigh"`, `max → "max"`) restores the platform's
+ * intent — the request reaches the provider, which answers for itself.
+ *
+ * Two cases are left alone, both deliberate:
+ *  - an explicit native mapping (`max → "high"`): the catalog already answered.
+ *  - an explicit refusal (`max → null`): the catalog says the model cannot do
+ *    it, so Pi's clamp is the correct outcome — forcing a pass-through here
+ *    would override a fact the platform itself published.
  */
 export function preserveRequestedThinkingLevel(
   model: PiModelConfig,
   level: PiRunnerOptions["thinkingLevel"],
 ): PiModelConfig {
-  if (level !== "xhigh" || !model.reasoning || model.thinkingLevelMap?.xhigh !== undefined) {
-    return model;
-  }
+  if (level === undefined || !needsExplicitMap(level) || !model.reasoning) return model;
+  // `?? undefined`-free on purpose: `null` (explicit refusal) is NOT `undefined`
+  // and must fall through to "leave the model alone".
+  if (model.thinkingLevelMap?.[level] !== undefined) return model;
   return {
     ...model,
-    thinkingLevelMap: { ...model.thinkingLevelMap, xhigh: "xhigh" },
+    thinkingLevelMap: { ...model.thinkingLevelMap, [level]: level },
   };
 }
 
-type PiThinkingLevel = Exclude<ModelReasoningLevel, "max">;
-type PiThinkingBudgetLevel = Exclude<PiThinkingLevel, "off" | "xhigh">;
+type PiThinkingBudgetLevel = Exclude<ModelReasoningLevel, "off" | "xhigh" | "max">;
 type PiThinkingBudgets = Partial<Record<PiThinkingBudgetLevel, number>>;
 
 function prepareAnthropicThinkingBudgets(
@@ -119,42 +143,38 @@ function prepareProviderBaseUrl(model: PiModelConfig): PiModelConfig {
 }
 
 /**
- * Adapt Appstrate's complete LiteLLM vocabulary to Pi's six-level selector.
- * Pi has no first-class `max` selector, but its `xhigh` slot can map to the
- * provider-native `max` value. Classic Anthropic requests also receive a
- * request-scoped token budget because Pi otherwise clamps both levels to its
- * `high` budget. Models that support both values therefore stay distinct.
+ * Adapt a requested reasoning level to what Pi's session expects.
+ *
+ * Appstrate's portable vocabulary and Pi's `ThinkingLevel`
+ * (`pi-agent-core`: `off | minimal | low | medium | high | xhigh | max`) are
+ * the SAME seven values since Pi 0.84 — the level passes through unchanged.
+ * Two adaptations remain, both about what Pi does with it afterwards:
+ *
+ *  - {@link preserveRequestedThinkingLevel} — stop Pi clamping a top-end
+ *    request away for want of an explicit mapping.
+ *  - {@link prepareAnthropicThinkingBudgets} — classic (non-adaptive)
+ *    Anthropic requests need a request-scoped budget, because Pi's own table
+ *    collapses `xhigh` AND `max` onto its `high` budget
+ *    (`pi-ai/api/simple-options.js` → `clampReasoning`).
+ *
+ * Pre-0.84 this function also routed `max` through Pi's `xhigh` slot, since
+ * `max` did not exist as a selector. It does now; the disguise is gone —
+ * it clobbered the model's own `xhigh` mapping for the duration of the turn,
+ * which the adaptive-Anthropic path reads back (`mapThinkingLevelToEffort`).
  */
 export function prepareRequestedThinkingLevel(
   model: PiModelConfig,
   level: ModelReasoningLevel,
 ): {
   model: PiModelConfig;
-  thinkingLevel: PiThinkingLevel;
+  thinkingLevel: ModelReasoningLevel;
   thinkingBudgets?: PiThinkingBudgets;
 } {
   const preparedModel = prepareProviderBaseUrl(model);
   const thinkingBudgets = prepareAnthropicThinkingBudgets(preparedModel, level);
-  if (level !== "max") {
-    return {
-      model: preserveRequestedThinkingLevel(preparedModel, level),
-      thinkingLevel: level,
-      ...(thinkingBudgets ? { thinkingBudgets } : {}),
-    };
-  }
-
-  const levelMap = preparedModel.thinkingLevelMap as
-    Partial<Record<ModelReasoningLevel, ModelNativeReasoningLevel | null>> | undefined;
-  const nativeLevel = levelMap?.max ?? "max";
   return {
-    model: {
-      ...preparedModel,
-      thinkingLevelMap: {
-        ...preparedModel.thinkingLevelMap,
-        xhigh: nativeLevel,
-      } as PiModelConfig["thinkingLevelMap"],
-    },
-    thinkingLevel: "xhigh",
+    model: preserveRequestedThinkingLevel(preparedModel, level),
+    thinkingLevel: level,
     ...(thinkingBudgets ? { thinkingBudgets } : {}),
   };
 }
