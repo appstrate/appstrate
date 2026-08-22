@@ -13,7 +13,12 @@ export {
   type InternalSink,
 } from "./pi-runner.ts";
 
-export { deriveProviderFromApi, PROVIDER_BY_API } from "./provider-map.ts";
+export {
+  deriveProviderFromApi,
+  derivePiProvider,
+  PROVIDER_BY_API,
+  PI_PROVIDER_BY_MODEL_PROVIDER,
+} from "./provider-map.ts";
 
 // Warms `@earendil-works/pi-coding-agent` (dynamic import) so the container
 // entrypoint can overlap its ~200ms eval with network-bound provisioning

@@ -40,7 +40,7 @@ import {
   prepareBundleForPi,
   buildRuntimeToolExtensions,
   buildPublishDocumentExtension,
-  deriveProviderFromApi,
+  derivePiProvider,
   emitRuntimeReady,
   emitBootProgress,
   startSinkHeartbeat,
@@ -681,9 +681,11 @@ const model: Model<Api> = {
   id: modelId,
   name: modelId,
   api: api as Api,
-  // Pi SDK AuthStorage key, derived from the api shape. The runner reads
-  // this field directly to register + resolve the API key.
-  provider: deriveProviderFromApi(api),
+  // Pi SDK AuthStorage key AND its provider-detection input: Pi re-derives
+  // each provider's request shape from `provider` + `baseUrl`, and on a
+  // proxied run `baseUrl` is the sidecar's. Prefer the real backing provider
+  // the platform named, falling back to the api shape's generic key.
+  provider: derivePiProvider(env.modelProvider, api),
   baseUrl: env.modelBaseUrl ?? "",
   reasoning: env.modelReasoning,
   ...(env.modelReasoningLevelMap ? { thinkingLevelMap: env.modelReasoningLevelMap } : {}),

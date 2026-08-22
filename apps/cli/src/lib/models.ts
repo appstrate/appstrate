@@ -35,6 +35,13 @@ export interface ModelPreset {
    */
   needs_reconnection?: boolean;
   source: "built-in" | "custom";
+  /**
+   * Backing provider id. Absent for an ALIASED preset — the platform strips a
+   * model alias's binding before it reaches a non-loopback caller. When
+   * present it keeps Pi's provider detection working through the llm-proxy
+   * base URL (`derivePiProvider`).
+   */
+  providerId?: string | null;
   contextWindow: number | null;
   maxTokens: number | null;
   reasoning: boolean | null;

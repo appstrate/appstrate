@@ -22,7 +22,7 @@
  */
 
 import type { Api, Model } from "../../lib/pi-sdk.ts";
-import { deriveProviderFromApi, PROVIDER_BY_API } from "@appstrate/runner-pi";
+import { deriveProviderFromApi, derivePiProvider, PROVIDER_BY_API } from "@appstrate/runner-pi";
 import { ANTHROPIC_OAUTH_PLACEHOLDER_API_KEY } from "@appstrate/core/oauth-bearer-swap";
 import { listModelPresets, PROXY_SUPPORTED_APIS, type ModelPreset } from "../../lib/models.ts";
 
@@ -186,9 +186,12 @@ export async function resolvePresetModel(inputs: PresetResolutionInputs): Promis
     id: preset.id,
     name: preset.label,
     api: preset.apiShape as Api,
-    // preset.apiShape already passed the PROXY_SUPPORTED_APIS gate above,
-    // so it is always a known api here — derive without a fallback.
-    provider: deriveProviderFromApi(preset.apiShape),
+    // `baseUrl` below is the llm-proxy's, so the provider key is the only
+    // upstream-detection input Pi has left: prefer the preset's real backing
+    // and fall back to the api shape's generic key (an aliased preset hides
+    // its backing, and preset.apiShape already passed the PROXY_SUPPORTED_APIS
+    // gate above, so the fallback is always a known api).
+    provider: derivePiProvider(preset.providerId, preset.apiShape),
     baseUrl,
     reasoning: preset.reasoning ?? false,
     input: (preset.input ?? ["text"]) as ("text" | "image")[],

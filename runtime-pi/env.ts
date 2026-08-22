@@ -43,6 +43,13 @@ interface RuntimeEnv {
   modelTemperature?: number;
   modelReasoningLevel?: ModelReasoningLevel;
   modelReasoningLevelMap?: Partial<Record<ModelReasoningLevel, ModelNativeReasoningLevel>>;
+  /**
+   * Appstrate model-provider id of the real upstream (`MODEL_PROVIDER`). On a
+   * proxied run `MODEL_BASE_URL` points at the sidecar, so this is what lets
+   * Pi still recognise the provider and emit its request shape. Absent on an
+   * older platform — the api shape's generic key is the fallback.
+   */
+  modelProvider?: string;
   /** Pi SDK input modalities. */
   modelInput: ReadonlyArray<"text" | "image">;
   /** Per-token cost (input/output/cacheRead/cacheWrite USD). */
@@ -406,6 +413,7 @@ export function parseRuntimeEnv(source: NodeJS.ProcessEnv = process.env): Runtim
       ? { modelReasoningLevel: modelReasoningLevel.data as ModelReasoningLevel }
       : {}),
     ...(modelReasoningLevelMap ? { modelReasoningLevelMap } : {}),
+    ...(source.MODEL_PROVIDER ? { modelProvider: source.MODEL_PROVIDER } : {}),
     modelInput,
     modelCost,
     modelContextWindow,

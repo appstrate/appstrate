@@ -31,6 +31,13 @@ export { Type } from "@earendil-works/pi-ai";
 // reaching `@earendil-works/pi-ai/compat` directly. It is NOT re-exported from
 // `index.ts`; keep it that way.
 export { streamSimple } from "@earendil-works/pi-ai/compat";
+// Test-only: Pi's own list of built-in provider ids. `test/provider-map.test.ts`
+// pins `PI_PROVIDER_BY_MODEL_PROVIDER` against it, so an upstream rename fails
+// there instead of silently dropping a provider back to the generic request
+// shape. Same reason as `streamSimple` above: the `no-restricted-imports`
+// guard forbids a test from reaching the vendor package directly. NOT
+// re-exported from `index.ts`; keep it that way.
+export { getBuiltinProviders } from "@earendil-works/pi-ai/providers/all";
 
 // --- types (erased at runtime) ---
 export type { ModelRuntime, ExtensionAPI, ExtensionFactory } from "@earendil-works/pi-coding-agent";

@@ -16,7 +16,7 @@ import type {
   SubscriptionChatResolution,
 } from "@appstrate/core/chat-contract";
 import {
-  deriveProviderFromApi,
+  derivePiProvider,
   type Api,
   type ExtensionFactory,
   type Model,
@@ -107,8 +107,13 @@ function toPiModel(input: {
   cost?: ChatUsageRecord["cost"];
   contextWindow?: number | null;
   maxTokens?: number | null;
+  /**
+   * Appstrate provider id of the REAL backing. `baseUrl` below is the proxy's,
+   * so this is the only detection input Pi has left — see `derivePiProvider`.
+   */
+  providerId?: string | null;
 }): Model<Api> {
-  const provider = deriveProviderFromApi(input.apiShape);
+  const provider = derivePiProvider(input.providerId, input.apiShape);
   return {
     id: input.id,
     name: input.label ?? input.id,
@@ -159,6 +164,9 @@ export function createPiProxyModelBinding(args: {
     cost: args.model.cost,
     contextWindow: args.model.contextWindow,
     maxTokens: args.model.maxTokens,
+    // The proxy base URL above erases one of Pi's two provider-detection
+    // inputs; keep the other one real so it still recognises the upstream.
+    providerId: args.model.providerId,
   });
 
   return {
