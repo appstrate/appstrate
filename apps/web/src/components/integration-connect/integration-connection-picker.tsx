@@ -108,11 +108,11 @@ export function IntegrationConnectionPicker({
   version?: string;
 }) {
   const { t } = useTranslation(["agents", "settings"]);
-  const { data: resolution, isPending } = useIntegrationAgentResolution(
-    integrationId,
-    agentPackageId,
-    version,
-  );
+  const {
+    data: resolution,
+    isPending,
+    isError,
+  } = useIntegrationAgentResolution(integrationId, agentPackageId, version);
   // Authoritative run-blocking flag for this integration (run semantics) — same
   // bulk query as the launch badge, selected per-integration.
   const { data: runBlocking } = useIntegrationRunBlocking(integrationId, agentPackageId, version);
@@ -137,6 +137,30 @@ export function IntegrationConnectionPicker({
   // write or scope upgrade invalidates it so the dropdown re-resolves.
   const refresh = () => invalidateIntegrationQueries(qc);
 
+  // Failure first, then loading — the order `collection.ts` owns, applied to a
+  // CONTROL rather than to a body. This picker is not a collection (it returns
+  // a value, it has a locked state, it validates), so it does not take one of
+  // the three bodies; it owes the family the ORDER, and it was not paying.
+  // `isPending` is false once a query has failed, so `!resolution` swallowed
+  // the failure into the loading branch and the control span forever on a
+  // resolution that was never coming.
+  if (isError) {
+    return (
+      <div data-testid={`member-picker-${integrationId}`}>
+        <Button
+          variant="outline"
+          size="sm"
+          disabled
+          className="h-7 justify-start gap-1.5 text-xs"
+          title={t("detail.integrationMemberPicker.resolutionFailedHint")}
+          data-testid={`member-pick-failed-${integrationId}`}
+        >
+          <AlertTriangle className="text-destructive size-3" />
+          <span className="truncate">{t("detail.integrationMemberPicker.resolutionFailed")}</span>
+        </Button>
+      </div>
+    );
+  }
   if (isPending || !resolution) {
     return (
       <div data-testid={`member-picker-${integrationId}`}>

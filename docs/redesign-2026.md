@@ -996,7 +996,7 @@ and keeps the raw table on purpose with the family's frame and states;
 `/schedules`, which now has the same bar as `/runs`, filters in the URL
 included (`lib/list-params.ts`).
 
-**Left, in the order to take it:**
+**Left, in the order to take it:** _(1 and 2 are done; B is next.)_
 
 1. ~~**The integration detail's two tables.**~~ Done 22 August — see "The
    integration detail" below. It is the last raw table that was a collection,
@@ -1021,7 +1021,15 @@ included (`lib/list-params.ts`).
      picks one connection out of a resolved cascade, whose items happen to be a
      list. It owes the family its STATES, not its body, and dragging it into a
      collection component would be the `grid-cols-` miscount all over again —
-     made of rows is not the same as being a collection.
+     made of rows is not the same as being a collection. DONE 22 August, and
+     what it owed turned out to be one line: it had no failure branch at all,
+     and `isPending` is false once a query has FAILED, so `!resolution`
+     swallowed the failure into the loading branch and **the control span
+     forever on a resolution that was never coming**. Failure first, then
+     loading — the family's order, applied to a control instead of a body. It
+     keeps its four other branches, which are business states (locked by an
+     admin pin, blocked for this member, no OAuth client to connect through)
+     and not states of a request.
 
    So the work is three smaller things, not one extraction: a floor prop on
    `CardGrid` and the documents grid onto it; the third body, out of the memory
@@ -1035,7 +1043,10 @@ included (`lib/list-params.ts`).
    only thing that varied between the two grids) and the gallery moved onto it.
    That grid had been answering the states in the WRONG ORDER — loading before
    failure, so a 500 under a stale page drew a spinner rather than saying
-   anything had broken. What is left of A.2 is the connection picker's states.
+   anything had broken. **A.2 is done**: the picker's failure branch landed the
+   same day, and the three surfaces that were "three ways of doing one thing"
+   turned out to be a grid, a list and a control, each now answering the states
+   in the order `collection.ts` owns.
 
 3. Then B, loading in one pass.
 

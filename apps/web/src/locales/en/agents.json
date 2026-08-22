@@ -46,6 +46,8 @@
   "detail.integrationMemberPicker.resetToAuto": "Reset (automatic resolution)",
   "detail.integrationMemberPicker.inherit": "Inherit (default resolution)",
   "detail.integrationMemberPicker.blockedByAdmin": "Connections blocked by admin",
+  "detail.integrationMemberPicker.resolutionFailed": "Connection unavailable",
+  "detail.integrationMemberPicker.resolutionFailedHint": "Could not determine which connection to use: the check failed. Reload the page.",
   "detail.integrationMemberPicker.missingScopesBadge": "Missing permissions",
   "detail.integrationMemberPicker.missingScopesOwn": "This connection lacks some permissions the agent requires. Upgrade it to grant the missing ones.",
   "detail.integrationMemberPicker.upgradeButton": "Upgrade",

@@ -46,6 +46,8 @@
   "detail.integrationMemberPicker.resetToAuto": "Réinitialiser (résolution automatique)",
   "detail.integrationMemberPicker.inherit": "Hériter (résolution par défaut)",
   "detail.integrationMemberPicker.blockedByAdmin": "Connexions bloquées par l'admin",
+  "detail.integrationMemberPicker.resolutionFailed": "Connexion indisponible",
+  "detail.integrationMemberPicker.resolutionFailedHint": "Impossible de déterminer la connexion à utiliser : la vérification a échoué. Rechargez la page.",
   "detail.integrationMemberPicker.missingScopesBadge": "Permissions manquantes",
   "detail.integrationMemberPicker.missingScopesOwn": "Cette connexion n'a pas toutes les permissions requises par l'agent. Mettez-la à niveau pour les autoriser.",
   "detail.integrationMemberPicker.upgradeButton": "Mettre à niveau",
