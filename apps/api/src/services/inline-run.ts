@@ -120,10 +120,10 @@ export function buildShadowLoadedPackage(
  * A run only receives a file when the manifest declares a file input field
  * AND the `appfile://` URI is passed through the top-level `input` in THAT
  * field — the platform then streams the file into the workspace under
- * `documents/`. A `appfile://` URI merely pasted into the sub-agent's prompt
- * text — or dropped into a non-file input field — is inert: the runtime has no
- * way to fetch it, so the run launches against dead URIs and the sub-agent
- * silently sees nothing. The chat model has been observed doing exactly this.
+ * `files/` (the directory `runtime-pi/provision.ts` creates). An `appfile://`
+ * URI merely pasted into the sub-agent's prompt text — or dropped into a
+ * non-file input field — is inert: the runtime has no way to fetch it, so the
+ * run launches against dead URIs and the sub-agent silently sees nothing. The chat model has been observed doing exactly this.
  * Fail loudly with a recoverable 400 that names the offending URIs and the exact
  * fix, so the chat model self-corrects (its prompt already retries recoverable
  * field-validation errors) instead of shipping silent garbage.
@@ -279,9 +279,10 @@ interface ContextFilesInjection {
  *
  * Declaring the field is all the work: from here the URIs travel the NORMAL
  * file-ref path (`collectFileRefs` → `getFileForActor` ACL → byte/count caps
- * → stream into `documents/` → `file_links`), and the platform prompt
- * announces them like any other input file. Nothing is mounted by a side
- * path, so nothing can be mounted unannounced or unchecked.
+ * → stream into the run-workspace storage prefix `{runId}/documents/` →
+ * `file_links`), and the platform prompt announces them like any other input
+ * file. Nothing is mounted by a side path, so nothing can be mounted
+ * unannounced or unchecked.
  *
  * Pure: returns a shallow-copied manifest, never mutates the caller's.
  */

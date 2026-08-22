@@ -63,9 +63,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
      this way (`github-action` sending a removed field), so it is spelled out
      rather than left to the diff. Read `file_counts.{input,output}`; for "which
      file to show", see the derived rule under Removed.
-  3. **The problem code `document_count_exceeded` is now
-     `file_count_exceeded`** (still a `413`, same `RUN_MAX_DOCUMENTS` limit).
-     Any client branching on the code string must be updated.
+  3. **Five RFC 9457 problem codes are renamed, and NONE of them has a read
+     alias.** The code is a string a client branches on; an unrecognised value
+     falls to whatever the client's default arm does, silently.
+
+     | Before                    | After                 | Raised by                                                                                       |
+     | ------------------------- | --------------------- | ----------------------------------------------------------------------------------------------- |
+     | `document_count_exceeded` | `file_count_exceeded` | `413`, `RUN_MAX_DOCUMENTS` over-cap (`@appstrate/core/api-errors`)                              |
+     | `document_in_use`         | `file_in_use`         | `409`, `DELETE /api/files/{id}` on a file a live run still links (`services/files.ts`)          |
+     | `document_unavailable`    | `file_unavailable`    | `409`, an input file deleted between resolve and run creation (`services/state/runs.ts`)        |
+     | `duplicate_document_name` | `duplicate_file_name` | `400`, colliding workspace names in a run's input manifest (`services/run-file-naming.ts`)      |
+     | `document_uri_in_prompt`  | `file_uri_in_prompt`  | field-level code inside the `400 validation_failed` on an inline run (`services/inline-run.ts`) |
+
+     The limits and the statuses are unchanged; only the strings moved.
+
   4. **`publish_document` is now `publish_file` and no longer accepts
      `presentation`.** A persisted manifest declaring
      `runtime_tools: ["publish_document"]` keeps working — the id is
@@ -83,6 +94,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
      server advertises `tools: { listChanged: false }`, so a client that listed
      before the upgrade and calls an old name after it is behaving correctly and
      must not get `-32602 Unknown tool` mid-conversation.
+
+     One MCP break is NOT covered by any alias, and it is client-facing: a
+     dynamically-registering client whose published Client ID Metadata Document
+     still declares `documents:read` / `documents:write` now fails registration
+     with `invalid_scope`. `@better-auth/cimd` lists `scope` in
+     `ALLOWED_METADATA_FIELDS` and feeds it into
+     `createOAuthClientEndpoint(..., { isRegister: true })`, which validates
+     every requested scope against the server's set and throws on anything
+     outside it. The scope-canonicalising hook cannot help here:
+     `SCOPE_BEARING_PATHS` matches INBOUND request paths, and a metadata
+     document is fetched outbound by the server. Nothing is silently
+     mis-granted — registration is refused outright — but the client's own
+     metadata has to be updated to the `files:` spelling. Tell any partner
+     registering through CIMD before you deploy.
+
   6. **The four OpenTelemetry metric series are renamed:
      `appstrate.documents.created`, `.deleted`, `.storage_limit_rejections` and
      `.partial_publications` are now `appstrate.files.*`.** Nothing errors —
@@ -96,19 +122,82 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
      `fileUri()`, `extractDocumentIds[FromText]` → `extractFileIds[FromText]`,
      plus renames on `./permissions`, `./telemetry`, `./api-errors`, `./module`
      and `./run-and-wait-client`. **Core is NOT published from this branch.**
-     `cloud` and `connect-helper` stay on the currently published version and
-     are unaffected today; the eventual major needs a matching code change in
-     each, not just a version bump. See `packages/core/CHANGELOG.md`.
-  8. **Migrations `0042`, `0043` and `0044` run automatically at boot.** `0042`
+     `cloud` and `connect-helper` stay on the currently published version, but
+     the pin only protects them at the TYPE level: `cloud` binds
+     `services.setDocumentStorageLimit` off the LIVE services object this
+     platform injects at boot, so what keeps it working here is the deprecated
+     `setDocumentStorageLimit` alias kept beside the canonical
+     `setFileStorageLimit` — temporary, and the only thing holding that seam
+     together. The eventual major needs a matching code change in `cloud`, not
+     just a version bump. See `packages/core/CHANGELOG.md`.
+  8. **Migrations `0042` through `0045` run automatically at boot.** `0042`
      drops the `presentation` column with its partial unique index and CHECK.
      `0043` is a pure `ALTER … RENAME` of the tables, columns, enum type,
      indexes and constraints — catalog-only, no table rewrite, no data movement,
      no window where a constraint is absent. `0044` rewrites stored
      `documents:*` permission scope strings to `files:*` across `api_keys` and
-     the four `oauth_*` scope columns. All three are idempotent and converge
-     from a partially-applied state. Third-party provider scopes
+     the four `oauth_*` scope columns; `0045` does the same for the two
+     space-delimited `text` scope columns the array pattern cannot reach
+     (`cli_refresh_tokens.scope`, `device_codes.scope`). All four are idempotent
+     and converge from a partially-applied state. Third-party provider scopes
      (`integrations.scopes_granted`, `application_social_providers.scopes`) are
      deliberately untouched.
+
+     **Migration `0043` is irreversible, and the rollback is a hard outage,
+     not a degraded mode.** There is no down migration in the repo and `0043`
+     creates no compatibility view. Once boot has applied it, the previous
+     release's code queries `documents`, `document_links` and
+     `organizations.documents_bytes_*` — none of which exist under those names
+     any more. **Take a database snapshot immediately before the deploy**; it
+     is the only fast way back. To reverse by hand:
+
+     ```sql
+     ALTER TABLE "files" RENAME TO "documents";
+     ALTER TABLE "file_links" RENAME TO "document_links";
+     ALTER TABLE "document_links" RENAME COLUMN "file_id" TO "document_id";
+     ALTER TABLE "organizations" RENAME COLUMN "files_bytes_used" TO "documents_bytes_used";
+     ALTER TABLE "organizations" RENAME COLUMN "files_bytes_limit" TO "documents_bytes_limit";
+     ALTER TYPE "public"."file_purpose" RENAME TO "document_purpose";
+     ```
+
+     Constraint and index names are cosmetic to the old code and can be left
+     alone. `0042` is not reversible at all — the `presentation` column and its
+     data are dropped, and only the snapshot brings them back.
+
+     `0044` / `0045` need reversing too, and the reason is not obvious:
+     they rewrote stored `documents:*` scope strings to `files:*` in
+     `api_keys.scopes`, the four `oauth_*` scope columns and the two
+     space-delimited `cli_refresh_tokens.scope` / `device_codes.scope`
+     columns. It is the NEW code that canonicalizes a legacy scope on read
+     (`canonicalPermissions`); the pre-#1177 code has no `files` resource at
+     all (`CORE_RESOURCE_NAMES` lists `documents`) and drops an unknown scope
+     **silently** rather than rejecting it — so after a code-only rollback
+     every affected key and token keeps authenticating and quietly grants
+     less than it was issued with. Rewrite `files:` back to `documents:` in
+     those seven columns, or restore the snapshot.
+
+  9. **Deploy order: roll the PLATFORM first, then the runtime image.** Two
+     things moved on the container boundary and the skew is NOT symmetric:
+     the run container's input directory is `workspace/files/` (was
+     `workspace/documents/`), and a published file is uploaded to
+     `POST /api/runs/{id}/files` (was `…/documents`).
+
+     - **New platform + old image — prompt-level miss.** `prompt-builder.ts`
+       announces `./files/<name>`; a pre-#1177 image provisioned `documents/`
+       only, so the agent is pointed at a directory that is not there. The
+       bytes ARE provisioned and the manifest carries both a `files` and a
+       `documents` key, so a run that goes looking still finds them.
+     - **New image + old platform — HARD FAILURE.** The previous release
+       registers `/runs/:runId/documents` and nothing else; `runtime-pi`'s
+       uploader posts unconditionally to `/files` with no fallback, so
+       **every `publish_file` call 404s**, the run finishes with no
+       deliverable, and nothing in the platform log says why. The image-side
+       `documents` → `files` symlink (`runtime-pi/provision.ts`) covers the
+       INPUT path across this skew; it cannot cover the upload.
+
+     `PI_IMAGE` defaults to `appstrate-pi:latest` and is operator-controlled,
+     so an eager pull lands the new image on the old platform by accident.
+     Pin the tag, or upgrade the platform first.
 
   Read compatibility that needs no action, and is permanent: `document://` URIs
   parse everywhere `appfile://` does (historical `runs.input` rows are full of
@@ -179,9 +268,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   triggers.** It did not, for two independent reasons that had to be fixed
   together: the chat system prompt never told the model that a top-level
   `context_files` argument existed, so it had no way to pass the attachment on;
-  and the shared `run_and_wait` launch client dropped the legacy `context_files`
-  spelling before the HTTP call, so even a model that guessed the argument saw
-  it disappear. The run started anyway, with no error and no file — the agent
+  and the shared `run_and_wait` launch client
+  (`packages/core/src/run-and-wait-client.ts`) read only the canonical
+  `context_files` name and dropped the legacy `context_documents` spelling
+  before the HTTP call — an allowlist builds the launch body, so a model that
+  reached for the argument under its pre-#1177 name, from an earlier turn or a
+  stale tool listing, watched it disappear with no 400 from the route that
+  accepts it forever. The run started anyway, with no error and no file — the agent
   simply worked without the attachment the user had just given it.
 
 ### Added

@@ -6368,7 +6368,7 @@ export interface operations {
                              * @example app_abc/doc_def/report.pdf
                              */
                             storage_key: string;
-                            /** @description Why the object is being purged (document_deleted | file_expired | org_deleted | application_deleted | end_user_deleted | run_workspace_deleted | upload_expired | materialization_failed). */
+                            /** @description Why the object is being purged (document_deleted | document_expired | org_deleted | application_deleted | end_user_deleted | run_workspace_deleted | version_deleted | upload_expired | materialization_failed). Free text, not a constrained enum; the `document_*` labels keep their pre-#1177 spelling because they are persisted on live rows that no migration rewrites. */
                             reason: string;
                             /** @description Delete attempts made so far. */
                             attempts: number;
@@ -14923,7 +14923,7 @@ export interface operations {
                     redirectUris?: string[];
                     /** @description URIs allowed for post-logout redirects (OIDC RP-Initiated Logout). */
                     postLogoutRedirectUris?: string[];
-                    /** @description OAuth scopes granted to this client. Must be a subset of `/api/oauth/scopes`. Existing access tokens retain the scopes they were minted with; updating this field only affects subsequent authorizations. */
+                    /** @description OAuth scopes granted to this client. Must be a subset of `/api/oauth/scopes` — but a RETIRED spelling is accepted and silently rewritten, not rejected: the service canonicalizes each scope before validating it and persists the canonical form (`canonicalizeValidScopes`, `services/oauth-admin.ts`), so a client sending `["documents:read"]` gets a `200` and reads back `["files:read"]`. That is deliberate — a client registered before #1177 must not be refused for asking for a scope it already holds — but nothing in the response explains the substitution, so diff the echoed value rather than assuming it round-trips. Existing access tokens retain the scopes they were minted with; updating this field only affects subsequent authorizations. */
                     scopes?: string[];
                     disabled?: boolean;
                     isFirstParty?: boolean;
@@ -18643,6 +18643,11 @@ export interface operations {
                     input?: Record<string, never>;
                     /** @description `appfile://doc_xxx` URIs to mount read-only into the run's `files/` directory — fan-in by reference, without declaring a file field in the manifest. The platform declares a reserved `_context_files` input field for them, so they go through the same ACL, byte/count caps and `file_links` chaining as any other file input, and are announced to the agent in its prompt. A manifest (or `input`) that already declares `_context_files` is rejected with a `400` — the name is reserved. */
                     context_files?: string[];
+                    /**
+                     * @deprecated
+                     * @description DEPRECATED — the pre-#1177 spelling of `context_files`, same contract. Declared because the server accepts it (`body.context_files ?? body.context_documents`, `routes/runs.ts`) and the body schema is `additionalProperties: false`: omitting it here would publish a contract that FORBIDS a field the server honours, and a generated SDK or a validating gateway would reject exactly the pinned legacy caller the alias exists for. `context_files` wins when both are present.
+                     */
+                    context_documents?: string[];
                     /** @description Per-integration connection picks for THIS run (flat-connections mechanism #2). Flat map: `{ "@scope/integration": "<connection_id>" }` — one connection per integration; the chosen connection carries its own authKey. Loses to admin pins (mechanism #1), beats the schedule-frozen layer (#3) and the actor-fallback (#4). Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same pick. Returns 412 `missing_integration_connection` if the chosen id is not accessible to the actor. */
                     connection_overrides?: {
                         [key: string]: string;
@@ -18821,6 +18826,11 @@ export interface operations {
                     input?: Record<string, never>;
                     /** @description Same field as `POST /api/runs/inline` — validated here for shape and for the reserved `_context_files` name collision, never mounted. */
                     context_files?: string[];
+                    /**
+                     * @deprecated
+                     * @description DEPRECATED — the pre-#1177 spelling of `context_files`, accepted here for the same reason as on `POST /api/runs/inline`: the body schema is `additionalProperties: false`, so a field the server honours has to be declared or the published contract forbids it. `context_files` wins when both are present.
+                     */
+                    context_documents?: string[];
                     /** @description Same field as `POST /api/runs/inline` — applied to the integration readiness check so a pick that clears `must_choose_connection` here clears it on the real launch too. Never persisted; no run is created. */
                     connection_overrides?: {
                         [key: string]: string;
@@ -19351,8 +19361,8 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description Display name for the file, percent-encoded with `encodeURIComponent` (an HTTP header value cannot carry a raw non-ASCII filename). The server decodes it strictly and returns 400 on a malformed encoding, then sanitises the decoded name (path separators, control characters and `..` collapsed, 255 chars max). A request carrying only the deprecated `X-Document-Name` is still accepted; this header wins when both are present. */
-                "X-File-Name": string;
+                /** @description Display name for the file, percent-encoded with `encodeURIComponent` (an HTTP header value cannot carry a raw non-ASCII filename). The server decodes it strictly and returns 400 on a malformed encoding, then sanitises the decoded name (path separators, control characters and `..` collapsed, 255 chars max). **Exactly one of `X-File-Name` or the deprecated `X-Document-Name` must be present** — a request with neither is a 400. Not marked `required` because a pre-#1177 runtime image sends only `X-Document-Name` and the handler accepts it; marking it required would make the very image the alias exists for non-conformant against this document, and a generated SDK or validating gateway would reject it before the server ever saw it. `X-File-Name` wins when both are present. */
+                "X-File-Name"?: string;
                 /**
                  * @deprecated
                  * @description DEPRECATED — the pre-#1177 spelling of `X-File-Name`, identical encoding rules. Still accepted because the runtime image and the platform deploy independently: a container built before the rename sends this header and it carries the deliverable's only name. Never emitted by a current runtime.
@@ -19808,8 +19818,8 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description Display name for the file, percent-encoded with `encodeURIComponent` (an HTTP header value cannot carry a raw non-ASCII filename). The server decodes it strictly and returns 400 on a malformed encoding, then sanitises the decoded name (path separators, control characters and `..` collapsed, 255 chars max). A request carrying only the deprecated `X-Document-Name` is still accepted; this header wins when both are present. */
-                "X-File-Name": string;
+                /** @description Display name for the file, percent-encoded with `encodeURIComponent` (an HTTP header value cannot carry a raw non-ASCII filename). The server decodes it strictly and returns 400 on a malformed encoding, then sanitises the decoded name (path separators, control characters and `..` collapsed, 255 chars max). **Exactly one of `X-File-Name` or the deprecated `X-Document-Name` must be present** — a request with neither is a 400. Not marked `required` because a pre-#1177 runtime image sends only `X-Document-Name` and the handler accepts it; marking it required would make the very image the alias exists for non-conformant against this document, and a generated SDK or validating gateway would reject it before the server ever saw it. `X-File-Name` wins when both are present. */
+                "X-File-Name"?: string;
                 /**
                  * @deprecated
                  * @description DEPRECATED — the pre-#1177 spelling of `X-File-Name`, identical encoding rules. Still accepted because the runtime image and the platform deploy independently: a container built before the rename sends this header and it carries the deliverable's only name. Never emitted by a current runtime.

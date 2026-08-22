@@ -2141,6 +2141,14 @@
                     },
                     "description": "`appfile://doc_xxx` URIs to mount read-only into the run's `files/` directory — fan-in by reference, without declaring a file field in the manifest. The platform declares a reserved `_context_files` input field for them, so they go through the same ACL, byte/count caps and `file_links` chaining as any other file input, and are announced to the agent in its prompt. A manifest (or `input`) that already declares `_context_files` is rejected with a `400` — the name is reserved."
                   },
+                  "context_documents": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "deprecated": true,
+                    "description": "DEPRECATED — the pre-#1177 spelling of `context_files`, same contract. Declared because the server accepts it (`body.context_files ?? body.context_documents`, `routes/runs.ts`) and the body schema is `additionalProperties: false`: omitting it here would publish a contract that FORBIDS a field the server honours, and a generated SDK or a validating gateway would reject exactly the pinned legacy caller the alias exists for. `context_files` wins when both are present."
+                  },
                   "connection_overrides": {
                     "type": "object",
                     "description": "Per-integration connection picks for THIS run (flat-connections mechanism #2). Flat map: `{ \"@scope/integration\": \"<connection_id>\" }` — one connection per integration; the chosen connection carries its own authKey. Loses to admin pins (mechanism #1), beats the schedule-frozen layer (#3) and the actor-fallback (#4). Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same pick. Returns 412 `missing_integration_connection` if the chosen id is not accessible to the actor.",
@@ -2400,6 +2408,14 @@
                       "type": "string"
                     },
                     "description": "Same field as `POST /api/runs/inline` — validated here for shape and for the reserved `_context_files` name collision, never mounted."
+                  },
+                  "context_documents": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "deprecated": true,
+                    "description": "DEPRECATED — the pre-#1177 spelling of `context_files`, accepted here for the same reason as on `POST /api/runs/inline`: the body schema is `additionalProperties: false`, so a field the server honours has to be declared or the published contract forbids it. `context_files` wins when both are present."
                   },
                   "connection_overrides": {
                     "type": "object",
@@ -3832,11 +3848,11 @@
           {
             "name": "X-File-Name",
             "in": "header",
-            "required": true,
+            "required": false,
             "schema": {
               "type": "string"
             },
-            "description": "Display name for the file, percent-encoded with `encodeURIComponent` (an HTTP header value cannot carry a raw non-ASCII filename). The server decodes it strictly and returns 400 on a malformed encoding, then sanitises the decoded name (path separators, control characters and `..` collapsed, 255 chars max). A request carrying only the deprecated `X-Document-Name` is still accepted; this header wins when both are present."
+            "description": "Display name for the file, percent-encoded with `encodeURIComponent` (an HTTP header value cannot carry a raw non-ASCII filename). The server decodes it strictly and returns 400 on a malformed encoding, then sanitises the decoded name (path separators, control characters and `..` collapsed, 255 chars max). **Exactly one of `X-File-Name` or the deprecated `X-Document-Name` must be present** — a request with neither is a 400. Not marked `required` because a pre-#1177 runtime image sends only `X-Document-Name` and the handler accepts it; marking it required would make the very image the alias exists for non-conformant against this document, and a generated SDK or validating gateway would reject it before the server ever saw it. `X-File-Name` wins when both are present."
           },
           {
             "name": "X-Document-Name",
@@ -4271,11 +4287,11 @@
           {
             "name": "X-File-Name",
             "in": "header",
-            "required": true,
+            "required": false,
             "schema": {
               "type": "string"
             },
-            "description": "Display name for the file, percent-encoded with `encodeURIComponent` (an HTTP header value cannot carry a raw non-ASCII filename). The server decodes it strictly and returns 400 on a malformed encoding, then sanitises the decoded name (path separators, control characters and `..` collapsed, 255 chars max). A request carrying only the deprecated `X-Document-Name` is still accepted; this header wins when both are present."
+            "description": "Display name for the file, percent-encoded with `encodeURIComponent` (an HTTP header value cannot carry a raw non-ASCII filename). The server decodes it strictly and returns 400 on a malformed encoding, then sanitises the decoded name (path separators, control characters and `..` collapsed, 255 chars max). **Exactly one of `X-File-Name` or the deprecated `X-Document-Name` must be present** — a request with neither is a 400. Not marked `required` because a pre-#1177 runtime image sends only `X-Document-Name` and the handler accepts it; marking it required would make the very image the alias exists for non-conformant against this document, and a generated SDK or validating gateway would reject it before the server ever saw it. `X-File-Name` wins when both are present."
           },
           {
             "name": "X-Document-Name",
@@ -20857,7 +20873,7 @@
                           },
                           "reason": {
                             "type": "string",
-                            "description": "Why the object is being purged (document_deleted | file_expired | org_deleted | application_deleted | end_user_deleted | run_workspace_deleted | upload_expired | materialization_failed)."
+                            "description": "Why the object is being purged (document_deleted | document_expired | org_deleted | application_deleted | end_user_deleted | run_workspace_deleted | version_deleted | upload_expired | materialization_failed). Free text, not a constrained enum; the `document_*` labels keep their pre-#1177 spelling because they are persisted on live rows that no migration rewrites."
                           },
                           "attempts": {
                             "type": "integer",

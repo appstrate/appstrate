@@ -14,11 +14,39 @@ published without them, so the version in `package.json` does not move.
 **Out-of-tree consumers.** The config removals below touch nothing `cloud` or
 `connect-helper` import. The `document` → `file` rename (#1177) does: both
 consume `module`, `api-errors`, `telemetry` and `permissions`, and the rename
-lands on all four (`PlatformServices.cleanupSessionDocuments` /
-`setDocumentStorageLimit`, `documentCountExceeded`, `recordDocument*`,
-`CoreResources.documents`). Neither is broken today — both stay pinned to the
-published `7.0.0` — but the eventual major release of this branch requires a
-matching change in each, not just a version bump.
+lands on all four — the symbols a consumer imports today are
+`PlatformServices.cleanupSessionDocuments` / `setDocumentStorageLimit`,
+`documentCountExceeded`, `recordDocument*` and `CoreResources.documents`.
+
+Staying pinned to the published `7.0.0` protects them at the TYPE level only.
+`cloud` also binds one of these off the LIVE services object the platform
+injects at runtime — `services.setDocumentStorageLimit.bind(services)`
+(`cloud/src/billing/storage-entitlement.ts`) — and a compile-time pin does
+nothing for a property read at boot. What keeps `cloud` working against this
+branch is the **deprecated `setDocumentStorageLimit` alias**: `PlatformServices`
+declares it beside the canonical `setFileStorageLimit`, and the platform
+registry assigns both names the same function. It is declared REQUIRED, not
+optional, and that detail is load-bearing in both directions. `cloud` reads it
+unconditionally, and it typechecks against the platform image's core rather
+than against npm, so an optional member is a `TS18048 possibly 'undefined'`
+build failure in the repo the alias exists to protect. Required also keeps the
+compiler's grip on the platform side: with `?`, deleting the binding in
+`buildPlatformServices()` would still typecheck. The alias is temporary and is
+the only thing holding the seam together — `cloud` must move to
+`setFileStorageLimit` before it is removed.
+
+`cleanupSessionDocuments` → `cleanupSessionFiles` deliberately gets NO such
+alias. Its only consumer is the in-tree `@appstrate/module-chat`, which ships
+in the same image and was renamed in the same commit, so an alias would need a
+ledger owner in `scripts/verify-module-contract.ts` that does not exist — a
+fiction rather than a contract. An out-of-tree module binding the old name off
+the live services object WILL break; that is the accepted cost, recorded here
+rather than left as an oversight.
+
+`connect-helper` reads none of this surface and is unaffected either way.
+
+The eventual major release of this branch still requires a matching code change
+in `cloud`, not just a version bump.
 
 An AFPS agent manifest used to declare TWO parameter schemas — `input` (asked
 per run) and `config` (set once at setup). AFPS 0.3 removed `config`; whether a

@@ -122,8 +122,8 @@ Primary source of truth: the `@appstrate/env` Zod schema (`packages/env/src/inde
 
 Issue #1177 renamed the `document` concept to `file` from the schema up: the
 tables are `files` / `file_links`, the URI scheme is `appfile://`, the routes are
-`/api/files/*`. Five environment variables deliberately kept their pre-rename
-spelling:
+`/api/files/*`. Four environment variables deliberately kept their pre-rename
+spelling (the fifth row below never carried it — see the note under the table):
 
 | Variable                   | Governs                               |
 | -------------------------- | ------------------------------------- |
